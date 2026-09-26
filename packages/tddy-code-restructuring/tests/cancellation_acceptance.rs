@@ -169,6 +169,7 @@ async fn cancelling_stops_the_blocking_wait_rather_than_only_dropping_its_future
 /// proper subset is what an extraction anchor has to be.
 fn an_extraction_of_the_function_body() -> RefactorOp {
     RefactorOp {
+        id: None,
         op: RefactorKind::ExtractMethod,
         anchor: Anchor::Range {
             file: "src/lib.rs".to_string(),

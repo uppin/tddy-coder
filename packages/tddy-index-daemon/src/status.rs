@@ -36,6 +36,8 @@ pub fn status_of(error: &RestructureError) -> Status {
         RestructureError::SeamRefused(_)
         | RestructureError::SnapshotMismatch { .. }
         | RestructureError::ItemChanged { .. }
+        | RestructureError::PlanChangedOnDisk { .. }
+        | RestructureError::NeedsIndexDaemon { .. }
         | RestructureError::AnchorInvalidated { .. }
         | RestructureError::JournalExists
         | RestructureError::RepoScopedJournal { .. }

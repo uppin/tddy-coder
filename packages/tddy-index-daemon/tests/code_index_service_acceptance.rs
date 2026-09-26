@@ -16,9 +16,10 @@ use prost::Message;
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnalyzeEvent, AnchorsRequest, AnchorsResponse, ApplyRequest, CheckRequest,
     CodeIndexServiceServer, ComplexityRequest, ComplexityResponse, CoverageRequest,
-    DuplicateTestsRequest, Finding, FunctionComplexity, IndexProgress, PlanStatusRequest,
-    PlanStatusResponse, ReportRequest, ReportResponse, RestructureEvent, RunOutcome,
-    SourcePosition, SourceRange, VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest,
+    DuplicateTestsRequest, Finding, FunctionComplexity, IndexProgress, ListPlansRequest,
+    LoadPlansRequest, LoadedPlan, PlanStatusRequest, PlanStatusResponse, PlansResponse,
+    ReportRequest, ReportResponse, RestructureEvent, RunOutcome, SourcePosition, SourceRange,
+    UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest,
     WorkspacesResponse,
 };
 use tddy_index_daemon::{
@@ -1016,4 +1017,194 @@ async fn reports_a_plan_that_is_not_there_as_a_failed_precondition_naming_the_pa
         "the refusal must name the plan it could not find, was: {}",
         refusal.message()
     );
+}
+
+/// An apply request for `plan` under `workspace`, run from its start.
+fn an_apply_of(workspace: &tempfile::TempDir, plan: &Path) -> ApplyRequest {
+    ApplyRequest {
+        workspace_root: workspace.path().to_string_lossy().to_string(),
+        plan: plan.to_string_lossy().to_string(),
+        dry_run: false,
+        resume: false,
+        from: None,
+        stop_after: None,
+    }
+}
+
+/// A plan file named `name` under `workspace`, holding the header and `operations`.
+fn a_plan_named(
+    workspace: &tempfile::TempDir,
+    name: &str,
+    operations: &[&str],
+) -> std::path::PathBuf {
+    let plan = workspace.path().join(name);
+    let mut lines = vec!["{\"v\":1,\"snapshot\":{}}".to_string()];
+    lines.extend(operations.iter().map(|line| (*line).to_string()));
+    std::fs::write(&plan, format!("{}\n", lines.join("\n"))).expect("write the plan");
+    plan
+}
+
+fn root_of(workspace: &tempfile::TempDir) -> String {
+    workspace.path().to_string_lossy().to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn apply_of_an_unloaded_plan_loads_it_and_list_plans_shows_it() {
+    // Given a plan nothing has loaded
+    let workspace = a_committed_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let plan = a_plan_named(&workspace, "carve.jsonl", &[]);
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is applied, and the root's plans are then listed
+    let _: Vec<RestructureEvent> = stream_at(&entry, "Apply", an_apply_of(&workspace, &plan))
+        .await
+        .expect("the apply runs");
+    let listed: PlansResponse = unary_at(
+        &entry,
+        "ListPlans",
+        ListPlansRequest {
+            workspace_root: root_of(&workspace),
+        },
+    )
+    .await
+    .expect("the root's plans are listed");
+
+    // Then the applied plan is held
+    assert_eq!(
+        listed,
+        PlansResponse {
+            plans: vec![LoadedPlan {
+                plan: "carve.jsonl".to_string(),
+                ops: 0,
+                dirty: false,
+            }],
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unload_all_flushes_and_drops_every_plan_of_the_root() {
+    // Given two loaded plans, each holding an operation loaded without an id
+    let workspace = a_committed_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let first = a_plan_named(
+        &workspace,
+        "first.jsonl",
+        &[&an_extraction_of("foo", "src/lib.rs")],
+    );
+    let second = a_plan_named(
+        &workspace,
+        "second.jsonl",
+        &[&an_extraction_of("foo", "src/lib.rs")],
+    );
+    let entry = a_host_over_fake_language_servers();
+    let _: PlansResponse = unary_at(
+        &entry,
+        "LoadPlans",
+        LoadPlansRequest {
+            workspace_root: root_of(&workspace),
+            plans: vec!["first.jsonl".to_string(), "second.jsonl".to_string()],
+        },
+    )
+    .await
+    .expect("the plans load");
+
+    // When every plan of the root is unloaded
+    let remaining: PlansResponse = unary_at(
+        &entry,
+        "UnloadPlans",
+        UnloadPlansRequest {
+            workspace_root: root_of(&workspace),
+            plans: Vec::new(),
+            all: true,
+        },
+    )
+    .await
+    .expect("the plans unload");
+
+    // Then none is held, and both files were written back with their ids
+    assert_eq!(remaining, PlansResponse { plans: Vec::new() });
+    for plan in [first, second] {
+        let written =
+            tddy_code_restructuring::Plan::parse(&std::fs::read_to_string(&plan).unwrap())
+                .expect("the flushed plan parses");
+        assert!(
+            written.ops[0].id.is_some(),
+            "{} was not flushed",
+            plan.display()
+        );
+    }
+}
+
+/// The code issue `stale-repo-scoped-restructure-state-apply`: a plan that ran through the daemon
+/// left its journal keyed by the *root*, so the next plan under that root was refused with
+/// "a journal already exists" although it had never run.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_plan_applies_after_a_first_ran_under_the_same_root() {
+    // Given a root where one plan has already run through the daemon and written its journal
+    let workspace = a_workspace_whose_test_binary_reads_a_file_beside_it();
+    let first = a_plan_named(
+        &workspace,
+        "first.jsonl",
+        &[
+            "{\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+           \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+           \"to\":\"crates/destination\"}",
+        ],
+    );
+    let second = a_plan_named(&workspace, "second.jsonl", &[]);
+    let entry = a_host_over_fake_language_servers();
+    let _ =
+        stream_at::<_, RestructureEvent>(&entry, "Apply", an_apply_of(&workspace, &first)).await;
+
+    // When a different plan is applied under the same root
+    let second_run: Result<Vec<RestructureEvent>, _> =
+        stream_at(&entry, "Apply", an_apply_of(&workspace, &second)).await;
+
+    // Then it runs — the first plan's journal is its own, not the root's
+    assert_eq!(
+        second_run.map_err(|status| status.message().to_string()),
+        Ok(vec![RestructureEvent {
+            event: Some(restructure_event::Event::Outcome(RunOutcome {
+                applied: 0,
+                total: 0,
+                stopped_early: false,
+            })),
+        }])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dirty_plan_reaches_disk_within_the_flush_interval() {
+    // Given a plan whose one operation carries no id
+    let workspace = a_committed_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let plan = a_plan_named(
+        &workspace,
+        "carve.jsonl",
+        &[&an_extraction_of("foo", "src/lib.rs")],
+    );
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is loaded — which gives the operation an id and so makes the plan dirty
+    let _: PlansResponse = unary_at(
+        &entry,
+        "LoadPlans",
+        LoadPlansRequest {
+            workspace_root: root_of(&workspace),
+            plans: vec!["carve.jsonl".to_string()],
+        },
+    )
+    .await
+    .expect("the plan loads");
+
+    // Then, without any further request, the file carries the id within the flush interval — the
+    // flush is eventual by design, so this waits for it rather than for an event nothing sends
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let mut flushed = false;
+    while std::time::Instant::now() < deadline && !flushed {
+        flushed = tddy_code_restructuring::Plan::parse(&std::fs::read_to_string(&plan).unwrap())
+            .map(|written| written.ops[0].id.is_some())
+            .unwrap_or(false);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(flushed, "the loaded plan was never written back");
 }

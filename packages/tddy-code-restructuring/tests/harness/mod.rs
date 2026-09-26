@@ -707,6 +707,7 @@ pub fn a_cluster_move_of(modules: &[&str], reexport: Option<Reexport>) -> Refact
     });
 
     RefactorOp {
+        id: None,
         op: RefactorKind::MoveClusterToCrate,
         anchor: anchors.next().expect("a cluster names at least one module"),
         name: None,
@@ -726,6 +727,7 @@ pub fn a_move_of(
     reexport: Option<tddy_code_restructuring::Reexport>,
 ) -> RefactorOp {
     RefactorOp {
+        id: None,
         op: RefactorKind::MoveModuleToCrate,
         anchor: Anchor::Symbol {
             file: file.to_string(),
@@ -775,6 +777,7 @@ pub fn a_move_of_the_host_registry(
     reexport: Option<tddy_code_restructuring::Reexport>,
 ) -> RefactorOp {
     RefactorOp {
+        id: None,
         op: RefactorKind::MoveModuleToCrate,
         anchor: Anchor::Symbol {
             file: "crates/origin/src/host_registry.rs".to_string(),
@@ -798,6 +801,7 @@ pub fn a_rename_of(symbol: &str, to: &str) -> RefactorOp {
 /// Renaming a symbol declared in `file`.
 pub fn a_rename_in(file: &str, symbol: &str, to: &str) -> RefactorOp {
     RefactorOp {
+        id: None,
         op: RefactorKind::RenameSymbol,
         anchor: Anchor::Symbol {
             file: file.to_string(),
@@ -1514,6 +1518,7 @@ pub fn an_extract_variable_of(
 
 fn an_extraction(op: RefactorKind, anchor: Anchor, name: &str) -> RefactorOp {
     RefactorOp {
+        id: None,
         op,
         anchor,
         name: Some(name.to_string()),
@@ -2017,4 +2022,32 @@ pub async fn the_anchor_command_emits(
     })
     .await
     .expect("the blocking half joins")
+}
+
+/// Apply the plan `key` names from `store`, through the runner, against a live rust-analyzer.
+pub async fn applying_from_the_store(
+    fixture: &AFixtureWorkspace,
+    store: tddy_code_restructuring::plan_store::PlanStore,
+    key: tddy_code_restructuring::plan_store::PlanKey,
+) -> (
+    tddy_code_restructuring::plan_store::PlanStore,
+    Result<tddy_code_restructuring::runner::RunSummary, String>,
+) {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+    tokio::task::spawn_blocking(move || {
+        let mut store = store;
+        let options = runner::Options {
+            command: runner::Command::Apply,
+            ..runner::Options::default()
+        };
+        let outcome =
+            runner::apply_from_store(&root, &mut store, &key, options, Some(client), cancel)
+                .map_err(|error| error.to_string());
+        (store, outcome)
+    })
+    .await
+    .expect("the blocking half of the apply joins")
 }

@@ -74,7 +74,29 @@ pub fn dispatch(
         }
         Command::Verify => verify(root, options).map(Outcome::Verified),
         Command::Snapshot => snapshot(root, options).map(Outcome::Snapshotted),
+        Command::Load | Command::Unload | Command::Plans => {
+            // TODO(plan-store): implement — refused as needing the index daemon.
+            todo!("plan-store: daemon-only commands without a daemon")
+        }
     }
+}
+
+/// Apply the plan `key` names from `store`, starting at `from` (or where its journal left off),
+/// refreshing the plan's pending operations after each one and flushing it at the end.
+///
+/// What every front end runs: the daemon over its long-lived store, a one-shot `apply` over a store
+/// that lives for the run.
+pub fn apply_from_store(
+    root: &Path,
+    store: &mut crate::plan_store::PlanStore,
+    key: &crate::plan_store::PlanKey,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<RunSummary> {
+    // TODO(plan-store): implement
+    let _ = (root, store, key, options, client, cancel);
+    todo!("plan-store: apply a plan from the store")
 }
 
 /// Build a registry for static checks only (no LSP connection).

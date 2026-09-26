@@ -105,3 +105,28 @@ fn restructure_check_reports_the_files_a_plan_names_that_are_over_the_budget() {
         "a file within the budget was reported, got: {stdout}"
     );
 }
+
+#[test]
+fn restructure_load_without_a_daemon_is_refused_as_needing_one() {
+    // Given no warm index daemon in the environment
+    let dir = tempfile::tempdir().expect("tempdir");
+    let plan = dir.path().join("plan.jsonl");
+    fs::write(&plan, "{\"v\":1,\"snapshot\":{}}\n").expect("plan");
+
+    // When a plan is loaded
+    let mut cmd = tddy_tools_bin();
+    cmd.env_remove("TDDY_INDEX_SOCKET");
+    cmd.current_dir(dir.path());
+    cmd.args(["restructure", "load", plan.to_str().unwrap()]);
+    let assert = cmd.assert().failure();
+
+    // Then the refusal says a daemon is needed and how to start one
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains(
+            "`restructure load` needs the index daemon — start one with ./run-index-daemon and \
+             export TDDY_INDEX_SOCKET"
+        ),
+        "the refusal did not name the daemon, got: {stderr}"
+    );
+}

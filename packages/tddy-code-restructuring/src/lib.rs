@@ -15,6 +15,7 @@ pub mod journal;
 pub mod ledger;
 pub mod overlay;
 pub mod plan;
+pub mod plan_store;
 pub mod registry;
 mod restructure_args;
 pub mod restructure_cli;
@@ -32,7 +33,8 @@ pub use journal::{Journal, JournalRecord, OpStatus};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{
-    Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, Plan, Reexport, RefactorKind, RefactorOp,
+    Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, OpId, Plan, Reexport, RefactorKind,
+    RefactorOp,
 };
 pub use registry::{BackendRegistry, LanguageBackend};
 pub use runner::state_directory_for_plan;
@@ -104,6 +106,19 @@ pub enum RestructureError {
          matches; re-anchor it with `restructure anchors`"
     )]
     ItemChanged { item: String, file: String },
+    /// A loaded plan's file changed on disk since the store read it, so writing the store's copy
+    /// back would discard what somebody wrote.
+    #[error(
+        "{plan} changed on disk since it was loaded — not overwriting it; unload it and load it \
+         again"
+    )]
+    PlanChangedOnDisk { plan: String },
+    /// A command only the index daemon's plan store can answer, asked of a run without one.
+    #[error(
+        "`restructure {command}` needs the index daemon — start one with ./run-index-daemon and \
+         export TDDY_INDEX_SOCKET"
+    )]
+    NeedsIndexDaemon { command: String },
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
     /// The server stayed unable to answer one method, as distinct from the plan being wrong.
