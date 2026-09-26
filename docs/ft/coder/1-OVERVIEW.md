@@ -80,6 +80,7 @@ its changeset wraps.
 | [Index daemon plan store](1-WIP/PRD-2026-09-26-index-daemon-plan-store.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Cross-crate move paths](1-WIP/PRD-2026-09-26-restructure-move-paths.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Cross-crate move facades](1-WIP/PRD-2026-09-26-restructure-move-facades.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
+| [Extraction defects](1-WIP/PRD-2026-09-26-restructure-extraction-defects.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 
 ## Integration Points
 
