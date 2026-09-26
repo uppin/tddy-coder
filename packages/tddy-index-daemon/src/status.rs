@@ -39,6 +39,7 @@ pub fn status_of(error: &RestructureError) -> Status {
         | RestructureError::ItemAnchorsOnContinuedRun { .. }
         | RestructureError::PlanChangedOnDisk { .. }
         | RestructureError::NeedsIndexDaemon { .. }
+        | RestructureError::StaleOperation { .. }
         | RestructureError::AnchorInvalidated { .. }
         | RestructureError::JournalExists
         | RestructureError::RepoScopedJournal { .. }

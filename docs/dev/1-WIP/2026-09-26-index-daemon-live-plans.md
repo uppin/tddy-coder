@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 3/7 — branch `feature/live-plan/live-plans`, base `feature/live-plan/plan-store`.
-PR: _recorded in wave 2_
+PR: [#539](https://github.com/uppin/tddy-coder/pull/539)
 
 ## Responsibility
 
@@ -39,6 +39,13 @@ implementing one here collides with the PR that owns it.
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `item-anchors` (1/7) | `Anchor::{Item, Items}`, `resolve_item` and its refusals, the v2 header | re-resolution after external change calls `resolve_item`; a refusal becomes a stale reason | change the resolver, its refusals or the header shape |
+**Sequencing fact.** Every test of this node reaches its parents' behaviour: an item anchor is
+parsed by `item-anchors`' `ItemPath::parse`, and every plan is held through `plan-store`'s
+`PlanStore::load`. At the draft-PR contract both are still `TODO`, so today **every** test here fails
+at a parent's stub (`plan.rs` / `plan_store.rs::load`), not at this node's own. They are kept real on
+purpose — the integration *is* the point — and they start failing on this node's own stubs as soon as
+those two parents are green.
+
 | `plan-store` (2/7) | `PlanStore` per root, op ids, `refresh_after_op` for the applied plan, flush, `LoadPlans`/`UnloadPlans`/`ListPlans` | calls the same refresh for every other loaded plan; extends `ListPlans`/`PlanStatus` responses with stale ops; flushes through the store | change the store's load/unload/flush API, op-id rules, or the RPCs' existing fields |
 
 ## Draft PR contract
@@ -157,25 +164,47 @@ path observe them.
 
 ## Acceptance Tests
 
-### tddy-index-daemon — `tests/live_plans_acceptance.rs`
+### tddy-code-restructuring — `tests/live_plans_acceptance.rs` (live rust-analyzer, two plans in one store)
 
 - `applying_plan_a_keeps_plan_bs_anchor_on_its_item`
-- `a_module_move_in_plan_a_updates_plan_bs_file_hint`
-- `an_edit_inside_plan_bs_range_marks_its_op_stale_edited_by_plan_a`
+- `an_edit_inside_plan_bs_anchored_item_marks_its_op_stale_edited_by_plan_a`
 - `apply_refuses_a_stale_next_op_before_any_write`
 - `a_hand_edit_above_the_item_refreshes_the_hint`
 - `a_hand_edit_inside_the_item_marks_the_op_stale`
-- `list_plans_and_plan_status_report_stale_ops_with_reasons`
-- `an_unloaded_plan_is_byte_identical_after_another_plan_applies`
-
-### tddy-code-restructuring — `tests/snapshot_rewrites_the_header.rs`
-
 - `snapshot_re_resolves_item_anchors_after_lines_were_inserted_above_them`
 - `snapshot_reports_an_op_whose_item_changed_and_leaves_it`
 
+The library is where these live, not the daemon: the daemon's real-rust-analyzer suite
+(`warm_index_production.rs`) is `#[ignore]`d, and the behaviour is the store's — the daemon's part is
+calling it after each op and on tree changes.
+
+### tddy-index-daemon — `tests/live_plans_acceptance.rs` (fake language server)
+
+- `a_test_binary_move_in_plan_a_moves_plan_bs_file_hint` — the daemon's apply loop folds into the
+  other loaded plan, and flushes it
+- `an_unloaded_plan_is_byte_identical_after_another_plan_applies` — passes today; the guard that the
+  fold never reaches a plan nobody loaded
+
+### tddy-code-restructuring — `src/plan_store.rs` `live_plans_tests` (unit, stub resolver)
+
+- `a_foreign_op_moves_another_plans_range_anchor_down_past_lines_it_inserted`
+- `a_foreign_op_editing_inside_another_plans_range_marks_it_edited_by`
+- `a_foreign_file_move_moves_another_plans_file_hint`
+- `a_foreign_op_leaves_the_plan_it_came_from_alone`
+- `re_resolving_an_intact_item_rewrites_only_its_hint`
+- `re_resolving_a_changed_item_marks_its_op_item_changed`
+- `re_resolving_an_item_that_is_gone_marks_its_op_item_not_found`
+- `a_stale_reason_reads_the_way_the_wire_reports_it` — passes today (the `Display` is contract)
+
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs: `TODO(live-plans)` in `plan_store.rs` (`fold_foreign_op`,
+  `reresolve_files`, `stale_ops`, `rebase_plan_file`) and `tddy-index-daemon/src/queries.rs`
+  (`PlanStatusResponse.stale`).
+- Still to wire in green: the daemon's apply loop calling `fold_foreign_op`, the tree-change path
+  calling `reresolve_files`, `LoadedPlan.stale` in `ListPlans`, `restructure snapshot` routing a v2
+  plan through `rebase_plan_file`.
+- New: `RestructureError::StaleOperation` (`FailedPrecondition`); `StaleOp` on the wire.
 
 ## Decisions & Trade-offs
 
@@ -201,10 +230,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
