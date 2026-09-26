@@ -177,3 +177,139 @@ fn reports_a_module_that_is_in_no_crate() {
     // Then
     assert_eq!(findings.len(), 1, "expected one finding, got {findings:?}");
 }
+
+/// A two-crate workspace where `origin`'s `workspace_session` reaches `host` only through a body
+/// path, and `host` stays behind.
+fn a_workspace_whose_moving_module_reaches_its_host_in_a_body() -> tempfile::TempDir {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    for (relative, text) in [
+        (
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (
+            "crates/origin/src/lib.rs",
+            "pub mod host;\npub mod workspace_session;\n",
+        ),
+        (
+            "crates/origin/src/host.rs",
+            "pub(crate) fn project_root() -> u32 {\n    1\n}\n",
+        ),
+        (
+            "crates/origin/src/workspace_session.rs",
+            "pub fn start() -> u32 {\n    let root = crate::host::project_root();\n    root + 1\n}\n",
+        ),
+        (
+            "crates/destination/Cargo.toml",
+            "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        ("crates/destination/src/lib.rs", "\n"),
+    ] {
+        let absolute = directory.path().join(relative);
+        std::fs::create_dir_all(absolute.parent().expect("a parent")).expect("directories");
+        std::fs::write(absolute, text).expect("the file is written");
+    }
+    directory
+}
+
+#[test]
+fn a_body_path_to_a_module_staying_behind_is_a_finding_naming_the_line() {
+    // Given a move of `workspace_session`, whose only edge to `host` is a body path on line 2
+    let workspace = a_workspace_whose_moving_module_reaches_its_host_in_a_body();
+    let plan = [a_move_of(
+        "crates/origin/src/workspace_session.rs",
+        "workspace_session",
+    )];
+
+    // When the plan is checked
+    let findings = unrunnable_in(workspace.path(), &plan);
+
+    // Then there is one finding, naming the path and where it is written
+    assert_eq!(
+        findings,
+        vec![
+            "plan is malformed: `crates/origin/src/workspace_session.rs` reaches \
+             `crate::host::project_root` in a body at line 2, and `host` stays behind in `origin` — \
+             after the move that path names nothing in `destination`, and naming `origin` from \
+             there is a cycle. Cut the body's dependency on `host` before moving the module."
+                .to_string()
+        ]
+    );
+}
+
+#[test]
+fn the_body_path_remedy_does_not_suggest_a_cluster_for_the_host_module() {
+    let workspace = a_workspace_whose_moving_module_reaches_its_host_in_a_body();
+    let plan = [a_move_of(
+        "crates/origin/src/workspace_session.rs",
+        "workspace_session",
+    )];
+
+    let findings = unrunnable_in(workspace.path(), &plan);
+
+    assert_eq!(findings.len(), 1, "expected one finding, got {findings:?}");
+    assert!(
+        !findings[0].contains("move_cluster_to_crate"),
+        "the remedy suggested moving the host along: {}",
+        findings[0]
+    );
+}
+
+#[test]
+fn a_destination_that_already_declares_the_module_is_reported_as_a_merge() {
+    // Given a destination whose root already declares `host_registry`
+    let workspace = a_workspace_with_both_module_shapes();
+    std::fs::write(
+        workspace.path().join("crates/destination/src/lib.rs"),
+        "pub mod host_registry;\n",
+    )
+    .unwrap();
+    let plan = [a_move_of(
+        "crates/origin/src/host_registry.rs",
+        "host_registry",
+    )];
+
+    // When the plan is checked
+    let findings = unrunnable_in(workspace.path(), &plan);
+
+    // Then the collision is named as a merge
+    assert_eq!(
+        findings,
+        vec![
+            "plan is malformed: `destination` already declares `host_registry` in \
+             crates/destination/src/lib.rs — moving `host_registry` into it would be a merge, which \
+             no operation performs"
+                .to_string()
+        ]
+    );
+}
+
+#[test]
+fn a_destination_with_a_file_at_the_target_path_is_reported_as_a_merge() {
+    // Given a destination with an undeclared `host_registry.rs` already on disk
+    let workspace = a_workspace_with_both_module_shapes();
+    std::fs::write(
+        workspace
+            .path()
+            .join("crates/destination/src/host_registry.rs"),
+        "pub struct Other;\n",
+    )
+    .unwrap();
+    let plan = [a_move_of(
+        "crates/origin/src/host_registry.rs",
+        "host_registry",
+    )];
+
+    // When the plan is checked
+    let findings = unrunnable_in(workspace.path(), &plan);
+
+    // Then the file already there is named as a merge
+    assert_eq!(
+        findings,
+        vec![
+            "plan is malformed: `destination` already has crates/destination/src/host_registry.rs \
+             — moving `host_registry` into it would be a merge, which no operation performs"
+                .to_string()
+        ]
+    );
+}

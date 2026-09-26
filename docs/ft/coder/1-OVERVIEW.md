@@ -82,6 +82,7 @@ its changeset wraps.
 | [Cross-crate move paths](1-WIP/PRD-2026-09-26-restructure-move-paths.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Cross-crate move facades](1-WIP/PRD-2026-09-26-restructure-move-facades.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Extraction defects](1-WIP/PRD-2026-09-26-restructure-extraction-defects.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
+| [Check/apply parity for cross-crate moves](1-WIP/PRD-2026-09-26-restructure-check-parity.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 
 ## Integration Points
 

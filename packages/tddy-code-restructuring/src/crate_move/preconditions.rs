@@ -62,6 +62,36 @@ pub(crate) fn unrunnable(
     Ok(findings)
 }
 
+/// A moved file reaching a module that stays behind **through a body path** — `crate::host::f(…)`
+/// with no `use` line naming it — read from the move's path survey rather than from its header.
+///
+/// The header-only finding passed `check --deep` on exactly this shape, and the move then could not
+/// build: after it, `crate::host` names nothing in the destination, and naming `origin` from there
+/// is a cycle. The finding never suggests `move_cluster_to_crate` — a body's reach into the code that
+/// hosts it is not a sibling that can come along.
+#[allow(dead_code)] // TODO(check-parity): `move_preconditions` reports this.
+pub(crate) fn stays_behind_through_a_body(
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+) -> Result<Option<String>> {
+    // TODO(check-parity): implement over `crate_move::survey`
+    let _ = (workspace, op);
+    todo!("check-parity: a body path to a module staying behind")
+}
+
+/// The destination's root already binds the moved module's name — a `mod` declaration, or a file
+/// at the target path. Moving into it would be a **merge**, which no operation performs. Static: it
+/// needs no index, so a plain `check` reports it.
+#[allow(dead_code)] // TODO(check-parity): `move_preconditions` reports this.
+pub(crate) fn destination_already_has_the_module(
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+) -> Result<Option<String>> {
+    // TODO(check-parity): implement
+    let _ = (workspace, op);
+    todo!("check-parity: a module name the destination already has")
+}
+
 /// Every check [`resolve`] runs before it consults rust-analyzer.
 pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<()> {
     let moving = moving::Move::read(workspace, op)?;
