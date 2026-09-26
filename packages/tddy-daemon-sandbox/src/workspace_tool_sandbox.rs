@@ -190,13 +190,22 @@ pub fn build_workspace_tool_plan(
         "--stdio".to_string(),
     ];
 
-    let env = tddy_sandbox::scratch_runner_env(
+    let mut env = tddy_sandbox::scratch_runner_env(
         &scratch_home,
         &scratch_tmp,
         &session_id,
         &layout.tool_ipc_socket,
         &layout.egress_dir,
     );
+    // FIXME(grep-in-jail): see `host_ripgrep_dir`. Both halves are needed and neither is enough on
+    // its own — PATH so `Command::new("rg")` resolves, and the exec-marked read below so Seatbelt
+    // lets the loader read and run what it resolved.
+    let ripgrep_dir = host_ripgrep_dir();
+    if let Some(dir) = &ripgrep_dir {
+        if let Some(path) = env.get_mut("PATH") {
+            *path = format!("{}:{path}", dir.display());
+        }
+    }
 
     let plan_worktree = worktree_path.clone();
     let mut plan =
@@ -238,8 +247,49 @@ pub fn build_workspace_tool_plan(
     // `main()` runs. Denied, that read fails with `EINVAL` and the runtime aborts, so the jail
     // never comes up at all. Nothing else of the shell policy is relaxed.
     plan.policy.sysctl_read = true;
+    // FIXME(grep-in-jail): see `host_ripgrep_dir`. `exec_paths` alone would not do — it grants
+    // `process-exec*` and no read, and a binary the loader cannot read is a binary it cannot run.
+    // `.executable()` is the grant that carries both.
+    if let Some(dir) = ripgrep_dir {
+        plan.reads.push(
+            tddy_sandbox::ReadSpec::subpath(dir, tddy_sandbox::ReadReason::Toolchain).executable(),
+        );
+    }
     plan.cgroup = cgroup;
     Ok(plan)
+}
+
+/// The directory holding the host's `rg`, when there is one.
+///
+/// FIXME(grep-in-jail): temporary. `tool_grep` shells out to `ripgrep`, and the jail's PATH is
+/// `/usr/bin:/bin:/usr/sbin:/sbin` while Homebrew installs `rg` under `/opt/homebrew/bin` (or
+/// `/usr/local/bin` on Intel). So `Grep` fails `spawn failed: No such file or directory` on every
+/// call in every sandboxed session on a Mac — silently, as one refused tool among many, which is
+/// how it went unnoticed.
+///
+/// This grants the *one directory the host's own `rg` lives in*, resolved at plan time rather than
+/// hardcoded, so it is right on Intel, Apple Silicon and Linux alike and grants nothing on a host
+/// that has no `rg`. It is still the wrong shape: it widens a jail's exec surface to a directory
+/// full of unrelated Homebrew binaries because of one tool's dependency, hardcoded in the plan
+/// builder for one named binary.
+///
+/// The designed replacement is **`ToolSpec`**: a jail accepts a declared list of the external
+/// tools it needs, and each entry states what becomes readable, what becomes executable and what
+/// joins its `PATH`. Then `rg` is one declaration among several rather than a special case here,
+/// the grant is the binary rather than its directory, and a tool the host cannot satisfy is a
+/// refusal at jail startup instead of a per-call `spawn failed` nobody reads.
+///
+/// Tracked in `docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md`.
+fn host_ripgrep_dir() -> Option<PathBuf> {
+    let output = std::process::Command::new("/usr/bin/which")
+        .arg("rg")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    path.parent().map(Path::to_path_buf)
 }
 
 /// Every directory above `worktree`, from the filesystem root down to its parent.
