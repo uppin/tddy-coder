@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 5/7 — branch `feature/live-plan/move-facades`, base `feature/live-plan/move-paths`.
-PR: _recorded in wave 2_
+PR: [#541](https://github.com/uppin/tddy-coder/pull/541)
 
 ## Responsibility
 
@@ -153,30 +153,47 @@ Acceptance tests over multi-crate fixtures asserting the written text, the compi
 
 ## Acceptance Tests
 
-### tddy-code-restructuring — `tests/move_module_to_crate_acceptance.rs`
+### tddy-code-restructuring — `tests/move_facades_acceptance.rs` (new suite, live rust-analyzer)
 
-- `three_modules_moved_to_one_destination_leave_one_grouped_facade`
+- `three_modules_moved_to_one_destination_leave_one_grouped_facade` — today three
+  `pub use destination::*;` lines; asserts one `pub use destination::{auth, config, paths};` and a
+  clean `cargo clippy -D warnings` (new harness `assert_lints_clean`)
 - `a_destination_name_the_origin_also_binds_does_not_trip_hidden_glob_reexports`
-- `a_module_added_to_the_destination_root_is_declared_in_sorted_position`
+- `a_module_added_to_the_destination_root_is_declared_in_sorted_position` — today appended last
+- `moving_a_nested_module_rewrites_its_parents_glob_to_the_destination` — today `pub use inner::*;`
+  is left dangling
+- `a_crate_use_inside_the_moved_files_mod_tests_is_read_like_a_root_level_one` — today the move
+  applies; read, the inner `crate::runtime` path is the same edge back into `origin` a root-level
+  `use` is refused for, so the move is refused before any write (see Decisions)
+- `a_super_glob_inside_the_moved_files_mod_tests_is_left` — passes today; the gap-H guard the depth
+  walk must keep holding
+- `a_test_binary_move_after_a_module_move_names_the_defining_crate` — today the moved test keeps
+  naming `origin`
 
-### tddy-code-restructuring — `tests/nested_module_move_acceptance.rs`
+### tddy-code-restructuring — unit
 
-- `moving_a_nested_module_rewrites_its_parents_glob_to_the_destination`
+- `crate_move.rs` `facade_tests`: `three_modules_moved_to_one_destination_leave_one_grouped_line`,
+  `two_destinations_leave_one_line_each_in_the_order_they_were_first_moved_into`
+- `crate_move/manifest_edits.rs` `sorted_declaration_tests`: 2
+- `crate_move/header.rs` `every_depth_tests`:
+  `use_items_inside_an_inline_test_module_are_found_and_marked_as_test`
 
-### tddy-code-restructuring — `tests/test_module_reference_acceptance.rs`
-
-- `a_crate_use_inside_the_moved_files_mod_tests_is_re_pointed`
-- `a_super_glob_inside_the_moved_files_mod_tests_is_left`
-
-### tddy-code-restructuring — `tests/test_binary_move.rs`
-
-- `a_test_binary_move_after_a_module_move_names_the_defining_crate`
+All fail at `TODO(move-facades)` or with the recorded defect.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+- Draft-PR-contract stubs, all `#[allow(dead_code)]` until their callers switch: `TODO(move-facades)`
+  in `crate_move.rs` (`facade_lines_for_plan`), `crate_move/manifest_edits.rs`
+  (`insert_module_declaration_sorted`), `crate_move/header.rs` (`use_items_at_every_depth`),
+  `crate_move/module_home.rs` (`crate_root_facade_forwarding`).
 
 ## Decisions & Trade-offs
+
+- **A `crate::` path in the moved file's `mod tests` to a module staying behind is refused, not
+  re-pointed.** Re-pointed, it would be `destination → origin` — the same edge the move refuses for
+  a root-level `use`. The PRD's "re-pointed" holds for every path whose target moves or lives
+  elsewhere; for this one the consistent answer is the existing refusal, now reached before the
+  write instead of as a broken test build.
 
 - **Named facade over root glob** — names only what moved, so it cannot shadow; also removes the
   duplicate-line cosmetic defect in the same stroke.
@@ -198,10 +215,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

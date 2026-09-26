@@ -2113,3 +2113,27 @@ pub const ORIGIN_OVER_BOTH: &str =
     "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
                                     [dependencies]\nshared = { path = \"../shared\" }\n\
                                     destination = { path = \"../destination\" }\n";
+
+/// Assert the workspace passes `cargo clippy --workspace --all-targets -- -D warnings` — CI's lint
+/// gate, which a move that compiles can still leave red.
+pub fn assert_lints_clean(fixture: &AFixtureWorkspace) {
+    let output = Command::new("cargo")
+        .args([
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--quiet",
+            "--",
+            "-D",
+            "warnings",
+        ])
+        .current_dir(fixture.path())
+        .env("CARGO_TARGET_DIR", fixture.path().join("target"))
+        .output()
+        .expect("cargo clippy runs");
+    assert!(
+        output.status.success(),
+        "the workspace does not lint clean:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
