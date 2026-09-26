@@ -275,6 +275,8 @@ pub(crate) use refusals::*;
 
 mod header;
 
+mod survey;
+
 mod module_home;
 pub use module_home::*;
 
