@@ -1,9 +1,10 @@
-# Changeset: tddy-session-lifecycle becomes a wiring crate
+# Changeset: tddy-session-lifecycle's leaf topics move to their receivers
 
 **Date**: 2026-09-23
-**Status**: 🚧 In Progress — green (rescoped 2026-09-26: leaf moves only; wiring target moves to follow-up nodes)
+**Status**: 🚧 In Progress — implementation complete for the rescoped node (2026-09-26); `/validate-changes`, `/pr-wrap` and the wrap remain
+**Rescoped**: 2026-09-26 (developer) — this node delivers the leaf moves; the host-method ports and the wiring target move to #531 (`#carve` 16) and its successors
 **Type**: Refactor (crate extraction; no behaviour change)
-**Stack**: `#carve` 15/15, on top of `lifecycle-wiring` (#524, the destructure node)
+**Stack**: `#carve` 15/N, on top of #524 (merged); #531 (`#carve` 16) sits on this node
 
 ## Initial Discovery
 
@@ -13,13 +14,16 @@ from #524. The receivers and the port design below were checked against every `C
 
 ## Affected Packages
 
-- **`tddy-session-lifecycle`**: left with only host construction, delegating port impls and `pub use`
-  facades.
-- **New crates:** `tddy-agent-launch`, `tddy-session-split`.
-- **Existing receivers:**
-  - `tddy-session-agents`, `tddy-session-files`, `tddy-session-activity` and `tddy-session-catalog`;
-  - `tddy-terminal-rpc`, `tddy-daemon-sandbox`, `tddy-daemon-livekit` and `tddy-daemon-kernel`;
-  - `tddy-demo-runner` (or `tddy-vm`).
+- **`tddy-session-lifecycle`**: its host-free leaf topics leave; it keeps `pub use` facades for every
+  moved public path. ~22.8k → 20,041 production lines.
+- **Receivers** (production lines after this node): `tddy-daemon-kernel` 3,409, `tddy-terminal-rpc`
+  2,526, `tddy-daemon-sandbox` 3,239, `tddy-session-activity` 2,541, `tddy-daemon-livekit` 5,863,
+  `tddy-session-files` 4,716, `tddy-session-agents` 4,132.
+- **Restructure engine** (defects found by the moves, fixed test-first): `tddy-code-restructuring`,
+  `tddy-lsp`, `tddy-lsp-executor`, `tddy-index-daemon`; plus `.agents/skills/code-restructuring/references/plan-schema.md`
+  and `.config/nextest.toml`.
+- **Not created here** (moved to #531 and successors): `tddy-agent-launch`, `tddy-session-split`.
+  `tddy-session-catalog` and `tddy-demo-runner` are untouched.
 - **Consumers** (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`): none is edited. They
   resolve through facades.
 
@@ -39,6 +43,12 @@ This PR moves each topic to a receiver below lifecycle:
 
 Every public `tddy_session_lifecycle::…` path stays reachable.
 
+**Rescoped 2026-09-26.** The engine can move a module whole, or the `self`-free tail of a host
+method; it cannot move a host method's orchestration. After the leaf topics moved, two T3 pilot runs
+moved 11 methods for a net −185 lines. The developer rescoped this node to what it delivered — the
+leaf moves, the host-free parts of T3, T7 and T8, and eight engine fixes — and moved the in-place
+port restructure and the wiring target to #531 (`#carve` 16) and its successors.
+
 ## Background
 
 This is the last `#carve` node. It carries the stack's acceptance criterion for lifecycle, which the
@@ -47,11 +57,15 @@ move cannot shrink what #524 restructures.
 
 ## Responsibility
 
-- Cut the three cross-topic cycles (see "Phase 2 design").
-- Define each receiver's state struct and callback trait; lifecycle builds and implements them.
-- Move the topics leaves-first, in the order below. Tests move with their code.
+- Move lifecycle's **host-free** topics to their receivers with `tddy-tools restructure`, leaves first.
+  Tests move with their code.
 - Leave a facade for every public `tddy_session_lifecycle::…` path.
-- Reach the wiring size target the developer picks (see "What wiring only can reach").
+- Fix, test-first, the engine defects that block those moves; file every other defect found as a
+  `docs/dev/todo/` entry with a code example.
+- Record, per move, the baseline and what the plan premises got wrong — the input #531 plans from.
+- **Not this node's** (rescoped 2026-09-26, to #531 and successors): the cross-topic cycle cuts, the
+  per-topic state structs and callback traits, T4, T1, T10, the demo VM, the host-bound remainders
+  of T3/T7/T8, and the wiring size target.
 
 ## Boundaries
 
@@ -65,6 +79,8 @@ move cannot shrink what #524 restructures.
   finding against #524, not work done here.
 - **Nothing is moved into `tddy-daemon-rpc`.** It depends on lifecycle, so a facade over it is
   impossible.
+- **Engine moves only** (developer, 2026-09-25). No `git mv` or hand-written move; a refusal stops
+  for the developer; hand edits after a move are build corrections, each new cause filed as a todo.
 
 ## Dependencies
 
@@ -88,7 +104,7 @@ plan. If the developer approves shape tests, they are the contract, following #5
 **Greenable independently:** **no.** It moves the layout #524 creates, so it can go green only once
 #524 is green and this branch is rebased onto it.
 **Concurrent with:** nothing.
-**Blocks:** nothing. This is the top of the stack.
+**Blocks:** #531 (`#carve` 16) and its successors, which plan against the layout this node leaves.
 
 ## Prerequisites
 
@@ -103,12 +119,24 @@ plan. If the developer approves shape tests, they are the contract, following #5
 ## Scope
 
 - [x] Rebased onto a green #524 (merged; branch rebuilt on master `2688227f`, dropping the already-wrapped #524/#527 WIP docs)
-- [ ] The three cross-topic cycles cut: agent-def resolution moves down into `tddy-session-agents` (T1↔T3); a `SplitHost` port (T1↔T4); callback ports for T3→T2 and T4→T2
-- [ ] Per-topic state structs + callback traits, defined in each receiver (the inverted pattern)
-- [ ] Topics moved leaves-first (order below); receivers ≤ 10k, none depends on lifecycle
-- [ ] `tddy-session-lifecycle` meets the wiring definition; facades cover every public path; consumers unedited
-- [ ] Tests moved with their code; baseline back to #524's numbers
-- [ ] `/analyze-code-issues` on `tddy-agent-launch` and `tddy-session-split`
+- [x] Leaf topics moved with the engine, leaves first:
+  - `task_service`, `action_service` → `tddy-daemon-sandbox` (`6b1e8235`)
+  - `relay_idle`, `local_token_tonic_adapter` → `tddy-daemon-kernel` (`ba2eec55`)
+  - `pty_runtime`, `tddy_user_config` → `tddy-terminal-rpc` (`a21c1dcc`)
+  - `session_reader`, `user_sessions_path`, `session_deletion`, `session_list_enrichment` → `tddy-session-activity` (`15374089`)
+  - `peer_routing`, `session_admission_service` → `tddy-daemon-livekit` (`96531fcc`)
+  - `attachment_progress` → `tddy-session-files` (`3b3237bd`)
+  - T3's host-free pieces → `tddy-session-agents`: clone readiness, exec-tool caller authorization, and 11 methods (`205c0162` … `63fcd0ca`), with the hand-written `AgentRosterState<'a>`
+- [x] Receivers ≤ 10k production lines, no moved file ≥ 500 production lines, none depends on lifecycle (normal or dev)
+- [x] Facades cover every moved public path; consumers unedited (`cargo check --all-targets` on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` after every move)
+- [x] Tests moved with their code; lifecycle baseline held by name after every move (562 passed, the 22 known failures, 1 ignored at the end)
+- [x] Engine defects that blocked the moves fixed test-first (8 commits: `543125a6`, `3c8323e6`, `5446cec6`, `ebeb8282`, `cb367ac6`, `cc19d3a4`, `ff73fcb6`, `841545dd`); engine tests 646 → 694 passed, 0 failed
+- [x] Every other engine defect found filed as a `docs/dev/todo/2026-09-25-restructure-*` entry with a code example (15 entries)
+- Deferred to #531 (`#carve` 16) and its successors (rescoped 2026-09-26):
+  - **Deferred:** ~~The three cross-topic cycles cut~~ — the code needs eight more cuts; planned in #531
+  - **Deferred:** ~~Per-topic state structs + callback traits, defined in each receiver~~ — the in-place port restructure, #531 and successors
+  - **Deferred:** ~~`tddy-session-lifecycle` meets the wiring definition~~ — the move node after the ports
+  - **Deferred:** ~~`/analyze-code-issues` on `tddy-agent-launch` and `tddy-session-split`~~ — neither crate is created here
 
 ## Technical changes
 
@@ -929,7 +957,7 @@ design call. A T4 pilot without both would move T4's leaves only.
 - [x] Create changeset — this document
 - [x] USER REVIEW — wiring target ~3.4k, no shape tests (2026-09-25); `PeerRouted*` stays (the ~3.4k row keeps it)
 - [x] Rebase onto a green #524
-- [ ] Implementation
+- [x] Implementation (rescoped node)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
@@ -938,8 +966,8 @@ design call. A T4 pilot without both would move T4's leaves only.
 
 Executed at wrap:
 
-- [ ] ~~`tddy-session-lifecycle` meets the wiring definition at the chosen size~~ — moved to the follow-up nodes (2026-09-26); this node records the size it reached
-- [ ] Every receiver ≤ 10k production lines; none depends on `tddy-session-lifecycle`; no file ≥ 500 in any receiver
-- [ ] Every public `tddy_session_lifecycle::…` path resolves; consumers unedited apart from listed exceptions
-- [ ] Baseline numbers matched
-- [ ] `/analyze-code-issues` run on every new crate
+- [x] ~~`tddy-session-lifecycle` meets the wiring definition at the chosen size~~ — deferred to the follow-up nodes (2026-09-26); this node reached 20,041 production lines
+- [x] Every receiver ≤ 10k production lines; none depends on `tddy-session-lifecycle`; no moved file ≥ 500 production lines
+- [x] Every public `tddy_session_lifecycle::…` path resolves; consumers unedited (no exceptions were needed)
+- [x] Baseline numbers matched by name after every move
+- [x] `/analyze-code-issues` run on every new crate — not applicable: this node creates none
