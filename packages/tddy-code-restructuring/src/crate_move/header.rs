@@ -127,6 +127,15 @@ fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a S
 /// rules: what a moved test names and what a moved module names are different questions, but
 /// *which* text answers either is one question, and two scanners would disagree about an indented
 /// `use` before long.
+/// Every `use` item of the file at any module depth — inline `mod tests { … }` included — with its
+/// byte offset, and whether it sits under `#[cfg(test)]`.
+#[allow(dead_code)] // TODO(move-facades): the header pass walks these instead of root items only.
+pub(crate) fn use_items_at_every_depth(text: &str) -> Vec<(usize, &str, bool)> {
+    // TODO(move-facades): implement
+    let _ = text;
+    todo!("move-facades: every use item at any depth")
+}
+
 pub(crate) fn use_declarations(text: &str) -> Vec<(usize, &str)> {
     let mut declarations = Vec::new();
     let mut offset = 0usize;
@@ -213,4 +222,32 @@ pub(crate) fn repointed(written: &str, moving: &Move) -> Option<String> {
         moving.destination.extern_name,
         segments[at..].join("::")
     ))
+}
+
+#[cfg(test)]
+mod every_depth_tests {
+    use super::*;
+
+    #[test]
+    fn use_items_inside_an_inline_test_module_are_found_and_marked_as_test() {
+        // Given a file with a root `use` and one inside its `mod tests`
+        let text = "use crate::runtime::boot;\n\n#[cfg(test)]\nmod tests {\n    \
+                    use crate::clock::Clock;\n    use super::*;\n}\n";
+
+        // When every use item is read
+        let found: Vec<(&str, bool)> = use_items_at_every_depth(text)
+            .into_iter()
+            .map(|(_, path, in_test)| (path, in_test))
+            .collect();
+
+        // Then all three are found, the inner two marked as under test
+        assert_eq!(
+            found,
+            vec![
+                ("crate::runtime::boot", false),
+                ("crate::clock::Clock", true),
+                ("super::*", true),
+            ]
+        );
+    }
 }

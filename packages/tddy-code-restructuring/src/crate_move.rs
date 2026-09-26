@@ -323,6 +323,67 @@ pub fn facade_line(
     }
 }
 
+/// The facade lines a whole plan's cross-crate moves leave in the origin's root: **one grouped
+/// `pub use <dest>::{a, b};` per destination crate**, naming the modules that moved there, in the
+/// order destinations are first moved into and with the modules sorted.
+///
+/// A root glob per operation re-exported the destination's whole root — shadowing any name the
+/// origin already binds (`hidden_glob_reexports`) and repeating itself once per operation (`unused
+/// import`). Naming what moved can do neither.
+// TODO(move-facades): the move and cluster writers call this in place of `facade_line` per op.
+#[allow(dead_code)]
+pub(crate) fn facade_lines_for_plan(moved: &[(destination::Destination, String)]) -> Vec<String> {
+    // TODO(move-facades): implement
+    let _ = moved;
+    todo!("move-facades: one grouped facade per destination")
+}
+
+#[cfg(test)]
+mod facade_tests {
+    use super::*;
+
+    fn a_destination(extern_name: &str) -> destination::Destination {
+        destination::Destination {
+            dir: format!("crates/{extern_name}"),
+            package: extern_name.to_string(),
+            extern_name: extern_name.to_string(),
+        }
+    }
+
+    #[test]
+    fn three_modules_moved_to_one_destination_leave_one_grouped_line() {
+        // Given a plan that moved three modules into `kernel`, in no particular order
+        let moved = [
+            (a_destination("kernel"), "config".to_string()),
+            (a_destination("kernel"), "auth".to_string()),
+            (a_destination("kernel"), "paths".to_string()),
+        ];
+
+        // Then the origin is left one line naming all three, sorted
+        assert_eq!(
+            facade_lines_for_plan(&moved),
+            vec!["pub use kernel::{auth, config, paths};".to_string()]
+        );
+    }
+
+    #[test]
+    fn two_destinations_leave_one_line_each_in_the_order_they_were_first_moved_into() {
+        let moved = [
+            (a_destination("sandbox"), "runtime".to_string()),
+            (a_destination("kernel"), "config".to_string()),
+            (a_destination("sandbox"), "jail".to_string()),
+        ];
+
+        assert_eq!(
+            facade_lines_for_plan(&moved),
+            vec![
+                "pub use sandbox::{jail, runtime};".to_string(),
+                "pub use kernel::config;".to_string(),
+            ]
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

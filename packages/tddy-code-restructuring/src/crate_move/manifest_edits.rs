@@ -23,6 +23,15 @@ pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::R
 ///
 /// Placed rather than sorted in, because a crate root's `mod` order is the author's and nothing
 /// here knows what it means.
+/// The edit that declares `line` (`pub mod host_registry;`) among the root's existing `mod` lines
+/// in sorted position, rather than after the last of them.
+#[allow(dead_code)] // TODO(move-facades): replaces `after_last_module_declaration` at its callers.
+pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str) -> TextEdit {
+    // TODO(move-facades): implement
+    let _ = (text, line);
+    todo!("move-facades: declare a module in sorted position")
+}
+
 pub(crate) fn after_last_module_declaration(text: &str) -> usize {
     let mut offset = 0usize;
     let mut header_ends = 0usize;
@@ -259,5 +268,42 @@ pub(crate) fn position_of(text: &str, offset: usize) -> Position {
             .next()
             .map_or(0, |line| line.chars().count()) as u32
             + 1,
+    }
+}
+
+#[cfg(test)]
+mod sorted_declaration_tests {
+    use super::*;
+    use crate::apply::edited;
+
+    fn apply_text_edits(text: &str, edits: &[TextEdit]) -> String {
+        edited(text.to_string(), edits).unwrap()
+    }
+
+    #[test]
+    fn a_module_is_declared_between_the_ones_it_sorts_between() {
+        // Given a root declaring `alpha` and `zeta`
+        let root = "//! The crate.\n\npub mod alpha;\npub mod zeta;\n";
+
+        // When `host_registry` is declared
+        let edit = insert_module_declaration_sorted(root, "pub mod host_registry;");
+
+        // Then it lands between them
+        assert_eq!(
+            apply_text_edits(root, &[edit]),
+            "//! The crate.\n\npub mod alpha;\npub mod host_registry;\npub mod zeta;\n"
+        );
+    }
+
+    #[test]
+    fn a_module_that_sorts_last_is_declared_after_the_last() {
+        let root = "pub mod alpha;\npub mod beta;\n";
+
+        let edit = insert_module_declaration_sorted(root, "pub mod gamma;");
+
+        assert_eq!(
+            apply_text_edits(root, &[edit]),
+            "pub mod alpha;\npub mod beta;\npub mod gamma;\n"
+        );
     }
 }
