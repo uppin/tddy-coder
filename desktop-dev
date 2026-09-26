@@ -8,14 +8,21 @@
 #
 # Usage: ./desktop-dev                   # dev.desktop.yaml at the repo root
 #        ./desktop-dev --release         # extra CLI for `tauri dev` (pass-through)
-#        ./desktop-dev --build           # also build every binary the app can INVOKE. `tauri dev`
-#                                          builds only tddy-desktop; the daemon it hosts then
-#                                          resolves the session worker, the tool binary, the sandbox
-#                                          runner, the index daemon, the git shim and the worktree
-#                                          mirror as siblings of that binary in target/debug, and
-#                                          falls back to a bare name on PATH with no existence check
-#                                          — so a missing one silently drives whatever ./install
-#                                          last put on PATH. See scripts/dev-runtime-binaries.sh.
+#
+# Every binary the app can INVOKE is built by default, before anything starts. `tauri dev` builds
+# only tddy-desktop; the daemon it hosts then resolves the session worker, the tool binary, the
+# sandbox runner, the index daemon, the git shim and the worktree mirror as siblings of that binary
+# in target/debug, and falls back to a bare name on PATH with no existence check. Leaving that to a
+# flag meant the common case was a stack missing a sibling — surfacing much later as a session that
+# will not start, or as a dev run silently driving whatever ./install last put on PATH. The build is
+# incremental and costs nothing when the binaries are current, so it is no longer opt-in.
+# See scripts/dev-runtime-binaries.sh.
+#
+#        ./desktop-dev --build           # the default; accepted so an existing habit or script
+#                                          keeps working, and to say the build is wanted explicitly.
+#        ./desktop-dev --no-build        # skip it. For a run that must not touch target/debug —
+#                                          e.g. driving binaries another checkout or ./install
+#                                          placed there on purpose.
 #        ./desktop-dev --resolve-private-repo
 #                                        # install the JS dependencies through the local private npm
 #                                          registry (LOCAL_REGISTRY_URL) instead of the public one,
@@ -23,8 +30,8 @@
 #                                          with no public registry access; it rewrites node_modules,
 #                                          so it is opt-in rather than automatic.
 #
-# Both flags are consumed here; every other argument is passed through to `tauri dev`, which accepts
-# neither.
+# All of these flags are consumed here; every other argument is passed through to `tauri dev`,
+# which accepts none of them.
 #
 # Environment variables:
 #   VITE_PORT       — Port for the Vite dev server (default: 5173)
@@ -70,12 +77,14 @@ fi
 
 # Flags this script owns, parsed after the re-exec above so that exec still forwards the original
 # argv. Consumed here; everything else is passed through to `tauri dev`.
-WANT_BUILD=false
+# Default: build the runtime-invocable siblings. See the usage header for why this is not opt-in.
+WANT_BUILD=true
 RESOLVE_PRIVATE_REPO=false
 filtered_args=()
 for arg in "$@"; do
   case "$arg" in
     --build) WANT_BUILD=true ;;
+    --no-build) WANT_BUILD=false ;;
     --resolve-private-repo) RESOLVE_PRIVATE_REPO=true ;;
     *) filtered_args+=("$arg") ;;
   esac
