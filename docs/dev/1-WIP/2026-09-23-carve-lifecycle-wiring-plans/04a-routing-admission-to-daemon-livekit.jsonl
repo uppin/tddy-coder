@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/peer_routing.rs","path":"peer_routing"},"also":[{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/session_admission_service.rs","path":"session_admission_service"}],"to":"packages/tddy-daemon-livekit","reexport":"glob"}

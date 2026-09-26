@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs","start":{"line":145,"col":9},"end":{"line":161,"col":11}},"name":"report_shadowed_agent_def"}

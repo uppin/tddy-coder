@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-daemon-kernel/src/privilege_drop.rs` — the whole module
 **Category:** misplaced-tests
 **Detected:** 2026-09-19 by structural audit
-**Metrics:** **5 of 5 tests live in another crate** (`tddy-session-lifecycle/src/pty_runtime.rs`) · 0 `#[cfg(test)]` blocks in the module · 104 production lines · the crate's own 82 tests enter none of it
+**Metrics:** **5 of 5 tests live in another crate** (`tddy-terminal-rpc/src/pty_runtime.rs` since #526; `tddy-session-lifecycle/src/pty_runtime.rs` at detection) · 0 `#[cfg(test)]` blocks in the module · 104 production lines · the crate's own 82 tests enter none of it
 **Restructure:** not required — ordinary work (move the tests)
 **Status:** Open — **unclaimed**
 **Verified:** ✅ hand-verified 2026-09-19 — see *Verified by hand*
@@ -13,6 +13,7 @@
 | Run | Tests in owning crate | Tests in consumer crate | Note |
 |---|---|---|---|
 | 2026-09-19 | 0 | 5 | first detection |
+| 2026-09-26 | 0 | 5 | #526 (`#carve` 15/21) moved `pty_runtime` whole to `tddy-terminal-rpc`, the five tests with it (`:175`, `:193`, `:215`, `:225`, `:236`). Still in a consumer crate, still reached through `pty_runtime`'s re-export; `privilege_drop.rs` still has no `#[cfg(test)]` |
 
 ## What the tool found
 
@@ -72,6 +73,11 @@ land in the same new `#[cfg(test)]` block.
 - Confirmed `privilege_drop.rs` contains no `#[cfg(test)]`.
 - Ran `./test -p tddy-github -p tddy-daemon-kernel`: 112 passed, 0 failed — 82 of them the kernel's
   (78 unit + 4 acceptance), none naming a `privilege_drop` symbol.
+
+**2026-09-26.** Re-checked after #526: `packages/tddy-terminal-rpc/src/pty_runtime.rs` has its
+`#[cfg(test)]` at `:166` and the five tests after it; `privilege_drop.rs` has no `#[cfg(test)]`. The
+consumer crate in *What the tool found* and *What would close it* is `tddy-terminal-rpc` now, not
+`tddy-session-lifecycle`.
 
 **What this record is not claiming.** Testing through a re-export is not wrong in itself, and these
 five tests are good tests — they are Given/When/Then, they assert on behaviour, and they pass. The

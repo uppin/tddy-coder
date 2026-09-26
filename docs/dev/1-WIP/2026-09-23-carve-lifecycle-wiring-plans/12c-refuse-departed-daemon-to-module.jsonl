@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_start_hosted_agent_clone.rs","start":{"line":375,"col":1},"end":{"line":386,"col":2}},"name":"departed_daemon","reexport":"glob","to_file":true}

@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/agent_roster.rs","start":{"line":83,"col":1},"end":{"line":153,"col":2}},"name":"agent_records","reexport":"glob","to_file":true}

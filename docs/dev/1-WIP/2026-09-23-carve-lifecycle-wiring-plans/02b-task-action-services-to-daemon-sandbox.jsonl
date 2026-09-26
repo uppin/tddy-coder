@@ -1,5 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/task_service.rs","path":"task_service"},"to":"packages/tddy-daemon-sandbox","reexport":"glob"}
-{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/action_service.rs","path":"action_service"},"to":"packages/tddy-daemon-sandbox","reexport":"glob"}
-{"op":"move_test_binary_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/tests/action_service_acceptance.rs","path":"action_service_acceptance"},"to":"packages/tddy-daemon-sandbox"}
-{"op":"move_test_binary_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/tests/action_sandbox_acceptance.rs","path":"action_sandbox_acceptance"},"to":"packages/tddy-daemon-sandbox"}

@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **4,342 production lines** (4,788 before #527) · budget 500
+**Metrics:** **4,360 production lines** (2026-09-26, #526; 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
-**Status:** Open — pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
+**Status:** Open — regressed 2026-09-26 (+18 in #526, `#carve` 15/21); pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
 
 ## Measurement history
 
@@ -16,6 +16,7 @@
 | 2026-09-24 | 4,307 | #527's three explicit-failure guards. The logic went to siblings (`early_return.rs`, `chatter.rs`, `readiness.rs`, and `runner/compile_gate.rs` outside this file); the +13 here is wiring only: the `mod`/`use` lines and the two `refuse_early_returns` call sites in `check` and `resolve` |
 | 2026-09-24 | 4,316 | #527 wrap re-measure, after gaps A–C: the repairs went to `imports.rs`, `impl_seam.rs` and a new `nested_modules.rs`; the +9 here is the `nested_modules` wiring and one reworded refusal. 8.6× the budget — `rust.rs` shrank only because new logic went elsewhere, and none of its own seams were cut |
 | 2026-09-25 | 4,342 | #524 (`#carve` 14/15), `3714a654`: every entry point now closes the documents it opened. `did_open` and the closing went to a new sibling, `documents.rs` (59 lines); the +29 here (4,313 → 4,342 at `3714a654^` and after, both by the inline-test-block rule) is the three `closing_what_it_opens` wrappers around the bodies moved verbatim into `resolve_opening`, `anchor_opening` and `outside_references_opening`, and the `opened` field. Unchanged in kind: none of its own seams were cut |
+| 2026-09-26 | 4,360 | #526 (`#carve` 15/21): +18 by this wrap's re-implementation of the inline-test-block rule, which reads `2688227f` as 4,340 and `22787218` as 4,358. +5 in `5446cec6` (the inactive-code answer threaded through the caller survey) and +13 in `cb367ac6` (`carries_placeholder_type` reading `'_` as a lifetime); `cc19d3a4` net 0 (the `extract_variable` naming went to a new sibling, `introduced.rs`). Regressed slightly; none of its own seams were cut |
 
 ## What the gate found
 

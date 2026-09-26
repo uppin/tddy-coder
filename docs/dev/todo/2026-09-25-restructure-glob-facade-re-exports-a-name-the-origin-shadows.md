@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine defect; the lint gate goes red after the move)
 **Source:** `#carve` 15/15, [#526](https://github.com/uppin/tddy-coder/pull/526), plan
-`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/02a-pty-runtime-to-terminal-rpc.jsonl`,
+`22787218:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/02a-pty-runtime-to-terminal-rpc.jsonl`,
 op 0 (`pty_runtime` + `tddy_user_config` → `tddy-terminal-rpc`, `reexport: glob`)
 
 ## What happened

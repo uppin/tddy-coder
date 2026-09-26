@@ -28,10 +28,16 @@ stays exactly one definition of each.
 
 - **A subsystem.** The model registry, telegram, screen sharing, sandbox, spawn, auth and LiveKit are
   services in their own right and belong to their own crates.
-- **A module, as a rule.** `config.rs` is the single exception, and a deliberate one: four moving
+- **A module, as a rule.** `config.rs` is the first exception, and a deliberate one: four moving
   modules and every handler in both new services take `&DaemonConfig` and read disjoint parts of it,
   so there is no smaller cut — the symbol *is* the file. The alternative, a narrow value struct per
-  consuming crate, is authoring rather than moving, and every later node would repeat it.
+  consuming crate, is authoring rather than moving, and every later node would repeat it. The other
+  two are whole leaf modules with no session-host state, which the host and the RPC families above
+  it both reach, and which no subsystem crate owns: `relay_idle` (`RpcActivity`, the handle every RPC
+  handler bumps so a relay daemon does not shut down mid-session, over `tddy_task::IdleTimeoutTracker`)
+  and `local_token_tonic_adapter` (`LocalTokenUdsTonicAdapter`, which serves `MintLocalToken` from the
+  Unix socket's peer credential). They are why this crate depends on `tddy-task`, `tddy-github` and
+  `tonic`, and `tddy-session-lifecycle` re-exports both under their old paths.
 - **Anything the moving families do not reach.** `pty_registry.rs` was moved here and then retracted
   untouched on exactly that test.
 - **The daemon's signing key and key directory.** They are auth's (`tddy-daemon-auth`), and they
@@ -179,8 +185,8 @@ them and nothing more:
 the credential vaults are built): the defaults (600 s; the refresh-token lifetime), the ceiling (the
 refresh-token lifetime, past which the **daemon does not start**) and `0` = never — see
 [auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults).
-The ceiling is `tddy_github::REFRESH_TOKEN_TTL`, and this crate, with seventeen dependents, does
-**not** depend on `tddy-github`; the meaning lives in a crate that already does.
+The ceiling is `tddy_github::REFRESH_TOKEN_TTL`, and the meaning lives where the vaults are built,
+not in a crate with seventeen dependents that only parses the setting.
 
 `pending_login_ttl.rs` and `open_vault_idle_ttl.rs` now hold only their module doc and the parsing
 tests (absent, `0`, a value past the ceiling read as given, and the two refusals naming the

@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_provision_agent_clone.rs","start":{"line":347,"col":9},"end":{"line":353,"col":11}},"name":"agent_clone_worktree_path"}

@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/agent_roster/agent_records.rs","path":"agent_records"},"to":"packages/tddy-session-agents","reexport":"glob"}

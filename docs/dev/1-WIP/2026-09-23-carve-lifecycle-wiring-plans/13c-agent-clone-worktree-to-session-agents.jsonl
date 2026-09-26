@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/svc_provision_agent_clone/agent_clone_worktree.rs","path":"agent_clone_worktree"},"to":"packages/tddy-session-agents","reexport":"glob"}

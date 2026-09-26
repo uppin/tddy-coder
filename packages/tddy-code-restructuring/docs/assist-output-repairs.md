@@ -11,6 +11,7 @@ refuses the operation by name; none writes a result it cannot vouch for.
 | `imports.rs` | `restore_imports`, `next_import`, the verified reconstructions, the seam-lost filter, `names_bound`, `rebased_for_child` |
 | `impl_seam.rs` | `refuse_impl_sibling_references`, `is_inherent_impl`, `with_method_calls_restored`, `reached_through_the_type` |
 | `nested_modules.rs` | `with_nested_references_restored`, and the brace-depth module reader behind it |
+| `introduced.rs` | finding the `let` binding `extract_variable`'s assist introduced, so it can be renamed to the plan's `name` |
 
 `backends/rust.rs` wires these in. It keeps `choose_import`, `already_bound`, `expand_use` and
 `collect_aliases`.
@@ -131,6 +132,27 @@ literals are masked with the same lexer the test-binary move uses (`readable_spa
 When a placeholder is still left over after the repairs, the refusal names both cases it cannot tell
 apart lexically: reorder the plan for a module an earlier operation extracted; for a module the file
 already had, reach the item through `use super::*;` or cut the seam elsewhere.
+
+## Naming the binding `extract_variable` introduced
+
+Most assists write a fixed placeholder the engine renames to the plan's name (`fun_name`, `modname`,
+`NewTrait`). rust-analyzer's "extract variable" writes none: it names the binding from the expression
+(`suggest_name::for_variable`, so a read of `self.clones` becomes `let clones`). So the placeholder
+for this operation has no name (`Placeholder::name` is `None`: the server names the symbol), and
+`introduced.rs` finds the binding by what the assist added:
+
+- a `let` whose name is declared more often after the assist than before, counted over text with
+  comments and literals masked, so a `let` the assist only rewrote does not count;
+- sitting in the span the assist changed, which picks the right declaration when the new binding
+  shadows an older one of the same name.
+
+That binding is renamed to the plan's `name` with the same server rename the other placeholders use,
+and left as it is when rust-analyzer already chose that name. The operation is refused as
+`rust-analyzer's answer was unusable:` only when the assist introduced no `let` binding, or more than
+one. The leftover-placeholder check then runs against the name actually renamed. Two limits are
+rust-analyzer's: one operation replaces **one** occurrence of the expression, and the assist decides
+between `&self.x` and `self.x` from the autoref it sees (see
+[plan-schema.md](../../../.agents/skills/code-restructuring/references/plan-schema.md)).
 
 ## Known limitations
 

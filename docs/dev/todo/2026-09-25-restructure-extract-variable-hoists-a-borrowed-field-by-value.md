@@ -3,7 +3,7 @@
 **Category:** Future enhancement (engine defect; the tree does not compile after the apply)
 **Source:** `#carve` 15/15, [#526](https://github.com/uppin/tddy-coder/pull/526), T3 port-move
 pilot, second run: plan
-`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/21a-agent-def-for-spawn-hoist.jsonl`
+`22787218:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/21a-agent-def-for-spawn-hoist.jsonl`
 
 ## What happened
 

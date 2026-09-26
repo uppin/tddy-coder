@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/split_start.rs","start":{"line":43,"col":1},"end":{"line":48,"col":2}},"name":"peer_session_answer","reexport":"glob","to_file":true}

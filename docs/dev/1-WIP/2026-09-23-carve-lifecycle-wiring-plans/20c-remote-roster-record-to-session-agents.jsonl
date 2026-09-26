@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"move_module_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/connection_service/svc_turn_end_reporter/remote_roster_record.rs","path":"remote_roster_record"},"to":"packages/tddy-session-agents","reexport":"glob"}

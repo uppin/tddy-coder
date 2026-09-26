@@ -8,8 +8,10 @@ ExecTool and PR-stack families are served above this crate, by
 
 Extracted from `tddy-daemon` by the `#unbundle` stack; destructured in place by `#carve` 14/15
 ([#524](https://github.com/uppin/tddy-coder/pull/524)), so no file is over 500 production lines and
-each duplicate has one definition. The `#carve` wiring split
-([#526](https://github.com/uppin/tddy-coder/pull/526)) moves its topics out by directory.
+each duplicate has one definition. Its host-free topics live in the crates below it, behind facades
+([#526](https://github.com/uppin/tddy-coder/pull/526)); the host-bound rest is converted to per-topic
+ports and moved by `#carve` 16–21
+([#531](https://github.com/uppin/tddy-coder/pull/531)–[#536](https://github.com/uppin/tddy-coder/pull/536)).
 
 ## Quick Start
 
@@ -18,8 +20,7 @@ each duplicate has one definition. The `#carve` wiring split
 ```
 
 Twenty-two tests are red on a developer host for environmental reasons (the sandboxed-start suites
-never get a sandbox RPC bridge, and the `session_sync` suite needs `tddy-remote-git-repo` built),
-and one hangs. The full command and the list are in
+never get a sandbox RPC bridge, and the `session_sync` suite needs `tddy-remote-git-repo` built). The full command and the list are in
 [docs/test-suites.md § What a local run shows](docs/test-suites.md#what-a-local-run-shows).
 
 ## Documentation
@@ -27,8 +28,8 @@ and one hangs. The full command and the list are in
 | Doc | What it covers |
 |---|---|
 | [docs/session-service.md](docs/session-service.md) | the eight `session.SessionService` RPCs, `TaskRegistry` ownership, the `DaemonRpcFamilies` port, the shared components the RPC handlers above this crate use, the presenter observer, the transports |
-| [docs/module-layout.md](docs/module-layout.md) | how `src/` is organised: `connection_service`'s topic files and step modules, the sandboxed launch steps, the ports and peer-routed wrappers, the host builders, the `service_util` helpers, the definitions taken from lower crates, the topics and the coupling |
-| [docs/test-suites.md](docs/test-suites.md) | the 59 integration suites, and where a new one goes |
+| [docs/module-layout.md](docs/module-layout.md) | how `src/` is organised: `connection_service`'s topic files and step modules, the sandboxed launch steps, the ports and peer-routed wrappers, the host builders, the `service_util` helpers, the facades over the modules below this crate, the definitions taken from lower crates, the topics and the coupling |
+| [docs/test-suites.md](docs/test-suites.md) | the 56 integration suites, and where a new one goes |
 | [docs/code-issues/](docs/code-issues/) | the open analyzer and structural findings, one file each |
 | [docs/changesets/](docs/changesets/) | change history, one file per change |
 

@@ -4,7 +4,7 @@
 code that does compile is not what the plan asked for)
 **Source:** `#carve` 15/15, [#526](https://github.com/uppin/tddy-coder/pull/526), T3 port-move
 pilot, second run: plan
-`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/16b-broadcast-roster-extract.jsonl`
+`22787218:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/16b-broadcast-roster-extract.jsonl`
 
 ## What happened
 

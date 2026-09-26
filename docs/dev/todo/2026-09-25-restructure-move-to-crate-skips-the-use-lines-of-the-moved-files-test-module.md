@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine defect; the destination's test build fails after the move)
 **Source:** `#carve` 15/15, [#526](https://github.com/uppin/tddy-coder/pull/526), plan
-`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/03b-session-catalog-daemon-half-to-session-activity.jsonl`,
+`22787218:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/03b-session-catalog-daemon-half-to-session-activity.jsonl`,
 op 0 (`move_cluster_to_crate`: `session_deletion` + `session_reader` + `user_sessions_path` +
 `session_list_enrichment` → `tddy-session-activity`)
 

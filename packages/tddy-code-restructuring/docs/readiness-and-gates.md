@@ -8,9 +8,11 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Mechanism | Where | Refuses as |
 |---|---|---|
 | Readiness waits on quiescence | `backends/rust/readiness.rs`, `backends/rust/chatter.rs` | (waits; `ServerNotSettled` / `CallerStopped` if it ends early) |
+| A wait ended by the server's own diagnostics | `readiness.rs` (`wait_until_answerable`) | `SeamRefused` for an operation at inactive code or in a file no module tree reaches |
 | Documents closed after each entry point | `backends/rust/documents.rs` (`closing_what_it_opens`) | (refuses nothing; stops a shared server answering from a finished run's text) |
 | Health gate | `readiness.rs` (`refuse_degraded_index`), `ServerChatter::degraded` | `ServerDefect` |
 | Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`) | `SeamRefused` |
+| Partial-cluster finding | `crate_move/cluster.rs` (`stranded_siblings`) | a static `check` finding: the cycle `apply` refuses (`refusals::refuse_a_dependency_cycle`) |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
 | Compile gate | `runner/compile_gate.rs` | `BaselineDoesNotCompile`, `AppliedTreeDoesNotCompile` |
 
@@ -35,6 +37,24 @@ latest status on the client (`LspClient::server_status`), and `LspClientBridge::
 appends it after whatever it drained. The same readiness and health rules hold on the cold path and
 against a warm index daemon, because the daemon builds its backends through `runner::registry_for`.
 
+**A `null` hover that will never change is read from the server's diagnostics, not waited out.**
+Two kinds of position never resolve, however long the index has been ready, and rust-analyzer says
+which in its pull diagnostics (`textDocument/diagnostic`). Once the index is loaded and a hover is
+still `null`, `wait_until_answerable` fetches that report, once per poll:
+
+- **`inactive-code`**: an item under a `#[cfg]` the server has switched off (`#[cfg(not(unix))]` on
+  macOS). The syntax outline lists it, so a caller survey (`move_module_to_crate`,
+  `move_cluster_to_crate`, the `extract_module` reach) asks about it. The wait ends with
+  `Answerable::Inactive`: the survey still asks the server for the item's references, takes the
+  empty answer, and says on the progress line that only code under the evaluated cfg is surveyed. An
+  operation acting *at* such code, such as a rename, is refused as `this seam cannot be cut here:`,
+  naming the file and line and quoting the server.
+- **`unlinked-file`**: a file no crate's module tree reaches, as the server has loaded it. The
+  operation is refused as `this seam cannot be cut here:`, naming the file and quoting the server.
+
+Before the index is loaded, a missing diagnostic proves nothing, so the wait goes on. No timeout is
+involved: the server's own answer ends the wait.
+
 ## Documents are closed when an operation ends
 
 An open document is the server's authority on its file: rust-analyzer stops reading that file from
@@ -55,9 +75,15 @@ a real `check --deep` of two seams on a settled server, then a seam naming the p
 
 **What this does not change.** Within one `check --deep`, an operation after the first is still
 resolved against overlay text whose new files the server cannot see. The server forgets that text
-when the operation ends, so it does not reach the next run. A hand edit made **outside** any run is a
-different case: a warm daemon answers from the tree as it was when it started until it is restarted
-(recorded as V in `docs/dev/todo/2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md`).
+when the operation ends, so it does not reach the next run.
+
+A file written **between** requests — a module an earlier `apply` created, or a hand edit — reaches a
+warm server because `tddy-index-daemon` tells it: before handing a warm server to a request, the
+daemon sends `workspace/didChangeWatchedFiles` for every `*.rs`, `Cargo.toml` and `Cargo.lock` file
+created, changed or deleted since the previous request (see
+[code-index-service.md](../../tddy-index-daemon/docs/code-index-service.md#warm-state-per-workspace-root)).
+A close sent before an `apply` writes, or for a file the server never opened, would not do it, and
+rust-analyzer's own watcher does not see these files on this workspace.
 
 ## The health gate
 
@@ -94,12 +120,53 @@ Detection is **lexical**:
 - only the range is scanned, from depth zero, so statements lifted out of a closure body cannot carry
   that closure's `return`.
 
+**Except a range that runs to the end of a named `fn`, ending with its tail expression**
+(`runs_to_the_end_of_a_function`). There rust-analyzer keeps the `return` verbatim, gives the new
+function the caller's return type (the tail's), and the call replaces the range as the caller's tail,
+so a `return` means what it did; a `?` in that tail propagates the same error type. The range may not
+end with `;`, only whitespace or a comment may follow it before a `}`, and that brace must close the
+body of a named `fn` — not an `if` block, a `match` arm, a closure passed to a call or an `async`
+block, which are refused as before. A range ending with the body's last `return …;` statement is
+refused too: rust-analyzer then rewrites every `return` into an `Option` matched at the call, leaving
+the caller with no tail (`E0317`). A return type rust-analyzer spells differently from the caller's
+(an `impl Trait`) cannot be told from the text; the compile gate catches it. The refusal's remedy
+offers all three ways out: cut the range so it holds no `return`, end it before the first one, or run
+it to the end of the function's tail expression.
+
+## The partial-cluster finding
+
+`apply` refuses to move a module whose header still names a module staying behind in the origin:
+the destination would depend on the crate it left, while the crate it left names the destination
+back — through the facade, or, with `reexport: none`, from each caller `apply` re-points. A plain
+`check` predicts that refusal statically, with no index (`stranded_siblings`), from the same pieces
+`apply` uses: `header::repointed_header` and `refusals::origin_named_dependencies`, with the plan's
+co-moving set and re-export resolution, so a path the origin only re-exports from another crate is
+not an edge. With a facade the finding fires whenever such a header path exists; with
+`reexport: none`, only when some file staying behind names the moved module, and it lists them.
+
+**A module staying behind that names the moved one is not a finding.** A facade keeps its
+`crate::…` path resolving, and without a facade `apply` re-points it, so it compiles either way.
+
+**Staying behind is read at each operation's point in the plan** (`gone_by_then`), because `apply`
+runs one operation at a time. A module moved by the same operation or an earlier one has left the
+origin; one moved by a later operation is still there. So a mutually-referencing set written as one
+`move_module_to_crate` per member is reported at its first operation, naming the later operation that
+moves the sibling and giving `move_cluster_to_crate` (this module as anchor, the rest in `also`) as
+the remedy; the same set as one `move_cluster_to_crate` reports nothing. A module `move_preconditions`
+already refuses is left out of the set. The plan-level rule is in
+[plan-schema.md](../../../.agents/skills/code-restructuring/references/plan-schema.md).
 ## The inferred-placeholder post-condition
 
-An extract-method whose signature holds `_` (`fn resumed_session(req: _)`) is never applied.
-`refuse_inferred_placeholder` checks the signature rust-analyzer wrote, on one line as it writes it,
-and refuses as `ServerDefect`. With the readiness wait and the health gate ahead of it, this is a
-backstop rather than the expected path.
+An extract-method whose signature holds `_` (`fn resumed_session(req: _)`, `-> Vec<_>`,
+`-> (_, _)`) is never applied: that is `E0121` in an item signature. `refuse_inferred_placeholder`
+checks the signature rust-analyzer wrote, on one line as it writes it, and refuses as `ServerDefect`.
+With the readiness wait and the health gate ahead of it, this is a backstop rather than the expected
+path.
+
+**The elided lifetime `'_` is not a placeholder.** A `_` straight after `'` is read as a lifetime, so
+a borrowed view passed as a parameter (`state: RosterState<'_>`) is accepted, while a real `_` beside
+it (`state: View<'_>, value: _`) is still refused. The check applies to signatures only: a `let` may
+legally carry `_` (`collect::<Vec<_>>()`), which is why `extract_variable`'s binding is not checked.
 
 ## The compile gate
 
@@ -153,6 +220,9 @@ is its own `RestructureError` variant. `tddy-index-daemon`'s `status_of` maps th
   that arm would not be counted.
 - **`break` and `continue` that target a loop outside the range** are the same hazard as an early
   return and are not refused.
+- **Callers are surveyed only under the cfg rust-analyzer evaluated.** A caller inside code that is
+  inactive on this host is not re-pointed by a crate move; the progress line says so when the moved
+  module holds inactive code itself.
 - **`check --deep` does not run the compiler.** A clean deep check still does not mean the applied
   tree compiles; only `apply`'s gate says that.
 - **Each writing apply pays two checks.** On a warm target directory they are incremental; on a cold

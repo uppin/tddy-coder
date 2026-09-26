@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_method","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_turn_end_reporter.rs","start":{"line":104,"col":9},"end":{"line":152,"col":11}},"name":"remote_roster_record_for"}

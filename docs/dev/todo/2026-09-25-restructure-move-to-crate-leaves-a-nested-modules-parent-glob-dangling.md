@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine defect; the origin does not compile after the move, and `check --deep` does not see it coming)
 **Source:** `#carve` 15/15, [#526](https://github.com/uppin/tddy-coder/pull/526), plan
-`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/05a-attachment-progress-to-session-files.jsonl`,
+`22787218:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/05a-attachment-progress-to-session-files.jsonl`,
 op 0 (`move_module_to_crate`: `connection_service::attachment_progress` → `tddy-session-files`,
 `reexport: glob`)
 

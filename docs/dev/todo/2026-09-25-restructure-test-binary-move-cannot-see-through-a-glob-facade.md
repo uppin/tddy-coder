@@ -2,7 +2,7 @@
 
 **Category:** Future enhancement (engine defect)
 **Source:** `#carve` 15/15, [#526](https://github.com/uppin/tddy-coder/pull/526), plan
-`docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/02b-task-action-services-to-daemon-sandbox.jsonl`,
+`22787218:docs/dev/1-WIP/2026-09-23-carve-lifecycle-wiring-plans/02b-task-action-services-to-daemon-sandbox.jsonl`,
 ops 2 and 3 (`tests/action_service_acceptance.rs` and `tests/action_sandbox_acceptance.rs` →
 `tddy-daemon-sandbox`)
 

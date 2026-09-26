@@ -4,7 +4,8 @@ Eight RPCs over a session's whole life: listing, starting (unary or streamed wit
 materialization), connecting, resuming, signalling, deleting, and measuring a checkout for a session
 room. The proto is `packages/tddy-service/proto/session.proto`; handlers live under
 `packages/tddy-session-lifecycle/src/` (the modules moved from `tddy-daemon` in `#unbundle` node 9),
-laid out as [module-layout.md](module-layout.md) describes.
+laid out as [module-layout.md](module-layout.md) describes. Listing's enrichment, reading and
+deletion are `tddy-session-activity`'s modules, reached here through facades.
 
 ## The surface
 
@@ -33,10 +34,10 @@ only caller that needed an `Arc` back into the old god object.
 
 **This crate names nothing Telegram.** The Telegram control plane is
 [`tddy-telegram-control`](../../tddy-telegram-control/README.md), which depends on this crate, and
-`teloxide` is not in this manifest. `tddy-telegram` stays a dependency because
-`session_list_enrichment` reads a session's pending elicitation through its `elicitation` module,
-and `active_elicitation`, `elicitation`, `telegram_github_link` and `telegram_tracked_session` stay
-re-exported here under their old paths.
+`teloxide` is not in this manifest. `tddy-telegram` stays a dependency only for the re-exports:
+`active_elicitation`, `elicitation`, `telegram_github_link` and `telegram_tracked_session` keep their
+old paths here. `session_list_enrichment`, which reads a session's pending elicitation, is
+[`tddy-session-activity`](../../tddy-session-activity/README.md)'s.
 
 ## RPC families served above this crate
 
@@ -81,8 +82,8 @@ by both the host and the handlers. Each is shared, not copied: `Clone` hands out
 
 | Component | Where | What it is |
 |---|---|---|
-| `RpcActivity` | `relay_idle` | the daemon's idle tracker, when it has one; `record()` is what every RPC handler bumps so a relay daemon does not shut down mid-session. `RpcActivity::on(tracker)`, or `Default` for none |
-| `PeerRouting` | `peer_routing` | this daemon's routing identity, the eligible peers and the common-room slot: `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `eligible_daemon_source`, `common_room_livekit_room`. A session RPC and an exec-tool RPC addressed at the same daemon therefore agree on who owns the call |
+| `RpcActivity` | `relay_idle` (`tddy-daemon-kernel`, re-exported here) | the daemon's idle tracker, when it has one; `record()` is what every RPC handler bumps so a relay daemon does not shut down mid-session. `RpcActivity::on(tracker)`, or `Default` for none |
+| `PeerRouting` | `peer_routing` (`tddy-daemon-livekit`, re-exported here) | this daemon's routing identity, the eligible peers and the common-room slot: `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `eligible_daemon_source`, `common_room_livekit_room`. A session RPC and an exec-tool RPC addressed at the same daemon therefore agree on who owns the call |
 | `LocalExecTools` | `connection_service` | where a tool runs on this daemon — a sandboxed session's jail, the session's own checkout, or a hosted agent clone — over the task registry, workspace sandboxes and hosted clones: `run_exec_tool_locally`, `run_hosted_clone_tool`, `hosted_clone_for`. A roster agent's turn loop and the `ExecuteTool` RPC take this one path |
 
 Free functions over the fields they read, so a handler behaves exactly as the host does without
@@ -91,7 +92,7 @@ holding it (all re-exported from `connection_service`):
 | Function | What it answers |
 |---|---|
 | `resolve_os_user` | a caller's session token → the OS user this daemon runs its work as |
-| `authorize_exec_tool_caller` | authenticates an exec-tool caller before the hosted-clone branch, naming **this** daemon in both refusals |
+| `authorize_exec_tool_caller` | authenticates an exec-tool caller before the hosted-clone branch, naming **this** daemon in both refusals. Defined in `tddy_session_agents::exec_tool_caller` |
 | `resolve_exec_tool_worktree` | the worktree an exec-tool call resolves to |
 | `resolve_tddy_tools_path` | the `tddy-tools` binary from the daemon's toolchain config — what session start and the catalogue's model probe both use |
 | `resolvable_agent_defs` | YAML defs under `<tddy_data_dir>/agents` plus the model registry's assistants, the registry winning a name tie — the one list session start, roster attach and `ListSubagents` all resolve against |

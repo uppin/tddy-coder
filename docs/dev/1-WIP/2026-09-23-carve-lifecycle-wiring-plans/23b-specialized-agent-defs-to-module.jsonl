@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"extract_module","anchor":{"kind":"range","file":"packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs","start":{"line":275,"col":1},"end":{"line":291,"col":2}},"name":"specialized_agent_defs","reexport":"glob","to_file":true}

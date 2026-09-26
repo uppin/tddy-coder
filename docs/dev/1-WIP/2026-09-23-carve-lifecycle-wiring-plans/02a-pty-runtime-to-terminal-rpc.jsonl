@@ -1,2 +1,0 @@
-{"v":1,"snapshot":{}}
-{"op":"move_cluster_to_crate","anchor":{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/pty_runtime.rs","path":"pty_runtime"},"also":[{"kind":"symbol","file":"packages/tddy-session-lifecycle/src/tddy_user_config.rs","path":"tddy_user_config"}],"to":"packages/tddy-terminal-rpc","reexport":"glob"}
