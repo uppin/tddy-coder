@@ -4,9 +4,9 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **2,488 production lines** (of 3,423 total; the `#[cfg(test)]` module opens at `:2489`)
-· budget 500 · **5.0× over**
-**Thresholds breached:** length 2,488 > 500
+**Metrics:** **2,652 production lines** (the `#[cfg(test)]` module opens after them) · budget 500 ·
+**5.3× over**
+**Thresholds breached:** length 2,652 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
 
@@ -15,6 +15,7 @@ subagent turn-control changeset
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-26 | 2,488 | first detection |
+| 2026-09-26 | 2,652 | +164 for `subagent_resume` (tool, schema, handler, router), `maxTurns` on both schemas, and a shared `take_a_turn`. Deferred with developer consent — see `docs/dev/todo/2026-09-26-seven-files-over-budget-deferred-by-the-subagent-turn-control-change.md` |
 
 ## What the tool found
 
@@ -52,7 +53,7 @@ against a warm index (`./run-index-daemon`).
 
 **Deliberately not done in the changeset that detected it.** The developer chose to record rather
 than restructure, so that
-[`2026-09-26-subagent-turn-control-and-honest-tool-failure`](../../../../docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md)
+[`2026-09-26-subagent-turn-control-and-honest-tool-failure`](../../../../docs/dev/changesets/2026-09-26-subagent-turn-control-and-honest-tool-failure.md)
 stays one reviewable PR rather than burying a behaviour change under a mechanical one. That
 changeset adds a seventh tool (`subagent_resume`) and `maxTurns` to an existing one, so expect the
 next measurement to be higher, not lower.

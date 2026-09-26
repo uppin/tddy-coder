@@ -169,7 +169,7 @@ impl LocalExecTools {
     ///
     /// Exactly once, and only for a transport failure. A jail whose channel broke refuses every
     /// later call of that session for the life of the daemon
-    /// (`docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md`), so the
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox), so the
     /// choice here is between one rebuild and a session that can no longer run a tool. A second
     /// failure is not a transient: the replacement is a freshly spawned runner, and a host that
     /// cannot keep one alive will not keep the third one alive either — so it is reported, and

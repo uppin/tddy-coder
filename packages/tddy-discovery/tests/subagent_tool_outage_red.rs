@@ -18,7 +18,7 @@
 //! be checked by looking at the answer: a synthesis that ran and returned something error-shaped
 //! would pass that. It can only be checked by counting what the provider was asked.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § Turn control
 
 use std::pin::Pin;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};

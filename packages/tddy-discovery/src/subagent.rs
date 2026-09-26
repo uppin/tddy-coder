@@ -27,7 +27,7 @@ mod turn_request;
 use transcript::Transcript;
 
 pub use transcript::{MessageDescriptor, MessageId, MessageRole, MESSAGE_PREVIEW_CHARS};
-pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING};
+pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 
 /// A single block of subagent response content — currently text-only, mirroring ACP's
 /// `ContentBlock`.
@@ -232,13 +232,17 @@ impl CodebaseAccess {
                 Ok(window_content(&content, offset, limit))
             }
             CodebaseAccess::Managed(dispatch) => {
-                let mut args = serde_json::json!({ "path": path });
-                if let Some(offset) = offset {
-                    args["offset"] = serde_json::json!(offset);
-                }
-                if let Some(limit) = limit {
-                    args["limit"] = serde_json::json!(limit);
-                }
+                // The window is **resolved here**, not forwarded as the caller wrote it. On this
+                // path the file crosses the wire before anything on this side could trim it, so an
+                // absent `limit` has to become the cap *in the request* — a cap applied after the
+                // transfer bounds the context but not the wire, and a cap the daemon never hears
+                // about bounds neither. `CodebaseAccess::Local` reaches the same defaults the other
+                // way round, in `window_content`, because there the bytes are already in hand.
+                let args = serde_json::json!({
+                    "path": path,
+                    "offset": offset.unwrap_or(0),
+                    "limit": limit.unwrap_or(DEFAULT_READ_LINE_CAP as u64),
+                });
                 let result = dispatch("Read".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
             }

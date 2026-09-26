@@ -84,7 +84,7 @@ by both the host and the handlers. Each is shared, not copied: `Clone` hands out
 |---|---|---|
 | `RpcActivity` | `relay_idle` (`tddy-daemon-kernel`, re-exported here) | the daemon's idle tracker, when it has one; `record()` is what every RPC handler bumps so a relay daemon does not shut down mid-session. `RpcActivity::on(tracker)`, or `Default` for none |
 | `PeerRouting` | `peer_routing` (`tddy-daemon-livekit`, re-exported here) | this daemon's routing identity, the eligible peers and the common-room slot: `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `eligible_daemon_source`, `common_room_livekit_room`. A session RPC and an exec-tool RPC addressed at the same daemon therefore agree on who owns the call |
-| `LocalExecTools` | `connection_service` | where a tool runs on this daemon — a sandboxed session's jail, the session's own checkout, or a hosted agent clone — over the task registry, workspace sandboxes and hosted clones: `run_exec_tool_locally`, `run_hosted_clone_tool`, `hosted_clone_for`. A roster agent's turn loop and the `ExecuteTool` RPC take this one path |
+| `LocalExecTools` | `connection_service` | where a tool runs on this daemon — a sandboxed session's jail, the session's own checkout, or a hosted agent clone — over the task registry, workspace sandboxes, hosted clones and a `WorkspaceSandboxProvisioner`: `run_exec_tool_locally`, `run_hosted_clone_tool`, `hosted_clone_for`. A roster agent's turn loop and the `ExecuteTool` RPC take this one path |
 
 Free functions over the fields they read, so a handler behaves exactly as the host does without
 holding it (all re-exported from `connection_service`):
@@ -103,6 +103,38 @@ credential_vaults, rpc_activity, peer_routing, local_exec_tools}`, each shared v
 a clone of the same handle. `credential_vaults()` is the daemon's one `tddy_credentials::SessionVaults`
 registry (re-exported as `tddy_daemon_auth::SessionVaults`), `None` when `auth_storage` is unset; the
 PR-stack handler reads a caller's GitHub token from it.
+
+### The jail rebuild lives here because nothing else sits under all three entries
+
+A jailed call comes back as `ToolDispatchOutcome`: the tool **ran** (whatever it answered,
+`is_error` included), or the call **never reached a tool**. Only the second is repairable, and
+`run_exec_tool_locally` repairs it — tear the jail down, re-provision through
+`jail_relaunch::JailRelaunch`, re-insert into the registry, and run that call once in the
+replacement.
+
+Three properties, each deliberate:
+
+- **Exactly once, and only on a transport failure.** A non-zero exit is ordinary traffic on a
+  healthy jail. A second transport failure in a freshly spawned runner is not a transient, so it is
+  reported rather than retried again.
+- **Serialised per session**, so two concurrent calls cannot rebuild twice.
+- **Never a route onto the host worktree.** A rebuild that cannot be made, and a replacement that
+  dies the same way, answer with the failure. That is the whole reason the two outcomes are
+  distinguished at all, and it is not licence to treat them differently anywhere else.
+
+`LocalExecTools` is the only layer holding the sandbox registry *and* sitting beneath all three
+dispatch entries — the unary RPC, the streaming RPC, and a roster agent's own turn loop. The jail
+type itself holds neither its spec nor a provisioner, and giving it both would make the `Arc` handed
+out by `registry.get()` mutable in place.
+
+A retry can **re-run a mutating call that already executed** — a transport failure says the answer
+did not come back, not that the tool did not run. Accepted, and recorded in
+[`docs/dev/todo/2026-09-26-a-jail-rebuild-can-re-run-a-tool-call-that-already-executed.md`](../../../docs/dev/todo/2026-09-26-a-jail-rebuild-can-re-run-a-tool-call-that-already-executed.md).
+The seam is covered by `connection_service/jail_relaunch_unit_tests.rs` against a recording
+provisioner (in-crate, because `LocalExecTools::new` is `pub(crate)` and the path under test is the
+private `local_agent_codebase_access`); nothing proves a real `tddy-sandbox-runner` comes back up,
+because the real-jail suite runs on no CI machine
+([`2026-09-12`](../../../docs/dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md)).
 
 `pr_stack_rpc` is a facade re-exporting `PrStackHandler`, `PrStackServiceImpl` and
 `build_pr_stack_entry` from [`tddy_pr_stack::rpc`](../../tddy-pr-stack/docs/architecture.md#rpcrs--the-pr-stack-rpc-family),

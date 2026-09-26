@@ -77,7 +77,14 @@ impl MessageRole {
 }
 
 /// What one message in a conversation was, in the form a caller reads to decide what to do next.
+///
+/// `camelCase` on the wire, because this is serialized **inside** the MCP turn outcome, whose
+/// other fields are `stopReason`, `inputTokens`, `outputTokens`, `totalTokens` and
+/// `clampedMaxTurns`. Without the rename an agent reads `isError` in the tool description and
+/// `is_error` in the payload, which is a small lie of exactly the kind this surface exists to stop
+/// telling.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageDescriptor {
     pub id: MessageId,
     pub role: MessageRole,

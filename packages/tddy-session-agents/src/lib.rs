@@ -74,9 +74,14 @@ mod tests {
     /// has to be made here, in a diff of its own, rather than hidden inside a mechanical change.
     ///
     /// `ResumeAgentConversation` is the one addition since `#unbundle` node 7 moved this list onto
-    /// this coordinate. It grants nothing the four conversation operations beside it did not: the
-    /// same authenticated `(session, conversation)` pair, one more turn on a conversation the
-    /// caller already opened. It is here because the in-jail `tddy-tools`
+    /// this coordinate. It reaches the same code path as `PromptAgentConversation`, with the same
+    /// authentication, and so opens no weaker route than one already open — but it is not confined
+    /// to the caller's own session's conversations, because nothing binds a conversation id to the
+    /// session that opened it (see
+    /// `docs/dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md`;
+    /// the gap predates this entry). Unlike prompt, resume is a destructive write:
+    /// `from_message_id` truncates a transcript and `correction` injects into it. It is here
+    /// because the in-jail `tddy-tools`
     /// advertises `subagent_resume`, and an operation advertised in a jail and refused by the
     /// relay is the "tool that is offered and cannot be called" defect this coordinate's own
     /// history is full of.

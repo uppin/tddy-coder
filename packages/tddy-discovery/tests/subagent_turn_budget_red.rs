@@ -16,7 +16,7 @@
 //! `assistant_def.rs`, with no column in `models.db` to change it — and ten turns was both too
 //! many (all of them failed) and, for a real search, too few.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § Turn control
 
 use std::pin::Pin;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
@@ -209,4 +209,40 @@ async fn a_budget_within_the_ceiling_is_not_reported_as_clamped() {
 
     // Then nothing was clamped
     assert_eq!(outcome.clamped_max_turns, None);
+}
+
+/// A budget of zero must not buy a summary.
+///
+/// `run_turn_loop` iterates `0..max_turns`, so a budget of zero runs no turns at all: nothing is
+/// read, the tally stays empty, and the total-outage guard — which fires on *a failure having
+/// happened* — has nothing to fire on. Control then falls into the synthesis turn, which asks a
+/// model to cite file:line locations against a history holding only the prompt. That is incident
+/// 2026-09-26's mechanism reached through an advertised, caller-controlled field, with no tool
+/// outage anywhere.
+///
+/// The floor is clamped rather than refused, for the same reason the ceiling is: a caller that
+/// asks for something unusable keeps working, and is told what it actually got.
+#[tokio::test]
+async fn a_budget_of_zero_is_clamped_up_to_one_turn_rather_than_buying_a_synthesis() {
+    // Given a caller that asks for no turns at all
+    let server = a_model_that_never_finishes().await;
+    let mut session = a_session_over(&server, THE_DEFINITIONS_BUDGET);
+
+    // When the turn runs
+    let outcome = session
+        .take_turn(TurnRequest::prompting(THE_GOAL).within_turns(0))
+        .await
+        .expect("a zero budget is clamped, not refused");
+
+    // Then it bought exactly one turn, and said so
+    assert_eq!(
+        turns_the_model_was_asked_for(&server).await,
+        turns_for_a_budget_of(1),
+        "a zero budget must not fall straight through the turn loop into the synthesis turn"
+    );
+    assert_eq!(
+        outcome.clamped_max_turns,
+        Some(1),
+        "a caller given a different budget from the one it asked for must be told"
+    );
 }

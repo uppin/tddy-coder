@@ -17,7 +17,7 @@
 //! The assertions here are on **the messages the provider received**, because that is the only
 //! place a rewind is observable. An outcome cannot show you what was left out.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § Turn control
 
 use std::pin::Pin;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};

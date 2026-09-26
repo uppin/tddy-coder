@@ -444,13 +444,14 @@ impl RustSources {
     }
 }
 
-const SESSION_AGENT_METHODS: [&str; 9] = [
+const SESSION_AGENT_METHODS: [&str; 10] = [
     "AttachSessionAgent",
     "DetachSessionAgent",
     "ListSessionAgents",
     "StreamSessionAgents",
     "OpenAgentConversation",
     "PromptAgentConversation",
+    "ResumeAgentConversation",
     "CancelAgentConversation",
     "ReportAgentCloneState",
     "ReportAgentConversationState",

@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-sandbox/src/workspace_tool_sandbox.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **590 production lines** · budget 500
-**Thresholds breached:** length 590 > 500
+**Metrics:** **614 production lines** · budget 500
+**Thresholds breached:** length 614 > 500
 **Restructure:** `extract_module --to_file` — single seam, designed, **passes a plain `check`**, not applied
 **Status:** Open — **unclaimed**
 
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-19 | 590 | 522 → 571 for `stop_all()`, then → 590 for the registry `Drop` |
+| 2026-09-26 | 614 | `ToolDispatchOutcome` added to the trait and its impl, and the trait doc rewritten to say why the distinction exists |
 
 ## What would close it — designed seam
 

@@ -66,7 +66,7 @@ Separately and more cheaply: the file should gain a `#[cfg(test)]` module coveri
 a restructure, and does not need to wait for the split.
 
 **Deliberately not restructured by the changeset that detected it** —
-[`2026-09-26-subagent-turn-control-and-honest-tool-failure`](../../../../docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md)
+[`2026-09-26-subagent-turn-control-and-honest-tool-failure`](../../../../docs/dev/changesets/2026-09-26-subagent-turn-control-and-honest-tool-failure.md)
 records rather than splits, to keep one reviewable PR. That changeset *does* add unit coverage for
 the error-shaping seam, because it has to build one.
 

@@ -22,7 +22,7 @@
 //! it is the one driven here, through the private `local_agent_codebase_access` seam for the same
 //! reason `workspace_sandbox_roster_dispatch_unit_tests` does.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Workspace tool sandbox
 
 use super::*;
 use crate::test_util::{test_service, TestDaemon, TEST_TOKEN};

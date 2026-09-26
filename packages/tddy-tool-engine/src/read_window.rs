@@ -19,9 +19,15 @@ use serde_json::Value;
 /// verbatim — including a trailing newline, which re-joining lines would silently drop. That is
 /// what every caller issuing a bare `Read` has always received.
 ///
-/// `tddy_discovery::subagent::window_content` applies the same semantics on the Local
-/// `CodebaseAccess` path; the crates cannot depend on each other, so the two are kept in step by
-/// hand.
+/// This is the **engine's** window and it deliberately has no default cap: a bare `Read` returns
+/// the whole file, because that is what every caller has always received and narrowing it here
+/// would silently truncate for all of them.
+///
+/// The 200-line cap that bounds a *subagent's* context lives one layer up, in
+/// `tddy_discovery::subagent` — `window_content` applies it after a Local read, and the managed
+/// path puts it in the request before the file crosses the wire. So the two are **not** the same
+/// defaults, and should not be made so: this decides what a tool call returns, that decides how
+/// much of it an agent may pull into a model context.
 pub(crate) fn line_window(content: &str, offset: Option<u64>, limit: Option<u64>) -> Value {
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();

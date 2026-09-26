@@ -10,7 +10,7 @@
 //! Message ids are the other half. `subagent_resume` rewinds to a named message, and a caller
 //! cannot name one it has never been told about.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § Turn control
 
 use std::collections::HashSet;
 use std::pin::Pin;

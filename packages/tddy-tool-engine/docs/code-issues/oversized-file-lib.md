@@ -16,6 +16,7 @@ budget 500 · **1.6× over**
 |---|---|---|
 | 2026-09-26 | 793 | first detection |
 | 2026-09-26 | 787 | after the M2/M5 fix: the three spawn sites became `contained_shell.rs` and the read window `read_window.rs`, so the two additions left the parent six lines *shorter* rather than longer |
+| 2026-09-26 | 789 | **improved.** Two extractions — `contained_shell.rs` (128) and `read_window.rs` (46) — took out more than the shell hardening and `Read` windowing put in |
 
 ## What the tool found
 
@@ -34,10 +35,23 @@ registration helpers.
 
 Two defects it hid, both found by reading rather than by any tool, **both now fixed**:
 
-- ~~**Three shell spawn sites** (`:128-135`, `:523-528`, and `shell.rs:88-95`) each construct
-  `tokio::process::Command` with neither `.stdin(Stdio::null())` nor `.kill_on_drop(true)`.~~
-  Closed 2026-09-26: all three now call `contained_shell::run_contained`, the single spawn that
-  nulls stdin, spawns into its own process group and signals that group on overrun.
+- ~~**Four unhardened spawn sites** (`:128-135`, `:523-528`, `shell.rs:88-95`, and `tool_grep`)
+  each construct `tokio::process::Command` with neither `.stdin(Stdio::null())` nor
+  `.kill_on_drop(true)`.~~ Closed 2026-09-26: all four now go through `contained_shell`, the
+  single spawn that nulls stdin, spawns into its own process group and signals that group on
+  overrun.
+
+  **The first sweep found three and declared itself complete.** On 2026-09-26, `/green` fixed
+  `:128-135`, `:523-528` and `shell.rs:88-95`, and this record was marked closed. Later the same
+  day a PR #545 validator found the **fourth**: `tool_grep` was still spawning `rg` directly, with
+  stdin inherited, no `kill_on_drop`, no process group **and no budget of any kind** — worse than
+  the three, which at least had a `tokio::time::timeout` around the wait. `Grep` is an advertised
+  tool dispatched through this engine, so it sits on the same in-jail path as the incident. The
+  sweep missed it because it searched for the *shell* spawns named in the incident rather than for
+  every `tokio::process::Command` in the crate. Fixed on 2026-09-26 via
+  `contained_shell::run_contained_argv` (an argv entry point, because shell-quoting a user-supplied
+  regex would be a defect of its own) with a 30s budget matching the blocking `Shell` default, and
+  covered by a fourth test in `tests/shell_containment_red.rs`.
 - ~~**`tool_read` `:302-320` ignores `offset` and `limit`**, which `catalog.rs:21` has advertised
   since the catalog was written.~~ Closed 2026-09-26: `tool_read` applies
   `read_window::line_window` and answers `{content, truncated, total_lines}`.
@@ -55,7 +69,7 @@ Anchor with `tddy-tools restructure anchors`; prove with `restructure check --de
 index.
 
 **Deliberately not restructured by the changeset that detected it** —
-[`2026-09-26-subagent-turn-control-and-honest-tool-failure`](../../../../docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md)
+[`2026-09-26-subagent-turn-control-and-honest-tool-failure`](../../../../docs/dev/changesets/2026-09-26-subagent-turn-control-and-honest-tool-failure.md)
 fixes both defects named above and records the length rather than splitting, to keep one
 reviewable PR. It consolidated the three spawn sites into `contained_shell.rs` and put the read
 window in `read_window.rs`, which removed the duplication and — unexpectedly — took the parent
@@ -75,3 +89,10 @@ than nulled. Confirmed `tool_read` never reads `offset` or `limit`. Did **not** 
 `packages/tddy-tool-engine/tests/shell_containment_red.rs` (3 tests) and
 `packages/tddy-tool-engine/tests/read_window_engine_red.rs` (4 tests), all green. The length breach
 is untouched and this record stays **Open**.
+
+2026-09-26 (PR #545 review) — The spawn-site count above was **wrong when it was written**: three
+were found and fixed, and a fourth, `tool_grep`, was in the file the whole time. It has now been
+routed through `contained_shell::run_contained_argv` and `shell_containment_red.rs` carries a
+fourth test, verified red against the unfixed call (the test hangs, because the raw spawn had no
+budget to time out on) and green after. Re-grepped the crate for `process::Command` afterwards:
+`contained_shell.rs` is the only remaining constructor in production code.

@@ -10,9 +10,10 @@
 //! `grep` with no file operand held that pipe for ten minutes, until the 600s in-jail deadline
 //! killed the session's tool channel for good.
 //!
-//! The three spawn sites share the defect and therefore share these tests:
-//! `lib.rs` blocking `tool_shell`, `lib.rs` `ShellTaskBody` (background jobs), and
-//! `shell.rs` `LocalShell::run`.
+//! The four spawn sites share the defect and therefore share these tests:
+//! `lib.rs` blocking `tool_shell`, `lib.rs` `ShellTaskBody` (background jobs),
+//! `shell.rs` `LocalShell::run`, and `lib.rs` `tool_grep` — the last found only on 2026-09-26
+//! review, after the first three had been fixed and the sweep declared complete.
 //!
 //! ## Why the stdin tests re-exec this binary
 //!
@@ -23,7 +24,7 @@
 //! fd 0 bound to a pipe that is open and holds data, which is the condition a `--stdio` runner is
 //! always in, and assert the command saw none of it.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/coder/sandboxed-codebase-mode.md § Nothing the jail runs can read the channel it is served over
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -32,8 +33,13 @@ use tddy_task::TaskRegistry;
 use tddy_tool_engine::execute_tool;
 use tempfile::TempDir;
 
-/// Set on the re-executed child so it runs the spawn instead of the assertions.
+/// Set on the re-executed child so it runs the spawn instead of the assertions. Its value is
+/// `<host>\u{1f}<argument>\u{1f}<block_until_ms>`.
 const RUN_AS_SPAWN_HOST: &str = "TDDY_SHELL_CONTAINMENT_SPAWN_HOST";
+
+/// The two spawn hosts the marker selects: one runs a `Shell` call, the other a `Grep` call.
+const SHELL_HOST: &str = "Shell";
+const GREP_HOST: &str = "Grep";
 
 /// What the parent feeds its child's standard input. If a spawned command can reach it, this
 /// string comes back in the command's stdout — and in production it would have been a protocol
@@ -122,6 +128,69 @@ fn run_as_spawn_host(command: &str, block_until_ms: u64) -> ! {
     std::process::exit(0);
 }
 
+/// What the stand-in `rg` prints, with whatever it could read from standard input substituted in.
+/// `Grep` keeps every `--json` line whose `type` is `match`, so the shim's report arrives through
+/// the tool's own result rather than out of band.
+const STAND_IN_RG: &str =
+    "#!/bin/sh\nprintf '{\"type\":\"match\",\"data\":{\"stdin_seen\":\"%s\"}}\\n' \"$(cat)\"\n";
+
+/// Run one `Grep` call through the engine, with a stand-in `rg` first on `PATH`, and report the
+/// outcome the same way [`run_as_spawn_host`] does.
+///
+/// The property under test belongs to the engine, not to ripgrep: whatever `Grep` spawns must not
+/// be handed the caller's standard input. Real ripgrep, given the explicit `.` path operand
+/// `tool_grep` passes, never reads standard input at all — so against the real binary an inherited
+/// fd 0 is entirely invisible and the test would pass with the defect fully present, which is the
+/// same false negative the module header describes. A shim named `rg` that *does* read standard
+/// input makes the difference observable: with fd 0 nulled it sees end of file at once and reports
+/// an empty string; with fd 0 inherited it blocks on the parent's still-open pipe until the
+/// `Grep` budget expires.
+fn run_as_grep_spawn_host(pattern: &str) -> ! {
+    let worktree = TempDir::new().expect("a worktree to run in");
+    let path_head = TempDir::new().expect("a directory to hold the stand-in `rg`");
+    let shim = path_head.path().join("rg");
+    std::fs::write(&shim, STAND_IN_RG).expect("to write the stand-in `rg`");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755))
+            .expect("the stand-in `rg` to be executable");
+    }
+    std::env::set_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            path_head.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+
+    let registry = TaskRegistry::new();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("a runtime");
+
+    let reported = runtime.block_on(async {
+        let outcome = execute_tool(
+            worktree.path(),
+            "Grep",
+            &serde_json::json!({ "pattern": pattern }).to_string(),
+            &registry,
+            "shell-containment-test",
+        )
+        .await;
+        serde_json::json!({
+            "result_json": outcome.result_json,
+            "is_error": outcome.is_error,
+            "error_message": outcome.error_message,
+        })
+    });
+
+    println!("{RESULT_PREFIX}{reported}");
+    std::process::exit(0);
+}
+
 /// Re-exec this test binary for `test_name`, with fd 0 bound to an open pipe that already holds
 /// data, and return what the spawn host reported.
 fn a_shell_call_from_a_process_whose_stdin_is_readable(
@@ -129,11 +198,34 @@ fn a_shell_call_from_a_process_whose_stdin_is_readable(
     command: &str,
     block_until_ms: u64,
 ) -> SpawnHostReport {
+    a_tool_call_from_a_process_whose_stdin_is_readable(
+        test_name,
+        SHELL_HOST,
+        command,
+        block_until_ms,
+    )
+}
+
+/// The same re-exec for the `Grep` path, which takes a pattern rather than a command and has no
+/// caller-settable budget.
+fn a_grep_call_from_a_process_whose_stdin_is_readable(
+    test_name: &str,
+    pattern: &str,
+) -> SpawnHostReport {
+    a_tool_call_from_a_process_whose_stdin_is_readable(test_name, GREP_HOST, pattern, 0)
+}
+
+fn a_tool_call_from_a_process_whose_stdin_is_readable(
+    test_name: &str,
+    host: &str,
+    argument: &str,
+    block_until_ms: u64,
+) -> SpawnHostReport {
     let mut child = Command::new(std::env::current_exe().expect("this test binary"))
         .args(["--exact", test_name, "--nocapture", "--test-threads", "1"])
         .env(
             RUN_AS_SPAWN_HOST,
-            format!("{command}\u{1f}{block_until_ms}"),
+            format!("{host}\u{1f}{argument}\u{1f}{block_until_ms}"),
         )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -218,6 +310,14 @@ impl SpawnHostReport {
     fn exit_code(&self) -> i64 {
         self.result()["exit_code"].as_i64().unwrap_or(i64::MIN)
     }
+
+    /// What the stand-in `rg` said it could read from standard input, as `Grep` relayed it.
+    fn stdin_the_grep_child_saw(&self) -> String {
+        self.result()["matches"][0]["data"]["stdin_seen"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string()
+    }
 }
 
 /// The child half of every re-exec test: if the marker is set, do the spawn and exit before the
@@ -226,8 +326,15 @@ fn serve_if_spawn_host() {
     let Ok(spec) = std::env::var(RUN_AS_SPAWN_HOST) else {
         return;
     };
-    let (command, budget) = spec.split_once('\u{1f}').expect("a command and a budget");
-    run_as_spawn_host(command, budget.parse().expect("a numeric budget"));
+    let mut fields = spec.split('\u{1f}');
+    let host = fields.next().expect("a host");
+    let argument = fields.next().expect("an argument");
+    let budget = fields.next().expect("a budget");
+    match host {
+        SHELL_HOST => run_as_spawn_host(argument, budget.parse().expect("a numeric budget")),
+        GREP_HOST => run_as_grep_spawn_host(argument),
+        other => panic!("unknown spawn host {other}"),
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -338,5 +445,40 @@ async fn a_shell_command_that_outlives_its_budget_leaves_no_descendant_running()
         "a descendant survived the timeout and touched {}; the whole process group must be \
          signalled, not just the direct child",
         marker.display()
+    );
+}
+
+/// `tool_grep` is the fourth spawn site, and the one the first sweep missed. It ran
+/// `tokio::process::Command::new("rg")` directly: stdin inherited, no `kill_on_drop`, no process
+/// group, and — unlike the three shell paths — no budget of any kind, so a search that never
+/// finished held the tool-IPC pipe until the in-jail deadline killed the channel.
+///
+/// `Grep` is an advertised tool dispatched through this engine, so it runs on exactly the in-jail
+/// path the incident came from.
+#[test]
+fn the_process_grep_spawns_cannot_read_the_parents_standard_input() {
+    serve_if_spawn_host();
+
+    // Given a parent process whose standard input is an open pipe holding a frame
+    // When it runs a `Grep`, whose child reads standard input
+    let report = a_grep_call_from_a_process_whose_stdin_is_readable(
+        "the_process_grep_spawns_cannot_read_the_parents_standard_input",
+        "anything",
+    );
+
+    // Then the child saw end of file at once rather than parking on the pipe until its budget ran
+    // out — `Grep` had no budget at all before this, so with fd 0 inherited it parked for ever
+    assert!(
+        !report.timed_out(),
+        "the process `Grep` spawned blocked on an inherited stdin: {}",
+        report.error_message()
+    );
+
+    // And none of the parent's frame reached it; in a jail those bytes are tool-IPC frames, and
+    // whatever a search consumes from that channel the runner never sees
+    assert_eq!(
+        report.stdin_the_grep_child_saw(),
+        "",
+        "the process `Grep` spawned read the parent's standard input"
     );
 }

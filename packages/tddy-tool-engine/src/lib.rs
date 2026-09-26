@@ -416,17 +416,25 @@ fn tool_delete(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     }
 }
 
+/// How long a `Grep` may run before its process group is signalled. The same 30s the blocking
+/// `Shell` path defaults to (`tool_shell`'s `block_until_ms`), because a search over a worktree is
+/// the same order of work and `Grep` has no argument to override it with.
+const GREP_BUDGET: Duration = Duration::from_secs(30);
+
 async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     let pattern = match args.get("pattern").and_then(|v| v.as_str()) {
         Some(p) => p,
         None => return ToolOutcome::err("Grep: missing 'pattern' argument"),
     };
 
-    let output = tokio::process::Command::new("rg")
-        .args(["--json", "-e", pattern, "."])
-        .current_dir(root)
-        .output()
-        .await;
+    let output = contained_shell::run_contained_argv(
+        "rg",
+        &["--json", "-e", pattern, "."],
+        root,
+        &[],
+        Some(GREP_BUDGET),
+    )
+    .await;
 
     match output {
         Ok(out) => {
@@ -441,7 +449,7 @@ async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
             }
             ToolOutcome::ok(serde_json::json!({ "matches": matches }).to_string())
         }
-        Err(e) => ToolOutcome::err(format!("Grep: rg execution failed: {e}")),
+        Err(e) => ToolOutcome::err(format!("Grep: {e}")),
     }
 }
 

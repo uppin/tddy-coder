@@ -62,7 +62,7 @@ pub trait WorkspaceSandbox: Send + Sync {
     /// jail's to draw because it is the only layer that knows which happened — and it exists for
     /// exactly one caller decision, whether to rebuild the jail: a dead jail refuses every call
     /// for the rest of the session, while a failing command is ordinary traffic on a healthy one
-    /// (`docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md`).
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
     ///
     /// It is **not** a licence to treat the two differently anywhere else. `TransportFailed` is
     /// still a failure the caller must report; the one thing it must never become is a reason to

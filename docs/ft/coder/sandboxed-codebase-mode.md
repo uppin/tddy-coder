@@ -90,6 +90,34 @@ credentials to; the build is not. Confine the build.
   `SessionChannel` and answers with the `in_jail_tool_response` that comes back. One call is
   outstanding at a time, the same discipline the existing `tool_request`/`tool_response` pair uses.
 
+### Nothing the jail runs can read the channel it is served over
+
+One call outstanding at a time makes the tool-IPC channel a shared, serialising resource, and the
+runner reads its half of it from **standard input**. So a command the jail starts must not be able
+to reach that descriptor, and must not outlive the call that started it:
+
+- **Every child the tool engine starts gets `/dev/null` for standard input.**
+  `tokio::process::Command::output()` sets stdout and stderr but, unlike its `std` counterpart,
+  leaves stdin *inherited*. A jailed `Shell` whose command reads standard input — `grep` with an
+  empty file argument is enough — therefore became a second reader on the daemon→jail request pipe
+  and consumed frames meant for the runner.
+- **Every child is started in its own process group, and a command that overruns its budget has
+  that whole group signalled** (`SIGTERM`, then `SIGKILL` after a short grace).
+  `tokio::time::timeout` only stops *waiting*: without the group signal the command keeps running,
+  and keeps reading, long after the caller has been told it timed out. The group rather than the
+  child, because the descendants of `( sleep 1; touch marker ) & wait` outlive the `sh` the engine
+  started.
+
+Both hold for the blocking `Shell` path, for a background `ShellTaskBody`, for `LocalShell::run`,
+and for the helper binaries a tool spawns directly (`Grep`'s `rg`) — one containment helper, so a
+new spawn site cannot quietly opt out of either.
+
+A wedged channel is not a recoverable state for this mode: after the in-jail deadline expires the
+channel is closed for the life of the session, and the app provisions no replacement jail. Rebuilding
+a dead jail is the **daemon**-provisioned workspace jail's behaviour — see
+[`docs/ft/daemon/remote-codebase-mode.md`](../daemon/remote-codebase-mode.md) § Workspace tool
+sandbox. Here the wedge is prevented rather than repaired.
+
 ### Egress
 
 A `--workspace-tools` jail has no egress shim today — a jail that serves file tools needs no
@@ -315,6 +343,11 @@ the other macOS paths.
     and answers `subagent_*` from its seed for the life of the session. The declaration is emitted
     whenever a seed is, in every codebase mode, and not at all when no agent is wired. A session
     that makes no such declaration still follows its roster over whatever transport it configured.
+16. **Shell containment.** A command run for a jailed session cannot read the runner's standard
+    input — a command that would block on stdin sees end of file instead, on the blocking path and
+    on a background `ShellTaskBody` alike. A command that exceeds its budget leaves **no surviving
+    descendant**: the process group is signalled, so a grandchild that outlives its `sh` goes with
+    it.
 
 ## What is deliberately not in scope
 

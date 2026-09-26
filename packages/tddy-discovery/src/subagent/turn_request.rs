@@ -13,6 +13,11 @@ use super::transcript::MessageId;
 /// one requested is how a caller reads an early stop as a finished search.
 pub const SUBAGENT_MAX_TURNS_CEILING: u32 = 50;
 
+/// The fewest turns a caller may buy. A budget below this buys no search at all and, because the
+/// turn loop would then exit before any tool call could fail, lands straight in the synthesis turn
+/// — a summary of nothing. Clamped rather than refused, and reported, exactly like the ceiling.
+pub const SUBAGENT_MIN_TURNS: u32 = 1;
+
 /// One request to take a turn on an open conversation.
 ///
 /// Built from one of two starting points, so the two intents cannot be confused:
@@ -92,9 +97,17 @@ impl TurnRequest {
     ///
     /// The caller's choice wins where it made one, because it is choosing how long *this* search
     /// may take rather than what the agent runs against — the endpoint, model and credential stay
-    /// the operator's alone. Only the caller's figure meets the ceiling: the definition's budget is
+    /// the operator's alone. Only the caller's figure meets the bounds: the definition's budget is
     /// the operator's own configuration, and clamping it here would quietly override a deliberate
     /// setting nobody in this call asked to change.
+    ///
+    /// **The floor matters as much as the ceiling, and for a sharper reason.** The turn loop runs
+    /// `0..turns`, so a budget of zero runs no turns: nothing is read, no tool call fails, and the
+    /// total-outage guard — which fires on a failure having *happened* — has nothing to fire on.
+    /// Control then reaches the synthesis turn, which asks a model to cite file:line locations
+    /// against a history holding only the prompt. That is the 2026-09-26 fabrication reached
+    /// through a caller-controlled field with no tool outage anywhere, so zero is clamped up to
+    /// one rather than passed through.
     pub(crate) fn budget_within(&self, definitions_budget: u32) -> TurnBudget {
         match self.max_turns {
             None => TurnBudget {
@@ -104,6 +117,10 @@ impl TurnRequest {
             Some(asked) if asked > SUBAGENT_MAX_TURNS_CEILING => TurnBudget {
                 turns: SUBAGENT_MAX_TURNS_CEILING,
                 clamped_to: Some(SUBAGENT_MAX_TURNS_CEILING),
+            },
+            Some(asked) if asked < SUBAGENT_MIN_TURNS => TurnBudget {
+                turns: SUBAGENT_MIN_TURNS,
+                clamped_to: Some(SUBAGENT_MIN_TURNS),
             },
             Some(asked) => TurnBudget {
                 turns: asked,

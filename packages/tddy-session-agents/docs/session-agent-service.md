@@ -1,8 +1,8 @@
-# `session_agents.SessionAgentService` — the nine methods and their ports
+# `session_agents.SessionAgentService` — the ten methods and their ports
 
 ## Role
 
-`tddy-session-agents` serves the nine RPCs of family B: who is attached to a session's agent roster,
+`tddy-session-agents` serves the ten RPCs of family B: who is attached to a session's agent roster,
 and what has been asked of them. The coordinate and the crate both arrived with `#unbundle` node 7,
 which moved the family off `connection.ConnectionService` (50 methods → 33) along with its four
 source modules.
@@ -15,6 +15,7 @@ source modules.
 | `StreamSessionAgents` | server-stream | the roster now, and every revision after |
 | `OpenAgentConversation` | unary | a conversation id, and where its turn loop runs |
 | `PromptAgentConversation` | server-stream | one turn's frames, local or relayed |
+| `ResumeAgentConversation` | server-stream | the same, for a turn that asks nothing new — optionally after a rewind and a correction |
 | `CancelAgentConversation` | unary | a turn interrupted and a conversation closed |
 | `ReportAgentCloneState` | unary | a checkout's readiness, pushed by the daemon holding it |
 | `ReportAgentConversationState` | unary | what a jailed agent says it is doing, clamped |
@@ -55,7 +56,7 @@ conversation an open had just created.
 
 ## The routing split: two forwards, one of them not here
 
-Seven of the nine route on the `daemon_instance_id` the **request** names — a roster lives on the
+Eight of the ten route on the `daemon_instance_id` the **request** names — a roster lives on the
 daemon facilitating its session, so a call served anywhere else answers about the wrong host. That
 fork needs the eligible-daemon roster, the common room slot and the LiveKit forwarding clients, so
 it lives in `tddy-session-lifecycle`'s `PeerRoutedSessionAgents`
@@ -66,12 +67,25 @@ The forward that follows the **agent's** owning daemon is a different decision a
 it can only be taken once the roster entry naming the owner has been read, which is this crate's
 read. Delivering it is `AgentConversationPeers`'.
 
-## Five of these nine are a security boundary
+## Six of these ten are a security boundary
 
 `packages/tddy-sandbox-runner/src/runner.rs` holds the `(service, method)` allowlist of what an
-in-jail agent may relay to its host. Five entries are family B: `StreamSessionAgents`,
-`OpenAgentConversation`, `PromptAgentConversation`, `CancelAgentConversation` and
-`ReportAgentConversationState`.
+in-jail agent may relay to its host. Six entries are family B: `StreamSessionAgents`,
+`OpenAgentConversation`, `PromptAgentConversation`, `ResumeAgentConversation`,
+`CancelAgentConversation` and `ReportAgentConversationState`.
+
+`ResumeAgentConversation` is in the set because a conversation an in-jail `tddy-tools` opened
+over this relay is one it must also be able to continue: without the entry a jailed conversation
+could be started and never carried on. It reaches the same code path as `PromptAgentConversation`
+under the same authentication, so it opens no route weaker than one already open — and the
+justification stops there. It is **not** the case that a caller is confined to its own session's
+conversations: `SessionAgentServiceImpl::session_dir` resolves the token to an OS user and never
+cross-checks `session_id` against it, and `OpenAgentConversations::routing_for` reads a
+host-global map keyed on conversation id alone. Pre-existing — `Prompt` and `Cancel` were already
+relayable through it — and recorded in
+[`docs/dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md`](../../../docs/dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md).
+What resume adds over prompt is a **destructive write** rather than one more turn:
+`from_message_id` truncates a transcript and `correction` injects into it.
 
 The pairs are **data, not literals**:
 [`tddy_service::session_agents::IN_JAIL_RELAYABLE`](../../tddy-service/src/session_agents.rs) is the
@@ -79,14 +93,33 @@ one declaration, read by the runner, by this crate and by nothing else. It is de
 `tddy-service` rather than here because its second reader is the binary that runs *inside every
 jail*, which must not link this crate's `livekit` dependency tree for five string pairs.
 
-`#unbundle` node 7 changed the service name each pair carries and **nothing else**. The permitted
-operation set is identical, pinned by a unit test in `src/lib.rs`. Widening or narrowing it inside a
-mechanical move is exactly what a stack like this makes easy and must not do.
+The permitted operation set is pinned by a unit test in `src/lib.rs`, which is what keeps each
+widening deliberate: `#unbundle` node 7 changed the service name each pair carries and nothing
+else, because widening or narrowing the set inside a mechanical move is exactly what a stack like
+that makes easy and must not do.
 
 Moving the coordinate without moving the allowlist would make every in-jail subagent conversation
 fail **closed** — the safe direction, but silently and at runtime rather than at compile time. That
 is why the acceptance test drives a real jail rather than reading the list: a test that read the
 tuples would agree with the runner by construction and prove nothing about the name.
+
+## What a conversation turn carries, in both directions
+
+A jail holds no agent definition, so in a jailed deployment every subagent conversation is served
+here rather than run in the caller's process. Everything a caller can say about a turn, and
+everything a turn can report about itself, is therefore a field on this coordinate:
+
+| Field | Message | Meaning |
+|---|---|---|
+| `max_turns` | `PromptAgentConversationRequest`, `ResumeAgentConversationRequest` | the budget for this one call, in place of the definition's. Clamped to the serving host's bounds |
+| `from_message_id` | `ResumeAgentConversationRequest` | rewind to a message the conversation holds, discarding what follows |
+| `correction` | `ResumeAgentConversationRequest` | one corrective instruction appended after the rewind point |
+| `messages` | `AgentConversationChunk`, **final frame** | `AgentMessageDescriptor { id, role, tool, tool_calls, is_error, preview }` per message the turn appended |
+| `clamped_max_turns` | `AgentConversationChunk`, **final frame** | the budget actually applied; unset when the caller got what it asked for |
+
+`messages` and `clamped_max_turns` ride the final frame for the reason `stop_reason` does: neither
+is known until the turn has ended. `preview` is cut by the host that owns the history, because a
+turn outcome carrying whole tool payloads would put the agent's context back into its caller's.
 
 ## Known gaps
 
@@ -95,7 +128,14 @@ tuples would agree with the runner by construction and prove nothing about the n
   binary and runs none of its cases; on macOS it fails in setup on a stdio-bridge defect its own
   `FIXME(sandbox-stdio-attach)` records, which is a predecessor's, not family B's. See
   [`docs/dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md`](../../../docs/dev/todo/2026-09-12-the-in-jail-conversation-suite-runs-nowhere.md).
-- **`service.rs` is 876 production lines**, over this repo's 500-line budget, and was not split. See
+- **`ResumeAgentConversation` is not proven across the wire.** It is compile-checked and clippy
+  clean, and covered on either side of this coordinate — `tddy-discovery`'s local-session tests for
+  the turn loop, `tddy-tools`' `--mcp` stdio acceptance tests for the tool shape — but no test
+  drives the RPC itself end to end. The suite that would is the one directly above. Recorded in
+  [`docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md`](../../../docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md);
+  a long `messages` list on the final frame can also overflow the chunk-framing threshold
+  ([`2026-09-26`](../../../docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md)).
+- **`service.rs` is 1,055 production lines**, over this repo's 500-line budget, and was not split. See
   [`docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md`](../../../docs/dev/todo/2026-09-12-the-two-new-service-rs-files-are-over-budget.md).
 - **`session_agent_clone.rs` is 1,157 production lines** and is the sole reason this crate depends on
   `tddy-daemon-livekit` and `livekit` — which contradicts `ports.rs`'s own header claim that nothing

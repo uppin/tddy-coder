@@ -4,9 +4,9 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **557 production lines** (of 807 total; `#[cfg(test)]` at `:558`) · budget 500 ·
+**Metrics:** **595 production lines** (of 807 total; `#[cfg(test)]` at `:558`) · budget 500 ·
 **1.1× over**
-**Thresholds breached:** length 557 > 500
+**Thresholds breached:** length 595 > 500
 **Restructure:** not required — one extraction, or it may fall under budget on its own
 **Status:** Open — unclaimed
 
@@ -15,6 +15,7 @@ subagent turn-control changeset
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-26 | 557 | first detection — 57 lines over |
+| 2026-09-26 | 595 | after `DeferredTurn` took a `TurnRequest` instead of a `prompt_text`, `prompt_outcome_json` grew `messages`/`clampedMaxTurns`, and `TurnEnd::took_a_turn` was removed |
 
 ## What the tool found
 

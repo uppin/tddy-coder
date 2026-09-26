@@ -1,8 +1,9 @@
-//! The one way this engine starts a shell command.
+//! The one way this engine starts a child process.
 //!
 //! Every tool-call shell — the blocking `Shell` path, a background `ShellTaskBody`, and
-//! [`crate::LocalShell::run`] — goes through [`run_contained`], because a shell started any other
-//! way inherits two defects that together cost a session:
+//! [`crate::LocalShell::run`] — goes through [`run_contained`], and every tool that spawns a
+//! helper binary directly — `Grep`'s `rg` — goes through [`run_contained_argv`], because a child
+//! started any other way inherits two defects that together cost a session:
 //!
 //! * `tokio::process::Command::output()` sets stdout and stderr but, unlike its `std` counterpart,
 //!   leaves **stdin inherited**. Inside a jail that stdin is `tddy-sandbox-runner --stdio`'s
@@ -55,10 +56,25 @@ pub(crate) async fn run_contained(
     env: &[(String, String)],
     budget: Option<Duration>,
 ) -> Result<Output, ContainedShellError> {
-    let mut spawn = tokio::process::Command::new("sh");
+    run_contained_argv("sh", &["-c", command], root, env, budget).await
+}
+
+/// The same containment for a helper binary the engine runs *without* a shell.
+///
+/// `Grep` spawns `rg` with a caller-supplied regex as one argument. Routing it through
+/// [`run_contained`] would mean pasting that regex into a shell command string, so an argv form
+/// exists instead: quoting a user-supplied pattern for `sh` is a defect of its own, and there is
+/// nothing here a shell is needed for.
+pub(crate) async fn run_contained_argv(
+    program: &str,
+    args: &[&str],
+    root: &Path,
+    env: &[(String, String)],
+    budget: Option<Duration>,
+) -> Result<Output, ContainedShellError> {
+    let mut spawn = tokio::process::Command::new(program);
     spawn
-        .arg("-c")
-        .arg(command)
+        .args(args)
         .current_dir(root)
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         // Never the caller's: in a jail that stream is the tool-IPC request pipe.

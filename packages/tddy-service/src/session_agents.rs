@@ -66,9 +66,19 @@ pub const SESSION_AGENT_SERVICE: &str = "session_agents.SessionAgentService";
 /// `ResumeAgentConversation` is here because a conversation an in-jail `tddy-tools` opened over
 /// this relay is one it must also be able to continue: without the entry the resume fails
 /// `not_found` — closed, which is the safe direction, but it would leave every jailed
-/// conversation able to be started and never carried on. It grants nothing the four conversation
-/// operations beside it did not already grant: the same authenticated `(session, conversation)`
-/// pair, one more turn on a conversation the caller already opened.
+/// conversation able to be started and never carried on.
+///
+/// What the entry costs, stated exactly. `ResumeAgentConversation` reaches the same code path as
+/// `PromptAgentConversation`, under the same authentication — the session token is resolved to an
+/// OS user by `session_dirs`, and the conversation is looked up by id — so it opens no route that
+/// is weaker than one already open. It is **not** the case that a caller is confined to its own
+/// session's conversations: `SessionAgentServiceImpl::session_dir` never cross-checks `session_id`
+/// against the token, and `OpenAgentConversations::routing_for` reads a host-global map keyed on
+/// conversation id alone. That gap is pre-existing — `Prompt` and `Cancel` were already relayable
+/// through it — and is recorded in
+/// `docs/dev/todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md`.
+/// What resume does add over prompt is a **destructive write** rather than one more turn:
+/// `from_message_id` truncates a transcript and `correction` injects into it.
 pub const IN_JAIL_RELAYABLE: [(&str, &str); 6] = [
     (SESSION_AGENT_SERVICE, "StreamSessionAgents"),
     (SESSION_AGENT_SERVICE, "OpenAgentConversation"),

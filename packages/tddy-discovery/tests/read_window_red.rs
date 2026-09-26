@@ -137,3 +137,35 @@ async fn managed_read_window_forwards_offset_and_limit_to_the_read_tool() {
         "managed READ must forward offset and limit to the daemon"
     );
 }
+
+/// An **un-windowed** managed READ still forwards the default cap.
+///
+/// The cap is what stops a subagent pulling a whole file into a 32k context, and on the Local path
+/// `window_content` applies it after the read. The managed path cannot: the file crosses the wire
+/// first, so a cap applied on this side bounds the context but not the transfer, and a cap the
+/// daemon never hears about bounds neither.
+///
+/// Before this was fixed the two paths answered the same bare `READ` differently — Local stopped at
+/// `DEFAULT_READ_LINE_CAP`, managed returned the whole file — which is the defect the engine-side
+/// `Read` window was added to close, still open on the only path a jailed agent uses.
+#[tokio::test]
+async fn an_unwindowed_managed_read_forwards_the_default_line_cap() {
+    // Given a managed codebase that records what the daemon is asked for
+    let (calls, access) = managed_access_recording();
+
+    // When a subagent reads a file without naming a window
+    access
+        .read("src/config.rs")
+        .await
+        .expect("managed un-windowed READ must succeed");
+
+    // Then the daemon is asked for the capped window, not the whole file
+    let recorded = calls.lock().unwrap();
+    assert_eq!(recorded.len(), 1, "exactly one dispatch call must be made");
+    assert_eq!(
+        recorded[0].1,
+        serde_json::json!({"path": "src/config.rs", "offset": 0, "limit": 200}),
+        "an un-windowed managed READ must carry the default cap; without it the whole file \
+         crosses the wire and the cap protects nothing on the path every jailed agent uses"
+    );
+}

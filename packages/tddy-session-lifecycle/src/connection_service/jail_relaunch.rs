@@ -8,7 +8,7 @@
 //! Reached only from a [`ToolDispatchOutcome::TransportFailed`](tddy_daemon_sandbox::workspace_tool_sandbox::ToolDispatchOutcome::TransportFailed):
 //! a tool that ran and exited non-zero leaves the jail alone.
 //!
-//! Changeset: `docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md`.
+//! Feature: `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox.
 
 use std::collections::HashMap;
 use std::path::Path;

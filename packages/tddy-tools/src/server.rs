@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use tddy_discovery::roster::seed_subagents_or_report;
 use tddy_discovery::subagent::{
     resolve_replaced_tools_for_defs, MessageId, SubagentRegistry, TurnRequest,
-    SUBAGENT_MAX_TURNS_CEILING,
+    SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS,
 };
 // The conversation runtime the seven `subagent_*` tools drive: the table of open conversations, the
 // turns that outlived the calls that started them, and the accounting of both. It moved to
@@ -2457,13 +2457,13 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
 fn max_turns_property() -> serde_json::Value {
     serde_json::json!({
         "type": "integer",
-        "minimum": 0,
+        "minimum": SUBAGENT_MIN_TURNS,
         "description": format!(
             "How many model turns this ONE call may spend, in place of the agent definition's \
-             own budget. Omit to leave the definition's budget alone. Above {SUBAGENT_MAX_TURNS_CEILING} \
-             it is cut to {SUBAGENT_MAX_TURNS_CEILING}, and the outcome then carries \
-             `clampedMaxTurns` saying so — a turn that stopped early on a clamped budget has not \
-             finished searching."
+             own budget. Omit to leave the definition's budget alone. Outside \
+             {SUBAGENT_MIN_TURNS}..={SUBAGENT_MAX_TURNS_CEILING} it is cut to the nearer bound, and \
+             the outcome then carries `clampedMaxTurns` saying so — a turn that stopped early on a \
+             clamped budget has not finished searching."
         )
     })
 }
@@ -2515,7 +2515,7 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
          parallel, open a second conversation — more prompts to one conversation is a queue. \
          Blocks for at most `graceMs` (default 25000). A turn that yields in time returns \
          {stopReason, content, usage, messages}. `messages` is what the turn appended, each with \
-         an id, a role, `is_error` and a short preview: read it to see whether the agent's tool \
+         an id, a role, `isError` and a short preview: read it to see whether the agent's tool \
          calls actually worked, and to pick an id to hand `subagent_resume` a `fromMessageId`. \
          Pass `maxTurns` to bound this one call. A turn still running when the grace elapses is \
          NOT cancelled: the call returns {responseId, pending: true, queuePosition, queueSize}, \

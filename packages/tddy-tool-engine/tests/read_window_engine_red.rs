@@ -11,7 +11,7 @@
 //! read cap at all, and pulls whole files into a 32k context. In the 2026-09-26 session one file
 //! crossed that boundary twice at 42 KB a time, with `offset` and `limit` set on both calls.
 //!
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/daemon/remote-codebase-mode.md § Remote daemon: tool execution
 
 use tddy_task::TaskRegistry;
 use tddy_tool_engine::execute_tool;
@@ -46,7 +46,7 @@ fn numbered_lines(count: usize) -> String {
 }
 
 impl AReadCall {
-    fn from_line(mut self, offset: u64) -> Self {
+    fn starting_at_line(mut self, offset: u64) -> Self {
         self.offset = Some(offset);
         self
     }
@@ -111,7 +111,7 @@ impl ReadResult {
 async fn reading_a_file_window_returns_only_the_requested_lines() {
     // Given a thousand-line file
     let call = a_read_of_a_file_with_lines(1000)
-        .from_line(400)
+        .starting_at_line(400)
         .of_at_most(3);
 
     // When three lines are requested from line 400
@@ -126,7 +126,9 @@ async fn reading_a_file_window_returns_only_the_requested_lines() {
 #[tokio::test]
 async fn a_window_reaching_the_end_of_the_file_is_not_truncated() {
     // Given a ten-line file
-    let call = a_read_of_a_file_with_lines(10).from_line(8).of_at_most(50);
+    let call = a_read_of_a_file_with_lines(10)
+        .starting_at_line(8)
+        .of_at_most(50);
 
     // When a window larger than the remainder is requested
     let result = call.run().await;
@@ -140,7 +142,9 @@ async fn a_window_reaching_the_end_of_the_file_is_not_truncated() {
 #[tokio::test]
 async fn a_window_starting_past_the_end_of_the_file_is_empty_rather_than_an_error() {
     // Given a ten-line file
-    let call = a_read_of_a_file_with_lines(10).from_line(99).of_at_most(5);
+    let call = a_read_of_a_file_with_lines(10)
+        .starting_at_line(99)
+        .of_at_most(5);
 
     // When the window starts beyond the last line
     let result = call.run().await;

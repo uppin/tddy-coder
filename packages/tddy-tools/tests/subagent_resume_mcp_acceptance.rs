@@ -2,8 +2,7 @@
 //! outcome now carries — over the real `tddy-tools --mcp` stdio wire.
 //!
 //! Feature: docs/ft/coder/managed-codebase-subagents.md
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-26-subagent-turn-control-and-honest-tool-failure.md
-//! Changeset: docs/dev/1-WIP/2026-09-26-subagent-turn-control-and-honest-tool-failure.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § Turn control
 //!
 //! Spawns the actual compiled binary and speaks the newline-delimited JSON-RPC wire, the same
 //! seam Claude Code talks to — because the thing under test here is the *advertised contract*, and
@@ -19,6 +18,7 @@
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::time::Duration;
+use tddy_discovery::subagent::MESSAGE_PREVIEW_CHARS;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use wiremock::matchers::{method, path};
@@ -34,6 +34,10 @@ const THE_CEILING: u64 = 50;
 /// A tool result far larger than any sensible preview — the size a single `Read` reached in the
 /// 2026-09-26 session.
 const A_HUGE_ANSWER: usize = 42_000;
+
+/// What the huge file is made of. A single repeated character, so a preview can be recognised as
+/// *the payload* rather than as an error message that happens to be short.
+const THE_PAYLOAD_BYTE: &str = "x";
 
 fn explorer_def_json(base_url: &str) -> String {
     json!([{
@@ -77,11 +81,25 @@ fn a_turn_that_reads() -> Value {
 }
 
 fn spawn_mcp_server(env: &[(&str, &str)]) -> Child {
+    spawn_mcp_server_in(None, env)
+}
+
+/// The same server, optionally rooted in `worktree`.
+///
+/// With no session-tool transport configured the subagent reaches the codebase as
+/// `CodebaseAccess::Local`, which resolves a `READ` path against the **child's** working
+/// directory. A test that wants the agent to read a real file therefore has to hand that
+/// directory to the child; writing the file into a `tempdir` the child never hears about only
+/// buys an `ENOENT` dressed up as a tool result.
+fn spawn_mcp_server_in(worktree: Option<&std::path::Path>, env: &[(&str, &str)]) -> Child {
     let mut cmd = tokio::process::Command::new(env!("CARGO_BIN_EXE_tddy-tools"));
     cmd.arg("--mcp")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    if let Some(worktree) = worktree {
+        cmd.current_dir(worktree);
+    }
     for (key, value) in env {
         cmd.env(key, value);
     }
@@ -182,7 +200,16 @@ struct AnOpenConversation {
 
 impl AnOpenConversation {
     async fn over(base_url: &str) -> Self {
-        let mut child = spawn_mcp_server(&[("TDDY_SUBAGENTS_JSON", &explorer_def_json(base_url))]);
+        Self::over_in(base_url, None).await
+    }
+
+    /// The same conversation, with the server rooted in `worktree` so its subagent's `READ`
+    /// resolves against a codebase the test controls.
+    async fn over_in(base_url: &str, worktree: Option<&std::path::Path>) -> Self {
+        let mut child = spawn_mcp_server_in(
+            worktree,
+            &[("TDDY_SUBAGENTS_JSON", &explorer_def_json(base_url))],
+        );
         let mut stdin = child.stdin.take().expect("child stdin");
         let mut stdout = BufReader::new(child.stdout.take().expect("child stdout"));
         initialize_mcp_session(&mut stdin, &mut stdout).await;
@@ -331,6 +358,13 @@ async fn a_turn_outcome_lists_the_messages_the_turn_appended() {
 /// A preview is a handle, not a copy. Returning whole tool payloads in every outcome would put
 /// the subagent's context back into the main agent's, which is the cost the subagent exists to
 /// avoid.
+///
+/// The first version of this test was green with the defect fully present: it wrote the big file
+/// into a `tempdir` the spawned server was never given, at a path the scripted model never asked
+/// for, so the child's `READ` failed with `ENOENT` and the "preview" under assertion was a
+/// sixty-character error string measured against a threshold of 4 200. It now roots the server in
+/// that worktree, puts the file exactly where the model reads, asserts the payload was genuinely
+/// read, and holds the preview to the real cap.
 #[tokio::test]
 async fn a_large_tool_result_is_previewed_rather_than_returned_whole() {
     // Given a model that reads a very large file and then answers
@@ -349,10 +383,16 @@ async fn a_large_tool_result_is_previewed_rather_than_returned_whole() {
         .mount(&server)
         .await;
 
+    // ...in a worktree the server is actually rooted in, at the path the model asks for
     let worktree = tempfile::tempdir().expect("a worktree");
-    std::fs::write(worktree.path().join("a.rs"), "x".repeat(A_HUGE_ANSWER)).expect("a big file");
+    std::fs::create_dir_all(worktree.path().join("src")).expect("a src directory");
+    std::fs::write(
+        worktree.path().join("src/a.rs"),
+        THE_PAYLOAD_BYTE.repeat(A_HUGE_ANSWER),
+    )
+    .expect("a big file");
 
-    let mut conversation = AnOpenConversation::over(&server.uri()).await;
+    let mut conversation = AnOpenConversation::over_in(&server.uri(), Some(worktree.path())).await;
 
     // When the agent reads it
     let outcome = conversation
@@ -364,15 +404,26 @@ async fn a_large_tool_result_is_previewed_rather_than_returned_whole() {
         .await;
     conversation.close().await;
 
-    // Then no descriptor carries anything like the payload
+    // Then the file was genuinely read — without this the rest measures an ENOENT, not a preview
     let messages = outcome["messages"]
         .as_array()
         .unwrap_or_else(|| panic!("a turn outcome must list its messages; got: {outcome}"))
         .clone();
-    for message in &messages {
-        let preview = message["preview"].as_str().unwrap_or_default();
+    let previews: Vec<&str> = messages
+        .iter()
+        .map(|m| m["preview"].as_str().unwrap_or_default())
+        .collect();
+    let a_run_of_the_payload = THE_PAYLOAD_BYTE.repeat(32);
+    assert!(
+        previews.iter().any(|p| p.contains(&a_run_of_the_payload)),
+        "no descriptor carries any of the file's contents, so the read did not reach it; \
+         previews: {previews:?}"
+    );
+
+    // And no descriptor carries anything like the whole payload
+    for preview in &previews {
         assert!(
-            preview.chars().count() < A_HUGE_ANSWER / 10,
+            preview.chars().count() <= MESSAGE_PREVIEW_CHARS,
             "a {}-character preview is a copy of the payload, not a handle",
             preview.chars().count()
         );
@@ -442,4 +493,61 @@ async fn resuming_an_unknown_conversation_is_an_error_result() {
         message.contains("conv-never-opened"),
         "the refusal must name the conversation the caller got wrong; got: {body}"
     );
+}
+
+/// The descriptors are serialized inside an otherwise camelCase envelope, and an agent reads these
+/// names literally — from the tool description, and then from the payload. They have to agree.
+#[tokio::test]
+async fn message_descriptors_use_the_same_casing_as_the_envelope_around_them() {
+    // Given a conversation whose turn calls a tool and then answers
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(a_turn_that_reads()))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(final_answer_response("src/a.rs:1-9")),
+        )
+        .mount(&server)
+        .await;
+    let mut conversation = AnOpenConversation::over(&server.uri()).await;
+
+    // When it is prompted
+    let outcome = conversation
+        .call(
+            2,
+            "subagent_prompt",
+            json!({"prompt": [{"type": "text", "text": "read a.rs"}]}),
+        )
+        .await;
+    conversation.close().await;
+
+    // Then every descriptor spells its fields the way the envelope does
+    let messages = outcome["messages"]
+        .as_array()
+        .unwrap_or_else(|| panic!("a turn outcome must list its messages; got: {outcome}"))
+        .clone();
+    let with_a_tool_call = messages
+        .iter()
+        .find(|m| m["role"] == "assistant" && m.get("toolCalls").is_some_and(|c| !c.is_null()))
+        .unwrap_or_else(|| panic!("a turn that called a tool reports it; got: {messages:?}"));
+    assert!(
+        with_a_tool_call.get("tool_calls").is_none(),
+        "snake_case `tool_calls` beside camelCase `stopReason` in one payload; got: \
+         {with_a_tool_call}"
+    );
+    for message in &messages {
+        assert!(
+            message.get("is_error").is_none(),
+            "snake_case `is_error` in a camelCase envelope; got: {message}"
+        );
+        assert!(
+            message.get("isError").is_some(),
+            "every descriptor reports whether it is an error; got: {message}"
+        );
+    }
 }

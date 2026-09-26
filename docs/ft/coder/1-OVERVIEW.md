@@ -76,7 +76,6 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
-| [Subagent turn control and honest tool failure](1-WIP/PRD-2026-09-26-subagent-turn-control-and-honest-tool-failure.md) | [Managed-codebase subagents](managed-codebase-subagents.md) — per-call `maxTurns`, `subagent_resume` with rewind and correction, message ids on every turn outcome, and an all-tools-failed prompt that errors instead of fabricating; also [sandboxed codebase mode](../daemon/sandboxed-codebase-mode.md) (jail stdin isolation, channel death and relaunch) and [remote codebase mode](../daemon/remote-codebase-mode.md) (`Read` windowing) |
 
 ## Integration Points
 

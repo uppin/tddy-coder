@@ -24,10 +24,12 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 |---------------------------------------------------|----------------------------------------------------------------------|
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
-| `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
+| `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
+| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that asks nothing new |
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
-| `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` |
+| `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
+| *(no ACP counterpart)*                            | output field `messages` — the messages **this turn appended**, each `{ id, role, tool, toolCalls, isError, preview }`; plus `clampedMaxTurns` when the ceiling cut the budget |
 | `session/cancel`                                  | `subagent_cancel` — input `{ sessionId }` |
 
 These tools use plain JSON (serde), not the `agent-client-protocol` crate — that crate's
@@ -38,10 +40,15 @@ shape immediately.
 
 "Yield when there's an opportunity for an extra prompt" (the requirement that the subagent's
 internal tool-call ↔ tool-result loop hands control back to the main agent) = the loop terminating
-either on a `<final_answer>` (→ `stopReason: "end_turn"`) or on hitting its configured turn budget
-(→ `stopReason: "max_turn_requests"`) — mirroring `FastContextBackend`'s existing termination
-conditions (`discovery-agent.md`), just exposed per-turn instead of only at the very end of a whole
-invocation.
+on a `<final_answer>` (→ `stopReason: "end_turn"`), on hitting the turn budget in force for the call
+(→ `stopReason: "max_turn_requests"`), or on a model that refuses the turn because its context
+window is full (→ `stopReason: "context_exhausted"`, whose outcome carries a handoff brief for a
+fresh conversation — that condition is not one the same conversation recovers from, because every
+further turn re-sends the same oversized history). Exposed per-turn rather than only at the very end
+of a whole invocation.
+
+The one way a turn ends without a `stopReason` is **[a total tool outage](#a-turn-in-which-no-tool-call-succeeded-is-an-error)**,
+which is an error result rather than a landing.
 
 ## Architecture
 
@@ -160,6 +167,118 @@ The daemon. A remote agent's turn already arrives as a server stream
 (`PromptAgentConversation`), consumed to completion by `AgentConversationLink::prompt`; the
 background task drives exactly that call. Nothing about the wire, the frame contract, or the
 truncation rule moves — only which task is awaiting it.
+
+## Turn control: the budget, the transcript, and the resume
+
+A subagent's turn budget, the record of what it did with the budget, and the ability to send it back
+and try again are one surface. They exist because of the failure that has all three missing:
+incident 2026-09-26, in which a discovery agent spent ten turns on tool calls that were every one
+refused and answered with an invented file, line number and constant value — twice, byte for byte,
+because turns run at `temperature: 0.0`.
+
+### `maxTurns` — the budget belongs to the call
+
+`subagent_prompt` and `subagent_resume` each accept an optional `maxTurns`: how many model turns
+**that one call** may spend, in place of the agent definition's own budget. Omitted, the
+definition's budget applies untouched.
+
+- The caller's figure is bounded to `1..=50`. Outside it, the value is **clamped to the nearer
+  bound and the outcome carries `clampedMaxTurns`** saying what was actually applied. Clamping
+  rather than refusing keeps an over-eager caller working; reporting it is what stops a caller
+  reading an early stop as a finished search.
+- **A definition's own budget is never clamped.** It is the operator's configuration, and the
+  ceiling exists to bound what a *caller* may spend, not to override a deliberate setting nobody in
+  the call asked to change.
+- The floor matters as much as the ceiling, and for a sharper reason. The loop runs `0..turns`, so a
+  budget of zero runs no turn: nothing is read, no tool call fails, and the total-outage guard —
+  which fires on a failure having happened — has nothing to fire on. Control would then reach the
+  synthesis turn with a history holding only the prompt, which is the 2026-09-26 fabrication reached
+  through a caller-controlled field with no tool outage anywhere.
+- A roster entry still carries no turn budget of its own, and editing an agent definition still
+  cannot change what a running session may do. The ceiling is what keeps that guarantee true in
+  substance: a caller may ask for a longer search, not for an unbounded one.
+
+### Every turn outcome enumerates the messages it appended
+
+Alongside `{stopReason, content, usage}`, a turn outcome carries `messages` — the messages **that
+turn appended**, in the order they happened, not the whole history:
+
+```json
+"messages": [
+  {"id": "m18", "role": "assistant", "tool": null, "toolCalls": ["Read"], "isError": false, "preview": "I'll read the theme interface…"},
+  {"id": "m19", "role": "tool", "tool": "Read", "toolCalls": [], "isError": true, "preview": "…its channel is closed"}
+]
+```
+
+- `id` is opaque and unique for the life of the conversation. Ids come from a counter that only
+  rises, **including across a rewind**: an id a rewind discarded is never minted again, so an id
+  held from before a rewind addresses nothing rather than silently addressing a different message.
+- `role` is `system`, `user`, `assistant` or `tool`. A spelling the reader does not model is refused
+  naming it rather than defaulted — describing a message as the wrong speaker misreports who said
+  it.
+- `isError` is the field whose absence let the incident run: a main agent could see how many
+  messages went by, but not that every one of them was a refusal.
+- `preview` is a handle, not a copy. It is cut to 240 characters, because one `Read` result in the
+  incident was 42 KB and a turn outcome carrying a handful of those would put the agent's context
+  back into its caller's — the cost the agent exists to avoid.
+
+### `subagent_resume` — carry on, or go back and correct
+
+`subagent_resume { sessionId, fromMessageId?, correction?, maxTurns?, graceMs? }` takes another turn
+on an open conversation and **sends no new prompt turn**.
+
+- With neither `fromMessageId` nor `correction` it continues the history as it stands, under a fresh
+  budget — the case where a chain was cut short by its budget and re-asking would make the agent
+  re-read everything it has already read.
+- `fromMessageId` sends the conversation back to that message, discarding everything after it. A
+  rewind landing between a tool call and its results **keeps the results**, so the history stays one
+  the model accepts. An id the conversation does not hold is an error naming it, never a silent
+  continue; so is an unknown `sessionId`.
+- `correction` appends exactly one corrective instruction after the rewind point. It is what makes a
+  rewind able to change anything at all: turns go out at `temperature: 0.0`, so re-sending identical
+  context reproduces an identical turn. A rewind offered without a correction would be a feature
+  that silently does nothing.
+- Present-but-empty is refused for both fields rather than treated as absent, for the same reason
+  `subagent_prompt` refuses an empty prompt: a caller that sent a field meant to send something in
+  it.
+- A resume queues exactly as a prompt does — a conversation runs one turn at a time — and reports
+  `queuePosition` / `queueSize`, `graceMs` and `responseId` identically.
+
+### A turn in which no tool call succeeded is an error
+
+When a call's whole budget goes on tool calls of which **none ran**, the turn returns an error
+naming the transport failure, and returns it **before any model call**. The guarantee is that
+nothing was asked to summarise, not that its answer was discarded afterwards: the synthesis turn
+asks for "the specific file:line locations you found" without checking that anything was found, and
+a model at `temperature: 0.0` obliges with an invented one.
+
+The conversation is left exactly as the failed call built it and stays promptable. Its history is
+the record of what was attempted, so a caller that has fixed the tool channel can carry on from
+there, and `subagent_resume` can rewind into it.
+
+A tool that **ran** and exited non-zero is not this condition. One failed call among successful ones
+is ordinary traffic, and a call in which some tools worked keeps today's `max_turn_requests` soft
+landing unchanged.
+
+**The guard fires at budget exhaustion, and there alone.** A model that ends the turn early with a
+final answer after every tool call failed still returns that answer, because the loop never reaches
+the exhaustion path where the tally is read — recorded in
+[`docs/dev/todo/2026-09-26-the-honest-failure-guard-does-not-cover-a-model-ended-turn.md`](../../dev/todo/2026-09-26-the-honest-failure-guard-does-not-cover-a-model-ended-turn.md).
+
+### What is proven, and where the proof stops
+
+Every conversation in a jailed deployment is a **remote** one: the jail holds no agent definition, so
+the turn loop runs on the facilitating daemon and each of these fields crosses
+`session_agents.SessionAgentService` (see
+[session-agent-roster.md](../daemon/session-agent-roster.md)). That crossing is compile-checked and
+covered on either side — `tddy-discovery`'s local-session tests for the loop, the `--mcp` stdio
+acceptance tests for the wire shape — but **no test drives `ResumeAgentConversation` end to end**:
+the suite that would runs on no CI machine. Recorded in
+[`docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md`](../../dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md).
+
+A second, narrower gap on the same path: a turn's `messages` list rides the final conversation chunk,
+and a long one can overflow the chunk-framing threshold —
+[`docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md`](../../dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md).
 
 ## Acceptance Criteria
 
@@ -336,6 +455,43 @@ fully migrated onto the array model.
 34. The advertised `subagent_prompt` description states both return shapes and names
     `subagent_await` as what collects the pending one — the schema is the only place the main agent
     can learn that a `responseId` is not an error.
+
+### Turn control (`tddy-discovery`, `tddy-tools`, `tddy-sandbox-recipes`)
+
+35. `subagent_prompt` accepts `maxTurns` and honours it **for that call only**: a later call on the
+    same conversation with no `maxTurns` runs on the agent definition's budget again.
+36. A `maxTurns` outside `1..=50` is clamped to the nearer bound and the outcome carries
+    `clampedMaxTurns` with the applied figure; a value inside the range is not reported as clamped.
+    A definition's own budget above the ceiling stands unclamped.
+37. A `maxTurns` that is not a whole number of turns is refused naming the field, never ignored.
+38. Every turn outcome — `subagent_prompt`, `subagent_await`, `subagent_resume` — carries
+    `messages`: the messages that turn appended, each with `id`, `role`, `tool`, `toolCalls`,
+    `isError` and a `preview` **shorter than the payload it previews**.
+39. Message ids are unique for the life of the conversation, and an id discarded by a rewind is
+    never minted again.
+40. `subagent_resume` with `sessionId` alone continues the conversation and sends no new prompt
+    turn; the next request the provider receives carries the existing history and no appended user
+    message.
+41. `subagent_resume { fromMessageId }` discards every message after that id, and the rewound
+    history — compared element-wise, not by length — is what the next turn is sent. A rewind never
+    separates a tool-call message from its results.
+42. `subagent_resume { correction }` appends exactly one corrective user message, in final position
+    after the rewind point.
+43. An unknown `sessionId` or `fromMessageId`, and a present-but-empty `fromMessageId` or
+    `correction`, are in-band error results naming the cause — never a silent continue and never a
+    protocol error.
+44. A call whose every tool call failed returns an error naming the transport failure and makes
+    **no synthesis model call**: a budget of *N* causes the provider to receive exactly *N*
+    requests, never *N*+1. A call in which some tool calls succeeded keeps the `max_turn_requests`
+    landing unchanged, and one failed call among successful ones is not an outage.
+45. A conversation whose call failed that way is still open and can be rewound into: a following
+    `subagent_resume` sends a history that still contains the failed call's tool exchanges.
+46. `subagent_resume` is advertised in the MCP catalog exactly where `subagent_prompt` is — gated on
+    the same roster condition, with `fromMessageId`, `correction` and `maxTurns` in its schema —
+    and is present in the sandboxed Claude CLI `--allowedTools` list exactly where
+    `mcp__tddy-tools__subagent_prompt` is. The two lists are separate and hand-maintained, so a
+    tool that reaches only one of them is advertised and uncallable — which reads to the main agent
+    as an agent that is not registered.
 
 ## Non-goals (out of scope for v1)
 
