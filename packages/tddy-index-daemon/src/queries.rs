@@ -140,6 +140,8 @@ async fn plan_progress(
         in_flight: progress.in_flight as u32,
         pending: progress.pending as u32,
         failed: progress.failed as u32,
+        // TODO(live-plans): implement — the held plan's stale operations.
+        stale: Vec::new(),
     })
 }
 
