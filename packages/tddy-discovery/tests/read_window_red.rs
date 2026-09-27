@@ -145,11 +145,14 @@ async fn managed_read_window_forwards_offset_and_limit_to_the_read_tool() {
 /// first, so a cap applied on this side bounds the context but not the transfer, and a cap the
 /// daemon never hears about bounds neither.
 ///
-/// Before this was fixed the two paths answered the same bare `READ` differently — Local stopped at
-/// `DEFAULT_READ_LINE_CAP`, managed returned the whole file — which is the defect the engine-side
-/// `Read` window was added to close, still open on the only path a jailed agent uses.
+/// What crosses the wire is the model's own choice, including the choice not to window. This
+/// layer briefly substituted a 200-line cap for a missing `limit`; session 01a0e285 showed the
+/// cost, re-reading the first 200 lines of a 960-line file nine times because a truncated answer
+/// is only useful to a model that then pages, and this one did not. Choosing the window is the
+/// model's job — `truncated` and `total_lines` come back regardless, so one that does page still
+/// can.
 #[tokio::test]
-async fn an_unwindowed_managed_read_forwards_the_default_line_cap() {
+async fn an_unwindowed_managed_read_forwards_no_window_at_all() {
     // Given a managed codebase that records what the daemon is asked for
     let (calls, access) = managed_access_recording();
 
@@ -159,13 +162,13 @@ async fn an_unwindowed_managed_read_forwards_the_default_line_cap() {
         .await
         .expect("managed un-windowed READ must succeed");
 
-    // Then the daemon is asked for the capped window, not the whole file
+    // Then the daemon is asked for the file, with no window invented on the model's behalf
     let recorded = calls.lock().unwrap();
     assert_eq!(recorded.len(), 1, "exactly one dispatch call must be made");
     assert_eq!(
         recorded[0].1,
-        serde_json::json!({"path": "src/config.rs", "offset": 0, "limit": 200}),
-        "an un-windowed managed READ must carry the default cap; without it the whole file \
-         crosses the wire and the cap protects nothing on the path every jailed agent uses"
+        serde_json::json!({"path": "src/config.rs"}),
+        "an un-windowed managed READ must forward no window: a cap this layer invents is one \
+         the model never asked for and cannot reason about"
     );
 }

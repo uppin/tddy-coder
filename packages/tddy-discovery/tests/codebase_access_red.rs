@@ -54,7 +54,9 @@ async fn managed_codebase_access_maps_read_to_the_capitalized_read_tool_name() {
     );
     assert_eq!(
         recorded[0].1,
-        serde_json::json!({"path": "src/main.rs", "offset": 0, "limit": 200})
+        serde_json::json!({"path": "src/main.rs"}),
+        "a read the model did not window is forwarded unwindowed: this layer carries the \
+         model's choice and does not make one for it"
     );
 }
 

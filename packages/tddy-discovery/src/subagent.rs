@@ -227,7 +227,7 @@ impl CodebaseAccess {
     /// Read a line window of a file, bounding how much content flows back into the model's context.
     ///
     /// `offset` is a 0-based starting line (default 0); `limit` is the maximum number of lines
-    /// (default [`DEFAULT_READ_LINE_CAP`]). The result carries `truncated` (true when more lines
+    /// (default: every line that remains). The result carries `truncated` (true when more lines
     /// follow the returned window) and `total_lines` (the file's true length) so the model can page
     /// with a follow-up `offset` instead of blindly re-reading. An un-windowed read of a file within
     /// the cap returns its bytes verbatim.
@@ -244,17 +244,21 @@ impl CodebaseAccess {
                 Ok(window_content(&content, offset, limit))
             }
             CodebaseAccess::Managed(dispatch) => {
-                // The window is **resolved here**, not forwarded as the caller wrote it. On this
-                // path the file crosses the wire before anything on this side could trim it, so an
-                // absent `limit` has to become the cap *in the request* — a cap applied after the
-                // transfer bounds the context but not the wire, and a cap the daemon never hears
-                // about bounds neither. `CodebaseAccess::Local` reaches the same defaults the other
-                // way round, in `window_content`, because there the bytes are already in hand.
-                let args = serde_json::json!({
-                    "path": path,
-                    "offset": offset.unwrap_or(0),
-                    "limit": limit.unwrap_or(DEFAULT_READ_LINE_CAP as u64),
-                });
+                // Forwarded exactly as the model wrote it — including the absence of a window.
+                // This layer used to substitute a 200-line cap for a missing `limit`, which made
+                // an un-windowed read of a 960-line file return its first 200 lines with
+                // `truncated: true`. A model that does not then page re-reads the same window
+                // instead, and session 01a0e285 did precisely that nine times on one file while
+                // its turn latency grew from 6s to 168s. Choosing the window is the model's job;
+                // this layer's job is to carry the choice faithfully, and `truncated` /
+                // `total_lines` come back either way so a model that does page still can.
+                let mut args = serde_json::json!({ "path": path });
+                if let Some(offset) = offset {
+                    args["offset"] = offset.into();
+                }
+                if let Some(limit) = limit {
+                    args["limit"] = limit.into();
+                }
                 let result = dispatch("Read".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
             }
@@ -511,17 +515,16 @@ impl CodebaseAccess {
     }
 }
 
-/// Default number of lines a single un-windowed READ returns before truncating. Bounds how much
-/// file content a subagent can pull into the model's context in one tool call.
-const DEFAULT_READ_LINE_CAP: usize = 200;
-
 /// Default number of paths a single un-windowed GLOB returns before truncating.
 ///
-/// The same 200 as [`DEFAULT_READ_LINE_CAP`], and for the same reason: a path is about the size
-/// of a line of source, so 200 of them cost a model's context roughly what an un-windowed read
-/// does — a few thousand tokens, affordable in the 32k window a fast local agent runs in, and
-/// enough to see the shape of a directory. Session 01a0e200's `GLOB **/*` returned 408,282 bytes
-/// of tree into exactly such a window.
+/// 200 because a path is about the size of a line of source, so 200 of them cost a few thousand
+/// tokens — affordable in the 32k window a fast local agent runs in, and enough to see the shape
+/// of a directory. Session 01a0e200's `GLOB **/*` returned 408,282 bytes of tree into exactly
+/// such a window.
+///
+/// Unlike `READ`, this one is still applied when the model names no `limit`: `GLOB` has no
+/// `offset`, so a truncated match set cannot be paged and the cap is the only bound there is.
+/// See `docs/dev/todo/2026-09-27-glob-and-grep-cannot-be-paged.md`.
 pub const DEFAULT_GLOB_PATH_CAP: usize = 200;
 
 /// Default number of matches a single un-windowed GREP returns before truncating.
@@ -558,7 +561,7 @@ fn capped_results(
 
 /// Apply a line window to file `content`, returning `{content, truncated, total_lines}`.
 ///
-/// `offset` (default 0) and `limit` (default [`DEFAULT_READ_LINE_CAP`]) select the returned lines.
+/// `offset` (default 0) and `limit` (default: every line that remains) select the returned lines.
 /// When the whole file fits in the window (offset 0, all lines within `limit`), the original bytes
 /// are returned verbatim so callers see the file exactly as-is; otherwise the selected lines are
 /// re-joined with `\n`. `truncated` is true when lines follow the returned window.
@@ -566,7 +569,7 @@ fn window_content(content: &str, offset: Option<u64>, limit: Option<u64>) -> ser
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
     let start = (offset.unwrap_or(0) as usize).min(total_lines);
-    let max_lines = limit.map(|l| l as usize).unwrap_or(DEFAULT_READ_LINE_CAP);
+    let max_lines = limit.map(|l| l as usize).unwrap_or(usize::MAX);
     let end = start.saturating_add(max_lines).min(total_lines);
     let truncated = end < total_lines;
 
