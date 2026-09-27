@@ -13221,6 +13221,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-session-sync",
+ "tddy-testing-commons",
  "tddy-worktree-service",
  "tempfile",
  "tokio",

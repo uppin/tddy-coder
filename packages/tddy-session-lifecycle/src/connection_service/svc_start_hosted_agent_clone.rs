@@ -15,6 +15,27 @@ use tddy_rpc::Status;
 
 use super::DaemonSessionHost;
 
+/// The system prompt one conversation opens under: the caller's override where it sent one, the
+/// def's own where it did not.
+///
+/// The override replaces the def's prompt rather than appending to it — the model is never left
+/// weighing two sets of instructions — and the def is left untouched, so the next conversation
+/// opened from it gets its prompt back.
+///
+/// A blank override is refused through [`tddy_discovery::subagent::refuse_blank_system_prompt`],
+/// the same rule the local registry and the in-jail client apply, so a caller meets one answer
+/// whichever host ends up running its agent.
+fn conversation_system_prompt(
+    override_prompt: Option<&str>,
+    def_prompt: &Option<String>,
+) -> Result<Option<String>, Status> {
+    tddy_discovery::subagent::refuse_blank_system_prompt(override_prompt)
+        .map_err(|e| Status::invalid_argument(e.to_string()))?;
+    Ok(override_prompt
+        .map(str::to_string)
+        .or_else(|| def_prompt.clone()))
+}
+
 impl DaemonSessionHost {
     /// Turn a freshly created `workspace` checkout into a live mirror of the facilitating daemon's
     /// session.
@@ -131,12 +152,16 @@ impl DaemonSessionHost {
     }
 
     /// A turn loop for an agent this daemon resolves and serves from the session's own worktree.
+    ///
+    /// `system_prompt` replaces the def's own for this conversation alone — see
+    /// [`conversation_system_prompt`]; `None` leaves the def's in place.
     pub(crate) async fn open_local_agent_session(
         &self,
         session_id: &str,
         session_dir: &Path,
         record: &tddy_core::SessionAgentRecord,
         session_token: &str,
+        system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
         let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
@@ -164,7 +189,7 @@ impl DaemonSessionHost {
                     &record.agent_id,
                     session_token,
                 ),
-                def.system_prompt.clone(),
+                conversation_system_prompt(system_prompt, &def.system_prompt)?,
                 def.tools.clone(),
             ),
         ))
@@ -172,10 +197,15 @@ impl DaemonSessionHost {
 
     /// A turn loop for an agent **this** daemon owns, reading the clone it holds for another
     /// daemon's session.
+    ///
+    /// Takes the same override as [`Self::open_local_agent_session`], for the same reason: the
+    /// caller opening the conversation chose it, and which host happens to hold the checkout is
+    /// not something it can see.
     pub(crate) async fn open_owned_agent_session(
         &self,
         agent_id: &str,
         clone: &Arc<crate::session_agent_clone::HostedClone>,
+        system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
         let id = tddy_core::AgentId::parse(agent_id)
             .map_err(|e| Status::invalid_argument(e.to_string()))?;
@@ -203,7 +233,7 @@ impl DaemonSessionHost {
                 def.api_key.clone(),
                 def.max_turns,
                 self.owned_agent_codebase_access(clone),
-                def.system_prompt.clone(),
+                conversation_system_prompt(system_prompt, &def.system_prompt)?,
                 def.tools.clone(),
             ),
         ))

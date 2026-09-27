@@ -1729,6 +1729,12 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
         .get("systemPrompt")
         .and_then(|v| v.as_str())
         .map(str::to_string);
+    // Refused before anything is opened, and before which host runs the agent is even known, so
+    // the caller reads the same answer on both paths. It is checked again at each layer beneath —
+    // this is the one that can still name the field the caller got wrong.
+    if let Err(e) = tddy_discovery::subagent::refuse_blank_system_prompt(system_prompt.as_deref()) {
+        return subagent_error_json(e.to_string());
+    }
 
     let entry = match roster.open_conversation_as(&session_id, agent_id) {
         Ok(entry) => entry,
@@ -1740,23 +1746,12 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
     // same `session_id` the caller chose, so a `subagent_cancel` addresses the same conversation on
     // both paths.
     let Some(def) = roster.local_def_for(&entry) else {
-        // An agent this process holds no def for is run by the facilitating daemon, over an RPC
-        // that carries no system prompt — so an override here could not reach the conversation.
-        // Refused naming that, rather than opened without it: a caller told its conversation is
-        // open would believe the prompt it sent is the one the agent is running under.
-        //
-        // TODO: carry the override on `OpenAgentConversation` so a remotely-run agent can take
-        // one too, and drop this refusal.
-        if system_prompt.is_some() {
-            roster.close_conversation(&session_id);
-            return subagent_error_json(format!(
-                "agent '{}' is routed by daemon '{}', which opens its conversations over an RPC \
-                 that carries no system prompt: this conversation cannot take a systemPrompt \
-                 override. Open it without one, or use an agent this session runs itself.",
-                entry.agent_id, entry.daemon_instance_id
-            ));
-        }
-        return match open_remote_agent_session(&entry, &session_id).await {
+        // An agent this process holds no def for is run by the facilitating daemon, which is every
+        // roster agent in a split session — the jail holds no defs at all. The override rides
+        // `OpenAgentConversation` to that daemon, so the caller gets the same answer here as it
+        // would for an agent this process runs itself.
+        return match open_remote_agent_session(&entry, &session_id, system_prompt.as_deref()).await
+        {
             Ok(opened) => {
                 subagent_sessions().lock().await.open.insert(
                     session_id.clone(),
@@ -3562,6 +3557,105 @@ mod tests {
             properties.contains_key("timeoutMs"),
             "subagent_await must accept 'timeoutMs'; got: {:?}",
             properties.keys().collect::<Vec<_>>()
+        );
+    }
+
+    // ─── Opening a conversation under the caller's own system prompt ──────────
+
+    /// The roster snapshot these tests publish. The registry is process-wide and only moves
+    /// forward, so a literal revision would make them depend on the order they run in.
+    fn next_roster_rev() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_REV: AtomicU64 = AtomicU64::new(1_000);
+        NEXT_REV.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// An agent whose turn loop runs somewhere this process holds no def for — which is every
+    /// roster agent in a split session, where `tddy-tools` lives in the jail and the defs do not.
+    fn a_session_with_one_remotely_routed_agent(agent_id: &str) {
+        let (name, daemon) = agent_id
+            .split_once('@')
+            .expect("a roster agent id is qualified");
+        crate::session_agents::session_agent_roster().apply_snapshot(
+            tddy_service::proto::session_agents_svc::SessionAgentRoster {
+                session_id: "1790497976955-remote-roster".to_string(),
+                rev: next_roster_rev(),
+                agents: vec![tddy_service::proto::session_agents_svc::SessionAgentEntry {
+                    agent_id: agent_id.to_string(),
+                    name: name.to_string(),
+                    daemon_instance_id: daemon.to_string(),
+                    label: format!("{name} (on {daemon})"),
+                    model: "gemma-3-27b:latest".to_string(),
+                    replaces: Vec::new(),
+                    tools: vec!["Read".to_string(), "Grep".to_string()],
+                    codebase_session_id: "ws-01-clone".to_string(),
+                    clone_state: 3, // AGENT_CLONE_STATE_READY
+                    clone_error: String::new(),
+                    status: 0, // SESSION_AGENT_STATUS_UNSPECIFIED
+                    last_activity: None,
+                }],
+            },
+        );
+    }
+
+    /// The `error` an MCP subagent tool reports inside its success envelope.
+    fn the_refusal_in(result: &str) -> String {
+        let body: serde_json::Value = serde_json::from_str(result)
+            .unwrap_or_else(|e| panic!("a subagent tool returns JSON, got {result:?}: {e}"));
+        body["error"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the call should have been refused, got: {body}"))
+            .to_string()
+    }
+
+    /// The whole point of the override: in a split session every roster agent is run by the
+    /// facilitating daemon, so a `systemPrompt` refused for being remotely routed is a
+    /// `systemPrompt` that does not exist for the configuration most sessions run in.
+    ///
+    /// The open cannot succeed here — there is no daemon to reach — so what is pinned is *which*
+    /// refusal comes back: the missing transport, not the override.
+    #[tokio::test]
+    #[serial]
+    async fn a_system_prompt_for_a_remotely_routed_agent_is_carried_rather_than_refused() {
+        // Given a session whose only agent is run by another daemon
+        a_session_with_one_remotely_routed_agent("Gemma@ws-01");
+
+        // When a conversation with it is opened under a prompt of the caller's own
+        let result = subagent_new_session_tool(serde_json::json!({
+            "agent": "Gemma@ws-01",
+            "sessionId": "conv-override-remote",
+            "systemPrompt": "Answer only with file paths, one per line.",
+        }))
+        .await;
+
+        // Then the open was attempted and failed for want of a daemon, not refused for the prompt
+        assert!(
+            the_refusal_in(&result).contains(tddy_discovery::roster::NO_TRANSPORT),
+            "the override must reach the daemon that runs the agent; got: {result}"
+        );
+    }
+
+    /// A blank override is a caller that meant to send something, and it is refused the same way
+    /// on both paths — an empty `system_prompt` on the wire *means* "use the def's own", so
+    /// sending one would open the conversation under a prompt nobody chose.
+    #[tokio::test]
+    #[serial]
+    async fn a_blank_system_prompt_for_a_remotely_routed_agent_is_refused_naming_it() {
+        // Given a session whose only agent is run by another daemon
+        a_session_with_one_remotely_routed_agent("Gemma@ws-02");
+
+        // When a conversation with it is opened under a prompt of nothing but spaces
+        let result = subagent_new_session_tool(serde_json::json!({
+            "agent": "Gemma@ws-02",
+            "sessionId": "conv-blank-remote",
+            "systemPrompt": "   ",
+        }))
+        .await;
+
+        // Then the caller is told the override is blank
+        assert!(
+            the_refusal_in(&result).contains("blank"),
+            "a blank override must be named rather than dropped; got: {result}"
         );
     }
 }

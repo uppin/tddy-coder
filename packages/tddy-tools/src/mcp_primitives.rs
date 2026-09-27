@@ -151,9 +151,13 @@ pub(crate) struct OpenedAgent {
 /// them (docs/ft/daemon/session-agent-roster.md § Invoking an agent). The refusal names the agent
 /// and the daemon its conversations are routed by, so an operator reads which host to go and look
 /// at rather than "this session cannot reach it".
+///
+/// `system_prompt` replaces the def's own for this conversation, and travels with the open: the
+/// daemon runs the turn loop, so it is the only side that can apply it.
 pub(crate) async fn open_remote_agent_session(
     entry: &tddy_service::proto::session_agents_svc::SessionAgentEntry,
     conversation_id: &str,
+    system_prompt: Option<&str>,
 ) -> Result<OpenedAgent, String> {
     let refused = |e: String| {
         format!(
@@ -167,7 +171,7 @@ pub(crate) async fn open_remote_agent_session(
             .map_err(refused)?,
     );
     let opened = link
-        .open(&entry.agent_id, conversation_id)
+        .open(&entry.agent_id, conversation_id, system_prompt)
         .await
         .map_err(refused)?;
     Ok(OpenedAgent {
@@ -193,8 +197,9 @@ pub(crate) async fn open_roster_agent_session(agent_id: &str) -> Result<OpenedAg
     let Some(def) = roster.local_def_for(&entry) else {
         // The daemon mints the conversation id here: nothing outside this call can name the
         // exchange, so there is nothing a caller-chosen id would let it cancel. The caller closes
-        // it through the handle instead.
-        return open_remote_agent_session(&entry, "").await;
+        // it through the handle instead. No system prompt either: this is one bounded exchange
+        // run by a tool, and the def's own prompt is what it was written for.
+        return open_remote_agent_session(&entry, "", None).await;
     };
     let name = def.name.clone();
     let session = SubagentRegistry::from_defs(vec![def])
