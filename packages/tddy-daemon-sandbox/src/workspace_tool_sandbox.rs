@@ -197,13 +197,13 @@ pub fn build_workspace_tool_plan(
         &layout.tool_ipc_socket,
         &layout.egress_dir,
     );
-    // FIXME(grep-in-jail): see `host_ripgrep_dir`. Both halves are needed and neither is enough on
-    // its own — PATH so `Command::new("rg")` resolves, and the exec-marked read below so Seatbelt
-    // lets the loader read and run what it resolved.
-    let ripgrep_dir = host_ripgrep_dir();
-    if let Some(dir) = &ripgrep_dir {
+    // FIXME(grep-in-jail): see `host_ripgrep_grants`. Both halves are needed and neither is enough
+    // on its own — PATH so `Command::new("rg")` resolves, and the reads below so Seatbelt lets the
+    // loader read and run what it resolved, including the libraries it pulls in.
+    let ripgrep = host_ripgrep_grants();
+    if let Some(grants) = &ripgrep {
         if let Some(path) = env.get_mut("PATH") {
-            *path = format!("{}:{path}", dir.display());
+            *path = format!("{}:{path}", grants.bin_dir.display());
         }
     }
 
@@ -247,40 +247,46 @@ pub fn build_workspace_tool_plan(
     // `main()` runs. Denied, that read fails with `EINVAL` and the runtime aborts, so the jail
     // never comes up at all. Nothing else of the shell policy is relaxed.
     plan.policy.sysctl_read = true;
-    // FIXME(grep-in-jail): see `host_ripgrep_dir`. `exec_paths` alone would not do — it grants
+    // FIXME(grep-in-jail): see `host_ripgrep_grants`. `exec_paths` alone would not do — it grants
     // `process-exec*` and no read, and a binary the loader cannot read is a binary it cannot run.
-    // `.executable()` is the grant that carries both.
-    if let Some(dir) = ripgrep_dir {
-        plan.reads.push(
-            tddy_sandbox::ReadSpec::subpath(dir, tddy_sandbox::ReadReason::Toolchain).executable(),
-        );
+    // `binary_exec_reads` carries both for the binary's own directory, and plain reads for the
+    // libraries and the symlink farm above them.
+    if let Some(grants) = ripgrep {
+        plan.reads.extend(grants.reads);
     }
     plan.cgroup = cgroup;
     Ok(plan)
 }
 
-/// The directory holding the host's `rg`, when there is one.
+/// Everything the jail needs to run the host's `rg`: the binary, its libraries, and the symlink
+/// farm the loader walks to reach them.
 ///
 /// FIXME(grep-in-jail): temporary. `tool_grep` shells out to `ripgrep`, and the jail's PATH is
 /// `/usr/bin:/bin:/usr/sbin:/sbin` while Homebrew installs `rg` under `/opt/homebrew/bin` (or
-/// `/usr/local/bin` on Intel). So `Grep` fails `spawn failed: No such file or directory` on every
-/// call in every sandboxed session on a Mac — silently, as one refused tool among many, which is
-/// how it went unnoticed.
+/// `/usr/local/bin` on Intel). So `Grep` failed `spawn failed: No such file or directory` on every
+/// call in every sandboxed session on a Mac — silently, as one refused tool among many.
 ///
-/// This grants the *one directory the host's own `rg` lives in*, resolved at plan time rather than
-/// hardcoded, so it is right on Intel, Apple Silicon and Linux alike and grants nothing on a host
-/// that has no `rg`. It is still the wrong shape: it widens a jail's exec surface to a directory
-/// full of unrelated Homebrew binaries because of one tool's dependency, hardcoded in the plan
-/// builder for one named binary.
+/// Three things make this harder than "grant the directory `which` reported", and all three were
+/// found by running `sandbox-exec` against a real session's profile:
 ///
-/// The designed replacement is **`ToolSpec`**: a jail accepts a declared list of the external
-/// tools it needs, and each entry states what becomes readable, what becomes executable and what
-/// joins its `PATH`. Then `rg` is one declaration among several rather than a special case here,
-/// the grant is the binary rather than its directory, and a tool the host cannot satisfy is a
-/// refusal at jail startup instead of a per-call `spawn failed` nobody reads.
+/// 1. **`which` reports a symlink.** `/opt/homebrew/bin/rg` points into
+///    `../Cellar/ripgrep/<version>/bin`. Seatbelt matches the *resolved* path, so granting the
+///    symlink's directory grants nothing. The path is canonicalized before anything is derived
+///    from it.
+/// 2. **`rg` links a Homebrew library**, `libpcre2-8`. The binary's own directory is not enough;
+///    [`binary_exec_reads`] walks `otool -L` for exactly this.
+/// 3. **The loader asks for the library by its *symlinked* path** (`/opt/homebrew/opt/pcre2/lib/…`),
+///    and the profile renderer canonicalizes every rule path — so the canonical grant alone still
+///    denies the traversal. The nearest ancestor that is itself not a symlink
+///    (`/opt/homebrew/opt`) has to be readable for the walk to succeed.
 ///
-/// Tracked in `docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md`.
-fn host_ripgrep_dir() -> Option<PathBuf> {
+/// It is still the wrong shape: it grants directories of unrelated binaries and libraries because
+/// of one tool's dependencies, hardcoded in the plan builder for one named binary, in a sandbox
+/// whose whole claim is an explicit allow-list. The designed replacement is a declared tool set —
+/// `<tddyhome>/tools/*.yaml` naming a host binary or a `tddy-build` target, each stating what
+/// becomes readable, executable and reachable on `PATH`. See PR #548 and
+/// `docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md`.
+fn host_ripgrep_grants() -> Option<RipgrepGrants> {
     let output = std::process::Command::new("/usr/bin/which")
         .arg("rg")
         .output()
@@ -288,8 +294,75 @@ fn host_ripgrep_dir() -> Option<PathBuf> {
     if !output.status.success() {
         return None;
     }
-    let path = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
-    path.parent().map(Path::to_path_buf)
+    let reported = PathBuf::from(String::from_utf8(output.stdout).ok()?.trim());
+    // Point 1: resolve the symlink before deriving anything. Everything below is about the real
+    // binary, so `PATH` names the directory the loader will actually be asked for.
+    let binary = std::fs::canonicalize(&reported).ok()?;
+    let bin_dir = binary.parent()?.to_path_buf();
+
+    // Point 2: the binary's directory as executable, plus each `otool -L` dependency's directory.
+    let mut reads = tddy_sandbox::binary_exec_reads(&binary);
+    // Point 3: the traversal. Each dependency is named by a path that runs through Homebrew's
+    // symlink farm; grant the nearest ancestor that is not itself a symlink, which is the deepest
+    // directory a canonicalizing renderer can still express.
+    for ancestor in binary_dependency_traversal_dirs(&binary) {
+        reads.push(tddy_sandbox::ReadSpec::subpath(
+            ancestor,
+            tddy_sandbox::ReadReason::Toolchain,
+        ));
+    }
+    Some(RipgrepGrants { bin_dir, reads })
+}
+
+/// What [`host_ripgrep_grants`] found: the directory to put on `PATH`, and the grants that let the
+/// loader read and run what is there.
+struct RipgrepGrants {
+    bin_dir: PathBuf,
+    reads: Vec<tddy_sandbox::ReadSpec>,
+}
+
+/// The nearest non-symlinked ancestor of each of `binary`'s dynamic dependencies.
+///
+/// `otool -L` reports a library by the path the loader will ask for, which for Homebrew runs
+/// through `<prefix>/opt/<formula>` — a symlink into `Cellar`. A grant on that path is rewritten to
+/// its canonical form by the profile renderer, so it never authorises the walk that reaches it.
+/// Walking up to the first directory that is its own canonical form gives a path the renderer
+/// leaves alone.
+fn binary_dependency_traversal_dirs(binary: &Path) -> Vec<PathBuf> {
+    let Ok(output) = std::process::Command::new("otool")
+        .args(["-L"])
+        .arg(binary)
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for line in text.lines().skip(1) {
+        let lib = line.split_whitespace().next().unwrap_or("");
+        if !lib.starts_with('/') {
+            continue;
+        }
+        let mut walk = Path::new(lib).parent();
+        while let Some(dir) = walk {
+            if dir == Path::new("/") {
+                break;
+            }
+            // The first ancestor that is already its own canonical form. Below it every component
+            // is a symlink the renderer would rewrite.
+            if std::fs::canonicalize(dir).is_ok_and(|c| c == dir) {
+                if !dirs.contains(&dir.to_path_buf()) {
+                    dirs.push(dir.to_path_buf());
+                }
+                break;
+            }
+            walk = dir.parent();
+        }
+    }
+    dirs
 }
 
 /// Every directory above `worktree`, from the filesystem root down to its parent.
