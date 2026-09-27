@@ -50,6 +50,13 @@ type TerminalClient = Client<typeof TerminalSessionService>;
 interface CapturedStream {
   request: StreamTerminalOutputRequest;
   pushFrame(frame: SessionTerminalOutput): void;
+  /** How many frames the component has actually taken off this stream.
+   *
+   *  Pushing a frame only resolves a promise — the component consumes it a microtask later, and
+   *  `GrpcSessionTerminal` records the offset inside `feed.stream.onMessage`, which runs during
+   *  that consumption. Until this count moves, the offset has not been tracked and a reconnect
+   *  would correctly still be `TAIL`. */
+  deliveredCount(): number;
   end(): void;
 }
 
@@ -60,12 +67,14 @@ function makeFakeClient() {
 
   function streamTerminalOutput(req: StreamTerminalOutputRequest): AsyncIterable<SessionTerminalOutput> {
     const frames: SessionTerminalOutput[] = [];
+    let delivered = 0;
     let ended = false;
     let pending: ((value: IteratorResult<SessionTerminalOutput>) => void) | null = null;
 
     const iterator: AsyncIterator<SessionTerminalOutput> = {
       next(): Promise<IteratorResult<SessionTerminalOutput>> {
         if (frames.length > 0) {
+          delivered += 1;
           return Promise.resolve({ value: frames.shift() as SessionTerminalOutput, done: false });
         }
         if (ended) {
@@ -95,8 +104,12 @@ function makeFakeClient() {
         if (pending) {
           const resolve = pending;
           pending = null;
+          delivered += 1;
           resolve({ value: frames.shift() as SessionTerminalOutput, done: false });
         }
+      },
+      deliveredCount() {
+        return delivered;
       },
       end() {
         ended = true;
@@ -191,6 +204,17 @@ function aResumeTerminal() {
             terminalId: "main",
           }),
         );
+      });
+      // The push only resolves a promise; wait until the component has actually taken the frame
+      // before doing anything else, so a blip cannot tear down a stream mid-delivery.
+      //
+      // This says the frame left the fake, not that the offset was recorded — the component may
+      // still be holding it for a subscriber that has not mounted. What makes that safe is the
+      // buffer in `GrpcSessionTerminal`: a frame delivered before anything subscribed is kept and
+      // handed over on subscribe, rather than dropped. Without it this test failed every time on
+      // a fast machine, because the frame reached an empty listener list and vanished.
+      cy.wrap(null).should(() => {
+        expect(fake.opens[0].deliveredCount(), "the TAIL replay frame was taken").to.equal(1);
       });
       return driver;
     },

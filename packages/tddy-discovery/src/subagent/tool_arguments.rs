@@ -36,6 +36,15 @@ pub enum ArgumentProblem {
     /// A leading or trailing quote character on an argument that names files — the defect from
     /// session 01a0e200.
     SurroundingQuote,
+    /// An anchor with no content in it — `"\n\n"`, `" "`, `""` — which cannot single out one
+    /// place in a file, so the edit it anchors was never going to land.
+    ///
+    /// Session 01a0e285 sent `old_string: "\n\n"` four times and was answered `old_string
+    /// matches 51 times (must be unique)` each time. That answer is accurate and the agent
+    /// repeated the call anyway, so the value here is not a better message after the fact: it is
+    /// refusing the value up front, next to the other argument faults, rather than three layers
+    /// down as a uniqueness count that reads like bad luck.
+    NotAnAnchor,
 }
 
 impl ArgumentProblem {
@@ -55,6 +64,12 @@ impl ArgumentProblem {
             Self::SurroundingQuote => {
                 "the value starts or ends with a quote character, so it is a quoted literal \
                  rather than the path itself — send the path without the quotes"
+                    .to_string()
+            }
+            Self::NotAnAnchor => {
+                "the value is nothing but whitespace, so it names no place in particular — \
+                 anchor the edit on the surrounding code, with the whitespace you mean to change \
+                 inside it"
                     .to_string()
             }
         }
@@ -109,6 +124,16 @@ fn is_path_like(tool: &str, argument: &str) -> bool {
 /// legitimate request — writing an empty file, or replacing a string with nothing.
 const FREE_TEXT_ARGUMENTS: &[&str] = &["contents", "old_string", "new_string"];
 
+/// The argument whose job is to *locate* an edit rather than to carry text into one.
+///
+/// Only `old_string`: `new_string` is the replacement itself, and whitespace or nothing at all
+/// there is an ordinary deletion. The rule is about an anchor with no content in it, never about
+/// an anchor that *contains* whitespace — a real edit routinely spans blank lines, and faulting
+/// those would make the tool unusable for exactly the tidy-up this incident was about.
+fn is_anchor(argument: &str) -> bool {
+    argument == "old_string"
+}
+
 /// Whether `value` matches the JSON type the schema spells, or `None` when the schema names a
 /// type this check does not model — in which case nothing is asserted rather than something
 /// guessed.
@@ -135,8 +160,8 @@ fn quoted_back(value: &serde_json::Value) -> String {
 /// What is wrong with one declared argument, or `None` when nothing is.
 ///
 /// At most one problem per argument, in the order a reader would find them: absent, then the
-/// wrong shape, then blank, then quoted. A value has only one defect worth naming, and listing
-/// two for the same argument would read as two arguments to fix.
+/// wrong shape, then blank, then unusable as an anchor, then quoted. A value has only one defect
+/// worth naming, and listing two for the same argument would read as two arguments to fix.
 fn fault_in(
     tool: &str,
     argument: &str,
@@ -162,6 +187,9 @@ fn fault_in(
     let text = value.as_str()?;
     if required && !FREE_TEXT_ARGUMENTS.contains(&argument) && text.trim().is_empty() {
         return Some(ArgumentProblem::Empty);
+    }
+    if is_anchor(argument) && text.trim().is_empty() {
+        return Some(ArgumentProblem::NotAnAnchor);
     }
     let quoted = |c: char| c == '"' || c == '\'';
     if is_path_like(tool, argument) && (text.starts_with(quoted) || text.ends_with(quoted)) {

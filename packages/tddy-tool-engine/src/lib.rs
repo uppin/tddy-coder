@@ -8,11 +8,13 @@
 
 pub mod catalog;
 pub(crate) mod contained_shell;
+pub(crate) mod edited_region;
 pub(crate) mod read_window;
 pub(crate) mod search_window;
 pub mod shell;
 
 pub use catalog::{tool_catalog, ToolDef};
+pub use edited_region::EDITED_REGION_CONTEXT_LINES;
 pub use shell::{
     execute_tool_on_shell, session_shell, LocalShell, RemoteShell, Shell, ShellError, ShellKind,
 };
@@ -381,10 +383,12 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Err(e) => return ToolOutcome::err(format!("StrReplace: read failed: {e}")),
     };
 
-    let count = content.matches(old_string).count();
-    if count == 0 {
+    // The offset is taken here rather than re-derived after the write, because it is the same
+    // byte in both: everything before the match is untouched by the replacement.
+    let Some(edit_offset) = content.find(old_string) else {
         return ToolOutcome::err("StrReplace: old_string not found in file");
-    }
+    };
+    let count = content.matches(old_string).count();
     if count > 1 {
         return ToolOutcome::err(format!(
             "StrReplace: old_string matches {count} times (must be unique)"
@@ -392,9 +396,16 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     }
 
     let new_content = content.replacen(old_string, new_string, 1);
+    let region = edited_region::edited_region(&new_content, edit_offset);
     match std::fs::write(&resolved, &new_content) {
         Ok(()) => ToolOutcome::ok(
-            serde_json::json!({ "replaced": true, "bytes_written": new_content.len() }).to_string(),
+            serde_json::json!({
+                "replaced": true,
+                "bytes_written": new_content.len(),
+                "edited_region": region.text,
+                "edited_line": region.line,
+            })
+            .to_string(),
         ),
         Err(e) => ToolOutcome::err(format!("StrReplace: write failed: {e}")),
     }
