@@ -158,6 +158,17 @@ export function GrpcSessionTerminal({
     }
 
     const outputListeners: Array<(frame: TerminalFrame) => void> = [];
+    // Frames that arrived before anything subscribed.
+    //
+    // This effect publishes the stream with `setStream` and starts consuming in the same pass, but
+    // the subscriber — `GhosttyTerminalSession`'s own effect — cannot run until React has
+    // re-rendered with a non-null `feed`. A frame delivered in that window used to reach an empty
+    // listener list and be dropped silently: no replay in the terminal, and no offset recorded,
+    // so the next open asked for TAIL and replayed from the tip instead of resuming.
+    //
+    // A network round trip normally hides the gap. A fast transport does not: Tddy Desktop hosts
+    // the daemon *in this process*, so the first frame can and does beat a React commit.
+    const framesBeforeAnyListener: TerminalFrame[] = [];
     let closed = false;
 
     const terminalStream: TerminalStream = {
@@ -166,6 +177,9 @@ export function GrpcSessionTerminal({
       },
       onMessage(fn: (frame: TerminalFrame) => void) {
         outputListeners.push(fn);
+        // Hand the new subscriber whatever arrived before it existed, in order. Drained rather
+        // than replayed to every later subscriber: this is delivery that was owed, not history.
+        framesBeforeAnyListener.splice(0).forEach((frame) => fn(frame));
       },
       close() {
         closed = true;
@@ -239,7 +253,11 @@ export function GrpcSessionTerminal({
               endOffset: output.endOffset,
               atOldest: output.atOldest,
             };
-            outputListeners.forEach((fn) => fn(frame));
+            if (outputListeners.length === 0) {
+              framesBeforeAnyListener.push(frame);
+            } else {
+              outputListeners.forEach((fn) => fn(frame));
+            }
           }
         }
         if (!closed) emitDisconnect();
