@@ -337,8 +337,13 @@ impl TurnOnAConversation {
         }
     }
 
-    /// What this request asks the conversation to do, in the conversation's own vocabulary — or
-    /// why the yield conditions it sent cannot run as written.
+    /// What this request asks the conversation to do, in the conversation's own vocabulary.
+    ///
+    /// Fallible on the request's own shape: the yield conditions it sent must run as written, and
+    /// a replacement the resume carries that is not a replacement this build can parse is refused
+    /// **here**, before any turn runs, rather than dropped — the caller asked for its call and
+    /// result to be part of the history, and a resume that continues without them does less than
+    /// was asked.
     fn turn_request(&self) -> Result<TurnRequest, String> {
         match self {
             Self::Prompt(req) => Ok(within(
@@ -357,12 +362,34 @@ impl TurnOnAConversation {
                     requested = requested.with_correction(correction.clone());
                 }
                 Ok(within(
-                    with_yield_conditions(requested, &req.yield_conditions_json)?,
+                    with_replacement(
+                        with_yield_conditions(requested, &req.yield_conditions_json)?,
+                        &req.replacement_json,
+                    )?,
                     req.max_turns,
                 ))
             }
         }
     }
+}
+
+/// Apply the caller's replacement where the resume sent one, appending after any rewind and
+/// correction. An unparseable object is an error naming the request, not a silent resume without
+/// it: the caller asked for its call and result to be part of the history, and continuing without
+/// them does less than was asked.
+fn with_replacement(requested: TurnRequest, replacement_json: &str) -> Result<TurnRequest, String> {
+    if replacement_json.is_empty() {
+        return Ok(requested);
+    }
+    let replacement = serde_json::from_str::<tddy_discovery::subagent::Replacement>(
+        replacement_json,
+    )
+    .map_err(|e| format!("ResumeAgentConversation replacement_json is not a replacement: {e}"))?;
+    if replacement.tool.is_empty() {
+        return Ok(requested);
+    }
+    tddy_discovery::subagent::validate_replacement(&replacement)?;
+    Ok(requested.with_replacement(replacement))
 }
 
 /// Apply the caller's yield conditions where the request sent any, leaving the turn unconditional

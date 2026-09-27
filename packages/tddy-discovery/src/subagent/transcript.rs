@@ -145,6 +145,28 @@ fn preview_of(text: &str) -> String {
     format!("{kept}…")
 }
 
+impl Transcript {
+    /// Append a caller-provided tool call and its result as history: an `assistant` message
+    /// carrying the call, then a `tool` message carrying the caller's result, each with a minted
+    /// id — in the same shape a real call would have appeared in, so the model reading the
+    /// history cannot tell a replaced call from one it made.
+    ///
+    /// Append-only by design (the yielded conversation's own history is untouched — the failed
+    /// call stays, and the model sees both it and the operator's fix): nothing here rewrites or
+    /// removes what the conversation already holds.
+    ///
+    /// Returns the minted ids, the assistant message's then the tool message's — the anchors a
+    /// caller names to a later rewind.
+    pub(crate) fn append_replacement(
+        &mut self,
+        _replacement: &super::replacement::Replacement,
+    ) -> (MessageId, MessageId) {
+        // TODO(resume-replacement): push the assistant tool-call message and the tool result
+        // message, each with a minted id, and return both ids.
+        unimplemented!("resume-replacement appends its call and result")
+    }
+}
+
 /// One message, with the identity and the refusal flag the chat protocol has nowhere to put.
 struct TranscriptEntry {
     id: MessageId,

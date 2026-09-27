@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Stack:** `subagent-control` node 5 of 5 (`(#subagent-control 5/5)`), wave 3.
+**Stack:** `subagent-control` node 5 of 5 (`(#subagent-control 5/5)`), wave 3. **PR:** [#557](https://github.com/uppin/tddy-coder/pull/557) (draft).
 **Branch:** `feature/subagent-control/resume-replacement` · **Base:** `feature/subagent-control/yield-conditions`
 
 **PRD:** [`2026-09-27-resume-replacement-prd.md`](2026-09-27-resume-replacement-prd.md)
@@ -168,10 +168,10 @@ is the caller's text. The whole thing travels the resume RPC, with wire-level te
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — 4 unit (validation) + 3 acceptance (the append behaviours) + 1 wire-level RPC failures, each the missing transcript append; nodes 1–4's inherited red rides this branch and is theirs to green
+- [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

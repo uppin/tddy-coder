@@ -23,6 +23,7 @@ use crate::openai::{
 
 mod grep_context;
 mod repeated_calls;
+mod replacement;
 mod result_summary;
 mod tool_arguments;
 mod transcript;
@@ -33,6 +34,7 @@ use transcript::Transcript;
 
 pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
+pub use replacement::{validate_replacement, Replacement, REPLACEMENT_RESULT_LIMIT};
 pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
 pub use transcript::{
@@ -1896,6 +1898,14 @@ impl SubagentSession for SpecializedSubagentSession {
         if let Some(correction) = request.correction() {
             self.transcript
                 .push(ChatMessage::user(correction.to_string()));
+        }
+        // The caller's replacement call and its result, appended after any rewind and correction —
+        // in that order, so all three can be given. Resume-only: a fresh prompt never carries one
+        // (a prompt has nothing to replace), enforced where the RPC shapes are built.
+        // TODO(resume-replacement): append the replacement's call and result here, before the
+        // turn loop runs over the appended history.
+        if let Some(replacement) = request.replacement() {
+            let _ = replacement;
         }
 
         let mut outcome = self
