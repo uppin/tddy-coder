@@ -431,6 +431,19 @@ fn parse_message_descriptor(
             .collect(),
         is_error: described.is_error,
         preview: described.preview.clone(),
+        // The wire's JSON string parsed back into the same summary the append site computed, so
+        // a descriptor built from a remote turn is indistinguishable from a local one. An
+        // unparseable payload is an error rather than a silent `None`: the host that ran the
+        // turn sent a summary this build cannot read, and reporting none would misstate what
+        // arrived as what was never sent.
+        result_summary: if described.result_summary_json.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::from_str(&described.result_summary_json)
+                    .map_err(|e| format!("result_summary_json is not a summary: {e}"))?,
+            )
+        },
     })
 }
 

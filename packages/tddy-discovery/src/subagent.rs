@@ -22,6 +22,7 @@ use crate::openai::{
 };
 
 mod repeated_calls;
+mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
@@ -29,6 +30,7 @@ mod turn_request;
 use transcript::Transcript;
 
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
+pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
 pub use transcript::{
     MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,

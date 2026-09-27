@@ -120,6 +120,15 @@ pub struct MessageDescriptor {
     pub is_error: bool,
     /// The message's own text, cut to [`MESSAGE_PREVIEW_CHARS`].
     pub preview: String,
+    /// The structured facts of a `tool`-role message's result — `None` for every other role and
+    /// for a dispatch that produced nothing (whose shape [`ResultSummary::Error`] names and
+    /// whose text the `preview` already carries).
+    ///
+    /// Serialized as an externally tagged object — `{"read": {…}}` — so a caller dispatches on
+    /// the same tool name it dispatches the tool call on. Absent rather than `null` when there
+    /// is nothing to say, matching the descriptor's other optional readings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_summary: Option<super::result_summary::ResultSummary>,
 }
 
 /// Cut `text` to [`MESSAGE_PREVIEW_CHARS`], marking that it was cut.
@@ -218,6 +227,9 @@ impl Transcript {
                         .collect(),
                     is_error: entry.is_error,
                     preview: preview_of(entry.message.content.as_deref().unwrap_or("")),
+                    // TODO(tool-previews): carry the summary the append site computed, so a
+                    // descriptor reports its tool's facts rather than only its raw preview.
+                    result_summary: None,
                 })
             })
             .collect()

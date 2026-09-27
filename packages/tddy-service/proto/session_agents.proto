@@ -132,6 +132,10 @@ message AgentMessageDescriptor {
   bool is_error = 5;
   // The message's own text, cut to the host's preview bound.
   string preview = 6;
+  // The structured facts of a `tool`-role message's result, as an externally tagged JSON object
+  // ("read", "strReplace", ...) — the same shape the MCP turn outcome carries, string-typed like
+  // `stop_reason` above. Empty for every other role and for a dispatch that produced nothing.
+  string result_summary_json = 7;
 }
 
 message AttachSessionAgentRequest {

@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Stack:** `subagent-control` node 1 of 5 (`(#subagent-control 1/5)`), wave 1.
+**Stack:** `subagent-control` node 1 of 5 (`(#subagent-control 1/5)`), wave 1. **PR:** [#553](https://github.com/uppin/tddy-coder/pull/553) (draft).
 **Branch:** `feature/subagent-control/tool-previews` · **Base:** `master`
 
 **PRD:** [`2026-09-27-subagent-tool-previews-prd.md`](2026-09-27-subagent-tool-previews-prd.md)
@@ -171,10 +171,10 @@ Unit + integration (no E2E needed; the MCP/RPC surfaces have existing test harne
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — 11 unit + 3 acceptance + 2 engine failures, each attributable to the missing extraction/engine count
+- [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
