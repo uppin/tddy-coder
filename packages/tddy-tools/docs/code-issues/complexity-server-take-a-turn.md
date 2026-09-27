@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-tools/src/server.rs` — `take_a_turn`
 **Category:** complexity
 **Detected:** 2026-09-26 by `/analyze-clean-code` during `/pr-wrap` on PR #545
-**Metrics:** **74 lines raw · 55 code lines · control nesting depth 3**
-**Thresholds breached:** length 74 > 60
+**Metrics:** **80 lines raw · 59 code lines** (nesting last measured at 3)
+**Thresholds breached:** length 80 > 60
 **Restructure:** `extract_method` — ordinary work
 **Status:** Open — unclaimed
 
@@ -15,6 +15,7 @@
 | 2026-09-26 | 74 | 55 | 3 | first detection, in PR #545 |
 
 | 2026-09-27 | 74 | 55 | 3 | **unchanged.** `server.rs` grew by 33 lines in the same change, all of it in `subagent_new_session_tool` and the schema; this body was not edited |
+| 2026-09-27 | 80 | 59 | — | **regressed** by 6: the provider a turn queues on is read here and passed to `PendingTurns::start`, so the receipt can report a provider-queue position beside the conversation one |
 ## What the tool found
 
 Over the 60-line ceiling; nesting is fine. Inherited from `subagent_prompt_tool`, and, like its

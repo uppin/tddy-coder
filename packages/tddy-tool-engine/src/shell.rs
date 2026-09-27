@@ -321,12 +321,22 @@ async fn remote_tool_str_replace(shell: &dyn Shell, args: &serde_json::Value) ->
         Ok(c) => c,
         Err(e) => return ToolOutcome::err(format!("StrReplace: read failed: {e}")),
     };
-    if !content.contains(old_string) {
+    let Some(edit_offset) = content.find(old_string) else {
         return ToolOutcome::err("StrReplace: old_string not found in file");
-    }
+    };
     let updated = content.replacen(old_string, new_string, 1);
+    // A remote edit is as blind as a local one, and for the same reason: the caller is told the
+    // write happened and nothing about what it now says.
+    let region = crate::edited_region::edited_region(&updated, edit_offset);
     match shell.write_string(path_str, &updated).await {
-        Ok(()) => ToolOutcome::ok(serde_json::json!({ "replaced": true }).to_string()),
+        Ok(()) => ToolOutcome::ok(
+            serde_json::json!({
+                "replaced": true,
+                "edited_region": region.text,
+                "edited_line": region.line,
+            })
+            .to_string(),
+        ),
         Err(e) => ToolOutcome::err(format!("StrReplace: write failed: {e}")),
     }
 }

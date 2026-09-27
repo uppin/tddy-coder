@@ -4,9 +4,9 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **1,687 production lines** · budget 500 · **3.4× over** · **no `#[cfg(test)]` module
+**Metrics:** **1,820 production lines** · budget 500 · **3.6× over** · **no `#[cfg(test)]` module
 at all**
-**Thresholds breached:** length 1,687 > 500
+**Thresholds breached:** length 1,820 > 500
 **Restructure:** required — `extract_module --to_file` × 2, `/code-restructuring` territory
 **Status:** Open — unclaimed
 
@@ -19,6 +19,7 @@ at all**
 | 2026-09-26 | 1,431 | none | after per-call turn budgets, message ids and resume/rewind. Two new sibling modules absorbed what could be moved — `subagent/transcript.rs` (242 production lines, 6 in-file tests) and `subagent/turn_request.rs` (123, 4) — so the growth here is only what has to stay: `PromptOutcome`'s two new fields, `SubagentSession::take_turn`, and the `take_turn`/`run_turn_loop` split |
 | 2026-09-27 | 1,687 | none | after tool-argument validation, the generation cap and the glob/grep result window. A third sibling absorbed what could be moved — `subagent/tool_arguments.rs` (275 production lines, its own in-file tests) — so the +256 here is again only what has to stay: `glob_limited`/`grep_limited` and their caps on `CodebaseAccess`, `ToolDispatch::Rejected`, `SubagentConfig::new`/`with_system_prompt`, and the `MaxTokens` stop-reason plumbing through three turn branches |
 
+| 2026-09-27 | 1,820 | none | after the repeated-call guard. A fourth sibling took the logic — `subagent/repeated_calls.rs` (160 production lines) — so the +133 here is wiring only: `ToolDispatch::Repeated` and its arms, the `ToolCallTally` split into `last_dispatch_failure`/`last_refusal`, the session field, `dispatch_bounded` taking `&mut self`, and the ledger reset in `take_turn` |
 ## What the tool found
 
 Hand measurement: 1,208 lines, and `grep -n '#\[cfg(test)\]'` returns **nothing**. Every test that

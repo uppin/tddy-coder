@@ -4,8 +4,8 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **805 production lines** · budget 500 · **1.6× over**
-**Thresholds breached:** length 805 > 500
+**Metrics:** **816 production lines** · budget 500 · **1.6× over**
+**Thresholds breached:** length 816 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
 
@@ -18,6 +18,7 @@ subagent turn-control changeset
 | 2026-09-26 | 789 | **improved.** Two extractions — `contained_shell.rs` (128) and `read_window.rs` (46) — took out more than the shell hardening and `Read` windowing put in |
 
 | 2026-09-27 | 805 | **regressed.** `tool_glob`/`tool_grep` now read `limit` and answer through the new `search_window.rs` (45 production lines), which absorbed the windowing itself; the +8 here is the two call sites reading the argument and passing the totals through |
+| 2026-09-27 | 816 | +11 for the edited region `StrReplace` now returns. The windowing itself went to a new sibling, `edited_region.rs` (52 production lines); what stayed is `tool_str_replace` taking the match offset from `find` and adding the two fields |
 ## What the tool found
 
 Hand measurement: 793 production lines. The `#[cfg(test)]` at `:741` is an inner attribute inside a

@@ -447,3 +447,62 @@ async fn an_invalid_tool_call_is_marked_as_an_error_in_the_turn_outcome() {
         "a glob rejected for a malformed pattern must not read as a glob that matched nothing"
     );
 }
+
+// ─── An anchor that cannot be unique ─────────────────────────────────────────
+//
+// Gemma spent four of session 01a0e285's calls on `StrReplace` with `old_string: "\n\n"`, and was
+// told `old_string matches 51 times (must be unique)` each time. That answer is accurate and the
+// agent still repeated it — so the value here is not a better message after the fact, it is
+// refusing a value that was never going to identify one place in a file, alongside the other
+// argument faults rather than three layers down as a bare uniqueness count.
+
+/// Whitespace alone cannot name a location in a file. Any file with two blank lines has many.
+#[test]
+fn a_replace_anchored_on_whitespace_alone_is_faulted_as_unusable() {
+    // Given the anchor Gemma used four times
+    let args = serde_json::json!({ "path": A_REAL_PATH, "old_string": "\n\n", "new_string": "" });
+
+    // When
+    let violations = validate_tool_arguments("STR_REPLACE", &args);
+
+    // Then
+    violations
+        .assert_arguments_faulted(&["old_string"])
+        .assert_problem_for("old_string", ArgumentProblem::NotAnAnchor);
+}
+
+/// A single space is the same problem in its smallest form.
+#[test]
+fn a_replace_anchored_on_a_single_space_is_faulted_as_unusable() {
+    // Given an anchor of one space
+    let args = serde_json::json!({ "path": A_REAL_PATH, "old_string": " ", "new_string": "" });
+
+    // When
+    let violations = validate_tool_arguments("STR_REPLACE", &args);
+
+    // Then
+    violations.assert_problem_for("old_string", ArgumentProblem::NotAnAnchor);
+}
+
+/// The rule is about anchors with no content, not about anchors containing whitespace — a real
+/// edit routinely spans blank lines, and faulting those would make the tool unusable.
+#[test]
+fn a_replace_anchor_that_contains_blank_lines_but_also_code_is_accepted() {
+    // Given the anchor Gemma should have used: the blank run with its surrounding code
+    let args = serde_json::json!({
+        "path": A_REAL_PATH,
+        "old_string": "  }, [canScrollBack]);\n\n\n\n  // The affordance",
+        "new_string": "  }, [canScrollBack]);\n\n  // The affordance",
+    });
+
+    // When
+    let violations = validate_tool_arguments("STR_REPLACE", &args);
+
+    // Then
+    assert_eq!(
+        violations,
+        Vec::new(),
+        "whitespace inside an anchor is ordinary; only an anchor that is nothing but whitespace \
+         can never identify one place"
+    );
+}

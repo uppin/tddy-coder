@@ -21,12 +21,14 @@ use crate::openai::{
     ToolCall,
 };
 
+mod repeated_calls;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
 
 use transcript::Transcript;
 
+pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
 pub use transcript::{
     MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
@@ -759,6 +761,12 @@ enum ToolDispatch {
         tool: String,
         violations: Vec<ArgumentViolation>,
     },
+    /// The call was stopped before dispatch because this conversation has already made it to the
+    /// limit and nothing has changed since (see [`RepeatedCalls`]).
+    ///
+    /// A rejection like [`Self::Rejected`] rather than a failure — the arguments are fine, and
+    /// the model can fix this by asking something it does not already know the answer to.
+    Repeated(RepeatedCall),
 }
 
 impl ToolDispatch {
@@ -778,6 +786,7 @@ impl ToolDispatch {
             ToolDispatch::Rejected { tool, violations } => {
                 Some(tool_arguments::rejection_reason(tool, violations))
             }
+            ToolDispatch::Repeated(repeated) => Some(repeated.to_string()),
         }
     }
 
@@ -794,6 +803,7 @@ impl ToolDispatch {
             ToolDispatch::Rejected { tool, violations } => {
                 tool_arguments::rejection_payload(tool, violations).to_string()
             }
+            ToolDispatch::Repeated(repeated) => repeated.payload().to_string(),
         }
     }
 }
@@ -804,18 +814,32 @@ impl ToolDispatch {
 struct ToolCallTally {
     ran: usize,
     produced_nothing: usize,
-    /// The most recent reason no result came back — the state the prompt ended in, and the one
-    /// worth quoting when every call ended that way.
-    last_failure: Option<String>,
+    /// The most recent reason a call that **reached the codebase** came back with nothing — the
+    /// state the prompt ended in, and the one worth quoting when every call ended that way.
+    last_dispatch_failure: Option<String>,
+    /// The most recent reason a call was stopped **before** the codebase was asked.
+    ///
+    /// Kept apart from [`Self::last_dispatch_failure`] because a refusal describes the
+    /// conversation rather than the codebase, and it is usually downstream of the thing that
+    /// actually went wrong: an agent whose tool channel is dead reaches for the same file until
+    /// the repeat guard stops it, and a report quoting that guard would name the symptom and
+    /// bury the closed channel that caused it.
+    last_refusal: Option<String>,
 }
 
 impl ToolCallTally {
     fn note(&mut self, dispatch: &ToolDispatch) {
-        match dispatch.produced_nothing() {
-            None => self.ran += 1,
-            Some(reason) => {
-                self.produced_nothing += 1;
-                self.last_failure = Some(reason);
+        let Some(reason) = dispatch.produced_nothing() else {
+            self.ran += 1;
+            return;
+        };
+        self.produced_nothing += 1;
+        match dispatch {
+            ToolDispatch::Rejected { .. } | ToolDispatch::Repeated(_) => {
+                self.last_refusal = Some(reason)
+            }
+            ToolDispatch::Ran(_) | ToolDispatch::NeverRan(_) => {
+                self.last_dispatch_failure = Some(reason)
             }
         }
     }
@@ -834,11 +858,18 @@ impl ToolCallTally {
     /// the reasons are not sifted further. A prompt the **model** ended never reaches here: it
     /// answered of its own accord, having been told in its own tool results what came back, and
     /// that is a conversation rather than an outage.
+    ///
+    /// The reason quoted is the last **dispatch** failure when there was one, and a refusal only
+    /// when nothing was ever dispatched — see [`Self::last_refusal`] for why that order and not
+    /// simply the most recent of the two.
     fn total_outage(&self) -> Option<String> {
         if self.ran > 0 {
             return None;
         }
-        let reason = self.last_failure.as_deref()?;
+        let reason = self
+            .last_dispatch_failure
+            .as_deref()
+            .or(self.last_refusal.as_deref())?;
         Some(format!(
             "nothing was read: all {} tool calls in this prompt produced no result, the last of \
              them failing with — {reason}",
@@ -1210,6 +1241,13 @@ pub struct SpecializedSubagentSession {
     /// Where this conversation queues for its endpoint, when the host that opened it gave it one.
     /// `None` calls the model directly.
     admission: Option<crate::subagent_runtime::ProviderAdmission>,
+    /// What this conversation has already asked, so it cannot spend its budget asking again.
+    ///
+    /// On the conversation rather than inside the loop: session 01a0e285's nine identical reads
+    /// were spread across the *turns* of one question, and a ledger scoped to a single turn
+    /// would have seen one fresh call each time. It is cleared when the caller brings something
+    /// new — see [`SubagentSession::take_turn`].
+    repeated_calls: RepeatedCalls,
 }
 
 impl SpecializedSubagentSession {
@@ -1236,6 +1274,7 @@ impl SpecializedSubagentSession {
             cumulative: TokenUsage::default(),
             context_tokens: 0,
             admission: None,
+            repeated_calls: RepeatedCalls::new(),
         }
     }
 
@@ -1275,19 +1314,37 @@ impl SpecializedSubagentSession {
     }
 
     /// Dispatches a model-issued tool call, rejecting one that names a tool the def did not bind
-    /// (a typed error tool-result, not a silent execution and not a panic).
-    async fn dispatch_bounded(&self, tool_call: &ToolCall) -> ToolDispatch {
-        let bound = self
-            .tools
-            .iter()
-            .any(|t| tool_name(*t) == tool_call.function.name);
+    /// (a typed error tool-result, not a silent execution and not a panic), and one this
+    /// conversation has already made to the limit (see [`RepeatedCalls`]).
+    ///
+    /// Takes `&mut self` because the ledger is conversation state and the turn loop holds the
+    /// conversation: a shared-mutability cell here would only be hiding that from the borrow
+    /// checker, and there is nothing concurrent to justify it — a conversation runs one turn at
+    /// a time, and one tool call at a time within it.
+    async fn dispatch_bounded(&mut self, tool_call: &ToolCall) -> ToolDispatch {
+        let tool = tool_call.function.name.clone();
+        let bound = self.tools.iter().any(|t| tool_name(*t) == tool);
         if !bound {
             return ToolDispatch::unavailable(format!(
-                "tool '{}' is not bound for this subagent",
-                tool_call.function.name
+                "tool '{tool}' is not bound for this subagent"
             ));
         }
-        dispatch_tool_call(&self.access, tool_call).await
+        if let Err(repeated) = self
+            .repeated_calls
+            .admit(&tool, &tool_call.function.arguments)
+        {
+            log::warn!(
+                target: "tddy_discovery::subagent",
+                "SpecializedSubagentSession: model={} refused a repeated call — {repeated}",
+                self.model
+            );
+            return ToolDispatch::Repeated(repeated);
+        }
+
+        let dispatch = dispatch_tool_call(&self.access, tool_call).await;
+        self.repeated_calls
+            .record_outcome(&tool, dispatch.produced_nothing().is_none());
+        dispatch
     }
 
     /// One pass of the turn loop, adding what its tool calls did to `tools_called`.
@@ -1643,6 +1700,15 @@ impl SubagentSession for SpecializedSubagentSession {
     /// (AC17).
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
         let budget = request.budget_within(self.max_turns);
+        // Anything that changes the conversation from outside the loop — a new question, a
+        // correction, a rewind that discards answers it was holding — invalidates the premise
+        // the repeat ledger rests on (see [`RepeatedCalls::forget_earlier_calls`]).
+        if request.prompt_text().is_some()
+            || request.correction().is_some()
+            || request.rewind_point().is_some()
+        {
+            self.repeated_calls.forget_earlier_calls();
+        }
         if let Some(rewind_point) = request.rewind_point() {
             self.transcript
                 .rewind_to(rewind_point)
