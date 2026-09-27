@@ -53,9 +53,7 @@ fn a_def(base_url: &str) -> SpecializedAgentDef {
 }
 
 fn a_local_config() -> SubagentConfig {
-    SubagentConfig {
-        access: CodebaseAccess::Local,
-    }
+    SubagentConfig::new(CodebaseAccess::Local)
 }
 
 async fn mount_always(server: &MockServer, body: serde_json::Value) {
@@ -82,6 +80,7 @@ async fn openai_client_parses_prompt_and_completion_token_usage_from_a_response(
         tools: vec![],
         tool_choice: serde_json::json!("auto"),
         temperature: 0.0,
+        max_tokens: None,
     };
 
     // When
@@ -123,6 +122,7 @@ async fn openai_client_reports_no_usage_when_the_response_omits_it() {
         tools: vec![],
         tool_choice: serde_json::json!("auto"),
         temperature: 0.0,
+        max_tokens: None,
     };
 
     // When

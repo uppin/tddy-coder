@@ -158,7 +158,7 @@ fn a_session_over(
     max_turns: u32,
 ) -> Box<dyn SubagentSession> {
     SubagentRegistry::from_defs(vec![a_def(&server.uri(), max_turns)])
-        .create("explorer", SubagentConfig { access })
+        .create("explorer", SubagentConfig::new(access))
         .expect("the def must resolve")
 }
 

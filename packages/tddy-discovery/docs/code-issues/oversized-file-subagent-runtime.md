@@ -4,9 +4,9 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **595 production lines** (of 807 total; `#[cfg(test)]` at `:558`) · budget 500 ·
-**1.1× over**
-**Thresholds breached:** length 595 > 500
+**Metrics:** **716 production lines** (of 1016 total; `#[cfg(test)]` at `:717`) · budget 500 ·
+**1.4× over**
+**Thresholds breached:** length 716 > 500
 **Restructure:** not required — one extraction, or it may fall under budget on its own
 **Status:** Open — unclaimed
 
@@ -16,6 +16,7 @@ subagent turn-control changeset
 |---|---|---|
 | 2026-09-26 | 557 | first detection — 57 lines over |
 | 2026-09-26 | 595 | after `DeferredTurn` took a `TurnRequest` instead of a `prompt_text`, `prompt_outcome_json` grew `messages`/`clampedMaxTurns`, and `TurnEnd::took_a_turn` was removed |
+| 2026-09-27 | 716 | after the provider dimension: `PendingTurns` gained `provider` + `provider_queue_position` / `provider_queue_size` / `provider_of`, `SubagentConversation` gained `provider`, and `pending_turn_json` moved in from `tddy-tools`' `server.rs` (which lost the same ~25 lines). The provider queue itself went to a submodule, `subagent_runtime/provider_queue.rs`, rather than in here |
 
 ## What the tool found
 
@@ -40,11 +41,12 @@ failed prompt has to be resumable.
 
 ## What would close it
 
-Extracting `PendingTurns` and its `TurnState` / `PendingTurn` types (~170 lines, `:139-311`) into
-their own module takes the parent to roughly 390 and gives the queue a home of its own — it is the
-part with real logic and the part
-[`2026-09-20-subagent-turn-queue-visibility`](../../../../docs/dev/changesets/) most recently grew.
-Ordinary `extract_module`, not a hard one.
+Extracting `PendingTurns` and its `TurnState` / `PendingTurn` types (now ~250 lines, both queue
+dimensions included) into their own module — `subagent_runtime/pending_turns.rs`, beside the
+`provider_queue` submodule the 2026-09-27 change already added — takes the parent to roughly 465
+and gives the queue a home of its own. It is the part with real logic, and the part both
+[`2026-09-20-subagent-turn-queue-visibility`](../../../../docs/dev/changesets/) and the provider
+dimension grew. Ordinary `extract_module`, not a hard one.
 
 Fix the `took_a_turn` premise at the same time, or before: it is a two-line change and a comment
 that is currently wrong.

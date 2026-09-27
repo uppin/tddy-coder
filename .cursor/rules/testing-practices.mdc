@@ -12,6 +12,15 @@ alwaysApply: false
 
 Required: Given/When/Then structure, intent-revealing test names, one behavior per test, named page-object/driver helpers (no raw selectors or wire-format handling in test bodies), meaningful fixture values, and in-memory backends instead of `cy.intercept` for Cypress component tests. Violations are treated as test bugs.
 
+**Names describe the subject — file names included.** A test is named for what it tests, never for
+the command, phase or changeset that produced it: `*_red.rs` is the same mistake as
+`fn red_phase_rejects_…`, one level out. `unit`, `integration` and `e2e` **are** legitimate
+markers — they state the scope and cost of the file and stay true for its life. `acceptance` is
+not: it names no level, and the 348 files carrying it are mostly ordinary integration tests, so it
+partitions nothing. Suffixes a runner discovers by (`.test.ts(x)`, `.cy.ts(x)`) always stay. See
+[docs/dev/guides/testing.md](../../docs/dev/guides/testing.md) § Workflow Names in Test or File
+Names.
+
 ## Anti-Patterns and Composition
 
 For anti-patterns, test composition, and unit/integration/production test guidelines,

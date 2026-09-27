@@ -5,11 +5,20 @@
 #         target/release/tddy-session-sync, target/release/tddy-sandbox-runner,
 #         target/release/tddy-index-daemon
 #
-# Usage: ./release [--desktop]
+# Usage: ./release [--desktop] [--installers]
 #
 #   --desktop   Additionally build everything `./install --desktop` ships: the tddy-web bundle and
 #               then the Tauri application. Output: packages/tddy-web/dist and, on macOS,
 #               target/release/bundle/macos/Tddy Desktop.app; on Linux target/release/tddy-desktop.
+#
+#   --installers  Also produce the distributable installer artifacts `tauri.conf.json` lists —
+#               `dmg` on macOS, `deb`/`appimage` on Linux. Requires --desktop. OFF BY DEFAULT, and
+#               that default is the point: `./install --desktop` installs the .app (macOS) or the
+#               binary (Linux) and needs none of them, while on macOS the `dmg` target drives
+#               Finder over AppleScript and fails without Automation permission — long after the
+#               .app is complete and valid. Building them by default meant `./install --desktop
+#               --build` reported a failure for an artifact nobody had asked for, having already
+#               produced everything it was going to install.
 #
 # tddy-sandbox-runner is the process every jail runs inside itself (sandboxed claude-cli and
 # cursor-cli sessions, and the workspace tool jail). tddy-index-daemon is the process that holds a
@@ -25,13 +34,15 @@ cd "$ROOT_DIR"
 DESKTOP_APP_NAME="Tddy Desktop"
 
 usage() {
-  echo "Usage: $0 [--desktop]" >&2
+  echo "Usage: $0 [--desktop] [--installers]" >&2
 }
 
 want_desktop=false
+want_installers=false
 for arg in "$@"; do
   case "$arg" in
     --desktop) want_desktop=true ;;
+    --installers) want_installers=true ;;
     -h|--help) usage; exit 0 ;;
     *)
       echo "release: unknown argument: $arg" >&2
@@ -57,6 +68,14 @@ in_shell cargo build --release \
   -p tddy-session-sync \
   -p tddy-index-daemon
 
+if [[ "$want_installers" == true && "$want_desktop" != true ]]; then
+  # Refused rather than implied: --installers alone reads as "build the installers", and quietly
+  # turning it into a full desktop build is a different, much longer job than the caller asked for.
+  echo "release: --installers requires --desktop (the installers package the application)" >&2
+  usage
+  exit 1
+fi
+
 if [[ "$want_desktop" != true ]]; then
   exit 0
 fi
@@ -67,22 +86,42 @@ fi
 echo "release: --desktop — building the tddy-web bundle (the application embeds it)"
 in_shell bun run build
 
-echo "release: --desktop — building the application (tauri build)"
+# `tauri.conf.json` lists every target (`app`, `dmg`, `deb`, `appimage`); a bare `tauri build`
+# attempts all of them. Only the first is what gets installed, so narrow to it unless the caller
+# asked for the rest — passing the target list on the command line rather than editing the config,
+# because `--installers` has to be able to build them all without a second source of truth.
+if [[ "$want_installers" == true ]]; then
+  echo "release: --desktop --installers — building the application and every bundle target"
+  bundle_args=()
+elif [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "release: --desktop — building the application (.app only; --installers adds the dmg)"
+  bundle_args=(--bundles app)
+else
+  # Linux has no `app` target: the thing `./install --desktop` copies is the plain binary at
+  # target/release/tddy-desktop, which `tauri build` produces before any bundling.
+  echo "release: --desktop — building the application (binary only; --installers adds deb/appimage)"
+  bundle_args=(--no-bundle)
+fi
+
 status=0
-in_shell bun run desktop:build || status=$?
+in_shell bun run desktop:build "${bundle_args[@]+"${bundle_args[@]}"}" || status=$?
 if [[ "$status" -eq 0 ]]; then
   exit 0
 fi
 
-# Do not swallow this. On macOS the `dmg` bundle target drives Finder over AppleScript and fails
+# Do not swallow this. With --installers the `dmg` target drives Finder over AppleScript and fails
 # without Automation permission, LONG AFTER the .app itself is complete and valid — so say which of
-# the two happened instead of reporting a uniform failure the operator cannot act on.
+# the two happened instead of reporting a uniform failure the operator cannot act on. Without
+# --installers this branch should not be reachable on that account, and reaching it means the
+# application build itself failed: say that too, rather than pointing at a target nobody ran.
 echo "release: tauri build failed (exit ${status})" >&2
-if [[ "$(uname -s)" == "Darwin" && -d "${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" ]]; then
+if [[ "$want_installers" == true && "$(uname -s)" == "Darwin" \
+      && -d "${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" ]]; then
   echo "release: the application bundle itself IS present and installable:" >&2
   echo "release:   ${ROOT_DIR}/target/release/bundle/macos/${DESKTOP_APP_NAME}.app" >&2
   echo "release: a later bundle target failed, not the app. On macOS the 'dmg' target drives Finder" >&2
   echo "release:   over AppleScript and times out without Automation permission." >&2
-  echo "release: ./install --desktop (without --build) installs what is already built." >&2
+  echo "release: drop --installers to build only what ./install --desktop needs, or run" >&2
+  echo "release:   ./install --desktop (without --build) to install what is already built." >&2
 fi
 exit "$status"

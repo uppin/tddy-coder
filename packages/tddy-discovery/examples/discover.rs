@@ -121,6 +121,7 @@ async fn main() {
             tools: tools.clone(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         };
         let response = client
             .complete(req)

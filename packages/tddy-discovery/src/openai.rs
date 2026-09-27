@@ -148,11 +148,18 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "GLOB".to_string(),
-                description: "Return file paths matching a glob pattern.".to_string(),
+                description: "Return file paths matching a glob pattern. Long match sets are \
+                    truncated to a path cap; narrow the pattern, or ask for a different window \
+                    with limit."
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "pattern": { "type": "string", "description": "Glob pattern." }
+                        "pattern": { "type": "string", "description": "Glob pattern." },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of paths to return."
+                        }
                     },
                     "required": ["pattern"]
                 }),
@@ -162,12 +169,18 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "GREP".to_string(),
-                description: "Search files with a regex pattern.".to_string(),
+                description: "Search files with a regex pattern. Long result sets are truncated \
+                    to a match cap; narrow the pattern, or ask for a different window with limit."
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Regex pattern." },
-                        "path": { "type": "string", "description": "Optional path to search in." }
+                        "path": { "type": "string", "description": "Optional path to search in." },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of matches to return."
+                        }
                     },
                     "required": ["pattern"]
                 }),
@@ -323,6 +336,15 @@ pub struct ChatCompletionRequest {
     pub tools: Vec<ToolDefinition>,
     pub tool_choice: serde_json::Value,
     pub temperature: f32,
+    /// The greatest number of tokens the provider may generate for this turn, or `None` to let
+    /// it generate until it stops of its own accord.
+    ///
+    /// Omitted from the body entirely when `None`, so a caller that sets no bound sends exactly
+    /// the request it always did. A turn the provider cut at this bound comes back with
+    /// `finish_reason: "length"`, which is the only way a caller can tell a truncated answer from
+    /// a finished one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
 
 /// Response from `/v1/chat/completions`.
@@ -530,6 +552,7 @@ mod tests {
             tools: read_glob_grep_tools(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         };
 
         // When
@@ -589,6 +612,7 @@ mod tests {
             tools: read_glob_grep_tools(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         };
 
         // When
@@ -677,6 +701,7 @@ mod tests {
             tools: Vec::new(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         }
     }
 }

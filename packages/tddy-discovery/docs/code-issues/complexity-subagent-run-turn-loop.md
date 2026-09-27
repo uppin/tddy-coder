@@ -14,6 +14,7 @@
 |---|---|---|---|---|
 | 2026-09-26 | 70 | 43 | 3 | first detection, in PR #545 |
 
+| 2026-09-27 | 70 | 43 | 3 | **unchanged.** The subagent input-validation and output-bounds change edited this file heavily (1,435 → 1,687 production lines) but not this body: the `MaxTokens` reporting went into `TurnStep`/`turn_stop_reason` and the argument check into `dispatch_tool_call`, both outside the loop |
 ## What the tool found
 
 Over the ceiling on **raw** lines only: 43 of the 70 are code and the rest is justification prose,

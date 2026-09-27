@@ -42,13 +42,21 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "Grep".to_string(),
-            description: "Search for a pattern in files.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"}}}"#.to_string(),
+            description: "Search for a pattern in files. 'limit' is the greatest number of \
+                          matches to return (default: all of them). Answers with 'matches', \
+                          'truncated' (whether further matches follow the window) and \
+                          'total_matches' (the search's true size)."
+                .to_string(),
+            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"},"limit":{"type":"integer"}}}"#.to_string(),
         },
         ToolDef {
             name: "Glob".to_string(),
-            description: "Find files matching a glob pattern.".to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"}}}"#.to_string(),
+            description: "Find files matching a glob pattern. 'limit' is the greatest number of \
+                          paths to return (default: all of them). Answers with 'paths', \
+                          'truncated' (whether further paths follow the window) and 'total_paths' \
+                          (the match set's true size)."
+                .to_string(),
+            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"limit":{"type":"integer"}}}"#.to_string(),
         },
         ToolDef {
             name: "Shell".to_string(),

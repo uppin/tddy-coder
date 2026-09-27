@@ -28,6 +28,7 @@
 
 use tddy_core::spawn_env::env_non_empty;
 use tddy_discovery::subagent::{CodebaseAccess, SubagentConfig, SubagentRegistry, SubagentSession};
+use tddy_discovery::subagent_runtime::ProviderQueue;
 
 // --- The spawn environment ---
 
@@ -58,12 +59,28 @@ fn managed_codebase_access() -> CodebaseAccess {
     })
 }
 
-/// The only thing a caller supplies that a def cannot: how this process reaches the codebase.
-/// Endpoint, model, credential and turn budget come from the def itself.
+/// The admission gate every conversation this process opens queues at, one model call at a time
+/// per provider endpoint.
+///
+/// One queue for the whole process, because the contention is: this is one in-jail process serving
+/// exactly one session (the precondition `tddy_discovery::subagent_runtime::subagent_sessions`
+/// already states), and the agents attached to that session are precisely the ones that end up
+/// pointed at the same local endpoint. Session 01a0e200 was two of them on one Ollama; with one
+/// queue between them the second turn waits here, counted and bounded, instead of inside the
+/// provider's socket for 38 minutes.
+///
+/// Sharing it costs nothing where there is nothing to share: the queue is keyed by endpoint, so
+/// conversations on different providers never meet in it.
+fn provider_queue() -> ProviderQueue {
+    static QUEUE: std::sync::OnceLock<ProviderQueue> = std::sync::OnceLock::new();
+    QUEUE.get_or_init(ProviderQueue::new).clone()
+}
+
+/// The only things a caller supplies that a def cannot: how this process reaches the codebase, and
+/// which queue its model calls wait in. Endpoint, model, credential and turn budget come from the
+/// def itself.
 pub(crate) fn subagent_config_from_env() -> SubagentConfig {
-    SubagentConfig {
-        access: subagent_codebase_access_from_env(),
-    }
+    SubagentConfig::new(subagent_codebase_access_from_env()).with_provider_queue(provider_queue())
 }
 
 // --- The shape of an MCP tool ---

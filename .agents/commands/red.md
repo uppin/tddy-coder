@@ -54,6 +54,47 @@ for Cypress component tests.
 
 **CRITICAL**: Never put "red phase" or "green phase" in code comments, test descriptions, or production code. Keep TDD phase information in chat context only.
 
+### Names describe the subject, never the ritual — file names included
+
+A test is named for **what it tests**. Nothing about the workflow, command or phase that happened
+to produce it belongs in the name, because none of it is true a week later: every test in this
+repo was once red, so `_red` distinguishes nothing and merely records which command the author
+typed.
+
+This applies to the **file name** exactly as it applies to the test name. A `*_red.rs` file is the
+same violation as a `#[test] fn red_phase_rejects_…` — the phase has just moved one level out,
+where it is more visible and harder to grep away.
+
+| Not allowed | Why |
+|---|---|
+| `provider_queue_red.rs`, `*_green.rs`, `*_tdd.rs`, `*_wip.rs` | the phase that produced it |
+| `pr433_tests.rs`, `2026_09_27_queue.rs`, `<changeset-slug>_tests.rs` | the changeset or PR that produced it |
+| `phase2_scheduling.rs`, `milestone3.rs` | a position in a plan nobody will reconstruct |
+| `*_acceptance.rs` | a category that partitions nothing — see below |
+
+**`unit`, `integration` and `e2e` are legitimate markers.** They tell a reader the scope and cost
+of the file before they open it: what it touches, how slow it is, what a failure implicates. That
+is real information about the test, and it stays true for its whole life.
+
+**`acceptance` is not one of them.** It names no level on that scale, and in this repo it is
+attached to 348 files that are overwhelmingly ordinary integration tests — so it partitions
+nothing and only crowds out the words that would have said what the file covers. If the file is an
+integration test, mark it `integration` or leave it unmarked; if it earns a marker, use one that
+narrows something.
+
+`_test` / `_tests` on a file already inside `tests/` is redundant rather than wrong. Drop it when
+you are renaming anyway; it is not what this rule is about.
+
+**Suffixes a runner discovers by always stay**: `.test.ts`, `.test.tsx`, `.cy.ts`, `.cy.tsx`.
+Those are mechanical, not descriptive.
+
+Name the file after the behaviour under test, the same way the tests inside it are named:
+`provider_queue.rs`, `subagent_generation_cap.rs`, `grep_path_scope.rs`.
+
+**Legacy names are not a licence.** 445 test files in `packages/` predate this rule. Do not add to
+them, and do not mass-rename them as a drive-by — a rename churns history and belongs in its own
+commit. See `docs/dev/todo/2026-09-27-test-files-are-named-after-the-workflow-that-made-them.md`.
+
 ## Output Format
 
 Present results as follows:

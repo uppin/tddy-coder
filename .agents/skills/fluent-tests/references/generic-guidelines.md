@@ -680,3 +680,33 @@ Test names should:
 - State the **outcome**: "returns empty list when..." not "handles empty input"
 - Include the **condition** when relevant: "applies discount when cart total exceeds 100"
 - Avoid `should` prefix — it adds words without meaning
+- Never name the **workflow** that produced it — no `red`/`green`/`tdd` phase, no PR or changeset
+  slug, no "phase 2". Every test was once red, so it distinguishes nothing and only records which
+  command the author typed
+
+### File names follow the same rule
+
+The file is named for its subject too. `provider_queue_red.ts` is the same mistake as
+`redPhaseAdmitsTheWaitingCaller` — the phase has moved one level out, where it is more visible and
+harder to grep away.
+
+```
+provider_queue_red.rs        →  provider_queue.rs
+pr433_scheduling.test.ts     →  requestScheduling.test.ts
+phase2_migration.rs          →  schema_migration.rs
+relay_dispatch_acceptance.rs →  relay_dispatch.rs
+```
+
+**`unit`, `integration` and `e2e` are legitimate markers** and should be kept. They state the
+scope and cost of the file — what it touches, how slow it is, what a failure implicates — which a
+reader wants before opening it, and which stays true for the file's whole life. So
+`session_store_unit_tests.rs`, `pr_stack_integration.rs` and `login_flow_e2e.rs` are all fine.
+
+**`acceptance` is not one of them.** It names no level on that scale and partitions nothing. If
+the file is an integration test, say `integration` or say nothing.
+
+`_test` / `_tests` on a file already in a test directory is redundant rather than wrong — drop it
+when renaming anyway.
+
+**Suffixes a runner discovers by always stay** — `.test.ts`, `.test.tsx`, `.cy.ts`, `.cy.tsx`.
+Those are mechanical, not descriptive.

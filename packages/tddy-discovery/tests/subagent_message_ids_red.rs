@@ -113,7 +113,7 @@ fn a_session_over(
     max_turns: u32,
 ) -> Box<dyn SubagentSession> {
     SubagentRegistry::from_defs(vec![a_def(&server.uri(), max_turns)])
-        .create("explorer", SubagentConfig { access })
+        .create("explorer", SubagentConfig::new(access))
         .expect("the def must resolve")
 }
 
@@ -162,8 +162,12 @@ async fn a_turn_outcome_lists_the_messages_it_appended() {
         "the caller must be able to see the prompt, the call, the result and the conclusion"
     );
     assert_eq!(
-        outcome.messages[1].tool_calls,
-        vec!["READ".to_string()],
+        outcome.messages[1]
+            .tool_calls
+            .iter()
+            .map(|call| call.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["READ"],
         "an assistant message names the tools it called"
     );
     assert_eq!(the_tool_result(&outcome).tool.as_deref(), Some("READ"));

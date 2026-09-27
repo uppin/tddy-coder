@@ -14,6 +14,7 @@
 |---|---|---|---|---|
 | 2026-09-26 | 74 | 55 | 3 | first detection, in PR #545 |
 
+| 2026-09-27 | 74 | 55 | 3 | **unchanged.** `server.rs` grew by 33 lines in the same change, all of it in `subagent_new_session_tool` and the schema; this body was not edited |
 ## What the tool found
 
 Over the 60-line ceiling; nesting is fine. Inherited from `subagent_prompt_tool`, and, like its

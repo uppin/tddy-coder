@@ -26,7 +26,7 @@ use std::sync::Arc;
 use crate::openai::TokenUsage;
 use crate::subagent::{
     ContentBlock, MessageDescriptor, MessageId, MessageRole, PromptOutcome, StopReason,
-    SubagentError, SubagentSession, TurnRequest,
+    SubagentError, SubagentSession, ToolCallDescriptor, TurnRequest,
 };
 use prost::Message;
 use tddy_service::proto::session_agents_svc::{
@@ -403,7 +403,21 @@ fn parse_message_descriptor(
         // back to `None` here so a descriptor built from the wire is indistinguishable from one
         // built locally — a caller must not be able to tell which host ran the turn.
         tool: Some(described.tool.clone()).filter(|tool| !tool.is_empty()),
-        tool_calls: described.tool_calls.clone(),
+        // The wire carries the tool *names* only (`AgentMessageDescriptor.tool_calls` is a
+        // `repeated string`), so a descriptor built from a remote turn reports no arguments. It
+        // is the honest reading of what arrived rather than a fabricated one — an empty
+        // `arguments` is "the host that ran this turn did not send them".
+        //
+        // TODO: widen `AgentMessageDescriptor.tool_calls` to carry the arguments too, so a main
+        // agent reading a remotely-run turn can see the broken path as well as the failing tool.
+        tool_calls: described
+            .tool_calls
+            .iter()
+            .map(|name| ToolCallDescriptor {
+                name: name.clone(),
+                arguments: String::new(),
+            })
+            .collect(),
         is_error: described.is_error,
         preview: described.preview.clone(),
     })
@@ -440,6 +454,8 @@ fn parse_stop_reason(reason: &str) -> Result<StopReason, String> {
         // The wire spelling `tddy-session-agents` writes for a turn the daemon ended because the
         // model's context window was full.
         "ContextExhausted" => Ok(StopReason::ContextExhausted),
+        // The wire spelling for a turn the provider cut at the generation cap.
+        "MaxTokens" => Ok(StopReason::MaxTokens),
         other => Err(format!(
             "PromptAgentConversation ended with stop reason '{other}', which this build does not \
              recognise — the two hosts disagree about how a turn ends"

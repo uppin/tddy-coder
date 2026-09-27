@@ -22,8 +22,8 @@ use tddy_discovery::subagent::{
 // `tddy-discovery` with the roster at `#unbundle` node 5 — it is logic over that crate's own
 // session types — while the tool bodies, their schemas and the router stayed here.
 use tddy_discovery::subagent_runtime::{
-    conversation_listing, report_local_conversation_state, run_turn, subagent_error_json,
-    subagent_sessions, wait_for_turn, write_accounting_file, DeferredTurn, PendingTurns,
+    conversation_listing, pending_turn_json, report_local_conversation_state, run_turn,
+    subagent_error_json, subagent_sessions, wait_for_turn, write_accounting_file, DeferredTurn,
     SubagentConversation,
 };
 use tddy_workflow_recipes::github_pr::{
@@ -1681,31 +1681,6 @@ fn subagent_tool_names() -> Vec<String> {
 /// (docs/ft/coder/managed-codebase-subagents.md § Long turns).
 const SUBAGENT_PROMPT_GRACE: std::time::Duration = std::time::Duration::from_secs(25);
 
-/// `{responseId, pending: true, queuePosition, queueSize}` — the second shape a conversation tool
-/// can return, told apart from an outcome by a key an outcome never carries.
-///
-/// The queue numbers are read **here**, as the receipt is written, so a `subagent_await` that hands
-/// one back reports where the turn stands now rather than where it stood when it was accepted —
-/// which is the number a caller polling for progress is asking for.
-///
-/// `queuePosition` is how many turns accepted before this one on the same conversation are still
-/// outstanding (`0` = this is the one running); `queueSize` counts every outstanding turn on that
-/// conversation, this one included. Both are `null` for a turn `pending` does not hold: that is "no
-/// queue to report", which a `0` would misstate as the front of the line.
-fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
-    let position = pending.queue_position(response_id);
-    let size = pending
-        .conversation_of(response_id)
-        .map(|conversation_id| pending.queue_size(conversation_id));
-    serde_json::json!({
-        "responseId": response_id,
-        "pending": true,
-        "queuePosition": position,
-        "queueSize": size,
-    })
-    .to_string()
-}
-
 /// Read a caller-named blocking budget (`graceMs`, `timeoutMs`) in milliseconds.
 ///
 /// A malformed value is refused naming the field rather than replaced by `default`: substituting 25
@@ -1750,6 +1725,10 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
         .and_then(|v| v.as_str())
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let system_prompt = args
+        .get("systemPrompt")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
 
     let entry = match roster.open_conversation_as(&session_id, agent_id) {
         Ok(entry) => entry,
@@ -1761,11 +1740,35 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
     // same `session_id` the caller chose, so a `subagent_cancel` addresses the same conversation on
     // both paths.
     let Some(def) = roster.local_def_for(&entry) else {
+        // An agent this process holds no def for is run by the facilitating daemon, over an RPC
+        // that carries no system prompt — so an override here could not reach the conversation.
+        // Refused naming that, rather than opened without it: a caller told its conversation is
+        // open would believe the prompt it sent is the one the agent is running under.
+        //
+        // TODO: carry the override on `OpenAgentConversation` so a remotely-run agent can take
+        // one too, and drop this refusal.
+        if system_prompt.is_some() {
+            roster.close_conversation(&session_id);
+            return subagent_error_json(format!(
+                "agent '{}' is routed by daemon '{}', which opens its conversations over an RPC \
+                 that carries no system prompt: this conversation cannot take a systemPrompt \
+                 override. Open it without one, or use an agent this session runs itself.",
+                entry.agent_id, entry.daemon_instance_id
+            ));
+        }
         return match open_remote_agent_session(&entry, &session_id).await {
             Ok(opened) => {
                 subagent_sessions().lock().await.open.insert(
                     session_id.clone(),
-                    SubagentConversation::opened(opened.agent_id, opened.session, opened.remote),
+                    // No provider: the loop runs on the facilitating daemon, against an
+                    // endpoint this process cannot see. Naming one here would report a queue
+                    // the turn is not standing in.
+                    SubagentConversation::opened(
+                        opened.agent_id,
+                        None,
+                        opened.session,
+                        opened.remote,
+                    ),
                 );
                 serde_json::json!({ "sessionId": session_id }).to_string()
             }
@@ -1776,13 +1779,20 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
         };
     };
     let agent_name = def.name.clone();
+    // The endpoint this conversation's turns will be sent to, read before the def is consumed by
+    // the registry: it is what the turns queue on, and what their receipts name.
+    let provider = def.base_url.clone();
     let registry = SubagentRegistry::from_defs(vec![def]);
-    match registry.create(&agent_name, subagent_config_from_env()) {
+    let mut config = subagent_config_from_env();
+    if let Some(prompt) = system_prompt {
+        config = config.with_system_prompt(prompt);
+    }
+    match registry.create(&agent_name, config) {
         Ok(session) => {
             let agent_id = entry.agent_id.clone();
             subagent_sessions().lock().await.open.insert(
                 session_id.clone(),
-                SubagentConversation::opened(entry.agent_id, session, None),
+                SubagentConversation::opened(entry.agent_id, Some(provider), session, None),
             );
             // The daemon is never asked to open this one, so this is the first and only moment its
             // roster row can stop reporting UNSPECIFIED.
@@ -1956,13 +1966,19 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
         reported_agent: conv.remote.is_none().then(|| conv.agent.clone()),
     };
     let response_id = turn.response_id.clone();
+    // Read before the spawn takes the conversation's session: the turn queues on its endpoint as
+    // well as on its conversation, and the receipt its caller gets reports both.
+    let provider = conv.provider().map(str::to_string);
     // Spawned and registered under the same hold on the table: the task takes this lock before it
     // can publish anything, so registering it here cannot lose a race with a turn that finishes
     // immediately.
     let running = tokio::spawn(run_turn(turn));
-    sessions
-        .pending
-        .start(&response_id, session_id, running.abort_handle());
+    sessions.pending.start(
+        &response_id,
+        session_id,
+        provider.as_deref(),
+        running.abort_handle(),
+    );
     let mut watched = sessions
         .pending
         .watch(&response_id)
@@ -2348,7 +2364,16 @@ pub(crate) fn subagent_new_session_schema(
         "properties": {
             "agent": agent,
             "sessionId": {"type": "string", "description": "Caller-chosen conversation id. Generated if omitted."},
-            "cwd": {"type": "string", "description": "Optional working directory hint."}
+            "cwd": {"type": "string", "description": "Optional working directory hint."},
+            "systemPrompt": {
+                "type": "string",
+                "description": "Optional system prompt for this conversation. It REPLACES the \
+                                agent's own system prompt rather than appending to it, and only \
+                                for this conversation — omit it to keep the agent's. Use it to \
+                                tell the agent what its definition could not know: which \
+                                repository this is, what shape the answer must take, or what it \
+                                must stop doing after a turn that went wrong."
+            }
         }
     }))
 }
@@ -3392,51 +3417,6 @@ mod tests {
     // Feature: docs/ft/coder/managed-codebase-subagents.md (criteria 25-29, 31, 34)
 
     use std::time::Duration;
-    use tddy_discovery::openai::TokenUsage;
-    use tddy_discovery::subagent::{ContentBlock, PromptOutcome, StopReason};
-    use tddy_discovery::subagent_runtime::prompt_outcome_json;
-
-    fn an_end_turn_outcome(answer: &str) -> PromptOutcome {
-        PromptOutcome::new(
-            StopReason::EndTurn,
-            vec![ContentBlock::text(answer)],
-            TokenUsage {
-                input_tokens: 30,
-                output_tokens: 12,
-            },
-        )
-    }
-
-    // ─── The dual return shape ────────────────────────────────────────────────
-
-    /// The whole contract the tool description promises rests on one key: a caller that reads
-    /// `pending` knows it holds a receipt rather than an answer. If a deferral could be mistaken
-    /// for an outcome — or an outcome for a deferral — every caller of either is wrong.
-    #[test]
-    fn an_outcome_and_a_deferral_are_told_apart_by_the_pending_key() {
-        // Given one of each
-        let outcome: serde_json::Value = serde_json::from_str(&prompt_outcome_json(
-            an_end_turn_outcome("src/auth.rs:1-50"),
-        ))
-        .expect("an outcome must serialize to JSON");
-        let deferral: serde_json::Value =
-            serde_json::from_str(&pending_turn_json(&PendingTurns::default(), "response-1"))
-                .expect("a deferral must serialize to JSON");
-
-        // Then the outcome carries no trace of the deferred shape
-        assert!(
-            outcome.get("pending").is_none() && outcome.get("responseId").is_none(),
-            "a turn that yielded must return the outcome shape verbatim; got: {outcome}"
-        );
-
-        // And the deferral carries no trace of an answer, only the id that will produce one
-        assert_eq!(deferral["pending"].as_bool(), Some(true));
-        assert_eq!(deferral["responseId"].as_str(), Some("response-1"));
-        assert!(
-            deferral.get("stopReason").is_none() && deferral.get("content").is_none(),
-            "a deferred turn has not stopped and has said nothing; got: {deferral}"
-        );
-    }
 
     // ─── The blocking budget a caller names ───────────────────────────────────
 

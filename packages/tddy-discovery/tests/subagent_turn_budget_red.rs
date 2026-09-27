@@ -102,12 +102,7 @@ async fn turns_the_model_was_asked_for(server: &MockServer) -> usize {
 
 fn a_session_over(server: &MockServer, max_turns: u32) -> Box<dyn SubagentSession> {
     SubagentRegistry::from_defs(vec![a_def(&server.uri(), max_turns)])
-        .create(
-            "explorer",
-            SubagentConfig {
-                access: a_codebase_that_answers(),
-            },
-        )
+        .create("explorer", SubagentConfig::new(a_codebase_that_answers()))
         .expect("the def must resolve")
 }
 

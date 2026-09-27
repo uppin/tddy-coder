@@ -58,7 +58,10 @@ async fn managed_codebase_access_maps_read_to_the_capitalized_read_tool_name() {
     );
 }
 
-/// A managed GLOB dispatches the capitalized `"Glob"` tool name with a `{"pattern": ...}` payload.
+/// A managed GLOB dispatches the capitalized `"Glob"` tool name with the pattern plus the
+/// resolved result window. The window's default is the subject of
+/// `subagent_search_result_cap_red::a_managed_glob_puts_the_cap_in_the_request_rather_than_trimming_the_answer`;
+/// it is asserted here too so this test keeps naming the whole payload rather than part of it.
 #[tokio::test]
 async fn managed_codebase_access_maps_glob_to_the_capitalized_glob_tool_name() {
     // Given
@@ -80,11 +83,14 @@ async fn managed_codebase_access_maps_glob_to_the_capitalized_glob_tool_name() {
         recorded[0].0, "Glob",
         "dispatched tool name must be 'Glob', not 'GLOB'"
     );
-    assert_eq!(recorded[0].1, serde_json::json!({"pattern": "src/**/*.rs"}));
+    assert_eq!(
+        recorded[0].1,
+        serde_json::json!({"pattern": "src/**/*.rs", "limit": 200})
+    );
 }
 
-/// A managed GREP dispatches the capitalized `"Grep"` tool name, including the optional `path`
-/// argument only when the caller provided one.
+/// A managed GREP dispatches the capitalized `"Grep"` tool name with the pattern and the resolved
+/// result window, including the optional `path` argument only when the caller provided one.
 #[tokio::test]
 async fn managed_codebase_access_maps_grep_to_the_capitalized_grep_tool_name_with_optional_path() {
     // Given
@@ -104,7 +110,7 @@ async fn managed_codebase_access_maps_grep_to_the_capitalized_grep_tool_name_wit
     );
     assert_eq!(
         recorded[0].1,
-        serde_json::json!({"pattern": "fn authenticate", "path": "src/auth.rs"})
+        serde_json::json!({"pattern": "fn authenticate", "path": "src/auth.rs", "limit": 100})
     );
 }
 
