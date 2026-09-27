@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-daemon-sandbox/src/workspace_tool_sandbox.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 — `/pr-wrap` step 3.5 file-length gate
-**Metrics:** **660 production lines** · budget 500
-**Thresholds breached:** length 660 > 500
+**Metrics:** **737 production lines** · budget 500
+**Thresholds breached:** length 737 > 500
 **Restructure:** `extract_module --to_file` — single seam, designed, **passes a plain `check`**, not applied
 **Status:** Open — **unclaimed**
 
@@ -15,6 +15,7 @@
 | 2026-09-19 | 590 | 522 → 571 for `stop_all()`, then → 590 for the registry `Drop` |
 | 2026-09-26 | 614 | `ToolDispatchOutcome` added to the trait and its impl, and the trait doc rewritten to say why the distinction exists |
 | 2026-09-26 | 660 | +46 for `host_ripgrep_dir` and the two grants that make `Grep` reachable inside a jail. Marked `FIXME(grep-in-jail)`; the real fix removes it again — see `docs/dev/todo/2026-09-26-grep-is-unreachable-inside-every-jail.md` |
+| 2026-09-27 | 737 | +73 fixing the ripgrep grants: `which` reports a symlink into `Cellar`, `rg` links a Homebrew `libpcre2`, and the loader traverses a symlink farm the renderer canonicalizes away. Still `FIXME(grep-in-jail)`; PR #548 deletes all of it |
 
 ## What would close it — designed seam
 
