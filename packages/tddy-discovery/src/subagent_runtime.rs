@@ -437,6 +437,19 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     if let (Some(object), Some(clamped)) = (body.as_object_mut(), outcome.clamped_max_turns) {
         object.insert("clampedMaxTurns".to_string(), serde_json::json!(clamped));
     }
+    // Present only when the turn stopped on a yield condition, so a caller can tell "the turn
+    // yielded" from "the turn finished" without re-checking the stop reason's spelling.
+    if let Some(object) = body.as_object_mut() {
+        if let Some(fired) = &outcome.fired_condition {
+            object.insert("firedCondition".to_string(), serde_json::json!(fired));
+        }
+        if let Some(id) = &outcome.yielded_message_id {
+            object.insert(
+                "yieldedMessageId".to_string(),
+                serde_json::json!(id.to_string()),
+            );
+        }
+    }
     body.to_string()
 }
 

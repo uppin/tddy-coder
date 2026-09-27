@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Stack:** `subagent-control` node 4 of 5 (`(#subagent-control 4/5)`), wave 2.
+**Stack:** `subagent-control` node 4 of 5 (`(#subagent-control 4/5)`), wave 2. **PR:** [#556](https://github.com/uppin/tddy-coder/pull/556) (draft).
 **Branch:** `feature/subagent-control/yield-conditions` · **Base:** `feature/subagent-control/agent-usage-notes`
 
 **PRD:** [`2026-09-27-yield-conditions-prd.md`](2026-09-27-yield-conditions-prd.md)
@@ -169,10 +169,10 @@ whole thing travels on both request protos and back on the final chunk.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — 4 unit (evaluate/validate) + 3 acceptance (the yield behaviours) failures, each the missing loop evaluation; nodes 1–3's inherited red rides this branch and is theirs to green
+- [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

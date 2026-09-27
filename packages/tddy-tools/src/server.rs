@@ -1840,6 +1840,10 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
+    let request = match yield_conditions_of(&args, request) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     take_a_turn(session_id, request, grace).await
 }
 
@@ -1886,6 +1890,10 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         None => {}
     }
     let request = match turn_budget(&args, request) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
+    let request = match yield_conditions_of(&args, request) {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
@@ -2430,6 +2438,7 @@ fn subagent_prompt_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                                 collect it with. Defaults to 25000; 0 defers immediately."
             },
             "maxTurns": max_turns_property(),
+            "yieldConditions": yield_conditions_property(),
         }
     }))
 }
@@ -2467,6 +2476,55 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
             "maxTurns": max_turns_property(),
         }
     }))
+}
+
+/// The `yieldConditions` property, spelled once for the two tools that accept it: the conditions
+/// on a tool call that stop the turn at that call and hand control back to the caller, for this
+/// turn only.
+fn yield_conditions_property() -> serde_json::Value {
+    serde_json::json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "required": ["tool", "when"],
+            "properties": {
+                "tool": {"type": "string", "description": "The tool this condition watches, by \
+                            name (READ, STR_REPLACE, …)."},
+                "when": {
+                    "type": "object",
+                    "description": "What to watch for: {\"outcome\": {\"fact\": …}} for a fact of \
+                                    the call's result summary, or {\"argument\": {\"field\": …, \
+                                    \"contains\": …}} for a string field of the call's arguments \
+                                    containing a substring."
+                }
+            }
+        },
+        "description": "Stop this turn the moment one of these fires on a tool call, returning \
+                        stopReason \"yieldedToCaller\" with the fired condition and the yielded \
+                        tool message's id. Bounded: at most 8 conditions, each substring at most \
+                        256 chars, each fact one the tool's own result summary can carry. For \
+                        this turn only, never the conversation."
+    })
+}
+
+/// Parse the `yieldConditions` argument of a prompt or resume, or why it cannot run as written.
+///
+/// Rejected **before** the turn runs, so a malformed condition costs no model turn: the
+/// conditions are this caller's own words, and running past a point the caller asked to be
+/// handed control at does the opposite of what it asked.
+fn yield_conditions_of(
+    args: &serde_json::Value,
+    mut request: TurnRequest,
+) -> Result<TurnRequest, String> {
+    let Some(raw) = args.get("yieldConditions") else {
+        return Ok(request);
+    };
+    let encoded = serde_json::to_string(raw).map_err(|e| format!("yieldConditions: {e}"))?;
+    let conditions =
+        serde_json::from_str::<Vec<tddy_discovery::subagent::YieldCondition>>(&encoded)
+            .map_err(|e| format!("yieldConditions is not a list of conditions: {e}"))?;
+    tddy_discovery::subagent::validate_yield_conditions(&conditions)?;
+    Ok(request.with_yield_conditions(conditions))
 }
 
 /// The `maxTurns` property, spelled once for the two tools that accept it.

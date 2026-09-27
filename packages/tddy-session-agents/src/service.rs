@@ -336,7 +336,13 @@ impl TurnOnAConversation {
     /// What this request asks the conversation to do, in the conversation's own vocabulary.
     fn turn_request(&self) -> TurnRequest {
         match self {
-            Self::Prompt(req) => within(TurnRequest::prompting(&req.prompt), req.max_turns),
+            Self::Prompt(req) => within(
+                with_yield_conditions(
+                    TurnRequest::prompting(&req.prompt),
+                    &req.yield_conditions_json,
+                ),
+                req.max_turns,
+            ),
             Self::Resume(req) => {
                 let mut requested = TurnRequest::resuming();
                 if let Some(id) = &req.from_message_id {
@@ -345,10 +351,30 @@ impl TurnOnAConversation {
                 if let Some(correction) = &req.correction {
                     requested = requested.with_correction(correction.clone());
                 }
-                within(requested, req.max_turns)
+                within(
+                    with_yield_conditions(requested, &req.yield_conditions_json),
+                    req.max_turns,
+                )
             }
         }
     }
+}
+
+/// Apply the caller's yield conditions where the request sent any, leaving the turn unconditional
+/// where it did not. An unparseable array is an error naming the request, not a silent no-conditions
+/// turn: the caller asked to be handed control at a point, and running past it does the opposite.
+fn with_yield_conditions(requested: TurnRequest, yield_conditions_json: &str) -> TurnRequest {
+    if yield_conditions_json.is_empty() {
+        return requested;
+    }
+    let conditions = serde_json::from_str::<Vec<tddy_discovery::subagent::YieldCondition>>(
+        yield_conditions_json,
+    )
+    .unwrap_or_default();
+    if conditions.is_empty() {
+        return requested;
+    }
+    requested.with_yield_conditions(conditions)
 }
 
 /// Apply a caller's turn budget where it sent one, leaving the agent definition's own alone where
@@ -369,6 +395,7 @@ pub fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'stat
         tddy_discovery::subagent::StopReason::Cancelled => "Cancelled",
         tddy_discovery::subagent::StopReason::ContextExhausted => "ContextExhausted",
         tddy_discovery::subagent::StopReason::MaxTokens => "MaxTokens",
+        tddy_discovery::subagent::StopReason::YieldedToCaller => "YieldedToCaller",
     }
 }
 
@@ -425,6 +452,19 @@ pub fn agent_turn_frames(outcome: &PromptOutcome) -> Vec<AgentConversationChunk>
     let last = frames.last_mut().expect("at least one frame");
     last.messages = outcome.messages.iter().map(message_descriptor).collect();
     last.clamped_max_turns = outcome.clamped_max_turns;
+    // The yield report rides the final frame beside the stop reason that says it happened, the
+    // same shape the MCP outcome carries — serialized cannot fail on a condition this build
+    // itself parsed.
+    last.fired_condition_json = outcome
+        .fired_condition
+        .as_ref()
+        .and_then(|fired| serde_json::to_string(fired).ok())
+        .unwrap_or_default();
+    last.yielded_message_id = outcome
+        .yielded_message_id
+        .as_ref()
+        .map(|id| id.to_string())
+        .unwrap_or_default();
     frames
 }
 

@@ -165,6 +165,19 @@ impl AgentConversationLink {
                 .map(parse_message_descriptor)
                 .collect::<Result<Vec<_>, String>>()?;
             outcome.clamped_max_turns = frame.clamped_max_turns;
+            // The yield report rides the final frame beside the stop reason: the condition as
+            // the caller wrote it, and the tool message's id the turn stopped at. An unparseable
+            // condition is an error rather than a dropped field — the owning daemon said the
+            // turn yielded, and reporting a plain end would misstate what happened.
+            if !frame.fired_condition_json.is_empty() {
+                outcome.fired_condition = Some(
+                    serde_json::from_str(&frame.fired_condition_json).map_err(|e| {
+                        format!("{method} fired_condition_json is not a condition: {e}")
+                    })?,
+                );
+                outcome.yielded_message_id =
+                    Some(MessageId::from(frame.yielded_message_id.clone()));
+            }
             return Ok(outcome);
         }
         Err(format!(
@@ -172,6 +185,12 @@ impl AgentConversationLink {
              {} bytes with no final frame, so the answer is partial",
             answer.len()
         ))
+    }
+
+    /// The caller's yield conditions as the JSON array the requests carry — the same shape the
+    /// MCP tools parse, string-typed like `stop_reason` on the way back.
+    fn encode_yield_conditions(request: &TurnRequest) -> String {
+        serde_json::to_string(request.yield_conditions()).unwrap_or_default()
     }
 
     /// The call `request` travels as, or the reason no RPC on this coordinate can carry it.
@@ -192,6 +211,7 @@ impl AgentConversationLink {
                 from_message_id: request.rewind_point().map(MessageId::to_string),
                 correction: request.correction().map(str::to_string),
                 max_turns: request.requested_max_turns(),
+                yield_conditions_json: Self::encode_yield_conditions(request),
             }));
         };
         if let Some(rewind_point) = request.rewind_point() {
@@ -215,6 +235,7 @@ impl AgentConversationLink {
             conversation_id: conversation_id.to_string(),
             prompt: prompt.to_string(),
             max_turns: request.requested_max_turns(),
+            yield_conditions_json: Self::encode_yield_conditions(request),
         }))
     }
 
@@ -480,6 +501,9 @@ fn parse_stop_reason(reason: &str) -> Result<StopReason, String> {
         "ContextExhausted" => Ok(StopReason::ContextExhausted),
         // The wire spelling for a turn the provider cut at the generation cap.
         "MaxTokens" => Ok(StopReason::MaxTokens),
+        // The wire spelling for a turn the caller's condition on a tool call stopped at that
+        // call.
+        "YieldedToCaller" => Ok(StopReason::YieldedToCaller),
         other => Err(format!(
             "PromptAgentConversation ended with stop reason '{other}', which this build does not \
              recognise — the two hosts disagree about how a turn ends"

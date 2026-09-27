@@ -27,6 +27,7 @@ mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
+mod yield_condition;
 
 use transcript::Transcript;
 
@@ -38,6 +39,10 @@ pub use transcript::{
     MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
+pub use yield_condition::{
+    evaluate as evaluate_yield_condition, validate as validate_yield_conditions, OutcomeFact, When,
+    YieldCondition, YIELD_CONDITION_LIMIT, YIELD_CONTAINS_LIMIT,
+};
 
 /// A single block of subagent response content — currently text-only, mirroring ACP's
 /// `ContentBlock`.
@@ -79,6 +84,14 @@ pub enum StopReason {
     /// produce still comes back: a cut answer is still work, and discarding it would make the
     /// caller re-run the turn to recover what it already said.
     MaxTokens,
+    /// The caller's condition on a tool call fired, and the turn stopped at that call — the
+    /// result already appended stays in the transcript, and the model is never sent it.
+    ///
+    /// A stop reason rather than an error for the same reason [`Self::MaxTurnRequests`] is one:
+    /// the caller asked to be handed control at exactly this point, so the work up to and
+    /// including the yielded call is the answer. The outcome names the fired condition and the
+    /// yielded tool message's id, which is the id a resume-with-replacement consumes.
+    YieldedToCaller,
 }
 
 /// Result of one [`SubagentSession::take_turn`] call — the loop's yield point.
@@ -99,6 +112,13 @@ pub struct PromptOutcome {
     /// [`SUBAGENT_MAX_TURNS_CEILING`] and was given the ceiling instead; `None` when the caller got
     /// what it asked for.
     pub clamped_max_turns: Option<u32>,
+    /// The condition that fired, when the turn stopped on [`StopReason::YieldedToCaller`] —
+    /// which condition, as the caller wrote it. `None` for every other stop reason.
+    pub fired_condition: Option<yield_condition::YieldCondition>,
+    /// The tool message's id the turn stopped at, when it stopped on
+    /// [`StopReason::YieldedToCaller`] — the id a resume-with-replacement names. `None` for
+    /// every other stop reason.
+    pub yielded_message_id: Option<MessageId>,
 }
 
 impl PromptOutcome {
@@ -111,6 +131,8 @@ impl PromptOutcome {
             usage,
             messages: Vec::new(),
             clamped_max_turns: None,
+            fired_condition: None,
+            yielded_message_id: None,
         }
     }
 }

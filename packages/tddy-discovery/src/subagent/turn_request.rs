@@ -31,6 +31,10 @@ pub struct TurnRequest {
     from_message: Option<MessageId>,
     correction: Option<String>,
     max_turns: Option<u32>,
+    /// The conditions on a tool call that stop this turn at that call and hand control back to
+    /// the caller ([`crate::subagent::yield_condition`]). For **this** turn only, never the
+    /// conversation.
+    yield_conditions: Vec<super::yield_condition::YieldCondition>,
 }
 
 impl TurnRequest {
@@ -71,6 +75,21 @@ impl TurnRequest {
     pub fn within_turns(mut self, max_turns: u32) -> Self {
         self.max_turns = Some(max_turns);
         self
+    }
+
+    /// Yield this turn back to the caller the moment one of `conditions` fires on a tool call —
+    /// for this call only, never the conversation.
+    pub fn with_yield_conditions(
+        mut self,
+        conditions: Vec<super::yield_condition::YieldCondition>,
+    ) -> Self {
+        self.yield_conditions = conditions;
+        self
+    }
+
+    /// The conditions this turn watches tool calls for; empty when the caller set none.
+    pub fn yield_conditions(&self) -> &[super::yield_condition::YieldCondition] {
+        &self.yield_conditions
     }
 
     /// The new question this request asks, if it asks one.
