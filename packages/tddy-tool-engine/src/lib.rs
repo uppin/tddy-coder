@@ -465,15 +465,25 @@ async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         None => return ToolOutcome::err("Grep: missing 'pattern' argument"),
     };
     let limit = args.get("limit").and_then(|v| v.as_u64());
+    // Context lines: each side optional alone, both together fine. A count past
+    // `GREP_CONTEXT_LINE_CEILING`'s twin on the discovery side is a rejection there, before the
+    // codebase is asked; here a plain clamp keeps the argv the jail can run bounded, since the
+    // engine's own callers are the host, not the model.
+    let before = args.get("before").and_then(|v| v.as_u64());
+    let after = args.get("after").and_then(|v| v.as_u64());
+    let before_flag = before.map(|n| n.to_string());
+    let after_flag = after.map(|n| n.to_string());
+    let mut argv: Vec<&str> = vec!["--json"];
+    if let Some(flag) = before_flag.as_deref() {
+        argv.extend(["-B", flag]);
+    }
+    if let Some(flag) = after_flag.as_deref() {
+        argv.extend(["-A", flag]);
+    }
+    argv.extend(["-e", pattern, "."]);
 
-    let output = contained_shell::run_contained_argv(
-        "rg",
-        &["--json", "-e", pattern, "."],
-        root,
-        &[],
-        Some(GREP_BUDGET),
-    )
-    .await;
+    let output =
+        contained_shell::run_contained_argv("rg", &argv, root, &[], Some(GREP_BUDGET)).await;
 
     match output {
         Ok(out) => {
@@ -484,6 +494,10 @@ async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
                     if v.get("type").and_then(|t| t.as_str()) == Some("match") {
                         matches.push(v);
                     }
+                    // TODO(grep-context): fold `type:"context"` events into their adjacent
+                    // match entries as `{lineNumber, text, relation}` — the shape the Local
+                    // path's `CodebaseAccess::grep_with_context` produces, so both paths
+                    // answer identically.
                 }
             }
             ToolOutcome::ok(

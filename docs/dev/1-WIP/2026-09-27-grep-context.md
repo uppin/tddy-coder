@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Stack:** `subagent-control` node 2 of 5 (`(#subagent-control 2/5)`), wave 1.
+**Stack:** `subagent-control` node 2 of 5 (`(#subagent-control 2/5)`), wave 1. **PR:** [#554](https://github.com/uppin/tddy-coder/pull/554) (draft).
 **Branch:** `feature/subagent-control/grep-context` · **Base:** `feature/subagent-control/tool-previews`
 
 **PRD:** [`2026-09-27-grep-context-prd.md`](2026-09-27-grep-context-prd.md)
@@ -153,10 +153,10 @@ Unit + integration:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — 3 engine + 3 local failures, each the missing context folding/computation; node 1's 13 inherited red tests also ride this branch and are #553's to green
+- [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

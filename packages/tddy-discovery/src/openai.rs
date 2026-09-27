@@ -188,6 +188,14 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
                         "limit": {
                             "type": "integer",
                             "description": "Maximum number of matches to return."
+                        },
+                        "before": {
+                            "type": "integer",
+                            "description": "Context lines to return before each match (0-50)."
+                        },
+                        "after": {
+                            "type": "integer",
+                            "description": "Context lines to return after each match (0-50)."
                         }
                     },
                     "required": ["pattern"]

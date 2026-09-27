@@ -21,6 +21,7 @@ use crate::openai::{
     ToolCall,
 };
 
+mod grep_context;
 mod repeated_calls;
 mod result_summary;
 mod tool_arguments;
@@ -29,6 +30,7 @@ mod turn_request;
 
 use transcript::Transcript;
 
+pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
@@ -373,6 +375,44 @@ impl CodebaseAccess {
                 });
                 if let Some(p) = path {
                     args["path"] = serde_json::Value::String(p.to_string());
+                }
+                let result = dispatch("Grep".to_string(), args).await;
+                Self::parse_dispatch_result(&result)
+            }
+        }
+    }
+
+    /// Search with context lines around each match — [`Self::grep_limited`] plus the
+    /// `before`/`after` window the call asked for ([`grep_context::GrepContext`]).
+    ///
+    /// Every match entry gains its `context` lines — `{lineNumber, text, relation}` each,
+    /// `before` then `after` in file order — while `truncated`/`total_matches` keep counting
+    /// matches, exactly as they do without context.
+    pub async fn grep_with_context(
+        &self,
+        pattern: &str,
+        path: Option<&str>,
+        limit: Option<u64>,
+        context: grep_context::GrepContext,
+    ) -> Result<serde_json::Value, SubagentError> {
+        match self {
+            CodebaseAccess::Local => {
+                // TODO(grep-context): compute the context windows from the file's lines, in the
+                // same shape the engine's event folding produces.
+                let _ = context;
+                self.grep_limited(pattern, path, limit).await
+            }
+            CodebaseAccess::Managed(dispatch) => {
+                let mut args = serde_json::json!({
+                    "pattern": pattern,
+                    "before": context.before,
+                    "after": context.after,
+                });
+                if let Some(p) = path {
+                    args["path"] = serde_json::Value::String(p.to_string());
+                }
+                if let Some(l) = limit {
+                    args["limit"] = serde_json::Value::from(l);
                 }
                 let result = dispatch("Grep".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
