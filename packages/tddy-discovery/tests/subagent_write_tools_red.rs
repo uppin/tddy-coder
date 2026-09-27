@@ -221,7 +221,7 @@ fn a_def_with_tools(name: &str, base_url: &str, tools: Vec<SubagentTool>) -> Spe
 }
 
 fn managed_config(access: CodebaseAccess) -> SubagentConfig {
-    SubagentConfig { access }
+    SubagentConfig::new(access)
 }
 
 /// A coder def that binds WRITE executes a model-issued WRITE through the managed dispatch fn —

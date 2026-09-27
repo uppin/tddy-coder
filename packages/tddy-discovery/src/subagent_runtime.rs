@@ -22,6 +22,14 @@ use tddy_service::proto::types::SessionAgentStatus;
 
 use crate::subagent::{PromptOutcome, SubagentError, SubagentSession, TurnRequest};
 
+/// One model call at a time per provider endpoint — the admission gate a turn passes through
+/// before it reaches the model, and the counts that make a wait for one visible.
+mod provider_queue;
+
+pub use provider_queue::{
+    ProviderAdmission, ProviderQueue, ProviderQueueError, ProviderSlot, DEFAULT_PROVIDER_WAIT,
+};
+
 /// The error envelope a subagent tool returns, so a failure is a *result* an agent can read rather
 /// than a transport error it never sees.
 ///
@@ -46,6 +54,13 @@ pub struct SubagentConversation {
     turns: u32,
     /// The model the session talks to, as it named itself at open.
     model: String,
+    /// The provider endpoint this conversation's turns are sent to, from the def it was opened
+    /// from. `None` for a conversation another daemon runs the loop of: the endpoint is real but
+    /// it is that daemon's, and nothing on this side can see it.
+    ///
+    /// From the def rather than read back through the session, for the reason the accounting
+    /// fields are: a turn in flight holds the session's lock.
+    provider: Option<String>,
     /// Token usage across the turns that have **ended**. A turn in flight has spent nothing this
     /// session can attribute to it yet.
     usage: crate::openai::TokenUsage,
@@ -65,9 +80,12 @@ pub struct SubagentConversation {
 }
 
 impl SubagentConversation {
-    /// Adopt a freshly opened session, taking its accounting identity from the session itself.
+    /// Adopt a freshly opened session, taking its accounting identity from the session itself and
+    /// the endpoint it talks to from `provider` — which the caller holds the def for and the
+    /// session does not report.
     pub fn opened(
         agent: String,
+        provider: Option<String>,
         session: Box<dyn SubagentSession>,
         remote: Option<crate::roster::RemoteConversationHandle>,
     ) -> Self {
@@ -75,11 +93,18 @@ impl SubagentConversation {
             agent,
             turns: 0,
             model: session.model().to_string(),
+            provider,
             usage: session.cumulative_usage(),
             context_tokens: session.context_tokens(),
             session: std::sync::Arc::new(tokio::sync::Mutex::new(session)),
             remote,
         }
+    }
+
+    /// The endpoint this conversation's turns go to, for registering one with
+    /// [`PendingTurns::start`]. `None` for a conversation another daemon runs.
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
     }
 }
 
@@ -152,6 +177,13 @@ pub enum TurnState {
 /// table.
 struct PendingTurn {
     conversation_id: String,
+    /// The provider endpoint this turn's model calls go to — the second thing a turn queues on,
+    /// and the one session 01a0e200 had no name for.
+    ///
+    /// `None` for a conversation whose loop runs on another daemon: the turn does reach a
+    /// provider, but this process cannot see which, and reporting one it guessed at would be
+    /// worse than reporting none.
+    provider: Option<String>,
     /// Where this turn came in the order prompts were **accepted** on this process — the sequence
     /// [`PendingTurns::start`] was called in. The table is a `HashMap`, which has no order of its
     /// own, so without this there is nothing to say which of two outstanding turns was asked for
@@ -183,11 +215,17 @@ pub struct PendingTurns {
 }
 
 impl PendingTurns {
-    /// Register a turn about to run on `conversation_id` under the id its caller will be given.
-    pub fn start(
+    /// Register a turn about to run on `conversation_id`, against `provider`, under the id its
+    /// caller will be given.
+    ///
+    /// `provider` is the endpoint the turn's model calls go to — an endpoint for a loop running
+    /// here, and `None` for one another daemon runs, which is why it is taken as an
+    /// `Option`-convertible rather than as a plain `&str`.
+    pub fn start<'a>(
         &mut self,
         response_id: &str,
         conversation_id: &str,
+        provider: impl Into<Option<&'a str>>,
         abort: tokio::task::AbortHandle,
     ) {
         let (publish, _) = tokio::sync::watch::channel(TurnState::Running);
@@ -197,6 +235,7 @@ impl PendingTurns {
             response_id.to_string(),
             PendingTurn {
                 conversation_id: conversation_id.to_string(),
+                provider: provider.into().map(str::to_string),
                 arrived,
                 publish,
                 abort,
@@ -231,12 +270,48 @@ impl PendingTurns {
     /// How many turns are outstanding on `conversation_id`, the one running included. `0` for a
     /// conversation with nothing in flight.
     ///
-    /// Per conversation, because a conversation is what a turn queues on: turns on two
-    /// conversations hold different session mutexes and wait for nothing of each other's.
+    /// Per conversation, because a conversation is **one** of the two things a turn queues on:
+    /// turns on two conversations hold different session mutexes, so neither waits for the
+    /// other's *history*. They may still wait for each other's **provider**, which this number
+    /// deliberately says nothing about — session 01a0e200 had one turn per conversation, reported
+    /// `queueSize: 1` on both, and one of them sat 38 minutes behind the other on the Ollama they
+    /// shared. [`Self::provider_queue_size`] is that missing dimension; this one is not wrong, it
+    /// is one short.
     pub fn queue_size(&self, conversation_id: &str) -> usize {
         self.turns
             .values()
             .filter(|turn| turn.conversation_id == conversation_id && turn.is_running())
+            .count()
+    }
+
+    /// How many turns accepted before `response_id` on the **same provider** have not ended — `0`
+    /// meaning nothing on that endpoint is ahead of it. `None` is an id this table never
+    /// registered, or one whose provider this process cannot see; neither is the front of the
+    /// line, and a `0` there would read as a turn about to run.
+    ///
+    /// Across conversations, unlike [`Self::queue_position`]: the endpoint is what two agents on
+    /// one local Ollama actually contend for, whether or not they share a conversation.
+    pub fn provider_queue_position(&self, response_id: &str) -> Option<usize> {
+        let turn = self.turns.get(response_id)?;
+        let provider = turn.provider.as_deref()?;
+        Some(
+            self.turns
+                .values()
+                .filter(|other| {
+                    other.provider.as_deref() == Some(provider)
+                        && other.arrived < turn.arrived
+                        && other.is_running()
+                })
+                .count(),
+        )
+    }
+
+    /// How many turns are outstanding on `provider`, the one running included. `0` for an endpoint
+    /// with nothing in flight.
+    pub fn provider_queue_size(&self, provider: &str) -> usize {
+        self.turns
+            .values()
+            .filter(|turn| turn.provider.as_deref() == Some(provider) && turn.is_running())
             .count()
     }
 
@@ -247,6 +322,14 @@ impl PendingTurns {
         self.turns
             .get(response_id)
             .map(|turn| turn.conversation_id.as_str())
+    }
+
+    /// The provider endpoint a deferred turn's model calls go to, for a caller holding only a
+    /// `responseId`. `None` for an unknown turn, and for one whose loop another daemon runs.
+    pub fn provider_of(&self, response_id: &str) -> Option<&str> {
+        self.turns
+            .get(response_id)
+            .and_then(|turn| turn.provider.as_deref())
     }
 
     /// A receiver for `response_id`, for a caller that wants to wait on it. `None` means no turn
@@ -355,6 +438,44 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
         object.insert("clampedMaxTurns".to_string(), serde_json::json!(clamped));
     }
     body.to_string()
+}
+
+/// `{responseId, pending: true, queuePosition, queueSize, provider, providerQueuePosition,
+/// providerQueueSize}` — the second shape a conversation tool can return, told apart from an
+/// outcome by a key an outcome never carries.
+///
+/// Here rather than in `tddy-tools`' `server.rs`, beside [`prompt_outcome_json`]: the two are the
+/// two answers a conversation tool can give, they are read as a pair by every caller of either,
+/// and both are built out of this module's own table.
+///
+/// The queue numbers are read **here**, as the receipt is written, so a `subagent_await` that
+/// hands one back reports where the turn stands now rather than where it stood when it was
+/// accepted — which is the number a caller polling for progress is asking for.
+///
+/// `queuePosition`/`queueSize` are the conversation's line: turns accepted before this one on the
+/// same conversation that are still outstanding, and every outstanding turn on it.
+/// `provider`/`providerQueuePosition`/`providerQueueSize` are the endpoint's, across
+/// conversations — the dimension whose absence let session 01a0e200 report a turn that had waited
+/// 38 minutes without executing a token as `queuePosition: 0, queueSize: 1`, which was accurate
+/// and completely misleading.
+///
+/// Every one of them is `null` for a turn `pending` does not hold: that is "no queue to report",
+/// which a `0` would misstate as the front of the line. The three provider fields are `null` too
+/// for a conversation another daemon runs, whose endpoint this process cannot see.
+pub fn pending_turn_json(pending: &PendingTurns, response_id: &str) -> String {
+    let provider = pending.provider_of(response_id);
+    serde_json::json!({
+        "responseId": response_id,
+        "pending": true,
+        "queuePosition": pending.queue_position(response_id),
+        "queueSize": pending
+            .conversation_of(response_id)
+            .map(|conversation_id| pending.queue_size(conversation_id)),
+        "provider": provider,
+        "providerQueuePosition": pending.provider_queue_position(response_id),
+        "providerQueueSize": provider.map(|provider| pending.provider_queue_size(provider)),
+    })
+    .to_string()
 }
 
 /// One conversation as the shared [`tddy_core::token_accounting::ConversationRecord`] shape used by
@@ -599,6 +720,12 @@ mod tests {
     use crate::openai::TokenUsage;
     use crate::subagent::{ContentBlock, StopReason};
 
+    /// The endpoint the turns in these tests run against. One provider throughout: what they pin
+    /// is the *conversation* dimension, and a second endpoint here would only obscure it — the
+    /// provider dimension has tests of its own in
+    /// `tests/subagent_provider_queue_visibility_red.rs`.
+    const A_PROVIDER: &str = "http://127.0.0.1:11434";
+
     /// A task that will never finish on its own — the abort handle a registered turn is held by,
     /// with nothing else about a real turn to get in the way.
     fn a_turn_still_running() -> tokio::task::AbortHandle {
@@ -630,7 +757,7 @@ mod tests {
         let mut pending = PendingTurns::default();
 
         // When a turn is registered
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
 
         // Then it is the one running, not one waiting
         assert_eq!(pending.queue_position("response-1"), Some(0));
@@ -641,11 +768,11 @@ mod tests {
     async fn each_further_turn_queues_behind_the_ones_accepted_before_it() {
         // Given a conversation already working
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
 
         // When two more prompts are accepted on it
-        pending.start("response-2", "conv-1", a_turn_still_running());
-        pending.start("response-3", "conv-1", a_turn_still_running());
+        pending.start("response-2", "conv-1", A_PROVIDER, a_turn_still_running());
+        pending.start("response-3", "conv-1", A_PROVIDER, a_turn_still_running());
 
         // Then each is told how many were accepted ahead of it. This is the number whose absence
         // had a caller fire ten prompts at one conversation and then call the queue a bug.
@@ -658,8 +785,8 @@ mod tests {
     async fn a_queue_is_per_conversation_and_not_a_process_wide_line() {
         // Given turns on two different conversations
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-        pending.start("response-2", "conv-2", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
+        pending.start("response-2", "conv-2", A_PROVIDER, a_turn_still_running());
 
         // Then neither waits on the other — they hold different session mutexes, so a shared count
         // would report a delay that does not exist
@@ -672,9 +799,9 @@ mod tests {
     async fn the_queue_drains_as_earlier_turns_finish() {
         // Given a turn waiting behind two others
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
-        pending.start("response-2", "conv-1", a_turn_still_running());
-        pending.start("response-3", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
+        pending.start("response-2", "conv-1", A_PROVIDER, a_turn_still_running());
+        pending.start("response-3", "conv-1", A_PROVIDER, a_turn_still_running());
 
         // When the one in front finishes
         pending.resolve(
@@ -699,13 +826,42 @@ mod tests {
         assert_eq!(pending.queue_size("conv-1"), 0);
     }
 
+    /// The whole contract the tool description promises rests on one key: a caller that reads
+    /// `pending` knows it holds a receipt rather than an answer. If a deferral could be mistaken
+    /// for an outcome — or an outcome for a deferral — every caller of either is wrong.
+    #[test]
+    fn an_outcome_and_a_deferral_are_told_apart_by_the_pending_key() {
+        // Given one of each
+        let outcome: serde_json::Value = serde_json::from_str(&prompt_outcome_json(
+            an_end_turn_outcome("src/auth.rs:1-50"),
+        ))
+        .expect("an outcome must serialize to JSON");
+        let deferral: serde_json::Value =
+            serde_json::from_str(&pending_turn_json(&PendingTurns::default(), "response-1"))
+                .expect("a deferral must serialize to JSON");
+
+        // Then the outcome carries no trace of the deferred shape
+        assert!(
+            outcome.get("pending").is_none() && outcome.get("responseId").is_none(),
+            "a turn that yielded must return the outcome shape verbatim; got: {outcome}"
+        );
+
+        // And the deferral carries no trace of an answer, only the id that will produce one
+        assert_eq!(deferral["pending"].as_bool(), Some(true));
+        assert_eq!(deferral["responseId"].as_str(), Some("response-1"));
+        assert!(
+            deferral.get("stopReason").is_none() && deferral.get("content").is_none(),
+            "a deferred turn has not stopped and has said nothing; got: {deferral}"
+        );
+    }
+
     /// Registering a turn is what makes its id answerable at all — before it resolves, the honest
     /// answer to "is it done" is "no", not "I have never heard of it".
     #[tokio::test]
     async fn a_started_turn_is_watchable_and_reads_as_running() {
         // Given a turn registered against its conversation
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
 
         // When a caller asks to watch it
         let watched = pending
@@ -722,7 +878,7 @@ mod tests {
     async fn resolving_a_turn_answers_everyone_watching_it() {
         // Given two callers already watching one running turn
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
         let first = pending
             .watch("response-1")
             .expect("a started turn must be watchable");
@@ -748,7 +904,7 @@ mod tests {
     async fn a_resolved_turn_stays_claimable() {
         // Given a turn that has already ended and been collected once
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
         pending.resolve(
             "response-1",
             prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),
@@ -775,7 +931,7 @@ mod tests {
     async fn a_turn_nobody_started_is_unknown_rather_than_running() {
         // Given a table with one turn in it
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
 
         // When a caller asks about an id that was never handed out
         let watched = pending.watch("response-that-never-was");
@@ -793,9 +949,24 @@ mod tests {
     async fn cancelling_a_conversation_resolves_every_turn_it_had_in_flight() {
         // Given two turns running on one conversation and one on another
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-doomed", a_turn_still_running());
-        pending.start("response-2", "conv-doomed", a_turn_still_running());
-        pending.start("response-3", "conv-untouched", a_turn_still_running());
+        pending.start(
+            "response-1",
+            "conv-doomed",
+            A_PROVIDER,
+            a_turn_still_running(),
+        );
+        pending.start(
+            "response-2",
+            "conv-doomed",
+            A_PROVIDER,
+            a_turn_still_running(),
+        );
+        pending.start(
+            "response-3",
+            "conv-untouched",
+            A_PROVIDER,
+            a_turn_still_running(),
+        );
 
         // When the first conversation is closed
         pending.cancel_conversation("conv-doomed", "the agent was detached");
@@ -827,7 +998,7 @@ mod tests {
     async fn a_turn_whose_id_was_never_handed_out_is_forgotten() {
         // Given a turn that resolved before its caller gave up waiting
         let mut pending = PendingTurns::default();
-        pending.start("response-1", "conv-1", a_turn_still_running());
+        pending.start("response-1", "conv-1", A_PROVIDER, a_turn_still_running());
         pending.resolve(
             "response-1",
             prompt_outcome_json(an_end_turn_outcome("src/auth.rs:1-50")),

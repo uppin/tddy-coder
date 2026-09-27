@@ -124,8 +124,12 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "READ".to_string(),
-                description: "Read a file and return its contents with line numbers. Long files \
-                    are truncated to a line cap; page through them with offset/limit."
+                description: "Read a file and return its contents with line numbers. The WHOLE \
+                    file comes back unless you choose a window: `offset` and `limit` are yours \
+                    to set, and nothing is trimmed on your behalf. Every result carries \
+                    `total_lines` (the file's real length) and `truncated` (whether lines follow \
+                    your window), so when you take a window of a large file, advance `offset` by \
+                    your `limit` to read the next one. Repeating a window returns the same lines."
                     .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -133,11 +137,15 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
                         "path": { "type": "string", "description": "File path to read." },
                         "offset": {
                             "type": "integer",
-                            "description": "0-based line to start reading from (default 0)."
+                            "description": "0-based line to start reading from. Default 0. To \
+                                continue after a truncated read, set this to the previous \
+                                offset plus the previous limit."
                         },
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of lines to return."
+                            "description": "How many lines to return. Default: every line from \
+                                `offset` to the end of the file. Set it only when you want part \
+                                of a large file rather than all of it."
                         }
                     },
                     "required": ["path"]
@@ -148,11 +156,18 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "GLOB".to_string(),
-                description: "Return file paths matching a glob pattern.".to_string(),
+                description: "Return file paths matching a glob pattern. Long match sets are \
+                    truncated to a path cap; narrow the pattern, or ask for a different window \
+                    with limit."
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
-                        "pattern": { "type": "string", "description": "Glob pattern." }
+                        "pattern": { "type": "string", "description": "Glob pattern." },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of paths to return."
+                        }
                     },
                     "required": ["pattern"]
                 }),
@@ -162,12 +177,18 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "GREP".to_string(),
-                description: "Search files with a regex pattern.".to_string(),
+                description: "Search files with a regex pattern. Long result sets are truncated \
+                    to a match cap; narrow the pattern, or ask for a different window with limit."
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "pattern": { "type": "string", "description": "Regex pattern." },
-                        "path": { "type": "string", "description": "Optional path to search in." }
+                        "path": { "type": "string", "description": "Optional path to search in." },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of matches to return."
+                        }
                     },
                     "required": ["pattern"]
                 }),
@@ -323,6 +344,15 @@ pub struct ChatCompletionRequest {
     pub tools: Vec<ToolDefinition>,
     pub tool_choice: serde_json::Value,
     pub temperature: f32,
+    /// The greatest number of tokens the provider may generate for this turn, or `None` to let
+    /// it generate until it stops of its own accord.
+    ///
+    /// Omitted from the body entirely when `None`, so a caller that sets no bound sends exactly
+    /// the request it always did. A turn the provider cut at this bound comes back with
+    /// `finish_reason: "length"`, which is the only way a caller can tell a truncated answer from
+    /// a finished one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
 }
 
 /// Response from `/v1/chat/completions`.
@@ -530,6 +560,7 @@ mod tests {
             tools: read_glob_grep_tools(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         };
 
         // When
@@ -589,6 +620,7 @@ mod tests {
             tools: read_glob_grep_tools(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         };
 
         // When
@@ -677,6 +709,7 @@ mod tests {
             tools: Vec::new(),
             tool_choice: serde_json::json!("auto"),
             temperature: 0.0,
+            max_tokens: None,
         }
     }
 }

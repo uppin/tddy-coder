@@ -368,6 +368,7 @@ pub fn agent_stop_reason(reason: tddy_discovery::subagent::StopReason) -> &'stat
         tddy_discovery::subagent::StopReason::MaxTurnRequests => "MaxTurnRequests",
         tddy_discovery::subagent::StopReason::Cancelled => "Cancelled",
         tddy_discovery::subagent::StopReason::ContextExhausted => "ContextExhausted",
+        tddy_discovery::subagent::StopReason::MaxTokens => "MaxTokens",
     }
 }
 
@@ -438,7 +439,13 @@ fn message_descriptor(described: &MessageDescriptor) -> AgentMessageDescriptor {
         id: described.id.to_string(),
         role: agent_message_role(described.role).to_string(),
         tool: described.tool.clone().unwrap_or_default(),
-        tool_calls: described.tool_calls.clone(),
+        // Names only: `tool_calls` is a `repeated string` here. See the TODO on
+        // `tddy_discovery::roster::conversation::parse_message_descriptor`, which reads it back.
+        tool_calls: described
+            .tool_calls
+            .iter()
+            .map(|call| call.name.clone())
+            .collect(),
         is_error: described.is_error,
         preview: described.preview.clone(),
     }

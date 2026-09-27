@@ -102,9 +102,7 @@ fn a_def(base_url: &str, max_turns: u32) -> SpecializedAgentDef {
 }
 
 fn a_local_config() -> SubagentConfig {
-    SubagentConfig {
-        access: CodebaseAccess::Local,
-    }
+    SubagentConfig::new(CodebaseAccess::Local)
 }
 
 /// The chat messages of the request that carried `prompt`, found by the prompt text rather than by

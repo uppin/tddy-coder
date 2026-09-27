@@ -223,6 +223,7 @@ impl ProviderAcpAgent {
             tools,
             tool_choice: serde_json::json!("auto"),
             temperature: TEMPERATURE,
+            max_tokens: None,
         };
         let response = self.client.complete(request).await.map_err(|e| {
             provider_error(format!("provider {} failed: {e}", self.config.base_url))

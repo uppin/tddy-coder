@@ -352,6 +352,7 @@ async fn remote_tool_grep(shell: &dyn Shell, args: &serde_json::Value) -> ToolOu
         Some(p) => p,
         None => return ToolOutcome::err("Grep: missing 'pattern' argument"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64());
     let quoted = shell_single_quote(pattern);
     let cmd = format!("rg --json -e {} .", quoted);
     match shell.run(&cmd).await {
@@ -365,7 +366,10 @@ async fn remote_tool_grep(shell: &dyn Shell, args: &serde_json::Value) -> ToolOu
                     }
                 }
             }
-            ToolOutcome::ok(serde_json::json!({ "matches": matches }).to_string())
+            ToolOutcome::ok(
+                crate::search_window::result_window(matches, limit, "matches", "total_matches")
+                    .to_string(),
+            )
         }
         Err(e) => ToolOutcome::err(format!("Grep: rg execution failed: {e}")),
     }
@@ -376,6 +380,7 @@ async fn remote_tool_glob(shell: &dyn Shell, args: &serde_json::Value) -> ToolOu
         Some(p) => p,
         None => return ToolOutcome::err("Glob: missing 'pattern' argument"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64());
     let quoted = shell_single_quote(pattern);
     let cmd = format!(
         "find . -path ./{} -prune -o -name {} -print | sed 's|^\\./||'",
@@ -384,13 +389,16 @@ async fn remote_tool_glob(shell: &dyn Shell, args: &serde_json::Value) -> ToolOu
     match shell.run(&cmd).await {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
-            let paths: Vec<String> = stdout
+            let paths: Vec<serde_json::Value> = stdout
                 .lines()
                 .map(str::trim)
                 .filter(|l| !l.is_empty())
-                .map(str::to_string)
+                .map(|l| serde_json::Value::String(l.to_string()))
                 .collect();
-            ToolOutcome::ok(serde_json::json!({ "paths": paths }).to_string())
+            ToolOutcome::ok(
+                crate::search_window::result_window(paths, limit, "paths", "total_paths")
+                    .to_string(),
+            )
         }
         Err(e) => ToolOutcome::err(format!("Glob: {e}")),
     }

@@ -137,6 +137,7 @@ impl CodingBackend for SpecializedAgentBackend {
                 tools: tools.clone(),
                 tool_choice: serde_json::json!("auto"),
                 temperature: 0.0,
+                max_tokens: None,
             };
 
             let request_started = std::time::Instant::now();

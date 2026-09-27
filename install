@@ -45,7 +45,10 @@
 #   --build     Optional. Run ./release before copying binaries. With --desktop it runs
 #               ./release --desktop, which additionally builds the tddy-web bundle and then the
 #               application itself, because the .app embeds that bundle rather than reading it
-#               from disk.
+#               from disk. It builds ONLY what this script installs — the .app on macOS, the
+#               binary on Linux — and not the dmg/deb/appimage installers, which nothing here
+#               copies and which on macOS fail without Finder Automation permission. Run
+#               `./release --desktop --installers` directly when you want those.
 #   --user      Optional. Install as a per-user systemd service (systemctl --user) instead of a
 #               system service. No root required: paths default to XDG user locations
 #               (~/.local/bin, ~/.config/tddy, ~/.config/systemd/user, ...), the unit runs as the
@@ -781,6 +784,9 @@ install_desktop() {
     # daemon spawns, the web bundle the application EMBEDS, and then the application itself. The
     # sequence lives there rather than here so that building without installing produces exactly
     # what this install pre-flights for, with no second copy of the order to drift.
+    # Deliberately without --installers: this script copies the .app (macOS) or the binary
+    # (Linux) and never a dmg/deb/appimage, so building them here could only fail for an artifact
+    # nobody asked for — which is exactly what it did, after producing everything it would install.
     echo "install: --build — running ${ROOT_DIR}/release --desktop"
     "${ROOT_DIR}/release" --desktop
   fi

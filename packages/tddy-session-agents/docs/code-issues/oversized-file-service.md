@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-session-agents/src/service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — `/pr-wrap` step 3.5 file-length gate on PR #545
-**Metrics:** **1,055 production lines** (counted to the module-level `#[cfg(test)]`) · budget 500 ·
+**Metrics:** **1,062 production lines** (counted to the module-level `#[cfg(test)]`) · budget 500 ·
 **2.1× over**
-**Thresholds breached:** length 1,055 > 500
+**Thresholds breached:** length 1,062 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
 
@@ -16,6 +16,7 @@
 | 2026-09-26 | 877 | first detection, at PR #545's merge-base |
 | 2026-09-26 | 1,055 | +178 in PR #545: `ResumeAgentConversation`, the shared `take_a_turn`, `TurnOnAConversation`, and the message-descriptor frame builders |
 
+| 2026-09-27 | 1,062 | **regressed** by 7. The `MaxTokens` stop reason gained its wire spelling, with a `TODO` noting that `AgentMessageDescriptor.tool_calls` still carries tool *names* only — so a turn run on a remote daemon reports empty tool-call arguments |
 ## What the tool found
 
 `wc -l` to the module-level `#[cfg(test)]`, which is how the `oversized-file` category is defined.

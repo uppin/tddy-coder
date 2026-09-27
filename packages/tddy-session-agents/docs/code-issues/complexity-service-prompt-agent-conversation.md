@@ -15,6 +15,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 113 | 6 | 4 | 7 | first detection |
 
+| 2026-09-27 | 113 | 6 | — | — | **unchanged.** `service.rs` was edited in the same change (stop-reason mapping, +7 lines) but not this body. Re-measured by hand, not by `/analyze-clean-code`, so the branch and early-exit columns are not restated |
 ## What the tool found
 
 The body is **113 lines**, 1.9x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.

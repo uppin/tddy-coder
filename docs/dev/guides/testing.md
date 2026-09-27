@@ -42,6 +42,58 @@ There is no partial success rate. The only production-ready rate is 100% passing
 
 ## Anti-Patterns
 
+### Workflow Names in Test or File Names
+
+A test is named for **what it tests**. The command, phase or changeset that happened to produce it
+is not part of its subject, and none of it stays true: every test here was once red, so `_red`
+distinguishes nothing — it records which command the author typed.
+
+This applies to the **file name** exactly as it does to the test name. A `*_red.rs` file is the
+same mistake as `#[test] fn red_phase_rejects_expired_cards`, with the phase moved one level out
+where it is more visible and harder to grep away.
+
+```
+// WRONG — names the ritual, the paperwork, or the category
+packages/tddy-discovery/tests/provider_queue_red.rs
+packages/tddy-tools/tests/pr433_scheduling.rs
+packages/tddy-core/tests/phase2_migration.rs
+packages/tddy-tools/tests/relay_dispatch_acceptance.rs
+#[test] fn green_phase_admits_the_waiting_caller()
+
+// RIGHT — names the subject
+packages/tddy-discovery/tests/provider_queue.rs
+packages/tddy-tools/tests/request_scheduling.rs
+packages/tddy-core/tests/schema_migration.rs
+packages/tddy-tools/tests/relay_dispatch.rs
+#[test] fn releasing_the_slot_admits_the_caller_that_was_waiting()
+```
+
+### `unit`, `integration` and `e2e` are legitimate markers
+
+They say what a reader needs before opening the file: the scope and cost of the test — what it
+touches, how slow it is, what a failure implicates. That is real information about the test, and
+unlike a phase it stays true for the file's whole life. Keep them.
+
+`session_store_unit_tests.rs`, `pr_stack_integration.rs`, `login_flow_e2e.rs` are all fine names.
+
+### `acceptance` is not one of them
+
+It names no level on that scale. In this repo it is attached to **348** files that are
+overwhelmingly ordinary integration tests, so it partitions nothing — it only crowds out the words
+that would have said what the file covers. If the file is an integration test, mark it
+`integration` or leave it unmarked; if it earns a marker, use one that narrows something.
+
+`_test` / `_tests` on a file already inside `tests/` is redundant rather than wrong. Drop it when
+renaming anyway; it is not what this rule is about.
+
+Suffixes a runner discovers by always stay: `.test.ts`, `.test.tsx`, `.cy.ts`, `.cy.tsx` — those
+are mechanical, not descriptive.
+
+**Legacy names are not a licence.** 374 test files in `packages/` carry a name this rule
+disallows — 348 `*_acceptance.rs` and 26 `*_red.rs`. Do not add to them. Do not mass-rename them
+as a drive-by either: a rename churns history and belongs in its own commit. See
+[2026-09-27-test-files-are-named-after-the-workflow-that-made-them.md](../todo/2026-09-27-test-files-are-named-after-the-workflow-that-made-them.md).
+
 ### Conditional Test Skipping
 
 ```rust

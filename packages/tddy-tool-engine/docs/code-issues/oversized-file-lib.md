@@ -4,9 +4,8 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **787 production lines** (of 846 total; the `#[cfg(test)]` module opens at `:788`) ·
-budget 500 · **1.6× over**
-**Thresholds breached:** length 787 > 500
+**Metrics:** **805 production lines** · budget 500 · **1.6× over**
+**Thresholds breached:** length 805 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
 
@@ -18,6 +17,7 @@ budget 500 · **1.6× over**
 | 2026-09-26 | 787 | after the M2/M5 fix: the three spawn sites became `contained_shell.rs` and the read window `read_window.rs`, so the two additions left the parent six lines *shorter* rather than longer |
 | 2026-09-26 | 789 | **improved.** Two extractions — `contained_shell.rs` (128) and `read_window.rs` (46) — took out more than the shell hardening and `Read` windowing put in |
 
+| 2026-09-27 | 805 | **regressed.** `tool_glob`/`tool_grep` now read `limit` and answer through the new `search_window.rs` (45 production lines), which absorbed the windowing itself; the +8 here is the two call sites reading the argument and passing the totals through |
 ## What the tool found
 
 Hand measurement: 793 production lines. The `#[cfg(test)]` at `:741` is an inner attribute inside a

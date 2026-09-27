@@ -1,9 +1,16 @@
-//! Unit tests: a subagent's un-windowed READ must bound how much file content it feeds back into
-//! the model's context — the root cause of the fastcontext runaway in session 019f2d14, where 129
-//! whole-file READs ballooned a 32k-token window (3 KB → 100 KB) and produced 100s-long prefill
-//! spikes. A file longer than the default cap must come back capped, flagged truncated, with the
-//! file's true length reported so the model can page instead of re-reading blindly. The READ tool
-//! schema must also advertise `offset`/`limit` so the model knows paging is possible.
+//! Unit tests: a subagent's READ returns the window the model asked for — and, when it asked for
+//! none, the whole file.
+//!
+//! This layer used to substitute a 200-line cap for an absent `limit`, added after session
+//! 019f2d14 where 129 whole-file READs ballooned a 32k window. It was removed after session
+//! 01a0e285 showed the other side of that trade: capping only helps a model that then *pages*,
+//! and this one re-read the first 200 lines of a 960-line file **nine times**, each turn
+//! re-sending a history that already held the answer, with latency climbing 6s → 168s. A cap the
+//! model did not ask for is one it cannot reason about.
+//!
+//! What remains is the machinery that lets a model bound its own reads, which is the part worth
+//! keeping: `offset`/`limit` honoured exactly as given, `truncated` and `total_lines` on every
+//! result, and both advertised in the tool schema so paging is discoverable.
 //!
 //! Root-cause: packages/tddy-discovery/src/subagent.rs (`CodebaseAccess::read`) and
 //! packages/tddy-discovery/src/openai.rs (`discovery_tool_definitions`).
@@ -11,12 +18,11 @@
 use tddy_discovery::openai::discovery_tool_definitions;
 use tddy_discovery::subagent::CodebaseAccess;
 
-/// Default number of lines a single un-windowed READ returns before truncating. A file longer than
-/// this must come back capped, with `truncated: true`, so the context can't blow up in one call.
-const DEFAULT_READ_LINE_CAP: usize = 200;
+/// A window small enough that the fixtures below have lines on both sides of it.
+const A_WINDOW: usize = 200;
 
 /// A deterministic file body of `count` lines: `line 0`, `line 1`, … `line {count-1}`, joined with
-/// newlines and no trailing newline — so the capped prefix is an exact substring we can assert on.
+/// newlines and no trailing newline — so a returned window is an exact substring we can assert on.
 fn numbered_lines(count: usize) -> String {
     (0..count)
         .map(|i| format!("line {i}"))
@@ -75,11 +81,11 @@ impl ReadResult {
     }
 }
 
-// ─── Default cap ─────────────────────────────────────────────────────────────
+// ─── The model owns the window ───────────────────────────────────────────────
 
-/// A file longer than the default cap comes back capped — not the whole file dumped into context.
+/// No window asked for, no window imposed — however long the file is.
 #[tokio::test]
-async fn read_caps_a_file_longer_than_the_default_line_limit() {
+async fn an_unwindowed_read_returns_the_whole_file_however_long_it_is() {
     // Given — a 500-line file, read with no explicit window
     let (_dir, path) = a_file_containing(&numbered_lines(500));
 
@@ -89,17 +95,37 @@ async fn read_caps_a_file_longer_than_the_default_line_limit() {
         .await
         .expect("READ of an existing file must succeed");
 
-    // Then — only the first 200 lines come back, flagged truncated, with the true length reported
+    // Then — all of it comes back, and nothing claims to have been left out
     read_result(result)
-        .has_content(&numbered_lines(DEFAULT_READ_LINE_CAP))
+        .has_content(&numbered_lines(500))
+        .is_truncated(false)
+        .has_total_lines(500);
+}
+
+/// The window the model *does* ask for is honoured exactly, and the result says what it missed —
+/// which is what makes paging possible for a model that chooses to page.
+#[tokio::test]
+async fn a_read_windowed_by_the_model_returns_that_window_and_reports_the_rest() {
+    // Given — a 500-line file, read with an explicit window
+    let (_dir, path) = a_file_containing(&numbered_lines(500));
+
+    // When
+    let result = CodebaseAccess::Local
+        .read_window(&path, Some(0), Some(A_WINDOW as u64))
+        .await
+        .expect("READ of an existing file must succeed");
+
+    // Then — exactly that window, flagged truncated, with the file's true length
+    read_result(result)
+        .has_content(&numbered_lines(A_WINDOW))
         .is_truncated(true)
         .has_total_lines(500);
 }
 
-/// A file within the cap comes back verbatim and is explicitly marked not truncated.
+/// A short file comes back verbatim and is explicitly marked not truncated.
 #[tokio::test]
 async fn read_returns_a_file_within_the_cap_verbatim_and_not_truncated() {
-    // Given — a 2-line file, comfortably under the cap
+    // Given — a 2-line file
     let body = "fn main() {}\nfn helper() {}";
     let (_dir, path) = a_file_containing(body);
 

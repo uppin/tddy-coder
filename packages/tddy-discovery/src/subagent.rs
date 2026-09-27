@@ -21,12 +21,16 @@ use crate::openai::{
     ToolCall,
 };
 
+mod tool_arguments;
 mod transcript;
 mod turn_request;
 
 use transcript::Transcript;
 
-pub use transcript::{MessageDescriptor, MessageId, MessageRole, MESSAGE_PREVIEW_CHARS};
+pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
+pub use transcript::{
+    MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
+};
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 
 /// A single block of subagent response content — currently text-only, mirroring ACP's
@@ -61,6 +65,14 @@ pub enum StopReason {
     /// condition this conversation can recover from — its history is still oversized, so every
     /// further prompt re-sends it — so the outcome carries a handoff brief for a fresh one.
     ContextExhausted,
+    /// The provider stopped generating because the turn hit [`SUBAGENT_MAX_OUTPUT_TOKENS`].
+    ///
+    /// Mirrors ACP's `max_tokens`. `finish_reason` was parsed and only logged until this existed,
+    /// so a model cut off mid-sentence produced an outcome shaped exactly like a finished one —
+    /// a truncated answer a caller had no way to tell from a whole one. What the model did
+    /// produce still comes back: a cut answer is still work, and discarding it would make the
+    /// caller re-run the turn to recover what it already said.
+    MaxTokens,
 }
 
 /// Result of one [`SubagentSession::take_turn`] call — the loop's yield point.
@@ -215,7 +227,7 @@ impl CodebaseAccess {
     /// Read a line window of a file, bounding how much content flows back into the model's context.
     ///
     /// `offset` is a 0-based starting line (default 0); `limit` is the maximum number of lines
-    /// (default [`DEFAULT_READ_LINE_CAP`]). The result carries `truncated` (true when more lines
+    /// (default: every line that remains). The result carries `truncated` (true when more lines
     /// follow the returned window) and `total_lines` (the file's true length) so the model can page
     /// with a follow-up `offset` instead of blindly re-reading. An un-windowed read of a file within
     /// the cap returns its bytes verbatim.
@@ -232,52 +244,101 @@ impl CodebaseAccess {
                 Ok(window_content(&content, offset, limit))
             }
             CodebaseAccess::Managed(dispatch) => {
-                // The window is **resolved here**, not forwarded as the caller wrote it. On this
-                // path the file crosses the wire before anything on this side could trim it, so an
-                // absent `limit` has to become the cap *in the request* — a cap applied after the
-                // transfer bounds the context but not the wire, and a cap the daemon never hears
-                // about bounds neither. `CodebaseAccess::Local` reaches the same defaults the other
-                // way round, in `window_content`, because there the bytes are already in hand.
-                let args = serde_json::json!({
-                    "path": path,
-                    "offset": offset.unwrap_or(0),
-                    "limit": limit.unwrap_or(DEFAULT_READ_LINE_CAP as u64),
-                });
+                // Forwarded exactly as the model wrote it — including the absence of a window.
+                // This layer used to substitute a 200-line cap for a missing `limit`, which made
+                // an un-windowed read of a 960-line file return its first 200 lines with
+                // `truncated: true`. A model that does not then page re-reads the same window
+                // instead, and session 01a0e285 did precisely that nine times on one file while
+                // its turn latency grew from 6s to 168s. Choosing the window is the model's job;
+                // this layer's job is to carry the choice faithfully, and `truncated` /
+                // `total_lines` come back either way so a model that does page still can.
+                let mut args = serde_json::json!({ "path": path });
+                if let Some(offset) = offset {
+                    args["offset"] = offset.into();
+                }
+                if let Some(limit) = limit {
+                    args["limit"] = limit.into();
+                }
                 let result = dispatch("Read".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
             }
         }
     }
 
+    /// Match a glob with the default path cap and no explicit window — a thin alias for
+    /// `glob_limited(pattern, None)`.
     pub async fn glob(&self, pattern: &str) -> Result<serde_json::Value, SubagentError> {
+        self.glob_limited(pattern, None).await
+    }
+
+    /// Match a glob, bounding how many paths flow back into the model's context.
+    ///
+    /// `limit` is the greatest number of paths to return (default [`DEFAULT_GLOB_PATH_CAP`]). The
+    /// result carries `truncated` (true when more paths follow the window) and `total_paths` (the
+    /// match set's true size) so the model can narrow its pattern, or ask for a different window,
+    /// instead of re-searching blind.
+    ///
+    /// The window resolves exactly the way [`Self::read_window`]'s does, and for the same reason:
+    /// on the **managed** path the cap goes *into the request*, because the paths cross the wire
+    /// before anything here could trim them — a cap applied after the transfer bounds the context
+    /// but not the wire, and a cap the daemon never hears about bounds neither. On **Local** the
+    /// paths are already in hand, so the cap is applied to them.
+    pub async fn glob_limited(
+        &self,
+        pattern: &str,
+        limit: Option<u64>,
+    ) -> Result<serde_json::Value, SubagentError> {
         match self {
             CodebaseAccess::Local => {
-                let mut paths: Vec<String> = Vec::new();
+                let mut paths: Vec<serde_json::Value> = Vec::new();
                 for entry in glob::glob(pattern)
                     .map_err(|e| SubagentError(format!("GLOB pattern error: {e}")))?
                     .flatten()
                 {
                     if let Some(s) = entry.to_str() {
-                        paths.push(s.to_string());
+                        paths.push(serde_json::Value::String(s.to_string()));
                     }
                 }
-                Ok(serde_json::json!({ "paths": paths }))
+                Ok(capped_results(
+                    paths,
+                    limit,
+                    DEFAULT_GLOB_PATH_CAP,
+                    "paths",
+                    "total_paths",
+                ))
             }
             CodebaseAccess::Managed(dispatch) => {
-                let result = dispatch(
-                    "Glob".to_string(),
-                    serde_json::json!({ "pattern": pattern }),
-                )
-                .await;
+                let args = serde_json::json!({
+                    "pattern": pattern,
+                    "limit": limit.unwrap_or(DEFAULT_GLOB_PATH_CAP as u64),
+                });
+                let result = dispatch("Glob".to_string(), args).await;
                 Self::parse_dispatch_result(&result)
             }
         }
     }
 
+    /// Search with the default match cap and no explicit window — a thin alias for
+    /// `grep_limited(pattern, path, None)`.
     pub async fn grep(
         &self,
         pattern: &str,
         path: Option<&str>,
+    ) -> Result<serde_json::Value, SubagentError> {
+        self.grep_limited(pattern, path, None).await
+    }
+
+    /// Search, bounding how many matches flow back into the model's context.
+    ///
+    /// `limit` is the greatest number of matches to return (default
+    /// [`DEFAULT_GREP_MATCH_CAP`]); `truncated` and `total_matches` report what the window left
+    /// out. The window resolves the same two ways [`Self::glob_limited`]'s does, for the same
+    /// reason.
+    pub async fn grep_limited(
+        &self,
+        pattern: &str,
+        path: Option<&str>,
+        limit: Option<u64>,
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
             CodebaseAccess::Local => {
@@ -293,10 +354,19 @@ impl CodebaseAccess {
                 } else {
                     grep_dir(&re, search_path, &mut matches);
                 }
-                Ok(serde_json::json!({ "matches": matches }))
+                Ok(capped_results(
+                    matches,
+                    limit,
+                    DEFAULT_GREP_MATCH_CAP,
+                    "matches",
+                    "total_matches",
+                ))
             }
             CodebaseAccess::Managed(dispatch) => {
-                let mut args = serde_json::json!({ "pattern": pattern });
+                let mut args = serde_json::json!({
+                    "pattern": pattern,
+                    "limit": limit.unwrap_or(DEFAULT_GREP_MATCH_CAP as u64),
+                });
                 if let Some(p) = path {
                     args["path"] = serde_json::Value::String(p.to_string());
                 }
@@ -445,13 +515,53 @@ impl CodebaseAccess {
     }
 }
 
-/// Default number of lines a single un-windowed READ returns before truncating. Bounds how much
-/// file content a subagent can pull into the model's context in one tool call.
-const DEFAULT_READ_LINE_CAP: usize = 200;
+/// Default number of paths a single un-windowed GLOB returns before truncating.
+///
+/// 200 because a path is about the size of a line of source, so 200 of them cost a few thousand
+/// tokens — affordable in the 32k window a fast local agent runs in, and enough to see the shape
+/// of a directory. Session 01a0e200's `GLOB **/*` returned 408,282 bytes of tree into exactly
+/// such a window.
+///
+/// Unlike `READ`, this one is still applied when the model names no `limit`: `GLOB` has no
+/// `offset`, so a truncated match set cannot be paged and the cap is the only bound there is.
+/// See `docs/dev/todo/2026-09-27-glob-and-grep-cannot-be-paged.md`.
+pub const DEFAULT_GLOB_PATH_CAP: usize = 200;
+
+/// Default number of matches a single un-windowed GREP returns before truncating.
+///
+/// Half [`DEFAULT_GLOB_PATH_CAP`] because a match is not a path: each one carries the matching
+/// line's whole text alongside the file and line number, so it costs several times what a path
+/// does, and 100 of them is the same order of context as 200 paths. The `GREP` that ran in
+/// session 01a0e200's fatal turn returned 180,475 bytes.
+pub const DEFAULT_GREP_MATCH_CAP: usize = 100;
+
+/// Apply a result window to a search's `results`, as `{<field>, truncated, <total_field>}`.
+///
+/// `limit` defaults to `default_cap`, and the total is always the search's true size rather than
+/// the window's — without it a model told its answer was cut has no idea by how much, and a
+/// caller cannot tell a finished search from a clipped one.
+fn capped_results(
+    mut results: Vec<serde_json::Value>,
+    limit: Option<u64>,
+    default_cap: usize,
+    field: &str,
+    total_field: &str,
+) -> serde_json::Value {
+    let total = results.len();
+    let wanted = limit.map_or(default_cap, |l| usize::try_from(l).unwrap_or(usize::MAX));
+    let truncated = total > wanted;
+    results.truncate(wanted);
+
+    serde_json::json!({
+        field: results,
+        "truncated": truncated,
+        total_field: total,
+    })
+}
 
 /// Apply a line window to file `content`, returning `{content, truncated, total_lines}`.
 ///
-/// `offset` (default 0) and `limit` (default [`DEFAULT_READ_LINE_CAP`]) select the returned lines.
+/// `offset` (default 0) and `limit` (default: every line that remains) select the returned lines.
 /// When the whole file fits in the window (offset 0, all lines within `limit`), the original bytes
 /// are returned verbatim so callers see the file exactly as-is; otherwise the selected lines are
 /// re-joined with `\n`. `truncated` is true when lines follow the returned window.
@@ -459,7 +569,7 @@ fn window_content(content: &str, offset: Option<u64>, limit: Option<u64>) -> ser
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
     let start = (offset.unwrap_or(0) as usize).min(total_lines);
-    let max_lines = limit.map(|l| l as usize).unwrap_or(DEFAULT_READ_LINE_CAP);
+    let max_lines = limit.map(|l| l as usize).unwrap_or(usize::MAX);
     let end = start.saturating_add(max_lines).min(total_lines);
     let truncated = end < total_lines;
 
@@ -568,6 +678,53 @@ pub fn resolve_replaced_tools_for_defs(
 /// model the operator never configured while still reporting the def's name.
 pub struct SubagentConfig {
     pub access: CodebaseAccess,
+    /// The system prompt for **this conversation**, replacing the def's own.
+    ///
+    /// A def's `system_prompt` is authored once, for every use of that agent. A caller delegating
+    /// a specific piece of work knows things the def's author could not: which repository this
+    /// is, what shape the answer has to take, and — after a turn that went wrong — what the agent
+    /// must stop doing. The alternative is another user message, which the model weighs against
+    /// everything already in its window; a system prompt is not.
+    ///
+    /// `None` keeps the def's prompt. The override replaces it rather than appending to it, so
+    /// the model is never left weighing two sets of instructions, and it is scoped to the session
+    /// it opens — the def is not edited by being used.
+    pub system_prompt: Option<String>,
+    /// The admission gate every model call this conversation makes waits at, keyed by the def's
+    /// endpoint.
+    ///
+    /// The caller's because the contention is: which conversations share a provider is a fact
+    /// about the host that opened them, not about any one def. A host that gives two
+    /// conversations the same queue has made them contend on this side of the socket instead of
+    /// inside the provider's.
+    ///
+    /// `None` reaches the model directly, exactly as every conversation did before this existed.
+    pub provider_queue: Option<crate::subagent_runtime::ProviderQueue>,
+}
+
+impl SubagentConfig {
+    /// The plain case: how this process reaches the codebase, and nothing else overridden.
+    pub fn new(access: CodebaseAccess) -> Self {
+        Self {
+            access,
+            system_prompt: None,
+            provider_queue: None,
+        }
+    }
+
+    /// Make this conversation's model calls queue on `queue`, one at a time per endpoint.
+    #[must_use]
+    pub fn with_provider_queue(mut self, queue: crate::subagent_runtime::ProviderQueue) -> Self {
+        self.provider_queue = Some(queue);
+        self
+    }
+
+    /// Replace the def's system prompt for the conversation this config opens.
+    #[must_use]
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
 }
 
 /// What one model-issued tool call produced — and the thing a bare result string cannot say:
@@ -590,6 +747,18 @@ enum ToolDispatch {
     Ran(serde_json::Value),
     /// No result came back, and the reason why.
     NeverRan(SubagentError),
+    /// The call was stopped before dispatch because its arguments do not match the schema the
+    /// model was given — a rejection rather than a failure, and the only one of these three the
+    /// model can fix by itself.
+    ///
+    /// Its own variant so the breakdown survives to the tool result: a rejection collapsed into
+    /// a single error string can name the argument but cannot name the problem *and* the value
+    /// for each of several at once, and one round trip per defect would cost a 32k agent its
+    /// whole budget.
+    Rejected {
+        tool: String,
+        violations: Vec<ArgumentViolation>,
+    },
 }
 
 impl ToolDispatch {
@@ -600,10 +769,15 @@ impl ToolDispatch {
     }
 
     /// The reason no result came back, or `None` when one did.
-    fn produced_nothing(&self) -> Option<&SubagentError> {
+    ///
+    /// A rejected call is one of these: the codebase was never asked, so nothing was read.
+    fn produced_nothing(&self) -> Option<String> {
         match self {
             ToolDispatch::Ran(_) => None,
-            ToolDispatch::NeverRan(error) => Some(error),
+            ToolDispatch::NeverRan(error) => Some(error.0.clone()),
+            ToolDispatch::Rejected { tool, violations } => {
+                Some(tool_arguments::rejection_reason(tool, violations))
+            }
         }
     }
 
@@ -617,6 +791,9 @@ impl ToolDispatch {
         match self {
             ToolDispatch::Ran(value) => value.to_string(),
             ToolDispatch::NeverRan(error) => serde_json::json!({ "error": error.0 }).to_string(),
+            ToolDispatch::Rejected { tool, violations } => {
+                tool_arguments::rejection_payload(tool, violations).to_string()
+            }
         }
     }
 }
@@ -638,7 +815,7 @@ impl ToolCallTally {
             None => self.ran += 1,
             Some(reason) => {
                 self.produced_nothing += 1;
-                self.last_failure = Some(reason.0.clone());
+                self.last_failure = Some(reason);
             }
         }
     }
@@ -676,6 +853,18 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> To
     let args: serde_json::Value =
         serde_json::from_str(&tool_call.function.arguments).unwrap_or(serde_json::Value::Null);
 
+    // Checked **before** dispatch, so a call the schema rejects never reaches the codebase. A
+    // malformed path asked of the jail comes back as `file not found`, which is the same answer
+    // a real missing file gives — the reading that sent session 01a0e200 round the identical
+    // broken path twice.
+    let violations = validate_tool_arguments(&tool_call.function.name, &args);
+    if !violations.is_empty() {
+        return ToolDispatch::Rejected {
+            tool: tool_call.function.name.clone(),
+            violations,
+        };
+    }
+
     let result = match tool_call.function.name.as_str() {
         "READ" => {
             let path = args["path"].as_str().unwrap_or("");
@@ -685,12 +874,14 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> To
         }
         "GLOB" => {
             let pattern = args["pattern"].as_str().unwrap_or("");
-            access.glob(pattern).await
+            let limit = args["limit"].as_u64();
+            access.glob_limited(pattern, limit).await
         }
         "GREP" => {
             let pattern = args["pattern"].as_str().unwrap_or("");
             let path = args["path"].as_str();
-            access.grep(pattern, path).await
+            let limit = args["limit"].as_u64();
+            access.grep_limited(pattern, path, limit).await
         }
         "WRITE" => {
             let path = args["path"].as_str().unwrap_or("");
@@ -733,6 +924,31 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> To
     }
 }
 
+/// The greatest number of tokens a subagent may generate in one turn.
+///
+/// Session 01a0e200 had no such bound. Its 32k model entered a degenerate generation and never
+/// emitted a stop token: `llama-server` reported `n_gen = 19790` and climbing at 24 t/s thirteen
+/// minutes in, having already context-shifted once (`n_discard = 16381`, `n_keep = 4`) — which
+/// discarded the whole prompt and guaranteed it would never recover. Nothing upstream could end
+/// it: the turn budget counts *turns*, so it cannot fire inside one, and the in-jail tool timeout
+/// bounds a tool call, not inference.
+///
+/// 4096 because it has to be comfortably above every legitimate turn and far below a runaway
+/// one. A tool-calling turn is a sentence and a JSON object; the longest honest answer a subagent
+/// gives is the synthesis turn's findings list, a few hundred tokens. 4096 is an eighth of the
+/// 32k window a fast local agent runs in, so even a turn that spends the whole allowance leaves
+/// the history room to survive it — and it ends a runaway in under three minutes at that
+/// session's observed 24 t/s instead of never.
+pub const SUBAGENT_MAX_OUTPUT_TOKENS: u32 = 4096;
+
+/// Whether the provider stopped generating because the turn hit its token cap.
+///
+/// `"length"` is the OpenAI spelling, and the one Ollama and llama-server follow. Any other
+/// reason — including none at all — is a turn the model ended itself.
+fn was_cut_at_the_token_cap(finish_reason: Option<&str>) -> bool {
+    finish_reason == Some("length")
+}
+
 /// Shared prefix of a subagent turn loop: send `messages` as the history, then short-circuit with
 /// `EndTurn` if the model produced a non-empty `<final_answer>`.
 ///
@@ -745,6 +961,7 @@ async fn send_turn_and_check_final_answer(
     model: &str,
     messages: &[ChatMessage],
     tools: Vec<crate::openai::ToolDefinition>,
+    admission: Option<&crate::subagent_runtime::ProviderAdmission>,
     error_context: &str,
 ) -> Result<(TurnStep, TokenUsage), SubagentError> {
     let message_count = messages.len();
@@ -759,6 +976,23 @@ async fn send_turn_and_check_final_answer(
         tools,
         tool_choice: serde_json::json!("auto"),
         temperature: 0.0,
+        // Every turn this loop sends, the synthesis turn included — that one runs after the turn
+        // budget is spent, which is exactly the position session 01a0e200's runaway occupied.
+        max_tokens: Some(SUBAGENT_MAX_OUTPUT_TOKENS),
+    };
+    // Taken here and released the moment the call returns — including on the `?` below, which
+    // drops it on the way out. The wait for it is this process's, and counted: a request handed
+    // to a busy single-slot provider instead waits inside that provider's socket, which is where
+    // session 01a0e200's second turn spent 38 minutes without executing a token.
+    let slot = match admission {
+        Some(admission) => Some(admission.hold().await.map_err(|e| {
+            log::warn!(
+                target: "tddy_discovery::subagent",
+                "{error_context}: model={model} never reached the provider: {e}"
+            );
+            SubagentError(format!("{error_context}: {e}"))
+        })?),
+        None => None,
     };
     let started = std::time::Instant::now();
     let response = client.complete(request).await.map_err(|e| {
@@ -770,6 +1004,7 @@ async fn send_turn_and_check_final_answer(
         SubagentError(format!("{error_context}: {e}"))
     })?;
     let elapsed = started.elapsed();
+    drop(slot);
     let turn_usage = response.usage.unwrap_or_default();
     let choice = response.choices.into_iter().next().ok_or_else(|| {
         log::warn!(
@@ -786,6 +1021,9 @@ async fn send_turn_and_check_final_answer(
         message.content.as_deref().map(str::len).unwrap_or(0),
         message.tool_calls.as_ref().map(Vec::len).unwrap_or(0),
     );
+    // Carried out of here rather than only logged: a turn the provider cut at the cap otherwise
+    // produces an outcome shaped exactly like a completed one.
+    let cut_at_token_cap = was_cut_at_the_token_cap(choice.finish_reason.as_deref());
 
     if let Some(answer) = message
         .content
@@ -797,7 +1035,7 @@ async fn send_turn_and_check_final_answer(
         return Ok((
             TurnStep::FinalAnswer {
                 outcome: PromptOutcome::new(
-                    StopReason::EndTurn,
+                    turn_stop_reason(cut_at_token_cap),
                     vec![ContentBlock::text(answer)],
                     turn_usage,
                 ),
@@ -806,7 +1044,21 @@ async fn send_turn_and_check_final_answer(
             turn_usage,
         ));
     }
-    Ok((TurnStep::Continue(message), turn_usage))
+    Ok((
+        TurnStep::Continue {
+            message,
+            cut_at_token_cap,
+        },
+        turn_usage,
+    ))
+}
+
+/// How a turn that the model itself ended reports its stop reason — cut at the cap, or finished.
+fn turn_stop_reason(cut_at_token_cap: bool) -> StopReason {
+    match cut_at_token_cap {
+        true => StopReason::MaxTokens,
+        false => StopReason::EndTurn,
+    }
 }
 
 /// Result of [`send_turn_and_check_final_answer`] — either the loop is done, or the caller must
@@ -818,7 +1070,13 @@ enum TurnStep {
         /// The assistant message that carried the answer, for the caller to record.
         message: ChatMessage,
     },
-    Continue(ChatMessage),
+    Continue {
+        message: ChatMessage,
+        /// Whether the provider stopped generating this message at the token cap rather than
+        /// because the model was done — so a caller that turns it into an outcome can say the
+        /// answer is cut instead of passing a half-written one off as finished.
+        cut_at_token_cap: bool,
+    },
 }
 
 /// Maps a bound-tool kind to the model-facing tool name — the SCREAMING_SNAKE spelling the tool
@@ -949,6 +1207,9 @@ pub struct SpecializedSubagentSession {
     /// Prompt tokens the most recent model turn reported — what the history costs to send now.
     /// See [`SubagentSession::context_tokens`].
     context_tokens: u64,
+    /// Where this conversation queues for its endpoint, when the host that opened it gave it one.
+    /// `None` calls the model directly.
+    admission: Option<crate::subagent_runtime::ProviderAdmission>,
 }
 
 impl SpecializedSubagentSession {
@@ -974,7 +1235,20 @@ impl SpecializedSubagentSession {
             tools,
             cumulative: TokenUsage::default(),
             context_tokens: 0,
+            admission: None,
         }
+    }
+
+    /// Send every model call this conversation makes through `admission` — one call at a time on
+    /// the endpoint it names, with the waiting counted here rather than inside the provider's
+    /// socket (see [`crate::subagent_runtime::ProviderQueue`]).
+    ///
+    /// A builder rather than a constructor argument: a conversation with no queue is the plain
+    /// case and stays the plain call.
+    #[must_use]
+    pub fn queued_on(mut self, admission: crate::subagent_runtime::ProviderAdmission) -> Self {
+        self.admission = Some(admission);
+        self
     }
 
     /// Record what the turn just sent cost, as this conversation's current occupancy.
@@ -1027,16 +1301,20 @@ impl SpecializedSubagentSession {
             &self.model,
             &self.transcript.messages(),
             tools,
+            self.admission.as_ref(),
             "SpecializedSubagentSession",
         )
         .await?;
         self.note_context_occupancy(turn_usage);
-        let message = match step {
+        let (message, cut_at_token_cap) = match step {
             TurnStep::FinalAnswer { outcome, message } => {
                 self.transcript.push(message);
                 return Ok((Some(outcome), turn_usage));
             }
-            TurnStep::Continue(message) => message,
+            TurnStep::Continue {
+                message,
+                cut_at_token_cap,
+            } => (message, cut_at_token_cap),
         };
 
         match message.tool_calls {
@@ -1068,7 +1346,7 @@ impl SpecializedSubagentSession {
                     .push(ChatMessage::assistant(message.content.clone(), None));
                 Ok((
                     Some(PromptOutcome::new(
-                        StopReason::EndTurn,
+                        turn_stop_reason(cut_at_token_cap),
                         vec![ContentBlock::text(content)],
                         turn_usage,
                     )),
@@ -1238,15 +1516,26 @@ impl SpecializedSubagentSession {
             &self.model,
             &request_messages,
             Vec::new(),
+            self.admission.as_ref(),
             "SpecializedSubagentSession synthesis",
         )
         .await?;
         self.note_context_occupancy(turn_usage);
-        let content = match step {
-            TurnStep::FinalAnswer { outcome, .. } => outcome.content,
-            TurnStep::Continue(message) => {
-                vec![ContentBlock::text(message.content.unwrap_or_default())]
+        // A synthesis turn the provider cut is the one that matters most: it *is* the answer on
+        // this path, so reporting it as a spent budget alone would hand the caller a summary
+        // that stops mid-sentence with nothing saying so.
+        let (content, cut_at_token_cap) = match step {
+            TurnStep::FinalAnswer { outcome, .. } => {
+                let cut = outcome.stop_reason == StopReason::MaxTokens;
+                (outcome.content, cut)
             }
+            TurnStep::Continue {
+                message,
+                cut_at_token_cap,
+            } => (
+                vec![ContentBlock::text(message.content.unwrap_or_default())],
+                cut_at_token_cap,
+            ),
         };
         self.transcript.push(ChatMessage::assistant(
             Some(
@@ -1259,7 +1548,10 @@ impl SpecializedSubagentSession {
             None,
         ));
         Ok(PromptOutcome::new(
-            StopReason::MaxTurnRequests,
+            match cut_at_token_cap {
+                true => StopReason::MaxTokens,
+                false => StopReason::MaxTurnRequests,
+            },
             content,
             turn_usage,
         ))
@@ -1332,7 +1624,7 @@ impl SpecializedSubagentSession {
         self.cumulative = self.cumulative + synthesis.usage;
         let call_usage = call_usage + synthesis.usage;
         Ok(PromptOutcome::new(
-            StopReason::MaxTurnRequests,
+            synthesis.stop_reason,
             synthesis.content,
             call_usage,
         ))
@@ -1411,24 +1703,51 @@ impl SubagentRegistry {
 
     /// Create a session for `name`, or a [`SubagentError`] naming the unknown subagent.
     ///
-    /// `config.access` is the whole configuration a caller supplies: it depends on the runtime
-    /// transport rather than on the agent, while base URL, model, credential, turn budget, system
-    /// prompt and bound tools all come from the def.
+    /// Base URL, model, credential, turn budget and bound tools all come from the def. The caller
+    /// supplies how this process reaches the codebase, and may replace the def's system prompt
+    /// for this one conversation ([`SubagentConfig::with_system_prompt`]) — the def itself is
+    /// never edited, so a second conversation opened from this registry gets its prompt back.
+    ///
+    /// A blank override is refused rather than seeding an empty system message: the caller meant
+    /// to send something, and an empty prefix reads in the transcript as a deliberate silence.
     pub fn create(
         &self,
         name: &str,
         config: SubagentConfig,
     ) -> Result<Box<dyn SubagentSession>, SubagentError> {
+        if config
+            .system_prompt
+            .as_ref()
+            .is_some_and(|prompt| prompt.trim().is_empty())
+        {
+            return Err(SubagentError(
+                "the system prompt override is blank: a conversation is opened with the agent's \
+                 own system prompt when none is given, so send the prompt you meant or omit it"
+                    .to_string(),
+            ));
+        }
         if let Some(def) = self.defs.iter().find(|d| d.name == name) {
-            return Ok(Box::new(SpecializedSubagentSession::new(
+            let mut session = SpecializedSubagentSession::new(
                 def.base_url.clone(),
                 def.model.clone(),
                 def.api_key.clone(),
                 def.max_turns,
                 config.access,
-                def.system_prompt.clone(),
+                config.system_prompt.or_else(|| def.system_prompt.clone()),
                 def.tools.clone(),
-            )));
+            );
+            if let Some(queue) = config.provider_queue {
+                // The def's endpoint, because that is what this conversation will actually call:
+                // two agents on one local Ollama contend, and two on different endpoints do not.
+                // The waiter name is this conversation's alone — a name two conversations shared
+                // would make the queue's own position report ambiguous between them.
+                session = session.queued_on(crate::subagent_runtime::ProviderAdmission::new(
+                    queue,
+                    def.base_url.clone(),
+                    format!("{}-{}", def.name, uuid::Uuid::new_v4()),
+                ));
+            }
+            return Ok(Box::new(session));
         }
         Err(SubagentError(format!("unknown subagent: {name}")))
     }

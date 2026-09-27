@@ -9,6 +9,7 @@
 pub mod catalog;
 pub(crate) mod contained_shell;
 pub(crate) mod read_window;
+pub(crate) mod search_window;
 pub mod shell;
 
 pub use catalog::{tool_catalog, ToolDef};
@@ -426,6 +427,7 @@ async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Some(p) => p,
         None => return ToolOutcome::err("Grep: missing 'pattern' argument"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64());
 
     let output = contained_shell::run_contained_argv(
         "rg",
@@ -447,7 +449,10 @@ async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
                     }
                 }
             }
-            ToolOutcome::ok(serde_json::json!({ "matches": matches }).to_string())
+            ToolOutcome::ok(
+                search_window::result_window(matches, limit, "matches", "total_matches")
+                    .to_string(),
+            )
         }
         Err(e) => ToolOutcome::err(format!("Grep: {e}")),
     }
@@ -458,6 +463,7 @@ fn tool_glob(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Some(p) => p,
         None => return ToolOutcome::err("Glob: missing 'pattern' argument"),
     };
+    let limit = args.get("limit").and_then(|v| v.as_u64());
 
     let full_pattern = root.join(pattern);
     let pattern_str = full_pattern.to_string_lossy();
@@ -471,9 +477,11 @@ fn tool_glob(root: &Path, args: &serde_json::Value) -> ToolOutcome {
                     .strip_prefix(root)
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| entry.to_string_lossy().into_owned());
-                paths.push(display);
+                paths.push(serde_json::Value::String(display));
             }
-            ToolOutcome::ok(serde_json::json!({ "paths": paths }).to_string())
+            ToolOutcome::ok(
+                search_window::result_window(paths, limit, "paths", "total_paths").to_string(),
+            )
         }
         Err(e) => ToolOutcome::err(format!("Glob: invalid pattern: {e}")),
     }

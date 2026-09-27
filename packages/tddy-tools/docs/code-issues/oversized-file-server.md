@@ -4,9 +4,9 @@
 **Category:** oversized-file
 **Detected:** 2026-09-26 by `structural audit` — hand-measured during `/plan-red` Step 2b for the
 subagent turn-control changeset
-**Metrics:** **2,652 production lines** (the `#[cfg(test)]` module opens after them) · budget 500 ·
-**5.3× over**
-**Thresholds breached:** length 2,652 > 500
+**Metrics:** **2,677 production lines** (the `#[cfg(test)]` module opens after them) · budget 500 ·
+**5.4× over**
+**Thresholds breached:** length 2,677 > 500
 **Restructure:** required — `extract_module --to_file`, `/code-restructuring` territory
 **Status:** Open — unclaimed
 
@@ -16,6 +16,9 @@ subagent turn-control changeset
 |---|---|---|
 | 2026-09-26 | 2,488 | first detection |
 | 2026-09-26 | 2,652 | +164 for `subagent_resume` (tool, schema, handler, router), `maxTurns` on both schemas, and a shared `take_a_turn`. Deferred with developer consent — see `docs/dev/todo/2026-09-26-seven-files-over-budget-deferred-by-the-subagent-turn-control-change.md` |
+
+| 2026-09-27 | 2,685 | **regressed** by 33. `subagent_new_session_tool` reads a `systemPrompt` override, refuses one aimed at a remotely-routed agent (it cannot reach the conversation over `OpenAgentConversation`), and `subagent_new_session_schema` advertises the parameter |
+| 2026-09-27 | 2,677 | −8. `pending_turn_json` and its test moved to `tddy_discovery::subagent_runtime`, beside `prompt_outcome_json` — the two answers a conversation tool can give now live together — against +17 for the provider a conversation and its turns are registered with |
 
 ## What the tool found
 

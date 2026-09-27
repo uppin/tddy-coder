@@ -76,6 +76,25 @@ impl MessageRole {
     }
 }
 
+/// One tool call an assistant message made: which tool, and what it asked for.
+///
+/// The arguments are the half that was missing. In session 01a0e200 a main agent reading a
+/// subagent's turn could see that three `READ`s had failed but not that all three asked for the
+/// same path with a stray quote on the end — the one reader positioned to notice the subagent was
+/// emitting broken arguments was handed a tool name and an error string, and could only conclude
+/// "wrong file, try another".
+///
+/// Bounded for the reason [`MessageDescriptor::preview`] is: a `WRITE` carries a whole file in its
+/// arguments, and an outcome enumerating several of those would cost its reader more context than
+/// the turn it describes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallDescriptor {
+    pub name: String,
+    /// The call's arguments as the model wrote them, cut to [`MESSAGE_PREVIEW_CHARS`].
+    pub arguments: String,
+}
+
 /// What one message in a conversation was, in the form a caller reads to decide what to do next.
 ///
 /// `camelCase` on the wire, because this is serialized **inside** the MCP turn outcome, whose
@@ -90,8 +109,9 @@ pub struct MessageDescriptor {
     pub role: MessageRole,
     /// The tool that produced a `tool`-role message, by name.
     pub tool: Option<String>,
-    /// The tools an `assistant`-role message called, by name, in the order it called them.
-    pub tool_calls: Vec<String>,
+    /// The tool calls an `assistant`-role message made, in the order it made them — each by name
+    /// and by what it asked for.
+    pub tool_calls: Vec<ToolCallDescriptor>,
     /// Whether this message reports a tool call that produced no result.
     ///
     /// The field whose absence let incident 2026-09-26 run for 54 refused calls: a main agent
@@ -191,7 +211,10 @@ impl Transcript {
                         .tool_calls
                         .iter()
                         .flatten()
-                        .map(|call| call.function.name.clone())
+                        .map(|call| ToolCallDescriptor {
+                            name: call.function.name.clone(),
+                            arguments: preview_of(&call.function.arguments),
+                        })
                         .collect(),
                     is_error: entry.is_error,
                     preview: preview_of(entry.message.content.as_deref().unwrap_or("")),
@@ -381,8 +404,12 @@ mod tests {
 
         // Then
         assert_eq!(
-            described[0].tool_calls,
-            vec!["READ".to_string(), "GREP".to_string()]
+            described[0]
+                .tool_calls
+                .iter()
+                .map(|call| call.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["READ", "GREP"]
         );
     }
 }

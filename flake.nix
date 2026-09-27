@@ -77,6 +77,12 @@
             pkgs.cargo-tauri
             pkgs.bzip2
             pkgs.git
+            # `tddy-tool-engine`'s Grep spawns `rg` (src/lib.rs `tool_grep`, src/shell.rs
+            # `remote_tool_grep`), and the sandbox recipes grant the jail access to it. Until it
+            # was declared here it was only ever present by accident of a developer's Homebrew, so
+            # Grep failed with `spawn failed: No such file or directory` anywhere built from this
+            # flake alone — including CI, where nothing had exercised the tool to notice.
+            pkgs.ripgrep
             pkgs.bun
             pkgs.nodejs_20
             pkgs.util-linux
@@ -86,7 +92,7 @@
             pkgs.openssh
           ];
           shellHook = ''
-            echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node"
+            echo "tddy-coder dev shell: rustc, cargo, rustfmt, clippy, rust-analyzer, bun, node, rg"
             export BUILDROOT_DIR="${buildrootSrc}"
 
             # The `llvm-tools-preview` extension above ships llvm-cov / llvm-profdata

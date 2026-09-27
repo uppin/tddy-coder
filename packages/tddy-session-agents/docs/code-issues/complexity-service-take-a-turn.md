@@ -14,6 +14,7 @@
 |---|---|---|---|---|
 | 2026-09-26 | 120 | 93 | 5 | first detection, in PR #545 |
 
+| 2026-09-27 | 120 | 93 | 5 | **unchanged.** `service.rs` grew by 7 lines in the same change, in the stop-reason mapping only |
 ## What the tool found
 
 The worst single unit in PR #545, breaching both thresholds at once. The nesting path is
