@@ -63,3 +63,9 @@ rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 # `session_agent_roster`'s tests persist a roster into a real session directory.
 tempfile = "3"
+# `a_session_metadata`: the roster is loaded from a session's `.session.yaml`, so a handler test
+# needs one on disk rather than a hand-written YAML literal per suite.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+# `#[tokio::test]`: the nine handlers are async. The production dependency above takes only the
+# features the handlers use, and a runtime is not one of them.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

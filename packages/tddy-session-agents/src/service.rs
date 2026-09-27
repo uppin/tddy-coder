@@ -712,6 +712,12 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
             true => uuid::Uuid::now_v7().to_string(),
             false => req.conversation_id.trim().to_string(),
         };
+        // The empty string is how the wire spells "no override" — proto3 cannot tell an unset
+        // string from an empty one — so it maps to the def's own prompt. Anything else is the
+        // caller's, verbatim, and a blank-but-not-empty one is refused rather than read as absent.
+        let system_prompt = Some(req.system_prompt.as_str()).filter(|prompt| !prompt.is_empty());
+        tddy_discovery::subagent::refuse_blank_system_prompt(system_prompt)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         // This host *owns* the agent: the session is another daemon's, its roster is over there,
         // and the def is here. Resolving it against a roster this host does not hold would report
@@ -719,7 +725,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
         let owned = self
             .ports
             .sessions
-            .open_owned(&req.session_id, &req.agent_id)
+            .open_owned(&req.session_id, &req.agent_id, system_prompt)
             .await?;
         let conversation = match owned {
             Some(session) => AgentConversation::Local {
@@ -751,6 +757,7 @@ impl tddy_service::proto::session_agents_svc::SessionAgentService for SessionAge
                                     &session_dir,
                                     &record,
                                     &req.session_token,
+                                    system_prompt,
                                 )
                                 .await?,
                         )),

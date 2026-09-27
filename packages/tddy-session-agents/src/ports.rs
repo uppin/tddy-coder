@@ -151,10 +151,15 @@ pub trait AgentSessions: Send + Sync {
 
     /// A turn loop for an agent this host **owns**, reading the clone it holds for a peer's
     /// session. `None` when it holds no such clone, which is when the roster decides instead.
+    ///
+    /// `system_prompt` replaces the def's own for this conversation; `None` leaves it alone. It is
+    /// a parameter on both opens rather than state on the port because it is the *caller's*, set
+    /// per conversation — a port field would make it the host's and outlive the open that chose it.
     async fn open_owned(
         &self,
         session_id: &str,
         agent_id: &str,
+        system_prompt: Option<&str>,
     ) -> Result<Option<Box<dyn SubagentSession>>, Status>;
 
     /// A turn loop for an agent resolved on this host, reading the session's own worktree.
@@ -164,6 +169,7 @@ pub trait AgentSessions: Send + Sync {
         session_dir: &Path,
         record: &SessionAgentRecord,
         session_token: &str,
+        system_prompt: Option<&str>,
     ) -> Result<Box<dyn SubagentSession>, Status>;
 
     /// Refuse a prompt to an agent whose checkout is not ready to serve reads, naming the state.

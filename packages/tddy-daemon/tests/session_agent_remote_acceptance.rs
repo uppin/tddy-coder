@@ -188,6 +188,7 @@ impl Fleet {
                 daemon_instance_id: String::new(),
                 agent_id: agent_id.to_string(),
                 conversation_id: String::new(),
+                system_prompt: String::new(),
             }))
             .await
             .expect("opening a conversation with a remote agent must succeed")
@@ -1132,6 +1133,7 @@ async fn open_conversation_with(fleet: &Fleet, agent_id: &str) -> String {
             daemon_instance_id: String::new(),
             agent_id: agent_id.to_string(),
             conversation_id: String::new(),
+            system_prompt: String::new(),
         }))
         .await
         .expect("opening a conversation with a remote agent must succeed")
@@ -1414,6 +1416,7 @@ async fn refuses_a_prompt_while_the_clone_is_still_being_built() {
             daemon_instance_id: String::new(),
             agent_id: explorer.clone(),
             conversation_id: String::new(),
+            system_prompt: String::new(),
         }))
         .await;
 
@@ -1498,6 +1501,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
             daemon_instance_id: String::new(),
             agent_id: explorer.clone(),
             conversation_id: String::new(),
+            system_prompt: String::new(),
         }))
         .await
         .expect("the surviving daemon's agent must still be reachable")
@@ -1516,6 +1520,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
             daemon_instance_id: String::new(),
             agent_id: linter.clone(),
             conversation_id: String::new(),
+            system_prompt: String::new(),
         }))
         .await
         .expect_err("an agent on a departed daemon must fail");

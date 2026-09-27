@@ -73,13 +73,24 @@ impl AgentConversationLink {
     /// `conversation_id` is the caller's choice where it has one: an open that times out still
     /// leaves it able to name — and therefore cancel — whatever the daemon built. Empty means the
     /// daemon mints one.
-    pub async fn open(&self, agent_id: &str, conversation_id: &str) -> Result<String, String> {
+    ///
+    /// `system_prompt` replaces the def's own for this conversation; `None` leaves it alone. A
+    /// blank one is refused here rather than sent, because the empty string is how the wire spells
+    /// "no override" — see [`crate::subagent::refuse_blank_system_prompt`].
+    pub async fn open(
+        &self,
+        agent_id: &str,
+        conversation_id: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, String> {
+        crate::subagent::refuse_blank_system_prompt(system_prompt).map_err(|e| e.to_string())?;
         let request = OpenAgentConversationRequest {
             session_token: self.envelope.session_token.clone(),
             session_id: self.envelope.session_id.clone(),
             daemon_instance_id: self.envelope.daemon_instance_id.clone(),
             agent_id: agent_id.to_string(),
             conversation_id: conversation_id.to_string(),
+            system_prompt: system_prompt.unwrap_or_default().to_string(),
         };
         let bytes = self
             .client

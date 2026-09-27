@@ -48,6 +48,7 @@ impl ConversingSession {
                 daemon_instance_id: String::new(),
                 agent_id: self.agent_id.clone(),
                 conversation_id: String::new(),
+                system_prompt: String::new(),
             }))
             .await
             .expect("opening a conversation with a local agent must succeed")

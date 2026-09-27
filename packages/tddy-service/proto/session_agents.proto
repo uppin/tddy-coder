@@ -177,6 +177,23 @@ message OpenAgentConversationRequest {
   // Caller-chosen conversation id, so an open that times out still leaves the caller able to name —
   // and therefore cancel — whatever the daemon built. Empty = the daemon mints one.
   string conversation_id = 5;
+  // The system prompt for THIS conversation, in place of the def's own. Empty = the def's prompt
+  // is left alone, which is what every caller that does not care sends.
+  //
+  // A def's `system_prompt` is authored once, for every use of that agent; the caller delegating a
+  // specific piece of work knows things its author could not. The override replaces the def's
+  // prompt rather than appending to it — the model is never left weighing two sets of instructions
+  // — and it is scoped to the conversation this opens: the def is not edited by being used.
+  //
+  // Carried here rather than left to the local path alone because in a **split session** the
+  // in-jail `tddy-tools` holds no defs at all, so every roster agent is opened over this RPC. A
+  // prompt that could not ride it would be a capability the advertised MCP schema offers and the
+  // configuration most sessions run in cannot honour.
+  //
+  // Blank-but-not-empty is refused by the serving daemon rather than read as absent: a caller that
+  // sent whitespace meant to send something, and opening under the def's prompt instead would
+  // report a conversation as running under a prompt nobody chose.
+  string system_prompt = 6;
 }
 
 message OpenAgentConversationResponse {

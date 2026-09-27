@@ -156,6 +156,7 @@ impl ADaemonInTheCommonRoom {
                 daemon_instance_id: daemon.to_string(),
                 agent_id: agent_id.to_string(),
                 conversation_id: "conversation-under-routing".to_string(),
+                system_prompt: String::new(),
             }))
             .await
             .map(|_| ())

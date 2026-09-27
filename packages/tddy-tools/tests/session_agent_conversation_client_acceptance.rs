@@ -31,6 +31,9 @@ use tokio::sync::mpsc;
 // Builders
 // ---------------------------------------------------------------------------
 
+/// A system prompt the agent opening the conversation chose, in place of the def's own.
+const AN_OVERRIDE: &str = "Answer only with file paths, one per line.";
+
 /// The identity a split session's `tddy-tools` carries in every request to its daemon.
 fn an_envelope() -> SessionToolEnvelope {
     SessionToolEnvelope {
@@ -253,6 +256,16 @@ fn a_link_to(daemon: &Arc<AFakeDaemon>) -> Arc<AgentConversationLink> {
     ))
 }
 
+/// The single `OpenAgentConversation` the fake daemon was sent, decoded.
+fn the_open_the_daemon_received(daemon: &Arc<AFakeDaemon>) -> OpenAgentConversationRequest {
+    OpenAgentConversationRequest::decode(
+        daemon
+            .the_one_request_to("OpenAgentConversation")
+            .as_slice(),
+    )
+    .expect("the request should decode as OpenAgentConversationRequest")
+}
+
 fn assert_refused_naming<T: std::fmt::Debug>(result: Result<T, String>, fragment: &str) {
     let message = result.expect_err("the call should have been refused");
     assert!(
@@ -280,7 +293,7 @@ async fn opens_a_conversation_on_the_facilitating_daemon_and_returns_its_id() {
     let daemon = AFakeDaemon::new().answering_open_with("conv-7");
 
     // When the agent is opened
-    let opened = a_link_to(&daemon).open("FastContext@mac", "").await;
+    let opened = a_link_to(&daemon).open("FastContext@mac", "", None).await;
 
     // Then the daemon's id is what the caller is handed
     assert_eq!(
@@ -296,7 +309,7 @@ async fn an_open_carries_the_session_identity_the_daemon_authenticates() {
 
     // When an agent is opened under a caller-chosen conversation id
     let _ = a_link_to(&daemon)
-        .open("FastContext@mac", "conv-mine")
+        .open("FastContext@mac", "conv-mine", None)
         .await;
 
     // Then every field the daemon resolves the call against is on the wire
@@ -325,6 +338,52 @@ async fn an_open_carries_the_session_identity_the_daemon_authenticates() {
 }
 
 #[tokio::test]
+async fn an_open_carries_the_system_prompt_the_caller_chose_for_this_conversation() {
+    // Given a daemon that accepts the open
+    let daemon = AFakeDaemon::new().answering_open_with("conv-7");
+
+    // When an agent is opened under a prompt of the caller's own
+    let _ = a_link_to(&daemon)
+        .open("FastContext@mac", "", Some(AN_OVERRIDE))
+        .await;
+
+    // Then the daemon is asked to run the conversation under it
+    let request = the_open_the_daemon_received(&daemon);
+    assert_eq!(request.system_prompt, AN_OVERRIDE);
+}
+
+#[tokio::test]
+async fn an_open_with_no_override_leaves_the_system_prompt_empty_so_the_def_keeps_its_own() {
+    // Given a daemon that accepts the open
+    let daemon = AFakeDaemon::new().answering_open_with("conv-7");
+
+    // When an agent is opened without one
+    let _ = a_link_to(&daemon).open("FastContext@mac", "", None).await;
+
+    // Then nothing rides the field the daemon reads an override out of
+    let request = the_open_the_daemon_received(&daemon);
+    assert_eq!(request.system_prompt, "");
+}
+
+/// A blank override is a caller that meant to send something. Refused here rather than sent,
+/// because an empty `system_prompt` on the wire *means* "use the def's own": sending one would
+/// open the conversation under a prompt the caller never chose and say nothing about it.
+#[tokio::test]
+async fn a_blank_override_is_refused_rather_than_sent_as_no_override_at_all() {
+    // Given a daemon that would accept any open
+    let daemon = AFakeDaemon::new().answering_open_with("conv-7");
+
+    // When an agent is opened under a system prompt of nothing but spaces
+    let opened = a_link_to(&daemon)
+        .open("FastContext@mac", "", Some("   "))
+        .await;
+
+    // Then the caller is told, and the daemon was never asked
+    assert_refused_naming(opened, "blank");
+    assert_eq!(daemon.methods_called(), Vec::<String>::new());
+}
+
+#[tokio::test]
 async fn an_open_the_daemon_refuses_is_reported_naming_the_refusal() {
     // Given a daemon that refuses the open because the agent is not attached
     let daemon = AFakeDaemon::new().refusing_open_with(Status::invalid_argument(
@@ -332,7 +391,7 @@ async fn an_open_the_daemon_refuses_is_reported_naming_the_refusal() {
     ));
 
     // When the agent is opened
-    let opened = a_link_to(&daemon).open("FastContext@mac", "").await;
+    let opened = a_link_to(&daemon).open("FastContext@mac", "", None).await;
 
     // Then the daemon's own words reach the caller rather than a generic failure
     assert_refused_naming(opened, "is not attached to session");
@@ -495,7 +554,7 @@ async fn a_remote_conversation_prompts_over_the_link_it_was_opened_on() {
         .answering_prompt_with(vec![a_final_frame("mac answered", "EndTurn")]);
     let link = a_link_to(&daemon);
     let conversation_id = link
-        .open("FastContext@mac", "")
+        .open("FastContext@mac", "", None)
         .await
         .expect("the open should have been accepted");
     let mut session = link.session(conversation_id, "qwen2.5-coder:7b");

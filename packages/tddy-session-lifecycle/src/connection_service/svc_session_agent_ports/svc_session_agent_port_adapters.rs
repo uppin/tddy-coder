@@ -159,12 +159,13 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         &self,
         session_id: &str,
         agent_id: &str,
+        system_prompt: Option<&str>,
     ) -> Result<Option<Box<dyn SubagentSession>>, Status> {
         let Some(clone) = self.connection.hosted_clone_for(session_id) else {
             return Ok(None);
         };
         self.connection
-            .open_owned_agent_session(agent_id, &clone)
+            .open_owned_agent_session(agent_id, &clone, system_prompt)
             .await
             .map(Some)
     }
@@ -175,9 +176,16 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         session_dir: &Path,
         record: &SessionAgentRecord,
         session_token: &str,
+        system_prompt: Option<&str>,
     ) -> Result<Box<dyn SubagentSession>, Status> {
         self.connection
-            .open_local_agent_session(session_id, session_dir, record, session_token)
+            .open_local_agent_session(
+                session_id,
+                session_dir,
+                record,
+                session_token,
+                system_prompt,
+            )
             .await
     }
 
@@ -221,6 +229,10 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
                     daemon_instance_id: owner.to_string(),
                     agent_id: request.agent_id.clone(),
                     conversation_id: conversation_id.to_string(),
+                    // The caller's, and the owner is the only side that can apply it: it runs the
+                    // turn loop. Dropped here, the conversation would open under the def's prompt
+                    // with nothing on either side saying the override was discarded.
+                    system_prompt: request.system_prompt.clone(),
                 },
                 owner,
                 conversation_id,

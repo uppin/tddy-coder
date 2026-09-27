@@ -729,6 +729,28 @@ impl SubagentConfig {
     }
 }
 
+/// Refuse a system-prompt override that is present but says nothing.
+///
+/// The caller meant to send something, and an empty prefix reads in the transcript as a deliberate
+/// silence. It matters beyond that on the wire: `OpenAgentConversationRequest.system_prompt` is a
+/// proto3 string, where "absent" and "empty" are the same bytes — so a blank override handed to a
+/// remotely-run agent would arrive as *no* override and the conversation would quietly run under
+/// the def's prompt instead.
+///
+/// One function rather than a check at each site, because there are three: the registry that
+/// builds a local turn loop, the client that sends an open to the facilitating daemon, and the
+/// daemon that serves it. Three spellings of this rule would be three answers to the same call.
+pub fn refuse_blank_system_prompt(prompt: Option<&str>) -> Result<(), SubagentError> {
+    match prompt.is_some_and(|prompt| prompt.trim().is_empty()) {
+        true => Err(SubagentError(
+            "the system prompt override is blank: a conversation is opened with the agent's own \
+             system prompt when none is given, so send the prompt you meant or omit it"
+                .to_string(),
+        )),
+        false => Ok(()),
+    }
+}
+
 /// What one model-issued tool call produced — and the thing a bare result string cannot say:
 /// whether the tool **ran**.
 ///
@@ -1781,17 +1803,7 @@ impl SubagentRegistry {
         name: &str,
         config: SubagentConfig,
     ) -> Result<Box<dyn SubagentSession>, SubagentError> {
-        if config
-            .system_prompt
-            .as_ref()
-            .is_some_and(|prompt| prompt.trim().is_empty())
-        {
-            return Err(SubagentError(
-                "the system prompt override is blank: a conversation is opened with the agent's \
-                 own system prompt when none is given, so send the prompt you meant or omit it"
-                    .to_string(),
-            ));
-        }
+        refuse_blank_system_prompt(config.system_prompt.as_deref())?;
         if let Some(def) = self.defs.iter().find(|d| d.name == name) {
             let mut session = SpecializedSubagentSession::new(
                 def.base_url.clone(),
