@@ -129,6 +129,10 @@ message AssistantEntry {
   // an assistant may grep for itself without taking Grep away from the session that attached it.
   // Empty = takes nothing over.
   repeated string replaces = 9;
+  // How to use this agent — quirks, limitations, what it is good at — as the operator wrote
+  // them. For the human operating the agent, never machine context: not injected into any
+  // system prompt and not advertised to a main agent at session open. Empty = none written.
+  string usage_notes = 10;
 }
 
 message AssignableTool {
@@ -220,6 +224,8 @@ message CreateAssistantRequest {
   repeated string tools = 7;
   // Main-agent tools this assistant takes over; see `AssistantEntry.replaces`.
   repeated string replaces = 8;
+  // Operator notes, carried to the stored entry; see `AssistantEntry.usage_notes`.
+  string usage_notes = 9;
 }
 message CreateAssistantResponse {
   AssistantEntry assistant = 1;
@@ -234,6 +240,8 @@ message UpdateAssistantRequest {
   // Carried whole, like `tools`: an update that omitted it would leave a takeover in place with
   // nothing on screen saying so.
   repeated string replaces = 6;
+  // Carried whole too — the operator's whole notes replace what was there; empty clears them.
+  string usage_notes = 7;
 }
 message UpdateAssistantResponse {
   AssistantEntry assistant = 1;

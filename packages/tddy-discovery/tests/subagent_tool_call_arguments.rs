@@ -41,6 +41,7 @@ fn a_def(base_url: &str, tools: Vec<SubagentTool>) -> SpecializedAgentDef {
         tools,
         max_turns: 2,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

@@ -272,6 +272,7 @@ impl ModelRegistryService for ModelRegistryServiceImpl {
                     system_prompt: req.system_prompt,
                     tools: req.tools,
                     replaces: req.replaces,
+                    usage_notes: (!req.usage_notes.is_empty()).then(|| req.usage_notes.clone()),
                 },
                 &caller,
             )
@@ -295,6 +296,9 @@ impl ModelRegistryService for ModelRegistryServiceImpl {
                 &req.system_prompt,
                 &req.tools,
                 &req.replaces,
+                // Carried whole, like `replaces`: the operator's whole notes replace what was
+                // there, and empty clears them.
+                (!req.usage_notes.is_empty()).then_some(req.usage_notes.as_str()),
                 &caller,
             )
             .await?;

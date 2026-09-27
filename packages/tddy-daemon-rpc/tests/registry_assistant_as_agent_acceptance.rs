@@ -85,6 +85,7 @@ impl Harness {
                     system_prompt: "You explore repositories.".to_string(),
                     tools: vec!["Read".to_string()],
                     replaces: Vec::new(),
+                    usage_notes: None,
                 },
                 THE_OPERATOR,
             )
@@ -112,6 +113,7 @@ impl Harness {
                     system_prompt: "You explore repositories.".to_string(),
                     tools: tools.iter().map(|t| t.to_string()).collect(),
                     replaces: replaces.iter().map(|t| t.to_string()).collect(),
+                    usage_notes: None,
                 },
                 THE_OPERATOR,
             )

@@ -23,6 +23,7 @@ fn a_def(name: &str, replaces: &[&str]) -> SpecializedAgentDef {
         tools: vec![SubagentTool::Read],
         max_turns: 10,
         replaces: replaces.iter().map(|s| s.to_string()).collect(),
+        usage_notes: None,
     }
 }
 

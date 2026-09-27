@@ -72,6 +72,7 @@ impl Registry {
                     system_prompt: String::new(),
                     tools: vec!["Read".to_string()],
                     replaces: Vec::new(),
+                    usage_notes: None,
                 },
                 THE_OPERATOR,
             )

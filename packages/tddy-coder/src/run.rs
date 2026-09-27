@@ -2784,6 +2784,7 @@ mod create_backend_specialized_agent_tests {
             tools: vec![],
             max_turns: 4,
             replaces: vec![],
+            usage_notes: None,
         };
 
         // When
@@ -2832,6 +2833,7 @@ mod create_backend_specialized_agent_tests {
             tools: vec![],
             max_turns: 4,
             replaces: vec![],
+            usage_notes: None,
         };
 
         // When
@@ -2879,6 +2881,7 @@ mod create_backend_specialized_agent_tests {
             tools: vec![],
             max_turns: 4,
             replaces: vec![],
+            usage_notes: None,
         };
 
         // When
@@ -2927,6 +2930,7 @@ mod agent_def_handover_tests {
             tools: vec![SubagentTool::Read, SubagentTool::Grep],
             max_turns: 10,
             replaces: Vec::new(),
+            usage_notes: None,
         }
     }
 

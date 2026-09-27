@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Status:** 🚧 In Progress
 **Type:** Feature
-**Stack:** `subagent-control` node 3 of 5 (`(#subagent-control 3/5)`), wave 1.
+**Stack:** `subagent-control` node 3 of 5 (`(#subagent-control 3/5)`), wave 1. **PR:** [#555](https://github.com/uppin/tddy-coder/pull/555) (draft).
 **Branch:** `feature/subagent-control/agent-usage-notes` · **Base:** `feature/subagent-control/grep-context`
 
 **PRD:** [`2026-09-27-agent-usage-notes-prd.md`](2026-09-27-agent-usage-notes-prd.md)
@@ -143,10 +143,10 @@ with full text on demand. Spawn, system prompts and turn behaviour are untouched
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — 3/3 Cypress failures (create submit, edit pre-fill, panel display), each the missing web wiring; the backend store/projection acceptance tests pass on the published surface
+- [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

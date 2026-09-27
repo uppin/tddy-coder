@@ -42,6 +42,7 @@ fn a_def(base_url: &str) -> SpecializedAgentDef {
         tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
         max_turns: 2,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

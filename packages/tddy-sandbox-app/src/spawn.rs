@@ -1228,6 +1228,7 @@ mod tests {
             tools: vec![tddy_discovery::agent_def::SubagentTool::Read],
             max_turns: 10,
             replaces: replaces.iter().map(|s| s.to_string()).collect(),
+            usage_notes: None,
         }
     }
 

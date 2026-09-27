@@ -30,6 +30,7 @@ fn a_warmup_agent(name: &str, base_url: &str) -> SpecializedAgentDef {
         tools: vec![SubagentTool::Read],
         max_turns: 1,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

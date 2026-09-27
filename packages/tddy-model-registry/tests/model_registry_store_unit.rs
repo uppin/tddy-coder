@@ -82,6 +82,7 @@ fn an_assistant(provider_id: &str) -> NewAssistant {
         system_prompt: "You read code and answer questions about it.".to_string(),
         tools: vec!["Read".to_string(), "Grep".to_string()],
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 
@@ -499,6 +500,7 @@ async fn updates_the_main_agent_tools_an_assistant_takes_over() {
             "You read code and answer questions about it.",
             &["Read".to_string(), "Grep".to_string()],
             &["Grep".to_string(), "Glob".to_string()],
+            None,
             AN_OPERATOR,
         )
         .await
@@ -533,6 +535,7 @@ async fn refuses_to_update_an_assistant_to_take_over_a_tool_outside_the_exec_cat
             "You read code and answer questions about it.",
             &["Read".to_string()],
             &["Telepathy".to_string()],
+            None,
             AN_OPERATOR,
         )
         .await;
@@ -640,6 +643,7 @@ async fn updates_an_assistants_label_prompt_and_tools() {
             "You read code and change it when asked.",
             &["Read".to_string(), "Write".to_string()],
             &[],
+            None,
             AN_OPERATOR,
         )
         .await
@@ -668,6 +672,7 @@ async fn refuses_to_update_an_assistant_that_does_not_exist() {
             "",
             &["Read".to_string()],
             &[],
+            None,
             AN_OPERATOR,
         )
         .await;
@@ -997,6 +1002,7 @@ fn refuses_to_project_an_assistant_whose_provider_is_not_the_one_it_names() {
         system_prompt: String::new(),
         tools: vec!["Read".to_string()],
         replaces: Vec::new(),
+        usage_notes: String::new(),
         daemon_instance_id: THIS_DAEMON.to_string(),
     };
     let other_provider = ProviderEntry {
@@ -1488,6 +1494,7 @@ async fn refuses_to_update_another_operators_assistant() {
             "Do as I say.",
             &["Shell".to_string()],
             &[],
+            None,
             ANOTHER_OPERATOR,
         )
         .await;
@@ -1676,6 +1683,7 @@ async fn refuses_an_edit_that_grows_a_system_prompt_past_that_same_ceiling() {
             &"y".repeat(MAX_SYSTEM_PROMPT_BYTES + 1),
             &["Read".to_string()],
             &[],
+            None,
             AN_OPERATOR,
         )
         .await;
@@ -1708,4 +1716,129 @@ async fn accepts_a_system_prompt_that_exactly_fills_the_ceiling() {
 
     // Then
     assert_eq!(assistant.system_prompt.len(), MAX_SYSTEM_PROMPT_BYTES);
+}
+
+// ---------------------------------------------------------------------------
+// Usage notes — an agent's notes for its operator, stored and projected
+// Feature: docs/dev/1-WIP/2026-09-27-agent-usage-notes-prd.md (AC1, AC2)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn a_created_assistant_round_trips_its_usage_notes() {
+    // Given
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+
+    // When — an assistant created carrying notes for its operator
+    let created = store
+        .create_assistant(
+            NewAssistant {
+                usage_notes: Some(
+                    "Best at refactoring seams, bad at API design. Needs maxTurns: 5.".to_string(),
+                ),
+                ..an_assistant(&provider.provider_id)
+            },
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // Then — the notes come back on every listing, unchanged
+    assert_eq!(
+        created.usage_notes,
+        "Best at refactoring seams, bad at API design. Needs maxTurns: 5."
+    );
+    let listed = store
+        .list_assistants()
+        .await
+        .expect("list assistants")
+        .into_iter()
+        .find(|a| a.assistant_id == created.assistant_id)
+        .expect("the created assistant is listed");
+    assert_eq!(
+        listed.usage_notes,
+        "Best at refactoring seams, bad at API design. Needs maxTurns: 5."
+    );
+}
+
+#[tokio::test]
+async fn an_updated_assistant_changes_its_usage_notes() {
+    // Given
+    let (_dir, store) = a_store().await;
+    let provider = store
+        .create_provider(a_keyless_ollama_provider(), AN_OPERATOR)
+        .await
+        .expect("create the provider");
+    let assistant = store
+        .create_assistant(
+            NewAssistant {
+                usage_notes: Some("old notes".to_string()),
+                ..an_assistant(&provider.provider_id)
+            },
+            AN_OPERATOR,
+        )
+        .await
+        .expect("create the assistant");
+
+    // When — the operator replaces the notes whole
+    let updated = store
+        .update_assistant(
+            &assistant.assistant_id,
+            "Repo Reader",
+            "You read code and answer questions about it.",
+            &["Read".to_string()],
+            &[],
+            Some("Needs maxTurns: 5 or it wanders."),
+            AN_OPERATOR,
+        )
+        .await
+        .expect("update the assistant");
+
+    // Then — the whole notes replace what was there, and empty clears them
+    assert_eq!(updated.usage_notes, "Needs maxTurns: 5 or it wanders.");
+    let cleared = store
+        .update_assistant(
+            &assistant.assistant_id,
+            "Repo Reader",
+            "You read code and answer questions about it.",
+            &["Read".to_string()],
+            &[],
+            None,
+            AN_OPERATOR,
+        )
+        .await
+        .expect("clear the notes");
+    assert_eq!(cleared.usage_notes, "");
+}
+
+#[test]
+fn a_registry_assistant_projects_usage_notes_into_its_agent_def() {
+    // Given an assistant carrying notes, and its provider
+    let assistant = tddy_service::proto::models::AssistantEntry {
+        assistant_id: "asst-1".to_string(),
+        name: "repo-reader".to_string(),
+        label: "Repo Reader".to_string(),
+        provider_id: "prov-ollama".to_string(),
+        model_id: "qwen3:32b".to_string(),
+        system_prompt: String::new(),
+        tools: vec!["Read".to_string()],
+        replaces: Vec::new(),
+        usage_notes: "Best at refactoring seams, bad at API design.".to_string(),
+        daemon_instance_id: THIS_DAEMON.to_string(),
+    };
+
+    // When — the registry projects it onto its agent def
+    let def =
+        tddy_model_registry::assistant_def::assistant_to_agent_def(&assistant, &a_provider_entry())
+            .expect("the assistant names its own provider");
+
+    // Then — the notes ride the def, for the operator to read wherever a def is listed
+    assert_eq!(
+        def.usage_notes,
+        Some("Best at refactoring seams, bad at API design.".to_string())
+    );
+    assert_eq!(def.name, "repo-reader");
 }

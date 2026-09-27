@@ -74,6 +74,9 @@ pub struct NewAssistant {
     /// attaches it stops being able to call itself. Same vocabulary as [`Self::tools`], a
     /// different question, and validated the same way.
     pub replaces: Vec<String>,
+    /// How to use this agent, as the operator wrote it — stored and displayed, never machine
+    /// context (see `AssistantEntry.usage_notes`). `None` = no notes.
+    pub usage_notes: Option<String>,
 }
 
 /// The registry of one daemon, backed by a SQLite file.
@@ -501,8 +504,8 @@ impl ModelRegistryStore {
         sqlx::query(
             "INSERT INTO assistant
                 (assistant_id, name, label, provider_id, model_id, system_prompt, tools, replaces,
-                 owner)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 usage_notes, owner)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .bind(&assistant_id)
         .bind(&assistant.name)
@@ -512,6 +515,7 @@ impl ModelRegistryStore {
         .bind(&assistant.system_prompt)
         .bind(encode_list(&tools))
         .bind(encode_list(&replaces))
+        .bind(&assistant.usage_notes)
         .bind(owner)
         .execute(&mut *tx)
         .await
@@ -532,6 +536,7 @@ impl ModelRegistryStore {
             system_prompt: assistant.system_prompt,
             tools,
             replaces,
+            usage_notes: assistant.usage_notes.unwrap_or_default(),
             daemon_instance_id: self.daemon_instance_id.clone(),
         })
     }
@@ -540,7 +545,7 @@ impl ModelRegistryStore {
     pub async fn list_assistants(&self) -> Result<Vec<AssistantEntry>, ModelRegistryError> {
         let rows = sqlx::query(
             "SELECT assistant_id, name, label, provider_id, model_id, system_prompt, tools,
-                    replaces
+                    replaces, usage_notes
              FROM assistant
              ORDER BY rowid",
         )
@@ -557,6 +562,7 @@ impl ModelRegistryStore {
                     system_prompt: row.get("system_prompt"),
                     tools: decode_list("assistant.tools", &row.get::<String, _>("tools"))?,
                     replaces: decode_list("assistant.replaces", &row.get::<String, _>("replaces"))?,
+                    usage_notes: row.get("usage_notes"),
                     daemon_instance_id: self.daemon_instance_id.clone(),
                 })
             })
@@ -586,6 +592,7 @@ impl ModelRegistryStore {
         system_prompt: &str,
         tools: &[String],
         replaces: &[String],
+        usage_notes: Option<&str>,
         caller: &str,
     ) -> Result<AssistantEntry, ModelRegistryError> {
         let tools = validate_tools(tools)?;
@@ -600,14 +607,14 @@ impl ModelRegistryStore {
             &format!("assistant {assistant_id}"),
         )?;
         sqlx::query(
-            "UPDATE assistant SET label = ?2, system_prompt = ?3, tools = ?4, replaces = ?5
-             WHERE assistant_id = ?1",
+            "UPDATE assistant SET label = ?2, system_prompt = ?3, tools = ?4, replaces = ?5, usage_notes = ?6 WHERE assistant_id = ?1",
         )
         .bind(assistant_id)
         .bind(label)
         .bind(system_prompt)
         .bind(encode_list(&tools))
         .bind(encode_list(&replaces))
+        .bind(usage_notes)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
@@ -1095,6 +1102,9 @@ async fn ensure_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "replaces TEXT NOT NULL DEFAULT '[]'",
     )
     .await?;
+    // Likewise for a database written before an assistant could carry usage notes: its rows
+    // carry none, which is what they said when they were written.
+    add_column_if_missing(pool, "assistant", "usage_notes", "usage_notes TEXT").await?;
     Ok(())
 }
 
