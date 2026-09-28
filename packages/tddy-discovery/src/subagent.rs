@@ -350,16 +350,7 @@ impl CodebaseAccess {
             CodebaseAccess::Local => {
                 let re = Regex::new(pattern)
                     .map_err(|e| SubagentError(format!("GREP invalid regex {pattern:?}: {e}")))?;
-                let mut matches: Vec<serde_json::Value> = Vec::new();
-                let search_path = path.unwrap_or(".");
-                let is_file = std::fs::metadata(search_path)
-                    .map(|m| m.is_file())
-                    .unwrap_or(false);
-                if is_file {
-                    grep_file(&re, search_path, &mut matches);
-                } else {
-                    grep_dir(&re, search_path, &mut matches);
-                }
+                let matches = scan_local(&re, path);
                 Ok(capped_results(
                     matches,
                     limit,
@@ -397,10 +388,16 @@ impl CodebaseAccess {
     ) -> Result<serde_json::Value, SubagentError> {
         match self {
             CodebaseAccess::Local => {
-                // TODO(grep-context): compute the context windows from the file's lines, in the
-                // same shape the engine's event folding produces.
-                let _ = context;
-                self.grep_limited(pattern, path, limit).await
+                let re = Regex::new(pattern)
+                    .map_err(|e| SubagentError(format!("GREP invalid regex {pattern:?}: {e}")))?;
+                let matches = grep_context::with_local_windows(scan_local(&re, path), context);
+                Ok(capped_results(
+                    matches,
+                    limit,
+                    DEFAULT_GREP_MATCH_CAP,
+                    "matches",
+                    "total_matches",
+                ))
             }
             CodebaseAccess::Managed(dispatch) => {
                 let mut args = serde_json::json!({
@@ -629,6 +626,24 @@ fn window_content(content: &str, offset: Option<u64>, limit: Option<u64>) -> ser
         "truncated": truncated,
         "total_lines": total_lines,
     })
+}
+
+/// Scan `path` — a file, a directory walked recursively, or the working directory when no path
+/// was named — for `re`, as the raw rg-shaped match events [`grep_file`] pushes. The same scan
+/// `grep_limited`'s Local arm runs; [`grep_context::with_local_windows`] decorates its
+/// output when the call asked for context.
+fn scan_local(re: &Regex, path: Option<&str>) -> Vec<serde_json::Value> {
+    let mut matches: Vec<serde_json::Value> = Vec::new();
+    let search_path = path.unwrap_or(".");
+    let is_file = std::fs::metadata(search_path)
+        .map(|m| m.is_file())
+        .unwrap_or(false);
+    if is_file {
+        grep_file(re, search_path, &mut matches);
+    } else {
+        grep_dir(re, search_path, &mut matches);
+    }
+    matches
 }
 
 fn grep_file(re: &Regex, path: &str, matches: &mut Vec<serde_json::Value>) {
@@ -989,7 +1004,14 @@ async fn dispatch_tool_call(access: &CodebaseAccess, tool_call: &ToolCall) -> To
             let pattern = args["pattern"].as_str().unwrap_or("");
             let path = args["path"].as_str();
             let limit = args["limit"].as_u64();
-            access.grep_limited(pattern, path, limit).await
+            match grep_context::GrepContext::from_args(&args) {
+                Some(context) => {
+                    access
+                        .grep_with_context(pattern, path, limit, context)
+                        .await
+                }
+                None => access.grep_limited(pattern, path, limit).await,
+            }
         }
         "WRITE" => {
             let path = args["path"].as_str().unwrap_or("");

@@ -47,8 +47,88 @@ impl GrepContext {
     /// answer a request the caller never made, and the model can re-ask within the bound once
     /// its tool result names it.
     pub fn from_args(args: &serde_json::Value) -> Option<Self> {
-        // TODO(grep-context): read `before`/`after`, reject past the ceiling, None when absent.
-        let _ = args;
-        None
+        // A non-integer or negative shape reads as absent: `validate_tool_arguments` faults one
+        // before dispatch, so a call reaching here was well-formed, and guessing a window from a
+        // malformed one would answer a request nobody made.
+        let count = |key: &str| args.get(key).and_then(|value| value.as_u64());
+        let before = count("before");
+        let after = count("after");
+        if before.is_none() && after.is_none() {
+            return None;
+        }
+        let (before, after) = (before.unwrap_or(0), after.unwrap_or(0));
+        if before > GREP_CONTEXT_LINE_CEILING || after > GREP_CONTEXT_LINE_CEILING {
+            return None;
+        }
+        if before == 0 && after == 0 {
+            return None;
+        }
+        Some(Self { before, after })
     }
+}
+
+/// Attach each match's `context` window, computed from the searched file's own lines — the Local
+/// path's answer to what the engine folds out of ripgrep's `context` events, in the same
+/// `{lineNumber, text, relation}` shape, so a caller cannot tell which path answered. A window
+/// clamps at the file's edges: fewer lines than asked for, never padding and never an error. A
+/// [`GrepContext`] of zero on both sides attaches nothing, so the entries keep their context-free
+/// shape byte for byte.
+pub(super) fn with_local_windows(
+    mut matches: Vec<serde_json::Value>,
+    context: GrepContext,
+) -> Vec<serde_json::Value> {
+    if context.before == 0 && context.after == 0 {
+        return matches;
+    }
+    // One read per file, however many matches it gave: a scan's matches cluster on few files.
+    let mut files: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for entry in matches.iter_mut() {
+        let (Some(path), Some(line_number)) = (
+            entry["data"]["path"]["text"].as_str().map(str::to_owned),
+            entry["data"]["line_number"].as_u64(),
+        ) else {
+            continue;
+        };
+        let lines = files.entry(path).or_insert_with_key(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect()
+        });
+        let window = context_window(lines, line_number, context);
+        if !window.is_empty() {
+            // Serializing a struct with string fields cannot fail, and an empty window is
+            // skipped above — the key is only ever present when context was asked for and found.
+            entry["context"] = serde_json::to_value(window).expect("ContextLine serializes");
+        }
+    }
+    matches
+}
+
+/// The context lines around `line_number` (1-based): up to `context.before` above, then up to
+/// `context.after` below, each tagged with the side of the match it sits on.
+fn context_window(lines: &[String], line_number: u64, context: GrepContext) -> Vec<ContextLine> {
+    let above = usize::try_from(line_number.saturating_sub(1)).unwrap_or(usize::MAX);
+    // The file can change between the scan and this read; a match line it no longer has has no
+    // window to compute.
+    if above >= lines.len() {
+        return Vec::new();
+    }
+    let before_count = usize::try_from(context.before).unwrap_or(usize::MAX);
+    let after_count = usize::try_from(context.after).unwrap_or(usize::MAX);
+    let before_start = above.saturating_sub(before_count);
+    let after_end = above
+        .saturating_add(1)
+        .saturating_add(after_count)
+        .min(lines.len());
+    let side = |i: usize, relation: &str| ContextLine {
+        line_number: i as u64 + 1,
+        text: lines[i].clone(),
+        relation: relation.to_string(),
+    };
+    let before = (before_start..above).map(|i| side(i, "before"));
+    let after = (above + 1..after_end).map(|i| side(i, "after"));
+    before.chain(after).collect()
 }

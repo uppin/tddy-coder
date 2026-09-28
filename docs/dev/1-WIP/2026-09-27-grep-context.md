@@ -157,7 +157,13 @@ Unit + integration:
 - [x] Run acceptance tests (verify they fail) — 3 engine + 3 local failures, each the missing context folding/computation; node 1's 13 inherited red tests also ride this branch and are #553's to green
 - [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (scoped gates green: `./test -p tddy-discovery
+  -p tddy-tool-engine`, 309 passed / 0 failed; scoped clippy clean). One red-phase expectation was
+  corrected with ground truth: `the_match_window_counts_matches_not_context_lines` asserted
+  `total_matches == 4` where rg reports 3 for its fixture — asserting 4 would have required
+  counting a context line as a match, the anti-pattern the test's own name forbids. The two
+  argument-bounds unit tests the testing plan called for were written green-side (the red phase
+  omitted them).
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass

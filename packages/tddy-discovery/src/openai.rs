@@ -191,11 +191,15 @@ pub fn discovery_tool_definitions() -> Vec<ToolDefinition> {
                         },
                         "before": {
                             "type": "integer",
-                            "description": "Context lines to return before each match (0-50)."
+                            "description": "Context lines to return before each match (0-50).",
+                            "minimum": 0,
+                            "maximum": 50
                         },
                         "after": {
                             "type": "integer",
-                            "description": "Context lines to return after each match (0-50)."
+                            "description": "Context lines to return after each match (0-50).",
+                            "minimum": 0,
+                            "maximum": 50
                         }
                     },
                     "required": ["pattern"]

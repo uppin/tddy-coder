@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_discovery::subagent::{
     validate_tool_arguments, ArgumentProblem, ArgumentViolation, CodebaseAccess, MessageRole,
-    PromptOutcome, SubagentConfig, SubagentRegistry, SubagentSession,
+    PromptOutcome, SubagentConfig, SubagentRegistry, SubagentSession, GREP_CONTEXT_LINE_CEILING,
 };
 use wiremock::matchers::{method, path as path_matcher};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -363,6 +363,51 @@ fn every_fault_in_one_call_is_reported_together_rather_than_only_the_first() {
         .assert_arguments_faulted(&["path", "limitt"])
         .assert_problem_for("path", ArgumentProblem::SurroundingQuote)
         .assert_problem_for("limitt", ArgumentProblem::Unknown);
+}
+
+// ─── The GREP context bounds ─────────────────────────────────────────────────
+
+/// The context window the GREP schema advertises (0–50) is a bound, not a suggestion: past it
+/// the call is refused with the argument named, so the model re-asks within the bound instead of
+/// learning the edge by trial and error.
+#[test]
+fn a_before_count_past_its_ceiling_is_faulted_naming_the_argument() {
+    // Given
+    let args = serde_json::json!({ "pattern": "x", "before": GREP_CONTEXT_LINE_CEILING + 1 });
+
+    // When
+    let violations = validate_tool_arguments("GREP", &args);
+
+    // Then
+    violations
+        .assert_arguments_faulted(&["before"])
+        .assert_problem_for(
+            "before",
+            ArgumentProblem::OutOfRange {
+                allowed: "0 to 50".to_string(),
+            },
+        );
+}
+
+/// A negative count is below the schema's `minimum` — refused by name, the same as a count past
+/// the ceiling, rather than read as absent and answered with a window nobody asked for.
+#[test]
+fn a_negative_after_count_is_faulted_naming_the_argument() {
+    // Given
+    let args = serde_json::json!({ "pattern": "x", "after": -1 });
+
+    // When
+    let violations = validate_tool_arguments("GREP", &args);
+
+    // Then
+    violations
+        .assert_arguments_faulted(&["after"])
+        .assert_problem_for(
+            "after",
+            ArgumentProblem::OutOfRange {
+                allowed: "0 to 50".to_string(),
+            },
+        );
 }
 
 // ─── Error scenarios, through the turn loop ──────────────────────────────────

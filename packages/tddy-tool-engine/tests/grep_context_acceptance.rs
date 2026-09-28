@@ -111,7 +111,8 @@ async fn the_match_window_counts_matches_not_context_lines() {
         "pattern": "line", "path": A_FILE, "before": 5, "after": 5, "limit": 1
     }))
     .await;
-    assert_eq!(result["total_matches"], serde_json::json!(4));
+    // Three real matches ("line" is not in line 2) — a window never counts context lines toward it.
+    assert_eq!(result["total_matches"], serde_json::json!(3));
     assert_eq!(
         result["matches"].as_array().expect("a window").len(),
         1,
