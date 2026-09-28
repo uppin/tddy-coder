@@ -145,7 +145,45 @@ Unit + integration:
 
 ## Validation results
 
-(to be filled by `/validate-changes`)
+(`/validate-changes`, 2026-09-28, stack base `feature/subagent-control/tool-previews`, leak check
+clean — 3 commits, all this PR's)
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ all 4 milestones implemented |
+| `## Responsibility` delivered | ✅ complete — all three green-phase stubs implemented, no TODO left |
+| `## Dependencies` not implemented here | ✅ clean — node 1's files absent from the diff (order-only edge) |
+| `## Boundaries` respected | ✅ clean — no offset/paging, no Glob/Read changes, no result-summary changes, no jail changes |
+| No dependent's behaviour | ✅ clean |
+| Diff contains only this PR's files | ✅ clean — 12 files, all claimed |
+| Parent-owned files intact | ✅ clean — no deletions |
+
+Build validation: `tddy-discovery`, `tddy-tool-engine` scoped `./test` — 309 passed / 0 failed
+(`.verify-result.txt`); scoped clippy clean.
+
+Risks: no critical findings. Two notes for review: (1) the engine repeats the context ceiling as a
+local const — the crates cannot import each other, so the mirror is by comment alone (house
+precedent `REMOTE_ENGINE_DEFAULT_BLOCK_MS`); (2) the shared-context folding rule (`before` of the
+next match, else `after` of the last) is a design choice the tests pin only in the single-match
+case, documented at the fold site.
+
+Test quality (`/validate-tests`, 2026-09-28): 10 tests analyzed (4 engine + 4 local acceptance +
+2 new argument-bounds units beside the existing suite, reusing its fluent-assertion trait).
+Fluent-tests compliant — sentence names, named helpers, one behavior per test, Given/When/Then.
+The one test correction is factual (`4 → 3`, verified against rg itself) and commented in place.
+No critical or warning issues.
+
+Production readiness (`/validate-prod-ready`, 2026-09-28): 6 production files checked — no mock
+code, no dev fallbacks, no debug output, no TODO/FIXME added (all three green-phase stub markers
+resolved). Status ✅ Ready. Full-workspace build/test left to CI per the scoped-verification rule.
+
+Code quality (`/analyze-clean-code`, 2026-09-28): **A** — the one function the raw metric flagged,
+`tool_grep` at 95 lines, had its folding loop extracted to `fold_context_events` (95 → 45; the
+helper is 53); every other changed function is 13–33 lines, nesting ≤3, no magic values, no
+duplication. File length gate (500 production lines, PR range vs the parent branch):
+`subagent.rs` 1850 → 1912, tool-engine `lib.rs` 789 → 863 — both pre-existing oversized with open,
+unclaimed records; growth is the engine's in-place folding (planned) and the Local arm's minimal
+threading; restructuring deferred past the stack (sibling nodes touch both).
 
 ## TODO
 

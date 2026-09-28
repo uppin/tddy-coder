@@ -502,63 +502,69 @@ async fn tool_grep(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Ok(out) => {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let mut matches = vec![];
-            // Context events arrive in file order between the matches they surround: the ones
-            // before the next match fold as its `before`, the ones after the last match as its
-            // `after`. A line two matches' windows share is emitted by ripgrep once, so folding
-            // "toward the next match, else the last" attaches it exactly once. With no `-B`/`-A`
-            // out, no context events come back and every entry keeps its shape byte for byte.
-            let mut pending: Vec<(u64, String)> = Vec::new();
-            for line in stdout.lines() {
-                let Ok(mut v) = serde_json::from_str::<serde_json::Value>(line) else {
-                    continue;
-                };
-                match v.get("type").and_then(|t| t.as_str()) {
-                    Some("match") => {
-                        if !pending.is_empty() {
-                            let before: Vec<_> = pending
-                                .drain(..)
-                                .map(|(n, text)| context_line(n, &text, "before"))
-                                .collect();
-                            v["context"] = serde_json::Value::Array(before);
-                        }
-                        matches.push(v);
-                    }
-                    Some("context") => {
-                        let text = v["data"]["lines"]["text"].as_str().unwrap_or("");
-                        // ripgrep's event text carries the line's trailing newline; the context
-                        // entries name line contents, as the Local path's do.
-                        let text = text.strip_suffix('\n').unwrap_or(text);
-                        let text = text.strip_suffix('\r').unwrap_or(text);
-                        if let Some(n) = v["data"]["line_number"].as_u64() {
-                            pending.push((n, text.to_string()));
-                        }
-                    }
-                    // A file boundary closes any window: context never folds across files.
-                    Some("begin") => pending.clear(),
-                    _ => {}
-                }
-            }
-            if !pending.is_empty() {
-                if let Some(last) = matches.last_mut() {
-                    let after: Vec<_> = pending
-                        .drain(..)
-                        .map(|(n, text)| context_line(n, &text, "after"))
-                        .collect();
-                    match last.get_mut("context") {
-                        Some(serde_json::Value::Array(context)) => context.extend(after),
-                        // No `before` came before the last match; its `after` is its whole window.
-                        _ => {
-                            last["context"] = serde_json::Value::Array(after);
-                        }
-                    }
-                }
-            }
+            fold_context_events(&stdout, &mut matches);
             ToolOutcome::ok(
                 search_window::result_window(matches, limit, "matches", "total_matches")
                     .to_string(),
             )
         }
         Err(e) => ToolOutcome::err(format!("Grep: {e}")),
+    }
+}
+
+/// Fold a ripgrep `--json` event stream into `matches`: each match entry gains the context lines
+/// ripgrep emitted around it, in the shape `context_line` builds.
+fn fold_context_events(stdout: &str, matches: &mut Vec<serde_json::Value>) {
+    // Context events arrive in file order between the matches they surround: the ones
+    // before the next match fold as its `before`, the ones after the last match as its
+    // `after`. A line two matches' windows share is emitted by ripgrep once, so folding
+    // "toward the next match, else the last" attaches it exactly once. With no `-B`/`-A`
+    // out, no context events come back and every entry keeps its shape byte for byte.
+    let mut pending: Vec<(u64, String)> = Vec::new();
+    for line in stdout.lines() {
+        let Ok(mut v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        match v.get("type").and_then(|t| t.as_str()) {
+            Some("match") => {
+                if !pending.is_empty() {
+                    let before: Vec<_> = pending
+                        .drain(..)
+                        .map(|(n, text)| context_line(n, &text, "before"))
+                        .collect();
+                    v["context"] = serde_json::Value::Array(before);
+                }
+                matches.push(v);
+            }
+            Some("context") => {
+                let text = v["data"]["lines"]["text"].as_str().unwrap_or("");
+                // ripgrep's event text carries the line's trailing newline; the context
+                // entries name line contents, as the Local path's do.
+                let text = text.strip_suffix('\n').unwrap_or(text);
+                let text = text.strip_suffix('\r').unwrap_or(text);
+                if let Some(n) = v["data"]["line_number"].as_u64() {
+                    pending.push((n, text.to_string()));
+                }
+            }
+            // A file boundary closes any window: context never folds across files.
+            Some("begin") => pending.clear(),
+            _ => {}
+        }
+    }
+    if !pending.is_empty() {
+        if let Some(last) = matches.last_mut() {
+            let after: Vec<_> = pending
+                .drain(..)
+                .map(|(n, text)| context_line(n, &text, "after"))
+                .collect();
+            match last.get_mut("context") {
+                Some(serde_json::Value::Array(context)) => context.extend(after),
+                // No `before` came before the last match; its `after` is its whole window.
+                _ => {
+                    last["context"] = serde_json::Value::Array(after);
+                }
+            }
+        }
     }
 }
 
