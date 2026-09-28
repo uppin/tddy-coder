@@ -122,24 +122,7 @@ pub fn summarize(tool: &str, result: &serde_json::Value) -> ResultSummary {
         "DELETE" => ResultSummary::Delete {
             deleted: bool_at(result, "deleted"),
         },
-        "SHELL" => {
-            // A background dispatch has no ending to report — the job id is its whole story, so
-            // the exit code and output size stay unset rather than reading as zero.
-            match str_at(result, "job_id") {
-                Some(job_id) => ResultSummary::Shell {
-                    exit_code: None,
-                    stdout_chars: None,
-                    job_id: Some(job_id.to_string()),
-                },
-                None => ResultSummary::Shell {
-                    exit_code: result.get("exit_code").and_then(serde_json::Value::as_i64),
-                    stdout_chars: Some(
-                        str_at(result, "stdout").unwrap_or_default().chars().count() as u64,
-                    ),
-                    job_id: None,
-                },
-            }
-        }
+        "SHELL" => shell_summary(result),
         "AWAIT" => ResultSummary::Await {
             exit_code: result.get("exit_code").and_then(serde_json::Value::as_i64),
             completed: bool_at(result, "completed"),
@@ -150,6 +133,23 @@ pub fn summarize(tool: &str, result: &serde_json::Value) -> ResultSummary {
         // A tool name this summary has no facts for: refusing to guess keeps an unrecognized
         // result from being read as, say, a zero-match search.
         _ => ResultSummary::Error,
+    }
+}
+
+/// A `SHELL` result's facts. A background dispatch has no ending to report — the job id is its
+/// whole story, so the exit code and output size stay unset rather than reading as zero.
+fn shell_summary(result: &serde_json::Value) -> ResultSummary {
+    match str_at(result, "job_id") {
+        Some(job_id) => ResultSummary::Shell {
+            exit_code: None,
+            stdout_chars: None,
+            job_id: Some(job_id.to_string()),
+        },
+        None => ResultSummary::Shell {
+            exit_code: result.get("exit_code").and_then(serde_json::Value::as_i64),
+            stdout_chars: Some(str_at(result, "stdout").unwrap_or_default().chars().count() as u64),
+            job_id: None,
+        },
     }
 }
 

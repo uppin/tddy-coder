@@ -163,7 +163,47 @@ Unit + integration (no E2E needed; the MCP/RPC surfaces have existing test harne
 
 ## Validation results
 
-(to be filled by `/validate-changes`)
+(`/validate-changes`, 2026-09-28, stack base `master`, leak check clean — 3 commits, all this PR's)
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ all 5 milestones implemented |
+| `## Responsibility` delivered | ✅ complete — no stubs; both `TODO(tool-previews)` markers resolved |
+| `## Dependencies` not implemented here | ✅ clean (root node — none) |
+| `## Boundaries` respected | ✅ clean — no yield conditions, no Grep shape change, no `usageNotes`, `tool_calls` still names-only, `preview` unchanged |
+| No dependent's behaviour | ✅ clean |
+| Diff contains only this PR's files | ✅ clean — 4 source files + 2 test files + 4 docs, all claimed by the changeset |
+| Parent-owned files intact | ✅ clean — no deletions |
+
+Build validation: `tddy-discovery`, `tddy-tool-engine`, `tddy-session-agents` via scoped `./test`
+(0 failed, evidence `.verify-result.txt`); `tddy-service` via scoped `cargo check`. Build warnings
+in changed code: none.
+
+Risks: no critical findings. One documented semantic choice to flag for review — `chars_read`
+counts characters excluding the newlines that separate lines (pinned by the acceptance test's 31
+for a 33-char content; documented on `chars_excluding_newlines`).
+
+Test quality (`/validate-tests`, 2026-09-28): 19 tests analyzed (11 unit + 4 acceptance + 2 engine
++ 2 pre-existing transcript units touched by the field). Fluent-tests compliant — sentence names,
+one behavior per test, named helpers, meaningful fixtures. One note: `a_grep_tool_message_carries_its_match_counts`
+asserts `summary != Error` rather than exact Grep facts — deliberate and commented in-file
+(Grep-specific counts are pinned at the unit level, where the real Grep result JSON drives the
+extraction). No critical or warning issues; nothing routed to refactor.
+
+Production readiness (`/validate-prod-ready`, 2026-09-28): 6 production files checked (2 test files
+excluded) — no mock code, no dev fallbacks, no unused code, no debug output, no TODO/FIXME added by
+this PR (both its own were resolved; the one `TODO(session-agent-roster)` at
+`tddy-session-agents/src/service.rs:910` is pre-existing and not this PR's). Status ✅ Ready.
+Full-workspace build/test deliberately left to CI per the scoped-verification rule.
+
+Code quality (`/analyze-clean-code`, 2026-09-28): **A** — no must-refactor items after a refactor
+pass fixed the two functions the raw line metric flagged: `tool_str_replace` 65 → 58 (the hand-built
+error `ToolOutcome` became a shared `ToolOutcome::err_json` constructor) and `summarize` 64 → 47
+(the SHELL arm extracted to `shell_summary`). Nesting ≤3, parameters ≤2, no magic values, no
+duplication. File length gate (500 production lines): `subagent.rs` 1832 → 1850, `service.rs`
+1069 → 1076, tool-engine `lib.rs` 763 → 777 — all pre-existing oversized with open, unclaimed
+code-issue records; growth is the changeset's planned minimal seams, and restructuring is deferred
+past the stack (sibling nodes touch all three).
 
 ## TODO
 
