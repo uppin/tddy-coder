@@ -160,7 +160,31 @@ is the caller's text. The whole thing travels the resume RPC, with wire-level te
 
 ## Validation results
 
-(to be filled by `/validate-changes`)
+(`/validate-changes`, 2026-09-28, stack base `feature/subagent-control/yield-conditions`, leak
+check clean — 3 commits, all this PR's; rebased over the base's landing-loop rewrites, one real
+conflict resolved: the parent's parse position kept, this node's `with_replacement` composition
+adapted to the parent's fallible helper)
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ all milestones implemented |
+| `## Responsibility` delivered | ✅ complete — replacement end to end: MCP args → validation → `TurnRequest` → proto → rewind-then-append with minted ids → the turn over the appended history; wire round-trip test green |
+| `## Dependencies` not implemented here | ✅ clean — node 4's yield surface read (the id, the vocabulary), never modified; nodes 1/2/3's files absent |
+| `## Boundaries` respected | ✅ clean — append-only (the original failed call stays), resume-only, the replaced call never dispatches, no stop-reason/summary/UI changes |
+| No dependent's behaviour | ✅ clean (no dependents — top of stack) |
+| Diff contains only this PR's files | ✅ clean — 16 files, all claimed |
+| Parent-owned files intact | ✅ clean — no deletions |
+
+Build validation: `./test -p tddy-discovery -p tddy-session-agents -p tddy-tools
+-p tddy-daemon-rpc` — 126 suites / 0 failed (`.verify-result.txt`, incl. the 4 acceptance + 5
+unit replacement tests); scoped clippy + fmt clean.
+
+Risks: no critical findings. Three documented judgment calls from green: the replacement tool set
+is **derived from the advertised definitions** (ten tools — a hand-kept nine would have missed
+`SEMANTIC_SEARCH`); the repeat-ledger invalidation covers an appended replacement (an
+outside-the-loop change, as its own comment enumerates); replacement call ids mint as
+`call_replacement_{ordinal}` from the transcript's rising counter. Validation runs **above the
+rewind**, so a malformed replacement never reshapes the history it is refused from.
 
 ## TODO
 
@@ -180,7 +204,24 @@ is the caller's text. The whole thing travels the resume RPC, with wire-level te
   hand-kept copy; the repeat-ledger invalidation now covers an appended replacement (outside the
   loop's changes, as its comment enumerates); replacement call ids mint as
   `call_replacement_{ordinal}` from the transcript's rising counter. Validation runs above the
-  rewind, so a malformed replacement never reshapes the history it is refused from.- [ ] Update documentation with progress
+  rewind, so a malformed replacement never reshapes the history it is refused from.
+
+Test quality (`/validate-tests`, 2026-09-28): 9 tests analyzed (5 unit in `replacement.rs` + 4
+acceptance) — the contract's own, untouched this session. Fluent-tests compliant: sentence names,
+named fixtures (`a_replacement`), one behavior per test, Given/When/Then. No critical or warning
+issues.
+
+Production readiness (`/validate-prod-ready`, 2026-09-28): 7 production files checked — no mock
+code, no dev fallbacks, no debug output, no TODO/FIXME added (all three stub markers resolved).
+Status ✅ Ready. Full-workspace build/test left to CI per the scoped-verification rule.
+
+Code quality (`/analyze-clean-code`, 2026-09-28): **A** — `validate_replacement` 41 lines (flat,
+three named checks), `append_replacement` 31; nesting ≤3, no magic values, the tool set derived
+rather than duplicated. File length gate (500 production lines, PR range vs the parent branch):
+`conversation.rs` 512 → **522** (+10), `subagent.rs` 1985 → **2001** (+16), `service.rs` 1122 →
+**1149** (+27) — all pre-existing oversized with open records **whose standing deferrals (node 4's
+consented ones) already name these files and schedule their split after the stack lands**; the
+rows below record this PR's growth in them.- [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

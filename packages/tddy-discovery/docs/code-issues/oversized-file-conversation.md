@@ -19,3 +19,4 @@
 The framing concern — `parse_message_descriptor` and the final-chunk condition echo — is the
 cohesive group; the conversation loop is the rest. Engine-driven extraction
 (`code-restructuring`) after the stack lands, with `parse_message_descriptor`'s callers repointed.
+| 2026-09-28 | 522 | +10 more in PR #557 (`#subagent-control` 5/5): the replacement fields' framing in the same parse — inside the standing deferral (the stack's top node; split after landing) |

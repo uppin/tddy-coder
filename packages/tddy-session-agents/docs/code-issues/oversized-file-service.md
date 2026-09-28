@@ -54,3 +54,4 @@ instead of 2,488). Confirmed the ten RPCs and that the conversation four are con
 **not** run `restructure check`, so the seam estimate is arithmetic, not a proven plan.
 | 2026-09-28 | 1,076 | +7 in PR #553: the `message_descriptor` frame builder maps one more field (`result_summary_json`) |
 | 2026-09-28 | 1,122 | +46 in PR #556 (`#subagent-control` 4/5): the `yield_conditions_json` request parsing (now erroring on an unparseable payload as documented) and the `fired_condition_json` chunk framing |
+| 2026-09-28 | 1,149 | +27 more in PR #557 (`#subagent-control` 5/5): `turn_request()`'s replacement parsing composed with the yield-conditions parse, and the resume framing |
