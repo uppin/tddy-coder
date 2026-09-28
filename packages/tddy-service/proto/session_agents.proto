@@ -110,6 +110,12 @@ message AgentConversationChunk {
   // Reported rather than silently applied: a caller given fewer turns than it asked for otherwise
   // reads an early stop as a finished search.
   optional uint32 clamped_max_turns = 5;
+  // The condition that fired, as the caller wrote it, when the turn stopped on
+  // "YieldedToCaller" — a JSON object, final frame only. Empty for every other stop reason.
+  string fired_condition_json = 6;
+  // The tool message's id the turn stopped at, when it stopped on "YieldedToCaller" — the id a
+  // resume-with-replacement names. Empty for every other stop reason.
+  string yielded_message_id = 7;
 }
 
 // One message of a conversation's history, as the caller of a turn reads it.
@@ -218,6 +224,10 @@ message PromptAgentConversationRequest {
   // Presence-tracked rather than "0 means unset": zero turns is a budget a caller can legitimately
   // name, and reading it as "use the definition's" would run a search the caller asked not to run.
   optional uint32 max_turns = 6;
+  // The conditions on a tool call that yield this turn back to the caller, as a JSON array of
+  // {tool, when} objects — the same shape the MCP tools parse. For this turn only, never the
+  // conversation. Empty = the turn is unconditional, which is every caller today.
+  string yield_conditions_json = 7;
 }
 
 message ReportAgentCloneStateRequest {
@@ -287,6 +297,9 @@ message ResumeAgentConversationRequest {
   optional string correction = 6;
   // As on PromptAgentConversationRequest, and clamped and reported the same way.
   optional uint32 max_turns = 7;
+  // As on PromptAgentConversationRequest — the same JSON array of {tool, when} objects, for
+  // this turn only.
+  string yield_conditions_json = 8;
 }
 
 message SessionAgentEntry {

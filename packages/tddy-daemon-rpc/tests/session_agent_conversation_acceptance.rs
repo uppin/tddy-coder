@@ -70,6 +70,7 @@ impl ConversingSession {
                 conversation_id: conversation_id.to_string(),
                 prompt: "where is main?".to_string(),
                 max_turns: None,
+                yield_conditions_json: String::new(),
             }))
             .await
             .expect("prompting an open conversation must succeed")

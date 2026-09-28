@@ -15,7 +15,11 @@ preview (`MESSAGE_PREVIEW_CHARS`), i.e. up to ~960 bytes in UTF-8, plus an id, a
 and a `tool_calls` list. PR #553 adds a per-tool `resultSummary` on every tool-role descriptor —
 bounded by construction (`packages/tddy-discovery/src/subagent/result_summary.rs`): the only text
 is `firstLine`, cut to 120 chars (≤ ~480 bytes in UTF-8), plus a few counters, so a summary adds
-at most ~600 bytes per tool-role descriptor.
+at most ~600 bytes per tool-role descriptor. PR #556 (`yield-conditions`) adds one more field to
+that same final frame: the fired condition a yielded turn reports (`packages/tddy-discovery/src/subagent/yield_condition.rs`),
+echoed only when the turn stopped on a caller's condition, and bounded by `validate`'s own rules —
+at most one condition (not all 8), whose largest part is a `contains` needle cut at 256 chars — so
+at most a few hundred bytes, once.
 
 At the ceiling of 50 turns a prompt can append well over a hundred messages. A hundred descriptors
 is 30–100 KB on one frame, on top of up to 48 KB of content — so the invariant the existing

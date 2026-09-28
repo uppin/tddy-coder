@@ -57,3 +57,4 @@ that is currently wrong.
 cross-checked against `SpecializedSubagentSession::prompt` and `run_one_turn` in
 `subagent.rs:864-910`, which push `ChatMessage::assistant` and `ChatMessage::tool_result` inside the
 loop — confirming the comment's premise is false. Did **not** run `restructure check`.
+| 2026-09-28 | 729 | +13 in PR #556 (`#subagent-control` 4/5): the yielded outcome's `prompt_outcome_json` fields (`firedCondition`, `yieldedMessageId`) and their framing |

@@ -123,6 +123,7 @@ async fn an_in_jail_agent_holds_a_conversation_on_the_new_coordinate() {
             conversation_id: conversation_id.clone(),
             prompt: "where is main?".to_string(),
             max_turns: None,
+            yield_conditions_json: String::new(),
         })
         .await;
 

@@ -27,6 +27,7 @@ mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
+mod yield_condition;
 
 use transcript::Transcript;
 
@@ -38,6 +39,10 @@ pub use transcript::{
     MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
+pub use yield_condition::{
+    evaluate as evaluate_yield_condition, validate as validate_yield_conditions, OutcomeFact, When,
+    YieldCondition, YIELD_CONDITION_LIMIT, YIELD_CONTAINS_LIMIT,
+};
 
 /// A single block of subagent response content — currently text-only, mirroring ACP's
 /// `ContentBlock`.
@@ -79,6 +84,14 @@ pub enum StopReason {
     /// produce still comes back: a cut answer is still work, and discarding it would make the
     /// caller re-run the turn to recover what it already said.
     MaxTokens,
+    /// The caller's condition on a tool call fired, and the turn stopped at that call — the
+    /// result already appended stays in the transcript, and the model is never sent it.
+    ///
+    /// A stop reason rather than an error for the same reason [`Self::MaxTurnRequests`] is one:
+    /// the caller asked to be handed control at exactly this point, so the work up to and
+    /// including the yielded call is the answer. The outcome names the fired condition and the
+    /// yielded tool message's id, which is the id a resume-with-replacement consumes.
+    YieldedToCaller,
 }
 
 /// Result of one [`SubagentSession::take_turn`] call — the loop's yield point.
@@ -99,6 +112,13 @@ pub struct PromptOutcome {
     /// [`SUBAGENT_MAX_TURNS_CEILING`] and was given the ceiling instead; `None` when the caller got
     /// what it asked for.
     pub clamped_max_turns: Option<u32>,
+    /// The condition that fired, when the turn stopped on [`StopReason::YieldedToCaller`] —
+    /// which condition, as the caller wrote it. `None` for every other stop reason.
+    pub fired_condition: Option<yield_condition::YieldCondition>,
+    /// The tool message's id the turn stopped at, when it stopped on
+    /// [`StopReason::YieldedToCaller`] — the id a resume-with-replacement names. `None` for
+    /// every other stop reason.
+    pub yielded_message_id: Option<MessageId>,
 }
 
 impl PromptOutcome {
@@ -111,6 +131,8 @@ impl PromptOutcome {
             usage,
             messages: Vec::new(),
             clamped_max_turns: None,
+            fired_condition: None,
+            yielded_message_id: None,
         }
     }
 }
@@ -1447,9 +1469,14 @@ impl SpecializedSubagentSession {
     }
 
     /// One pass of the turn loop, adding what its tool calls did to `tools_called`.
+    ///
+    /// `yield_conditions` are this call's own — [`TurnRequest::with_yield_conditions`] — and each
+    /// is read after its matching call's result is appended, where a fired condition stops the
+    /// turn.
     async fn run_one_turn(
         &mut self,
         tools_called: &mut ToolCallTally,
+        yield_conditions: &[yield_condition::YieldCondition],
     ) -> Result<(Option<PromptOutcome>, TokenUsage), SubagentError> {
         let tools = self.tool_definitions();
         let (step, turn_usage) = send_turn_and_check_final_answer(
@@ -1484,15 +1511,47 @@ impl SpecializedSubagentSession {
                     tools_called.note(&dispatch);
                     let tool = tool_call.function.name.clone();
                     let result_summary = dispatch.summary(&tool);
-                    self.transcript.push_tool_result(
+                    let produced_nothing = dispatch.produced_nothing().is_some();
+                    // The call's arguments as the JSON object they should be — the same reading
+                    // the argument validator gives them; malformed arguments were already
+                    // rejected at dispatch, and a shape that is not an object has no field for
+                    // an argument condition to find.
+                    let arguments: serde_json::Value =
+                        serde_json::from_str(&tool_call.function.arguments)
+                            .unwrap_or(serde_json::Value::Null);
+                    // Read against the call as made and its summary, before the result is
+                    // appended: the summary is absent exactly when the call produced nothing,
+                    // and the append below is what a fired condition yields with in the
+                    // transcript.
+                    let summary = if produced_nothing {
+                        None
+                    } else {
+                        Some(&result_summary)
+                    };
+                    let fired = yield_conditions.iter().find(|condition| {
+                        evaluate_yield_condition(condition, &tool, &arguments, summary)
+                    });
+                    let message_id = self.transcript.push_tool_result(
                         ChatMessage::tool_result(
                             dispatch.tool_result_payload(),
                             tool_call.id.clone(),
-                            tool,
+                            tool.clone(),
                         ),
-                        dispatch.produced_nothing().is_some(),
+                        produced_nothing,
                         result_summary,
                     );
+                    if let Some(condition) = fired {
+                        // The turn stops at this call, exactly as the condition asked: the
+                        // result just appended stays in the transcript, the model is never sent
+                        // it, and the outcome names the condition and the tool message's id —
+                        // the anchor a resume-with-replacement consumes. No further model turn
+                        // is issued.
+                        let mut outcome =
+                            PromptOutcome::new(StopReason::YieldedToCaller, Vec::new(), turn_usage);
+                        outcome.fired_condition = Some(condition.clone());
+                        outcome.yielded_message_id = Some(message_id);
+                        return Ok((Some(outcome), turn_usage));
+                    }
                 }
                 Ok((None, turn_usage))
             }
@@ -1718,22 +1777,30 @@ impl SpecializedSubagentSession {
 
     /// The turn loop proper, over a history [`SubagentSession::take_turn`] has already put in the
     /// shape this call should run against (prompted, resumed, or rewound and corrected).
-    async fn run_turn_loop(&mut self, max_turns: u32) -> Result<PromptOutcome, SubagentError> {
+    ///
+    /// `yield_conditions` ride the call that asked for them, into every pass — they are
+    /// per-request state, never the conversation's.
+    async fn run_turn_loop(
+        &mut self,
+        max_turns: u32,
+        yield_conditions: &[yield_condition::YieldCondition],
+    ) -> Result<PromptOutcome, SubagentError> {
         let mut call_usage = TokenUsage::default();
         let mut tools_called = ToolCallTally::default();
         for _turn in 0..max_turns {
-            let (maybe_outcome, turn_usage) = match self.run_one_turn(&mut tools_called).await {
-                Ok(turn) => turn,
-                // A full context is a stop condition, not a failure: the caller gets what was
-                // gathered, with a brief for a fresh conversation. The turns already spent are
-                // charged first, exactly as the budget-exhausted path below charges them — they
-                // were spent whatever this turn did.
-                Err(e) if is_context_length_refusal(&e) => {
-                    self.cumulative = self.cumulative + call_usage;
-                    return Ok(self.context_exhausted_outcome(call_usage));
-                }
-                Err(e) => return Err(e),
-            };
+            let (maybe_outcome, turn_usage) =
+                match self.run_one_turn(&mut tools_called, yield_conditions).await {
+                    Ok(turn) => turn,
+                    // A full context is a stop condition, not a failure: the caller gets what was
+                    // gathered, with a brief for a fresh conversation. The turns already spent are
+                    // charged first, exactly as the budget-exhausted path below charges them — they
+                    // were spent whatever this turn did.
+                    Err(e) if is_context_length_refusal(&e) => {
+                        self.cumulative = self.cumulative + call_usage;
+                        return Ok(self.context_exhausted_outcome(call_usage));
+                    }
+                    Err(e) => return Err(e),
+                };
             call_usage = call_usage + turn_usage;
             if let Some(mut outcome) = maybe_outcome {
                 outcome.usage = call_usage;
@@ -1801,6 +1868,10 @@ impl SubagentSession for SpecializedSubagentSession {
     /// spending a turn on a request that was never valid is the silent-continue this refuses to be
     /// (AC17).
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
+        // First of all — before the rewind below, before anything is appended, before a single
+        // model call: a malformed condition list is refused with the history untouched, so a
+        // malformed request costs no model turn (AC5).
+        validate_yield_conditions(request.yield_conditions()).map_err(SubagentError)?;
         let budget = request.budget_within(self.max_turns);
         // Anything that changes the conversation from outside the loop — a new question, a
         // correction, a rewind that discards answers it was holding — invalidates the premise
@@ -1827,7 +1898,9 @@ impl SubagentSession for SpecializedSubagentSession {
                 .push(ChatMessage::user(correction.to_string()));
         }
 
-        let mut outcome = self.run_turn_loop(budget.turns).await?;
+        let mut outcome = self
+            .run_turn_loop(budget.turns, request.yield_conditions())
+            .await?;
         outcome.messages = self.transcript.descriptors_from(appended_from);
         outcome.clamped_max_turns = budget.clamped_to;
         Ok(outcome)
