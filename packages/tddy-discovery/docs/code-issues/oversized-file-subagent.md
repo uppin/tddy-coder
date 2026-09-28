@@ -80,3 +80,4 @@ Confirmed `dispatch_tool_call`'s error branch at `:588` is the only place a tool
 into a string and that it carries no error flag. Did **not** run `restructure check`, so the
 line estimates for the split are arithmetic, not a proven plan.
 | 2026-09-28 | 1,850 | none | after PR #553's result summaries. The extraction itself went to a new sibling — `subagent/result_summary.rs` (types + per-tool extraction, with its own 11 in-file tests) — so the +18 here is wiring only: `ToolDispatch::summary`, the `push_tool_result` append site in `run_one_turn`, and the descriptor field read |
+| 2026-09-28 | 1,912 | none | after PR #554's Grep context lines. The window computation went to a new sibling — `subagent/grep_context.rs` (argument reading, entry shapes, the Local path's windows) — so the +62 here is the `grep_with_context` seam (contract-planned), the `scan_local` extraction shared with `grep_limited`, and the GREP dispatch arm threading the pair |

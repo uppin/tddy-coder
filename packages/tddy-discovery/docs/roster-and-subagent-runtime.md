@@ -45,6 +45,7 @@ The module docs carry it, and they are the authority rather than a summary of on
 | `subagent::turn_request` | what a caller may ask of a turn — a new question, a continuation, a rewind, a correction — and the budget it runs under, including why the **floor** is as load-bearing as the ceiling |
 | `subagent::transcript` | one conversation's addressable history: id minting that never reuses a discarded id, preview truncation, and rewind boundary-snapping that never separates a tool call from its results |
 | `subagent::result_summary` | the bounded, structured facts of one tool result — per-tool extraction from the result JSON at the transcript's append site, serialized as one externally tagged object (`{"read": {…}}`) |
+| `subagent::grep_context` | the `before`/`after` window a `GREP` asks for — argument reading that rejects past the ceiling rather than clamps, the shared context-entry shape, and the Local path's window computation over the file's own lines |
 | `subagent_runtime` | a conversation outlives the `tools/call` that opened it; a turn outlives the call that started it |
 
 ## One entry point per turn, and one rule the loop will not break
