@@ -33,6 +33,7 @@ fn a_def(base_url: &str) -> SpecializedAgentDef {
         ],
         max_turns: 2,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

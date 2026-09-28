@@ -57,6 +57,7 @@ fn a_repo_explorer_def() -> SpecializedAgentDef {
         tools: vec![SubagentTool::Read, SubagentTool::Grep],
         max_turns: 10,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

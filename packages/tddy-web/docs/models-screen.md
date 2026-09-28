@@ -45,6 +45,15 @@ empty**, so a first-run daemon with no providers does not look identical to a br
 compose `daemonInstanceId` with the row id — for React keys, `data-testid`s and the error maps alike.
 Keying an error map by the bare id renders one daemon's failure against another's row.
 
+## Assistant usage notes
+
+An assistant carries **usage notes** — the operator's own documentation of how to use it: its
+quirks, its budgets, what not to ask it. The composition dialogs expose a multi-line field
+(pre-filled when editing), the notes ride both RPC payloads whole — the same carried-whole rule
+`replaces` follows — and the panel row shows the note truncated with the full text on hover,
+so an operator choosing an agent reads how to use it before prompting it. They are **never
+machine context**: not injected into any system prompt and not advertised at session open.
+
 ## Chat
 
 Reuses `useAcpSessionOverClient` over `AcpService` — there is no second chat transport. The target is

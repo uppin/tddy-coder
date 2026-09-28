@@ -127,6 +127,15 @@ pub struct SpecializedAgentDef {
     pub system_prompt: Option<String>,
     #[serde(default)]
     pub system_prompt_path: Option<PathBuf>,
+    /// How to use this agent — its quirks, its limitations, what it is good at — as the operator
+    /// wrote them. For the human operating the agent, never machine context: not injected into
+    /// any system prompt and not advertised to a main agent at session open.
+    ///
+    /// The same serde shape as [`Self::api_key`]: every `*.yaml` written before this field
+    /// existed stays loadable under `deny_unknown_fields`, and a def without notes serializes to
+    /// exactly the shape that shipped before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_notes: Option<String>,
     #[serde(default = "default_tools")]
     pub tools: Vec<SubagentTool>,
     #[serde(default = "default_max_turns")]
@@ -154,6 +163,7 @@ impl std::fmt::Debug for SpecializedAgentDef {
             .field("api_key", &self.api_key.as_ref().map(|_| REDACTED_API_KEY))
             .field("system_prompt", &self.system_prompt)
             .field("system_prompt_path", &self.system_prompt_path)
+            .field("usage_notes", &self.usage_notes)
             .field("tools", &self.tools)
             .field("max_turns", &self.max_turns)
             .field("replaces", &self.replaces)

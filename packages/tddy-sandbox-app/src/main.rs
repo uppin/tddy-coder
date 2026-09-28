@@ -1001,6 +1001,7 @@ mod tests {
             tools: vec![tddy_discovery::agent_def::SubagentTool::Read],
             max_turns: 10,
             replaces: vec![],
+            usage_notes: None,
         }
     }
 

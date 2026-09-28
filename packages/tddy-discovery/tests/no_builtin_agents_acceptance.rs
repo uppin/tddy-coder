@@ -46,6 +46,7 @@ fn a_def(name: &str, replaces: &[&str]) -> SpecializedAgentDef {
         tools: Vec::new(),
         max_turns: 10,
         replaces: replaces.iter().map(|r| r.to_string()).collect(),
+        usage_notes: None,
     }
 }
 

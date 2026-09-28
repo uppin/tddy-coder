@@ -117,6 +117,7 @@ describe("AssistantEditingAcceptance — editing and deleting a defined assistan
           assistantId: "asst-1",
           label: "Repo Editor",
           systemPrompt: "You read code and make the edits you are asked for.",
+          usageNotes: "",
           tools: ["Read", "Write", "Grep"],
           replaces: [],
         },

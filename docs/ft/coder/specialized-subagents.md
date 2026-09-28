@@ -58,12 +58,18 @@ model: qwen2.5-coder:7b
 base_url: http://localhost:11434         # required — no default endpoint exists
 system_prompt: |                          # optional; system_prompt_path also supported
   You are a codebase explorer. Answer with <final_answer> citations only.
+usage_notes: |                            # optional — notes for *you*, the operator
+  Best at refactoring seams; weak at API design.
 tools: [READ, GLOB, GREP]                 # optional, defaults to [READ, GLOB, GREP];
                                           # WRITE/STR_REPLACE/DELETE/SHELL/AWAIT/READ_LINTS/
                                           # SEMANTIC_SEARCH also bindable
 max_turns: 10                             # optional, defaults to 10
 replaces: [Grep, Glob]                    # optional, defaults to [] (replaces nothing)
 ```
+
+`usage_notes` is operator documentation, never machine context: how to drive the agent, its quirks
+and its limitations, shown to the human choosing an agent — never injected into the agent's system
+prompt or advertised to a main agent at session open.
 
 `replaces` names main-agent exec-catalog tools this agent takes over — **any** exec tool, not the
 same universe as `tools` above (this agent's own internal tool loop). See

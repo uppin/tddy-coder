@@ -217,6 +217,7 @@ fn a_def_with_tools(name: &str, base_url: &str, tools: Vec<SubagentTool>) -> Spe
         tools,
         max_turns: 4,
         replaces: vec![],
+        usage_notes: None,
     }
 }
 

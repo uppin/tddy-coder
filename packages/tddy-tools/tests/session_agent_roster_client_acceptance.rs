@@ -91,6 +91,7 @@ fn a_seed_def(name: &str) -> SpecializedAgentDef {
         tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
         max_turns: 10,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

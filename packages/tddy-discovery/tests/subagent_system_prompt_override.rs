@@ -38,6 +38,7 @@ fn a_def_with_prompt(base_url: &str, system_prompt: Option<&str>) -> Specialized
         tools: vec![SubagentTool::Read, SubagentTool::Glob, SubagentTool::Grep],
         max_turns: 2,
         replaces: Vec::new(),
+        usage_notes: None,
     }
 }
 

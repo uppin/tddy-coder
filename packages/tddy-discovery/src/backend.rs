@@ -266,6 +266,7 @@ mod tests {
             tools: Vec::new(),
             max_turns,
             replaces: Vec::new(),
+            usage_notes: None,
         }
     }
 

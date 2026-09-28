@@ -49,6 +49,7 @@ pub fn assistant_to_agent_def(
         api_key: None,
         system_prompt: non_empty(&assistant.system_prompt),
         system_prompt_path: None,
+        usage_notes: non_empty(&assistant.usage_notes),
         tools,
         max_turns: DEFAULT_MAX_TURNS,
         // The main-agent tools this assistant stands in for. An assistant is offered as an

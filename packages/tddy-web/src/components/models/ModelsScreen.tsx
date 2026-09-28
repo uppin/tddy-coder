@@ -58,6 +58,7 @@ export interface ModelsScreenProps {
     name: string;
     label: string;
     systemPrompt: string;
+    usageNotes: string;
     tools: string[];
     replaces: string[];
   }) => Promise<string>;
@@ -65,6 +66,7 @@ export interface ModelsScreenProps {
     assistant: AssistantRow;
     label: string;
     systemPrompt: string;
+    usageNotes: string;
     tools: string[];
     replaces: string[];
   }) => Promise<string>;
