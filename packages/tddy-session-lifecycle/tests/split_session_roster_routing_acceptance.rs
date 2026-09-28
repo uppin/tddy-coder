@@ -172,6 +172,7 @@ impl ADaemonInTheCommonRoom {
                 conversation_id: "conversation-under-routing".to_string(),
                 prompt: "which files define the roster store?".to_string(),
                 max_turns: None,
+                yield_conditions_json: String::new(),
             }))
             .await
             .map(|_| ())
