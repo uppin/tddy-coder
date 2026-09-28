@@ -60,6 +60,11 @@ would break the day the owner adds one, and "no credential, so talk to their end
 the silent fallback this repo forbids. `NULL` owner means unowned and writable, for rows predating the
 column.
 
+An assistant also carries an optional **`usage_notes`** — its operator's documentation of how to use
+it (a column on `assistant`, a field on `AssistantEntry` and both write requests, projected into
+`SpecializedAgentDef.usage_notes`). It is **never machine context**: no prompt, spawn or session
+surface reads it — the operator it documents is the human choosing an agent.
+
 ## Provider clients
 
 `ProviderClientFactory::client_for` returns a `Result` and matches every kind **by name** — there is
