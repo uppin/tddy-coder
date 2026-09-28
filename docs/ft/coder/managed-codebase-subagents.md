@@ -29,7 +29,7 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
-| *(no ACP counterpart)*                            | output field `messages` — the messages **this turn appended**, each `{ id, role, tool, toolCalls, isError, preview }`; plus `clampedMaxTurns` when the ceiling cut the budget |
+| *(no ACP counterpart)*                            | output field `messages` — the messages **this turn appended**, each `{ id, role, tool, toolCalls, isError, preview, resultSummary }`; plus `clampedMaxTurns` when the ceiling cut the budget |
 | `session/cancel`                                  | `subagent_cancel` — input `{ sessionId }` |
 
 These tools use plain JSON (serde), not the `agent-client-protocol` crate — that crate's
@@ -206,7 +206,8 @@ turn appended**, in the order they happened, not the whole history:
 ```json
 "messages": [
   {"id": "m18", "role": "assistant", "tool": null, "toolCalls": ["Read"], "isError": false, "preview": "I'll read the theme interface…"},
-  {"id": "m19", "role": "tool", "tool": "Read", "toolCalls": [], "isError": true, "preview": "…its channel is closed"}
+  {"id": "m19", "role": "tool", "tool": "Read", "toolCalls": [], "isError": true, "preview": "…its channel is closed",
+   "resultSummary": {"error": true}}
 ]
 ```
 
@@ -221,6 +222,18 @@ turn appended**, in the order they happened, not the whole history:
 - `preview` is a handle, not a copy. It is cut to 240 characters, because one `Read` result in the
   incident was 42 KB and a turn outcome carrying a handful of those would put the agent's context
   back into its caller's — the cost the agent exists to avoid.
+- `resultSummary` is the structured facts of a `tool`-role message's result, extracted from the
+  result JSON at the moment it is appended and serialized as one externally tagged object —
+  `{"read": {…}}`, `{"strReplace": {…}}` — so the caller dispatches on the same name it dispatches
+  the tool call on. Per tool: `READ` reports `{firstLine, charsRead, totalLines, truncated}`
+  (`firstLine` is the first non-empty line, cut to 120 chars — the only text a summary carries);
+  `GREP`/`GLOB` report their match/path counts and totals; `STR_REPLACE` reports
+  `{replaced, matchedLines, bytesWritten}`; `SHELL` reports the exit code and output size, or the
+  background job's id; `AWAIT`, `WRITE`, `DELETE` and `READ_LINTS` report their ending. A dispatch
+  that produced no result — a failure, a rejection, a repeat — summarizes as `{"error": true}`,
+  with `isError` remaining the authoritative flag. Every summary is bounded, so a descriptor's
+  added byte cost on the final LiveKit frame is capped (~600 bytes per tool-role message, on top
+  of the ~960-byte preview bound).
 
 ### `subagent_resume` — carry on, or go back and correct
 
@@ -466,7 +479,9 @@ fully migrated onto the array model.
 37. A `maxTurns` that is not a whole number of turns is refused naming the field, never ignored.
 38. Every turn outcome — `subagent_prompt`, `subagent_await`, `subagent_resume` — carries
     `messages`: the messages that turn appended, each with `id`, `role`, `tool`, `toolCalls`,
-    `isError` and a `preview` **shorter than the payload it previews**.
+    `isError`, a `preview` **shorter than the payload it previews**, and — on a `tool`-role
+    message — a bounded `resultSummary` naming the tool's facts (`read`, `strReplace`, `shell`,
+    …; `{"error": true}` when the dispatch produced no result).
 39. Message ids are unique for the life of the conversation, and an id discarded by a rewind is
     never minted again.
 40. `subagent_resume` with `sessionId` alone continues the conversation and sends no new prompt

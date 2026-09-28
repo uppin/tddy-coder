@@ -448,6 +448,13 @@ fn message_descriptor(described: &MessageDescriptor) -> AgentMessageDescriptor {
             .collect(),
         is_error: described.is_error,
         preview: described.preview.clone(),
+        // The summary rides as an externally tagged JSON object, string-typed like `stop_reason`
+        // — the same shape the MCP turn outcome carries, so a caller reads one shape everywhere.
+        result_summary_json: described
+            .result_summary
+            .as_ref()
+            .and_then(|summary| serde_json::to_string(summary).ok())
+            .unwrap_or_default(),
     }
 }
 

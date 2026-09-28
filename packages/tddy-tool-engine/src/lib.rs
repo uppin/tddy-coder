@@ -58,6 +58,25 @@ impl ToolOutcome {
             job_running: false,
         }
     }
+
+    /// Like [`Self::err`], but the result JSON is already built — the caller pinned a shape the
+    /// plain `{ "error": msg }` wrapper cannot carry (e.g. an occurrence count beside the
+    /// error). The message still comes from the JSON's `"error"` key, so `error_message` says
+    /// what the result says.
+    pub(crate) fn err_json(result: serde_json::Value) -> Self {
+        let msg = result
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        Self {
+            result_json: result.to_string(),
+            is_error: true,
+            error_message: msg,
+            job_id: String::new(),
+            job_running: false,
+        }
+    }
 }
 
 /// Validate and resolve a path argument, ensuring it stays within `worktree_root`.
@@ -386,7 +405,13 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     // The offset is taken here rather than re-derived after the write, because it is the same
     // byte in both: everything before the match is untouched by the replacement.
     let Some(edit_offset) = content.find(old_string) else {
-        return ToolOutcome::err("StrReplace: old_string not found in file");
+        // `err_json` rather than `err`: a no-match edit still knows its occurrence count, and a
+        // caller deciding whether an edit landed reads that zero instead of an absence it
+        // would have to guess at.
+        return ToolOutcome::err_json(serde_json::json!({
+            "error": "StrReplace: old_string not found in file",
+            "matchedOccurrences": 0
+        }));
     };
     let count = content.matches(old_string).count();
     if count > 1 {
@@ -401,6 +426,7 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Ok(()) => ToolOutcome::ok(
             serde_json::json!({
                 "replaced": true,
+                "matchedOccurrences": count,
                 "bytes_written": new_content.len(),
                 "edited_region": region.text,
                 "edited_line": region.line,

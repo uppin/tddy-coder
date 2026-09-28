@@ -12,7 +12,10 @@ wedges the call with no error at all"*.
 PR #545 added `agent_turn_frames`, which attaches `last.messages` — an **unbounded**
 `repeated AgentMessageDescriptor` — to that same final frame. Each descriptor carries a 240-**char**
 preview (`MESSAGE_PREVIEW_CHARS`), i.e. up to ~960 bytes in UTF-8, plus an id, a role, a tool name
-and a `tool_calls` list.
+and a `tool_calls` list. PR #553 adds a per-tool `resultSummary` on every tool-role descriptor —
+bounded by construction (`packages/tddy-discovery/src/subagent/result_summary.rs`): the only text
+is `firstLine`, cut to 120 chars (≤ ~480 bytes in UTF-8), plus a few counters, so a summary adds
+at most ~600 bytes per tool-role descriptor.
 
 At the ceiling of 50 turns a prompt can append well over a hundred messages. A hundred descriptors
 is 30–100 KB on one frame, on top of up to 48 KB of content — so the invariant the existing
