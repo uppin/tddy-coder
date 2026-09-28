@@ -161,7 +161,46 @@ whole thing travels on both request protos and back on the final chunk.
 
 ## Validation results
 
-(to be filled by `/validate-changes`)
+(`/validate-changes`, 2026-09-28, stack base `feature/subagent-control/agent-usage-notes`, leak
+check clean — 3 commits, all this PR's; rebased twice this session, including over a same-tree
+history rewrite of the base made by another session)
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ all 5 milestones implemented |
+| `## Responsibility` delivered | ✅ complete — both contract stubs implemented and wired (loop check + turn-entry validation); `YieldedToCaller` at every exhaustive site; proto + MCP both directions |
+| `## Dependencies` not implemented here | ✅ clean — node 1's vocabulary *read*, never modified; nodes 2/3's surfaces absent |
+| `## Boundaries` respected | ✅ clean — conditions per-turn only, no model-output conditions, no resume-replacement, no new summary facts, no UI |
+| No dependent's behaviour | ✅ clean — the yielded message id is *named*, node 5's replacement is not implemented |
+| Diff contains only this PR's files | ✅ clean — 13 files, all claimed |
+| Parent-owned files intact | ✅ clean — no deletions |
+
+Build validation: `./test -p tddy-discovery -p tddy-session-agents -p tddy-tools` — 88 suites /
+0 failed (`.verify-result.txt`); scoped clippy clean; post-rebase re-run green.
+
+Risks: no critical findings. Two documented decisions for review: (1) `Error(false)` fires on any
+present summary — "it ran" — including a ran-but-error-shaped one (the summary's `Error` variant);
+(2) the contract-commit parser defect this green fixed (session-agents silently dropping an
+unparseable `yieldConditions` payload is now a `Status::invalid_argument`).
+
+Test quality (`/validate-tests`, 2026-09-28): 11 tests analyzed (7 unit + 4 acceptance — the
+contract's own, untouched this session). Fluent-tests compliant: sentence names, named fixtures
+(`a_str_replace_no_match`), one behavior per test, Given/When/Then. No critical or warning issues.
+
+Production readiness (`/validate-prod-ready`, 2026-09-28): 6 production files checked — no mock
+code, no dev fallbacks, no debug output, no TODO/FIXME added (both stub markers resolved). Status
+✅ Ready. Full-workspace build/test left to CI per the scoped-verification rule.
+
+Code quality (`/analyze-clean-code`, 2026-09-28): **A** — no must-refactor items; the new
+`evaluate`/`validate` are flat, documented matches within every function budget. File length gate
+(500 production lines, PR range vs the parent branch):
+- `roster/conversation.rs` 488 → **512** — **crossed the budget here** (+24, the yield framing);
+  decomposition **deferred by explicit developer consent** (node 5 threads the same surfaces),
+  recorded as the file's first record,
+  `packages/tddy-discovery/docs/code-issues/oversized-file-conversation.md`
+- `subagent.rs` 1912 → 1985, `subagent_runtime.rs` 716 → 729, `service.rs` 1076 → 1122 — all
+  pre-existing oversized with open, unclaimed records; growth is the changeset's planned minimal
+  seams; restructuring deferred past the stack (siblings touch all three)
 
 ## TODO
 
