@@ -1111,6 +1111,7 @@ async fn cancels_a_remote_agents_conversation_on_the_daemon_that_owns_it() {
             conversation_id: conversation.clone(),
             prompt: "where is main?".to_string(),
             max_turns: None,
+            yield_conditions_json: String::new(),
         }))
         .await
         .expect_err("a cancelled conversation must not be promptable");
@@ -1153,6 +1154,7 @@ async fn collect_prompt(fleet: &Fleet, conversation_id: &str, prompt: &str) -> P
             conversation_id: conversation_id.to_string(),
             prompt: prompt.to_string(),
             max_turns: None,
+            yield_conditions_json: String::new(),
         }))
         .await
         .expect("prompting a remote agent must succeed")
