@@ -10,9 +10,12 @@
 //! Split out of `subagent.rs` on the oversized-file record
 //! (`packages/tddy-discovery/docs/code-issues/oversized-file-subagent.md`).
 
+use super::tool_arguments::validate_tool_arguments;
+
 /// The longest result text a replacement may carry. Bounded so a caller cannot append a whole
 /// document as one `tool` message — the same bound the tool results themselves respect in
-/// spirit, and the transcript's own cost model.
+/// spirit, and the transcript's own cost model. Counted in `char`s, not bytes, for the reason
+/// `preview_of` counts in them: a byte bound would make the limit depend on the text's spelling.
 pub const REPLACEMENT_RESULT_LIMIT: usize = 16 * 1024;
 
 /// A caller-provided tool call and its result, appended after the yielded call it replaces —
@@ -31,13 +34,65 @@ pub struct Replacement {
     pub result: String,
 }
 
+/// The tools a replacement's call may name. Read from the advertised definitions rather than a
+/// second list written here — the discipline `tool_arguments.rs` states, for the same reason:
+/// a hand-kept roster drifts the moment a tool is added. These are the tools the turn loop's
+/// `dispatch_tool_call` records, so a replacement's call is indistinguishable in kind from one
+/// the model could have made.
+///
+/// Not `yield_condition`'s nine: that list is the vocabulary
+/// [`result_summary::summarize`](crate::subagent::result_summary::summarize) can name, and a
+/// replacement's result is the caller's own text — no dispatch ran, so no summary ever reads it.
+/// `SEMANTIC_SEARCH` is recordable without being summarizable, and a replacement of one is legal.
+fn known_tools() -> Vec<String> {
+    crate::openai::discovery_tool_definitions()
+        .into_iter()
+        .chain(crate::openai::mutation_tool_definitions())
+        .chain(crate::openai::engine_tool_definitions())
+        .map(|definition| definition.function.name)
+        .collect()
+}
+
 /// Reject a replacement a conversation cannot run with: an unknown tool, arguments the tool's
 /// own schema refuses, or a result that is not JSON or past [`REPLACEMENT_RESULT_LIMIT`] — each
 /// rejection naming the offending field, **before** the turn runs, so a malformed replacement
 /// costs no model turn.
-pub fn validate_replacement(_replacement: &Replacement) -> Result<(), String> {
-    // TODO(resume-replacement): validate the tool name, run validate_tool_arguments on the
-    // arguments, and bound + JSON-parse the result.
+pub fn validate_replacement(replacement: &Replacement) -> Result<(), String> {
+    if !known_tools().contains(&replacement.tool) {
+        return Err(format!(
+            "tool: '{}' is not a tool this build advertises, so the replacement's call could \
+             never have been one the turn loop recorded",
+            replacement.tool
+        ));
+    }
+    // The same check a model-issued call gets at dispatch — a replacement the schema would
+    // refuse must not buy its way into the history the schema has no place for.
+    let violations = validate_tool_arguments(&replacement.tool, &replacement.arguments);
+    if !violations.is_empty() {
+        let faults: Vec<String> = violations
+            .iter()
+            .map(|violation| format!("{}: {}", violation.argument, violation.problem.describe()))
+            .collect();
+        return Err(format!(
+            "arguments: {} of them do not match {}'s advertised schema ({})",
+            violations.len(),
+            replacement.tool,
+            faults.join("; ")
+        ));
+    }
+    let length = replacement.result.chars().count();
+    if length > REPLACEMENT_RESULT_LIMIT {
+        return Err(format!(
+            "result: {length} characters is past the {REPLACEMENT_RESULT_LIMIT} a replacement's \
+             result may carry"
+        ));
+    }
+    if serde_json::from_str::<serde_json::Value>(&replacement.result).is_err() {
+        return Err(
+            "result: not JSON — the subagent would read a payload no tool loop could produce"
+                .to_string(),
+        );
+    }
     Ok(())
 }
 

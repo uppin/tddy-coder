@@ -1872,15 +1872,21 @@ impl SubagentSession for SpecializedSubagentSession {
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
         // First of all — before the rewind below, before anything is appended, before a single
         // model call: a malformed condition list is refused with the history untouched, so a
-        // malformed request costs no model turn (AC5).
+        // malformed request costs no model turn (AC5). The replacement is refused on the same
+        // discipline, for the same reason.
         validate_yield_conditions(request.yield_conditions()).map_err(SubagentError)?;
+        if let Some(replacement) = request.replacement() {
+            validate_replacement(replacement).map_err(SubagentError)?;
+        }
         let budget = request.budget_within(self.max_turns);
         // Anything that changes the conversation from outside the loop — a new question, a
-        // correction, a rewind that discards answers it was holding — invalidates the premise
-        // the repeat ledger rests on (see [`RepeatedCalls::forget_earlier_calls`]).
+        // correction, a rewind that discards answers it was holding, a replacement appended
+        // after the yield — invalidates the premise the repeat ledger rests on (see
+        // [`RepeatedCalls::forget_earlier_calls`]).
         if request.prompt_text().is_some()
             || request.correction().is_some()
             || request.rewind_point().is_some()
+            || request.replacement().is_some()
         {
             self.repeated_calls.forget_earlier_calls();
         }
@@ -1901,11 +1907,11 @@ impl SubagentSession for SpecializedSubagentSession {
         }
         // The caller's replacement call and its result, appended after any rewind and correction —
         // in that order, so all three can be given. Resume-only: a fresh prompt never carries one
-        // (a prompt has nothing to replace), enforced where the RPC shapes are built.
-        // TODO(resume-replacement): append the replacement's call and result here, before the
-        // turn loop runs over the appended history.
+        // (a prompt has nothing to replace), enforced where the RPC shapes are built. Validated
+        // before the rewind above, so a malformed one never reshapes the history it was refused
+        // from. The append never dispatches — the result is the caller's text, verbatim.
         if let Some(replacement) = request.replacement() {
-            let _ = replacement;
+            self.transcript.append_replacement(replacement);
         }
 
         let mut outcome = self

@@ -172,8 +172,15 @@ is the caller's text. The whole thing travels the resume RPC, with wire-level te
 - [x] Run acceptance tests (verify they fail) — 4 unit (validation) + 3 acceptance (the append behaviours) + 1 wire-level RPC failures, each the missing transcript append; nodes 1–4's inherited red rides this branch and is theirs to green
 - [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code (scoped gates green:
+  `./test -p tddy-discovery -p tddy-session-agents -p tddy-tools -p tddy-daemon-rpc`, 912 passed /
+  0 failed across 122 binaries; scoped clippy + fmt clean). Green filled the three contract stubs.
+  Three documented judgment calls: the replacement tool set is **derived from the advertised
+  definitions** (ten tools — the summary vocabulary's nine misses `SEMANTIC_SEARCH`), not a
+  hand-kept copy; the repeat-ledger invalidation now covers an appended replacement (outside the
+  loop's changes, as its comment enumerates); replacement call ids mint as
+  `call_replacement_{ordinal}` from the transcript's rising counter. Validation runs above the
+  rewind, so a malformed replacement never reshapes the history it is refused from.- [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)
