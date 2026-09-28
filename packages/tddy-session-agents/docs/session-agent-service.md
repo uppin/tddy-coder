@@ -116,6 +116,8 @@ everything a turn can report about itself, is therefore a field on this coordina
 | `correction` | `ResumeAgentConversationRequest` | one corrective instruction appended after the rewind point |
 | `messages` | `AgentConversationChunk`, **final frame** | `AgentMessageDescriptor { id, role, tool, tool_calls, is_error, preview, result_summary_json }` per message the turn appended |
 | `clamped_max_turns` | `AgentConversationChunk`, **final frame** | the budget actually applied; unset when the caller got what it asked for |
+| `yield_conditions_json` | `PromptAgentConversationRequest`, `ResumeAgentConversationRequest` | the caller's per-turn yield conditions, string-typed JSON like the other per-call controls; refused with `invalid_argument` when unparseable, before any turn is stamped |
+| `fired_condition_json` | `AgentConversationChunk`, **final frame** | the condition that yielded the turn back, present only on a `yieldedToCaller` outcome |
 
 `messages` and `clamped_max_turns` ride the final frame for the reason `stop_reason` does: neither
 is known until the turn has ended. `preview` is cut by the host that owns the history, because a

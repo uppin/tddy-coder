@@ -53,3 +53,4 @@ diff larger than the behaviour change it accompanied. See
 instead of 2,488). Confirmed the ten RPCs and that the conversation four are contiguous. Did
 **not** run `restructure check`, so the seam estimate is arithmetic, not a proven plan.
 | 2026-09-28 | 1,076 | +7 in PR #553: the `message_descriptor` frame builder maps one more field (`result_summary_json`) |
+| 2026-09-28 | 1,122 | +46 in PR #556 (`#subagent-control` 4/5): the `yield_conditions_json` request parsing (now erroring on an unparseable payload as documented) and the `fired_condition_json` chunk framing |

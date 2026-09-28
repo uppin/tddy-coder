@@ -250,6 +250,23 @@ counting **matches**, so context lines never consume the window. Both codebase p
 identically — the managed path folds ripgrep's own `context` events, the local path computes the
 same windows from the file's lines.
 
+### A caller's condition on a tool call yields the turn back
+
+A `subagent_prompt` or `subagent_resume` call may carry **`yieldConditions`** — up to 8 conditions,
+each naming a tool and what to watch for on its call: an **`outcome`** fact compared for equality
+against the call's result summary (`{matchedLines: 0}`, `{exitCode: 1}`, `{matchCount: 0}`,
+`{error: true}` — the same vocabulary the result summary reports), or an **`argument`** string
+field containing a bounded substring (≤256 chars). Conditions are per-turn-request state: they
+apply to this turn only, never the conversation.
+
+When a condition matches, the turn stops **at that call**: the tool result just appended stays in
+the transcript, the model is never sent it and takes no further step, and the outcome returns
+`stopReason: "yieldedToCaller"` naming the fired condition and the tool message's id — the id
+`subagent_resume` consumes. Malformed conditions are rejected before the turn runs, each naming
+the offending condition: an unknown tool, a fact that tool's summary cannot carry (a
+`matchedLines` condition on a `WRITE` is a refusal, never a condition that silently never fires),
+an over-long needle, or too many conditions.
+
 ### `subagent_resume` — carry on, or go back and correct
 
 `subagent_resume { sessionId, fromMessageId?, correction?, maxTurns?, graceMs? }` takes another turn
