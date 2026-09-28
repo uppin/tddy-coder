@@ -97,3 +97,4 @@ routed through `contained_shell::run_contained_argv` and `shell_containment_red.
 fourth test, verified red against the unfixed call (the test hangs, because the raw spawn had no
 budget to time out on) and green after. Re-grepped the crate for `process::Command` afterwards:
 `contained_shell.rs` is the only remaining constructor in production code.
+| 2026-09-28 | 777 | +14 in PR #553: `tool_str_replace` reports `matchedOccurrences` on both result paths, plus the shared `ToolOutcome::err_json` constructor the change needed (which took the function from 65 to 58 lines) |

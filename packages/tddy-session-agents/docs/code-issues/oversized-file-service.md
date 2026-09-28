@@ -52,3 +52,4 @@ diff larger than the behaviour change it accompanied. See
 `#[cfg(test)]` branch (the naive reading under-reports; it scored a sibling file at 38 lines
 instead of 2,488). Confirmed the ten RPCs and that the conversation four are contiguous. Did
 **not** run `restructure check`, so the seam estimate is arithmetic, not a proven plan.
+| 2026-09-28 | 1,076 | +7 in PR #553: the `message_descriptor` frame builder maps one more field (`result_summary_json`) |

@@ -114,12 +114,14 @@ everything a turn can report about itself, is therefore a field on this coordina
 | `max_turns` | `PromptAgentConversationRequest`, `ResumeAgentConversationRequest` | the budget for this one call, in place of the definition's. Clamped to the serving host's bounds |
 | `from_message_id` | `ResumeAgentConversationRequest` | rewind to a message the conversation holds, discarding what follows |
 | `correction` | `ResumeAgentConversationRequest` | one corrective instruction appended after the rewind point |
-| `messages` | `AgentConversationChunk`, **final frame** | `AgentMessageDescriptor { id, role, tool, tool_calls, is_error, preview }` per message the turn appended |
+| `messages` | `AgentConversationChunk`, **final frame** | `AgentMessageDescriptor { id, role, tool, tool_calls, is_error, preview, result_summary_json }` per message the turn appended |
 | `clamped_max_turns` | `AgentConversationChunk`, **final frame** | the budget actually applied; unset when the caller got what it asked for |
 
 `messages` and `clamped_max_turns` ride the final frame for the reason `stop_reason` does: neither
 is known until the turn has ended. `preview` is cut by the host that owns the history, because a
 turn outcome carrying whole tool payloads would put the agent's context back into its caller's.
+`result_summary_json` is string-typed like `stop_reason` — the summary as one externally tagged
+JSON object — so the wire stays additive and a caller reads the same shape the MCP outcome carries.
 
 ## Known gaps
 
