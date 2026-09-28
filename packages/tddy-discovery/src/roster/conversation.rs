@@ -187,6 +187,15 @@ impl AgentConversationLink {
         ))
     }
 
+    /// The caller's replacement as the JSON object the resume request carries, empty when this
+    /// turn carries none.
+    fn encode_replacement(request: &TurnRequest) -> String {
+        request
+            .replacement()
+            .and_then(|replacement| serde_json::to_string(replacement).ok())
+            .unwrap_or_default()
+    }
+
     /// The caller's yield conditions as the JSON array the requests carry — the same shape the
     /// MCP tools parse, string-typed like `stop_reason` on the way back.
     fn encode_yield_conditions(request: &TurnRequest) -> String {
@@ -212,6 +221,7 @@ impl AgentConversationLink {
                 correction: request.correction().map(str::to_string),
                 max_turns: request.requested_max_turns(),
                 yield_conditions_json: Self::encode_yield_conditions(request),
+                replacement_json: Self::encode_replacement(request),
             }));
         };
         if let Some(rewind_point) = request.rewind_point() {

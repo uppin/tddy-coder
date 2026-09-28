@@ -300,6 +300,10 @@ message ResumeAgentConversationRequest {
   // As on PromptAgentConversationRequest — the same JSON array of {tool, when} objects, for
   // this turn only.
   string yield_conditions_json = 8;
+  // The caller's replacement for the yielded call, as a JSON {tool, arguments, result} object —
+  // appended after the original call (keep original + append), never dispatched, recorded as
+  // history. Appended after `from_message_id`'s rewind and `correction`, in that order.
+  string replacement_json = 9;
 }
 
 message SessionAgentEntry {

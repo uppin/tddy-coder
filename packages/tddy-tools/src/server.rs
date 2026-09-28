@@ -1897,7 +1897,31 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
+    let request = match replacement_of(&args, request) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     take_a_turn(session_id, request, grace).await
+}
+
+/// Parse the `replacement` argument of a resume, or why it cannot run as written.
+///
+/// Rejected **before** the turn runs, like the yield conditions and for the same reason: the
+/// replacement is the caller's own words, and a resume that continues without it does less than
+/// was asked.
+fn replacement_of(
+    args: &serde_json::Value,
+    mut request: TurnRequest,
+) -> Result<TurnRequest, String> {
+    let Some(raw) = args.get("replacement") else {
+        return Ok(request);
+    };
+    let encoded = serde_json::to_string(raw).map_err(|e| format!("replacement: {e}"))?;
+    let replacement = serde_json::from_str::<tddy_discovery::subagent::Replacement>(&encoded)
+        .map_err(|e| format!("replacement is not a {{tool, arguments, result}} object: {e}"))?;
+    tddy_discovery::subagent::validate_replacement(&replacement)?;
+    request = request.with_replacement(replacement);
+    Ok(request)
 }
 
 /// Apply a caller's `maxTurns` to `request`, or say why the value cannot be read.

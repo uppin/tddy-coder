@@ -54,7 +54,7 @@ pub enum ArgumentProblem {
 
 impl ArgumentProblem {
     /// What the model is told about this problem, in the words it has to act on.
-    fn describe(&self) -> String {
+    pub(crate) fn describe(&self) -> String {
         match self {
             Self::Missing => {
                 "this tool requires the argument and the call did not supply it".to_string()

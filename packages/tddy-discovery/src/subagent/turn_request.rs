@@ -35,6 +35,10 @@ pub struct TurnRequest {
     /// the caller ([`crate::subagent::yield_condition`]). For **this** turn only, never the
     /// conversation.
     yield_conditions: Vec<super::yield_condition::YieldCondition>,
+    /// A caller-provided tool call and its result, appended after the original (yielded) call —
+    /// the keep-original + append replacement
+    /// ([`crate::subagent::replacement::Replacement`]). Never dispatched; recorded as history.
+    replacement: Option<super::replacement::Replacement>,
 }
 
 impl TurnRequest {
@@ -90,6 +94,19 @@ impl TurnRequest {
     /// The conditions this turn watches tool calls for; empty when the caller set none.
     pub fn yield_conditions(&self) -> &[super::yield_condition::YieldCondition] {
         &self.yield_conditions
+    }
+
+    /// Append `replacement`'s call and result after the conversation's last message — resume-only
+    /// (a fresh prompt has nothing to replace), and after any rewind and correction, in that
+    /// order.
+    pub fn with_replacement(mut self, replacement: super::replacement::Replacement) -> Self {
+        self.replacement = Some(replacement);
+        self
+    }
+
+    /// The replacement this resume appends, when it carries one.
+    pub fn replacement(&self) -> Option<&super::replacement::Replacement> {
+        self.replacement.as_ref()
     }
 
     /// The new question this request asks, if it asks one.

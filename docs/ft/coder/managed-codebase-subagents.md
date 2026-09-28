@@ -25,7 +25,7 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
 | `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
-| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that asks nothing new |
+| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
@@ -286,6 +286,13 @@ on an open conversation and **sends no new prompt turn**.
 - Present-but-empty is refused for both fields rather than treated as absent, for the same reason
   `subagent_prompt` refuses an empty prompt: a caller that sent a field meant to send something in
   it.
+- A resume may carry a **`replacement`** — a `{tool, arguments, result}` the caller substitutes
+  for the call that yielded: appended after any rewind and correction as an assistant tool-call
+  message plus its tool result, with minted ids, and the turn continues over the appended
+  history. The original failed call **stays** in the history (append-only: nothing is rewritten),
+  the appended call **never dispatches** — the result is the caller's text, recorded verbatim —
+  and a malformed replacement is refused before the turn runs, above the rewind, so the refusal
+  never reshapes the history it is refused from.
 - A resume queues exactly as a prompt does — a conversation runs one turn at a time — and reports
   `queuePosition` / `queueSize`, `graceMs` and `responseId` identically.
 

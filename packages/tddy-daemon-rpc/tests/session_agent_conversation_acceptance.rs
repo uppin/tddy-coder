@@ -21,7 +21,8 @@ use tddy_rpc::{Code, Request};
 use tddy_service::proto::catalog::{CatalogService, ListSubagentsRequest};
 use tddy_service::proto::session_agents_svc::{
     AgentConversationChunk, AttachSessionAgentRequest, CancelAgentConversationRequest,
-    OpenAgentConversationRequest, PromptAgentConversationRequest, SessionAgentService as _,
+    OpenAgentConversationRequest, PromptAgentConversationRequest, ResumeAgentConversationRequest,
+    SessionAgentService as _,
 };
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 
@@ -417,4 +418,83 @@ async fn carries_the_stop_reason_on_the_final_frame_of_a_short_answer() {
     assert_eq!(frames[0].content_chunk, "src/main.rs");
     assert_eq!(frames[0].stop_reason, "EndTurn");
     assert!(frames[0].last);
+}
+
+// ---------------------------------------------------------------------------
+// Resume with a replacement — the wire-level test `ResumeAgentConversation` never had
+// Feature: docs/dev/1-WIP/2026-09-27-resume-replacement-prd.md (AC6); closes
+// docs/dev/todo/2026-09-26-the-resume-rpc-and-its-turn-budget-have-no-wire-level-test.md
+// ---------------------------------------------------------------------------
+
+/// `ResumeAgentConversation` carrying a caller's replacement: the call it meant to make and
+/// the result it would have produced, appended after the original and never dispatched.
+#[tokio::test]
+async fn resume_with_a_replacement_round_trips_the_rpc_wire() {
+    let model = a_model_answering("done").await;
+    let session = a_session_conversing_with_a_local_agent(model).await;
+    let conversation_id = session.open_conversation().await;
+
+    // A first turn, so the conversation holds history the resume continues from.
+    let mut prompt_stream = session.prompt(&conversation_id).await;
+    let prompt_frames = collect_frames(&mut prompt_stream).await;
+    assert!(
+        prompt_frames
+            .last()
+            .expect("a prompt produces a final frame")
+            .last
+    );
+
+    // The resume: a replacement STR_REPLACE call and its result, over the RPC.
+    let mut resume_stream = session
+        .service
+        .session_agents_service()
+        .resume_agent_conversation(Request::direct(ResumeAgentConversationRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session.session_id.clone(),
+            daemon_instance_id: String::new(),
+            conversation_id: conversation_id.clone(),
+            from_message_id: None,
+            correction: None,
+            max_turns: None,
+            yield_conditions_json: String::new(),
+            replacement_json: serde_json::json!({
+                "tool": "STR_REPLACE",
+                "arguments": {
+                    "path": "src/lib.rs",
+                    "old_string": "let a = 1;",
+                    "new_string": "let a = 0;"
+                },
+                "result": "{\"replaced\": true, \"matchedOccurrences\": 1, \"bytes_written\": 128}"
+            })
+            .to_string(),
+        }))
+        .await
+        .expect("resuming an open conversation must succeed")
+        .into_inner();
+
+    // The turn runs and ends, and the final frame carries the replacement's messages — the
+    // appended assistant call and its tool result, with ids the caller can name to a later
+    // rewind. This is the resume RPC exercised at the wire, which nothing had ever done.
+    let frames = collect_frames(&mut resume_stream).await;
+    let last = frames.last().expect("a resume produces a final frame");
+    assert_eq!(last.stop_reason, "EndTurn");
+    let appended: Vec<_> = last
+        .messages
+        .iter()
+        .filter(|described| described.role == "tool")
+        .collect();
+    assert_eq!(
+        appended.len(),
+        1,
+        "the resume appended exactly the replacement's tool result: {:?}",
+        appended
+            .iter()
+            .map(|described| described.preview.clone())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        appended[0].preview.contains("matchedOccurrences"),
+        "the caller's own result text, recorded verbatim — not a dispatched one"
+    );
+    assert!(!appended[0].is_error);
 }
