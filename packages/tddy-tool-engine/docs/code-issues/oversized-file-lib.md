@@ -98,3 +98,4 @@ fourth test, verified red against the unfixed call (the test hangs, because the 
 budget to time out on) and green after. Re-grepped the crate for `process::Command` afterwards:
 `contained_shell.rs` is the only remaining constructor in production code.
 | 2026-09-28 | 777 | +14 in PR #553: `tool_str_replace` reports `matchedOccurrences` on both result paths, plus the shared `ToolOutcome::err_json` constructor the change needed (which took the function from 65 to 58 lines) |
+| 2026-09-28 | 869 | after PR #554's Grep context lines: the `-B`/`-A` argv, the rg event folding (`fold_context_events`, 53 lines, beside `context_line`) and the mirrored context ceiling — the changeset planned this edit in place. Open, unclaimed; restructuring deferred past the `subagent-control` stack |

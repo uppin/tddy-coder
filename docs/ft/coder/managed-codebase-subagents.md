@@ -227,13 +227,28 @@ turn appended**, in the order they happened, not the whole history:
   `{"read": {…}}`, `{"strReplace": {…}}` — so the caller dispatches on the same name it dispatches
   the tool call on. Per tool: `READ` reports `{firstLine, charsRead, totalLines, truncated}`
   (`firstLine` is the first non-empty line, cut to 120 chars — the only text a summary carries);
-  `GREP`/`GLOB` report their match/path counts and totals; `STR_REPLACE` reports
+  `GREP`/`GLOB` report their match/path counts and totals (a `GREP` asked for `before`/`after`
+  context also carries its matches' context lines — see below); `STR_REPLACE` reports
   `{replaced, matchedLines, bytesWritten}`; `SHELL` reports the exit code and output size, or the
   background job's id; `AWAIT`, `WRITE`, `DELETE` and `READ_LINTS` report their ending. A dispatch
   that produced no result — a failure, a rejection, a repeat — summarizes as `{"error": true}`,
   with `isError` remaining the authoritative flag. Every summary is bounded, so a descriptor's
   added byte cost on the final LiveKit frame is capped (~600 bytes per tool-role message, on top
   of the ~960-byte preview bound).
+
+### Grep answers with the lines around each match
+
+A `GREP` call may ask for `before`/`after` context (each 0–50 lines, either alone or together):
+every match entry then carries a bounded `context` list — `{lineNumber, text, relation}` each,
+`relation` spelled `before` or `after`, in file order — computed from the same source the match
+ran against, so the signature-above/body-below question costs one call instead of a `READ` of the
+whole file. A line two matches' windows share is attached to exactly one entry (the next match's
+`before`, or the last match's `after`), and windows clamp at file edges — fewer lines than asked,
+never padding and never an error. Without the arguments the result is byte for byte the
+context-free shape, and the window semantics do not move: `truncated`/`total_matches` keep
+counting **matches**, so context lines never consume the window. Both codebase paths answer
+identically — the managed path folds ripgrep's own `context` events, the local path computes the
+same windows from the file's lines.
 
 ### `subagent_resume` — carry on, or go back and correct
 

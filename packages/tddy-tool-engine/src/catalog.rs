@@ -43,11 +43,14 @@ pub fn tool_catalog() -> Vec<ToolDef> {
         ToolDef {
             name: "Grep".to_string(),
             description: "Search for a pattern in files. 'limit' is the greatest number of \
-                          matches to return (default: all of them). Answers with 'matches', \
-                          'truncated' (whether further matches follow the window) and \
-                          'total_matches' (the search's true size)."
+                          matches to return (default: all of them). 'before'/'after' ask for \
+                          up to that many context lines before/after each match (0-50 each). \
+                          Answers with 'matches' (each carrying its 'context' lines when \
+                          asked), 'truncated' (whether further matches follow the window) and \
+                          'total_matches' (the search's true size — context lines never consume \
+                          the window)."
                 .to_string(),
-            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"},"limit":{"type":"integer"}}}"#.to_string(),
+            input_schema_json: r#"{"type":"object","required":["pattern"],"properties":{"pattern":{"type":"string"},"path":{"type":"string"},"include":{"type":"string"},"limit":{"type":"integer"},"before":{"type":"integer","minimum":0,"maximum":50},"after":{"type":"integer","minimum":0,"maximum":50}}}"#.to_string(),
         },
         ToolDef {
             name: "Glob".to_string(),

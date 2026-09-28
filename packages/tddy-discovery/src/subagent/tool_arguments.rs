@@ -45,6 +45,11 @@ pub enum ArgumentProblem {
     /// refusing the value up front, next to the other argument faults, rather than three layers
     /// down as a uniqueness count that reads like bad luck.
     NotAnAnchor,
+    /// An integer outside the range the schema spells — past its `maximum` or below its
+    /// `minimum`. Its own defect rather than [`Self::WrongType`]: the value is the right shape,
+    /// just one the advertised bound refuses, and naming the bound lets the model re-ask within
+    /// it instead of probing for where the edge was.
+    OutOfRange { allowed: String },
 }
 
 impl ArgumentProblem {
@@ -71,6 +76,9 @@ impl ArgumentProblem {
                  anchor the edit on the surrounding code, with the whitespace you mean to change \
                  inside it"
                     .to_string()
+            }
+            Self::OutOfRange { allowed } => {
+                format!("the value is outside the range the schema allows ({allowed})")
             }
         }
     }
@@ -149,6 +157,42 @@ fn matches_declared_type(declared: &str, value: &serde_json::Value) -> Option<bo
     }
 }
 
+/// Whether `value` is a number outside the range `declared` spells with `minimum`/`maximum`, or
+/// `None` when the schema names no bound (or the value is not a number — a shape fault, which
+/// [`ArgumentProblem::WrongType`] already names).
+fn out_of_range(
+    declared: &serde_json::Value,
+    value: &serde_json::Value,
+) -> Option<ArgumentProblem> {
+    let minimum = declared["minimum"].as_i64();
+    let maximum = declared["maximum"].as_i64();
+    if minimum.is_none() && maximum.is_none() {
+        return None;
+    }
+    // Widest signed room, so a value past `i64` still reads as past any `maximum` the schema
+    // names rather than slipping the check.
+    let number = value
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| value.as_u64().map(i128::from))?;
+    let below = minimum.is_some_and(|min| number < i128::from(min));
+    let above = maximum.is_some_and(|max| number > i128::from(max));
+    (below || above).then(|| ArgumentProblem::OutOfRange {
+        allowed: allowed_range(minimum, maximum),
+    })
+}
+
+/// The range as the model is told it: `0 to 50`, or the one-sided spellings.
+fn allowed_range(minimum: Option<i64>, maximum: Option<i64>) -> String {
+    match (minimum, maximum) {
+        (Some(min), Some(max)) => format!("{min} to {max}"),
+        (Some(min), None) => format!("at least {min}"),
+        (None, Some(max)) => format!("at most {max}"),
+        // Only reached when a bound exists — `out_of_range` returns early otherwise.
+        (None, None) => String::new(),
+    }
+}
+
 /// The value as the breakdown quotes it back: a string verbatim, anything else as its JSON.
 fn quoted_back(value: &serde_json::Value) -> String {
     match value.as_str() {
@@ -160,12 +204,13 @@ fn quoted_back(value: &serde_json::Value) -> String {
 /// What is wrong with one declared argument, or `None` when nothing is.
 ///
 /// At most one problem per argument, in the order a reader would find them: absent, then the
-/// wrong shape, then blank, then unusable as an anchor, then quoted. A value has only one defect
-/// worth naming, and listing two for the same argument would read as two arguments to fix.
+/// wrong shape, then outside the declared range, then blank, then unusable as an anchor, then
+/// quoted. A value has only one defect worth naming, and listing two for the same argument would
+/// read as two arguments to fix.
 fn fault_in(
     tool: &str,
     argument: &str,
-    declared_type: Option<&str>,
+    declared: Option<&serde_json::Value>,
     supplied: Option<&serde_json::Value>,
     required: bool,
 ) -> Option<ArgumentProblem> {
@@ -176,11 +221,16 @@ fn fault_in(
         return required.then_some(ArgumentProblem::Missing);
     };
 
-    if let Some(declared) = declared_type {
-        if matches_declared_type(declared, value) == Some(false) {
-            return Some(ArgumentProblem::WrongType {
-                expected: declared.to_string(),
-            });
+    if let Some(declared) = declared {
+        if let Some(declared_type) = declared["type"].as_str() {
+            if matches_declared_type(declared_type, value) == Some(false) {
+                return Some(ArgumentProblem::WrongType {
+                    expected: declared_type.to_string(),
+                });
+            }
+        }
+        if let Some(problem) = out_of_range(declared, value) {
+            return Some(problem);
         }
     }
 
@@ -236,7 +286,7 @@ pub fn validate_tool_arguments(tool: &str, args: &serde_json::Value) -> Vec<Argu
         let problem = fault_in(
             tool,
             argument,
-            declared["type"].as_str(),
+            Some(declared),
             supplied,
             required.contains(&argument.as_str()),
         );
