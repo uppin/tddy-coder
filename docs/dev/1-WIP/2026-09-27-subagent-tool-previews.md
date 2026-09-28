@@ -112,11 +112,11 @@ result reports `matchedOccurrences`; the summary derives `matchedLines`.
 
 ## Implementation milestones
 
-- [ ] Result summary types + per-tool extraction (`subagent/result_summary.rs`)
-- [ ] STR_REPLACE `matchedOccurrences` in the engine result
-- [ ] `MessageDescriptor.result_summary` + `push_marked` plumbing
-- [ ] MCP + proto serialization, both RPC directions
-- [ ] Frame-budget accounting note (bounded bytes per descriptor)
+- [x] Result summary types + per-tool extraction (`subagent/result_summary.rs`)
+- [x] STR_REPLACE `matchedOccurrences` in the engine result
+- [x] `MessageDescriptor.result_summary` + `push_marked` plumbing
+- [x] MCP + proto serialization, both RPC directions
+- [x] Frame-budget accounting note (bounded bytes per descriptor)
 
 ## Testing plan
 
@@ -175,7 +175,8 @@ Unit + integration (no E2E needed; the MCP/RPC surfaces have existing test harne
 - [x] Run acceptance tests (verify they fail) — 11 unit + 3 acceptance + 2 engine failures, each attributable to the missing extraction/engine count
 - [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (scoped gates green: `./test -p tddy-discovery
+  -p tddy-tool-engine -p tddy-session-agents`, 0 failed; scoped clippy clean)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass

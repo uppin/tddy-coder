@@ -830,6 +830,19 @@ impl ToolDispatch {
             ToolDispatch::Repeated(repeated) => repeated.payload().to_string(),
         }
     }
+
+    /// The structured facts of this dispatch's result, read from the tool the model called.
+    ///
+    /// Only a `Ran` dispatch carries a result with facts in it; every other shape produced
+    /// nothing, and [`ResultSummary::Error`] is the summary that says so.
+    fn summary(&self, tool: &str) -> ResultSummary {
+        match self {
+            ToolDispatch::Ran(value) => summarize(tool, value),
+            ToolDispatch::NeverRan(_)
+            | ToolDispatch::Rejected { .. }
+            | ToolDispatch::Repeated(_) => ResultSummary::Error,
+        }
+    }
 }
 
 /// What one `prompt()` call's tool calls have done so far — enough to answer, when the budget runs
@@ -1407,13 +1420,16 @@ impl SpecializedSubagentSession {
                 for tool_call in tool_calls {
                     let dispatch = self.dispatch_bounded(tool_call).await;
                     tools_called.note(&dispatch);
-                    self.transcript.push_marked(
+                    let tool = tool_call.function.name.clone();
+                    let result_summary = dispatch.summary(&tool);
+                    self.transcript.push_tool_result(
                         ChatMessage::tool_result(
                             dispatch.tool_result_payload(),
                             tool_call.id.clone(),
-                            tool_call.function.name.clone(),
+                            tool,
                         ),
                         dispatch.produced_nothing().is_some(),
+                        result_summary,
                     );
                 }
                 Ok((None, turn_usage))

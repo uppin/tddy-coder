@@ -7,6 +7,8 @@
 
 use crate::openai::ChatMessage;
 
+use super::result_summary::ResultSummary;
+
 /// How much of one message a [`MessageDescriptor`] carries.
 ///
 /// A descriptor is a handle for choosing a rewind point, not a copy of the payload: one `Read`
@@ -148,6 +150,9 @@ struct TranscriptEntry {
     id: MessageId,
     message: ChatMessage,
     is_error: bool,
+    /// The structured facts of a `tool`-role result, computed at the append site where the
+    /// result JSON is still structured — `None` for every other kind of message.
+    result_summary: Option<ResultSummary>,
 }
 
 /// One conversation's messages, in order, each addressable by a [`MessageId`].
@@ -170,12 +175,33 @@ impl Transcript {
 
     /// Append `message`, recording whether it reports a tool call that produced no result.
     pub(crate) fn push_marked(&mut self, message: ChatMessage, is_error: bool) -> MessageId {
+        self.push_with_summary(message, is_error, None)
+    }
+
+    /// Append a `tool`-role result carrying the facts of that result, as the append site read
+    /// them from the dispatch's still-structured JSON.
+    pub(crate) fn push_tool_result(
+        &mut self,
+        message: ChatMessage,
+        is_error: bool,
+        result_summary: ResultSummary,
+    ) -> MessageId {
+        self.push_with_summary(message, is_error, Some(result_summary))
+    }
+
+    fn push_with_summary(
+        &mut self,
+        message: ChatMessage,
+        is_error: bool,
+        result_summary: Option<ResultSummary>,
+    ) -> MessageId {
         self.next_ordinal += 1;
         let id = MessageId(format!("m{}", self.next_ordinal));
         self.entries.push(TranscriptEntry {
             id: id.clone(),
             message,
             is_error,
+            result_summary,
         });
         id
     }
@@ -227,9 +253,7 @@ impl Transcript {
                         .collect(),
                     is_error: entry.is_error,
                     preview: preview_of(entry.message.content.as_deref().unwrap_or("")),
-                    // TODO(tool-previews): carry the summary the append site computed, so a
-                    // descriptor reports its tool's facts rather than only its raw preview.
-                    result_summary: None,
+                    result_summary: entry.result_summary.clone(),
                 })
             })
             .collect()

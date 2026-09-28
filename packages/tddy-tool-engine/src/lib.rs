@@ -386,7 +386,20 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
     // The offset is taken here rather than re-derived after the write, because it is the same
     // byte in both: everything before the match is untouched by the replacement.
     let Some(edit_offset) = content.find(old_string) else {
-        return ToolOutcome::err("StrReplace: old_string not found in file");
+        // Built by hand rather than `ToolOutcome::err`: a no-match edit still knows its
+        // occurrence count, and a caller deciding whether an edit landed reads that zero
+        // instead of an absence it would have to guess at.
+        return ToolOutcome {
+            result_json: serde_json::json!({
+                "error": "StrReplace: old_string not found in file",
+                "matchedOccurrences": 0
+            })
+            .to_string(),
+            is_error: true,
+            error_message: "StrReplace: old_string not found in file".to_string(),
+            job_id: String::new(),
+            job_running: false,
+        };
     };
     let count = content.matches(old_string).count();
     if count > 1 {
@@ -401,6 +414,7 @@ fn tool_str_replace(root: &Path, args: &serde_json::Value) -> ToolOutcome {
         Ok(()) => ToolOutcome::ok(
             serde_json::json!({
                 "replaced": true,
+                "matchedOccurrences": count,
                 "bytes_written": new_content.len(),
                 "edited_region": region.text,
                 "edited_line": region.line,

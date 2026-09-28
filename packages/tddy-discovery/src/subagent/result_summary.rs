@@ -82,9 +82,120 @@ pub enum ResultSummary {
 /// Called at the one place a tool result is appended to the transcript (`run_one_turn`), where
 /// the `ToolDispatch::Ran(value)` JSON is in hand before it is stringified into the tool
 /// message — the only place the structure is still visible.
-pub fn summarize(_tool: &str, _result: &serde_json::Value) -> ResultSummary {
-    // TODO(tool-previews): extract each tool's facts from its result JSON.
-    ResultSummary::Error
+///
+/// The facts come from the tool the model **called**, not from the shape the result happens to
+/// wear: a result without the fields this tool reads summarizes as a summary of empty facts
+/// rather than an error, because "no matches found" is a result too. A result carrying an
+/// `"error"` key is the one thing that summarizes as [`ResultSummary::Error`] — that key is the
+/// pinned shape of a dispatch that produced nothing to report facts about.
+pub fn summarize(tool: &str, result: &serde_json::Value) -> ResultSummary {
+    if result.get("error").is_some() {
+        return ResultSummary::Error;
+    }
+    match tool {
+        "READ" => ResultSummary::Read {
+            first_line: first_non_empty_line(str_at(result, "content").unwrap_or_default()),
+            chars_read: chars_excluding_newlines(str_at(result, "content").unwrap_or_default()),
+            total_lines: u64_at(result, "total_lines"),
+            truncated: bool_at(result, "truncated"),
+        },
+        "GREP" => ResultSummary::Grep {
+            match_count: len_at(result, "matches"),
+            truncated: bool_at(result, "truncated"),
+            total_matches: u64_at(result, "total_matches"),
+        },
+        "GLOB" => ResultSummary::Glob {
+            path_count: len_at(result, "paths"),
+            truncated: bool_at(result, "truncated"),
+            total_paths: u64_at(result, "total_paths"),
+        },
+        // The engine spells the occurrence count `matchedOccurrences` on its result — the one
+        // field read under its wire name rather than the summary's own.
+        "STR_REPLACE" => ResultSummary::StrReplace {
+            replaced: bool_at(result, "replaced"),
+            matched_lines: u64_at(result, "matchedOccurrences"),
+            bytes_written: u64_at(result, "bytes_written"),
+        },
+        "WRITE" => ResultSummary::Write {
+            bytes_written: u64_at(result, "bytes_written"),
+        },
+        "DELETE" => ResultSummary::Delete {
+            deleted: bool_at(result, "deleted"),
+        },
+        "SHELL" => {
+            // A background dispatch has no ending to report — the job id is its whole story, so
+            // the exit code and output size stay unset rather than reading as zero.
+            match str_at(result, "job_id") {
+                Some(job_id) => ResultSummary::Shell {
+                    exit_code: None,
+                    stdout_chars: None,
+                    job_id: Some(job_id.to_string()),
+                },
+                None => ResultSummary::Shell {
+                    exit_code: result.get("exit_code").and_then(serde_json::Value::as_i64),
+                    stdout_chars: Some(
+                        str_at(result, "stdout").unwrap_or_default().chars().count() as u64,
+                    ),
+                    job_id: None,
+                },
+            }
+        }
+        "AWAIT" => ResultSummary::Await {
+            exit_code: result.get("exit_code").and_then(serde_json::Value::as_i64),
+            completed: bool_at(result, "completed"),
+        },
+        "READ_LINTS" => ResultSummary::ReadLints {
+            lint_count: len_at(result, "lints"),
+        },
+        // A tool name this summary has no facts for: refusing to guess keeps an unrecognized
+        // result from being read as, say, a zero-match search.
+        _ => ResultSummary::Error,
+    }
+}
+
+/// The value at `key` as a `u64`, or 0 when it is absent or of another shape.
+fn u64_at(result: &serde_json::Value, key: &str) -> u64 {
+    result
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+}
+
+/// The value at `key` as a `bool`, or `false` when it is absent or of another shape.
+fn bool_at(result: &serde_json::Value, key: &str) -> bool {
+    result
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// How many elements the array at `key` holds, or 0 when it is absent or not an array.
+fn len_at(result: &serde_json::Value, key: &str) -> u64 {
+    result
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, |items| items.len() as u64)
+}
+
+/// The value at `key` as a string slice, or `None` when it is absent or of another shape.
+fn str_at<'a>(result: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    result.get(key).and_then(serde_json::Value::as_str)
+}
+
+/// A text's first line that carries anything, cut to [`SUMMARY_FIRST_LINE_CHARS`].
+///
+/// `None` when every line is empty or whitespace — the summary of a file with nothing to show.
+fn first_non_empty_line(text: &str) -> Option<String> {
+    text.lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| line.chars().take(SUMMARY_FIRST_LINE_CHARS).collect())
+}
+
+/// How many characters a text carries, counting the characters of text and not the newlines that
+/// separate its lines — the newlines are structure the `total_lines` field already reports, so an
+/// empty file reads as 0 and a one-line file as its length, newline excluded.
+fn chars_excluding_newlines(text: &str) -> u64 {
+    text.lines().map(|line| line.chars().count() as u64).sum()
 }
 
 #[cfg(test)]
