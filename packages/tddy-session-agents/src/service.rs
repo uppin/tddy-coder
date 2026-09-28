@@ -181,6 +181,11 @@ impl SessionAgentServiceImpl {
                 ))
             })?;
 
+        // Built before the badge is stamped, so a request the conversation cannot run — a yield
+        // conditions array that never parses — is refused while the conversation still shows what
+        // it was doing, not a Prompting badge over a turn that never started.
+        let requested = turn.turn_request().map_err(Status::invalid_argument)?;
+
         // Stamped before either branch runs, so the badge changes when the turn starts rather than
         // when it is first observed to have started.
         self.note_agent_activity(
@@ -227,7 +232,6 @@ impl SessionAgentServiceImpl {
         // cancel can land while this turn is in flight — which is the only moment a cancel matters.
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let conversation_id = turn.conversation_id().to_string();
-        let requested = turn.turn_request();
         let turn_ended = self.turn_end_reporter(turn.session_id(), &session_dir, &agent_id);
         tokio::spawn(async move {
             let outcome = tokio::select! {
@@ -333,16 +337,17 @@ impl TurnOnAConversation {
         }
     }
 
-    /// What this request asks the conversation to do, in the conversation's own vocabulary.
-    fn turn_request(&self) -> TurnRequest {
+    /// What this request asks the conversation to do, in the conversation's own vocabulary — or
+    /// why the yield conditions it sent cannot run as written.
+    fn turn_request(&self) -> Result<TurnRequest, String> {
         match self {
-            Self::Prompt(req) => within(
+            Self::Prompt(req) => Ok(within(
                 with_yield_conditions(
                     TurnRequest::prompting(&req.prompt),
                     &req.yield_conditions_json,
-                ),
+                )?,
                 req.max_turns,
-            ),
+            )),
             Self::Resume(req) => {
                 let mut requested = TurnRequest::resuming();
                 if let Some(id) = &req.from_message_id {
@@ -351,10 +356,10 @@ impl TurnOnAConversation {
                 if let Some(correction) = &req.correction {
                     requested = requested.with_correction(correction.clone());
                 }
-                within(
-                    with_yield_conditions(requested, &req.yield_conditions_json),
+                Ok(within(
+                    with_yield_conditions(requested, &req.yield_conditions_json)?,
                     req.max_turns,
-                )
+                ))
             }
         }
     }
@@ -363,18 +368,19 @@ impl TurnOnAConversation {
 /// Apply the caller's yield conditions where the request sent any, leaving the turn unconditional
 /// where it did not. An unparseable array is an error naming the request, not a silent no-conditions
 /// turn: the caller asked to be handed control at a point, and running past it does the opposite.
-fn with_yield_conditions(requested: TurnRequest, yield_conditions_json: &str) -> TurnRequest {
+/// A well-formed list — empty included — runs on to the turn, where its own validation rules.
+fn with_yield_conditions(
+    requested: TurnRequest,
+    yield_conditions_json: &str,
+) -> Result<TurnRequest, String> {
     if yield_conditions_json.is_empty() {
-        return requested;
+        return Ok(requested);
     }
     let conditions = serde_json::from_str::<Vec<tddy_discovery::subagent::YieldCondition>>(
         yield_conditions_json,
     )
-    .unwrap_or_default();
-    if conditions.is_empty() {
-        return requested;
-    }
-    requested.with_yield_conditions(conditions)
+    .map_err(|e| format!("yieldConditions is not a list of conditions: {e}"))?;
+    Ok(requested.with_yield_conditions(conditions))
 }
 
 /// Apply a caller's turn budget where it sent one, leaving the agent definition's own alone where

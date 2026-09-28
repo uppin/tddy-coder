@@ -112,11 +112,11 @@ whole thing travels on both request protos and back on the final chunk.
 
 ## Implementation milestones
 
-- [ ] `yield_condition.rs` types + evaluation + validation
-- [ ] `TurnRequest` field + loop check + new stop reason at every site
-- [ ] RPC wire both directions (proto + client `turn_call`)
-- [ ] MCP schemas + parsing
-- [ ] Fired-condition report bounded for the frame budget
+- [x] `yield_condition.rs` types + evaluation + validation
+- [x] `TurnRequest` field + loop check + new stop reason at every site
+- [x] RPC wire both directions (proto + client `turn_call`)
+- [x] MCP schemas + parsing
+- [x] Fired-condition report bounded for the frame budget
 
 ## Testing plan
 
@@ -173,8 +173,15 @@ whole thing travels on both request protos and back on the final chunk.
 - [x] Run acceptance tests (verify they fail) — 4 unit (evaluate/validate) + 3 acceptance (the yield behaviours) failures, each the missing loop evaluation; nodes 1–3's inherited red rides this branch and is theirs to green
 - [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code (scoped gates green: `./test -p tddy-discovery
+  -p tddy-session-agents -p tddy-tools`, 88 suites / 0 failed; scoped clippy clean). Green filled
+  the two contract stubs (`evaluate`, `validate`) and wired their live call sites: the turn-entry
+  validation and the post-append loop check. One contract-commit defect fixed beyond the listed
+  seams: `tddy-session-agents`' request parser silently dropped an unparseable
+  `yieldConditions` payload — its own doc comment promised an error naming the request; it now
+  returns one (as `Status::invalid_argument`, before any turn is stamped). A pre-existing clippy
+  `-D warnings` failure in `tddy-tools` (dead `mut`) also blocked the gate and was fixed with a
+  one-token change.- [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass
 - [ ] Validate changes (/validate-changes)

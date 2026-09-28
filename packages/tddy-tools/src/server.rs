@@ -2514,7 +2514,7 @@ fn yield_conditions_property() -> serde_json::Value {
 /// handed control at does the opposite of what it asked.
 fn yield_conditions_of(
     args: &serde_json::Value,
-    mut request: TurnRequest,
+    request: TurnRequest,
 ) -> Result<TurnRequest, String> {
     let Some(raw) = args.get("yieldConditions") else {
         return Ok(request);
