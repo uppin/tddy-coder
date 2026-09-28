@@ -135,7 +135,43 @@ with full text on demand. Spawn, system prompts and turn behaviour are untouched
 
 ## Validation results
 
-(to be filled by `/validate-changes`)
+(`/validate-changes`, 2026-09-28, stack base `feature/subagent-control/grep-context`, leak check
+clean — 3 commits, all this PR's)
+
+| Check | Result |
+|---|---|
+| Changeset items implemented or deferred | ✅ all 6 milestones implemented |
+| `## Responsibility` delivered | ✅ complete — def field, proto + generated TS, store/migration, create/update/list, projection, web dialogs + panel + client, YAML doc |
+| `## Dependencies` not implemented here | ✅ clean — nodes 1/2's files absent from the diff (order-only) |
+| `## Boundaries` respected | ✅ clean — no prompt injection, no `subagent_new_session`/picker surface, no spawn/turn changes, no YAML tooling |
+| No dependent's behaviour | ✅ clean |
+| Diff contains only this PR's files | ✅ clean — 56 files, all claimed (the ~20 one-line `usage_notes: None` test-constructor ripples are the new def field's fan-out) |
+| Parent-owned files intact | ✅ clean — no deletions |
+
+Build validation: `./test -p tddy-model-registry` green (incl. the 3 store/projection acceptance
+tests), scoped clippy clean, all 9 models Cypress component specs 56/56 with the usage-notes spec
+3/3.
+
+Risks: no critical findings. One pre-existing-style clippy allow added
+(`store.rs` `update_assistant` `too_many_arguments`, why-commented).
+
+Test quality (`/validate-tests`, 2026-09-28): 12 tests analyzed — the 3-spec usage-notes file
+(sentence names, named fixtures, Given/When/Then; the ordering fix documented in place), 4
+pre-existing component specs whose exact-payload literals gained `usageNotes: ""` (assertions
+strengthened, nothing removed), and 2 unit files whose row builders gained the now-required field.
+Fluent-tests compliant; no critical or warning issues.
+
+Production readiness (`/validate-prod-ready`, 2026-09-28): web + registry production files
+checked — no mock code in production paths (the in-memory backend is test-support under
+`cypress/support/`), no dev fallbacks, no debug output, no TODO/FIXME added. Status ✅ Ready.
+
+Code quality (`/analyze-clean-code`, 2026-09-28): **A** — no must-refactor items; every changed
+function is within budget. File length gate (500 production lines, PR range vs the parent branch):
+three files unchanged-count alert-only (`run.rs` 2707, `main.rs` 973, `spawn.rs` 788 — the
+def-field fan-out added one constructor line each without moving the count);
+`store.rs` 1139 → 1152 (+13, measured into its record); `useModelRegistryFanOut.ts` 598 → 615
+(+17) — **decomposition deferred by explicit developer consent** at wrap, recorded as the package's
+first code-issue record plus `docs/dev/todo/2026-09-28-web-model-fan-out-over-budget.md`.
 
 ## TODO
 
