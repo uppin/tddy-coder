@@ -113,6 +113,18 @@ export function AssistantsPanel({
               >
                 {assistant.tools.join(" · ")}
               </div>
+              {assistant.usageNotes ? (
+                // Truncated on screen but whole in the DOM, the full text on hover — an operator
+                // choosing an agent reads the notes before prompting it. Operator documentation
+                // only: shown here, never injected into the agent's system prompt.
+                <div
+                  data-testid={`${testId}-usage-notes`}
+                  title={assistant.usageNotes}
+                  className="mt-1 truncate text-xs text-muted-foreground"
+                >
+                  {assistant.usageNotes}
+                </div>
+              ) : null}
               {error ? (
                 <div data-testid={`${testId}-error`} className="mt-1 text-xs text-destructive">
                   {error}

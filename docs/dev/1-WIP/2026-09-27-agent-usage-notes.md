@@ -147,7 +147,14 @@ with full text on demand. Spawn, system prompts and turn behaviour are untouched
 - [x] Run acceptance tests (verify they fail) — 3/3 Cypress failures (create submit, edit pre-fill, panel display), each the missing web wiring; the backend store/projection acceptance tests pass on the published surface
 - [x] USER REVIEW — acceptance tests — waived by the developer ("finish the remaining ones without stopping", 2026-09-27)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (scoped gates green: the usage-notes Cypress spec
+  3/3, all 9 models component specs 56/56, `./test -p tddy-model-registry` green, scoped clippy
+  clean). The backend half landed in the draft contract; green added the web wiring (dialogs,
+  panel row, RPC fan-out payloads) and the YAML doc example. Two test facts: the spec's first
+  test typed its notes field after the submit click — the dialog closes on success, so no
+  implementation could pass it; reordered to type-then-submit, matching the edit test's ordering,
+  intent and assertions unchanged. The store's `update_assistant` picked up a clippy
+  `too_many_arguments` allow with a why-comment (house precedent).
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (`./test`) — verify 100% pass

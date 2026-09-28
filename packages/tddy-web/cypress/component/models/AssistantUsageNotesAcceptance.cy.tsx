@@ -89,8 +89,14 @@ describe("AssistantUsageNotesAcceptance — an agent's notes for its operator", 
     const backend = aRegistryWithOneModel();
     mount(backend);
 
-    // When — the operator writes notes while composing the assistant
+    // When — the operator writes notes while composing the assistant, before submitting: the
+    // dialog closes on a successful create (pinned by AssistantsPanelAcceptance's collision
+    // test), so notes typed after the submit would land nowhere.
     page.openCreateAssistant(QWEN);
+    cy.get('[data-testid="models-create-assistant-usage-notes"]')
+      .should("exist")
+      .clear()
+      .type(USAGE_NOTES);
     page.fillAndSubmitCreateAssistantForm({
       name: "repo-reader",
       label: "Repo Reader",
@@ -98,10 +104,6 @@ describe("AssistantUsageNotesAcceptance — an agent's notes for its operator", 
       tools: ["Read", "Grep"],
       replaces: [],
     });
-    cy.get('[data-testid="models-create-assistant-usage-notes"]')
-      .should("exist")
-      .clear()
-      .type(USAGE_NOTES);
 
     // Then — the notes reach the daemon with the definition
     cy.wrap(backend).should((b) => {

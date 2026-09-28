@@ -124,17 +124,21 @@ export interface ModelRegistryFanOut {
     providerId: string;
     modelId: string;
     systemPrompt: string;
+    /** Operator documentation, carried to the stored entry — never machine context. */
+    usageNotes: string;
     tools: string[];
     replaces: string[];
   }) => Promise<string>;
   /**
-   * Resolves to the error to show, or `""` when the assistant was updated. Both tool sets are sent
-   * whole, so an operator who gives up a takeover is obeyed rather than left with the stored one.
+   * Resolves to the error to show, or `""` when the assistant was updated. Every free-text field —
+   * the tool sets as much as the prompts and notes — is sent whole, so an operator who gives up a
+   * takeover or clears the notes is obeyed rather than left with the stored one.
    */
   readonly updateAssistant: (input: {
     assistant: AssistantRow;
     label: string;
     systemPrompt: string;
+    usageNotes: string;
     tools: string[];
     replaces: string[];
   }) => Promise<string>;
@@ -188,6 +192,7 @@ function assistantRowOf(entry: AssistantEntry, sourceInstanceId: string): Assist
     providerId: entry.providerId,
     modelId: entry.modelId,
     systemPrompt: entry.systemPrompt,
+    usageNotes: entry.usageNotes,
     tools: entry.tools,
     replaces: entry.replaces,
   };
@@ -507,7 +512,17 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   );
 
   const createAssistant = useCallback<ModelRegistryFanOut["createAssistant"]>(
-    async ({ daemonInstanceId, name, label, providerId, modelId, systemPrompt, tools, replaces }) => {
+    async ({
+      daemonInstanceId,
+      name,
+      label,
+      providerId,
+      modelId,
+      systemPrompt,
+      usageNotes,
+      tools,
+      replaces,
+    }) => {
       const client = clientFor(daemonInstanceId);
       if (!client) return noConnectionTo(daemonInstanceId);
       try {
@@ -518,6 +533,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
           providerId,
           modelId,
           systemPrompt,
+          usageNotes,
           tools,
           replaces,
         });
@@ -531,7 +547,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
   );
 
   const updateAssistant = useCallback<ModelRegistryFanOut["updateAssistant"]>(
-    async ({ assistant, label, systemPrompt, tools, replaces }) => {
+    async ({ assistant, label, systemPrompt, usageNotes, tools, replaces }) => {
       const client = clientFor(assistant.daemonInstanceId);
       if (!client) return noConnectionTo(assistant.daemonInstanceId);
       try {
@@ -540,6 +556,7 @@ export function useModelRegistryFanOut(): ModelRegistryFanOut {
           assistantId: assistant.assistantId,
           label,
           systemPrompt,
+          usageNotes,
           tools,
           replaces,
         });

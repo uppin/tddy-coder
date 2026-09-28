@@ -585,6 +585,9 @@ impl ModelRegistryStore {
 
     /// Update the editable parts of an assistant `caller` owns (its name is its identity and stays
     /// put).
+    // One argument per editable field, mirroring `UpdateAssistantRequest` on the wire; a params
+    // struct would just re-state the request message.
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_assistant(
         &self,
         assistant_id: &str,

@@ -35,6 +35,8 @@ export interface CreateAssistantDialogProps {
     name: string;
     label: string;
     systemPrompt: string;
+    /** Operator documentation — how to use the agent, never machine context. */
+    usageNotes: string;
     tools: string[];
     replaces: string[];
   }) => Promise<string>;
@@ -50,6 +52,7 @@ export function CreateAssistantDialog({
   const [name, setName] = useState("");
   const [label, setLabel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [usageNotes, setUsageNotes] = useState("");
   const toolSets = useAssistantToolSets([], []);
   const [error, setError] = useState("");
   // A second click while the create is in flight mints a second assistant on the daemon, which the
@@ -65,6 +68,7 @@ export function CreateAssistantDialog({
         name: name.trim(),
         label: label.trim(),
         systemPrompt: systemPrompt.trim(),
+        usageNotes: usageNotes.trim(),
         tools: sent.tools,
         replaces: sent.replaces,
       });
@@ -107,6 +111,14 @@ export function CreateAssistantDialog({
         className={fieldClassName}
         value={systemPrompt}
         onChange={(e) => setSystemPrompt(e.target.value)}
+      />
+      <textarea
+        data-testid="models-create-assistant-usage-notes"
+        placeholder="Usage notes — for you, not the agent"
+        rows={3}
+        className={fieldClassName}
+        value={usageNotes}
+        onChange={(e) => setUsageNotes(e.target.value)}
       />
       <AssistantToolPicker
         idPrefix="models-create-assistant"

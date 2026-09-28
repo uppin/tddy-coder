@@ -56,6 +56,11 @@ export interface AssistantRow {
   readonly providerId: string;
   readonly modelId: string;
   readonly systemPrompt: string;
+  /**
+   * The operator's notes on this agent — quirks, limitations, what it is good at. For the human
+   * operating it, never machine context: not injected into any system prompt.
+   */
+  readonly usageNotes: string;
   /** What this assistant may call while it works. */
   readonly tools: readonly string[];
   /** The main-agent tools it stands in for — what attaching it takes away from the session. */

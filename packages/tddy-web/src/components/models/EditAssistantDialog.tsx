@@ -6,9 +6,10 @@ import { ModelsDialogShell } from "./ModelsDialogShell";
 import type { ToolCatalog } from "./useModelRegistryFanOut";
 
 /**
- * Edit an assistant in place: its label, its system prompt, the tools it may call and the main-agent
- * tools it takes over — the four fields `UpdateAssistant` accepts. The `--agent` name and the model
- * it speaks as are its identity on the daemon and are shown, not offered for editing.
+ * Edit an assistant in place: its label, its system prompt, its usage notes, the tools it may call
+ * and the main-agent tools it takes over — the five fields `UpdateAssistant` accepts. The `--agent`
+ * name and the model it speaks as are its identity on the daemon and are shown, not offered for
+ * editing.
  *
  * Both tool sets open on what the daemon holds and are sent whole, so giving up a takeover is
  * expressible: an update that carried only what was ticked could never remove one.
@@ -28,6 +29,8 @@ export interface EditAssistantDialogProps {
   onSubmit: (input: {
     label: string;
     systemPrompt: string;
+    /** Operator documentation — how to use the agent, never machine context. */
+    usageNotes: string;
     tools: string[];
     replaces: string[];
   }) => Promise<string>;
@@ -42,6 +45,7 @@ export function EditAssistantDialog({
 }: EditAssistantDialogProps) {
   const [label, setLabel] = useState(assistant.label);
   const [systemPrompt, setSystemPrompt] = useState(assistant.systemPrompt);
+  const [usageNotes, setUsageNotes] = useState(assistant.usageNotes);
   const toolSets = useAssistantToolSets(assistant.tools, assistant.replaces);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -54,6 +58,7 @@ export function EditAssistantDialog({
       const failure = await onSubmit({
         label: label.trim(),
         systemPrompt: systemPrompt.trim(),
+        usageNotes: usageNotes.trim(),
         tools: sent.tools,
         replaces: sent.replaces,
       });
@@ -89,6 +94,14 @@ export function EditAssistantDialog({
         className={fieldClassName}
         value={systemPrompt}
         onChange={(e) => setSystemPrompt(e.target.value)}
+      />
+      <textarea
+        data-testid="models-edit-assistant-usage-notes"
+        placeholder="Usage notes — for you, not the agent"
+        rows={3}
+        className={fieldClassName}
+        value={usageNotes}
+        onChange={(e) => setUsageNotes(e.target.value)}
       />
       <AssistantToolPicker
         idPrefix="models-edit-assistant"

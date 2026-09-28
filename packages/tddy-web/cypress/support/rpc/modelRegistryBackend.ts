@@ -108,6 +108,7 @@ export function anAssistant(overrides: Partial<AssistantEntry> = {}): AssistantE
     providerId: "prov-ollama",
     modelId: "qwen3:32b",
     systemPrompt: "You read code and answer questions about it.",
+    usageNotes: "",
     tools: ["Read", "Grep"],
     replaces: [],
     daemonInstanceId: FIXTURE_DAEMON,
@@ -255,6 +256,7 @@ export function aModelRegistryBackend(fixture: ModelRegistryFixture = {}): InMem
         providerId: req.providerId,
         modelId: req.modelId,
         systemPrompt: req.systemPrompt,
+        usageNotes: req.usageNotes,
         tools: req.tools,
         replaces: req.replaces,
       });
@@ -272,6 +274,9 @@ export function aModelRegistryBackend(fixture: ModelRegistryFixture = {}): InMem
         ];
       assistant.label = req.label;
       assistant.systemPrompt = req.systemPrompt;
+      // Carried whole, like the tool sets: the update is the new truth, so clearing the notes
+      // clears them rather than leaving the stored text behind.
+      assistant.usageNotes = req.usageNotes;
       assistant.tools = req.tools;
       assistant.replaces = req.replaces;
       return { assistant };
