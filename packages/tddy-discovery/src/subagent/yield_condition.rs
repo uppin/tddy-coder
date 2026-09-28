@@ -396,9 +396,8 @@ mod tests {
         }])
         .is_err());
         // More conditions than the limit.
-        let too_many: Vec<YieldCondition> = std::iter::repeat(a_str_replace_no_match())
-            .take(YIELD_CONDITION_LIMIT + 1)
-            .collect();
+        let too_many: Vec<YieldCondition> =
+            std::iter::repeat_n(a_str_replace_no_match(), YIELD_CONDITION_LIMIT + 1).collect();
         assert!(validate(&too_many).is_err());
         // A needle past the bound.
         assert!(validate(&[YieldCondition {
