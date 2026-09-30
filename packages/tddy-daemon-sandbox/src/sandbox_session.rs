@@ -258,9 +258,6 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
-        // TODO(isolated-edits): a non-empty `conversation_id` runs the call through
-        // `tddy_subagent_worktree::run_in_conversation` and merges its `worktreeChange`
-        let _ = conversation_id;
         // A running row before execution, then a terminal row from the outcome. The durable log is
         // best-effort — a write failure is logged and never blocks the tool call (mirrors
         // tool_call_log handling in the ExecuteTool path).
@@ -292,15 +289,31 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         };
         self.record_agent_activity(session_id, &running);
 
-        let outcome = tool_engine::execute_tool_with_env(
-            &self.worktree,
-            tool_name,
-            args_json,
-            &self.task_registry,
-            session_id,
-            &self.session_env,
-        )
-        .await;
+        let outcome = match conversation_id.is_empty() {
+            true => {
+                tool_engine::execute_tool_with_env(
+                    &self.worktree,
+                    tool_name,
+                    args_json,
+                    &self.task_registry,
+                    session_id,
+                    &self.session_env,
+                )
+                .await
+            }
+            false => {
+                crate::conversation_tool::execute_in_conversation(
+                    &self.worktree,
+                    conversation_id,
+                    tool_name,
+                    args_json,
+                    &self.task_registry,
+                    session_id,
+                    &self.session_env,
+                )
+                .await
+            }
+        };
 
         let status = if outcome.is_error {
             tddy_core::agent_activity::STATUS_ERROR

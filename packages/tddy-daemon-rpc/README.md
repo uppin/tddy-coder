@@ -25,6 +25,16 @@ on the host as its `DaemonRpcFamilies` port, which is the only way session code 
 families. The edge is one-way: nothing below this crate depends on it, not even as a
 dev-dependency.
 
+### Conversation worktrees
+
+`ExecToolRpcHandler::conversation_worktree` serves `ExecToolService/ConversationWorktree` (`Pull`,
+`Remove`): authorized exactly like `ExecuteTool`, the conversation worktree resolved *under* the
+token-resolved session worktree so a foreign conversation id can only name a directory inside the
+caller's own session. The operation itself, `run_conversation_worktree_op`, lives in
+`tddy-session-lifecycle` because the jail's host bridge serves it too. An `ExecuteTool` carrying a
+`conversation_id` needs nothing here: the shared route (`run_exec_tool_locally`) runs it in the
+conversation's worktree, and `resolve_exec_tool_worktree` refuses an unsafe id before any tool runs.
+
 ## Documentation
 
 ### Technical implementation (how)

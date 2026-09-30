@@ -180,6 +180,10 @@ const SUBAGENT_TOOLS: &[&str] = &[
     // uncallable tool in front of a sandboxed Claude.
     "mcp__tddy-tools__subagent_resume",
     "mcp__tddy-tools__subagent_cancel",
+    // The other way to close a conversation, and the one that hands its work to the caller: an
+    // agent allowed to cancel a conversation but not to end it could only ever throw that work
+    // away.
+    "mcp__tddy-tools__subagent_end",
 ];
 
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable

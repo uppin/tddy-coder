@@ -96,19 +96,27 @@ impl tddy_rpc::RpcService for ToolExecService {
         // coordinate the daemon actually serves cannot drift: a tuple naming a service nobody
         // answers fails *closed*, silently, at runtime.
         const FORWARDED_RPCS: &[(&str, &str)] = &tddy_service::session_agents::IN_JAIL_RELAYABLE;
+        // Conversation-worktree operations are exec-tool RPCs with a typed request; they ride the
+        // same channel, to the same daemon.
         if !FORWARDED_RPCS
             .iter()
+            .chain(tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS.iter())
             .any(|(s, m)| (*s == service) && (*m == method))
         {
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "unknown {service}/{method}"
             ))));
         }
-        let Some((request_id, mut rx)) = self
-            .relay
-            .call_rpc(service, method, message.payload.to_vec())
-            .await
-        else {
+        let payload = match crate::conversation_root::bind_to_this_session(
+            service,
+            method,
+            &message.payload,
+            &session_id_from_env(),
+        ) {
+            Ok(payload) => payload,
+            Err(status) => return tddy_rpc::RpcResult::Unary(Err(status)),
+        };
+        let Some((request_id, mut rx)) = self.relay.call_rpc(service, method, payload).await else {
             return tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::unavailable(
                 "the sandbox session channel is not connected to the host daemon yet",
             )));
@@ -405,13 +413,12 @@ impl SandboxSessionRelay {
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
-        // TODO(isolated-edits): carry `conversation_id` in the queued request
-        let _ = conversation_id;
         let (tx, rx) = oneshot::channel();
         let req = ExecuteToolRequest {
             session_id: session_id_from_env(),
             tool_name: tool_name.to_string(),
             args_json: args_json.to_string(),
+            conversation_id: conversation_id.to_string(),
             ..Default::default()
         };
         self.queued_tools
@@ -2172,8 +2179,19 @@ struct InJailToolExecutor {
 
 impl InJailToolExecutor {
     async fn execute(&self, req: &ExecuteToolRequest) -> ExecuteToolResponse {
+        let root = match crate::conversation_root::tool_root(&self.worktree, &req.conversation_id) {
+            Ok(root) => root,
+            Err(message) => {
+                return ExecuteToolResponse {
+                    result_json: serde_json::json!({ "error": message }).to_string(),
+                    is_error: true,
+                    error_message: message,
+                    ..Default::default()
+                }
+            }
+        };
         let outcome = tddy_tool_engine::execute_tool_with_env(
-            &self.worktree,
+            &root,
             &req.tool_name,
             &req.args_json,
             &self.registry,

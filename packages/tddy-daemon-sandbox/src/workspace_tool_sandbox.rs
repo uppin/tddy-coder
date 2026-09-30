@@ -567,7 +567,8 @@ impl WorkspaceSandbox for JailedWorkspaceSandbox {
             session_id: self.session_id.clone(),
             tool_name: req.tool_name.clone(),
             args_json: req.args_json.clone(),
-            conversation_id: String::new(),
+            // The jail finds the conversation's worktree under its own mount; the host created it.
+            conversation_id: req.conversation_id.clone(),
         };
 
         let mut guard = self.channel.lock().await;

@@ -28,6 +28,7 @@ mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
+mod worktree_change;
 mod yield_condition;
 
 use transcript::Transcript;
@@ -1542,6 +1543,7 @@ impl SpecializedSubagentSession {
                         ),
                         produced_nothing,
                         result_summary,
+                        worktree_change::of(&dispatch),
                     );
                     if let Some(condition) = fired {
                         // The turn stops at this call, exactly as the condition asked: the

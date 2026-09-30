@@ -190,6 +190,9 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                     Err(status) => tddy_rpc::RpcResult::Unary(Err(status)),
                 }
             }
+            (tddy_tool_engine::EXEC_TOOL_SERVICE, "ConversationWorktree") => {
+                tddy_rpc::RpcResult::Unary(conn.conversation_worktree_from_jail(payload).await)
+            }
             _ => tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "DaemonRpcHandler does not serve {service}/{method}"
             )))),

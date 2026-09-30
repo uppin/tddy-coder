@@ -571,9 +571,13 @@ async fn run_host_relay_inner<H: HostToolHandler, C: SessionChannelClient>(
                         end_signal.signal();
                     }
                     Some(SessionPayload::ToolRequest(req)) => {
-                        // TODO(isolated-edits): hand `req.conversation_id` to the handler
                         let resp = tool_handler
-                            .execute(&session_id, "", &req.tool_name, &req.args_json)
+                            .execute(
+                                &session_id,
+                                &req.conversation_id,
+                                &req.tool_name,
+                                &req.args_json,
+                            )
                             .await;
                         let _ = host_tx_reader
                             .send(SessionFrame {

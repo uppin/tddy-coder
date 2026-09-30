@@ -231,7 +231,7 @@ impl Transcript {
 
     /// Append `message`, recording whether it reports a tool call that produced no result.
     pub(crate) fn push_marked(&mut self, message: ChatMessage, is_error: bool) -> MessageId {
-        self.push_with_summary(message, is_error, None)
+        self.push_with_summary(message, is_error, None, None)
     }
 
     /// Append a `tool`-role result carrying the facts of that result, as the append site read
@@ -241,8 +241,9 @@ impl Transcript {
         message: ChatMessage,
         is_error: bool,
         result_summary: ResultSummary,
+        worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
     ) -> MessageId {
-        self.push_with_summary(message, is_error, Some(result_summary))
+        self.push_with_summary(message, is_error, Some(result_summary), worktree_change)
     }
 
     fn push_with_summary(
@@ -250,6 +251,7 @@ impl Transcript {
         message: ChatMessage,
         is_error: bool,
         result_summary: Option<ResultSummary>,
+        worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
     ) -> MessageId {
         self.next_ordinal += 1;
         let id = MessageId(format!("m{}", self.next_ordinal));
@@ -258,9 +260,7 @@ impl Transcript {
             message,
             is_error,
             result_summary,
-            // TODO(isolated-edits): recorded by `push_tool_result` from the result's
-            // `worktreeChange`
-            worktree_change: None,
+            worktree_change,
         });
         id
     }

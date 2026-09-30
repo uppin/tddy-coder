@@ -22,7 +22,7 @@ use tddy_service::proto::exec_tools::{
     ListSessionToolCallsResponse as ConnListSessionToolCallsResponse,
 };
 use tddy_session_lifecycle::connection_service::{
-    authorize_exec_tool_caller, resolve_exec_tool_worktree, wire_same,
+    authorize_exec_tool_caller, resolve_exec_tool_worktree, run_conversation_worktree_op, wire_same,
 };
 use tddy_session_lifecycle::tool_engine;
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
@@ -370,11 +370,43 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
         request: Request<ConversationWorktreeRequest>,
     ) -> Result<Response<ConversationWorktreeResponse>, Status> {
         self.rpc_activity.record();
-        let _req = request.into_inner();
-        // TODO(isolated-edits): implement — authorize, resolve the session worktree, then run the
-        // op through `tddy_subagent_worktree::ConversationWorktrees`
-        Err(Status::unimplemented(
-            "ConversationWorktree is not implemented yet",
-        ))
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
+        if let Some(answered) = self
+            .peer_routing
+            .rpc_served_by_peer(
+                EXEC_TOOL_SERVICE,
+                "ConversationWorktree",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        // The same credential and the same session lookup as `ExecuteTool`: only the tool name is
+        // absent, and nothing on this path reads it.
+        let as_exec_tool = ConnExecuteToolRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            daemon_instance_id: req.daemon_instance_id.clone(),
+            ..Default::default()
+        };
+        authorize_exec_tool_caller(&self.config, &self.user_resolver, &as_exec_tool)?;
+        let op = req
+            .op
+            .ok_or_else(|| Status::invalid_argument("ConversationWorktree carries no operation"))?;
+        let (_sessions_base, worktree_root) = resolve_exec_tool_worktree(
+            &self.config,
+            &self.user_resolver,
+            &self.tddy_data_dir,
+            &as_exec_tool,
+        )?;
+        let result_json =
+            run_conversation_worktree_op(&worktree_root, &req.session_id, &req.conversation_id, op)
+                .await?;
+        Ok(Response::new(ConversationWorktreeResponse { result_json }))
     }
 }

@@ -36,9 +36,23 @@
 //! `ManagedWorkflow`'s.
 
 pub mod action_service;
+mod conversation_tool;
 pub mod sandbox_action;
 pub mod sandbox_plan_builder;
 pub mod sandbox_runtime;
 pub mod sandbox_session;
 pub mod task_service;
 pub mod workspace_tool_sandbox;
+
+#[cfg(test)]
+mod tests {
+    /// The jail finds a conversation's worktree where the host created it; the runner cannot depend
+    /// on the crate that names the directory, so this pins the two spellings together.
+    #[test]
+    fn the_jail_and_the_host_agree_where_conversation_worktrees_live() {
+        assert_eq!(
+            tddy_sandbox_runner::CONVERSATION_WORKTREES_DIR,
+            tddy_subagent_worktree::SUBAGENT_WORKTREES_DIR
+        );
+    }
+}

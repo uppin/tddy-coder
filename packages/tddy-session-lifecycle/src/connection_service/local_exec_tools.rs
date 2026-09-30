@@ -13,6 +13,10 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
 };
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_subagent_worktree::{
+    run_in_conversation, with_worktree_change, ConversationId, ConversationRun,
+    ConversationWorktrees,
+};
 use tddy_task::TaskRegistry;
 
 use super::jail_relaunch::{self, JailRelaunch};
@@ -104,9 +108,54 @@ impl LocalExecTools {
         worktree_root: &Path,
     ) -> ExecuteToolResponse {
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
-        let response = match self.exec_tool_route(&session_dir, &req.session_id).await {
+        let response = match req.conversation_id.is_empty() {
+            true => {
+                self.route_tool(req, sessions_base, worktree_root, &session_dir)
+                    .await
+            }
+            false => {
+                self.run_in_conversation_worktree(req, sessions_base, worktree_root, &session_dir)
+                    .await
+            }
+        };
+
+        // Durably record the tool call (non-fatal on failure). One log for both routes: which side
+        // of the jail boundary a call ran on does not change that it is the session's tool call.
+        let record = tddy_tool_engine::tool_call_log::ToolCallRecord {
+            task_id: response.job_id.clone(),
+            tool_name: req.tool_name.clone(),
+            args_json: req.args_json.clone(),
+            result_json: response.result_json.clone(),
+            is_error: response.is_error,
+            error_message: response.error_message.clone(),
+            job_running: response.job_running,
+            created_unix_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        };
+        if let Err(e) = tddy_tool_engine::tool_call_log::append_tool_call(&session_dir, &record) {
+            log::warn!(
+                "tool_call_log: failed to persist tool call for session {}: {}",
+                req.session_id,
+                e
+            );
+        }
+
+        response
+    }
+
+    /// Run `req`'s tool where this session's tools run — its jail, or `worktree_root` on this host.
+    async fn route_tool(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> ExecuteToolResponse {
+        match self.exec_tool_route(session_dir, &req.session_id).await {
             ExecToolRoute::HostWorktree => {
-                let meta = tddy_core::read_session_metadata(&session_dir).ok();
+                let meta = tddy_core::read_session_metadata(session_dir).ok();
                 let ssh_host = meta
                     .as_ref()
                     .and_then(|m| m.ssh_config_host.as_deref())
@@ -137,32 +186,53 @@ impl LocalExecTools {
                 }
             },
             ExecToolRoute::Refused(reason) => refused(reason),
-        };
-
-        // Durably record the tool call (non-fatal on failure). One log for both routes: which side
-        // of the jail boundary a call ran on does not change that it is the session's tool call.
-        let record = tddy_tool_engine::tool_call_log::ToolCallRecord {
-            task_id: response.job_id.clone(),
-            tool_name: req.tool_name.clone(),
-            args_json: req.args_json.clone(),
-            result_json: response.result_json.clone(),
-            is_error: response.is_error,
-            error_message: response.error_message.clone(),
-            job_running: response.job_running,
-            created_unix_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-        };
-        if let Err(e) = tddy_tool_engine::tool_call_log::append_tool_call(&session_dir, &record) {
-            log::warn!(
-                "tool_call_log: failed to persist tool call for session {}: {}",
-                req.session_id,
-                e
-            );
         }
+    }
 
-        response
+    /// Run a subagent conversation's call in that conversation's worktree, and carry what the call
+    /// changed on the result. The rule itself — which root, when to commit — is
+    /// [`run_in_conversation`]'s; this only supplies the route.
+    async fn run_in_conversation_worktree(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> ExecuteToolResponse {
+        let conversation = match ConversationId::parse(&req.conversation_id) {
+            Ok(conversation) => conversation,
+            Err(unsafe_id) => return refused(unsafe_id.to_string()),
+        };
+        let worktrees = ConversationWorktrees::new(worktree_root, &req.session_id);
+        // A jail serves the conversation's root itself, from the conversation id the request
+        // carries; the root handed in is where a host-run tool goes.
+        let run = run_in_conversation(
+            &worktrees,
+            &conversation,
+            &req.tool_name,
+            |root| async move {
+                self.route_tool(req, sessions_base, &root, session_dir)
+                    .await
+            },
+        )
+        .await;
+        match run {
+            Ok(ConversationRun {
+                mut output,
+                change: Some(change),
+            }) => {
+                output.result_json = with_worktree_change(&output.result_json, &change);
+                output
+            }
+            Ok(ConversationRun {
+                output,
+                change: None,
+            }) => output,
+            Err(e) => refused(format!(
+                "conversation {conversation}: its worktree could not be prepared ({e}); \
+                 refusing to run the call in the session worktree instead"
+            )),
+        }
     }
 
     /// Rebuild the jail a call just died in, and run that call in the replacement.

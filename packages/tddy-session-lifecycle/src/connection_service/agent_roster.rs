@@ -152,10 +152,8 @@ pub(crate) fn started_roster_rev(agents: &[tddy_core::SessionAgentRecord]) -> u6
 /// has never heard of is one nobody has decided about, and running it against a mirror is the
 /// outcome that loses work silently.
 pub(crate) fn agent_tool_reads_the_clone(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "Read" | "Glob" | "Grep" | "SemanticSearch" | "ReadLints"
-    )
+    tddy_subagent_worktree::ToolEffect::of(tool_name)
+        == tddy_subagent_worktree::ToolEffect::ReadOnly
 }
 
 /// One exec-tool result as an agent's managed-dispatch layer reads it.

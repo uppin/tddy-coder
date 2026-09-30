@@ -297,6 +297,9 @@ pub use svc_resolve_os_user::{
 mod jail_relaunch;
 
 /// Where an exec tool runs on this daemon, shared with `tddy-daemon-rpc`'s exec-tool family.
+mod conversation_worktree_op;
+pub use conversation_worktree_op::run_conversation_worktree_op;
+
 mod local_exec_tools;
 pub use local_exec_tools::LocalExecTools;
 

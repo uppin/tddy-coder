@@ -34,6 +34,7 @@ tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 tddy-service = { path = "../tddy-service" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-task = { path = "../tddy-task" }
+tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 # Depended on directly rather than through `tddy_daemon::tool_engine`, which was only a re-export.
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 

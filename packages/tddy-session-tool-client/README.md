@@ -28,6 +28,14 @@ place on purpose: the selector is the only thing that knows the whole set, and s
 duplicate the decision. Every failure comes back as a `{"error": …, "is_error": true}` JSON string
 rather than a typed error, because the caller hands it straight to a model as the tool's answer.
 
+## Conversations
+
+`dispatch_conversation_tool(conversation, tool, args)` is `dispatch_session_tool` with the
+conversation named on the wire, so the daemon runs the call in that conversation's worktree;
+`conversation_worktree(conversation, op)` asks for `ConversationWorktreeOp::{Pull, Remove}` over the
+same four transports. Both live in `src/conversation.rs`, and the transports' request-taking cores
+(`dispatch_request_via_*`) are shared with the unchanged `dispatch_via_*` entry points.
+
 ## Why it is its own crate
 
 Every message it sends is a `tddy-service` proto, so `tddy-service` is where this belonged — and it

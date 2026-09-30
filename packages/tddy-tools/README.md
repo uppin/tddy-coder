@@ -51,8 +51,8 @@ they lived here.
 
 ## The MCP surface
 
-A session advertises **44** tools when its host claims it serves the session-action surface
-(`TDDY_SESSION_ACTION_TOOLS`), and **41** when it does not — `request_action`, `list_actions` and
+A session advertises **45** tools when its host claims it serves the session-action surface
+(`TDDY_SESSION_ACTION_TOOLS`), and **42** when it does not — `request_action`, `list_actions` and
 `invoke_action` are the difference. A transport alone cannot answer that question: the in-jail socket
 serves both a handler that implements all three and one that implements none, and the server cannot
 tell them apart from the socket. Only the host knows, so only the host says.
@@ -60,6 +60,16 @@ tell them apart from the socket. Only the host knows, so only the host says.
 `tests/mcp_tool_advertisement_audit.rs` pins both sets **by name** over the real `--mcp` stdio wire,
 and pins the difference as a difference. A tool added to both paths keeps it green; one added to only
 the claiming path fails.
+
+## Conversation worktrees
+
+With Managed access each conversation's subagent loop is built with its own dispatch closure, which
+names the conversation: the daemon runs its calls in the conversation's worktree and each mutating
+call's result carries `worktreeChange`. `subagent_end { sessionId }` (`src/subagent_end.rs`) refuses
+while a turn is outstanding, pulls the conversation's work into the caller's worktree as uncommitted
+changes, closes the conversation as `subagent_cancel` does, and answers `{ended, pulled}`;
+`subagent_cancel` removes the worktree without pulling. A conversation whose loop runs on the daemon
+has no conversation worktree, so there is nothing to pull or remove.
 
 ## The environment is the real interface
 

@@ -57,6 +57,16 @@ handler is `tddy_daemon_rpc::ExecToolRpcHandler`
 ([tddy-daemon-rpc](../tddy-daemon-rpc/docs/architecture.md)), and the suites that drive the service
 through it — `tool_call_log_acceptance.rs` among them — live in that crate.
 
+### `ConversationWorktree`
+
+`ExecuteToolRequest.conversation_id` names the subagent conversation a call belongs to (empty: the
+session worktree, as before). `ExecToolHandler::conversation_worktree` is the typed RPC for the two
+operations that are not tool calls — `Pull` hands a conversation's committed work to the session
+worktree, `Remove` deletes it — and `ExecToolServiceImpl` dispatches it to the host.
+`IN_JAIL_RELAYABLE_EXEC_TOOLS` names the exec-tool RPCs a jail may relay beside `ExecuteTool`; the
+runner and the daemon's host bridge both read it. The mechanics are
+[`tddy-subagent-worktree`](../tddy-subagent-worktree/README.md).
+
 ## Tools
 
 | Tool | Behaviour |
