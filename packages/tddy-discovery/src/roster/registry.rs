@@ -586,6 +586,17 @@ impl LiveAgentRoster {
         state.conversations.remove(conversation_id).is_some()
     }
 
+    /// Whether a roster revision is in force — from a stream frame or a spawn-seeded snapshot — as
+    /// opposed to only the def seed, or nothing at all.
+    pub fn has_an_applied_revision(&self) -> bool {
+        self.state
+            .lock()
+            .expect("session agent roster")
+            .currency
+            .applied_rev()
+            .is_some()
+    }
+
     /// How many MCP `notifications/tools/list_changed` this roster has earned: one per applied
     /// revision.
     ///

@@ -177,23 +177,35 @@ async fn run_mcp_server() -> Result<()> {
         "spawn seed carries {} specialized agent def(s)",
         seed.len()
     );
-    let service = PermissionServer::new();
-    let server = service.serve(rmcp::transport::stdio()).await?;
+    // The roster the spawning daemon already read, when it handed one over: applied as a frame
+    // would be, so the first answer is right even if the stream is slow, and refused like the def
+    // seed when it does not decode — a start the daemon meant to carry a roster must not quietly
+    // run without it.
+    if let Some(roster) =
+        tddy_discovery::roster::roster_seed_from_env().map_err(|e| anyhow::anyhow!(e))?
+    {
+        log::info!(
+            target: "tddy_tools::server",
+            "spawn hands over roster rev {} with {} agent(s)",
+            roster.rev,
+            roster.agents.len()
+        );
+        tddy_tools::session_agents::session_agent_roster().apply_snapshot(roster);
+    }
     // Follow the session's agent roster for as long as this process serves MCP, telling the main
     // agent to re-list its tools on every revision (docs/ft/daemon/session-agent-roster.md § The
-    // roster stream). Started after the handshake so the first notification has a peer to reach.
-    let peer = server.peer().clone();
-    tddy_tools::session_agents::follow_session_agent_roster(move || {
-        let peer = peer.clone();
-        tokio::spawn(async move {
-            if let Err(e) = peer.notify_tool_list_changed().await {
-                log::warn!(
-                    target: "tddy_tools::session_agents",
-                    "the roster changed but tools/list_changed could not be sent: {e}"
-                );
-            }
-        });
-    });
+    // roster stream) — and wait for its first snapshot **before** serving. A client builds its tool
+    // pool from its first `tools/list`, asked the moment the handshake completes; answered before
+    // the roster was known, that list could not reach the session's agents and still offered every
+    // tool they took over (session 01a0f089: a host-run agent told to "ask Gemma" found no way to).
+    let announcer =
+        std::sync::Arc::new(tddy_tools::tool_list_announcer::ToolListAnnouncer::default());
+    let announces = announcer.clone();
+    tddy_tools::session_agents::follow_session_agent_roster(move || announces.announce()).await;
+    announcer.serving_starts();
+    let service = PermissionServer::new();
+    let server = service.serve(rmcp::transport::stdio()).await?;
+    announcer.attach(server.peer().clone());
     server.waiting().await?;
     Ok(())
 }

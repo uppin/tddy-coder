@@ -33,6 +33,9 @@ struct SplitAgentProcess<'a> {
     initial_prompt: String,
     tddy_tools_path: std::path::PathBuf,
     remote: tddy_core::RemoteToolEnv,
+    /// The roster the spawn read from the codebase host, handed to the agent's `tddy-tools` so it
+    /// is in force before the first `tools/list` (see [`crate::split_session::roster_seed_env_pairs`]).
+    roster_seed: Vec<(String, String)>,
     context_dir: std::path::PathBuf,
     extra_args: Vec<String>,
 }
@@ -101,9 +104,10 @@ impl DaemonSessionHost {
         // A start that seeded nothing wrote nothing, so there is nothing to read and no forward is
         // spent asking: agents on such a session arrive later through `AttachSessionAgent`, which
         // relaunches the agent against the roster it just changed.
-        let withdrawals = self
-            .split_agent_withdrawals(codebase_instance_id, codebase_session_id, req)
+        let roster = self
+            .split_agent_roster(codebase_instance_id, codebase_session_id, req)
             .await?;
+        let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
         // The agent's working directory is populated **before** the agent process exists (AC23): a
         // split agent that starts, reads its cwd and finds only the notice has already missed the
         // project's rules for its first turn. A fetch that fails fails the start, and the caller
@@ -130,6 +134,7 @@ impl DaemonSessionHost {
                 initial_prompt,
                 tddy_tools_path,
                 remote,
+                roster_seed: crate::split_session::roster_seed_env_pairs(&roster),
                 context_dir,
                 extra_args,
             })
@@ -226,6 +231,7 @@ impl DaemonSessionHost {
             initial_prompt,
             tddy_tools_path,
             remote,
+            roster_seed,
             context_dir,
             extra_args,
         } = launch;
@@ -253,7 +259,7 @@ impl DaemonSessionHost {
                 false,
                 None,
                 extra_args,
-                remote.env_pairs(),
+                remote.env_pairs().into_iter().chain(roster_seed).collect(),
                 Some(os_user),
             )
             .await
@@ -321,24 +327,21 @@ impl DaemonSessionHost {
         Ok(())
     }
 
-    async fn split_agent_withdrawals(
+    async fn split_agent_roster(
         &self,
         codebase_instance_id: &str,
         codebase_session_id: &str,
         req: &StartSessionRequest,
-    ) -> Result<Vec<(String, Vec<String>)>, Status> {
-        let withdrawals = match req.specialized_agents.is_empty() {
-            true => Vec::new(),
-            false => {
-                self.split_withdrawals_from_codebase_host(
-                    &req.session_token,
-                    codebase_session_id,
-                    codebase_instance_id,
-                )
-                .await?
-            }
-        };
-        Ok(withdrawals)
+    ) -> Result<tddy_service::proto::session_agents_svc::SessionAgentRoster, Status> {
+        if req.specialized_agents.is_empty() {
+            return Ok(Default::default());
+        }
+        self.split_roster_from_codebase_host(
+            &req.session_token,
+            codebase_session_id,
+            codebase_instance_id,
+        )
+        .await
     }
 
     async fn split_agent_context_and_args(

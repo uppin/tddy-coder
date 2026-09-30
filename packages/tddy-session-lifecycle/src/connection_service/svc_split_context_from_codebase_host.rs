@@ -183,7 +183,7 @@ impl DaemonSessionHost {
     /// The project's own guidance, fetched from the daemon that holds the codebase.
     ///
     /// Routed through this daemon's own handlers, exactly as
-    /// [`Self::split_withdrawals_from_codebase_host`] routes the roster read, and subject to the
+    /// [`Self::split_roster_from_codebase_host`] routes the roster read, and subject to the
     /// same rule: **a failure is a refusal, never an empty result**. "The codebase host is
     /// unreachable" and "the project has no `CLAUDE.md`" would otherwise produce the same context
     /// dir, and the agent would work an entire session against rules it was never shown, with

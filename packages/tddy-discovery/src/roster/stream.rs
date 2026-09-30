@@ -35,6 +35,17 @@ const STREAM_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 /// deadline would tear down a perfectly good subscription every few minutes.
 const FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// The longest [`follow_session_agent_roster`] holds its caller for the first snapshot.
+///
+/// The caller is the MCP server, which does not answer its first `tools/list` until this returns:
+/// a client builds its tool pool from that first answer (a later `tools/list_changed` did not
+/// reach the turn already running, session 01a0f089), so answering before the roster is known
+/// hands the main agent a catalog that cannot reach its attached agents and still offers every
+/// tool they took over. A daemon answers the subscribe in milliseconds; this bounds only the case
+/// where it does not, which then starts on the spawn seed exactly as every start did before and
+/// announces the roster when it lands. Well inside the time an MCP client waits for a server.
+const ROSTER_PREPARATION_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// The delay before the first reconnect, doubled per consecutive failure.
 const RECONNECT_BACKOFF_START: Duration = Duration::from_millis(500);
 
@@ -288,11 +299,19 @@ pub fn decide_roster_subscription(
 }
 
 /// Follow the session's roster for the process lifetime, calling `on_change` once per applied
-/// revision.
+/// revision — and return only once the roster is **prepared**: the first snapshot applied, the
+/// first pass ended without one, or [`ROSTER_PREPARATION_TIMEOUT`] passed. Following carries on in
+/// the background either way.
+///
+/// The wait is the point. The MCP server awaits this before it serves, so its first `tools/list`
+/// already carries the attached agents' conversation tools and already withholds what they took
+/// over — a host-run agent is spawned with no seed at all, and the stream is the only way it learns
+/// its roster.
 ///
 /// `on_change` is what emits the MCP `notifications/tools/list_changed`: this module holds no MCP
-/// peer, and the roster's business is the roster.
-pub fn follow_session_agent_roster(on_change: impl Fn() + Send + Sync + 'static) {
+/// peer, and the roster's business is the roster. It is called for the first snapshot too, which
+/// may land before any client exists to notify.
+pub async fn follow_session_agent_roster(on_change: impl Fn() + Send + Sync + 'static) {
     let roster = session_agent_roster();
     let Some(transport) = decide_roster_subscription(
         detect_session_tool_transport(),
@@ -301,19 +320,46 @@ pub fn follow_session_agent_roster(on_change: impl Fn() + Send + Sync + 'static)
     ) else {
         return;
     };
-    tokio::spawn(async move { follow_roster(transport, roster, on_change).await });
+    let (prepared, first_pass) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move { follow_roster(transport, roster, on_change, prepared).await });
+    // A roster the spawn already handed over (`ROSTER_SEED_ENV`) is prepared: waiting on the
+    // stream would only delay an answer that is already right.
+    if roster.has_an_applied_revision() {
+        return;
+    }
+    if tokio::time::timeout(ROSTER_PREPARATION_TIMEOUT, first_pass)
+        .await
+        .is_err()
+    {
+        log::warn!(
+            target: "tddy_discovery::roster",
+            "no roster snapshot for session {} within {}s of subscribing; serving the spawn seed \
+             until one arrives, which re-announces the tool list",
+            roster.session_id(),
+            ROSTER_PREPARATION_TIMEOUT.as_secs()
+        );
+    }
 }
 
 /// Hold the stream open for the process lifetime, reconnecting when it drops.
+///
+/// `prepared` is fired by the first pass: when its first snapshot is applied, or — having none —
+/// when it ends, since nothing more is coming from it and the caller must not wait on a pass that
+/// is over. Later passes have nothing to prepare.
 async fn follow_roster(
     transport: SessionToolTransport,
     roster: &'static LiveAgentRoster,
     on_change: impl Fn() + Send + Sync,
+    prepared: tokio::sync::oneshot::Sender<()>,
 ) {
     let mut pacing = ReconnectPacing::default();
+    let mut prepared = Some(prepared);
     loop {
         let opened_at = Instant::now();
-        let pass = stream_roster_once(&transport, roster, &on_change).await;
+        let pass = stream_roster_once(&transport, roster, &on_change, &mut prepared).await;
+        if let Some(prepared) = prepared.take() {
+            let _ = prepared.send(());
+        }
         let last_failure = pass.reason();
         let backoff = pacing.record(&pass, opened_at.elapsed());
         if pass.counts_as_a_failure() {
@@ -380,6 +426,7 @@ async fn stream_roster_once(
     transport: &SessionToolTransport,
     roster: &LiveAgentRoster,
     on_change: &(impl Fn() + Send + Sync),
+    prepared: &mut Option<tokio::sync::oneshot::Sender<()>>,
 ) -> RosterStreamOutcome {
     // The client is held for as long as the frames are read: it owns the connection they ride, and
     // dropping it would close the subscription it just opened.
@@ -434,12 +481,20 @@ async fn stream_roster_once(
         // One notification per *applied* revision, so a re-delivered snapshot — a keepalive, or a
         // reconnect's opening frame — does not make the main agent re-list for nothing.
         if roster.tool_list_change_count() != announced_before {
-            log::debug!(
+            // `info`, not `debug`: whether the roster reached this process, and when, is the
+            // first question when an agent reports it cannot reach its agents — and a spawn's
+            // `RUST_LOG` filters `debug` out of every crate but `tddy_tools`.
+            log::info!(
                 target: "tddy_discovery::roster",
                 "roster rev {rev} applied for session {}",
                 roster.session_id()
             );
             on_change();
+        }
+        // Applied before it is announced as prepared, so whoever waited reads the roster this
+        // snapshot describes.
+        if let Some(prepared) = prepared.take() {
+            let _ = prepared.send(());
         }
     }
 }

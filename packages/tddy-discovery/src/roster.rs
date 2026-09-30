@@ -36,6 +36,7 @@
 mod conversation;
 mod link;
 mod registry;
+mod roster_seed;
 mod seed;
 mod stream;
 
@@ -45,6 +46,9 @@ pub use conversation::{
 pub use registry::{
     AddressableAgent, AgentStatus, CatalogVisibility, ConversationState, ConversationSummary,
     LiveAgentRoster, RosterError, RosterStatusReport, Takeover, WithdrawnExecTools,
+};
+pub use roster_seed::{
+    roster_seed_env, roster_seed_from_env, roster_seed_from_value, ROSTER_SEED_ENV,
 };
 pub use seed::{seed_subagents_or_report, session_agent_roster, subagents_from_env};
 pub use stream::{
