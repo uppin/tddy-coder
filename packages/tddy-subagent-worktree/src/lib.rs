@@ -18,6 +18,7 @@
 
 mod change_facts;
 mod conversation_id;
+mod diff;
 mod git;
 mod inherit;
 mod reset;
@@ -28,6 +29,7 @@ mod worktree;
 
 pub use change_facts::{FileCounts, LineCounts, WorktreeChange};
 pub use conversation_id::{ConversationId, UnsafeConversationId};
+pub use diff::{ConversationDiff, DIFF_TEXT_CAP_BYTES};
 pub use reset::{ResetTarget, WorktreeReset};
 pub use run::{run_in_conversation, with_worktree_change, ConversationRun, WORKTREE_CHANGE_KEY};
 pub use tool_effect::ToolEffect;

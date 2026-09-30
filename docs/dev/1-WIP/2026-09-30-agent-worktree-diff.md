@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Stack**: `#agent-worktree` 3/4 — branch `feature/agent-worktree/diff`, base `feature/agent-worktree/rewind-reset`
+**PR**: [#562](https://github.com/uppin/tddy-coder/pull/562)
 
 ## Initial Discovery
 
@@ -17,7 +18,10 @@ with whole-range counts and a 64 KiB text cap. It owns:
 - `ConversationWorktree::diff(from: Option<&str>, to: Option<&str>) -> Result<ConversationDiff, WorktreeError>`
   and `ConversationDiff { from, to, files, lines, diff, truncated }`, plus `DIFF_TEXT_CAP_BYTES`;
 - the `DiffOp` case of `ConversationWorktreeRequest.op` and its daemon arm;
-- the `subagent_diff` MCP tool (own module in `tddy-tools/src/`), its schema, and its allowlist entry.
+- `tddy_session_tool_client::diff_conversation_worktree` (beside n1's calls in `src/conversation.rs`);
+- the `subagent_diff` MCP tool (`tddy-tools/src/subagent_diff.rs`), its schema, its routing, and its
+  allowlist entry;
+- the regenerated `packages/tddy-web/src/gen/exec_tools_pb.ts` for `DiffOp`.
 
 ## Boundaries
 
@@ -41,9 +45,10 @@ wait on `rewind-reset`: the "dropped commit is refused" test makes its dropped c
 
 ## Draft PR contract
 
-The first push after this planning commit publishes `ConversationWorktree::diff`, `ConversationDiff`,
-`DIFF_TEXT_CAP_BYTES`, `DiffOp`, the handler arm and the `subagent_diff` tool registration and schema —
-bodies `// TODO(diff): implement` — plus the failing tests below.
+Published as this PR's second commit: `ConversationWorktree::diff`, `ConversationDiff`,
+`DIFF_TEXT_CAP_BYTES` (`src/diff.rs`), `DiffOp diff = 13`, `diff_conversation_worktree`, and the
+`subagent_diff` module — definition and handler, **not routed**, so its advertisement test fails until
+green routes it — with behaviour bodies `todo!()` under `// TODO(diff)`, plus the failing tests below.
 
 ## Green wave
 
@@ -129,9 +134,13 @@ wire for advertisement, argument validation and the no-worktree refusal.
 
 ### Acceptance Tests
 
-#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/diff_acceptance.rs`
+All fail on this branch. The mechanics and daemon suites fail first on #560's unimplemented
+`ConversationId::parse` / `ExecuteTool` routing — the sequencing fact above.
+
+#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/diff_acceptance.rs` (9)
 - `with_no_bounds_the_diff_runs_from_the_base_to_the_tip`
 - `from_and_to_select_the_changes_after_from_through_to`
+- `the_diff_text_is_what_git_itself_reports_for_the_range`
 - `the_counts_describe_the_whole_range`
 - `a_diff_past_the_cap_is_cut_at_a_line_and_marked_truncated_with_whole_range_counts`
 - `a_commit_outside_the_conversation_is_refused`
@@ -139,17 +148,24 @@ wire for advertisement, argument validation and the no-worktree refusal.
 - `a_from_that_is_not_an_ancestor_of_to_is_refused`
 - `a_binary_change_shows_as_binary`
 
-#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_diff_acceptance.rs`
+#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_diff_acceptance.rs` (2)
 - `diff_answers_with_the_conversations_changes`
-- `diff_on_a_conversation_without_a_worktree_is_refused`
+- `diff_on_a_conversation_without_a_worktree_is_refused` (`FailedPrecondition`)
 
-#### tddy-tools — `packages/tddy-tools/tests/subagent_diff_mcp_acceptance.rs`
+#### tddy-tools — `packages/tddy-tools/tests/subagent_diff_mcp_acceptance.rs` (3)
 - `subagent_diff_is_advertised`
 - `a_diff_of_a_conversation_that_never_wrote_is_refused`
 - `a_diff_of_an_unknown_conversation_is_refused`
 
 #### tddy-sandbox-recipes — unit test in `packages/tddy-sandbox-recipes/src/claude_cli.rs`
 - `subagent_diff_is_allowlisted_wherever_subagent_cancel_is`
+
+### Unit tests
+- `tddy-session-tool-client/src/conversation.rs` — `a_diff_names_both_bounds_and_leaves_an_omitted_one_empty`
+
+### Verified
+Scoped: `cargo clippy --all-targets -D warnings` clean over `tddy-subagent-worktree`, `tddy-service`,
+`tddy-session-tool-client`, `tddy-tools`, `tddy-daemon-rpc`, `tddy-sandbox-recipes`.
 
 ## Technical Debt & Production Readiness
 
@@ -182,10 +198,10 @@ wire for advertisement, argument validation and the no-worktree refusal.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node gate for 2/4–4/4 on 2026-09-30)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests per touched package; full workspace on CI

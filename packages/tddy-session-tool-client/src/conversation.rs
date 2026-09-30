@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
+    DiffOp, ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -330,6 +330,31 @@ pub(crate) fn conversation_reset_request(
     }
 }
 
+/// Ask the facilitating daemon for the diff `from..to` of `conversation_id` (either bound `None`:
+/// base / tip); the answer's `result_json` (`{"diff": {…}}`) or a `{"error", "is_error": true}` body.
+pub async fn diff_conversation_worktree(
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> String {
+    // TODO(diff): implement over the transports `conversation_worktree` uses
+    let _ = (conversation_id, from, to);
+    todo!("diff_conversation_worktree")
+}
+
+/// The `ConversationWorktree` request a diff sends.
+#[allow(dead_code)] // TODO(diff): called by `diff_conversation_worktree`
+pub(crate) fn conversation_diff_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> ConversationWorktreeRequest {
+    // TODO(diff): implement
+    let _ = (envelope, conversation_id, from, to, DiffOp::default());
+    todo!("conversation_diff_request")
+}
+
 /// The `ExecuteTool` a conversation's call sends.
 pub(crate) fn conversation_tool_request(
     envelope: &SessionToolEnvelope,
@@ -438,6 +463,17 @@ mod tests {
             conversation_reset_request(&an_envelope(), "explore", None).op,
             Some(Op::Reset(ResetOp {
                 commit: String::new()
+            }))
+        );
+    }
+
+    #[test]
+    fn a_diff_names_both_bounds_and_leaves_an_omitted_one_empty() {
+        assert_eq!(
+            conversation_diff_request(&an_envelope(), "explore", Some("3f9c2ab"), None).op,
+            Some(Op::Diff(DiffOp {
+                from: "3f9c2ab".into(),
+                to: String::new()
             }))
         );
     }

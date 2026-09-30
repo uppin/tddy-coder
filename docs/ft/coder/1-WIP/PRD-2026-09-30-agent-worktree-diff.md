@@ -28,7 +28,7 @@ between any two commits of a conversation — by default, everything since the b
 
     ```json
     { "from": "a01b2c3", "to": "3f9c2ab",
-      "files": { "created": 1, "updated": 2, "deleted": 0 },
+      "files": { "created": 1, "updated": 2, "removed": 0 },
       "lines": { "added": 41, "removed": 7 },
       "diff": "diff --git a/src/lib.rs b/src/lib.rs\n…",
       "truncated": false }
