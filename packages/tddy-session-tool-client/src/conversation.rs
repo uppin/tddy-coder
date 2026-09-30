@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    DiffOp, ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
+    DiffOp, ExecuteToolRequest, PullOp, PullRangeOp, RemoveOp, ResetOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -363,6 +363,41 @@ pub(crate) fn conversation_diff_request(
     }
 }
 
+/// Ask the facilitating daemon to apply `conversation_id`'s commits `from..=to` that are not in
+/// `already_pulled` to the session worktree; the answer's `result_json` (`{"pulled": {…} | null}`) or
+/// a `{"error", "is_error": true}` body.
+pub async fn pull_conversation_range(
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    already_pulled: &[String],
+) -> String {
+    // TODO(range-pull): implement over the transports `conversation_worktree` uses
+    let _ = (conversation_id, from, to, already_pulled);
+    todo!("pull_conversation_range")
+}
+
+/// The `ConversationWorktree` request a range pull sends.
+#[allow(dead_code)] // TODO(range-pull): called by `pull_conversation_range`
+pub(crate) fn conversation_pull_range_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    already_pulled: &[String],
+) -> ConversationWorktreeRequest {
+    // TODO(range-pull): implement
+    let _ = (
+        envelope,
+        conversation_id,
+        from,
+        to,
+        already_pulled,
+        PullRangeOp::default(),
+    );
+    todo!("conversation_pull_range_request")
+}
+
 /// The `ExecuteTool` a conversation's call sends.
 pub(crate) fn conversation_tool_request(
     envelope: &SessionToolEnvelope,
@@ -482,6 +517,25 @@ mod tests {
             Some(Op::Diff(DiffOp {
                 from: "3f9c2ab".into(),
                 to: String::new()
+            }))
+        );
+    }
+
+    #[test]
+    fn a_range_pull_carries_the_callers_ledger() {
+        assert_eq!(
+            conversation_pull_range_request(
+                &an_envelope(),
+                "explore",
+                None,
+                Some("9e01d4c"),
+                &["3f9c2ab".to_string()]
+            )
+            .op,
+            Some(Op::PullRange(PullRangeOp {
+                from: String::new(),
+                to: "9e01d4c".into(),
+                already_pulled: vec!["3f9c2ab".into()]
             }))
         );
     }

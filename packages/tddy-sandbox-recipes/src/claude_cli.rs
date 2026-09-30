@@ -522,6 +522,26 @@ mod tests {
         );
     }
 
+    /// `subagent_pull` is how a sandboxed Claude takes part of a conversation's work before it ends.
+    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-range-pull.md
+    #[test]
+    fn subagent_pull_is_allowlisted_wherever_subagent_cancel_is() {
+        // Given
+        let allowlist = build_claude_allowlist(true, &[]);
+
+        // When
+        let allowed = |tool: &str| allowlist.iter().any(|entry| entry == tool);
+
+        // Then
+        assert_eq!(
+            (
+                allowed("mcp__tddy-tools__subagent_cancel"),
+                allowed("mcp__tddy-tools__subagent_pull")
+            ),
+            (true, true)
+        );
+    }
+
     /// A subagent's turn budget is the caller's to extend, and `subagent_resume` is the only way
     /// to spend the extension on a conversation that already exists. A sandboxed Claude that can
     /// open and prompt but not resume can only ever restart a search that ran out of turns,

@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Stack**: `#agent-worktree` 4/4 — branch `feature/agent-worktree/range-pull`, base `feature/agent-worktree/diff`
+**PR**: [#563](https://github.com/uppin/tddy-coder/pull/563)
 
 ## Initial Discovery
 
@@ -17,7 +18,9 @@ pulled commits a rewind dropped. It owns:
 
 - `ConversationWorktree::pull_range(&PullRange, already_pulled: &BTreeSet<String>) -> Result<RangePullOutcome, WorktreeError>`,
   `PullRange { from, to }`, `RangePullOutcome { commits, skipped, files, lines, conflicts }`;
-- the `PullRangeOp pull_range = 14` case of `ConversationWorktreeRequest.op` and its daemon arm;
+- the `PullRangeOp pull_range = 14` case of `ConversationWorktreeRequest.op` and its daemon arm,
+  with the regenerated `packages/tddy-web/src/gen/exec_tools_pb.ts`;
+- `tddy_session_tool_client::pull_conversation_range` (beside n1's calls in `src/conversation.rs`);
 - `tddy-tools`' `PullLedger` (per conversation, in its own module) and the `subagent_pull` tool;
 - `subagent_end`'s `from` / `to` properties and its switch from `Pull` to `PullRange`;
 - `droppedPulledCommits` on the MCP `worktreeReset` object, computed in `tddy-tools` from the ledger.
@@ -43,16 +46,17 @@ pulled commits a rewind dropped. It owns:
 **Sequencing fact:** the dropped-pulled-commits test needs `rewind-reset`'s reset to actually run, so
 it goes green only after #561 is green; the range and ledger tests need only #560's behaviour.
 
-**Planned refinement in #561:** its PRD sketches `droppedCommits` as a count. This node needs the
-hashes, so #561's contract commit publishes `droppedCommits` as a list of short hashes (a count is its
-length). Recorded here so #561's implementer does not ship the count.
+**Refinement landed in #561:** its contract commit publishes `WorktreeReset.dropped_commits` as a list
+of short hashes (the PRD was updated with it), which is what `PullLedger::dropped` intersects.
 
 ## Draft PR contract
 
-The first push after this planning commit publishes `pull_range`, `PullRange`, `RangePullOutcome`,
-`PullRangeOp`, the handler arm, `PullLedger`, the `subagent_pull` tool registration and schema, and
-`subagent_end`'s `from` / `to` properties — bodies `// TODO(range-pull): implement` — plus the failing
-tests below.
+Published as this PR's second commit: `PullRange`, `RangePullOutcome`, `ConversationWorktree::pull_range`
+(`src/range_pull.rs`), `PullRangeOp`, `pull_conversation_range`, `tddy-tools`' `PullLedger`
+(`src/pull_ledger.rs`) and the `subagent_pull` module — definition and handler, **not routed** — with
+behaviour bodies `todo!()` under `// TODO(range-pull)`, plus the failing tests below. `subagent_end`'s
+`from` / `to` properties are **not** in the surface: they are advertised and parsed together in green,
+and their advertisement test fails until then.
 
 ## Green wave
 
@@ -146,21 +150,25 @@ running-turn refusal and the no-worktree case.
 
 ### Acceptance Tests
 
-#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/range_pull_acceptance.rs`
+All fail on this branch. The mechanics and daemon suites fail first on #560's unimplemented worktree
+— the sequencing fact above.
+
+#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/range_pull_acceptance.rs` (9)
 - `with_no_bounds_every_unpulled_commit_is_applied_in_order`
 - `from_and_to_are_both_inclusive`
 - `a_commit_already_pulled_is_skipped_and_reported`
+- `the_default_lower_bound_is_the_first_commit_not_yet_pulled`
 - `a_range_with_nothing_left_to_pull_applies_nothing`
 - `each_commit_is_applied_three_way_and_conflicts_are_named`
 - `a_commit_not_on_the_branch_is_refused`
 - `a_from_after_to_is_refused`
 - `pulling_leaves_the_conversation_branch_and_worktree_untouched`
 
-#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_range_pull_acceptance.rs`
+#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_range_pull_acceptance.rs` (2)
 - `pull_range_hands_exactly_the_range_to_the_session_worktree`
 - `pull_range_skips_what_the_caller_already_pulled`
 
-#### tddy-tools — `packages/tddy-tools/tests/subagent_pull_mcp_acceptance.rs`
+#### tddy-tools — `packages/tddy-tools/tests/subagent_pull_mcp_acceptance.rs` (4)
 - `subagent_pull_is_advertised`
 - `subagent_end_advertises_from_and_to`
 - `pulling_while_a_turn_runs_is_refused`
@@ -170,10 +178,19 @@ running-turn refusal and the no-worktree case.
 - `subagent_pull_is_allowlisted_wherever_subagent_cancel_is`
 
 ### Unit tests
-- `tddy-tools/src/pull_ledger.rs` — records, skips on the next selection, `dropped` intersects and
-  forgets, empty ledger
-- `tddy-tools/src/pull_ledger.rs` — `droppedPulledCommits` is added to `worktreeReset` only when
-  non-empty
+- `tddy-tools/src/pull_ledger.rs` (6) — `a_recorded_commit_is_reported_as_pulled`,
+  `an_empty_ledger_has_pulled_nothing`, `dropped_names_only_the_pulled_ones_and_forgets_them`,
+  `a_reset_that_dropped_a_pulled_commit_is_annotated`,
+  `a_reset_that_dropped_nothing_pulled_is_left_as_it_was`, `an_outcome_without_a_reset_is_left_as_it_was`
+- `tddy-session-tool-client/src/conversation.rs` — `a_range_pull_carries_the_callers_ledger`
+
+### Not covered by a red test
+- The dropped-pulled annotation end to end (a real rewind after a real pull) needs a transport this
+  harness does not have; the ledger's half is unit-tested and #561's reset half is pinned there.
+
+### Verified
+Scoped: `cargo clippy --all-targets -D warnings` clean over `tddy-subagent-worktree`, `tddy-service`,
+`tddy-session-tool-client`, `tddy-tools`, `tddy-daemon-rpc`, `tddy-sandbox-recipes`.
 
 ## Technical Debt & Production Readiness
 
@@ -208,10 +225,10 @@ running-turn refusal and the no-worktree case.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node gate for 2/4–4/4 on 2026-09-30)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests per touched package; full workspace on CI

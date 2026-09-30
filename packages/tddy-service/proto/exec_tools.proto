@@ -76,7 +76,19 @@ message ConversationWorktreeRequest {
     RemoveOp remove = 11;
     ResetOp  reset  = 12;
     DiffOp   diff   = 13;
+    PullRangeOp pull_range = 14;
   }
+}
+
+// Apply the conversation's commits `from`..=`to` (short hashes, both inclusive; empty `from` is the
+// earliest commit not in `already_pulled`, empty `to` the tip) that are not in `already_pulled`, each
+// as its own 3-way apply into the session worktree. Answers `{"pulled": {commits, skipped, files,
+// lines, conflicts} | null}` — null when the conversation has no worktree. The caller holds the
+// ledger; this daemon keeps no per-conversation state.
+message PullRangeOp {
+  string          from           = 1;
+  string          to             = 2;
+  repeated string already_pulled = 3;
 }
 
 // The diff `from..to` between two of the conversation's commits (short hashes; empty `from` is the
