@@ -39,6 +39,9 @@ pub struct TurnRequest {
     /// the keep-original + append replacement
     /// ([`crate::subagent::replacement::Replacement`]). Never dispatched; recorded as history.
     replacement: Option<super::replacement::Replacement>,
+    /// The caller asked that a rewind leave the conversation's worktree as it is
+    /// (`resetWorktree: false`).
+    keep_worktree: bool,
 }
 
 impl TurnRequest {
@@ -76,6 +79,21 @@ impl TurnRequest {
 
     /// Spend at most `max_turns` model turns on this call, in place of the agent definition's own
     /// budget — for this call only, and never above [`SUBAGENT_MAX_TURNS_CEILING`].
+    /// Rewind the transcript only: the conversation's worktree keeps every file the dropped
+    /// messages wrote, and later commits build on them.
+    #[must_use]
+    pub fn keeping_worktree(mut self) -> Self {
+        self.keep_worktree = true;
+        self
+    }
+
+    /// Whether a rewind by this request takes the conversation's worktree back too — the default.
+    pub fn resets_worktree(&self) -> bool {
+        // TODO(rewind-reset): implement
+        let _ = self.keep_worktree;
+        todo!("resets_worktree")
+    }
+
     pub fn within_turns(mut self, max_turns: u32) -> Self {
         self.max_turns = Some(max_turns);
         self
@@ -224,5 +242,20 @@ mod tests {
         // Then
         assert_eq!(budget.turns, SUBAGENT_MAX_TURNS_CEILING * 2);
         assert_eq!(budget.clamped_to, None);
+    }
+
+    #[test]
+    fn a_rewind_takes_the_worktree_back_by_default() {
+        assert!(TurnRequest::resuming()
+            .from_message(MessageId::from("m3".to_string()))
+            .resets_worktree());
+    }
+
+    #[test]
+    fn keeping_the_worktree_opts_a_rewind_out_of_the_reset() {
+        assert!(!TurnRequest::resuming()
+            .from_message(MessageId::from("m3".to_string()))
+            .keeping_worktree()
+            .resets_worktree());
     }
 }

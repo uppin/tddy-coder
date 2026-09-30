@@ -36,7 +36,7 @@ entry. That is exactly the information a rewind needs to take the files back wit
 - The turn outcome reports the reset:
 
   ```json
-  "worktreeReset": { "to": "3f9c2ab", "droppedCommits": 2 }
+  "worktreeReset": { "to": "3f9c2ab", "droppedCommits": ["9e01d4c", "a77b310"] }
   ```
 
   Absent when nothing was reset — no rewind, `resetWorktree: false`, or no worktree yet.
@@ -70,7 +70,7 @@ entry. That is exactly the information a rewind needs to take the files back wit
 - [ ] A rewind to before any commit resets to the conversation base
 - [ ] Untracked files the dropped calls created are removed
 - [ ] `resetWorktree: false` leaves files and branch untouched
-- [ ] The outcome reports `worktreeReset { to, droppedCommits }`; absent when nothing was reset
+- [ ] The outcome reports `worktreeReset { to, droppedCommits }` — the dropped commits by short hash, oldest first; absent when nothing was reset
 - [ ] A rewind without a worktree creates none
 - [ ] The resumed turn's first tool call reads the reset tree
 - [ ] A reset failure leaves the transcript un-rewound and the resume refused

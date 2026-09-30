@@ -319,6 +319,20 @@ impl Transcript {
             .collect()
     }
 
+    /// Where a rewind to `id` takes the conversation's worktree: the commit of the last entry the
+    /// rewind keeps that made one — the cut extends over the tool results answering `id`, so a
+    /// call's commit is kept with its call — or [`ResetTarget::Base`] when no kept entry did. An id
+    /// this transcript does not hold is the same error [`Self::rewind_to`] gives.
+    #[allow(dead_code)] // TODO(rewind-reset): called by `take_turn` before the cut
+    pub(crate) fn commit_kept_by(
+        &self,
+        id: &MessageId,
+    ) -> Result<super::worktree_reset::ResetTarget, RewindError> {
+        // TODO(rewind-reset): implement
+        let _ = id;
+        todo!("commit_kept_by")
+    }
+
     /// Discard every message after `id`, so the conversation continues from there.
     ///
     /// An id this transcript does not hold is an error naming it, never a continue from the end:

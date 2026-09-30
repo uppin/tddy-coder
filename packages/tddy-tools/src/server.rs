@@ -2503,6 +2503,8 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                                 collect it with. Defaults to 25000; 0 defers immediately."
             },
             "maxTurns": max_turns_property(),
+            // TODO(rewind-reset): `resetWorktree` (boolean, default true) — advertised and parsed
+            // together, so the tool never offers an argument it ignores
         }
     }))
 }

@@ -18,6 +18,7 @@ pub mod server;
 pub mod session_actions_cli;
 mod subagent_end;
 pub mod tool_list_announcer;
+mod worktree_reset_port;
 
 /// The in-session tool client, re-exported at the path it was reached by while it lived here.
 pub use tddy_session_tool_client as session_tool_client;

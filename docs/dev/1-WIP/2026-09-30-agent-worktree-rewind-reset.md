@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Stack**: `#agent-worktree` 2/4 — branch `feature/agent-worktree/rewind-reset`, base `feature/agent-worktree/isolated-edits`
+**PR**: [#561](https://github.com/uppin/tddy-coder/pull/561)
 
 ## Initial Discovery
 
@@ -15,14 +16,19 @@ A rewind (`subagent_resume{fromMessageId}`) resets the conversation worktree to 
 commit, by default, with `resetWorktree: false` to opt out and `worktreeReset {to, droppedCommits}`
 on the outcome. It owns:
 
-- `ConversationWorktree::reset_to(ResetTarget) -> ResetOutcome` in `tddy-subagent-worktree`;
-- the `ResetOp` case of `ConversationWorktreeRequest.op` and its daemon handling;
-- the reset port the subagent loop calls — `tddy_discovery::subagent::worktree_reset::{WorktreeResetPort,
-  ResetTarget, WorktreeReset}` and `SubagentConfig::worktree_reset`;
-- `Transcript::commit_kept_by(&MessageId) -> Option<…>` (the reset target a rewind implies);
-- `TurnRequest::keeping_worktree()` / `resets_worktree()`;
-- `PromptOutcome::worktree_reset` and its `worktreeReset` JSON;
-- `subagent_resume`'s `resetWorktree` property and the `tddy-tools` port adapter.
+- `tddy_subagent_worktree::{ResetTarget, WorktreeReset}` and `ConversationWorktree::reset_to`
+  (`src/reset.rs`); `WorktreeReset.dropped_commits` is a **list of short hashes** — `range-pull` needs
+  to know *which* commits a rewind dropped;
+- the `ResetOp reset = 12` case of `ConversationWorktreeRequest.op` and its daemon handling;
+- `tddy_session_tool_client::reset_conversation_worktree` (a function beside n1's calls in
+  `src/conversation.rs`, not a variant of n1's `Copy` enum `ConversationWorktreeOp`);
+- `tddy_discovery::subagent::{WorktreeResetPort, ResetTarget, WorktreeReset}` (`subagent/worktree_reset.rs`),
+  `SubagentConfig::{worktree_reset, with_worktree_reset}`,
+  `SpecializedSubagentSession::resetting_worktree_through`, `Transcript::commit_kept_by`,
+  `TurnRequest::{keeping_worktree, resets_worktree}`, `PromptOutcome::worktree_reset`;
+- the reset step in `take_turn` and `worktreeReset` in `prompt_outcome_json`;
+- `tddy-tools`' `ConversationWorktreeResetPort` (`src/worktree_reset_port.rs`) and `subagent_resume`'s
+  `resetWorktree` property with its parsing.
 
 ## Boundaries
 
@@ -51,22 +57,27 @@ inject a recording `WorktreeResetPort` and are greenable on the parent's publish
 
 ## Draft PR contract
 
-The first push after this planning commit publishes `reset_to`, `ResetTarget`, `ResetOutcome`,
-`ResetOp`, `WorktreeResetPort`, `SubagentConfig::worktree_reset`, `Transcript::commit_kept_by`,
-`TurnRequest::{keeping_worktree, resets_worktree}`, `PromptOutcome::worktree_reset` and the
-`resetWorktree` schema property — bodies `// TODO(rewind-reset): implement` — plus the failing tests
-below. It is the start of this PR's implementation, not its deliverable.
+Published as this PR's second commit — the first push of its implementation, not its deliverable:
+every symbol in `## Responsibility` exists with its signature, behaviour bodies `todo!()` under
+`// TODO(rewind-reset)`, plus the failing tests below. Two things are deliberately **not** in the
+surface because publishing them would make their own tests pass unimplemented: the `resetWorktree`
+schema property (advertised and parsed together in green) and the call in `take_turn` (marked
+`TODO(rewind-reset)` at the rewind). `TurnStep::FinalAnswer` now boxes its outcome — `PromptOutcome`
+grew past clippy's variant-size limit.
 
 ## Green wave
 
 **Wave:** 2 of 3
-**Greenable independently:** partly — the discovery and MCP-schema tests need only published surface;
-the mechanics and daemon tests need `isolated-edits`' worktree behaviour
-**Concurrent with:** `feature/agent-worktree/diff`
-**Blocks:** `feature/agent-worktree/range-pull` (its dropped-pulled-commits report extends this
-node's reset)
+**Greenable independently:** no — every acceptance suite here drives behaviour `isolated-edits` (#560)
+implements: the mechanics and daemon suites need its `ensure` / `commit_changes`, and the discovery
+suite needs its append site to record each result's `worktreeChange` (the reset target is read off
+those entries). The `TurnRequest` and client-builder unit tests need only this node.
+**Concurrent with:** `feature/agent-worktree/diff` (#562), once #560 is green
+**Blocks:** `feature/agent-worktree/range-pull` (#563) — it reads `worktreeReset.droppedCommits`
 
     n1 → n2, n3, n4      n2 → n4
+
+No new crate edges: `tddy-discovery → tddy-subagent-worktree` and the rest are #560's.
 
 ## Prerequisites
 
@@ -168,34 +179,47 @@ the real stdio wire.
 
 ### Acceptance Tests
 
-#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/reset_acceptance.rs`
+All fail on this branch; the three marked **guard** pass by design, pinning the paths that must not
+reset.
+
+#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/reset_acceptance.rs` (5)
 - `resetting_to_a_commit_drops_the_commits_after_it`
 - `resetting_to_the_base_drops_every_subagent_commit`
-- `a_reset_removes_files_the_dropped_calls_created`
-- `a_reset_reports_how_many_commits_it_dropped`
-- `a_commit_outside_the_conversation_is_refused`
+- `a_reset_removes_untracked_files_but_keeps_ignored_ones`
+- `resetting_to_the_tip_drops_nothing`
+- `a_commit_outside_the_conversation_is_refused_and_nothing_moves`
 
-#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_reset_acceptance.rs`
+#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_reset_acceptance.rs` (2)
 - `reset_moves_the_conversation_worktree_back_to_the_commit`
 - `reset_on_a_conversation_without_a_worktree_reports_no_worktree`
 
-#### tddy-discovery — `packages/tddy-discovery/tests/rewind_resets_worktree_acceptance.rs`
+#### tddy-discovery — `packages/tddy-discovery/tests/rewind_resets_worktree_acceptance.rs` (9)
+A recording `WorktreeResetPort` notes each target and how many model requests the `wiremock`
+provider had seen at that moment.
 - `a_rewind_resets_to_the_commit_of_the_last_kept_tool_result`
+- `a_rewind_to_the_call_that_made_a_commit_keeps_that_commit`
 - `a_rewind_before_any_commit_resets_to_the_base`
-- `a_rewind_with_reset_worktree_false_asks_for_no_reset`
+- `a_rewind_that_keeps_the_worktree_asks_for_no_reset` — **guard**
 - `the_reset_happens_before_the_resumed_turn_asks_the_model_anything`
 - `the_outcome_reports_the_reset`
-- `a_conversation_without_a_worktree_reports_no_reset`
+- `a_conversation_without_a_worktree_reports_no_reset` — **guard**
 - `a_failed_reset_refuses_the_resume_and_keeps_the_history`
-- `a_resume_without_a_rewind_asks_for_no_reset`
+- `a_resume_without_a_rewind_asks_for_no_reset` — **guard**
 
-#### tddy-tools — `packages/tddy-tools/tests/subagent_resume_reset_worktree_mcp.rs`
-- `subagent_resume_advertises_reset_worktree`
+#### tddy-tools — `packages/tddy-tools/tests/subagent_resume_reset_worktree_mcp.rs` (1)
+- `subagent_resume_advertises_reset_worktree_as_a_boolean`
 
 ### Unit tests
-- `tddy-discovery/src/subagent/transcript.rs` — `commit_kept_by`: the call's commit is kept with its
-  call; a replacement contributes none; ids with no kept commit → `Base`
-- `tddy-discovery/src/subagent/turn_request.rs` — resets by default; `keeping_worktree` flips it
+- `tddy-discovery/src/subagent/turn_request.rs` — `a_rewind_takes_the_worktree_back_by_default`,
+  `keeping_the_worktree_opts_a_rewind_out_of_the_reset`
+- `tddy-session-tool-client/src/conversation.rs` — `a_reset_to_a_commit_names_the_commit`,
+  `a_reset_to_the_base_sends_an_empty_commit`
+
+### Verified
+Scoped: `cargo clippy --all-targets -D warnings` clean over `tddy-subagent-worktree`, `tddy-service`,
+`tddy-discovery`, `tddy-session-tool-client`, `tddy-tools`, `tddy-daemon-rpc`, `tddy-session-agents`,
+`tddy-session-lifecycle`; `cargo test -p tddy-discovery` — every suite green except this node's and
+#560's planned red tests.
 
 ## Technical Debt & Production Readiness
 
@@ -232,10 +256,10 @@ the real stdio wire.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer waived the per-node gate for 2/4–4/4 on 2026-09-30)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests per touched package; full workspace on CI

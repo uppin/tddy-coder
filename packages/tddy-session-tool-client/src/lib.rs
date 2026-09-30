@@ -18,7 +18,10 @@
 
 mod conversation;
 
-pub use conversation::{conversation_worktree, dispatch_conversation_tool, ConversationWorktreeOp};
+pub use conversation::{
+    conversation_worktree, dispatch_conversation_tool, reset_conversation_worktree,
+    ConversationWorktreeOp,
+};
 
 use std::collections::HashMap;
 use std::future::Future;

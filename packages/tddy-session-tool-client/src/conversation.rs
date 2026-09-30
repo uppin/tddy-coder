@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    ExecuteToolRequest, PullOp, RemoveOp,
+    ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -294,6 +294,27 @@ fn error_body(message: String) -> String {
     serde_json::json!({ "error": message, "is_error": true }).to_string()
 }
 
+/// Ask the facilitating daemon to reset `conversation_id`'s worktree to `commit`, or to its base
+/// when `commit` is `None`; the answer's `result_json` (`{"reset": {to, droppedCommits} | null}`)
+/// or a `{"error", "is_error": true}` body.
+pub async fn reset_conversation_worktree(conversation_id: &str, commit: Option<&str>) -> String {
+    // TODO(rewind-reset): implement over the transports `conversation_worktree` uses
+    let _ = (conversation_id, commit);
+    todo!("reset_conversation_worktree")
+}
+
+/// The `ConversationWorktree` request a reset sends.
+#[allow(dead_code)] // TODO(rewind-reset): called by `reset_conversation_worktree`
+pub(crate) fn conversation_reset_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    commit: Option<&str>,
+) -> ConversationWorktreeRequest {
+    // TODO(rewind-reset): implement
+    let _ = (envelope, conversation_id, commit, ResetOp::default());
+    todo!("conversation_reset_request")
+}
+
 /// The `ExecuteTool` a conversation's call sends.
 pub(crate) fn conversation_tool_request(
     envelope: &SessionToolEnvelope,
@@ -383,6 +404,26 @@ mod tests {
             )
             .op,
             Some(Op::Remove(RemoveOp {}))
+        );
+    }
+
+    #[test]
+    fn a_reset_to_a_commit_names_the_commit() {
+        assert_eq!(
+            conversation_reset_request(&an_envelope(), "explore", Some("3f9c2ab")).op,
+            Some(Op::Reset(ResetOp {
+                commit: "3f9c2ab".into()
+            }))
+        );
+    }
+
+    #[test]
+    fn a_reset_to_the_base_sends_an_empty_commit() {
+        assert_eq!(
+            conversation_reset_request(&an_envelope(), "explore", None).op,
+            Some(Op::Reset(ResetOp {
+                commit: String::new()
+            }))
         );
     }
 }
