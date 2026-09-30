@@ -1,0 +1,126 @@
+//! What a conversation worktree starts from: the repository's common dir, the exclude entry that
+//! keeps the worktrees out of the caller's status, and the caller's uncommitted state as a commit.
+
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+
+use crate::git::{git, git_raw};
+use crate::worktree::{WorktreeError, SUBAGENT_WORKTREES_DIR};
+
+/// The repository's common dir, shared by the main checkout and every linked worktree — where
+/// `info/exclude` and the refs live.
+pub(crate) async fn common_dir(caller: &Path) -> Result<PathBuf, WorktreeError> {
+    let (_, output) = git_raw(caller, ["rev-parse", "--git-common-dir"], &[], None).await?;
+    if !output.success {
+        return Err(WorktreeError::NotARepository(caller.to_path_buf()));
+    }
+    // Relative to `caller` when git reports it so; `join` keeps an absolute answer as it is.
+    Ok(caller.join(String::from_utf8_lossy(&output.stdout).trim()))
+}
+
+/// Add `/tmp/subagent-worktrees/` to `<common dir>/info/exclude` unless it is already there.
+pub(crate) async fn exclude_conversation_worktrees(common: &Path) -> Result<(), WorktreeError> {
+    let entry = format!("/{SUBAGENT_WORKTREES_DIR}/");
+    let file = common.join("info").join("exclude");
+    let io = |context: &str| {
+        let context = format!("{context} {}", file.display());
+        move |source| WorktreeError::Io { context, source }
+    };
+    let existing = match tokio::fs::read_to_string(&file).await {
+        Ok(text) => text,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => return Err(io("reading")(source)),
+    };
+    if existing.lines().any(|line| line.trim() == entry) {
+        return Ok(());
+    }
+    let mut updated = existing;
+    if !updated.is_empty() && !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    updated.push_str(&entry);
+    updated.push('\n');
+    tokio::fs::create_dir_all(common.join("info"))
+        .await
+        .map_err(io("creating the directory of"))?;
+    tokio::fs::write(&file, updated)
+        .await
+        .map_err(io("writing"))
+}
+
+/// The commit a conversation starts from: the caller's `HEAD` when the caller is clean, else a commit
+/// on top of `HEAD` holding the caller's uncommitted state — staged, unstaged and untracked, not
+/// ignored. Built through a scratch index seeded from the caller's own, so the caller's index,
+/// branch and files are never touched.
+pub(crate) async fn base_commit(caller: &Path) -> Result<String, WorktreeError> {
+    let head = git(caller, ["rev-parse", "HEAD"], &[], None)
+        .await?
+        .trim()
+        .to_string();
+    let index = git(caller, ["rev-parse", "--git-path", "index"], &[], None).await?;
+    let index = caller.join(index.trim());
+    let scratch = scratch_path(&index);
+    let result = snapshot_tree(caller, &index, &scratch, &head).await;
+    // Best effort: a scratch file left behind is harmless, and must not mask the snapshot's result.
+    if let Err(error) = tokio::fs::remove_file(&scratch).await {
+        log::debug!("scratch index {} not removed: {error}", scratch.display());
+    }
+    result
+}
+
+async fn snapshot_tree(
+    caller: &Path,
+    index: &Path,
+    scratch: &Path,
+    head: &str,
+) -> Result<String, WorktreeError> {
+    tokio::fs::copy(index, scratch)
+        .await
+        .map_err(|source| WorktreeError::Io {
+            context: format!("seeding the scratch index from {}", index.display()),
+            source,
+        })?;
+    let env = [("GIT_INDEX_FILE", scratch.as_os_str())];
+    let exclude_ours = format!(":(exclude){SUBAGENT_WORKTREES_DIR}");
+    git(
+        caller,
+        ["add", "-A", "--", ".", exclude_ours.as_str()],
+        &env,
+        None,
+    )
+    .await?;
+    let tree = git(caller, ["write-tree"], &env, None).await?;
+    let tree = tree.trim();
+    let head_tree = git(caller, ["rev-parse", "HEAD^{tree}"], &[], None).await?;
+    if tree == head_tree.trim() {
+        return Ok(head.to_string());
+    }
+    let commit = git(
+        caller,
+        [
+            "commit-tree",
+            tree,
+            "-p",
+            head,
+            "-m",
+            "Uncommitted changes inherited from the caller",
+        ],
+        &[],
+        None,
+    )
+    .await?;
+    Ok(commit.trim().to_string())
+}
+
+pub(crate) fn scratch_path(index: &Path) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let mut name = index
+        .file_name()
+        .unwrap_or_else(|| OsStr::new("index"))
+        .to_os_string();
+    name.push(format!(".tddy-subagent-{}-{nanos}", std::process::id()));
+    index.with_file_name(name)
+}

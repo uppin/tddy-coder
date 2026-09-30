@@ -1,12 +1,16 @@
 //! Creating, committing in, handing over and removing one conversation's worktree.
 
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::change_facts::count_change;
 use crate::change_facts::{FileCounts, LineCounts, WorktreeChange};
 use crate::conversation_id::ConversationId;
+use crate::git::{git, git_raw};
+use crate::inherit;
 
 /// Where conversation worktrees live, relative to the session worktree. Added to the repository's
 /// `info/exclude` on first use, so it never shows in the caller's `git status`.
@@ -29,6 +33,9 @@ pub struct ConversationWorktree {
     caller: PathBuf,
     branch: String,
     base: String,
+    /// The ref that keeps `base` findable for a later `existing`, and alive when it is the
+    /// inherited-changes commit no branch points at.
+    base_ref: String,
 }
 
 /// What a hand-over applied to the caller's worktree.
@@ -69,6 +76,17 @@ impl ConversationWorktrees {
             .join(conversation.as_str())
     }
 
+    pub(crate) fn session_worktree(&self) -> &Path {
+        &self.session_worktree
+    }
+
+    fn base_ref_of(&self, conversation: &ConversationId) -> String {
+        format!(
+            "refs/tddy/subagent-base/{}/{}",
+            self.session_id, conversation
+        )
+    }
+
     /// `tddy/subagent/<session>/<conversation>`.
     pub fn branch_of(&self, conversation: &ConversationId) -> String {
         format!("tddy/subagent/{}/{}", self.session_id, conversation)
@@ -79,8 +97,30 @@ impl ConversationWorktrees {
         &self,
         conversation: &ConversationId,
     ) -> Result<Option<ConversationWorktree>, WorktreeError> {
-        // TODO(isolated-edits): implement
-        todo!("existing({conversation})")
+        let root = self.path_of(conversation);
+        let base_ref = self.base_ref_of(conversation);
+        let (_, found) = git_raw(
+            &self.session_worktree,
+            [
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{base_ref}^{{commit}}"),
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        if !found.success || !root.exists() {
+            return Ok(None);
+        }
+        Ok(Some(ConversationWorktree {
+            root,
+            caller: self.session_worktree.clone(),
+            branch: self.branch_of(conversation),
+            base: String::from_utf8_lossy(&found.stdout).trim().to_string(),
+            base_ref,
+        }))
     }
 
     /// The conversation's worktree, created on first use: cut from the session worktree's `HEAD`,
@@ -91,8 +131,38 @@ impl ConversationWorktrees {
         &self,
         conversation: &ConversationId,
     ) -> Result<ConversationWorktree, WorktreeError> {
-        // TODO(isolated-edits): implement
-        todo!("ensure({conversation})")
+        if let Some(found) = self.existing(conversation).await? {
+            return Ok(found);
+        }
+        let caller = &self.session_worktree;
+        inherit::exclude_conversation_worktrees(&inherit::common_dir(caller).await?).await?;
+        let base = inherit::base_commit(caller).await?;
+        let root = self.path_of(conversation);
+        let branch = self.branch_of(conversation);
+        let base_ref = self.base_ref_of(conversation);
+        git(
+            caller,
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                OsStr::new("-b"),
+                OsStr::new(&branch),
+                root.as_os_str(),
+                OsStr::new(&base),
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        git(caller, ["update-ref", &base_ref, &base], &[], None).await?;
+        Ok(ConversationWorktree {
+            root,
+            caller: caller.clone(),
+            branch,
+            base,
+            base_ref,
+        })
     }
 }
 
@@ -121,22 +191,143 @@ impl ConversationWorktree {
     /// Commit everything that changed since the last commit, with `subject`, and say what it was.
     /// Changing nothing commits nothing and returns counts of zero with no `commit`.
     pub async fn commit_changes(&self, subject: &str) -> Result<WorktreeChange, WorktreeError> {
-        // TODO(isolated-edits): implement
-        todo!("commit_changes({subject:?})")
+        git(&self.root, ["add", "-A"], &[], None).await?;
+        let name_status = git(&self.root, ["diff", "--cached", "--name-status"], &[], None).await?;
+        if name_status.trim().is_empty() {
+            return Ok(WorktreeChange::default());
+        }
+        let numstat = git(&self.root, ["diff", "--cached", "--numstat"], &[], None).await?;
+        // The subagent's snapshot is not the developer's commit: their hooks and signing do not apply.
+        git(
+            &self.root,
+            [
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                subject,
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        let commit = git(&self.root, ["rev-parse", "--short", "HEAD"], &[], None).await?;
+        let (files, lines) = count_change(&name_status, &numstat);
+        Ok(WorktreeChange {
+            commit: Some(commit.trim().to_string()),
+            files,
+            lines,
+        })
     }
 
     /// Apply everything committed since the base to the caller's worktree as uncommitted changes,
     /// 3-way: a hunk that no longer applies is written with conflict markers and its path reported.
     /// The caller's `HEAD` never moves.
     pub async fn pull_into_caller(&self) -> Result<PullOutcome, WorktreeError> {
-        // TODO(isolated-edits): implement
-        todo!("pull_into_caller")
+        let range = format!("{}..{}", self.base, self.branch);
+        let name_status = git(&self.caller, ["diff", "--name-status", &range], &[], None).await?;
+        if name_status.trim().is_empty() {
+            return Ok(PullOutcome::default());
+        }
+        let numstat = git(&self.caller, ["diff", "--numstat", &range], &[], None).await?;
+        let (files, lines) = count_change(&name_status, &numstat);
+        let patch = git(&self.caller, ["diff", "--binary", &range], &[], None).await?;
+        let touched = git(
+            &self.caller,
+            ["diff", "--name-only", "--no-renames", "-z", &range],
+            &[],
+            None,
+        )
+        .await?;
+        let conflicts = self
+            .apply_3way(patch.as_bytes(), touched.as_bytes())
+            .await?;
+        Ok(PullOutcome {
+            files,
+            lines,
+            conflicts,
+        })
     }
 
     /// Delete the worktree, its branch and its base ref.
     pub async fn remove(self) -> Result<(), WorktreeError> {
-        // TODO(isolated-edits): implement
-        todo!("remove")
+        git(
+            &self.caller,
+            [
+                OsStr::new("worktree"),
+                OsStr::new("remove"),
+                OsStr::new("--force"),
+                self.root.as_os_str(),
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        git(&self.caller, ["branch", "-D", &self.branch], &[], None).await?;
+        git(
+            &self.caller,
+            ["update-ref", "-d", &self.base_ref],
+            &[],
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Apply `patch` to the caller's files 3-way and return the paths left with conflict markers.
+    ///
+    /// `git apply --3way` implies `--index` and refuses a file whose working copy differs from the
+    /// index — exactly the caller's unstaged edits. So it runs against a scratch index in which
+    /// the touched paths are refreshed from the working tree: the caller's own index is never read
+    /// for its staging state and never written, and the pulled changes arrive unstaged.
+    async fn apply_3way(&self, patch: &[u8], touched: &[u8]) -> Result<Vec<String>, WorktreeError> {
+        let index = git(
+            &self.caller,
+            ["rev-parse", "--git-path", "index"],
+            &[],
+            None,
+        )
+        .await?;
+        let index = self.caller.join(index.trim());
+        let scratch = inherit::scratch_path(&index);
+        tokio::fs::copy(&index, &scratch)
+            .await
+            .map_err(|source| WorktreeError::Io {
+                context: format!("seeding the scratch index from {}", index.display()),
+                source,
+            })?;
+        let result = self.apply_with_index(patch, touched, &scratch).await;
+        if let Err(error) = tokio::fs::remove_file(&scratch).await {
+            log::debug!("scratch index {} not removed: {error}", scratch.display());
+        }
+        result
+    }
+
+    async fn apply_with_index(
+        &self,
+        patch: &[u8],
+        touched: &[u8],
+        scratch: &Path,
+    ) -> Result<Vec<String>, WorktreeError> {
+        let env = [("GIT_INDEX_FILE", scratch.as_os_str())];
+        git(
+            &self.caller,
+            ["update-index", "--add", "--remove", "-z", "--stdin"],
+            &env,
+            Some(touched),
+        )
+        .await?;
+        let (args, applied) = git_raw(&self.caller, ["apply", "--3way"], &env, Some(patch)).await?;
+        let conflicts = conflicted_paths(&applied.stderr);
+        if applied.success || !conflicts.is_empty() {
+            return Ok(conflicts);
+        }
+        Err(WorktreeError::Git {
+            args,
+            stderr: applied.stderr,
+        })
     }
 }
 
@@ -161,4 +352,17 @@ impl std::error::Error for WorktreeError {
             _ => None,
         }
     }
+}
+
+/// Paths `git apply --3way` reports as applied "with conflicts" (`Applied patch to 'path' with
+/// conflicts.`), in the order git reported them.
+fn conflicted_paths(apply_stderr: &str) -> Vec<String> {
+    apply_stderr
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("Applied patch to '")?
+                .strip_suffix("' with conflicts.")
+        })
+        .map(str::to_string)
+        .collect()
 }

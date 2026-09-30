@@ -21,8 +21,17 @@ pub struct UnsafeConversationId(pub String);
 impl ConversationId {
     /// Accept `raw` as a conversation id, or say why not.
     pub fn parse(raw: &str) -> Result<Self, UnsafeConversationId> {
-        // TODO(isolated-edits): implement
-        todo!("ConversationId::parse({raw:?})")
+        let plain = !raw.is_empty()
+            && raw.len() <= CONVERSATION_ID_MAX_LEN
+            && !raw.starts_with('.')
+            && raw
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+        if plain {
+            Ok(Self(raw.to_string()))
+        } else {
+            Err(UnsafeConversationId(raw.to_string()))
+        }
     }
 
     pub fn as_str(&self) -> &str {

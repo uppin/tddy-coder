@@ -15,7 +15,8 @@ path = "src/lib.rs"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["process", "fs"] }
+# `io-util` feeds a child's stdin; `macros` gives `join!`, which drives stdin and output together.
+tokio = { version = "1", features = ["process", "fs", "io-util", "macros"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

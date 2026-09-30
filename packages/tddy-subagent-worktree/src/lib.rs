@@ -19,6 +19,7 @@
 mod change_facts;
 mod conversation_id;
 mod git;
+mod inherit;
 mod run;
 mod tool_effect;
 mod worktree;

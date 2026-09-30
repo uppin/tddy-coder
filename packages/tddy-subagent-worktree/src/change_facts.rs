@@ -37,11 +37,37 @@ pub struct WorktreeChange {
 /// Count `git diff --cached --name-status -z`-style lines (here newline-separated
 /// `STATUS\tpath[\tpath]`) and `git diff --cached --numstat` lines (`added\tremoved\tpath`, `-` for
 /// binary).
-// TODO(isolated-edits): drop the allow once `commit_changes` counts through it
-#[allow(dead_code)]
 pub(crate) fn count_change(name_status: &str, numstat: &str) -> (FileCounts, LineCounts) {
-    // TODO(isolated-edits): implement
-    todo!("count_change({name_status:?}, {numstat:?})")
+    let mut files = FileCounts::default();
+    for status in name_status
+        .lines()
+        .filter_map(|line| line.split('\t').next())
+    {
+        match status.chars().next() {
+            Some('A') | Some('C') => files.created += 1,
+            Some('M') | Some('T') => files.updated += 1,
+            Some('D') => files.removed += 1,
+            Some('R') => {
+                files.removed += 1;
+                files.created += 1;
+            }
+            _ => {}
+        }
+    }
+    let mut lines = LineCounts::default();
+    for line in numstat.lines() {
+        let mut columns = line.split('\t');
+        // A binary file reports `-` for both columns and so adds nothing.
+        lines.added += columns
+            .next()
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0);
+        lines.removed += columns
+            .next()
+            .and_then(|n| n.parse::<u64>().ok())
+            .unwrap_or(0);
+    }
+    (files, lines)
 }
 
 #[cfg(test)]

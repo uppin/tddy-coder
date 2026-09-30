@@ -37,17 +37,45 @@ where
     F: FnOnce(PathBuf) -> Fut,
     Fut: Future<Output = T>,
 {
-    // TODO(isolated-edits): implement
-    let _ = (worktrees, conversation, execute, ToolEffect::of);
-    todo!("run_in_conversation({tool_name:?})")
+    match ToolEffect::of(tool_name) {
+        ToolEffect::ReadOnly => {
+            let root = match worktrees.existing(conversation).await? {
+                Some(worktree) => worktree.root().to_path_buf(),
+                None => worktrees.session_worktree().to_path_buf(),
+            };
+            Ok(ConversationRun {
+                output: execute(root).await,
+                change: None,
+            })
+        }
+        ToolEffect::Mutating => {
+            let worktree = worktrees.ensure(conversation).await?;
+            let output = execute(worktree.root().to_path_buf()).await;
+            let change = worktree.commit_changes(tool_name).await?;
+            Ok(ConversationRun {
+                output,
+                change: Some(change),
+            })
+        }
+    }
 }
 
 /// `result_json` with `"worktreeChange": change` added to its top-level object. A result that is
 /// not a JSON object is wrapped as `{"result": <it>, "worktreeChange": …}` so the change is never
 /// dropped.
 pub fn with_worktree_change(result_json: &str, change: &WorktreeChange) -> String {
-    // TODO(isolated-edits): implement
-    todo!("with_worktree_change({result_json:?}, {change:?})")
+    let change = serde_json::to_value(change).expect("a WorktreeChange serializes to JSON");
+    let mut object = match serde_json::from_str::<serde_json::Value>(result_json) {
+        Ok(serde_json::Value::Object(object)) => object,
+        Ok(other) => serde_json::Map::from_iter([("result".to_string(), other)]),
+        // Text that is not JSON is still a result; keep it as a string.
+        Err(_) => serde_json::Map::from_iter([(
+            "result".to_string(),
+            serde_json::Value::String(result_json.to_string()),
+        )]),
+    };
+    object.insert("worktreeChange".to_string(), change);
+    serde_json::Value::Object(object).to_string()
 }
 
 #[cfg(test)]

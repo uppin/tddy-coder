@@ -18,8 +18,10 @@ pub enum ToolEffect {
 impl ToolEffect {
     /// Classify an exec-catalog tool name (`"Write"`, `"StrReplace"`, …).
     pub fn of(tool_name: &str) -> Self {
-        // TODO(isolated-edits): implement
-        todo!("ToolEffect::of({tool_name:?})")
+        match tool_name {
+            "Read" | "Glob" | "Grep" | "SemanticSearch" | "ReadLints" => Self::ReadOnly,
+            _ => Self::Mutating,
+        }
     }
 }
 
