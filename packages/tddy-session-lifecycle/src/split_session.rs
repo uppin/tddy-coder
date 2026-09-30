@@ -117,7 +117,7 @@ pub fn split_context_dir(session_dir: &Path) -> PathBuf {
 /// fallback: `StartSession` fails and the caller tears down the worktree it created on the codebase
 /// daemon. A split session that cannot read its project's rules must not start pretending it has,
 /// because nothing downstream could tell the difference — this is
-/// [`crate::connection_service`]'s rule for `split_withdrawals_from_codebase_host`, applied to the
+/// [`crate::connection_service`]'s rule for `split_roster_from_codebase_host`, applied to the
 /// guidance for the same reason it applies to the roster.
 pub fn build_split_context_dir(
     session_dir: &Path,
@@ -1349,5 +1349,51 @@ mod withdrawal_contract_tests {
             "the withdrawal must be impossible to route around, not merely the default; got \
              {args:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod roster_seed_tests {
+    use super::agent_argv::roster_seed_env_pairs;
+    use tddy_service::proto::session_agents_svc::{SessionAgentEntry, SessionAgentRoster};
+
+    fn a_roster_attaching(agent_ids: &[&str]) -> SessionAgentRoster {
+        SessionAgentRoster {
+            rev: 1,
+            agents: agent_ids
+                .iter()
+                .map(|id| SessionAgentEntry {
+                    agent_id: (*id).to_string(),
+                    replaces: vec!["Grep".to_string()],
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The host-run agent's `tddy-tools` is told the roster its spawn already read, so its first
+    /// `tools/list` can address the agents in it before any stream frame has arrived.
+    #[test]
+    fn hands_the_agent_the_roster_the_spawn_read() {
+        let roster = a_roster_attaching(&["Gemma Local Coder@a-daemon"]);
+
+        let pairs = roster_seed_env_pairs(&roster);
+
+        let [(key, value)] = pairs.as_slice() else {
+            panic!("exactly one seed pair expected; got {pairs:?}");
+        };
+        assert_eq!(key, tddy_discovery::roster::ROSTER_SEED_ENV);
+        assert_eq!(
+            tddy_discovery::roster::roster_seed_from_value(value),
+            Ok(roster),
+            "the agent must be handed back exactly the roster the spawn read"
+        );
+    }
+
+    /// A roster with nobody in it has nothing to prepare, and later attaches arrive over the stream.
+    #[test]
+    fn hands_over_nothing_for_a_roster_with_no_agent() {
+        assert!(roster_seed_env_pairs(&a_roster_attaching(&[])).is_empty());
     }
 }

@@ -206,13 +206,10 @@ impl DaemonSessionHost {
             .await?;
 
         let local_instance_id = local_instance_id_for_config(&self.config);
-        let withdrawals = self
-            .split_withdrawals_from_codebase_host(
-                session_token,
-                checkout_session_id,
-                &local_instance_id,
-            )
+        let roster = self
+            .split_roster_from_codebase_host(session_token, checkout_session_id, &local_instance_id)
             .await?;
+        let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
         let agent = crate::context_files::context_agent_for_session_type("claude-cli");
         let context = self
             .split_context_from_codebase_host(
@@ -257,7 +254,13 @@ impl DaemonSessionHost {
                 &tddy_tools.to_string_lossy(),
                 &withdrawals,
             )?,
-            env: remote.env_pairs(),
+            // The roster just read goes with the agent, so its first `tools/list` is right before
+            // any stream frame has arrived.
+            env: remote
+                .env_pairs()
+                .into_iter()
+                .chain(crate::split_session::roster_seed_env_pairs(&roster))
+                .collect(),
         };
         log::info!(
             "ResumeSession: re-wired jailed-codebase session {session_id} to its checkout session {checkout_session_id} on this daemon"

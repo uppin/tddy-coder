@@ -734,6 +734,25 @@ Every snapshot at a **new** `rev` rebuilds `SubagentRegistry` and emits an MCP
 `notifications/tools/list_changed`, so the main agent's own tool listing reflects the roster without
 a restart.
 
+The first snapshot is awaited **before** the MCP server answers anything. A client builds its tool
+pool from the first `tools/list`, which it asks for the moment the handshake completes, and a later
+`list_changed` is not guaranteed to reach the turn already running — so that first answer must
+already carry the attached agents' conversation tools and already withhold what they took over. A
+host-run agent is spawned with no seed at all, so for it the stream is the only source; a list
+answered before the snapshot left a session told to "ask Gemma" with no tool that could. The wait is
+bounded (a few seconds — the daemon answers a subscribe in milliseconds): a stream that delivers
+nothing in that time starts the server on the seed, exactly as before, and the snapshot is
+announced with `list_changed` when it lands.
+
+A daemon spawning a host-run agent has usually **already read** the roster — the split and
+sandboxed-codebase placements fetch it from the codebase host to build the agent's
+`--disallowedTools` — so it hands that snapshot over too, in `TDDY_SESSION_AGENT_ROSTER_SEED`, and
+`tddy-tools` applies it as a frame before anything else. With a roster already in force the server
+does not wait on the stream at all. This is a roster **snapshot**, not `TDDY_SUBAGENTS_JSON`'s defs:
+a seeded def is what `tddy-tools` runs an agent's turn loop from in-process, which for a host-run
+agent would bypass the daemon it converses through and put the provider credential in its
+environment. A value that does not decode fails the start, like the def seed.
+
 A snapshot at the `rev` **already applied** is adopted for its entries and announces nothing. That
 is the frame carrying a status change (§ What an agent is doing): the agents are identical by
 construction, so nothing can newly need cancelling and no tool list has changed, but what those

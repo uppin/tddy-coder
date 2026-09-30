@@ -35,6 +35,23 @@ pub fn wire_roster_withdrawals(
         .collect()
 }
 
+/// The env pair that hands a host-run agent's `tddy-tools` the roster its spawn already read, so
+/// that roster is in force before the MCP server answers its first `tools/list` — or nothing, for a
+/// roster with no agent in it.
+///
+/// A roster **snapshot** rather than `TDDY_SUBAGENTS_JSON`'s defs: a seeded def is what `tddy-tools`
+/// runs an agent's turn loop from in-process, and a host-run agent's conversations go through the
+/// daemon — its host may not reach the model at all, and a def would export the provider credential
+/// into the agent's environment. The entries are what it lacks: who is attached, what each took over.
+pub fn roster_seed_env_pairs(
+    roster: &tddy_service::proto::session_agents_svc::SessionAgentRoster,
+) -> Vec<(String, String)> {
+    if roster.agents.is_empty() {
+        return Vec::new();
+    }
+    vec![tddy_discovery::roster::roster_seed_env(roster)]
+}
+
 /// Every tool the roster withdraws from the main agent, once each: the union across its agents,
 /// which is the rule (PRD § Tool replacement, AC19).
 fn withdrawn_tools(withdrawals: &[(String, Vec<String>)]) -> Vec<String> {

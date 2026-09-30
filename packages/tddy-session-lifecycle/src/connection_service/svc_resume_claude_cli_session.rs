@@ -188,9 +188,10 @@ impl DaemonSessionHost {
                 .map(Some);
         }
 
-        let withdrawals = self
-            .split_withdrawals_from_codebase_host(session_token, codebase_session, codebase_daemon)
+        let roster = self
+            .split_roster_from_codebase_host(session_token, codebase_session, codebase_daemon)
             .await?;
+        let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
 
         // Split placement is `claude-cli` only (PRD § Why claude-cli only), so the allow-list is
         // that backend's. Re-fetched on resume rather than trusted from the directory the previous
@@ -223,14 +224,20 @@ impl DaemonSessionHost {
             tddy_core::backend::context_globs_for_agent(agent),
             &context,
         )?;
+        // The roster just read goes with the agent too, so its first `tools/list` is right before
+        // any stream frame has arrived.
+        let mut wiring = wiring;
+        wiring
+            .env
+            .extend(crate::split_session::roster_seed_env_pairs(&roster));
         log::info!(
             "ResumeSession: re-wired split session {session_id} to workspace session {codebase_session} on daemon {codebase_daemon}"
         );
         Ok(Some(wiring))
     }
 
-    /// The tool withdrawals a resumed split agent must launch with, read from the daemon that holds
-    /// the session's roster.
+    /// The roster a split agent must launch with — its tool withdrawals and its roster seed — read
+    /// from the daemon that holds it.
     ///
     /// Routed through this daemon's own handler, exactly as the in-jail `tddy-tools` registry's
     /// reads are routed. A failure is a **refusal**, never an empty roster: "the codebase host is
@@ -241,12 +248,12 @@ impl DaemonSessionHost {
     /// The peer's status is re-worded rather than propagated, keeping its code: the transport's own
     /// refusal ("the common room is not connected") names neither the host nor the session, and this
     /// is the one path where the operator has to know *which* pairing they cannot resume.
-    pub(crate) async fn split_withdrawals_from_codebase_host(
+    pub(crate) async fn split_roster_from_codebase_host(
         &self,
         session_token: &str,
         codebase_session: &str,
         codebase_daemon: &str,
-    ) -> Result<Vec<(String, Vec<String>)>, Status> {
+    ) -> Result<tddy_service::proto::session_agents_svc::SessionAgentRoster, Status> {
         let roster = self
             .session_agents_service()
             .list_session_agents(Request::direct(ListSessionAgentsRequest {
@@ -265,8 +272,6 @@ impl DaemonSessionHost {
                 ),
             })?
             .into_inner();
-        Ok(crate::split_session::wire_roster_withdrawals(
-            &roster.agents,
-        ))
+        Ok(roster)
     }
 }
