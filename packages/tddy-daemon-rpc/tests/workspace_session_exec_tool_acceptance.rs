@@ -122,6 +122,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
             tool_name: "Write".to_string(),
             args_json: r#"{"path":"hello.txt","contents":"hello remote world"}"#.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("ExecuteTool Write must not return an RPC error");
@@ -141,6 +142,7 @@ async fn workspace_session_execute_tool_write_then_read_round_trips() {
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"hello.txt"}"#.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("ExecuteTool Read must not return an RPC error");

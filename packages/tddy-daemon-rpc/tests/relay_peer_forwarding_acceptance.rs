@@ -178,7 +178,8 @@ async fn execute_tool_with_known_remote_instance_id_returns_failed_precondition_
             session_id: NONEXISTENT_SESSION_ID.to_string(),
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"file.txt"}"#.to_string(),
-            daemon_instance_id: REMOTE_PEER_ID.to_string(), // known peer, no LiveKit room
+            daemon_instance_id: REMOTE_PEER_ID.to_string(), // known peer, no LiveKit room,
+            conversation_id: String::new(),
         }))
         .await
         .expect_err("execute_tool must fail when forwarding a known remote peer with no room");
@@ -220,7 +221,8 @@ async fn execute_tool_with_unknown_remote_instance_id_returns_invalid_argument()
             session_id: NONEXISTENT_SESSION_ID.to_string(),
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"file.txt"}"#.to_string(),
-            daemon_instance_id: "totally-unknown-daemon".to_string(), // not in eligible list
+            daemon_instance_id: "totally-unknown-daemon".to_string(), // not in eligible list,
+            conversation_id: String::new(),
         }))
         .await
         .expect_err("execute_tool must fail for unknown daemon_instance_id");

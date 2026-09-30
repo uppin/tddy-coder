@@ -16,6 +16,10 @@
 //! `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` reach the daemon through this crate
 //! and no longer depend on `tddy-tools` at all.
 
+mod conversation;
+
+pub use conversation::{conversation_worktree, dispatch_conversation_tool, ConversationWorktreeOp};
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
@@ -850,6 +854,7 @@ fn execute_tool_request(
         tool_name: tool_name.to_string(),
         args_json: args.to_string(),
         daemon_instance_id: envelope.daemon_instance_id.clone(),
+        conversation_id: String::new(),
     }
 }
 

@@ -26,7 +26,7 @@ After this change, a conversation's first mutating tool call cuts an **ephemeral
 worktree** from the caller's worktree — its tip **plus the caller's uncommitted changes**, which
 become one commit on the new branch and nowhere else. Every mutating call that changes a file is
 **committed** there, and its tool summary says what it did: how many files it created, updated and
-deleted, how many lines it added and removed, and the commit's short hash. A new
+removed, how many lines it added and removed, and the commit's short hash. A new
 **`subagent_end`** hands the subagent's work to the caller as **uncommitted changes** and deletes the
 worktree; **`subagent_cancel`** deletes it without handing anything back.
 
@@ -78,7 +78,7 @@ rewind, diffing between any two points, and pulling a chosen range.
   ```json
   "worktreeChange": {
     "commit": "3f9c2ab",
-    "files": { "created": 1, "updated": 2, "deleted": 0 },
+    "files": { "created": 1, "updated": 2, "removed": 0 },
     "lines": { "added": 41, "removed": 7 }
   }
   ```
@@ -98,7 +98,7 @@ rewind, diffing between any two points, and pulling a chosen range.
 
   ```json
   { "ended": true,
-    "pulled": { "files": { "created": 1, "updated": 3, "deleted": 0 },
+    "pulled": { "files": { "created": 1, "updated": 3, "removed": 0 },
                 "lines": { "added": 52, "removed": 9 },
                 "conflicts": ["src/lib.rs"] } }
   ```
@@ -161,7 +161,7 @@ rewind, diffing between any two points, and pulling a chosen range.
 - [ ] After creation, reads see the subagent's own writes
 - [ ] Each mutating call that changed files makes exactly one commit; one that changed nothing makes
       none
-- [ ] `worktreeChange` reports created / updated / deleted files, added / removed lines, and the
+- [ ] `worktreeChange` reports created / updated / removed files, added / removed lines, and the
       commit's short hash when one was made; a read carries none
 - [ ] `AWAIT` and unknown tools are treated as mutating
 - [ ] An unsafe conversation id is refused before any git state is created

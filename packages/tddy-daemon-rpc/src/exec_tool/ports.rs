@@ -10,9 +10,10 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_daemon_livekit::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
-    ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ToolCallInfo as ExecToolCallInfo, ToolDef as ExecToolDef,
+    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecuteToolChunk,
+    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo as ExecToolCallInfo,
+    ToolDef as ExecToolDef,
 };
 use tddy_service::proto::exec_tools::{
     ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest,
@@ -358,5 +359,22 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             .collect();
 
         Ok(Response::new(ListSessionToolCallsResponse { tool_calls }))
+    }
+
+    /// `Pull` and `Remove` on a subagent conversation's worktree. Authorized exactly like
+    /// `ExecuteTool`, and the conversation worktree is resolved *under* the token-resolved session
+    /// worktree, so a conversation id can only ever name a directory inside the caller's own
+    /// session.
+    async fn conversation_worktree(
+        &self,
+        request: Request<ConversationWorktreeRequest>,
+    ) -> Result<Response<ConversationWorktreeResponse>, Status> {
+        self.rpc_activity.record();
+        let _req = request.into_inner();
+        // TODO(isolated-edits): implement — authorize, resolve the session worktree, then run the
+        // op through `tddy_subagent_worktree::ConversationWorktrees`
+        Err(Status::unimplemented(
+            "ConversationWorktree is not implemented yet",
+        ))
     }
 }

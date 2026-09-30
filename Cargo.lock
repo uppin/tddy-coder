@@ -12423,6 +12423,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-session-tool-client",
+ "tddy-subagent-worktree",
  "tddy-testing-commons",
  "tempfile",
  "tokio",
@@ -13458,6 +13459,20 @@ dependencies = [
  "async-trait",
  "futures",
  "tddy-rpc",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-subagent-worktree"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tddy-task",
+ "tddy-tool-engine",
+ "tempfile",
  "tokio",
 ]
 

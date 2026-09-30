@@ -31,6 +31,11 @@ service ExecToolService {
   rpc StreamExecuteTool(ExecuteToolRequest) returns (stream ExecuteToolChunk);
   rpc ListExecTools(ListExecToolsRequest) returns (ListExecToolsResponse);
   rpc ListSessionToolCalls(ListSessionToolCallsRequest) returns (ListSessionToolCallsResponse);
+  // The conversation-worktree operations that are not tool calls: hand a subagent conversation's
+  // committed work to the session worktree, or delete the conversation's worktree and branch.
+  // The worktree itself is created, used and committed in by `ExecuteTool` carrying a
+  // `conversation_id` (docs/ft/coder/managed-codebase-subagents.md § The conversation worktree).
+  rpc ConversationWorktree(ConversationWorktreeRequest) returns (ConversationWorktreeResponse);
 }
 
 // One frame of a StreamExecuteTool response. The result is the concatenation of every frame's
@@ -55,6 +60,34 @@ message ExecuteToolRequest {
   string tool_name          = 3;
   string args_json          = 4;
   string daemon_instance_id = 5;
+  // The subagent conversation this call belongs to. Empty: the call runs in the session worktree,
+  // exactly as before. Set: it runs in that conversation's own worktree — created by its first
+  // mutating call — and a mutating call's result gains `worktreeChange`.
+  string conversation_id    = 6;
+}
+
+message ConversationWorktreeRequest {
+  string session_token      = 1;
+  string session_id         = 2;
+  string daemon_instance_id = 3;
+  string conversation_id    = 4;
+  oneof op {
+    PullOp   pull   = 10;
+    RemoveOp remove = 11;
+  }
+}
+
+// Apply everything the conversation committed since its base to the session worktree as
+// uncommitted changes, 3-way; conflicted hunks are written with markers.
+message PullOp {}
+
+// Delete the conversation's worktree, its branch and its base ref.
+message RemoveOp {}
+
+message ConversationWorktreeResponse {
+  // The operation's answer: `{"pulled": {files, lines, conflicts} | null}` for `pull` (null when the
+  // conversation never created a worktree), `{"removed": bool}` for `remove`.
+  string result_json = 1;
 }
 
 message ExecuteToolResponse {

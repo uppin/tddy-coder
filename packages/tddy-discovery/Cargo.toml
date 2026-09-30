@@ -5,6 +5,9 @@ edition = "2021"
 
 [dependencies]
 tddy-rpc = { path = "../tddy-rpc" }
+# `WorktreeChange`: what a mutating tool call did to its conversation's worktree, read off the
+# result at the append site. A leaf crate — git CLI, serde, tokio.
+tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 async-trait = "0.1"
 glob = "0.3"
 log = "0.4"

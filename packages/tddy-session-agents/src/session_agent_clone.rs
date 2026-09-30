@@ -295,6 +295,7 @@ impl HostedClone {
             daemon_instance_id: String::new(),
             tool_name: tool_name.to_string(),
             args_json: args_json.to_string(),
+            conversation_id: String::new(),
         };
         let mut frames = self
             .client

@@ -254,9 +254,13 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
     async fn execute(
         &self,
         session_id: &str,
+        conversation_id: &str,
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
+        // TODO(isolated-edits): a non-empty `conversation_id` runs the call through
+        // `tddy_subagent_worktree::run_in_conversation` and merges its `worktreeChange`
+        let _ = conversation_id;
         // A running row before execution, then a terminal row from the outcome. The durable log is
         // best-effort — a write failure is logged and never blocks the tool call (mirrors
         // tool_call_log handling in the ExecuteTool path).
@@ -1102,7 +1106,12 @@ mod tests {
 
         // When the agent reads that file through the sandbox tool handler.
         let outcome = handler
-            .execute("sandbox-activity-1", "Read", r#"{"path":"greeting.txt"}"#)
+            .execute(
+                "sandbox-activity-1",
+                "",
+                "Read",
+                r#"{"path":"greeting.txt"}"#,
+            )
             .await;
         assert!(!outcome.is_error, "Read of an existing file must succeed");
 
@@ -1125,6 +1134,61 @@ mod tests {
         );
     }
 
+    /// A subagent conversation's call arriving over the jail's session channel runs in that
+    /// conversation's own worktree, not in the session worktree, and its result carries the change.
+    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+    #[tokio::test]
+    async fn a_conversations_call_runs_in_the_conversations_worktree() {
+        use tddy_sandbox_runner::HostToolHandler;
+
+        // Given a session worktree that is a git checkout
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+        for args in [
+            &["init", "-q", "-b", "master"][..],
+            &["config", "user.email", "developer@example.com"][..],
+            &["config", "user.name", "Developer"][..],
+            &["commit", "-q", "--allow-empty", "-m", "initial"][..],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&worktree)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+        let hub = Arc::new(tddy_daemon_kernel::AgentActivityHub::default());
+        let handler = a_tool_handler(worktree.clone(), tmp.path().join("session"), hub);
+
+        // When a conversation writes through the sandbox tool handler
+        let outcome = handler
+            .execute(
+                "sandbox-conversation-1",
+                "explore",
+                "Write",
+                r#"{"path":"a.txt","contents":"a\n"}"#,
+            )
+            .await;
+
+        // Then
+        let result: serde_json::Value = serde_json::from_str(&outcome.result_json).unwrap();
+        assert_eq!(
+            (
+                worktree
+                    .join("tmp/subagent-worktrees/explore/a.txt")
+                    .exists(),
+                worktree.join("a.txt").exists(),
+                result["worktreeChange"]["files"].clone(),
+            ),
+            (
+                true,
+                false,
+                serde_json::json!({ "created": 1, "updated": 0, "removed": 0 })
+            )
+        );
+    }
+
     /// A failing tool call records a terminal `error` row (not `completed`).
     #[tokio::test]
     async fn execute_appends_an_error_row_when_the_tool_fails() {
@@ -1140,7 +1204,12 @@ mod tests {
 
         // When the agent reads a missing file.
         let outcome = handler
-            .execute("sandbox-activity-err", "Read", r#"{"path":"missing.txt"}"#)
+            .execute(
+                "sandbox-activity-err",
+                "",
+                "Read",
+                r#"{"path":"missing.txt"}"#,
+            )
             .await;
         assert!(outcome.is_error, "reading a missing file must be an error");
 

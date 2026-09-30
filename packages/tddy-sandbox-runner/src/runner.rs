@@ -77,7 +77,10 @@ impl tddy_rpc::RpcService for ToolExecService {
                     )));
                 }
             };
-            let resp = self.relay.call_tool(&req.tool_name, &req.args_json).await;
+            let resp = self
+                .relay
+                .call_tool(&req.conversation_id, &req.tool_name, &req.args_json)
+                .await;
             return tddy_rpc::RpcResult::Unary(Ok(resp.encode_to_vec()));
         }
         // The roster and conversation RPCs live on the facilitating daemon's
@@ -396,7 +399,14 @@ struct SandboxSessionRelay {
 }
 
 impl SandboxSessionRelay {
-    async fn call_tool(&self, tool_name: &str, args_json: &str) -> ExecuteToolResponse {
+    async fn call_tool(
+        &self,
+        conversation_id: &str,
+        tool_name: &str,
+        args_json: &str,
+    ) -> ExecuteToolResponse {
+        // TODO(isolated-edits): carry `conversation_id` in the queued request
+        let _ = conversation_id;
         let (tx, rx) = oneshot::channel();
         let req = ExecuteToolRequest {
             session_id: session_id_from_env(),
@@ -2771,7 +2781,7 @@ mod tests {
 
         let call = tokio::spawn({
             let relay = Arc::clone(&relay);
-            async move { relay.call_tool("Read", r#"{"path":"README.md"}"#).await }
+            async move { relay.call_tool("", "Read", r#"{"path":"README.md"}"#).await }
         });
 
         // When — host poll flushes the queued request. Production polls every 25ms; poll in a
@@ -2801,6 +2811,43 @@ mod tests {
         let resp = call.await.expect("call_tool task");
         assert!(!resp.is_error, "{}", resp.error_message);
         assert_eq!(resp.result_json, r#"{"tool":"Read"}"#);
+    }
+
+    /// A subagent conversation's call leaves the jail still naming its conversation: the host runs
+    /// it in that conversation's worktree, and a request that lost the id would silently run in the
+    /// caller's own.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_jail_relay_keeps_the_conversation_of_a_tool_call() {
+        // Given
+        let relay = Arc::new(SandboxSessionRelay::default());
+        let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel();
+        let _call = tokio::spawn({
+            let relay = Arc::clone(&relay);
+            async move {
+                relay
+                    .call_tool("explore", "Write", r#"{"path":"a.txt","contents":"a"}"#)
+                    .await
+            }
+        });
+
+        // When — polled in a loop so the test does not race the spawned push (see above)
+        let mut frame = None;
+        for _ in 0..400 {
+            relay.handle_host_poll(&out_tx);
+            if let Ok(f) = out_rx.try_recv() {
+                frame = Some(f.expect("ok frame"));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        // Then
+        let Some(SessionPayload::ToolRequest(request)) =
+            frame.expect("tool request frame flushed within 2s").payload
+        else {
+            panic!("expected a tool request frame");
+        };
+        assert_eq!(request.conversation_id, "explore");
     }
 
     #[test]
@@ -3492,6 +3539,43 @@ mod tests {
         };
         assert_eq!(request.service, allowed_service);
         assert_eq!(request.method, allowed_method);
+    }
+
+    /// A conversation-worktree operation is an exec-tool RPC the jail may relay: it reaches the host
+    /// as an `RpcRequest` naming `exec_tools.ExecToolService/ConversationWorktree`.
+    #[tokio::test]
+    async fn forwards_a_conversation_worktree_call_to_the_host_as_an_rpc_request() {
+        // Given
+        let (relay, mut from_jail) = a_relay_with_a_host_attached();
+        let service = ToolExecService {
+            relay: Arc::clone(&relay),
+        };
+        let (allowed_service, allowed_method) = tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS[0];
+
+        // When
+        let _stream = service
+            .handle_rpc(
+                allowed_service,
+                allowed_method,
+                &tddy_rpc::RpcMessage {
+                    payload: Vec::new(),
+                    metadata: tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+                },
+            )
+            .await;
+
+        // Then
+        let frame = from_jail
+            .try_recv()
+            .expect("a conversation-worktree call must be forwarded to the host")
+            .expect("the forwarded frame must not be an error");
+        let Some(SessionPayload::RpcRequest(request)) = frame.payload else {
+            panic!("a forwarded RPC must travel as an RpcRequest frame");
+        };
+        assert_eq!(
+            (request.service.as_str(), request.method.as_str()),
+            ("exec_tools.ExecToolService", "ConversationWorktree")
+        );
     }
 }
 

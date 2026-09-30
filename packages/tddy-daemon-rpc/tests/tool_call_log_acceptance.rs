@@ -63,6 +63,7 @@ async fn execute_tool_writes_durable_record_with_args_json() {
             tool_name: "Read".to_string(),
             args_json: args_json.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("ExecuteTool Read must succeed");
@@ -120,6 +121,7 @@ async fn durable_record_readable_independently_of_task_registry() {
                 tool_name: tool_name.to_string(),
                 args_json: args.to_string(),
                 daemon_instance_id: String::new(),
+                conversation_id: String::new(),
             }))
             .await
             .expect("ExecuteTool must succeed");
@@ -162,6 +164,7 @@ async fn list_session_tool_calls_is_scoped_to_session_id() {
                 tool_name: "Read".to_string(),
                 args_json: args.to_string(),
                 daemon_instance_id: String::new(),
+                conversation_id: String::new(),
             }))
             .await
             .expect("ExecuteTool must succeed in session A");
@@ -173,6 +176,7 @@ async fn list_session_tool_calls_is_scoped_to_session_id() {
             tool_name: "Glob".to_string(),
             args_json: r#"{"pattern":"*.txt"}"#.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("ExecuteTool must succeed in session B");
@@ -231,6 +235,7 @@ async fn list_session_tool_calls_returns_records_chronologically_with_args_json(
                 tool_name: tool.to_string(),
                 args_json: args.to_string(),
                 daemon_instance_id: String::new(),
+                conversation_id: String::new(),
             }))
             .await
             .expect("ExecuteTool must succeed");

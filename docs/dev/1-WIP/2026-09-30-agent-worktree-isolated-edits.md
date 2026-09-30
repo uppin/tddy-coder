@@ -4,6 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Feature
 **Stack**: `#agent-worktree` 1/4 — branch `feature/agent-worktree/isolated-edits`, base `master`
+**PR**: [#560](https://github.com/uppin/tddy-coder/pull/560)
 
 ## Initial Discovery
 
@@ -45,22 +46,33 @@ None — this is the root node, cut from `master`.
 
 ## Draft PR contract
 
-The first push after this planning commit publishes:
+Published as this PR's second commit — the interface this PR goes on to implement, not its
+deliverable; the PR must not merge in that state:
 
-- `packages/tddy-subagent-worktree` with its public surface — `ConversationId::parse`,
-  `ConversationWorktrees::{new, ensure, existing}`, `ConversationWorktree::{root, base,
-  commit_changes, pull_into_caller, remove}`, `WorktreeChange`, `FileCounts`, `LineCounts`,
-  `PullOutcome`, `ToolEffect::of`, and `run_in_conversation(…)` (route + execute + commit + merge the
-  change facts into the result JSON) — every body `// TODO(isolated-edits): implement`;
-- `exec_tools.proto`: `ExecuteToolRequest.conversation_id = 6`, `ConversationWorktreeRequest`
-  (`oneof op { PullOp pull; RemoveOp remove; }`), `ConversationWorktreeResponse`, the
-  `ConversationWorktree` RPC, and `ExecToolHandler::conversation_worktree`;
-- `tddy_discovery::subagent::transcript::MessageDescriptor::worktree_change`;
-- `subagent_end` registered in `tddy-tools`' router with its schema;
-- the failing acceptance and unit tests listed below.
-
-That surface is the interface this PR goes on to implement; it is not this PR's deliverable, and the
-PR must not merge in that state.
+- `packages/tddy-subagent-worktree` — `ConversationId::parse`, `UnsafeConversationId`,
+  `ConversationWorktrees::{new, path_of, branch_of, existing, ensure}`,
+  `ConversationWorktree::{root, branch, base, caller, commit_changes, pull_into_caller, remove}`,
+  `WorktreeChange`, `FileCounts {created, updated, removed}`, `LineCounts {added, removed}`,
+  `PullOutcome`, `WorktreeError`, `ToolEffect::of`, `run_in_conversation`, `ConversationRun`,
+  `with_worktree_change`, `SUBAGENT_WORKTREES_DIR`; every behaviour body
+  `todo!()` under `// TODO(isolated-edits): implement`;
+- `exec_tools.proto` — `ExecuteToolRequest.conversation_id = 6`, `ConversationWorktreeRequest`
+  (`oneof op { PullOp pull = 10; RemoveOp remove = 11; }`), `ConversationWorktreeResponse`, the
+  `ConversationWorktree` RPC; the hand-kept tonic adapter supplement; regenerated
+  `packages/tddy-web/src/gen/exec_tools_pb.ts`; `conversation_id: String::new()` at the 40 existing
+  request literals;
+- `ExecToolHandler::conversation_worktree` + the service adapter; `ExecToolRpcHandler` answering
+  `Unimplemented`; `tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS`;
+- `tddy_sandbox_runner::HostToolHandler::execute(session_id, conversation_id, tool, args)` — the new
+  parameter at all seven implementations; the jail relay's `call_tool(conversation_id, …)` and the host
+  relay still dropping it (`TODO`);
+- `tddy_session_tool_client::{dispatch_conversation_tool, conversation_worktree,
+  ConversationWorktreeOp}` in `src/conversation.rs`;
+- `tddy_discovery::subagent::MessageDescriptor::worktree_change` (serialized `worktreeChange`),
+  re-exported `WorktreeChange` / `FileCounts` / `LineCounts`; the transcript entry field, never set yet;
+- `tddy-tools`' `subagent_end` module — definition and handler, **not routed**, so its advertisement
+  test fails until green routes it;
+- the failing tests listed below.
 
 ## Green wave
 
@@ -73,6 +85,31 @@ PR must not merge in that state.
 Real dependency edges, as opposed to the branch line:
 
     n1 → n2, n3, n4      n2 → n4
+
+## Dependency graph after this node
+
+```mermaid
+graph LR
+  subgraph new
+    SW[tddy-subagent-worktree]
+  end
+  DISC[tddy-discovery] --> SW
+  LIFE[tddy-session-lifecycle] --> SW
+  RPC[tddy-daemon-rpc] --> SW
+  SBX[tddy-daemon-sandbox] --> SW
+  TOOLS[tddy-tools] --> DISC
+  TOOLS --> STC[tddy-session-tool-client]
+  RUN[tddy-sandbox-runner] --> ENG[tddy-tool-engine]
+  SW -. dev .-> ENG
+```
+
+| Edge | Status | Check |
+|---|---|---|
+| `tddy-discovery → tddy-subagent-worktree` | new (published here) | `cargo tree -p tddy-discovery -i tddy-subagent-worktree` |
+| `tddy-session-lifecycle`, `tddy-daemon-rpc`, `tddy-daemon-sandbox` `→ tddy-subagent-worktree` | new (green) | same, per crate |
+| `tddy-subagent-worktree → any tddy-* crate` (normal deps) | **must not exist** — a leaf | `grep -c 'path = "../tddy-' packages/tddy-subagent-worktree/Cargo.toml` under `[dependencies]` is 0 |
+| `tddy-sandbox-runner → tddy-subagent-worktree` | **must not exist** — the runner relays, it never runs git (it is inside every jail) | `cargo tree -p tddy-sandbox-runner -i tddy-subagent-worktree` fails |
+| `tddy-discovery → tddy-tool-engine` (normal) | **must not exist** — unchanged | `cargo tree -p tddy-discovery -e normal -i tddy-tool-engine` fails |
 
 ## Prerequisites
 
@@ -128,6 +165,9 @@ resolved in the shared route (`run_exec_tool_locally`) that both `execute_tool` 
 - **tddy-discovery**: [roster-and-subagent-runtime.md](../../packages/tddy-discovery/docs/roster-and-subagent-runtime.md) — `worktree_change` on the descriptor and in `prompt_outcome_json`
 - **tddy-tools**: [README.md](../../packages/tddy-tools/README.md) — `subagent_end`, `subagent_cancel` removes, the Managed closure carries the conversation id
 - **tddy-sandbox-recipes**: allowlists `mcp__tddy-tools__subagent_end`
+- **tddy-daemon-sandbox**: [README.md](../../packages/tddy-daemon-sandbox/README.md) — `DaemonToolHandler` runs a conversation's call through `run_in_conversation`
+- **tddy-web**: regenerated `src/gen/exec_tools_pb.ts` (no UI change)
+- **tddy-sandbox-app**, **tddy-testing-commons**, **tddy-integration-tests**: the new `HostToolHandler::execute` parameter on their handlers
 
 ## Related Feature Documentation
 
@@ -139,7 +179,7 @@ resolved in the shared route (`run_exec_tool_locally`) that both `execute_tool` 
 A subagent conversation gets its own branch and worktree inside the session worktree, created on its
 first mutating tool call and seeded with the caller's uncommitted state. Each mutating call that
 changes files is committed there, and its summary reports the files and lines it created, updated and
-deleted with the commit's short hash. `subagent_end` hands the result to the caller as uncommitted
+removed with the commit's short hash. `subagent_end` hands the result to the caller as uncommitted
 changes; `subagent_cancel` discards it.
 
 ## Background
@@ -205,8 +245,8 @@ tddy-tools (in jail)                             facilitating daemon
     `HEAD`; `git worktree add -b tddy/subagent/<session>/<conv> <path> <base>`.
   - `ConversationWorktree::{root, base, commit_changes(subject) -> WorktreeChange,
     pull_into_caller() -> PullOutcome, remove()}`. `commit_changes` stages everything, derives the
-    facts from `diff --cached --name-status` + `--numstat` (A = created, M/T = updated, D = deleted,
-    R = one deleted + one created; binary `-` counts no lines) and commits only when non-empty.
+    facts from `diff --cached --name-status` + `--numstat` (A = created, M/T = updated, D = removed,
+    R = one removed + one created; binary `-` counts no lines) and commits only when non-empty.
     `pull_into_caller` runs `git diff --binary base..tip | git apply --3way` in the caller's worktree
     and reports conflicted paths. `remove` = `git worktree remove --force` + `git branch -D`.
   - `ToolEffect::of(tool_name) -> ToolEffect::{ReadOnly, Mutating}` — `ReadOnly` for exactly
@@ -264,7 +304,7 @@ tddy-tools (in jail)                             facilitating daemon
 - `subagent_end` module; `subagent_cancel` removes; per-conversation Managed closure.
 
 #### tddy-sandbox-recipes
-- `mcp__tddy-tools__subagent_end` on the three allowlists that carry `subagent_cancel`.
+- `mcp__tddy-tools__subagent_end` beside `subagent_cancel` in the subagent tool list.
 
 ## Implementation Milestones
 
@@ -292,62 +332,122 @@ sandbox per run and was rejected as the primary proof; the relay gets a focused 
 
 ### Acceptance Tests
 
-#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/conversation_worktree_acceptance.rs`
-- `a_conversation_that_only_reads_creates_no_worktree_and_no_branch`
-- `the_first_mutating_call_cuts_the_worktree_from_the_callers_head`
+Every test below fails on this branch for this node's missing implementation. The two marked
+**guard** pass by design: they pin the unchanged path (no conversation id → today's behaviour) so the
+implementation cannot break it.
+
+#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/conversation_worktree_acceptance.rs` (19)
+Fixture: `tests/support/mod.rs` — `a_caller_worktree()` builder over real repositories
+(`with_committed_file`, `with_staged_edit`, `with_unstaged_edit`, `with_untracked_file`,
+`with_ignored_file`, `in_a_linked_worktree`).
+- `looking_up_a_conversation_that_never_wrote_creates_nothing`
+- `the_worktree_is_cut_from_the_callers_head_on_its_own_branch`
 - `the_callers_uncommitted_and_untracked_changes_become_one_commit_on_the_subagent_branch`
-- `creating_the_worktree_leaves_the_callers_index_branch_and_files_untouched`
+- `the_inherited_commit_leaves_out_ignored_files`
+- `cutting_the_worktree_leaves_the_callers_index_branch_and_files_untouched`
 - `the_conversation_worktree_never_shows_in_the_callers_status`
-- `a_change_is_committed_with_its_created_updated_and_deleted_counts`
+- `a_linked_session_worktree_gets_its_conversation_worktree_in_its_own_tmp`
+- `ensuring_twice_finds_the_same_worktree_and_base`
+- `two_sessions_can_hold_conversations_of_the_same_name`
+- `a_change_is_committed_with_its_created_updated_and_removed_counts`
+- `each_commit_is_named_after_the_tool_that_made_it`
 - `a_call_that_changed_nothing_makes_no_commit`
 - `a_binary_file_counts_as_a_file_and_adds_no_lines`
-- `an_unsafe_conversation_id_is_refused_before_any_git_state_exists`
+- `the_subagents_commits_are_not_attributed_to_the_developer`
 - `pulling_applies_everything_since_the_base_as_uncommitted_changes`
+- `pulling_does_not_reapply_the_callers_own_inherited_changes`
 - `a_pull_over_the_callers_own_edit_leaves_conflict_markers_and_names_the_path`
 - `pulling_never_moves_the_callers_head`
 - `removing_deletes_the_worktree_and_its_branch`
 
-#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/run_in_conversation_acceptance.rs`
-- `a_read_before_any_write_reads_the_session_worktree`
+#### tddy-subagent-worktree — `packages/tddy-subagent-worktree/tests/run_in_conversation_acceptance.rs` (9)
+Executor: the real `tddy_tool_engine::execute_tool`.
+- `a_read_before_any_write_reads_the_session_worktree_and_creates_nothing`
 - `a_write_lands_in_the_conversation_worktree_and_reports_its_commit`
 - `a_read_after_a_write_sees_the_subagents_own_write`
 - `a_shell_call_that_creates_files_reports_them`
-- `await_is_treated_as_mutating`
+- `a_delete_reports_a_removed_file`
+- `await_is_treated_as_mutating_and_commits_what_the_background_job_wrote`
 - `a_read_only_call_carries_no_worktree_change`
+- `a_mutating_call_that_changed_nothing_reports_zero_counts_without_a_commit`
+- `the_tool_result_itself_is_passed_through_unchanged`
 
-#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_exec_tool_acceptance.rs`
+#### tddy-daemon-rpc — `packages/tddy-daemon-rpc/tests/conversation_worktree_exec_tool_acceptance.rs` (7)
 - `an_execute_tool_carrying_a_conversation_id_writes_to_that_conversations_worktree`
-- `an_execute_tool_without_a_conversation_id_writes_to_the_session_worktree`
+- `an_execute_tool_without_a_conversation_id_writes_to_the_session_worktree` — **guard**
+- `an_unsafe_conversation_id_is_refused_before_any_tool_runs`
 - `pull_hands_the_conversations_changes_to_the_session_worktree`
+- `pulling_a_conversation_that_never_wrote_pulls_nothing`
 - `remove_deletes_the_conversation_worktree`
-- `a_conversation_worktree_call_with_a_foreign_token_is_refused`
+- `a_conversation_worktree_call_with_an_unverifiable_token_is_refused`
 
-#### tddy-sandbox-runner — `packages/tddy-sandbox-runner/tests/conversation_tool_relay.rs`
-- `the_relay_carries_the_conversation_id_to_the_host`
-- `the_relay_forwards_conversation_worktree_calls_to_the_host`
+#### tddy-daemon-sandbox — unit test in `packages/tddy-daemon-sandbox/src/sandbox_session.rs`
+- `a_conversations_call_runs_in_the_conversations_worktree` — the SandboxIpc route
+  (`DaemonToolHandler`), which never enters `run_exec_tool_locally`
 
-#### tddy-discovery — `packages/tddy-discovery/tests/worktree_change_summary_acceptance.rs`
+#### tddy-sandbox-runner
+- `src/runner.rs` unit: `the_jail_relay_keeps_the_conversation_of_a_tool_call`
+- `src/runner.rs` unit: `forwards_a_conversation_worktree_call_to_the_host_as_an_rpc_request`
+- `tests/host_relay_dispatch.rs`: `hands_the_conversation_of_a_jails_tool_call_to_the_handler`
+  (new fixture mode `Mode::PushConversationToolRequest` in `tests/common/mod.rs`)
+
+#### tddy-session-tool-client — unit tests in `packages/tddy-session-tool-client/src/conversation.rs`
+- `a_conversation_tool_call_names_its_conversation_on_the_wire`
+- `a_pull_names_its_conversation_and_asks_for_a_pull`
+- `a_remove_asks_for_a_remove`
+
+#### tddy-discovery — `packages/tddy-discovery/tests/worktree_change_summary_acceptance.rs` (4)
 - `a_mutating_call_reports_its_worktree_change_in_the_turn_outcome`
-- `a_read_reports_no_worktree_change`
 - `a_mutating_call_that_changed_nothing_reports_counts_without_a_commit`
+- `the_worktree_change_is_serialized_beside_the_result_summary`
+- `a_read_reports_no_worktree_change` — **guard**
 
-#### tddy-tools — `packages/tddy-tools/tests/subagent_end_mcp_acceptance.rs`
-- `subagent_end_is_advertised`
+#### tddy-tools — `packages/tddy-tools/tests/subagent_end_mcp_acceptance.rs` (4)
+- `subagent_end_is_advertised_beside_subagent_cancel`
 - `ending_a_conversation_that_never_wrote_pulls_nothing`
 - `ending_a_conversation_with_a_turn_running_is_refused`
 - `an_ended_conversation_can_no_longer_be_prompted`
 
-#### tddy-sandbox-recipes — unit tests in `packages/tddy-sandbox-recipes/src/claude_cli.rs`
+#### tddy-sandbox-recipes — unit test in `packages/tddy-sandbox-recipes/src/claude_cli.rs`
 - `subagent_end_is_allowlisted_wherever_subagent_cancel_is`
 
-### Unit tests
-- `tddy-subagent-worktree/src/conversation_id.rs` — charset, length, leading dot, `..`, `/`, empty
-- `tddy-subagent-worktree/src/tool_effect.rs` — the five read-only names, `Await`, unknown, case
-- `tddy-subagent-worktree/src/change_facts.rs` — `--name-status` / `--numstat` parsing incl. renames and binary
+### Unit tests (tddy-subagent-worktree)
+- `src/conversation_id.rs` (8) — accepted shape, `/`, `..`, leading `.`, empty, length ±1, space
+- `src/tool_effect.rs` (5) — the five read-only names, the four writers, `Await`, unknown, case
+- `src/change_facts.rs` (8) — created, updated (M/T), removed, rename, summed lines, binary, empty;
+  plus `a_change_without_a_commit_serializes_without_the_commit_key`, which **passes** on the
+  surface's serde derive — it pins the wire shape the other suites assert through
+- `src/run.rs` (2) — `with_worktree_change` merges beside the tool's fields; a non-object is wrapped
+
+### Not covered by a red test — gaps to close in green
+- **The host bridge arm.** `DaemonRpcHandler::handle_rpc`
+  (`tddy-session-lifecycle/src/connection_service/daemon_rpc_handler.rs`) must dispatch
+  `(exec_tools.ExecToolService, ConversationWorktree)` to the daemon's exec-tool service; it cannot be
+  constructed without a `DaemonSessionHost`, and no suite drives it today. Green adds the arm and a test
+  where the host's bridge is reachable.
+- **The workspace jail route.** A sandboxed workspace session (`ExecToolRoute::Jail`) runs its tools in
+  a jail at the session root; the conversation root is inside that jail's mount, so the in-jail executor
+  must run a conversation's call at `<mount>/tmp/subagent-worktrees/<conv>`. The existing
+  `workspace_tool_sandbox_*_acceptance` suites are the place; they need a sandbox to run.
 
 ## Technical Debt & Production Readiness
 
-(populated during development)
+### Baseline (recorded before this node's work)
+- `cargo check --all-targets` over the nine packages first in scope: green, zero warnings.
+- ❌ **Pre-existing, not this node's:** `packages/tddy-daemon-sandbox/tests/sandbox_stdio_seatbelt_acceptance.rs`
+  (macOS-only) does not compile on `master` — it names `SandboxHandle` without importing it. This node
+  only adds the new `_conversation_id` parameter to its fake handler. Every other
+  `tddy-daemon-sandbox` target compiles and lints clean.
+
+### Discovered while publishing the surface
+- **Two in-jail routes, not one.** An in-jail `tddy-tools` reaches mutations either over the sandbox
+  session channel (`SandboxIpc` → runner → host relay → `DaemonToolHandler`, which runs the tool engine
+  directly) or over `ExecuteTool` (`DaemonUds` / `DaemonHttp` / LiveKit → `run_exec_tool_locally`).
+  Both wrap in `run_in_conversation`.
+- **Both relay halves dropped the id.** The jail side rebuilt the request from `tool_name` /
+  `args_json` with `..Default::default()`; the host side called `HostToolHandler::execute(session,
+  tool, args)`. The trait gained a `conversation_id` parameter — seven implementations — rather than a
+  defaulted second method, which would have been a silent fallback.
 
 ## Decisions & Trade-offs
 
@@ -388,10 +488,10 @@ sandbox per run and was rejected as the primary proof; the relay gets a focused 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (approved 2026-09-30)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

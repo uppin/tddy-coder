@@ -174,6 +174,7 @@ impl JailedWorkspace {
                 daemon_instance_id: String::new(),
                 tool_name: tool.to_string(),
                 args_json: args.to_string(),
+                conversation_id: String::new(),
             }))
             .await
             .expect("ExecuteTool must not fail at the RPC level")

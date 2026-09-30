@@ -90,6 +90,7 @@ impl HostToolHandler for AppToolHandler {
     async fn execute(
         &self,
         session_id: &str,
+        _conversation_id: &str,
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {

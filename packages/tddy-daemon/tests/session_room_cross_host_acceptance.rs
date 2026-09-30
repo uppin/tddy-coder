@@ -634,6 +634,7 @@ async fn read_file_in_room(
                 tool_name: "Read".to_string(),
                 args_json: serde_json::json!({ "path": path }).to_string(),
                 daemon_instance_id: codebase.daemon_instance_id.clone(),
+                conversation_id: String::new(),
             }
             .encode_to_vec(),
         ),

@@ -260,6 +260,7 @@ impl DaemonSessionHost {
                     daemon_instance_id: String::new(),
                     tool_name,
                     args_json: args.to_string(),
+                    conversation_id: String::new(),
                 };
                 agent_roster::dispatch_envelope(
                     service.run_hosted_clone_tool(&request, &clone).await,
@@ -304,6 +305,7 @@ impl DaemonSessionHost {
                     daemon_instance_id: String::new(),
                     tool_name,
                     args_json: args.to_string(),
+                    conversation_id: String::new(),
                 };
                 let answer = match service.resolve_exec_tool_worktree(&request) {
                     Ok((sessions_base, worktree_root)) => agent_roster::dispatch_envelope(

@@ -293,6 +293,7 @@ fn a_tool_request(session_id: &str, tool: &str, args: &str) -> ExecuteToolReques
         daemon_instance_id: String::new(),
         tool_name: tool.to_string(),
         args_json: args.to_string(),
+        conversation_id: String::new(),
     }
 }
 

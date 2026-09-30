@@ -475,6 +475,27 @@ mod tests {
         }
     }
 
+    /// `subagent_end` is how a conversation's work reaches the caller at all: a sandboxed Claude
+    /// allowed to cancel a conversation but not to end it could only ever throw the work away.
+    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+    #[test]
+    fn subagent_end_is_allowlisted_wherever_subagent_cancel_is() {
+        // Given
+        let allowlist = build_claude_allowlist(true, &[]);
+
+        // When
+        let allowed = |tool: &str| allowlist.iter().any(|entry| entry == tool);
+
+        // Then
+        assert_eq!(
+            (
+                allowed("mcp__tddy-tools__subagent_cancel"),
+                allowed("mcp__tddy-tools__subagent_end")
+            ),
+            (true, true)
+        );
+    }
+
     /// A subagent's turn budget is the caller's to extend, and `subagent_resume` is the only way
     /// to spend the extension on a conversation that already exists. A sandboxed Claude that can
     /// open and prompt but not resume can only ever restart a search that ran out of turns,

@@ -131,6 +131,14 @@ pub struct MessageDescriptor {
     /// is nothing to say, matching the descriptor's other optional readings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_summary: Option<super::result_summary::ResultSummary>,
+    /// What a mutating tool call did to the conversation's own worktree — files created, updated
+    /// and removed, lines added and removed, and the commit that recorded it. `None` for a read,
+    /// for every non-`tool` role, and for a call whose codebase has no conversation worktree.
+    ///
+    /// A sibling of `result_summary` rather than a field inside it: it describes the worktree, not
+    /// the tool's answer, and `SHELL` / `AWAIT` change files their own summaries never mention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
 }
 
 /// Cut `text` to [`MESSAGE_PREVIEW_CHARS`], marking that it was cut.
@@ -198,6 +206,9 @@ struct TranscriptEntry {
     /// The structured facts of a `tool`-role result, computed at the append site where the
     /// result JSON is still structured — `None` for every other kind of message.
     result_summary: Option<ResultSummary>,
+    /// What the call did to the conversation worktree, read off the result's `worktreeChange` at
+    /// the same append site. Kept on the entry so a rewind can find the commit it goes back to.
+    worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
 }
 
 /// One conversation's messages, in order, each addressable by a [`MessageId`].
@@ -247,6 +258,9 @@ impl Transcript {
             message,
             is_error,
             result_summary,
+            // TODO(isolated-edits): recorded by `push_tool_result` from the result's
+            // `worktreeChange`
+            worktree_change: None,
         });
         id
     }
@@ -299,6 +313,7 @@ impl Transcript {
                     is_error: entry.is_error,
                     preview: preview_of(entry.message.content.as_deref().unwrap_or("")),
                     result_summary: entry.result_summary.clone(),
+                    worktree_change: entry.worktree_change.clone(),
                 })
             })
             .collect()
