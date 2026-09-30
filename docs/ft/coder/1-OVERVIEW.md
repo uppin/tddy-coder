@@ -77,6 +77,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [Rewinding a subagent conversation resets its worktree](1-WIP/PRD-2026-09-30-agent-worktree-rewind-reset.md) | [Managed-codebase subagents](managed-codebase-subagents.md) — `subagent_resume{fromMessageId}` resets the conversation worktree; `resetWorktree: false` opts out |
 
 ## Integration Points
 
