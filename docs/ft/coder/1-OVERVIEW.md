@@ -76,6 +76,7 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
+| [A subagent edits its own worktree](1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md) | [Managed-codebase subagents](managed-codebase-subagents.md) — per-conversation worktree, one commit per mutating call, change facts in the tool summary, `subagent_end` / `subagent_cancel` hand-over |
 
 ## Integration Points
 
