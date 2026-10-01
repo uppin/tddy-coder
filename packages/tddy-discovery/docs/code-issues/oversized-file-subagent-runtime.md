@@ -58,3 +58,4 @@ cross-checked against `SpecializedSubagentSession::prompt` and `run_one_turn` in
 `subagent.rs:864-910`, which push `ChatMessage::assistant` and `ChatMessage::tool_result` inside the
 loop — confirming the comment's premise is false. Did **not** run `restructure check`.
 | 2026-09-28 | 729 | +13 in PR #556 (`#subagent-control` 4/5): the yielded outcome's `prompt_outcome_json` fields (`firedCondition`, `yieldedMessageId`) and their framing |
+| 2026-10-01 | gate: 729 → 732 | **worse** by 3 in PR #561 (`#agent-worktree` 2/4): `prompt_outcome_json` adds the `worktreeReset` field. No other node of the stack touches this file, so the split was open to this PR; **deferred at the developer's direction** — three lines do not justify decomposing a 729-line file inside a stacked PR, and the extraction this record already names (the outcome-JSON rendering) is one move. Do it as its own change. |
