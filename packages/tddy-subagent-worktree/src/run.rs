@@ -9,13 +9,36 @@ use crate::conversation_id::ConversationId;
 use crate::tool_effect::ToolEffect;
 use crate::worktree::{ConversationWorktrees, WorktreeError};
 
+/// The key a call's result carries its [`WorktreeChange`] under — or, when the call ran but its
+/// commit failed, `{"error": …}`.
+pub const WORKTREE_CHANGE_KEY: &str = "worktreeChange";
+
 /// What one call produced, and what it changed.
 #[derive(Debug)]
 pub struct ConversationRun<T> {
     /// Whatever the executor returned.
     pub output: T,
-    /// Present for every [`ToolEffect::Mutating`] call; `None` for a read.
+    /// Present for every [`ToolEffect::Mutating`] call whose commit succeeded; `None` for a read.
     pub change: Option<WorktreeChange>,
+    /// Why recording a mutating call that already ran failed. The tool's `output` is still the
+    /// truth about what it did — its effects are on disk, uncommitted — so it is carried, not
+    /// dropped for the error.
+    pub commit_error: Option<String>,
+}
+
+impl<T> ConversationRun<T> {
+    /// `result_json` as the caller should see it: with the call's [`WorktreeChange`] merged in, or
+    /// with `"worktreeChange": {"error": …}` when the commit failed, or untouched for a read.
+    pub fn merge(&self, result_json: &str) -> String {
+        match (&self.change, &self.commit_error) {
+            (Some(change), _) => with_worktree_change(result_json, change),
+            (None, Some(error)) => with_worktree_value(
+                result_json,
+                serde_json::json!({ "error": format!("the call ran, but its worktree commit failed: {error}") }),
+            ),
+            (None, None) => result_json.to_string(),
+        }
+    }
 }
 
 /// Run one tool call of `conversation`:
@@ -46,15 +69,22 @@ where
             Ok(ConversationRun {
                 output: execute(root).await,
                 change: None,
+                commit_error: None,
             })
         }
         ToolEffect::Mutating => {
             let worktree = worktrees.ensure(conversation).await?;
             let output = execute(worktree.root().to_path_buf()).await;
-            let change = worktree.commit_changes(tool_name).await?;
+            // The tool has already run: a commit failure is reported beside its output, never
+            // instead of it.
+            let (change, commit_error) = match worktree.commit_changes(tool_name).await {
+                Ok(change) => (Some(change), None),
+                Err(error) => (None, Some(error.to_string())),
+            };
             Ok(ConversationRun {
                 output,
-                change: Some(change),
+                change,
+                commit_error,
             })
         }
     }
@@ -65,6 +95,10 @@ where
 /// dropped.
 pub fn with_worktree_change(result_json: &str, change: &WorktreeChange) -> String {
     let change = serde_json::to_value(change).expect("a WorktreeChange serializes to JSON");
+    with_worktree_value(result_json, change)
+}
+
+fn with_worktree_value(result_json: &str, change: serde_json::Value) -> String {
     let mut object = match serde_json::from_str::<serde_json::Value>(result_json) {
         Ok(serde_json::Value::Object(object)) => object,
         Ok(other) => serde_json::Map::from_iter([("result".to_string(), other)]),
@@ -74,7 +108,7 @@ pub fn with_worktree_change(result_json: &str, change: &WorktreeChange) -> Strin
             serde_json::Value::String(result_json.to_string()),
         )]),
     };
-    object.insert("worktreeChange".to_string(), change);
+    object.insert(WORKTREE_CHANGE_KEY.to_string(), change);
     serde_json::Value::Object(object).to_string()
 }
 

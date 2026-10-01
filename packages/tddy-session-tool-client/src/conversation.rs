@@ -246,20 +246,28 @@ async fn ask_daemon(
 
 /// The same call over the daemon's HTTP Connect endpoint.
 async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRequest) -> String {
-    let op = match &request.op {
-        Some(Op::Pull(_)) => serde_json::json!({ "pull": {} }),
-        Some(Op::Remove(_)) => serde_json::json!({ "remove": {} }),
-        None => serde_json::json!({}),
+    // The Connect JSON body: the request's fields, and the chosen operation as a key of its own.
+    let mut fields = serde_json::Map::from_iter([
+        (
+            "session_token".to_string(),
+            request.session_token.clone().into(),
+        ),
+        ("session_id".to_string(), request.session_id.clone().into()),
+        (
+            "daemon_instance_id".to_string(),
+            request.daemon_instance_id.clone().into(),
+        ),
+        (
+            "conversation_id".to_string(),
+            request.conversation_id.clone().into(),
+        ),
+    ]);
+    match &request.op {
+        Some(Op::Pull(_)) => fields.insert("pull".to_string(), serde_json::json!({})),
+        Some(Op::Remove(_)) => fields.insert("remove".to_string(), serde_json::json!({})),
+        None => None,
     };
-    let mut body = serde_json::json!({
-        "session_token": request.session_token,
-        "session_id": request.session_id,
-        "daemon_instance_id": request.daemon_instance_id,
-        "conversation_id": request.conversation_id,
-    });
-    body.as_object_mut()
-        .expect("a JSON object literal")
-        .extend(op.as_object().expect("a JSON object literal").clone());
+    let body = serde_json::Value::Object(fields);
     let url = format!(
         "{}/exec_tools.ExecToolService/ConversationWorktree",
         daemon_url.trim_end_matches('/')

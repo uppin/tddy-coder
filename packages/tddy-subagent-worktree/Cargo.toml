@@ -16,10 +16,11 @@ log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `io-util` feeds a child's stdin; `macros` gives `join!`, which drives stdin and output together.
-tokio = { version = "1", features = ["process", "fs", "io-util", "macros"] }
+tokio = { version = "1", features = ["process", "fs", "io-util", "macros", "sync"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+rstest = { workspace = true }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs"] }
 # The real executor, so a `Write` in `run_in_conversation_acceptance` really writes.

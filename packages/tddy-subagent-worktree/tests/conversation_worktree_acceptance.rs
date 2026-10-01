@@ -538,3 +538,150 @@ async fn removing_deletes_the_worktree_and_its_branch() {
         (false, branches_before, true)
     );
 }
+
+#[tokio::test]
+async fn a_deleted_worktree_directory_is_recreated_on_its_surviving_branch() {
+    // Given
+    let caller = a_caller_worktree().build();
+    let conversations = caller.conversations();
+    let first = conversations
+        .ensure(&conversation("explore"))
+        .await
+        .expect("first ensure");
+    write(
+        first.root(),
+        "kept.md",
+        b"committed before the directory vanished\n",
+    );
+    first.commit_changes("Write").await.expect("commit");
+    caller.delete_directory("tmp/subagent-worktrees/explore");
+
+    // When
+    let again = conversations
+        .ensure(&conversation("explore"))
+        .await
+        .expect("ensure after the directory was deleted");
+
+    // Then
+    assert_eq!(
+        (
+            std::fs::read_to_string(again.root().join("kept.md")).unwrap(),
+            again.base().to_string()
+        ),
+        (
+            "committed before the directory vanished\n".to_string(),
+            first.base().to_string()
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_surviving_branch_whose_base_was_lost_starts_the_conversation_afresh() {
+    // Given
+    let caller = a_caller_worktree().build();
+    let conversations = caller.conversations();
+    let first = conversations
+        .ensure(&conversation("explore"))
+        .await
+        .expect("first ensure");
+    write(
+        first.root(),
+        "orphaned.md",
+        b"no known base to hand back against\n",
+    );
+    first.commit_changes("Write").await.expect("commit");
+    caller.delete_directory("tmp/subagent-worktrees/explore");
+    caller.lose_base_ref_of(&conversation("explore"));
+
+    // When
+    let again = conversations
+        .ensure(&conversation("explore"))
+        .await
+        .expect("ensure after the base was lost");
+
+    // Then
+    assert_eq!(
+        (
+            again.root().join("orphaned.md").exists(),
+            again.base().to_string()
+        ),
+        (false, caller.head())
+    );
+}
+
+#[tokio::test]
+async fn two_concurrent_ensures_of_one_conversation_create_it_once() {
+    // Given
+    let caller = a_caller_worktree().build();
+    let conversations = caller.conversations();
+
+    let explore = conversation("explore");
+
+    // When
+    let (one, other) = tokio::join!(
+        conversations.ensure(&explore),
+        conversations.ensure(&explore)
+    );
+
+    // Then
+    assert_eq!(
+        (
+            one.expect("first ensure").root().to_path_buf(),
+            other.expect("second ensure").root().to_path_buf()
+        ),
+        (
+            caller.path().join("tmp/subagent-worktrees/explore"),
+            caller.path().join("tmp/subagent-worktrees/explore")
+        )
+    );
+}
+
+#[tokio::test]
+async fn two_concurrent_commits_in_one_conversation_both_succeed_and_keep_every_file() {
+    // Given
+    let caller = a_caller_worktree().build();
+    let worktree = caller
+        .conversations()
+        .ensure(&conversation("explore"))
+        .await
+        .expect("ensure");
+    write(worktree.root(), "a.md", b"a\n");
+    write(worktree.root(), "b.md", b"b\n");
+
+    // When
+    let (one, other) = tokio::join!(
+        worktree.commit_changes("Write a"),
+        worktree.commit_changes("Write b"),
+    );
+
+    // Then
+    let files_changed =
+        one.expect("first commit").files.created + other.expect("second commit").files.created;
+    assert_eq!(
+        (
+            files_changed,
+            file_at(worktree.root(), "HEAD", "a.md"),
+            file_at(worktree.root(), "HEAD", "b.md")
+        ),
+        (2, "a\n".to_string(), "b\n".to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_developers_post_commit_hook_does_not_run_for_a_subagents_commit() {
+    // Given
+    let caller = a_caller_worktree().build();
+    caller.install_post_commit_hook_leaving_hook_ran();
+    let worktree = caller
+        .conversations()
+        .ensure(&conversation("explore"))
+        .await
+        .expect("ensure");
+    write(worktree.root(), "new.md", b"new\n");
+
+    // When
+    worktree.commit_changes("Write").await.expect("commit");
+
+    // Then
+    assert_eq!(caller.exists("hook-ran"), false);
+}

@@ -498,6 +498,12 @@ mod workspace_start_request_unit_tests;
 #[cfg(test)]
 mod workspace_sandbox_roster_dispatch_unit_tests;
 
+/// A subagent conversation's call on a sandboxed workspace session reaches the jail with the root
+/// the conversation rule chose: the session root until the conversation's first write, its own
+/// worktree after.
+#[cfg(test)]
+mod conversation_worktree_jail_route_unit_tests;
+
 /// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
 /// failure is not mistaken for one. Driven through the same private
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.

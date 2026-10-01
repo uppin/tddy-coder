@@ -48,7 +48,7 @@ pub(crate) fn bind_to_this_session(
     use prost::Message;
     use tddy_service::proto::exec_tools::ConversationWorktreeRequest;
 
-    if (service, method) != tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS[0] {
+    if !tddy_tool_engine::IN_JAIL_RELAYABLE_EXEC_TOOLS.contains(&(service, method)) {
         return Ok(payload.to_vec());
     }
     let request = ConversationWorktreeRequest::decode(payload).map_err(|e| {

@@ -475,8 +475,9 @@ fn parse_message_descriptor(
                     .map_err(|e| format!("result_summary_json is not a summary: {e}"))?,
             )
         },
-        // A daemon-run conversation has no conversation worktree: its loop writes the session
-        // worktree (docs/dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md).
+        // TODO(agent-worktree): a daemon-run conversation has no conversation worktree — its loop
+        // writes the session worktree, so there is no change to report
+        // (docs/dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md).
         worktree_change: None,
     })
 }

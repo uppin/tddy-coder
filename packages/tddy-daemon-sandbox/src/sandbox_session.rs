@@ -15,8 +15,6 @@ use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_task::TerminalCapture;
 
-use tddy_tool_engine as tool_engine;
-
 /// A resource whose lifetime is tied to a sandbox session and whose cleanup happens on `Drop`.
 ///
 /// The daemon's managed-workflow wiring is the only implementor: a per-session toolcall listener
@@ -234,7 +232,7 @@ async fn connect_sandbox_client(
         .map_err(|e| format!("connect sandbox grpc: {e}"))
 }
 
-/// Tool handler that runs MCP tool calls in the session worktree via [`tool_engine`].
+/// Tool handler that runs MCP tool calls in the session worktree via `tddy_tool_engine`.
 struct DaemonToolHandler {
     worktree: PathBuf,
     task_registry: tddy_task::TaskRegistry,
@@ -289,31 +287,17 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         };
         self.record_agent_activity(session_id, &running);
 
-        let outcome = match conversation_id.is_empty() {
-            true => {
-                tool_engine::execute_tool_with_env(
-                    &self.worktree,
-                    tool_name,
-                    args_json,
-                    &self.task_registry,
-                    session_id,
-                    &self.session_env,
-                )
-                .await
-            }
-            false => {
-                crate::conversation_tool::execute_in_conversation(
-                    &self.worktree,
-                    conversation_id,
-                    tool_name,
-                    args_json,
-                    &self.task_registry,
-                    session_id,
-                    &self.session_env,
-                )
-                .await
-            }
-        };
+        let outcome =
+            crate::conversation_tool::execute_in_conversation(crate::conversation_tool::ToolCall {
+                worktree: &self.worktree,
+                conversation_id,
+                tool_name,
+                args_json,
+                registry: &self.task_registry,
+                session_id,
+                env: &self.session_env,
+            })
+            .await;
 
         let status = if outcome.is_error {
             tddy_core::agent_activity::STATUS_ERROR

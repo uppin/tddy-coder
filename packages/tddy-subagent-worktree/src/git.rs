@@ -1,7 +1,9 @@
 //! The one way this crate runs git.
 //!
 //! Null stdin, `GIT_OPTIONAL_LOCKS=0` (a status-like read must not take the index lock a caller's
-//! own `git` may be holding), a fixed committer identity (the repository's own `user.*` may be
+//! own `git` may be holding), no hooks and no signing (these are automatic snapshots of a
+//! subagent's work, not the developer's commits, and no developer hook may run on the host on their
+//! behalf), a fixed committer identity (the repository's own `user.*` may be
 //! unset, and a subagent's commit must not be attributed to the developer), and the command line
 //! carried in the error so a failure names what was run.
 
@@ -13,6 +15,14 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use crate::worktree::WorktreeError;
+
+/// Config applied to every call, ahead of the caller's arguments.
+const NEUTRAL_CONFIG: [&str; 4] = [
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "commit.gpgsign=false",
+];
 
 pub(crate) const COMMITTER_NAME: &str = "tddy-subagent";
 pub(crate) const COMMITTER_EMAIL: &str = "tddy-subagent@tddy.invalid";
@@ -48,6 +58,7 @@ where
     };
     let mut command = Command::new("git");
     command
+        .args(NEUTRAL_CONFIG)
         .args(&args)
         .current_dir(dir)
         .env("GIT_OPTIONAL_LOCKS", "0")

@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-26 | 2,610 | first detection, at PR #545's merge-base |
 | 2026-09-26 | 2,611 | +1 in PR #545 — **two prose comments only** ("the five …" → "the six …"), no code. Recorded because the gate attributes growth whatever its size, and because a one-line delta is the clearest possible evidence that this file's size predates that change |
+| 2026-10-01 | 2,639 | **worse** by 28 over master's 2,611 in PR #560 (`#agent-worktree` 1/4): `call_tool(conversation_id, …)` and the `ConversationWorktree` relay arm. The jail-side root and session binding live in `conversation_root.rs` |
 
 ## What the tool found
 

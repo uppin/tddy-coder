@@ -15,6 +15,7 @@
 | 2026-09-19 | 147 | 8 | 143 → 147 in PR #518 (the `Weak` upgrade for the `Arc` cycle) |
 | 2026-09-24 | 147 | 8 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: five `Request::new` → `Request::direct` (in-process calls stamped as such), same line count and nesting. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD |
 | 2026-09-24 | 147 | — | re-measured for #524 (2026-09-24): unchanged, and not touched by it |
+| 2026-10-01 | 182 | 8 | **worse** by 3 (179 → 182, same fn-line-to-closing-brace count on `master` and HEAD; the 147 above predates growth that was not recorded) in PR #560 (`#agent-worktree` 1/4): one more arm, `(EXEC_TOOL_SERVICE, "ConversationWorktree")`, delegating to `conversation_worktree_from_jail`. Nesting unchanged |
 
 ## What the tool found
 

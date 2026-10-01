@@ -296,3 +296,40 @@ async fn the_tool_result_itself_is_passed_through_unchanged() {
     // Then
     assert_eq!(result_of(&run)["bytes_written"], json!(3));
 }
+
+#[tokio::test]
+async fn a_commit_that_fails_after_the_tool_ran_still_returns_the_tools_output() {
+    // Given
+    let caller = a_caller_worktree().build();
+    let registry = &TaskRegistry::new();
+
+    // When the worktree's git link is severed mid-call, so the commit that follows the write fails
+    let run = run_in_conversation(
+        &caller.conversations(),
+        &conversation("explore"),
+        "Write",
+        |root: PathBuf| async move {
+            let args = json!({ "path": "new.rs", "contents": "pub fn new() {}\n" }).to_string();
+            let outcome = execute_tool(&root, "Write", &args, registry, support::SESSION_ID).await;
+            support::sever_git_link(&root);
+            outcome
+        },
+    )
+    .await
+    .expect("the worktree itself was prepared");
+
+    // Then
+    let merged: serde_json::Value =
+        serde_json::from_str(&run.merge(&run.output.result_json)).unwrap();
+    assert_eq!(
+        (
+            run.output.is_error,
+            run.change.is_none(),
+            merged["worktreeChange"]["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("worktree commit failed")),
+            merged.get("error").is_none(),
+        ),
+        (false, true, true, true)
+    );
+}

@@ -10,7 +10,8 @@ use std::fmt;
 pub const CONVERSATION_ID_MAX_LEN: usize = 64;
 
 /// A conversation id that is safe as one path component and one ref component:
-/// `[A-Za-z0-9._-]{1,64}`, not starting with `.`.
+/// `[A-Za-z0-9._-]{1,64}`, and a valid component of a git ref name (`git check-ref-format`): not
+/// starting with `.`, not containing `..`, not ending with `.` or `.lock`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConversationId(String);
 
@@ -24,6 +25,9 @@ impl ConversationId {
         let plain = !raw.is_empty()
             && raw.len() <= CONVERSATION_ID_MAX_LEN
             && !raw.starts_with('.')
+            && !raw.contains("..")
+            && !raw.ends_with('.')
+            && !raw.ends_with(".lock")
             && raw
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
@@ -50,7 +54,8 @@ impl fmt::Display for UnsafeConversationId {
         write!(
             f,
             "conversation id {:?} is not usable as a worktree name: it must be 1-{CONVERSATION_ID_MAX_LEN} \
-             characters of [A-Za-z0-9._-] and must not start with '.'",
+             characters of [A-Za-z0-9._-], and a valid git ref component: it must not start or end \
+             with '.', contain '..', or end with '.lock'",
             self.0
         )
     }
@@ -61,74 +66,35 @@ impl std::error::Error for UnsafeConversationId {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::rstest;
 
-    #[test]
-    fn a_uuid_like_id_is_accepted() {
-        // Given
-        let raw = "conv-3f9c2ab0-1d2e.v2_final";
-
-        // When
-        let id = ConversationId::parse(raw);
-
-        // Then
-        assert_eq!(id.map(|id| id.as_str().to_string()), Ok(raw.to_string()));
-    }
-
-    #[test]
-    fn an_id_with_a_slash_is_refused() {
+    #[rstest]
+    #[case::uuid_like("conv-3f9c2ab0-1d2e.v2_final")]
+    #[case::at_the_length_limit(&"a".repeat(CONVERSATION_ID_MAX_LEN))]
+    #[case::a_single_dot_inside("a.b")]
+    #[case::lock_in_the_middle("a.lock.b")]
+    fn a_plain_id_is_accepted(#[case] raw: &str) {
         assert_eq!(
-            ConversationId::parse("a/b"),
-            Err(UnsafeConversationId("a/b".into()))
+            ConversationId::parse(raw).map(|id| id.as_str().to_string()),
+            Ok(raw.to_string())
         );
     }
 
-    #[test]
-    fn a_parent_directory_id_is_refused() {
+    #[rstest]
+    #[case::slash("a/b")]
+    #[case::parent_directory("..")]
+    #[case::leading_dot(".hidden")]
+    #[case::empty("")]
+    #[case::one_past_the_length_limit(&"a".repeat(CONVERSATION_ID_MAX_LEN + 1))]
+    #[case::space("my conv")]
+    #[case::double_dot_inside("a..b")]
+    #[case::trailing_dot("conv.")]
+    #[case::lock_suffix("conv.lock")]
+    #[case::lock_only(".lock")]
+    fn an_id_that_cannot_be_a_directory_and_a_ref_component_is_refused(#[case] raw: &str) {
         assert_eq!(
-            ConversationId::parse(".."),
-            Err(UnsafeConversationId("..".into()))
-        );
-    }
-
-    #[test]
-    fn an_id_starting_with_a_dot_is_refused() {
-        assert_eq!(
-            ConversationId::parse(".hidden"),
-            Err(UnsafeConversationId(".hidden".into()))
-        );
-    }
-
-    #[test]
-    fn an_empty_id_is_refused() {
-        assert_eq!(
-            ConversationId::parse(""),
-            Err(UnsafeConversationId(String::new()))
-        );
-    }
-
-    #[test]
-    fn an_id_one_past_the_length_limit_is_refused() {
-        let raw = "a".repeat(CONVERSATION_ID_MAX_LEN + 1);
-        assert_eq!(
-            ConversationId::parse(&raw),
-            Err(UnsafeConversationId(raw.clone()))
-        );
-    }
-
-    #[test]
-    fn an_id_at_the_length_limit_is_accepted() {
-        let raw = "a".repeat(CONVERSATION_ID_MAX_LEN);
-        assert_eq!(
-            ConversationId::parse(&raw).map(|id| id.as_str().len()),
-            Ok(CONVERSATION_ID_MAX_LEN)
-        );
-    }
-
-    #[test]
-    fn an_id_with_a_space_is_refused() {
-        assert_eq!(
-            ConversationId::parse("my conv"),
-            Err(UnsafeConversationId("my conv".into()))
+            ConversationId::parse(raw),
+            Err(UnsafeConversationId(raw.to_string()))
         );
     }
 }

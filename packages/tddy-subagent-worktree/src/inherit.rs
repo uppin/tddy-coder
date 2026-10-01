@@ -1,8 +1,8 @@
 //! What a conversation worktree starts from: the repository's common dir, the exclude entry that
 //! keeps the worktrees out of the caller's status, and the caller's uncommitted state as a commit.
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::git::{git, git_raw};
 use crate::worktree::{WorktreeError, SUBAGENT_WORKTREES_DIR};
@@ -81,14 +81,10 @@ async fn snapshot_tree(
             source,
         })?;
     let env = [("GIT_INDEX_FILE", scratch.as_os_str())];
-    let exclude_ours = format!(":(exclude){SUBAGENT_WORKTREES_DIR}");
-    git(
-        caller,
-        ["add", "-A", "--", ".", exclude_ours.as_str()],
-        &env,
-        None,
-    )
-    .await?;
+    // The conversation worktrees are kept out by `info/exclude`, which `ensure` writes first. An
+    // explicit `:(exclude)` pathspec for the same directory makes `git add` refuse once that
+    // directory exists but is empty ("paths are ignored"), as it is after a worktree was deleted.
+    git(caller, ["add", "-A", "--", "."], &env, None).await?;
     let tree = git(caller, ["write-tree"], &env, None).await?;
     let tree = tree.trim();
     let head_tree = git(caller, ["rev-parse", "HEAD^{tree}"], &[], None).await?;
@@ -112,15 +108,15 @@ async fn snapshot_tree(
     Ok(commit.trim().to_string())
 }
 
+/// A path beside `index` no other call of this process, or of another one, is using: the process
+/// id tells processes apart and a counter tells this process's calls apart.
 pub(crate) fn scratch_path(index: &Path) -> PathBuf {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|elapsed| elapsed.as_nanos())
-        .unwrap_or_default();
-    let mut name = index
-        .file_name()
-        .unwrap_or_else(|| OsStr::new("index"))
-        .to_os_string();
-    name.push(format!(".tddy-subagent-{}-{nanos}", std::process::id()));
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    // Beside the index it is seeded from, so it is on the same filesystem and in the same git dir.
+    let name = format!(
+        "index.tddy-subagent-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
     index.with_file_name(name)
 }

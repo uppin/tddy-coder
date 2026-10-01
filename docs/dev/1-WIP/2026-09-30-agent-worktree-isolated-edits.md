@@ -95,7 +95,7 @@ graph LR
   end
   DISC[tddy-discovery] --> SW
   LIFE[tddy-session-lifecycle] --> SW
-  RPC[tddy-daemon-rpc] --> SW
+  RPC[tddy-daemon-rpc] --> LIFE
   SBX[tddy-daemon-sandbox] --> SW
   TOOLS[tddy-tools] --> DISC
   TOOLS --> STC[tddy-session-tool-client]
@@ -106,9 +106,10 @@ graph LR
 | Edge | Status | Check |
 |---|---|---|
 | `tddy-discovery → tddy-subagent-worktree` | new (published here) | `cargo tree -p tddy-discovery -i tddy-subagent-worktree` |
-| `tddy-session-lifecycle`, `tddy-daemon-rpc`, `tddy-daemon-sandbox` `→ tddy-subagent-worktree` | new (green) | same, per crate |
+| `tddy-session-lifecycle`, `tddy-daemon-sandbox` `→ tddy-subagent-worktree` | new (green) | same, per crate |
+| `tddy-daemon-rpc → tddy-session-lifecycle → tddy-subagent-worktree` | no direct edge: the shared `Pull` / `Remove` operation lives in `tddy-session-lifecycle` (`connection_service/conversation_worktree_op.rs`), which both the token path (`daemon-rpc`'s handler) and the jail bridge arm call | `cargo tree -p tddy-daemon-rpc -i tddy-subagent-worktree` shows it only through `tddy-session-lifecycle` |
 | `tddy-subagent-worktree → any tddy-* crate` (normal deps) | **must not exist** — a leaf | `grep -c 'path = "../tddy-' packages/tddy-subagent-worktree/Cargo.toml` under `[dependencies]` is 0 |
-| `tddy-sandbox-runner → tddy-subagent-worktree` | **must not exist** — the runner relays, it never runs git (it is inside every jail) | `cargo tree -p tddy-sandbox-runner -i tddy-subagent-worktree` fails |
+| `tddy-sandbox-runner → tddy-subagent-worktree` | **no direct edge, and the runner never calls the crate or runs git** — git runs only on the host. The crate is linked *transitively*, through `tddy-discovery`'s re-export of `WorktreeChange` (`runner → tool-engine → worktree-service → daemon-kernel → discovery → SW`, and `runner → discovery`), so `cargo tree -p tddy-sandbox-runner -i tddy-subagent-worktree` **succeeds** and cannot be the check. The check is that no `use tddy_subagent_worktree` appears under `packages/tddy-sandbox-runner/src/` and the runner's `Cargo.toml` has no `tddy-subagent-worktree` line; `conversation_root.rs` re-states the directory name and `tddy-daemon-sandbox` pins the two equal in a test | `grep -rn tddy_subagent_worktree packages/tddy-sandbox-runner/src packages/tddy-sandbox-runner/Cargo.toml` prints nothing |
 | `tddy-discovery → tddy-tool-engine` (normal) | **must not exist** — unchanged | `cargo tree -p tddy-discovery -e normal -i tddy-tool-engine` fails |
 
 ## Prerequisites
@@ -125,9 +126,16 @@ stands, and the commit makes it easier to see, not worse.
 
 ### ℹ ANSWERED — A conversation id is not bound to the session that opened it — [`2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md`](../todo/2026-09-26-a-conversation-id-is-not-bound-to-the-session-that-opened-it.md)
 
-The gap does not transfer to the new RPC: the conversation worktree is resolved **under the
-token-resolved session worktree**, so a foreign conversation id can only ever name a directory inside
-the caller's own session. The entry's own gap in `SessionAgentService` stays open.
+The gap does not transfer to the new RPC **on the token path**: the conversation worktree is resolved
+**under the token-resolved session worktree**, so a foreign conversation id can only ever name a
+directory inside the caller's own session. The entry's own gap in `SessionAgentService` stays open.
+
+This holds for the token path only. The **jail bridge arm** binds `session_id` from the runner's own
+environment (`bind_to_this_session`) and the host takes it as given: nothing host-side checks it
+against the session the jail was built for, and the session directory is looked up as
+`tddy_data_dir/sessions/<id>` rather than through `sessions_base_for_user`. Deferred, MEDIUM — filed as
+[`2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md`](../todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md).
+⚠ **AWAITING developer consent** for the deferral.
 
 ### ⚠ DURING — A turn's message list can overflow the chunk-framing threshold — [`2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md`](../todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md)
 
@@ -144,8 +152,20 @@ and `tddy-session-tool-client/src/lib.rs` are over 500 lines (code issues
 `packages/tddy-sandbox-runner/docs/code-issues/oversized-file-runner.md`,
 `packages/tddy-session-tool-client/docs/code-issues/oversized-file-lib.md`). New logic goes into new
 modules — `subagent_end` into its own module under `tddy-tools/src/`, the per-conversation dispatch
-into its own module of `tddy-session-tool-client` — and each of those files grows only by its wiring
-line(s).
+into its own module of `tddy-session-tool-client`.
+
+**"Grows only by its wiring line(s)" did not hold.** Re-measured 2026-10-01 against `master`
+(production lines): `tddy-session-tool-client/src/lib.rs` **+60** (1,047 → 1,107, the
+`dispatch_request_via_*` split — a request-taking variant of each transport's dispatch so a
+conversation's call can reuse it); `tddy-sandbox-runner/src/runner.rs` **+28** (2,611 → 2,639);
+`tddy-daemon-sandbox/src/sandbox_session.rs` +1 (916 → 917, after `execute` was made to always call
+`execute_in_conversation`); `tddy-sandbox-runner/src/host_relay.rs` **+10** (939 → 949, a file with
+no record until now); `tddy-tools/src/server.rs` +10; `tddy-discovery/src/subagent.rs` +3;
+`tddy-discovery/src/roster/conversation.rs` +4; `workspace_tool_sandbox.rs` +2;
+`handle_rpc` +3 lines (one more arm). Each has a dated row in its code-issue record; `host_relay.rs`
+and `tddy-session-agents/src/session_agent_clone.rs` (not edited here) got new records. The
+`lib.rs` extraction of the transport helpers (seam B) is deferred. ⚠ **AWAITING developer consent**
+for the deferral.
 
 ### ⚠ DURING — `stream_execute_tool` complexity — `packages/tddy-daemon-rpc/docs/code-issues/complexity-exec-tool-ports-stream-execute-tool.md`
 
@@ -190,11 +210,11 @@ what changed on disk, and nothing can be taken back.
 ## Scope
 
 - [ ] **Package Documentation**: new crate README + docs; updated READMEs for the packages above
-- [ ] **Implementation**: mechanics crate, wire, daemon route, jail relay, subagent loop, MCP tools
-- [ ] **Testing**: all acceptance tests below passing
-- [ ] **Integration**: an in-jail subagent's write lands in its conversation worktree end-to-end
-- [ ] **Technical Debt**: TODOs filed for daemon-run conversations and the orphan sweep
-- [ ] **Code Quality**: scoped clippy/fmt per touched package
+- [x] **Implementation**: mechanics crate, wire, daemon route, jail relay, subagent loop, MCP tools
+- [ ] **Testing**: all acceptance tests below passing — ticked per package once verified; verified 2026-10-01 for `tddy-subagent-worktree`, `tddy-discovery`, `tddy-session-tool-client`; the `tddy-tools` and `tddy-daemon-rpc` suites were not re-run in this pass
+- [ ] **Integration**: an in-jail subagent's write lands in its conversation worktree end-to-end — **not verified**: no test runs a real jail on this host (the jail route is covered at the request seam only)
+- [x] **Technical Debt**: TODOs filed for daemon-run conversations and the orphan sweep (and, 2026-10-01, the jail-bridge session binding)
+- [x] **Code Quality**: scoped clippy/fmt per touched package (2026-10-01: clean for `tddy-subagent-worktree`, `tddy-session-lifecycle`, `tddy-discovery`, `tddy-sandbox-runner`, `tddy-session-tool-client`, `tddy-daemon-sandbox --lib`; `tddy-daemon-sandbox`'s `sandbox_stdio_seatbelt_acceptance` does not compile on `master`)
 
 ## Technical Changes
 
@@ -308,13 +328,13 @@ tddy-tools (in jail)                             facilitating daemon
 
 ## Implementation Milestones
 
-- [ ] `ConversationId`, `ToolEffect` and their unit tests green
-- [ ] `ensure` creates the worktree with the inherited commit and exclude entry
-- [ ] `commit_changes` facts green for create / update / delete / rename / binary / no-op
-- [ ] `pull_into_caller` clean and conflicted cases green; `remove` green
-- [ ] `run_in_conversation` routing green with the real tool engine
-- [ ] Wire + daemon handler + jail relay green
-- [ ] Discovery descriptor + MCP `subagent_end` / `subagent_cancel` green
+- [x] `ConversationId`, `ToolEffect` and their unit tests green
+- [x] `ensure` creates the worktree with the inherited commit and exclude entry
+- [x] `commit_changes` facts green for create / update / delete / rename / binary / no-op
+- [x] `pull_into_caller` clean and conflicted cases green; `remove` green
+- [x] `run_in_conversation` routing green with the real tool engine
+- [x] Wire + daemon handler + jail relay green — the lifecycle / runner / jail-route unit tests are verified (2026-10-01); `tddy-daemon-rpc`'s `conversation_worktree_exec_tool_acceptance` (7) and `conversation_worktree_host_bridge_acceptance` (2) pass (2026-10-01)
+- [ ] Discovery descriptor + MCP `subagent_end` / `subagent_cancel` green — discovery verified (2026-10-01); the `tddy-tools` MCP suite was not re-run (the crate is untouched by the validation fixes)
 - [ ] Allowlists updated
 
 ## Testing Plan
@@ -412,23 +432,26 @@ Executor: the real `tddy_tool_engine::execute_tool`.
 - `subagent_end_is_allowlisted_wherever_subagent_cancel_is`
 
 ### Unit tests (tddy-subagent-worktree)
-- `src/conversation_id.rs` (8) — accepted shape, `/`, `..`, leading `.`, empty, length ±1, space
+- `src/conversation_id.rs` (table-driven, 14 cases) — accepted shape and length limit, `/`, `..`, leading `.`, empty, length +1, space, and the git-ref rules: `a..b`, trailing `.`, `.lock` suffix
 - `src/tool_effect.rs` (5) — the five read-only names, the four writers, `Await`, unknown, case
 - `src/change_facts.rs` (8) — created, updated (M/T), removed, rename, summed lines, binary, empty;
   plus `a_change_without_a_commit_serializes_without_the_commit_key`, which **passes** on the
   surface's serde derive — it pins the wire shape the other suites assert through
 - `src/run.rs` (2) — `with_worktree_change` merges beside the tool's fields; a non-object is wrapped
+- added in validation fixes, in `tests/conversation_worktree_acceptance.rs`: `a_deleted_worktree_directory_is_recreated_on_its_surviving_branch`, `a_surviving_branch_whose_base_was_lost_starts_the_conversation_afresh`, `two_concurrent_ensures_of_one_conversation_create_it_once`, `two_concurrent_commits_in_one_conversation_both_succeed_and_keep_every_file`, `a_developers_post_commit_hook_does_not_run_for_a_subagents_commit`; in `tests/run_in_conversation_acceptance.rs`: `a_commit_that_fails_after_the_tool_ran_still_returns_the_tools_output`
+- `tddy-session-lifecycle` unit tests, `connection_service/conversation_worktree_jail_route_unit_tests.rs` (2): `a_read_before_the_conversations_first_write_is_sent_to_the_jail_for_the_session_root`, `a_call_after_the_conversations_first_write_is_sent_to_the_jail_for_its_worktree`
 
-### Not covered by a red test — gaps to close in green
-- **The host bridge arm.** `DaemonRpcHandler::handle_rpc`
-  (`tddy-session-lifecycle/src/connection_service/daemon_rpc_handler.rs`) must dispatch
-  `(exec_tools.ExecToolService, ConversationWorktree)` to the daemon's exec-tool service; it cannot be
-  constructed without a `DaemonSessionHost`, and no suite drives it today. Green adds the arm and a test
-  where the host's bridge is reachable.
-- **The workspace jail route.** A sandboxed workspace session (`ExecToolRoute::Jail`) runs its tools in
-  a jail at the session root; the conversation root is inside that jail's mount, so the in-jail executor
-  must run a conversation's call at `<mount>/tmp/subagent-worktrees/<conv>`. The existing
-  `workspace_tool_sandbox_*_acceptance` suites are the place; they need a sandbox to run.
+### Not covered by a red test — gaps, and what closed them
+- **The host bridge arm** — now covered by
+  `packages/tddy-daemon-rpc/tests/conversation_worktree_host_bridge_acceptance.rs`.
+- **The workspace jail route** — now covered by
+  `tddy-session-lifecycle`'s `conversation_worktree_jail_route_unit_tests` (see above). That is a
+  unit test at the seam where the request reaches the jail — `LocalExecTools::run_exec_tool_locally`
+  with a jail double that records the `conversation_id` it is handed — because a real jail needs a
+  sandbox this macOS host cannot start for the `workspace_tool_sandbox_*` suites. It proves what
+  reaches the jail (no id before the first write, the id after); the runner's side of the contract
+  (`conversation_root::tool_root`) is covered in `tddy-sandbox-runner`. No test runs a real jail
+  end-to-end, so the **Integration** item stays open.
 
 ## Technical Debt & Production Readiness
 
@@ -461,6 +484,21 @@ Executor: the real `tddy_tool_engine::execute_tool`.
 - **3-way with conflict markers** (developer choice) over refuse-and-keep.
 - **Pull at the end only** in this node (developer choice); mid-conversation pulls are 4/4.
 - **Fail-closed classifier** — one list of read-only tools, everything else commits.
+- **Automatic commits skip hooks and signing** — every git call this crate makes runs with
+  `core.hooksPath=/dev/null` and `commit.gpgsign=false`, and the commit itself uses `--no-verify`:
+  they are automatic snapshots of a subagent's work, not developer commits, and no developer
+  post-commit / post-checkout hook may run on the host on a subagent's behalf (nor a signing prompt
+  block a call). Cost: a repository whose policy relies on a hook seeing every commit does not see
+  these. ⚠ **AWAITING developer consent** — chosen by the implementer, not yet approved.
+- **One conversation's git steps are serialised** — `ensure`, `commit_changes` and `remove` take a
+  per-worktree async lock (process-wide, keyed by the worktree path, since `ConversationWorktrees`
+  is built per call), so two concurrent mutating calls cannot race on creation or on `index.lock`.
+- **A commit that fails after the tool ran does not drop the tool's output** —
+  `ConversationRun::commit_error` carries it and `ConversationRun::merge` puts
+  `"worktreeChange": {"error": …}` on the result; the tool's effects are on disk, uncommitted.
+- **The root `run_in_conversation` chose decides what a jail is sent** — a call that runs at the
+  session root (a read before the conversation's first write) reaches the jail with no
+  `conversation_id`, so the jail does not look for a worktree directory that does not exist yet.
 
 ## Refactoring Needed
 

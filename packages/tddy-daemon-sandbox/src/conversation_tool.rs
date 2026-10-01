@@ -6,25 +6,41 @@
 
 use std::path::Path;
 
-use tddy_subagent_worktree::{
-    run_in_conversation, with_worktree_change, ConversationId, ConversationRun,
-    ConversationWorktrees,
-};
+use tddy_subagent_worktree::{run_in_conversation, ConversationId, ConversationWorktrees};
 use tddy_task::TaskRegistry;
 use tddy_tool_engine::{execute_tool_with_env, ToolOutcome};
 
-/// Run `tool_name` for `conversation_id` in that conversation's worktree under `worktree`, and put
-/// what it changed on the result. An id that cannot be a conversation, or a worktree that cannot be
-/// prepared, answers as a tool error: the call never runs in the session worktree instead.
-pub(crate) async fn execute_in_conversation(
-    worktree: &Path,
-    conversation_id: &str,
-    tool_name: &str,
-    args_json: &str,
-    registry: &TaskRegistry,
-    session_id: &str,
-    env: &[(String, String)],
-) -> ToolOutcome {
+/// One tool call as the jail's session channel delivers it.
+pub(crate) struct ToolCall<'a> {
+    /// The session worktree the call's session owns.
+    pub worktree: &'a Path,
+    /// The subagent conversation the call belongs to; empty for the session's own call.
+    pub conversation_id: &'a str,
+    pub tool_name: &'a str,
+    pub args_json: &'a str,
+    pub registry: &'a TaskRegistry,
+    pub session_id: &'a str,
+    pub env: &'a [(String, String)],
+}
+
+/// Run `call` — in the conversation's worktree under the session worktree when it names a
+/// conversation, and put what it changed on the result; in the session worktree itself when it
+/// does not. An id that cannot be a conversation, or a worktree that cannot be prepared, answers as
+/// a tool error: the call never runs in the session worktree instead.
+pub(crate) async fn execute_in_conversation(call: ToolCall<'_>) -> ToolOutcome {
+    let ToolCall {
+        worktree,
+        conversation_id,
+        tool_name,
+        args_json,
+        registry,
+        session_id,
+        env,
+    } = call;
+    if conversation_id.is_empty() {
+        return execute_tool_with_env(worktree, tool_name, args_json, registry, session_id, env)
+            .await;
+    }
     let conversation = match ConversationId::parse(conversation_id) {
         Ok(conversation) => conversation,
         Err(unsafe_id) => return refused(unsafe_id.to_string()),
@@ -35,17 +51,13 @@ pub(crate) async fn execute_in_conversation(
     })
     .await;
     match run {
-        Ok(ConversationRun {
-            mut output,
-            change: Some(change),
-        }) => {
-            output.result_json = with_worktree_change(&output.result_json, &change);
-            output
+        Ok(run) => {
+            let result_json = run.merge(&run.output.result_json);
+            ToolOutcome {
+                result_json,
+                ..run.output
+            }
         }
-        Ok(ConversationRun {
-            output,
-            change: None,
-        }) => output,
         Err(e) => refused(format!(
             "conversation {conversation}: its worktree could not be prepared ({e}); refusing to \
              run the call in the session worktree instead"

@@ -11,6 +11,7 @@ use crate::change_facts::{FileCounts, LineCounts, WorktreeChange};
 use crate::conversation_id::ConversationId;
 use crate::git::{git, git_raw};
 use crate::inherit;
+use crate::serialise;
 
 /// Where conversation worktrees live, relative to the session worktree. Added to the repository's
 /// `info/exclude` on first use, so it never shows in the caller's `git status`.
@@ -97,48 +98,82 @@ impl ConversationWorktrees {
         &self,
         conversation: &ConversationId,
     ) -> Result<Option<ConversationWorktree>, WorktreeError> {
-        let root = self.path_of(conversation);
-        let base_ref = self.base_ref_of(conversation);
+        let base = self.recorded_base(conversation).await?;
+        Ok(base.and_then(|base| self.live_worktree(conversation, base)))
+    }
+
+    /// The commit the conversation's base ref records, if the ref exists.
+    async fn recorded_base(
+        &self,
+        conversation: &ConversationId,
+    ) -> Result<Option<String>, WorktreeError> {
         let (_, found) = git_raw(
             &self.session_worktree,
             [
                 "rev-parse",
                 "--verify",
                 "--quiet",
-                &format!("{base_ref}^{{commit}}"),
+                &format!("{}^{{commit}}", self.base_ref_of(conversation)),
             ],
             &[],
             None,
         )
         .await?;
-        if !found.success || !root.exists() {
-            return Ok(None);
-        }
-        Ok(Some(ConversationWorktree {
+        Ok(found
+            .success
+            .then(|| String::from_utf8_lossy(&found.stdout).trim().to_string()))
+    }
+
+    /// The worktree for `base`, if its directory is still there.
+    fn live_worktree(
+        &self,
+        conversation: &ConversationId,
+        base: String,
+    ) -> Option<ConversationWorktree> {
+        let root = self.path_of(conversation);
+        root.exists().then(|| ConversationWorktree {
             root,
             caller: self.session_worktree.clone(),
             branch: self.branch_of(conversation),
-            base: String::from_utf8_lossy(&found.stdout).trim().to_string(),
-            base_ref,
-        }))
+            base,
+            base_ref: self.base_ref_of(conversation),
+        })
     }
 
     /// The conversation's worktree, created on first use: cut from the session worktree's `HEAD`,
     /// with the session worktree's uncommitted state — staged, unstaged and untracked-not-ignored —
     /// as one commit on the new branch. The session worktree's index, branch and files are not
     /// touched.
+    ///
+    /// Concurrent calls for one conversation are serialised, so the worktree is created once. A
+    /// conversation whose directory was deleted but whose branch survived gets its worktree back
+    /// on that branch, with its commits; any other leftover is cleared and the conversation
+    /// starts afresh.
     pub async fn ensure(
         &self,
         conversation: &ConversationId,
     ) -> Result<ConversationWorktree, WorktreeError> {
-        if let Some(found) = self.existing(conversation).await? {
+        let root = self.path_of(conversation);
+        let _exclusive = serialise::exclusive(&root).await;
+        let recorded = self.recorded_base(conversation).await?;
+        if let Some(found) = recorded
+            .clone()
+            .and_then(|base| self.live_worktree(conversation, base))
+        {
             return Ok(found);
         }
         let caller = &self.session_worktree;
+        let branch = self.branch_of(conversation);
+        // A directory git still has registered, but that is gone, would refuse `worktree add`.
+        git(caller, ["worktree", "prune"], &[], None).await?;
+        let branch_survived = self.branch_exists(&branch).await?;
+        if let (Some(base), true) = (recorded, branch_survived) {
+            return self.reattach(conversation, root, base).await;
+        }
+        self.clear_leftovers(&root, &branch, branch_survived)
+            .await?;
         inherit::exclude_conversation_worktrees(&inherit::common_dir(caller).await?).await?;
         let base = inherit::base_commit(caller).await?;
-        let root = self.path_of(conversation);
-        let branch = self.branch_of(conversation);
         let base_ref = self.base_ref_of(conversation);
         git(
             caller,
@@ -163,6 +198,82 @@ impl ConversationWorktrees {
             base,
             base_ref,
         })
+    }
+
+    async fn branch_exists(&self, branch: &str) -> Result<bool, WorktreeError> {
+        let (_, found) = git_raw(
+            &self.session_worktree,
+            [
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        Ok(found.success)
+    }
+
+    /// Check the surviving branch out again at `root`, keeping its commits and its recorded base.
+    async fn reattach(
+        &self,
+        conversation: &ConversationId,
+        root: PathBuf,
+        base: String,
+    ) -> Result<ConversationWorktree, WorktreeError> {
+        let branch = self.branch_of(conversation);
+        git(
+            &self.session_worktree,
+            [
+                OsStr::new("worktree"),
+                OsStr::new("add"),
+                OsStr::new("-q"),
+                root.as_os_str(),
+                OsStr::new(&branch),
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        Ok(ConversationWorktree {
+            root,
+            caller: self.session_worktree.clone(),
+            branch,
+            base,
+            base_ref: self.base_ref_of(conversation),
+        })
+    }
+
+    /// Clear what a creation that never finished left behind: a branch whose base ref was lost
+    /// (its commits have no known base to be handed back against) and a worktree directory that
+    /// was never recorded.
+    async fn clear_leftovers(
+        &self,
+        root: &Path,
+        branch: &str,
+        branch_survived: bool,
+    ) -> Result<(), WorktreeError> {
+        let caller = &self.session_worktree;
+        if root.exists() {
+            git(
+                caller,
+                [
+                    OsStr::new("worktree"),
+                    OsStr::new("remove"),
+                    OsStr::new("--force"),
+                    root.as_os_str(),
+                ],
+                &[],
+                None,
+            )
+            .await?;
+        }
+        if branch_survived {
+            git(caller, ["branch", "-D", branch], &[], None).await?;
+        }
+        Ok(())
     }
 }
 
@@ -191,24 +302,19 @@ impl ConversationWorktree {
     /// Commit everything that changed since the last commit, with `subject`, and say what it was.
     /// Changing nothing commits nothing and returns counts of zero with no `commit`.
     pub async fn commit_changes(&self, subject: &str) -> Result<WorktreeChange, WorktreeError> {
+        let _exclusive = serialise::exclusive(&self.root).await;
         git(&self.root, ["add", "-A"], &[], None).await?;
         let name_status = git(&self.root, ["diff", "--cached", "--name-status"], &[], None).await?;
         if name_status.trim().is_empty() {
             return Ok(WorktreeChange::default());
         }
         let numstat = git(&self.root, ["diff", "--cached", "--numstat"], &[], None).await?;
-        // The subagent's snapshot is not the developer's commit: their hooks and signing do not apply.
+        // The subagent's snapshot is not the developer's commit: their hooks and signing do not
+        // apply (`crate::git` runs every call with hooks and signing off; `--no-verify` is the
+        // explicit statement of it at the one call that commits).
         git(
             &self.root,
-            [
-                "-c",
-                "commit.gpgsign=false",
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                subject,
-            ],
+            ["commit", "-q", "--no-verify", "-m", subject],
             &[],
             None,
         )
@@ -253,6 +359,7 @@ impl ConversationWorktree {
 
     /// Delete the worktree, its branch and its base ref.
     pub async fn remove(self) -> Result<(), WorktreeError> {
+        let _exclusive = serialise::exclusive(&self.root).await;
         git(
             &self.caller,
             [

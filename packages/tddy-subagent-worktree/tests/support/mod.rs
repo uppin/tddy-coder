@@ -195,6 +195,42 @@ impl CallerWorktree {
     pub fn exists(&self, path: &str) -> bool {
         self.path.join(path).exists()
     }
+
+    /// Delete a directory out from under git, as a cleanup job or a careless `rm -rf` would,
+    /// leaving the branch, the base ref and git's worktree registration behind.
+    pub fn delete_directory(&self, path: &str) {
+        std::fs::remove_dir_all(self.path.join(path)).expect("delete directory");
+    }
+
+    /// Install a `post-commit` hook that leaves `hook-ran` in the caller's checkout, to prove a
+    /// developer's hook did or did not run.
+    pub fn install_post_commit_hook_leaving_hook_ran(&self) {
+        use std::os::unix::fs::PermissionsExt;
+        let hook = self.path.join(".git/hooks/post-commit");
+        let marker = self.path.join("hook-ran");
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display()))
+            .expect("write hook");
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    /// Lose the ref that records a conversation's base, as a crash between creating the worktree
+    /// and recording its base would.
+    pub fn lose_base_ref_of(&self, conversation: &ConversationId) {
+        git(
+            &self.path,
+            &[
+                "update-ref",
+                "-d",
+                &format!("refs/tddy/subagent-base/{SESSION_ID}/{conversation}"),
+            ],
+        );
+    }
+}
+
+/// Point a conversation worktree's `.git` file at nothing, so that every later git step in it
+/// fails while the files in it stay readable.
+pub fn sever_git_link(root: &Path) {
+    write(root, ".git", b"gitdir: /nonexistent/tddy-severed\n");
 }
 
 pub fn conversation(id: &str) -> ConversationId {

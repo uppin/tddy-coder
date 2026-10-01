@@ -13,10 +13,7 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
 };
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_subagent_worktree::{
-    run_in_conversation, with_worktree_change, ConversationId, ConversationRun,
-    ConversationWorktrees,
-};
+use tddy_subagent_worktree::{run_in_conversation, ConversationId, ConversationWorktrees};
 use tddy_task::TaskRegistry;
 
 use super::jail_relaunch::{self, JailRelaunch};
@@ -204,30 +201,25 @@ impl LocalExecTools {
             Err(unsafe_id) => return refused(unsafe_id.to_string()),
         };
         let worktrees = ConversationWorktrees::new(worktree_root, &req.session_id);
-        // A jail serves the conversation's root itself, from the conversation id the request
-        // carries; the root handed in is where a host-run tool goes.
         let run = run_in_conversation(
             &worktrees,
             &conversation,
             &req.tool_name,
             |root| async move {
-                self.route_tool(req, sessions_base, &root, session_dir)
+                let at_root = request_at(req, &root, worktree_root);
+                self.route_tool(&at_root, sessions_base, &root, session_dir)
                     .await
             },
         )
         .await;
         match run {
-            Ok(ConversationRun {
-                mut output,
-                change: Some(change),
-            }) => {
-                output.result_json = with_worktree_change(&output.result_json, &change);
-                output
+            Ok(run) => {
+                let result_json = run.merge(&run.output.result_json);
+                ExecuteToolResponse {
+                    result_json,
+                    ..run.output
+                }
             }
-            Ok(ConversationRun {
-                output,
-                change: None,
-            }) => output,
             Err(e) => refused(format!(
                 "conversation {conversation}: its worktree could not be prepared ({e}); \
                  refusing to run the call in the session worktree instead"
@@ -359,6 +351,25 @@ impl LocalExecTools {
             job_running: outcome.job_running,
         }
     }
+}
+
+/// `req` as it must reach a jail that runs it at `root`.
+///
+/// A jail finds a conversation's root itself, from the `conversation_id` the request carries, and
+/// the conversation worktree does not exist until the conversation's first write. So the root
+/// [`run_in_conversation`] chose is what decides it, not the id: a call that runs at the session
+/// worktree (a read before that first write) is sent with no conversation id, and the jail runs it
+/// there instead of in a directory that is not yet created.
+fn request_at(
+    req: &ExecuteToolRequest,
+    root: &Path,
+    session_worktree: &Path,
+) -> ExecuteToolRequest {
+    let mut at_root = req.clone();
+    if root == session_worktree {
+        at_root.conversation_id.clear();
+    }
+    at_root
 }
 
 /// A tool call this daemon would not run, answered as the failure it is.
