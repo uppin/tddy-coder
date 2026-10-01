@@ -1,6 +1,6 @@
 //! Acceptance: `ConversationWorktree { reset }` takes a conversation's worktree back to a commit.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-rewind-reset.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A rewind takes the worktree back
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

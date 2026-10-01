@@ -4,7 +4,7 @@
 //! reaches the worktree is recorded, and the provider is a `wiremock` server whose request count says
 //! whether the reset came before the resumed turn's first model call.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-rewind-reset.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A rewind takes the worktree back
 
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};

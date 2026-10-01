@@ -44,6 +44,7 @@ The module docs carry it, and they are the authority rather than a summary of on
 | `roster::link` | which daemon those RPCs reach, and the identity they carry |
 | `subagent::turn_request` | what a caller may ask of a turn — a new question, a continuation, a rewind, a correction — and the budget it runs under, including why the **floor** is as load-bearing as the ceiling |
 | `subagent::transcript` | one conversation's addressable history: id minting that never reuses a discarded id, preview truncation, and rewind boundary-snapping that never separates a tool call from its results |
+| `subagent::worktree_reset` | the `WorktreeResetPort` a rewind asks to take the conversation's worktree back, and the `ResetTarget` / `WorktreeReset` it speaks in (re-exported from `tddy-subagent-worktree`) — the discovery crate owns no git |
 | `subagent::result_summary` | the bounded, structured facts of one tool result — per-tool extraction from the result JSON at the transcript's append site, serialized as one externally tagged object (`{"read": {…}}`) |
 | `subagent::grep_context` | the `before`/`after` window a `GREP` asks for — argument reading that rejects past the ceiling rather than clamps, the shared context-entry shape, and the Local path's window computation over the file's own lines |
 | `subagent::yield_condition` | the per-turn conditions that yield a turn back to its caller — predicate types, evaluation against a call's arguments and result summary, and the validation that refuses a condition before the turn runs |
@@ -97,6 +98,31 @@ beside `resultSummary`. It is a sibling of the summary rather than a field of it
 worktree, not the tool's answer, and `SHELL` and `AWAIT` change files their own summaries never
 mention. A read, or a call outside a conversation worktree, carries none. The object is bounded — no
 paths — because it rides every mutating result of a turn.
+
+## A rewind takes the worktree back
+
+`subagent_resume { fromMessageId }` used to cut the transcript and touch no files. With a
+`WorktreeResetPort` configured (`SubagentConfig::{worktree_reset, with_worktree_reset}`, handed to the
+session by `SpecializedSubagentSession::resetting_worktree_through`), `take_turn` does this between
+validation and the cut:
+
+1. if the request rewinds and `TurnRequest::resets_worktree()` (the default; `keeping_worktree()` opts
+   out), `Transcript::commit_kept_by(point)` picks the target — the commit recorded on the last kept
+   entry's `worktree_change`, or `ResetTarget::Base` when none kept a commit. It shares
+   `last_kept_by` with `rewind_to`, so the reset and the cut cannot disagree about which entries a
+   rewind keeps;
+2. `port.reset(target)` runs. `Ok(None)` means the conversation has no worktree; an `Err` fails
+   `take_turn` **before `rewind_to`**, so a failed reset leaves the transcript, and the refusal, as
+   they were. The reset precedes the cut for exactly that reason;
+3. the transcript is cut and the turn runs; the first model request therefore follows the reset;
+4. `PromptOutcome::worktree_reset` carries the `WorktreeReset` (absent for no port, an opt-out, no
+   rewind, or no worktree), and `prompt_outcome_json` serializes it as `worktreeReset { to,
+   droppedCommits }`.
+
+`TurnStep::FinalAnswer` boxes its `PromptOutcome`, which grew past clippy's variant-size limit. The
+port is a trait rather than a dispatch-closure tool name because a reset is not something the model
+can call. The host-side implementation lives in `tddy-tools`; the tests inject a recording port and
+assert both the target asked for and that no model request had been made when it was asked.
 
 ## Features
 

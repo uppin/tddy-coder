@@ -1,7 +1,7 @@
 //! `subagent_resume` advertises `resetWorktree` — the caller's opt-out from a rewind taking the
 //! conversation's worktree back — over the real `tddy-tools --mcp` stdio wire.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-rewind-reset.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § A rewind takes the worktree back
 //!
 //! The reset itself is pinned where it can be observed: the request order in
 //! `packages/tddy-discovery/tests/rewind_resets_worktree_acceptance.rs` and the git in

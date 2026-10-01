@@ -44,6 +44,24 @@ command or a background job wrote is only knowable from the tree.
 `WorktreeChange` is deliberately bounded — counts and a short hash, never a path list — because it
 rides every mutating tool result in a turn's outcome.
 
+## Reset
+
+`reset_to(&ResetTarget)` takes the worktree and its branch back for a caller that rewound the
+conversation's transcript (`src/reset.rs`). `ResetTarget` is `Base` or `Commit(abbreviation)`.
+
+1. It takes the worktree's lock, the same one `commit_changes` and `pull_into_caller` hold.
+2. It lists `base..branch` oldest first. A `Commit` that is not on that list — off the branch, or the
+   base named by hash (the base is reached only through `Base`) — is **refused before anything
+   moves**, with an error naming the commit and the branch.
+3. It runs `reset --hard <target>` and `clean -fd`. `clean` omits `-x`, so **ignored files are kept**:
+   a `SHELL cargo build` leaves build output the reset must not delete.
+4. It answers `WorktreeReset { to, dropped_commits }` — the short hash the tree now stands at and the
+   short hashes of the commits past it, oldest first, serialized `droppedCommits`. A list rather than a
+   count, so a caller that already took some of them can tell which.
+
+Resetting to the tip drops nothing. The base ref under `refs/tddy/subagent-base/` is untouched, so a
+reset never loses the base.
+
 ## Hand-over
 
 `pull_into_caller` applies `base..tip` to the caller's worktree with `git apply --3way`, as
