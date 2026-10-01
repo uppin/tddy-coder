@@ -7,8 +7,10 @@
 use crate::backends::rust::ProgressSink;
 use crate::backends::RustBackend;
 use crate::crate_move;
+use crate::item_anchor;
+use crate::item_anchor::{has_item_anchors, item_anchor_at, items_anchor};
 use crate::journal::{Journal, OpStatus};
-use crate::plan::RefactorKind;
+use crate::plan::{Anchor, RefactorKind};
 use crate::registry::{BackendRegistry, Workspace};
 use crate::{Overlay, Plan, RestructureError, Result};
 use std::path::Path;
@@ -66,12 +68,7 @@ pub fn dispatch(
         Command::Apply => apply(root, options, client, cancel).map(Outcome::Applied),
         Command::Status => status(root, options).map(Outcome::Status),
         Command::Check => check(root, options, client, cancel).map(Outcome::Checked),
-        Command::Anchors => {
-            // The file is read off the request before the options move, because an anchor is
-            // "this range, in this file" — a range alone is not something a plan can carry.
-            let file = options.source()?.to_string_lossy().to_string();
-            anchors(root, options, client, cancel).map(|range| Outcome::Anchored { file, range })
-        }
+        Command::Anchors => item_anchors(root, options, client, cancel).map(Outcome::ItemAnchored),
         Command::Verify => verify(root, options).map(Outcome::Verified),
         Command::Snapshot => snapshot(root, options).map(Outcome::Snapshotted),
     }
@@ -142,6 +139,7 @@ pub fn apply(
         Arc::clone(&options.progress),
         options.trace,
     );
+    let plan = resolve_item_anchors(&plan, root, &journal, &mut registry)?;
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let total = plan.ops.len();
     (options.progress)(&format!(
@@ -303,7 +301,7 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
 
     Ok(SnapshotRewrite {
         plan: path.to_string_lossy().to_string(),
-        paths: plan.snapshot.len(),
+        paths: plan.snapshot.len() + plan.files.len(),
         rewritten,
     })
 }
@@ -353,6 +351,11 @@ pub fn check(
 ) -> Result<Vec<Finding>> {
     let plan = read_plan(&options.plan()?)?;
     plan.verify_snapshot(root)?;
+    for drifted in plan.drifted_hints(root)? {
+        (options.progress)(&format!(
+            "{drifted} has changed since the plan was written; item anchors do not depend on it"
+        ));
+    }
 
     let mut registry = if options.deep {
         let client = client.ok_or_else(|| {
@@ -363,6 +366,20 @@ pub fn check(
         registry_for(client, cancel, Arc::clone(&options.progress), options.trace)
     } else {
         registry_for_static()
+    };
+    // Resolved before anything reads an anchor, so every check below sees the ranges an apply would
+    // act on. A static check has no server to resolve them with, and says so rather than reading an
+    // item anchor as though it were a position.
+    let plan = if !has_item_anchors(&plan) {
+        plan
+    } else if options.deep {
+        item_anchor::resolve_item_anchors(&plan, root, &mut registry)?
+    } else {
+        (options.account)(
+            "this plan anchors by item, which only a deep check can resolve — its lexical checks \
+             skip those anchors; run `check --deep`",
+        );
+        plan
     };
     let mut rehearsal = Rehearsal::default();
     let mut findings: Vec<Finding> = Vec::new();
@@ -485,10 +502,65 @@ pub fn item_anchors(
     options: Options,
     client: Option<Arc<LspClient>>,
     cancel: CancellationToken,
-) -> Result<crate::plan::Anchor> {
-    // TODO(item-anchors): implement — and route `Command::Anchors` through it.
-    let _ = (root, options, client, cancel);
-    todo!("item-anchors: the anchor `restructure anchors` emits")
+) -> Result<Anchor> {
+    let client = client.ok_or_else(|| {
+        RestructureError::MalformedPlan("anchors requires a rust-analyzer LSP session".into())
+    })?;
+    let source = options.source()?;
+    let file = source.to_string_lossy().to_string();
+
+    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
+    match options.at {
+        Some(_) if !options.items.is_empty() => {
+            Err(usage("anchors takes --items or --at, not both"))
+        }
+        Some(at) => {
+            (options.progress)(&format!(
+                "anchors: the item enclosing {}:{} in `{file}`",
+                at.start.line, at.start.col
+            ));
+            item_anchor_at(root, &file, at, &mut registry)
+        }
+        None if options.items.is_empty() => {
+            Err(usage("anchors needs --items A,B,C or --at LINE:COL"))
+        }
+        None => {
+            (options.progress)(&format!(
+                "anchors: `{file}` ({} item(s))",
+                options.items.len()
+            ));
+            items_anchor(root, &file, &options.items, &mut registry)
+        }
+    }
+}
+
+/// `plan` with every item anchor resolved against the tree it is about to run on.
+///
+/// Item anchors are resolved once, at run open, into the snapshot coordinates the ledger already
+/// translates through the run — so what resolves them has to see the snapshot. A run that continues
+/// a journal does not: its tree already holds the edits of the operations the journal completed, and
+/// coordinates read from it would be translated through those edits a second time.
+///
+/// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
+/// resolve them; until then a resumed run of a plan that has item anchors is refused.
+pub fn resolve_item_anchors(
+    plan: &Plan,
+    root: &Path,
+    journal: &Journal,
+    registry: &mut BackendRegistry,
+) -> Result<Plan> {
+    if !has_item_anchors(plan) {
+        return Ok(plan.clone());
+    }
+    if journal.next_op() > 0 {
+        return Err(RestructureError::MalformedPlan(format!(
+            "this run continues a journal that already applied {} operation(s), and the plan \
+             anchors by item: item anchors are resolved against the tree the run starts on, which \
+             a continued run no longer has",
+            journal.next_op()
+        )));
+    }
+    item_anchor::resolve_item_anchors(plan, root, registry)
 }
 
 fn read_plan(path: &Path) -> Result<Plan> {

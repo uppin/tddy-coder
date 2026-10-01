@@ -18,7 +18,8 @@ use tddy_code_restructuring::restructure_cli::{
     RestructurePlanArgs, RestructureVerifyArgs,
 };
 use tddy_index_daemon::proto::code_index::{
-    AnchorsRequest, ApplyRequest, CheckRequest, PlanStatusRequest, VerifyRequest,
+    AnchorsRequest, ApplyRequest, CheckRequest, PlanStatusRequest, SourcePosition, SourceRange,
+    VerifyRequest,
 };
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tonic::transport::Channel;
@@ -193,25 +194,35 @@ async fn status(
     Ok(())
 }
 
-/// The range anchor covering a named run of items.
+/// The anchor a plan carries: `items` over a named run of items, or `item` for a position.
 async fn anchors(
     client: &mut CodeIndexServiceClient<Channel>,
     workspace_root: String,
     args: RestructureAnchorsArgs,
 ) -> Result<()> {
-    let file = named(&args.file)?;
     let response = client
         .anchors(AnchorsRequest {
             workspace_root,
-            file: file.clone(),
+            file: named(&args.file)?,
             items: normalised(args.items),
-            // TODO(item-anchors): implement — carry `--at` to the daemon.
-            at: None,
+            at: args.at.map(source_range),
         })
         .await
         .map_err(refused)?
         .into_inner();
-    index_console::anchors(&file, &response)
+    index_console::anchors(&response)
+}
+
+/// A one-based range as the wire carries it.
+fn source_range(range: tddy_code_restructuring::Range) -> SourceRange {
+    let wire = |position: tddy_code_restructuring::Position| SourcePosition {
+        line: position.line,
+        column: position.col,
+    };
+    SourceRange {
+        start: Some(wire(range.start)),
+        end: Some(wire(range.end)),
+    }
 }
 
 /// Hold the working tree's statements against a git ref's.

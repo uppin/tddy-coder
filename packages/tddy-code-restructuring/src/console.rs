@@ -37,6 +37,7 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
         Outcome::Status(progress) => plan_progress(progress),
         Outcome::Checked(found) => findings(found),
         Outcome::Anchored { file, range } => vec![anchor(file, *range)],
+        Outcome::ItemAnchored(found) => vec![item_anchor(found)],
         Outcome::Verified(comparison) => self::comparison(comparison),
         Outcome::Snapshotted(rewrite) => snapshot_rewrite(rewrite),
     }
@@ -192,6 +193,12 @@ pub fn anchor(file: &str, range: Range) -> String {
         "end": { "line": range.end.line, "col": range.end.col }
     })
     .to_string()
+}
+
+/// The anchor `restructure anchors` found, as the JSON document a plan carries it as.
+pub fn item_anchor(anchor: &crate::plan::Anchor) -> String {
+    // An anchor is strings, numbers and maps of them, none of which `serde_json` can fail to write.
+    serde_json::to_string(anchor).expect("an anchor serialises")
 }
 
 /// One line of per-operation progress.

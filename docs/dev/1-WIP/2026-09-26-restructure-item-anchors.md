@@ -123,14 +123,14 @@ verbatim and corrected only inside one run. One unrelated PR made six #524 plans
 
 ## Scope
 
-- [ ] `item` / `items` anchors, parse + validation
-- [ ] Item-path resolver with fingerprint check and refusals
-- [ ] Run-open resolution into ledger coordinates
-- [ ] Schema v2 header; v1 unchanged
-- [ ] `anchors --items` fixed (empty outline) and emitting `items`; `anchors --at` emitting `item`
-- [ ] Daemon `Anchors` RPC and `tddy-tools` client carry the new shape
-- [ ] TypeScript backend refuses item anchors
-- [ ] Skill and plan-schema reference updated
+- [x] `item` / `items` anchors, parse + validation
+- [x] Item-path resolver with fingerprint check and refusals
+- [x] Run-open resolution into ledger coordinates
+- [x] Schema v2 header; v1 unchanged
+- [x] `anchors --items` fixed (empty outline) and emitting `items`; `anchors --at` emitting `item`
+- [x] Daemon `Anchors` RPC and `tddy-tools` client carry the new shape
+- [x] TypeScript backend refuses item anchors
+- [x] Skill and plan-schema reference updated
 
 ## Technical Changes
 
@@ -177,14 +177,14 @@ verbatim and corrected only inside one run. One unrelated PR made six #524 plans
 
 ## Implementation Milestones
 
-- [ ] `ItemPath` parse/display round-trips, including trait-qualified members
-- [ ] Anchor kinds parse; v1 plans parse byte-identically
-- [ ] Outline read fixed; `anchors --items` returns items on warm and cold paths
-- [ ] Resolver resolves module items, inherent and trait members, inline-module items
-- [ ] Fingerprint mismatch / absent / ambiguous / prefix mismatch refusals
-- [ ] Run-open resolution; an `extract_method` through an item anchor matches the range-anchor edit
-- [ ] `anchors --at`; daemon RPC carries it
-- [ ] v2 header drift reported, not refused
+- [x] `ItemPath` parse/display round-trips, including trait-qualified members
+- [x] Anchor kinds parse; v1 plans parse byte-identically
+- [x] Outline read fixed; `anchors --items` returns items on warm and cold paths
+- [x] Resolver resolves module items, inherent and trait members, inline-module items
+- [x] Fingerprint mismatch / absent / ambiguous / prefix mismatch refusals
+- [x] Run-open resolution; an `extract_method` through an item anchor matches the range-anchor edit
+- [x] `anchors --at`; daemon RPC carries it
+- [x] v2 header drift reported, not refused
 
 ## Testing Plan
 
@@ -245,7 +245,33 @@ passes today by design — it is the v1 regression guard.
 
 ## Technical Debt & Production Readiness
 
-- Draft-PR-contract stubs: every `TODO(item-anchors)` in `plan.rs`, `item_anchor.rs`,
+Green-phase notes (what the implementation settled, and what it left):
+
+- **Resumed runs refuse item anchors** — `runner::resolve_item_anchors` resolves against the tree the
+  run starts on, and a run whose journal already completed operations no longer has it (the ledger
+  would translate coordinates read from the edited tree a second time). `TODO(plan-store)` in
+  `runner/entry_points.rs`; the plan store's per-op refresh is what lifts it.
+- **`tddy-lsp`: `LspClient::root_uri()`** — `ItemResolver::resolve_item(file, item)` is given only a
+  workspace-relative file, and a bridged backend holds only the client, so the client now reports the
+  root it was initialized against. One accessor, no behaviour change.
+- **Static `check` skips item anchors** (says so on the account sink); `check --deep` resolves them
+  first. A static check has no server to resolve with.
+- **TypeScript refusal** — this crate has no TypeScript backend, so "refuses by name" is the
+  registry's: `LanguageBackend::item_resolver` defaults to `None` and the registry answers
+  `UnsupportedOp { op: "item anchors" }`; a file with no backend at all is `NoBackend`.
+- **The empty outline** — diagnosed from the server's contract, not reproduced: rust-analyzer answers
+  `documentSymbol` for an open document with no symbols until its VFS has loaded, and
+  `ensure_indexed` treats an empty outline as "nothing to warm up" and leaves `indexed` false, so the
+  first answer was taken as the file's. `settled_outline` now waits out an empty answer until the
+  graph is observed loaded. The fixture crates answer immediately, so no acceptance test exercises
+  the wait itself. The cold path's `lsp server exited` is not addressed — it is a server exit, not
+  an outline.
+- **`walk_outline`** is the unit-test spelling of the walk; production calls the private `walk`
+  and words its refusals with the file, which the signature does not carry.
+- **`tddy-index-daemon` `code_index_service_acceptance`**: the anchors test's workspace now writes a
+  `Cargo.toml` — an item path is rooted in a package, and the fixture had none. Assertion untouched.
+
+- Draft-PR-contract stubs (all implemented; none remain): every `TODO(item-anchors)` in `plan.rs`, `item_anchor.rs`,
   `backends/rust/item_path.rs` (with `#[allow(dead_code)]` on `walk_outline`/`OutlineHit` until
   `resolve_item` calls them), `ledger.rs`, `backends/rust.rs` (`unlowered_item_anchor`),
   `runner/entry_points.rs` (`item_anchors`), `restructure_args.rs` (`parse_position_range`),
@@ -286,10 +312,10 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`); CI for the rest
+- [x] Run scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools -p tddy-lsp`) — 1120 passed, 0 failed, 9 ignored; CI for the rest
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete

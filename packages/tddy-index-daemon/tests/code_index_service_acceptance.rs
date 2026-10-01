@@ -650,8 +650,14 @@ async fn refuses_an_apply_whose_plan_names_a_file_no_backend_handles() {
 /// a seam's extent is the busywork the anchor query exists to remove.
 #[tokio::test(flavor = "multi_thread")]
 async fn emits_the_range_anchor_its_language_server_outlines_for_a_named_item() {
-    // Given a workspace whose language server can outline its source
+    // Given a workspace whose language server can outline its source, in a package an item path
+    // can be rooted in
     let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    std::fs::write(
+        workspace.path().join("Cargo.toml"),
+        "[package]\nname = \"subject\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("a package manifest");
     let entry = a_host_over_fake_language_servers();
 
     // When the anchor covering one named item is asked for

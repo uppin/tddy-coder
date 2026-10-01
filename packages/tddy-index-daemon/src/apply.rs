@@ -51,6 +51,7 @@ pub(crate) fn apply_plan(
     })?;
     let mut ledger = runner::restore_ledger(&journal, &paths)?;
     let mut registry = runner::registry_for(client, cancel.clone(), progress, logged_trace);
+    let plan = runner::resolve_item_anchors(&plan, root, &journal, &mut registry)?;
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let mut overlay = Overlay::new();
     let mut done = 0usize;

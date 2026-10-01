@@ -13,6 +13,7 @@ use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
 use crate::edit::{
     FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
 };
+use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
 use crate::{RestructureError, Result};
@@ -424,6 +425,8 @@ pub struct RustBackend {
     claimed: Vec<(String, String)>,
     /// The documents this backend has opened and not yet closed. See [`documents`].
     opened: Vec<String>,
+    /// The workspace root a self-spawned server was started in. A bridged client carries its own.
+    root: Option<PathBuf>,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -545,6 +548,7 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            root: None,
         }
     }
 
@@ -613,7 +617,22 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            root: None,
         }
+    }
+
+    /// The workspace root this backend's server is rooted at, which a workspace-relative path in a
+    /// plan is read against.
+    ///
+    /// A bridged client says so itself, having been initialized against it; a self-spawned server
+    /// is rooted wherever [`Self::start`] last started it.
+    fn workspace_root(&self) -> Result<PathBuf> {
+        if let Some(bridge) = &self.bridge {
+            return path_of(bridge.root_uri());
+        }
+        self.root.clone().ok_or_else(|| {
+            failure("this backend has no workspace root: no server has been started against one")
+        })
     }
 
     fn take_id(&mut self) -> u64 {
@@ -655,6 +674,7 @@ impl RustBackend {
     /// Start rust-analyzer and complete the initialize handshake, once per run.
     fn start(&mut self, root: &Path) -> Result<()> {
         (self.progress)("starting rust-analyzer session");
+        self.root = Some(root.to_path_buf());
         if let Some(bridge) = &self.bridge {
             // The handshake was someone else's, so the one thing that cannot be assumed is the
             // unit its columns are in. A server left on the LSP default counts utf-16 code
@@ -1067,6 +1087,14 @@ impl LanguageBackend for RustBackend {
     fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
         Some(self)
     }
+
+    fn item_resolver(&mut self) -> Option<&mut dyn ItemResolver> {
+        Some(self)
+    }
+
+    fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
+        Some(self)
+    }
 }
 
 /// The engine half of a cross-crate move.
@@ -1438,12 +1466,32 @@ impl RustBackend {
         Ok(items)
     }
 
+    /// The document's outline, once the server is able to give one.
+    ///
+    /// Until the server has loaded the workspace it answers `documentSymbol` for an open document
+    /// with no symbols at all, which reads exactly like a file that defines nothing. That is how
+    /// `restructure anchors` came to refuse every item of every file: it took the first answer. An
+    /// empty outline is only believed once the crate graph has been observed loaded — an outline
+    /// that has items in it is the server's real answer whenever it arrives.
+    fn settled_outline(&mut self, uri: &str) -> Result<Value> {
+        let started = Instant::now();
+        loop {
+            let symbols = self.request_settled(
+                "textDocument/documentSymbol",
+                json!({ "textDocument": { "uri": uri } }),
+            )?;
+            if self.indexed || !outline_is_empty(&symbols) {
+                return Ok(symbols);
+            }
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
+            }
+        }
+    }
+
     /// The file's module-level items, in the order they appear.
     fn module_outline(&mut self, uri: &str) -> Result<Vec<OutlineItem>> {
-        let symbols = self.request_settled(
-            "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri } }),
-        )?;
+        let symbols = self.settled_outline(uri)?;
 
         let mut outline: Vec<OutlineItem> = symbols
             .as_array()
@@ -1770,7 +1818,9 @@ impl RustBackend {
                 };
                 Ok(Range { start, end: start })
             }
-            Anchor::Item { .. } | Anchor::Items { .. } => Err(unlowered_item_anchor()),
+            Anchor::Item { .. } | Anchor::Items { .. } => {
+                Err(unlowered_item_anchor(&op.anchor, &format!("{:?}", op.op)))
+            }
         }
     }
 
@@ -1800,7 +1850,9 @@ impl RustBackend {
                 json!({ "line": start.line - 1, "character": start.col - 1 })
             }
             Anchor::Symbol { path, .. } => self.locate_symbol(uri, path)?,
-            Anchor::Item { .. } | Anchor::Items { .. } => return Err(unlowered_item_anchor()),
+            Anchor::Item { .. } | Anchor::Items { .. } => {
+                return Err(unlowered_item_anchor(&op.anchor, &format!("{:?}", op.op)))
+            }
         };
 
         self.wait_until_resolved(uri, &position)?;
@@ -2226,17 +2278,6 @@ impl LspPoint {
 }
 
 /// The start of a named symbol's selection range, searching nested symbols depth-first.
-/// An item anchor reached an operation without having been resolved at run open.
-///
-/// `runner::resolve_item_anchors` lowers every item anchor into the snapshot coordinates the
-/// ledger translates, so arriving here is this crate's own defect, never the plan's.
-fn unlowered_item_anchor() -> crate::RestructureError {
-    // TODO(item-anchors): implement — name the operation and the item.
-    crate::RestructureError::ServerDefect(
-        "an item anchor reached an operation without being resolved at run open".to_string(),
-    )
-}
-
 fn find_symbol(symbols: &Value, name: &str) -> Option<Value> {
     for symbol in symbols.as_array()? {
         if symbol.get("name").and_then(Value::as_str) == Some(name) {

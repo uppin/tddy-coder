@@ -26,7 +26,8 @@ pub enum RestructureCommand {
     Status(RestructurePlanArgs),
     /// Static (+ optional deep) preflight without writes.
     Check(RestructureCheckArgs),
-    /// Emit a range anchor covering named items.
+    /// Emit the anchor a plan carries: an `items` anchor over named items, or with `--at` the
+    /// `item` anchor of the innermost item enclosing a position.
     Anchors(RestructureAnchorsArgs),
     /// Compare statement multisets against a git ref.
     Verify(RestructureVerifyArgs),
@@ -81,9 +82,23 @@ pub struct RestructureAnchorsArgs {
 
 /// Read `LINE:COL` (a caret) or `LINE:COL-LINE:COL` (a range), one-based.
 pub fn parse_position_range(text: &str) -> std::result::Result<crate::edit::Range, String> {
-    // TODO(item-anchors): implement
-    let _ = text;
-    todo!("item-anchors: parse an --at position")
+    let refused = || format!("`{text}` is not LINE:COL or LINE:COL-LINE:COL");
+    let position = |written: &str| -> Option<crate::edit::Position> {
+        let (line, col) = written.split_once(':')?;
+        let (line, col) = (line.trim().parse().ok()?, col.trim().parse().ok()?);
+        (line >= 1 && col >= 1).then_some(crate::edit::Position { line, col })
+    };
+
+    let (start, end) = match text.split_once('-') {
+        Some((start, end)) => (position(start), position(end)),
+        None => (position(text), position(text)),
+    };
+    match (start, end) {
+        (Some(start), Some(end)) if (start.line, start.col) <= (end.line, end.col) => {
+            Ok(crate::edit::Range { start, end })
+        }
+        _ => Err(refused()),
+    }
 }
 
 #[derive(Parser)]

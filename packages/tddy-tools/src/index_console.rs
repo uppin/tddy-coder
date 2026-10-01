@@ -7,7 +7,7 @@
 //! What remains here, and is all that ever should have, is the mapping and the destination. The
 //! daemon streams *events* — prost messages shaped for a wire — and this maps each one onto the
 //! library type the renderer speaks: `RunOutcome` to a `RunSummary`, `PlanStatusResponse` to a
-//! `PlanProgress`, `VerifyResponse` to a `Comparison`, `SourceRange` to a `Range`. Then it writes
+//! `PlanProgress`, `VerifyResponse` to a `Comparison`. Then it writes
 //! the lines where this front end writes them.
 //!
 //! Two destinations, and they must match `restructure_cli::install_console`'s exactly: the answer
@@ -29,10 +29,9 @@ use tddy_code_restructuring::console;
 use tddy_code_restructuring::restructure_cli::step_delta;
 use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::Comparison;
-use tddy_code_restructuring::{Position, Range};
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
-    PlanStatusResponse, RestructureEvent, RunOutcome, SourceRange, VerifyResponse,
+    PlanStatusResponse, RestructureEvent, RunOutcome, VerifyResponse,
 };
 
 /// One line of a run's answer, on the console this front end owns.
@@ -214,32 +213,19 @@ pub(crate) fn verify(response: &VerifyResponse) -> Result<()> {
     Err(anyhow::anyhow!(console::comparison_refusal(&comparison)))
 }
 
-/// The anchor a run of items sits at, as the JSON document a plan carries it as.
+/// The anchor the daemon found, as the JSON document a plan carries it as.
 ///
-/// `file` comes from the command line rather than from the response: the schema's
-/// `AnchorsResponse` carries the range alone, and the document this front end has always emitted
-/// names the file the range is in.
-pub(crate) fn anchors(file: &str, response: &AnchorsResponse) -> Result<()> {
-    let Some(SourceRange {
-        start: Some(start),
-        end: Some(end),
-    }) = &response.range
-    else {
-        anyhow::bail!("the index daemon answered the anchor without a range");
-    };
-    say(&console::anchor(
-        file,
-        Range {
-            start: Position {
-                line: start.line,
-                col: start.column,
-            },
-            end: Position {
-                line: end.line,
-                col: end.column,
-            },
-        },
-    ));
+/// The response carries the whole anchor — file, item paths and fingerprints included. One without
+/// it came from a daemon that predates item anchors, and is refused as that rather than rendered as
+/// a bare range a plan could no longer be trusted to carry.
+pub(crate) fn anchors(response: &AnchorsResponse) -> Result<()> {
+    if response.anchor_json.is_empty() {
+        anyhow::bail!(
+            "the index daemon answered the anchor without its JSON — it predates item anchors; \
+             restart it from this build"
+        );
+    }
+    say(&response.anchor_json);
     Ok(())
 }
 
