@@ -526,7 +526,7 @@ mod tests {
     }
 
     /// `subagent_pull` is how a sandboxed Claude takes part of a conversation's work before it ends.
-    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-range-pull.md
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_pull` — take part of the work now
     #[test]
     fn subagent_pull_is_allowlisted_wherever_subagent_cancel_is() {
         // Given

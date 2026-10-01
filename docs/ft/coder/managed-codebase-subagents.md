@@ -369,11 +369,12 @@ runs are a [non-goal](#non-goals-out-of-scope-for-v1).
 
   `commit` is present only when a commit was made; a binary file counts as a file and adds no
   lines; a read carries none. It is bounded — counts and a hash, never paths.
-- **`subagent_end { sessionId }`** applies everything committed since the base to the caller's
+- **`subagent_end { sessionId, from?, to? }`** applies the conversation's commits since the base
+  (or the [range](#subagent_pull--take-part-of-the-work-now) named) to the caller's
   worktree as **uncommitted changes**, 3-way: where the caller changed the same lines since, the file
   is written with conflict markers. It then deletes the worktree and branch and closes the
   conversation, and answers
-  `{"ended": true, "pulled": {"files": {...}, "lines": {...}, "conflicts": ["src/lib.rs"]}}` —
+  `{"ended": true, "pulled": {"commits": [...], "skipped": [...], "files": {...}, "lines": {...}, "conflicts": ["src/lib.rs"]}}` —
   `pulled` is `null` when the conversation never created a worktree. The caller's `HEAD` never moves
   and no commit is made on the caller's branch. It is refused while a turn is running, naming the
   turn; a failed pull leaves the conversation open so the caller can retry or cancel.
@@ -384,7 +385,7 @@ cancelled loses them, which is the point, and the tool descriptions say so.
 
 Git runs on the facilitating daemon's host, never in the jail: a linked worktree's `.git` points into
 the repository's common directory, which a jail mounting only the checkout cannot see. The jail
-relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `Remove`, `Reset`, `Diff`) to
+relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `PullRange`, `Remove`, `Reset`, `Diff`) to
 the host. The automatic commits skip hooks and signing — every git call runs with
 `core.hooksPath=/dev/null` and `commit.gpgsign=false`, and the commit with `--no-verify` — so no
 developer hook runs on a subagent's behalf and a signing prompt cannot block a call. That is an
@@ -423,7 +424,9 @@ longer explains. So a rewind **also resets the conversation's worktree**, by def
 - A caller's **`replacement`** is never dispatched, so it makes no commit; a reset to a point after a
   replacement lands on the last real commit.
 - Nothing reaches the caller's worktree: the reset moves only the conversation's own tree, and
-  `subagent_end` still hands over what the branch then holds.
+  `subagent_end` still hands over what the branch then holds. Commits the caller had already
+  [pulled](#subagent_pull--take-part-of-the-work-now) stay applied; the outcome's `worktreeReset`
+  names the dropped ones among them as `droppedPulledCommits`, and is otherwise unchanged.
 
 Applies to the in-process loop with Managed access, like the rest of the worktree. Daemon-run
 conversations have no worktree to reset.
@@ -464,6 +467,42 @@ The daemon arm lives in `run_conversation_worktree_op` in `tddy-session-lifecycl
 exec-tool RPC and the jail bridge. Mechanics:
 [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
 
+### `subagent_pull` — take part of the work now
+
+`subagent_pull { sessionId, from?, to? }` applies a chosen range of the conversation's commits to the
+caller's worktree while the conversation carries on; `subagent_end` takes the same `from` / `to`.
+
+- **Both bounds are inclusive** — the commits a pull names are the commits it applies (unlike
+  `subagent_diff`'s `from..to`). Both are short hashes of commits on the conversation's branch,
+  `worktreeChange.commit` values; the base is not pullable. An omitted `from` is the earliest commit
+  not yet pulled, an omitted `to` is the branch tip.
+- **Each commit is applied as its own 3-way apply**, in order, as uncommitted changes, so a conflict
+  (markers in the file, path in `conflicts`) is attributable to one commit.
+- **The ledger.** The conversation remembers every commit it has pulled. A commit already pulled that
+  falls inside the range is **skipped**, never applied twice, and a later `subagent_end` takes only
+  what is left. The ledger is held by `tddy-tools` with the conversation and sent with every pull; it
+  is not persisted and is dropped when the conversation closes.
+- **The reply**:
+
+  ```json
+  { "pulled": { "commits": ["3f9c2ab", "9e01d4c"], "skipped": ["a77b310"],
+                "files": { "created": 1, "updated": 2, "removed": 0 },
+                "lines": { "added": 41, "removed": 7 }, "conflicts": [] } }
+  ```
+
+  `pulled` is `null` when the conversation never created a worktree. A range with nothing left to pull
+  replies with an empty `commits`; it is not an error.
+- **Refusals**: a commit that is not on the branch, a `from` after `to`, a pull while a turn is
+  running, an unknown `sessionId`.
+- **Nothing is un-applied.** A pull never changes the conversation's branch or worktree, and a rewind
+  that drops pulled commits leaves them in the caller's worktree.
+
+On the wire it is `ConversationWorktree { pull_range }` (`PullRangeOp { from, to, already_pulled }`,
+empty meaning omitted); a bound the conversation lacks answers `FailedPrecondition`. A range is
+applied commit by commit and a failure part-way leaves the commits applied so far in the caller's
+worktree without recording them in the ledger. Mechanics:
+[`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
+
 ### Known gaps
 
 - A `tddy-tools` process that dies without ending or cancelling its conversations leaves the branch
@@ -475,10 +514,8 @@ exec-tool RPC and the jail bridge. Mechanics:
   [`docs/dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md`](../../dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md).
 - `subagent_end` can race a prompt arriving between its pending check and the retire —
   [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
-- There is no range pull; a pull applies everything since the base as one diff. That belongs to the
-  `#agent-worktree` stack's later PR
-  ([#563](https://github.com/uppin/tddy-coder/pull/563)). Until it lands, `worktreeReset` cannot say
-  which dropped commits had already been handed to the caller.
+- A range pull that fails part-way (a git error after some commits applied) reports the error and
+  records none of the commits it applied, so a retry applies them again.
 
 ## Acceptance Criteria
 
@@ -734,6 +771,16 @@ fully migrated onto the array model.
 64. A binary change shows as `Binary files … differ`.
 65. `subagent_diff` is advertised, readable while a turn runs, and allowlisted in the sandbox recipes
     exactly where `subagent_cancel` is.
+66. `subagent_pull` with no range applies every commit not yet pulled, oldest first, each as its own
+    3-way apply; `from` and `to` are both inclusive.
+67. A commit already pulled is skipped and reported in `skipped`, by `subagent_pull` and by
+    `subagent_end`; a range with nothing left to pull applies nothing and is not an error.
+68. `subagent_end { from, to }` pulls the range, then deletes the worktree and branch.
+69. A commit not on the branch and a `from` after `to` are refused; a pull while a turn runs is
+    refused; a pull never changes the conversation's branch or worktree.
+70. A rewind that drops pulled commits names them in `worktreeReset.droppedPulledCommits`.
+71. `subagent_pull` is advertised and allowlisted in the sandbox recipes exactly where
+    `subagent_cancel` is.
 
 Verified at the request seams and against real git repositories; **no test runs a real jail end to
 end** (this needs a sandbox the development host cannot start).
@@ -762,7 +809,7 @@ end** (this needs a sandbox the development host cannot start).
 - **Daemon-run conversations** (`open_local`, `open_owned`, a peer's `RemoteAgentSession`) have no
   conversation worktree; their calls still run on the session worktree.
 - **Sweeping orphaned conversation worktrees and branches.**
-- **Range pulls** — a later PR of the `#agent-worktree` stack.
+- Un-applying a pulled commit from the caller's worktree, and persisting the ledger across a `tddy-tools` restart.
 - Diffing against the caller's worktree, and path filters on `subagent_diff`.
 
 ## Standalone launcher (`./claude-sandbox`)

@@ -1,6 +1,6 @@
 //! Handing a chosen range of a conversation's commits to the caller.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-range-pull.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_pull` — take part of the work now
 
 mod support;
 

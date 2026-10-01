@@ -16,6 +16,7 @@
 
 | 2026-09-27 | 74 | 55 | 3 | **unchanged.** `server.rs` grew by 33 lines in the same change, all of it in `subagent_new_session_tool` and the schema; this body was not edited |
 | 2026-09-27 | 80 | 59 | — | **regressed** by 6: the provider a turn queues on is read here and passed to `PendingTurns::start`, so the receipt can report a provider-queue position beside the conversation one |
+| 2026-10-01 | 80 | 59 | — | **unchanged** in PR #563 (`#agent-worktree` 4/4): the returned `result` becomes `crate::pull_ledger::annotated_turn_result(..)`, one line replaced by one line; the function is not simplified |
 ## What the tool found
 
 Over the 60-line ceiling; nesting is fine. Inherited from `subagent_prompt_tool`, and, like its

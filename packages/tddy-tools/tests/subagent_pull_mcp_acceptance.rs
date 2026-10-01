@@ -1,7 +1,7 @@
 //! Acceptance tests: `subagent_pull`, and `subagent_end`'s range, over the real `tddy-tools --mcp`
 //! stdio wire.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-range-pull.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_pull` — take part of the work now
 //!
 //! What these tests cannot reach: a pull with commits. With no session-tool transport configured the
 //! subagent reads through `CodebaseAccess::Local`, which refuses every write, so no conversation here
