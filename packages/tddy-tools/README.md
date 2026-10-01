@@ -51,8 +51,8 @@ they lived here.
 
 ## The MCP surface
 
-A session advertises **45** tools when its host claims it serves the session-action surface
-(`TDDY_SESSION_ACTION_TOOLS`), and **42** when it does not — `request_action`, `list_actions` and
+A session advertises **46** tools when its host claims it serves the session-action surface
+(`TDDY_SESSION_ACTION_TOOLS`), and **43** when it does not — `request_action`, `list_actions` and
 `invoke_action` are the difference. A transport alone cannot answer that question: the in-jail socket
 serves both a handler that implements all three and one that implements none, and the server cannot
 tell them apart from the socket. Only the host knows, so only the host says.
@@ -79,6 +79,13 @@ because `server.rs` is over the file budget). Each Managed conversation is built
 `ConversationWorktree { reset }` through `tddy_session_tool_client::reset_conversation_worktree` and
 maps the answer — `{"reset": {to, droppedCommits}}`, `{"reset": null}` for no worktree, or an error
 body that refuses the resume. The turn outcome then carries `worktreeReset`.
+
+`subagent_diff { sessionId, from?, to? }` (`src/subagent_diff.rs`) is read-only and takes no lock on
+the conversation, so it answers while a turn runs. It sends `ConversationWorktree { diff }` through
+`tddy_session_tool_client::diff_conversation_worktree` and answers the daemon's `diff` object —
+`{from, to, files, lines, diff, truncated}`, the diff text capped at 64 KiB while the counts cover the
+whole range. An unknown conversation, one that never wrote, and a commit the conversation does not
+have (a dropped one included) are refused by name.
 
 ## The environment is the real interface
 

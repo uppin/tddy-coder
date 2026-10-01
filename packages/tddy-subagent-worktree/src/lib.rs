@@ -11,7 +11,10 @@
 //!   [`WorktreeChange`] says how many files it created, updated and removed, how many lines it added
 //!   and removed, and the commit's short hash;
 //! - [`ConversationWorktree::pull_into_caller`] hands the result to the caller as uncommitted
-//!   changes, 3-way, and [`ConversationWorktree::remove`] deletes the worktree and its branch.
+//!   changes, 3-way, and [`ConversationWorktree::remove`] deletes the worktree and its branch;
+//! - [`ConversationWorktree::diff`] reads what the conversation changed between two of its commits
+//!   (git's `from..to`, the base and the tip by default), read-only, with counts over the whole range
+//!   and the text capped at [`DIFF_TEXT_CAP_BYTES`].
 //!
 //! Git runs through the CLI, on the host that owns the session worktree: a linked worktree's `.git`
 //! points into the repository's common dir, which a jail mounting only the checkout cannot see.

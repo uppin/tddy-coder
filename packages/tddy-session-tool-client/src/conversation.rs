@@ -277,6 +277,10 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
             "reset".to_string(),
             serde_json::json!({ "commit": reset.commit }),
         ),
+        Some(Op::Diff(diff)) => fields.insert(
+            "diff".to_string(),
+            serde_json::json!({ "from": diff.from, "to": diff.to }),
+        ),
         None => None,
     };
     let body = serde_json::Value::Object(fields);
@@ -337,22 +341,26 @@ pub async fn diff_conversation_worktree(
     from: Option<&str>,
     to: Option<&str>,
 ) -> String {
-    // TODO(diff): implement over the transports `conversation_worktree` uses
-    let _ = (conversation_id, from, to);
-    todo!("diff_conversation_worktree")
+    ask_conversation_worktree(|envelope| {
+        conversation_diff_request(&envelope, conversation_id, from, to)
+    })
+    .await
 }
 
 /// The `ConversationWorktree` request a diff sends.
-#[allow(dead_code)] // TODO(diff): called by `diff_conversation_worktree`
 pub(crate) fn conversation_diff_request(
     envelope: &SessionToolEnvelope,
     conversation_id: &str,
     from: Option<&str>,
     to: Option<&str>,
 ) -> ConversationWorktreeRequest {
-    // TODO(diff): implement
-    let _ = (envelope, conversation_id, from, to, DiffOp::default());
-    todo!("conversation_diff_request")
+    ConversationWorktreeRequest {
+        op: Some(Op::Diff(DiffOp {
+            from: from.unwrap_or_default().to_string(),
+            to: to.unwrap_or_default().to_string(),
+        })),
+        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
+    }
 }
 
 /// The `ExecuteTool` a conversation's call sends.

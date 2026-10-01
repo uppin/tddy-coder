@@ -2710,6 +2710,11 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
         |args| Box::pin(crate::subagent_end::subagent_end_tool(args)),
     ));
 
+    router.add_route(subagent_route(
+        crate::subagent_diff::subagent_diff_tool_definition(),
+        |args| Box::pin(crate::subagent_diff::subagent_diff_tool(args)),
+    ));
+
     let list_tool = rmcp::model::Tool::new(
         "subagent_list",
         "List all open subagent conversations with per-conversation token accounting, how \

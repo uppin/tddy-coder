@@ -79,7 +79,7 @@ impl ConversationWorktree {
     }
 
     /// The full hash `abbreviation` names, which must name a commit.
-    async fn resolve_commit(&self, abbreviation: &str) -> Result<String, WorktreeError> {
+    pub(crate) async fn resolve_commit(&self, abbreviation: &str) -> Result<String, WorktreeError> {
         let found = git(
             self.root(),
             [
@@ -95,7 +95,7 @@ impl ConversationWorktree {
     }
 
     /// The short form of each of `full`, in order.
-    async fn short_hashes(&self, full: &[&str]) -> Result<Vec<String>, WorktreeError> {
+    pub(crate) async fn short_hashes(&self, full: &[&str]) -> Result<Vec<String>, WorktreeError> {
         if full.is_empty() {
             return Ok(Vec::new());
         }

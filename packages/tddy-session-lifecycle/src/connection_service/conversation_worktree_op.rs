@@ -1,4 +1,4 @@
-//! `ConversationWorktree`'s operations — `Pull`, `Remove` and `Reset` — against a session's worktree.
+//! `ConversationWorktree`'s operations — `Pull`, `Remove`, `Reset` and `Diff` — against a session's worktree.
 //!
 //! Shared by the exec-tool RPC (`tddy-daemon-rpc`, which authorizes the caller's token first) and
 //! the host bridge a jail's relayed call arrives on (which has no token and is bound to its session
@@ -17,7 +17,9 @@ use super::DaemonSessionHost;
 /// Run `op` on `conversation_id`'s worktree under `session_worktree` and answer with the
 /// operation's `result_json`: `{"pulled": {files, lines, conflicts} | null}` for a pull (null when
 /// the conversation never created a worktree), `{"removed": bool}` for a remove, or
-/// `{"reset": {to, droppedCommits} | null}` for a reset (null likewise when there is no worktree).
+/// `{"reset": {to, droppedCommits} | null}` for a reset (null likewise when there is no worktree),
+/// or `{"diff": {from, to, files, lines, diff, truncated}}` for a diff (a conversation without a
+/// worktree is `FailedPrecondition`).
 ///
 /// An id that could escape its directory or branch namespace is refused before anything is looked
 /// up.
@@ -43,6 +45,20 @@ pub async fn run_conversation_worktree_op(
             serde_json::json!({ "removed": true })
         }
         (Op::Reset(_), None) => serde_json::json!({ "reset": null }),
+        (Op::Diff(_), None) => {
+            return Err(Status::failed_precondition(format!(
+                "conversation {conversation_id} has no worktree: nothing has been committed yet"
+            )))
+        }
+        (Op::Diff(diff), Some(worktree)) => {
+            // An empty bound is an omitted one: the base for `from`, the tip for `to`.
+            let bound = |bound: &str| (!bound.is_empty()).then_some(bound.to_string());
+            let outcome = worktree
+                .diff(bound(&diff.from).as_deref(), bound(&diff.to).as_deref())
+                .await
+                .map_err(refused)?;
+            serde_json::json!({ "diff": outcome })
+        }
         (Op::Reset(reset), Some(worktree)) => {
             // An empty commit names the base.
             let target = match reset.commit.as_str() {
@@ -54,6 +70,12 @@ pub async fn run_conversation_worktree_op(
         }
     };
     Ok(answer.to_string())
+}
+
+/// A diff bound the conversation does not have is the caller's mistake, not the daemon's.
+fn refused(error: WorktreeError) -> Status {
+    log::warn!("ConversationWorktree diff: {error}");
+    Status::failed_precondition(error.to_string())
 }
 
 fn internal(error: WorktreeError) -> Status {

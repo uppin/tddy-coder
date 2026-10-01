@@ -184,6 +184,8 @@ const SUBAGENT_TOOLS: &[&str] = &[
     // agent allowed to cancel a conversation but not to end it could only ever throw that work
     // away.
     "mcp__tddy-tools__subagent_end",
+    // Read-only, and how a sandboxed agent sees what a conversation changed before taking it.
+    "mcp__tddy-tools__subagent_diff",
 ];
 
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable
