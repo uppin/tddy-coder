@@ -17,6 +17,7 @@ pub mod mcp_primitives;
 mod reset_worktree_choice;
 pub mod server;
 pub mod session_actions_cli;
+mod subagent_diff;
 mod subagent_end;
 pub mod tool_list_announcer;
 mod worktree_reset_port;

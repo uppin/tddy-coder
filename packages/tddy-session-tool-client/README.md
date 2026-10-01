@@ -34,8 +34,10 @@ rather than a typed error, because the caller hands it straight to a model as th
 conversation named on the wire, so the daemon runs the call in that conversation's worktree;
 `conversation_worktree(conversation, op)` asks for `ConversationWorktreeOp::{Pull, Remove}` over the
 same four transports; `reset_conversation_worktree(conversation, commit)` sends the `Reset` op (an
-empty commit names the conversation's base) and is a function beside them rather than a
-`ConversationWorktreeOp` variant, because that enum is `Copy` and a reset carries data. All three live in `src/conversation.rs`, and the transports'
+empty commit names the conversation's base) and `diff_conversation_worktree(conversation, from, to)`
+sends the `Diff` op (an omitted bound is sent empty: the base for `from`, the tip for `to`). Both are
+functions beside them rather than `ConversationWorktreeOp` variants, because that enum is `Copy` and
+they carry data. All four live in `src/conversation.rs`, and the transports'
 request-taking cores
 (`dispatch_request_via_*`) are shared with the unchanged `dispatch_via_*` entry points.
 

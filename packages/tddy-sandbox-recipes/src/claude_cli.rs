@@ -184,6 +184,8 @@ const SUBAGENT_TOOLS: &[&str] = &[
     // agent allowed to cancel a conversation but not to end it could only ever throw that work
     // away.
     "mcp__tddy-tools__subagent_end",
+    // Read-only, and how a sandboxed agent sees what a conversation changed before taking it.
+    "mcp__tddy-tools__subagent_diff",
 ];
 
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable
@@ -495,6 +497,26 @@ mod tests {
             (
                 allowed("mcp__tddy-tools__subagent_cancel"),
                 allowed("mcp__tddy-tools__subagent_end")
+            ),
+            (true, true)
+        );
+    }
+
+    /// `subagent_diff` is how a sandboxed Claude reads what a conversation changed before taking it.
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_diff` — read what a conversation changed
+    #[test]
+    fn subagent_diff_is_allowlisted_wherever_subagent_cancel_is() {
+        // Given
+        let allowlist = build_claude_allowlist(true, &[]);
+
+        // When
+        let allowed = |tool: &str| allowlist.iter().any(|entry| entry == tool);
+
+        // Then
+        assert_eq!(
+            (
+                allowed("mcp__tddy-tools__subagent_cancel"),
+                allowed("mcp__tddy-tools__subagent_diff")
             ),
             (true, true)
         );

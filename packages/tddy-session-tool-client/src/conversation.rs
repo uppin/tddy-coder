@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
+    DiffOp, ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -277,6 +277,10 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
             "reset".to_string(),
             serde_json::json!({ "commit": reset.commit }),
         ),
+        Some(Op::Diff(diff)) => fields.insert(
+            "diff".to_string(),
+            serde_json::json!({ "from": diff.from, "to": diff.to }),
+        ),
         None => None,
     };
     let body = serde_json::Value::Object(fields);
@@ -325,6 +329,35 @@ pub(crate) fn conversation_reset_request(
     ConversationWorktreeRequest {
         op: Some(Op::Reset(ResetOp {
             commit: commit.unwrap_or_default().to_string(),
+        })),
+        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
+    }
+}
+
+/// Ask the facilitating daemon for the diff `from..to` of `conversation_id` (either bound `None`:
+/// base / tip); the answer's `result_json` (`{"diff": {…}}`) or a `{"error", "is_error": true}` body.
+pub async fn diff_conversation_worktree(
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> String {
+    ask_conversation_worktree(|envelope| {
+        conversation_diff_request(&envelope, conversation_id, from, to)
+    })
+    .await
+}
+
+/// The `ConversationWorktree` request a diff sends.
+pub(crate) fn conversation_diff_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> ConversationWorktreeRequest {
+    ConversationWorktreeRequest {
+        op: Some(Op::Diff(DiffOp {
+            from: from.unwrap_or_default().to_string(),
+            to: to.unwrap_or_default().to_string(),
         })),
         ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
     }
@@ -438,6 +471,17 @@ mod tests {
             conversation_reset_request(&an_envelope(), "explore", None).op,
             Some(Op::Reset(ResetOp {
                 commit: String::new()
+            }))
+        );
+    }
+
+    #[test]
+    fn a_diff_names_both_bounds_and_leaves_an_omitted_one_empty() {
+        assert_eq!(
+            conversation_diff_request(&an_envelope(), "explore", Some("3f9c2ab"), None).op,
+            Some(Op::Diff(DiffOp {
+                from: "3f9c2ab".into(),
+                to: String::new()
             }))
         );
     }

@@ -18,6 +18,7 @@ handler and the subagent loop depend on it; it depends on none of them. `tddy-sa
 | `ConversationWorktrees::{new, path_of, branch_of, existing, ensure}` | one session's conversation worktrees; `existing` never creates, `ensure` creates on first use |
 | `ConversationWorktree::{commit_changes, pull_into_caller, remove}` | one commit per call that changed files; the 3-way hand-over; deletion of worktree, branch and base ref |
 | `ConversationWorktree::reset_to`, `ResetTarget`, `WorktreeReset` | hard reset to the base or a commit on the branch, untracked files removed and ignored ones kept; reports where it stands and the short hashes it dropped |
+| `ConversationWorktree::diff`, `ConversationDiff`, `DIFF_TEXT_CAP_BYTES` | the unified diff `from..to` between two commits of the branch (default base..tip), whole-range counts, text capped at 64 KiB at a line boundary; read-only |
 | `ToolEffect::of` | the one fail-closed read-only classifier: `Read`, `Glob`, `Grep`, `SemanticSearch`, `ReadLints` read, everything else mutates |
 | `run_in_conversation` | the whole per-call rule — which root a call runs at, and the commit that follows a mutating one |
 | `with_worktree_change` | merges `worktreeChange` into a tool result |

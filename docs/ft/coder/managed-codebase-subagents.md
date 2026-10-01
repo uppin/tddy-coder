@@ -384,7 +384,7 @@ cancelled loses them, which is the point, and the tool descriptions say so.
 
 Git runs on the facilitating daemon's host, never in the jail: a linked worktree's `.git` points into
 the repository's common directory, which a jail mounting only the checkout cannot see. The jail
-relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `Remove`) to
+relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `Remove`, `Reset`, `Diff`) to
 the host. The automatic commits skip hooks and signing — every git call runs with
 `core.hooksPath=/dev/null` and `commit.gpgsign=false`, and the commit with `--no-verify` — so no
 developer hook runs on a subagent's behalf and a signing prompt cannot block a call. That is an
@@ -428,6 +428,42 @@ longer explains. So a rewind **also resets the conversation's worktree**, by def
 Applies to the in-process loop with Managed access, like the rest of the worktree. Daemon-run
 conversations have no worktree to reset.
 
+### `subagent_diff` — read what a conversation changed
+
+`subagent_diff { sessionId, from?, to? }` returns the unified diff between two points of a
+conversation's worktree branch. A turn outcome says, per call, how much changed and which commit
+recorded it; this tool shows the change itself, so a caller can look before it ends the conversation.
+
+- **`from` is exclusive, `to` is inclusive** — git's `from..to`, so the same two hashes given to
+  `git diff` give the same answer. Both are short hashes: the conversation's base, or a
+  `worktreeChange.commit` still on its branch. An omitted `from` is the base; an omitted `to` is the
+  branch tip, so no arguments diffs everything since the base.
+- **The reply**:
+
+  ```json
+  { "from": "a01b2c3", "to": "3f9c2ab",
+    "files": { "created": 1, "updated": 2, "removed": 0 },
+    "lines": { "added": 41, "removed": 7 },
+    "diff": "diff --git a/src/lib.rs b/src/lib.rs\n…",
+    "truncated": false }
+  ```
+
+- **The text is capped at 64 KiB**, cut at a line boundary, with `truncated: true`. The counts always
+  describe the whole range, so a truncated reply still says how large the change is.
+- **Binary changes** show as git's `Binary files … differ` line: the text is git's own, produced
+  without `--binary`, so no binary payload is carried.
+- **Refusals**, each naming what was wrong: a commit that is not in the conversation, including one a
+  rewind dropped from the branch; a `from` that is not an ancestor of `to`; a conversation with no
+  worktree (it never made a mutating call); an unknown `sessionId`.
+- **Read-only.** Nothing is written to either worktree, and the tool takes no lock on the
+  conversation, so it answers while a turn is running.
+
+On the wire it is `ConversationWorktree { diff }` (`DiffOp { from, to }`, empty meaning omitted); a
+conversation without a worktree, or a bound the conversation lacks, answers `FailedPrecondition`.
+The daemon arm lives in `run_conversation_worktree_op` in `tddy-session-lifecycle`, shared by the
+exec-tool RPC and the jail bridge. Mechanics:
+[`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
+
 ### Known gaps
 
 - A `tddy-tools` process that dies without ending or cancelling its conversations leaves the branch
@@ -439,11 +475,10 @@ conversations have no worktree to reset.
   [`docs/dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md`](../../dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md).
 - `subagent_end` can race a prompt arriving between its pending check and the retire —
   [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
-- There is no diff tool or range pull; a pull applies everything since the base as one diff. Those
-  belong to the `#agent-worktree` stack's later PRs
-  ([#562](https://github.com/uppin/tddy-coder/pull/562), [#563](https://github.com/uppin/tddy-coder/pull/563)).
-  Until the range pull lands, `worktreeReset` cannot say which dropped commits had already been
-  handed to the caller.
+- There is no range pull; a pull applies everything since the base as one diff. That belongs to the
+  `#agent-worktree` stack's later PR
+  ([#563](https://github.com/uppin/tddy-coder/pull/563)). Until it lands, `worktreeReset` cannot say
+  which dropped commits had already been handed to the caller.
 
 ## Acceptance Criteria
 
@@ -688,6 +723,17 @@ fully migrated onto the array model.
     no reset and report none; a rewind creates no worktree.
 59. A failed reset refuses the resume and leaves the transcript un-rewound.
 60. `subagent_resume` advertises `resetWorktree` as a boolean.
+61. `subagent_diff` with no arguments returns the diff base..tip; `from` (exclusive) and `to`
+    (inclusive) select exactly the changes after `from` through `to`, and the text is git's own for
+    that range.
+62. The counts describe the whole range; text past 64 KiB is cut at a line boundary and marked
+    `truncated`.
+63. A commit outside the conversation, a commit a rewind dropped, and a `from` that is not an
+    ancestor of `to` are refused; a conversation without a worktree is refused with
+    `FailedPrecondition`, as is an unknown conversation by the tool.
+64. A binary change shows as `Binary files … differ`.
+65. `subagent_diff` is advertised, readable while a turn runs, and allowlisted in the sandbox recipes
+    exactly where `subagent_cancel` is.
 
 Verified at the request seams and against real git repositories; **no test runs a real jail end to
 end** (this needs a sandbox the development host cannot start).
@@ -716,8 +762,8 @@ end** (this needs a sandbox the development host cannot start).
 - **Daemon-run conversations** (`open_local`, `open_owned`, a peer's `RemoteAgentSession`) have no
   conversation worktree; their calls still run on the session worktree.
 - **Sweeping orphaned conversation worktrees and branches.**
-- **Resetting the worktree on a rewind, diffing, range pulls** — later PRs of the `#agent-worktree`
-  stack.
+- **Range pulls** — a later PR of the `#agent-worktree` stack.
+- Diffing against the caller's worktree, and path filters on `subagent_diff`.
 
 ## Standalone launcher (`./claude-sandbox`)
 

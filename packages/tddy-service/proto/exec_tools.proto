@@ -75,7 +75,17 @@ message ConversationWorktreeRequest {
     PullOp   pull   = 10;
     RemoveOp remove = 11;
     ResetOp  reset  = 12;
+    DiffOp   diff   = 13;
   }
+}
+
+// The diff `from..to` between two of the conversation's commits (short hashes; empty `from` is the
+// base, empty `to` the tip). Answers `{"diff": {from, to, files, lines, diff, truncated}}`; a commit
+// outside the conversation, a `from` that is not an ancestor of `to`, or a conversation with no
+// worktree is an `invalid_argument` / `failed_precondition` status.
+message DiffOp {
+  string from = 1;
+  string to   = 2;
 }
 
 // Hard-reset the conversation's worktree and branch to `commit` (a short hash on its branch), or
