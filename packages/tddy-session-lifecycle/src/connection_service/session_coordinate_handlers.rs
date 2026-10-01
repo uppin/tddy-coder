@@ -296,6 +296,7 @@ impl DaemonSessionHost {
                 tool_name: "GetWorktreeSnapshot".to_string(),
                 args_json: String::new(),
                 daemon_instance_id: req.daemon_instance_id.clone(),
+                conversation_id: String::new(),
             })?;
 
         let budget = self.config.session_room_git_timeout();

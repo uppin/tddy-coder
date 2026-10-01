@@ -131,6 +131,14 @@ pub struct MessageDescriptor {
     /// is nothing to say, matching the descriptor's other optional readings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result_summary: Option<super::result_summary::ResultSummary>,
+    /// What a mutating tool call did to the conversation's own worktree — files created, updated
+    /// and removed, lines added and removed, and the commit that recorded it. `None` for a read,
+    /// for every non-`tool` role, and for a call whose codebase has no conversation worktree.
+    ///
+    /// A sibling of `result_summary` rather than a field inside it: it describes the worktree, not
+    /// the tool's answer, and `SHELL` / `AWAIT` change files their own summaries never mention.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
 }
 
 /// Cut `text` to [`MESSAGE_PREVIEW_CHARS`], marking that it was cut.
@@ -198,6 +206,9 @@ struct TranscriptEntry {
     /// The structured facts of a `tool`-role result, computed at the append site where the
     /// result JSON is still structured — `None` for every other kind of message.
     result_summary: Option<ResultSummary>,
+    /// What the call did to the conversation worktree, read off the result's `worktreeChange` at
+    /// the same append site. Kept on the entry so a rewind can find the commit it goes back to.
+    worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
 }
 
 /// One conversation's messages, in order, each addressable by a [`MessageId`].
@@ -220,7 +231,7 @@ impl Transcript {
 
     /// Append `message`, recording whether it reports a tool call that produced no result.
     pub(crate) fn push_marked(&mut self, message: ChatMessage, is_error: bool) -> MessageId {
-        self.push_with_summary(message, is_error, None)
+        self.push_with_summary(message, is_error, None, None)
     }
 
     /// Append a `tool`-role result carrying the facts of that result, as the append site read
@@ -230,8 +241,9 @@ impl Transcript {
         message: ChatMessage,
         is_error: bool,
         result_summary: ResultSummary,
+        worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
     ) -> MessageId {
-        self.push_with_summary(message, is_error, Some(result_summary))
+        self.push_with_summary(message, is_error, Some(result_summary), worktree_change)
     }
 
     fn push_with_summary(
@@ -239,6 +251,7 @@ impl Transcript {
         message: ChatMessage,
         is_error: bool,
         result_summary: Option<ResultSummary>,
+        worktree_change: Option<tddy_subagent_worktree::WorktreeChange>,
     ) -> MessageId {
         self.next_ordinal += 1;
         let id = MessageId(format!("m{}", self.next_ordinal));
@@ -247,6 +260,7 @@ impl Transcript {
             message,
             is_error,
             result_summary,
+            worktree_change,
         });
         id
     }
@@ -299,6 +313,7 @@ impl Transcript {
                     is_error: entry.is_error,
                     preview: preview_of(entry.message.content.as_deref().unwrap_or("")),
                     result_summary: entry.result_summary.clone(),
+                    worktree_change: entry.worktree_change.clone(),
                 })
             })
             .collect()

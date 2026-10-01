@@ -12339,6 +12339,7 @@ dependencies = [
  "tddy-service",
  "tddy-session-tool-client",
  "tddy-stdio",
+ "tddy-subagent-worktree",
  "tddy-task",
  "tddy-tool-engine",
  "tddy-tools",
@@ -12423,6 +12424,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-session-tool-client",
+ "tddy-subagent-worktree",
  "tddy-testing-commons",
  "tempfile",
  "tokio",
@@ -13335,6 +13337,7 @@ dependencies = [
  "tddy-session-tool-client",
  "tddy-spawn",
  "tddy-stdio",
+ "tddy-subagent-worktree",
  "tddy-supervisor",
  "tddy-task",
  "tddy-telegram",
@@ -13458,6 +13461,21 @@ dependencies = [
  "async-trait",
  "futures",
  "tddy-rpc",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-subagent-worktree"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "pretty_assertions",
+ "rstest 0.24.0",
+ "serde",
+ "serde_json",
+ "tddy-task",
+ "tddy-tool-engine",
+ "tempfile",
  "tokio",
 ]
 

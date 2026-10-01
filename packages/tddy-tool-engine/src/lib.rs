@@ -917,7 +917,7 @@ pub mod dynamic_proxy {
 pub mod exec_tool_entry;
 pub mod exec_tool_service;
 pub mod tool_call_log;
-pub use exec_tool_entry::{build_exec_tool_entry, EXEC_TOOL_SERVICE};
+pub use exec_tool_entry::{build_exec_tool_entry, EXEC_TOOL_SERVICE, IN_JAIL_RELAYABLE_EXEC_TOOLS};
 pub use exec_tool_service::{ExecToolHandler, ExecToolServiceImpl};
 
 #[cfg(test)]
@@ -971,6 +971,17 @@ mod unbundle_exec_tool_entry_tests {
                         tool_calls: vec![],
                     },
                 ))
+            }
+            async fn conversation_worktree(
+                &self,
+                _request: tddy_rpc::Request<
+                    tddy_service::proto::exec_tools::ConversationWorktreeRequest,
+                >,
+            ) -> Result<
+                tddy_rpc::Response<tddy_service::proto::exec_tools::ConversationWorktreeResponse>,
+                tddy_rpc::Status,
+            > {
+                Err(tddy_rpc::Status::unimplemented("stub"))
             }
         }
         assert_eq!(

@@ -1,0 +1,388 @@
+//! A subagent conversation's calls to its facilitating daemon: its tool calls, which run in the
+//! conversation's own worktree, and the worktree operations that are not tool calls.
+//!
+//! In its own module rather than beside [`crate::dispatch_session_tool`]: `lib.rs` is over the file
+//! budget (`packages/tddy-session-tool-client/docs/code-issues/oversized-file-lib.md`), and this is
+//! the one place the conversation id enters the envelope.
+
+use std::sync::Arc;
+
+use prost::Message as _;
+use tddy_service::proto::exec_tools::{
+    conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
+    ExecuteToolRequest, PullOp, RemoveOp,
+};
+
+#[cfg(feature = "livekit")]
+use crate::livekit_session;
+use crate::{
+    clamp_remote_blocking_args, connect_sandbox_ipc, detect_session_tool_transport,
+    dispatch_request_via_daemon_http, dispatch_request_via_livekit,
+    dispatch_request_via_rpc_transport, execute_tool_request, incomplete_livekit_error,
+    not_configured_error, LiveKitRoomKey, SessionToolEnvelope, SessionToolTransport,
+};
+
+/// A worktree operation a conversation asks its daemon for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationWorktreeOp {
+    /// Hand everything committed since the base to the session worktree, 3-way.
+    Pull,
+    /// Delete the worktree, its branch and its base ref.
+    Remove,
+}
+
+/// Run `tool_name` for `conversation_id` over whichever transport this process was given — the
+/// same transports as [`crate::dispatch_session_tool`], with the conversation named on the wire.
+pub async fn dispatch_conversation_tool(
+    conversation_id: &str,
+    tool_name: &str,
+    args: serde_json::Value,
+) -> String {
+    let Some(transport) = detect_session_tool_transport() else {
+        return not_configured_error();
+    };
+    let call = |envelope: &SessionToolEnvelope, args: &serde_json::Value| {
+        conversation_tool_request(envelope, conversation_id, tool_name, args)
+    };
+    match transport {
+        SessionToolTransport::SandboxIpc { socket_path } => {
+            // The socket identifies the session to the sandbox-runner; the envelope stays empty.
+            let request = call(&SessionToolEnvelope::default(), &args);
+            match connect_sandbox_ipc(&socket_path).await {
+                Ok(client) => dispatch_request_via_rpc_transport(&client, request).await,
+                Err(e) => error_body(e),
+            }
+        }
+        SessionToolTransport::DaemonUds {
+            socket_path,
+            session_id,
+            session_token,
+            daemon_instance_id,
+        } => {
+            let request = call(
+                &SessionToolEnvelope {
+                    session_id,
+                    session_token,
+                    daemon_instance_id,
+                },
+                &args,
+            );
+            match connect_sandbox_ipc(&socket_path).await {
+                Ok(client) => dispatch_request_via_rpc_transport(&client, request).await,
+                Err(e) => error_body(e),
+            }
+        }
+        SessionToolTransport::DaemonHttp {
+            session_id,
+            daemon_url,
+            session_token,
+            daemon_instance_id,
+        } => {
+            let request = call(
+                &SessionToolEnvelope {
+                    session_id,
+                    session_token,
+                    daemon_instance_id,
+                },
+                &args,
+            );
+            dispatch_request_via_daemon_http(&daemon_url, &request).await
+        }
+        SessionToolTransport::LiveKit {
+            url,
+            room,
+            token,
+            server_identity,
+            session_id,
+            session_token,
+            daemon_instance_id,
+        } => {
+            // Only this transport can hang, so only here are a call's blocks shortened.
+            let args = clamp_remote_blocking_args(tool_name, &args);
+            let request = call(
+                &SessionToolEnvelope {
+                    session_id,
+                    session_token,
+                    daemon_instance_id,
+                },
+                &args,
+            );
+            let key = LiveKitRoomKey {
+                url,
+                room,
+                token,
+                server_identity,
+            };
+            dispatch_request_via_livekit(&key, request).await
+        }
+        SessionToolTransport::IncompleteLiveKit { missing } => incomplete_livekit_error(&missing),
+    }
+}
+
+/// Ask the facilitating daemon for `op` on `conversation_id`'s worktree; the answer's
+/// `result_json`, or a `{"error", "is_error": true}` body naming why it could not be asked.
+pub async fn conversation_worktree(conversation_id: &str, op: ConversationWorktreeOp) -> String {
+    let Some(transport) = detect_session_tool_transport() else {
+        return not_configured_error();
+    };
+    let request = |envelope: SessionToolEnvelope| {
+        conversation_worktree_request(&envelope, conversation_id, op)
+    };
+    match transport {
+        SessionToolTransport::SandboxIpc { socket_path } => {
+            // The runner rewrites the request to name the jail's own session.
+            match connect_sandbox_ipc(&socket_path).await {
+                Ok(client) => ask_daemon(&client, request(SessionToolEnvelope::default())).await,
+                Err(e) => error_body(e),
+            }
+        }
+        SessionToolTransport::DaemonUds {
+            socket_path,
+            session_id,
+            session_token,
+            daemon_instance_id,
+        } => match connect_sandbox_ipc(&socket_path).await {
+            Ok(client) => {
+                let envelope = SessionToolEnvelope {
+                    session_id,
+                    session_token,
+                    daemon_instance_id,
+                };
+                ask_daemon(&client, request(envelope)).await
+            }
+            Err(e) => error_body(e),
+        },
+        SessionToolTransport::DaemonHttp {
+            session_id,
+            daemon_url,
+            session_token,
+            daemon_instance_id,
+        } => {
+            let envelope = SessionToolEnvelope {
+                session_id,
+                session_token,
+                daemon_instance_id,
+            };
+            ask_daemon_over_http(&daemon_url, &request(envelope)).await
+        }
+        SessionToolTransport::LiveKit {
+            url,
+            room,
+            token,
+            server_identity,
+            session_id,
+            session_token,
+            daemon_instance_id,
+        } => {
+            let envelope = SessionToolEnvelope {
+                session_id,
+                session_token,
+                daemon_instance_id,
+            };
+            ask_daemon_over_livekit(
+                &LiveKitRoomKey {
+                    url,
+                    room,
+                    token,
+                    server_identity,
+                },
+                request(envelope),
+            )
+            .await
+        }
+        SessionToolTransport::IncompleteLiveKit { missing } => incomplete_livekit_error(&missing),
+    }
+}
+
+#[cfg(feature = "livekit")]
+async fn ask_daemon_over_livekit(
+    key: &LiveKitRoomKey,
+    request: ConversationWorktreeRequest,
+) -> String {
+    match livekit_session(key).await {
+        Ok(session) if session.peer_present() => ask_daemon(session.transport(), request).await,
+        Ok(_) => error_body(format!(
+            "remote daemon participant \"{}\" is no longer in room \"{}\"",
+            key.server_identity, key.room
+        )),
+        Err(e) => error_body(e),
+    }
+}
+
+/// Without the `livekit` feature a split session cannot reach its daemon at all, and says so.
+#[cfg(not(feature = "livekit"))]
+async fn ask_daemon_over_livekit(
+    _key: &LiveKitRoomKey,
+    _request: ConversationWorktreeRequest,
+) -> String {
+    error_body(
+        "remote worktree dispatch requires the 'livekit' cargo feature; \
+         rebuild with: cargo build -p tddy-tools --features livekit"
+            .to_string(),
+    )
+}
+
+/// `ExecToolService/ConversationWorktree` over an RPC transport, answered with the result JSON.
+async fn ask_daemon(
+    client: &Arc<dyn tddy_rpc::RpcClientTransport>,
+    request: ConversationWorktreeRequest,
+) -> String {
+    let bytes = match client
+        .call_unary(
+            "exec_tools.ExecToolService",
+            "ConversationWorktree",
+            request.encode_to_vec(),
+        )
+        .await
+    {
+        Ok(bytes) => bytes,
+        Err(e) => return error_body(format!("conversation worktree rpc call: {e}")),
+    };
+    match ConversationWorktreeResponse::decode(bytes.as_slice()) {
+        Ok(response) => response.result_json,
+        Err(e) => error_body(format!("conversation worktree rpc decode response: {e}")),
+    }
+}
+
+/// The same call over the daemon's HTTP Connect endpoint.
+async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRequest) -> String {
+    // The Connect JSON body: the request's fields, and the chosen operation as a key of its own.
+    let mut fields = serde_json::Map::from_iter([
+        (
+            "session_token".to_string(),
+            request.session_token.clone().into(),
+        ),
+        ("session_id".to_string(), request.session_id.clone().into()),
+        (
+            "daemon_instance_id".to_string(),
+            request.daemon_instance_id.clone().into(),
+        ),
+        (
+            "conversation_id".to_string(),
+            request.conversation_id.clone().into(),
+        ),
+    ]);
+    match &request.op {
+        Some(Op::Pull(_)) => fields.insert("pull".to_string(), serde_json::json!({})),
+        Some(Op::Remove(_)) => fields.insert("remove".to_string(), serde_json::json!({})),
+        None => None,
+    };
+    let body = serde_json::Value::Object(fields);
+    let url = format!(
+        "{}/exec_tools.ExecToolService/ConversationWorktree",
+        daemon_url.trim_end_matches('/')
+    );
+    let answered = reqwest::Client::new()
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await;
+    match answered {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(body) => match body.get("result_json").and_then(|v| v.as_str()) {
+                Some(result) => result.to_string(),
+                None => error_body(format!("relay answered without a result: {body}")),
+            },
+            Err(e) => error_body(format!("relay parse error: {e}")),
+        },
+        Err(e) => error_body(format!("relay connection error: {e}")),
+    }
+}
+
+fn error_body(message: String) -> String {
+    serde_json::json!({ "error": message, "is_error": true }).to_string()
+}
+
+/// The `ExecuteTool` a conversation's call sends.
+pub(crate) fn conversation_tool_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    tool_name: &str,
+    args: &serde_json::Value,
+) -> ExecuteToolRequest {
+    ExecuteToolRequest {
+        conversation_id: conversation_id.to_string(),
+        ..execute_tool_request(envelope, tool_name, args)
+    }
+}
+
+/// The `ConversationWorktree` request for `op`.
+pub(crate) fn conversation_worktree_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    op: ConversationWorktreeOp,
+) -> ConversationWorktreeRequest {
+    ConversationWorktreeRequest {
+        session_token: envelope.session_token.clone(),
+        session_id: envelope.session_id.clone(),
+        daemon_instance_id: envelope.daemon_instance_id.clone(),
+        conversation_id: conversation_id.to_string(),
+        op: Some(match op {
+            ConversationWorktreeOp::Pull => Op::Pull(PullOp {}),
+            ConversationWorktreeOp::Remove => Op::Remove(RemoveOp {}),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn an_envelope() -> SessionToolEnvelope {
+        SessionToolEnvelope {
+            session_id: "sess-1".into(),
+            session_token: "token-1".into(),
+            daemon_instance_id: "daemon-a".into(),
+        }
+    }
+
+    #[test]
+    fn a_conversation_tool_call_names_its_conversation_on_the_wire() {
+        // Given
+        let args = serde_json::json!({ "path": "a.txt", "contents": "a" });
+
+        // When
+        let request = conversation_tool_request(&an_envelope(), "explore", "Write", &args);
+
+        // Then
+        assert_eq!(
+            request,
+            ExecuteToolRequest {
+                session_token: "token-1".into(),
+                session_id: "sess-1".into(),
+                tool_name: "Write".into(),
+                args_json: args.to_string(),
+                daemon_instance_id: "daemon-a".into(),
+                conversation_id: "explore".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_pull_names_its_conversation_and_asks_for_a_pull() {
+        assert_eq!(
+            conversation_worktree_request(&an_envelope(), "explore", ConversationWorktreeOp::Pull),
+            ConversationWorktreeRequest {
+                session_token: "token-1".into(),
+                session_id: "sess-1".into(),
+                daemon_instance_id: "daemon-a".into(),
+                conversation_id: "explore".into(),
+                op: Some(Op::Pull(PullOp {})),
+            }
+        );
+    }
+
+    #[test]
+    fn a_remove_asks_for_a_remove() {
+        assert_eq!(
+            conversation_worktree_request(
+                &an_envelope(),
+                "explore",
+                ConversationWorktreeOp::Remove
+            )
+            .op,
+            Some(Op::Remove(RemoveOp {}))
+        );
+    }
+}

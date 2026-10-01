@@ -112,6 +112,7 @@ async fn execute_tool_path_traversal_returns_permission_denied_status() {
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"../../etc/passwd"}"#.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await;
 
@@ -144,6 +145,7 @@ async fn execute_tool_unknown_tool_name_returns_is_error_not_rpc_error() {
             tool_name: "NonExistentTool".to_string(),
             args_json: "{}".to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("unknown tool must be a tool-level error, not an RPC error");
@@ -177,6 +179,7 @@ async fn execute_tool_background_shell_then_await_round_trips() {
             tool_name: "Shell".to_string(),
             args_json: r#"{"command":"echo hello","block_until_ms":0}"#.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("Shell(background) must not return an RPC error");
@@ -206,6 +209,7 @@ async fn execute_tool_background_shell_then_await_round_trips() {
             tool_name: "Await".to_string(),
             args_json: format!(r#"{{"task_id":"{}","block_until_ms":5000}}"#, job_id),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("Await must not return an RPC error");
@@ -286,6 +290,7 @@ async fn execute_tool_connect_by_id_works_on_cli_session_worktree() {
             tool_name: "Read".to_string(),
             args_json: r#"{"path":"remote_file.txt"}"#.to_string(),
             daemon_instance_id: String::new(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("ExecuteTool Read against a claude-cli session must not fail");

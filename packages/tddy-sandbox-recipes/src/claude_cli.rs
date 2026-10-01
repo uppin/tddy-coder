@@ -180,6 +180,10 @@ const SUBAGENT_TOOLS: &[&str] = &[
     // uncallable tool in front of a sandboxed Claude.
     "mcp__tddy-tools__subagent_resume",
     "mcp__tddy-tools__subagent_cancel",
+    // The other way to close a conversation, and the one that hands its work to the caller: an
+    // agent allowed to cancel a conversation but not to end it could only ever throw that work
+    // away.
+    "mcp__tddy-tools__subagent_end",
 ];
 
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable
@@ -473,6 +477,27 @@ mod tests {
                 "allowlist must contain {tool} when a subagent is enabled; got: {allowlist:?}"
             );
         }
+    }
+
+    /// `subagent_end` is how a conversation's work reaches the caller at all: a sandboxed Claude
+    /// allowed to cancel a conversation but not to end it could only ever throw the work away.
+    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+    #[test]
+    fn subagent_end_is_allowlisted_wherever_subagent_cancel_is() {
+        // Given
+        let allowlist = build_claude_allowlist(true, &[]);
+
+        // When
+        let allowed = |tool: &str| allowlist.iter().any(|entry| entry == tool);
+
+        // Then
+        assert_eq!(
+            (
+                allowed("mcp__tddy-tools__subagent_cancel"),
+                allowed("mcp__tddy-tools__subagent_end")
+            ),
+            (true, true)
+        );
     }
 
     /// A subagent's turn budget is the caller's to extend, and `subagent_resume` is the only way

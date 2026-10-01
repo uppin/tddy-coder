@@ -19,6 +19,7 @@ impl HostToolHandler for StubToolHandler {
     async fn execute(
         &self,
         _session_id: &str,
+        _conversation_id: &str,
         tool_name: &str,
         _args_json: &str,
     ) -> ExecuteToolResponse {

@@ -331,6 +331,7 @@ async fn execute_tool_in_room(
                 tool_name: tool_name.to_string(),
                 args_json: args.to_string(),
                 daemon_instance_id: INSTANCE_ID.to_string(),
+                conversation_id: String::new(),
             }
             .encode_to_vec(),
         ),

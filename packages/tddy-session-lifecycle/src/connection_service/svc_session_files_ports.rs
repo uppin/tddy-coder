@@ -182,6 +182,7 @@ impl DaemonSessionHost {
                 tool_name: CONTEXT_SCOPE_CALLER.to_string(),
                 args_json: String::new(),
                 daemon_instance_id: String::new(),
+                conversation_id: String::new(),
             })?;
         let globs = self.context_globs_for_session(
             CONTEXT_SCOPE_CALLER,

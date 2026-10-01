@@ -15,8 +15,6 @@ use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::tonic_sandbox::sandbox_service_client::SandboxServiceClient;
 use tddy_task::TerminalCapture;
 
-use tddy_tool_engine as tool_engine;
-
 /// A resource whose lifetime is tied to a sandbox session and whose cleanup happens on `Drop`.
 ///
 /// The daemon's managed-workflow wiring is the only implementor: a per-session toolcall listener
@@ -234,7 +232,7 @@ async fn connect_sandbox_client(
         .map_err(|e| format!("connect sandbox grpc: {e}"))
 }
 
-/// Tool handler that runs MCP tool calls in the session worktree via [`tool_engine`].
+/// Tool handler that runs MCP tool calls in the session worktree via `tddy_tool_engine`.
 struct DaemonToolHandler {
     worktree: PathBuf,
     task_registry: tddy_task::TaskRegistry,
@@ -254,6 +252,7 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
     async fn execute(
         &self,
         session_id: &str,
+        conversation_id: &str,
         tool_name: &str,
         args_json: &str,
     ) -> ExecuteToolResponse {
@@ -288,15 +287,17 @@ impl tddy_sandbox_runner::HostToolHandler for DaemonToolHandler {
         };
         self.record_agent_activity(session_id, &running);
 
-        let outcome = tool_engine::execute_tool_with_env(
-            &self.worktree,
-            tool_name,
-            args_json,
-            &self.task_registry,
-            session_id,
-            &self.session_env,
-        )
-        .await;
+        let outcome =
+            crate::conversation_tool::execute_in_conversation(crate::conversation_tool::ToolCall {
+                worktree: &self.worktree,
+                conversation_id,
+                tool_name,
+                args_json,
+                registry: &self.task_registry,
+                session_id,
+                env: &self.session_env,
+            })
+            .await;
 
         let status = if outcome.is_error {
             tddy_core::agent_activity::STATUS_ERROR
@@ -1102,7 +1103,12 @@ mod tests {
 
         // When the agent reads that file through the sandbox tool handler.
         let outcome = handler
-            .execute("sandbox-activity-1", "Read", r#"{"path":"greeting.txt"}"#)
+            .execute(
+                "sandbox-activity-1",
+                "",
+                "Read",
+                r#"{"path":"greeting.txt"}"#,
+            )
             .await;
         assert!(!outcome.is_error, "Read of an existing file must succeed");
 
@@ -1125,6 +1131,61 @@ mod tests {
         );
     }
 
+    /// A subagent conversation's call arriving over the jail's session channel runs in that
+    /// conversation's own worktree, not in the session worktree, and its result carries the change.
+    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+    #[tokio::test]
+    async fn a_conversations_call_runs_in_the_conversations_worktree() {
+        use tddy_sandbox_runner::HostToolHandler;
+
+        // Given a session worktree that is a git checkout
+        let tmp = tempfile::tempdir().unwrap();
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(&worktree).unwrap();
+        for args in [
+            &["init", "-q", "-b", "master"][..],
+            &["config", "user.email", "developer@example.com"][..],
+            &["config", "user.name", "Developer"][..],
+            &["commit", "-q", "--allow-empty", "-m", "initial"][..],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&worktree)
+                .status()
+                .unwrap();
+            assert!(status.success(), "git {args:?}");
+        }
+        let hub = Arc::new(tddy_daemon_kernel::AgentActivityHub::default());
+        let handler = a_tool_handler(worktree.clone(), tmp.path().join("session"), hub);
+
+        // When a conversation writes through the sandbox tool handler
+        let outcome = handler
+            .execute(
+                "sandbox-conversation-1",
+                "explore",
+                "Write",
+                r#"{"path":"a.txt","contents":"a\n"}"#,
+            )
+            .await;
+
+        // Then
+        let result: serde_json::Value = serde_json::from_str(&outcome.result_json).unwrap();
+        assert_eq!(
+            (
+                worktree
+                    .join("tmp/subagent-worktrees/explore/a.txt")
+                    .exists(),
+                worktree.join("a.txt").exists(),
+                result["worktreeChange"]["files"].clone(),
+            ),
+            (
+                true,
+                false,
+                serde_json::json!({ "created": 1, "updated": 0, "removed": 0 })
+            )
+        );
+    }
+
     /// A failing tool call records a terminal `error` row (not `completed`).
     #[tokio::test]
     async fn execute_appends_an_error_row_when_the_tool_fails() {
@@ -1140,7 +1201,12 @@ mod tests {
 
         // When the agent reads a missing file.
         let outcome = handler
-            .execute("sandbox-activity-err", "Read", r#"{"path":"missing.txt"}"#)
+            .execute(
+                "sandbox-activity-err",
+                "",
+                "Read",
+                r#"{"path":"missing.txt"}"#,
+            )
             .await;
         assert!(outcome.is_error, "reading a missing file must be an error");
 

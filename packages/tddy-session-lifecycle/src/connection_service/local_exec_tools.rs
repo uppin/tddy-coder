@@ -13,6 +13,7 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
 };
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_subagent_worktree::{run_in_conversation, ConversationId, ConversationWorktrees};
 use tddy_task::TaskRegistry;
 
 use super::jail_relaunch::{self, JailRelaunch};
@@ -104,9 +105,54 @@ impl LocalExecTools {
         worktree_root: &Path,
     ) -> ExecuteToolResponse {
         let session_dir = unified_session_dir_path(sessions_base, &req.session_id);
-        let response = match self.exec_tool_route(&session_dir, &req.session_id).await {
+        let response = match req.conversation_id.is_empty() {
+            true => {
+                self.route_tool(req, sessions_base, worktree_root, &session_dir)
+                    .await
+            }
+            false => {
+                self.run_in_conversation_worktree(req, sessions_base, worktree_root, &session_dir)
+                    .await
+            }
+        };
+
+        // Durably record the tool call (non-fatal on failure). One log for both routes: which side
+        // of the jail boundary a call ran on does not change that it is the session's tool call.
+        let record = tddy_tool_engine::tool_call_log::ToolCallRecord {
+            task_id: response.job_id.clone(),
+            tool_name: req.tool_name.clone(),
+            args_json: req.args_json.clone(),
+            result_json: response.result_json.clone(),
+            is_error: response.is_error,
+            error_message: response.error_message.clone(),
+            job_running: response.job_running,
+            created_unix_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
+        };
+        if let Err(e) = tddy_tool_engine::tool_call_log::append_tool_call(&session_dir, &record) {
+            log::warn!(
+                "tool_call_log: failed to persist tool call for session {}: {}",
+                req.session_id,
+                e
+            );
+        }
+
+        response
+    }
+
+    /// Run `req`'s tool where this session's tools run — its jail, or `worktree_root` on this host.
+    async fn route_tool(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> ExecuteToolResponse {
+        match self.exec_tool_route(session_dir, &req.session_id).await {
             ExecToolRoute::HostWorktree => {
-                let meta = tddy_core::read_session_metadata(&session_dir).ok();
+                let meta = tddy_core::read_session_metadata(session_dir).ok();
                 let ssh_host = meta
                     .as_ref()
                     .and_then(|m| m.ssh_config_host.as_deref())
@@ -137,32 +183,48 @@ impl LocalExecTools {
                 }
             },
             ExecToolRoute::Refused(reason) => refused(reason),
-        };
-
-        // Durably record the tool call (non-fatal on failure). One log for both routes: which side
-        // of the jail boundary a call ran on does not change that it is the session's tool call.
-        let record = tddy_tool_engine::tool_call_log::ToolCallRecord {
-            task_id: response.job_id.clone(),
-            tool_name: req.tool_name.clone(),
-            args_json: req.args_json.clone(),
-            result_json: response.result_json.clone(),
-            is_error: response.is_error,
-            error_message: response.error_message.clone(),
-            job_running: response.job_running,
-            created_unix_ms: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-        };
-        if let Err(e) = tddy_tool_engine::tool_call_log::append_tool_call(&session_dir, &record) {
-            log::warn!(
-                "tool_call_log: failed to persist tool call for session {}: {}",
-                req.session_id,
-                e
-            );
         }
+    }
 
-        response
+    /// Run a subagent conversation's call in that conversation's worktree, and carry what the call
+    /// changed on the result. The rule itself — which root, when to commit — is
+    /// [`run_in_conversation`]'s; this only supplies the route.
+    async fn run_in_conversation_worktree(
+        &self,
+        req: &ExecuteToolRequest,
+        sessions_base: &Path,
+        worktree_root: &Path,
+        session_dir: &Path,
+    ) -> ExecuteToolResponse {
+        let conversation = match ConversationId::parse(&req.conversation_id) {
+            Ok(conversation) => conversation,
+            Err(unsafe_id) => return refused(unsafe_id.to_string()),
+        };
+        let worktrees = ConversationWorktrees::new(worktree_root, &req.session_id);
+        let run = run_in_conversation(
+            &worktrees,
+            &conversation,
+            &req.tool_name,
+            |root| async move {
+                let at_root = request_at(req, &root, worktree_root);
+                self.route_tool(&at_root, sessions_base, &root, session_dir)
+                    .await
+            },
+        )
+        .await;
+        match run {
+            Ok(run) => {
+                let result_json = run.merge(&run.output.result_json);
+                ExecuteToolResponse {
+                    result_json,
+                    ..run.output
+                }
+            }
+            Err(e) => refused(format!(
+                "conversation {conversation}: its worktree could not be prepared ({e}); \
+                 refusing to run the call in the session worktree instead"
+            )),
+        }
     }
 
     /// Rebuild the jail a call just died in, and run that call in the replacement.
@@ -289,6 +351,25 @@ impl LocalExecTools {
             job_running: outcome.job_running,
         }
     }
+}
+
+/// `req` as it must reach a jail that runs it at `root`.
+///
+/// A jail finds a conversation's root itself, from the `conversation_id` the request carries, and
+/// the conversation worktree does not exist until the conversation's first write. So the root
+/// [`run_in_conversation`] chose is what decides it, not the id: a call that runs at the session
+/// worktree (a read before that first write) is sent with no conversation id, and the jail runs it
+/// there instead of in a directory that is not yet created.
+fn request_at(
+    req: &ExecuteToolRequest,
+    root: &Path,
+    session_worktree: &Path,
+) -> ExecuteToolRequest {
+    let mut at_root = req.clone();
+    if root == session_worktree {
+        at_root.conversation_id.clear();
+    }
+    at_root
 }
 
 /// A tool call this daemon would not run, answered as the failure it is.

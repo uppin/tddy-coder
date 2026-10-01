@@ -5,13 +5,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
-    ExecToolService, ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse,
-    ListExecToolsRequest, ListExecToolsResponse, ListSessionToolCallsRequest,
-    ListSessionToolCallsResponse,
+    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecToolService, ExecuteToolChunk,
+    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse,
 };
 use tddy_worktree_service::stream::MpscResultStream;
 
-/// What the four exec-tool RPCs need from the host process.
+/// What the five exec-tool RPCs need from the host process.
 #[async_trait]
 pub trait ExecToolHandler: Send + Sync {
     async fn execute_tool(
@@ -33,6 +33,13 @@ pub trait ExecToolHandler: Send + Sync {
         &self,
         request: Request<ListSessionToolCallsRequest>,
     ) -> Result<Response<ListSessionToolCallsResponse>, Status>;
+
+    /// Hand a subagent conversation's work to the session worktree, or remove the conversation's
+    /// worktree — the operations on a conversation worktree that are not tool calls.
+    async fn conversation_worktree(
+        &self,
+        request: Request<ConversationWorktreeRequest>,
+    ) -> Result<Response<ConversationWorktreeResponse>, Status>;
 }
 
 /// Thin `ExecToolService` adapter over an [`ExecToolHandler`].
@@ -77,5 +84,12 @@ impl<H: ExecToolHandler + 'static> ExecToolService for ExecToolServiceImpl<H> {
         request: Request<ListSessionToolCallsRequest>,
     ) -> Result<Response<ListSessionToolCallsResponse>, Status> {
         self.host.list_session_tool_calls(request).await
+    }
+
+    async fn conversation_worktree(
+        &self,
+        request: Request<ConversationWorktreeRequest>,
+    ) -> Result<Response<ConversationWorktreeResponse>, Status> {
+        self.host.conversation_worktree(request).await
     }
 }

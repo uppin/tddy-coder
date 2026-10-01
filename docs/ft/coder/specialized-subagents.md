@@ -92,7 +92,9 @@ callable would make the withdrawal meaningless — not a policy about what an ag
 kind: the read-only discovery trio `READ`/`GLOB`/`GREP` (the defaults) plus `WRITE`/`STR_REPLACE`/
 `DELETE`/`SHELL`/`AWAIT`/`READ_LINTS`/`SEMANTIC_SEARCH`. The mutation tools are **Managed-access
 only** — path confinement comes from the host tool engine; a `Local`-access subagent gets a typed
-error, so a YAML `tools:` entry alone can never grant unconfined host writes. A def naming an
+error, so a YAML `tools:` entry alone can never grant unconfined host writes. What the mutation tools write is the **conversation's own worktree**, committed once per call and
+handed to the caller by `subagent_end` — see
+[managed-codebase-subagents.md](managed-codebase-subagents.md#the-conversation-worktree-a-subagent-edits-its-own-tree). A def naming an
 unrecognized tool is rejected at load time (typed error, no silent drop).
 
 Malformed YAML files are skipped with a logged warning at load time — one bad file never prevents the

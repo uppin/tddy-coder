@@ -177,6 +177,12 @@ pub fn resolve_exec_tool_worktree(
 
     validate_session_id_segment(&req.session_id)
         .map_err(|e| Status::invalid_argument(e.message()))?;
+    // A conversation id becomes a directory and a branch name; one that could escape either is a
+    // routing failure, settled here so no tool of the call has run when it is refused.
+    if !req.conversation_id.is_empty() {
+        tddy_subagent_worktree::ConversationId::parse(&req.conversation_id)
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+    }
 
     let sessions_base =
         crate::user_sessions_path::sessions_base_for_user(os_user, Some(tddy_data_dir))

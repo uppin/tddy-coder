@@ -1375,6 +1375,7 @@ async fn refuses_an_unauthenticated_tool_call_against_a_clone_it_hosts() {
                 "content": "smuggled\n",
             })
             .to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .map(|r| r.into_inner());
@@ -1870,6 +1871,7 @@ async fn keeps_the_facilitating_daemon_as_the_identity_file_reads_are_addressed_
             daemon_instance_id: String::new(),
             tool_name: "Read".to_string(),
             args_json: serde_json::json!({ "path": "README.md" }).to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("the facilitating daemon must still serve its own worktree")

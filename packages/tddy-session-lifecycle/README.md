@@ -13,6 +13,15 @@ each duplicate has one definition. Its host-free topics live in the crates below
 ports and moved by `#carve` 16–21
 ([#531](https://github.com/uppin/tddy-coder/pull/531)–[#536](https://github.com/uppin/tddy-coder/pull/536)).
 
+## Conversation worktrees
+
+`LocalExecTools::run_exec_tool_locally` — the one route every exec tool takes — runs a call that
+carries a `conversation_id` through `tddy_subagent_worktree::run_in_conversation` (no branch inside
+`stream_execute_tool`), and merges the `worktreeChange` into its result. `run_conversation_worktree_op`
+serves `ConversationWorktree`'s `Pull` and `Remove` for both the exec-tool RPC and the jail's host
+bridge (`DaemonRpcHandler`), where the runner has already bound the request to its own session.
+`agent_tool_reads_the_clone` delegates to `ToolEffect::of`: one read-only classifier.
+
 ## Quick Start
 
 ```bash

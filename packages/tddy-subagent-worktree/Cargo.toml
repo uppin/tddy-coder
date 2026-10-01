@@ -1,0 +1,28 @@
+[package]
+name = "tddy-subagent-worktree"
+version = "0.1.0"
+edition = "2021"
+description = "A subagent conversation's own branch and worktree: lazy creation, one commit per mutating call, and the hand-over to the caller"
+
+[lib]
+name = "tddy_subagent_worktree"
+path = "src/lib.rs"
+
+# A leaf crate: git through the CLI, nothing from the rest of the workspace. The daemon's exec-tool
+# route, its `ConversationWorktree` handler and the subagent loop all depend on it; it depends on
+# none of them.
+[dependencies]
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# `io-util` feeds a child's stdin; `macros` gives `join!`, which drives stdin and output together.
+tokio = { version = "1", features = ["process", "fs", "io-util", "macros", "sync"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "fs"] }
+# The real executor, so a `Write` in `run_in_conversation_acceptance` really writes.
+tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-task = { path = "../tddy-task" }

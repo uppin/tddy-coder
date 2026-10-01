@@ -297,6 +297,9 @@ pub use svc_resolve_os_user::{
 mod jail_relaunch;
 
 /// Where an exec tool runs on this daemon, shared with `tddy-daemon-rpc`'s exec-tool family.
+mod conversation_worktree_op;
+pub use conversation_worktree_op::run_conversation_worktree_op;
+
 mod local_exec_tools;
 pub use local_exec_tools::LocalExecTools;
 
@@ -494,6 +497,12 @@ mod workspace_start_request_unit_tests;
 /// the outside, over the RPC surface.
 #[cfg(test)]
 mod workspace_sandbox_roster_dispatch_unit_tests;
+
+/// A subagent conversation's call on a sandboxed workspace session reaches the jail with the root
+/// the conversation rule chose: the session root until the conversation's first write, its own
+/// worktree after.
+#[cfg(test)]
+mod conversation_worktree_jail_route_unit_tests;
 
 /// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
 /// failure is not mistaken for one. Driven through the same private

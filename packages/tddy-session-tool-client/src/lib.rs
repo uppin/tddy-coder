@@ -16,6 +16,10 @@
 //! `tddy-daemon`, `tddy-sandbox-app` and `tddy-sandbox-darwin` reach the daemon through this crate
 //! and no longer depend on `tddy-tools` at all.
 
+mod conversation;
+
+pub use conversation::{conversation_worktree, dispatch_conversation_tool, ConversationWorktreeOp};
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
@@ -626,6 +630,16 @@ pub async fn dispatch_via_livekit(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> String {
+    dispatch_request_via_livekit(key, execute_tool_request(envelope, tool_name, args)).await
+}
+
+/// [`dispatch_via_livekit`] for a request already built.
+#[cfg(feature = "livekit")]
+pub(crate) async fn dispatch_request_via_livekit(
+    key: &LiveKitRoomKey,
+    request: tddy_service::proto::exec_tools::ExecuteToolRequest,
+) -> String {
+    let tool_name = request.tool_name.as_str();
     let LiveKitRoomKey {
         url,
         room,
@@ -669,7 +683,7 @@ pub async fn dispatch_via_livekit(
     }
     // Streaming, not unary: this is the one transport whose messages are chunk-framed past
     // MAX_CHUNK_FRAME_BYTES, where a lost chunk frame wedges the call with no error at all.
-    dispatch_via_streaming_rpc(session.transport(), envelope, tool_name, args).await
+    dispatch_request_via_streaming_rpc(session.transport(), request).await
 }
 
 /// Without the `livekit` feature the SDK is not linked, so a split session cannot reach its
@@ -678,10 +692,20 @@ pub async fn dispatch_via_livekit(
 #[cfg(not(feature = "livekit"))]
 pub async fn dispatch_via_livekit(
     key: &LiveKitRoomKey,
-    _envelope: &SessionToolEnvelope,
+    envelope: &SessionToolEnvelope,
     tool_name: &str,
-    _args: &serde_json::Value,
+    args: &serde_json::Value,
 ) -> String {
+    dispatch_request_via_livekit(key, execute_tool_request(envelope, tool_name, args)).await
+}
+
+/// [`dispatch_via_livekit`] for a request already built.
+#[cfg(not(feature = "livekit"))]
+pub(crate) async fn dispatch_request_via_livekit(
+    key: &LiveKitRoomKey,
+    request: tddy_service::proto::exec_tools::ExecuteToolRequest,
+) -> String {
+    let tool_name = request.tool_name.as_str();
     // A build-time omission, not a runtime fault — but it presents as every tool call failing, so
     // it is logged where an operator will find it like any other dispatch failure.
     log::error!(
@@ -801,12 +825,30 @@ pub async fn dispatch_via_daemon_http(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> String {
+    let envelope = SessionToolEnvelope {
+        session_id: session_id.to_string(),
+        session_token: session_token.to_string(),
+        daemon_instance_id: daemon_instance_id.to_string(),
+    };
+    dispatch_request_via_daemon_http(
+        daemon_url,
+        &execute_tool_request(&envelope, tool_name, args),
+    )
+    .await
+}
+
+/// [`dispatch_via_daemon_http`] for a request already built.
+pub(crate) async fn dispatch_request_via_daemon_http(
+    daemon_url: &str,
+    request: &tddy_service::proto::exec_tools::ExecuteToolRequest,
+) -> String {
     let req_body = serde_json::json!({
-        "session_token": session_token,
-        "session_id": session_id,
-        "tool_name": tool_name,
-        "args_json": args.to_string(),
-        "daemon_instance_id": daemon_instance_id,
+        "session_token": request.session_token,
+        "session_id": request.session_id,
+        "tool_name": request.tool_name,
+        "args_json": request.args_json,
+        "daemon_instance_id": request.daemon_instance_id,
+        "conversation_id": request.conversation_id,
     });
 
     let url = format!(
@@ -850,6 +892,7 @@ fn execute_tool_request(
         tool_name: tool_name.to_string(),
         args_json: args.to_string(),
         daemon_instance_id: envelope.daemon_instance_id.clone(),
+        conversation_id: String::new(),
     }
 }
 
@@ -865,10 +908,19 @@ pub async fn dispatch_via_rpc_transport(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> String {
+    dispatch_request_via_rpc_transport(client, execute_tool_request(envelope, tool_name, args))
+        .await
+}
+
+/// [`dispatch_via_rpc_transport`] for a request already built — the one a conversation's call
+/// builds with its conversation named.
+pub(crate) async fn dispatch_request_via_rpc_transport(
+    client: &std::sync::Arc<dyn tddy_rpc::RpcClientTransport>,
+    request: tddy_service::proto::exec_tools::ExecuteToolRequest,
+) -> String {
     use prost::Message;
     use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
-    let request = execute_tool_request(envelope, tool_name, args);
     let response_bytes = match client
         .call_unary(
             "exec_tools.ExecToolService",
@@ -925,15 +977,23 @@ pub async fn dispatch_via_streaming_rpc(
     tool_name: &str,
     args: &serde_json::Value,
 ) -> String {
+    dispatch_request_via_streaming_rpc(client, execute_tool_request(envelope, tool_name, args))
+        .await
+}
+
+/// [`dispatch_via_streaming_rpc`] for a request already built.
+pub(crate) async fn dispatch_request_via_streaming_rpc(
+    client: &std::sync::Arc<dyn tddy_rpc::RpcClientTransport>,
+    request: tddy_service::proto::exec_tools::ExecuteToolRequest,
+) -> String {
     use prost::Message;
     use tddy_service::proto::exec_tools::ExecuteToolChunk;
 
-    let SessionToolEnvelope {
-        session_id,
-        daemon_instance_id,
-        ..
-    } = envelope;
-    let request = execute_tool_request(envelope, tool_name, args);
+    let (session_id, daemon_instance_id, tool_name) = (
+        &request.session_id,
+        &request.daemon_instance_id,
+        &request.tool_name,
+    );
     let mut frames = match client
         .call_server_stream(
             "exec_tools.ExecToolService",

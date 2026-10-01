@@ -14,13 +14,19 @@ const AGENT_ID: &str = "reviewer";
 /// A jail that records what it ran and touches no filesystem, so an unchanged host worktree is
 /// proof the call never reached the host tool engine.
 #[derive(Default)]
-struct RecordingSandbox {
+pub(super) struct RecordingSandbox {
     tools: Mutex<Vec<String>>,
+    conversations: Mutex<Vec<String>>,
 }
 
 impl RecordingSandbox {
     fn tools(&self) -> Vec<String> {
         self.tools.lock().unwrap().clone()
+    }
+
+    /// The `conversation_id` each call arrived with, in order.
+    pub(super) fn conversations(&self) -> Vec<String> {
+        self.conversations.lock().unwrap().clone()
     }
 }
 
@@ -28,6 +34,10 @@ impl RecordingSandbox {
 impl WorkspaceSandbox for RecordingSandbox {
     async fn execute_tool(&self, req: &ExecuteToolRequest) -> ToolDispatchOutcome {
         self.tools.lock().unwrap().push(req.tool_name.clone());
+        self.conversations
+            .lock()
+            .unwrap()
+            .push(req.conversation_id.clone());
         ToolDispatchOutcome::Ran(ExecuteToolResponse {
             result_json: serde_json::json!({ "marker": JAIL_MARKER }).to_string(),
             is_error: false,
@@ -81,17 +91,17 @@ fn a_git_repo_with_origin() -> tempfile::TempDir {
 }
 
 /// A sandboxed workspace session, plus the jail standing in for its confinement.
-struct SeededWorkspace {
-    service: TestDaemon,
-    sandbox: Arc<RecordingSandbox>,
-    session_id: String,
+pub(super) struct SeededWorkspace {
+    pub(super) service: TestDaemon,
+    pub(super) sandbox: Arc<RecordingSandbox>,
+    pub(super) session_id: String,
     session_dir: PathBuf,
-    worktree: PathBuf,
+    pub(super) worktree: PathBuf,
     _repo: tempfile::TempDir,
-    _sessions: tempfile::TempDir,
+    sessions: tempfile::TempDir,
 }
 
-async fn a_sandboxed_workspace_session(sandbox: bool) -> SeededWorkspace {
+pub(super) async fn a_sandboxed_workspace_session(sandbox: bool) -> SeededWorkspace {
     let repo = a_git_repo_with_origin();
     let sessions = tempfile::tempdir().expect("sessions tempdir");
     crate::project_storage::write_projects(
@@ -140,11 +150,16 @@ async fn a_sandboxed_workspace_session(sandbox: bool) -> SeededWorkspace {
         session_dir,
         worktree,
         _repo: repo,
-        _sessions: sessions,
+        sessions,
     }
 }
 
 impl SeededWorkspace {
+    /// Where this daemon keeps its sessions.
+    pub(super) fn sessions_base(&self) -> &Path {
+        self.sessions.path()
+    }
+
     /// How a roster agent this daemon serves locally reaches the session's files.
     fn agent_codebase_access(&self) -> tddy_discovery::subagent::CodebaseAccess {
         self.service.local_agent_codebase_access(

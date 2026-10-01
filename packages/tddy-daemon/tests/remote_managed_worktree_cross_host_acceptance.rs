@@ -720,6 +720,7 @@ async fn a_split_session_addresses_tools_at_the_codebase_session_not_its_own() {
             args_json: serde_json::json!({ "path": "split.txt", "contents": "from host a" })
                 .to_string(),
             daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("a tool call routed to the codebase host must succeed")
@@ -765,6 +766,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
             args_json: serde_json::json!({ "path": "round-trip.txt", "contents": "hello b" })
                 .to_string(),
             daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("Write must succeed");
@@ -778,6 +780,7 @@ async fn a_tool_call_from_the_agent_host_reads_back_what_it_wrote_on_the_codebas
             tool_name: "Read".to_string(),
             args_json: serde_json::json!({ "path": "round-trip.txt" }).to_string(),
             daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("Read must succeed")
@@ -1037,6 +1040,7 @@ async fn a_tool_call_on_a_sandboxed_split_session_runs_in_the_jail_on_the_codeba
             args_json: serde_json::json!({ "path": "from-the-jail.txt", "contents": "confined" })
                 .to_string(),
             daemon_instance_id: CODEBASE_INSTANCE_ID.to_string(),
+            conversation_id: String::new(),
         }))
         .await
         .expect("a tool call routed to the codebase host must succeed")

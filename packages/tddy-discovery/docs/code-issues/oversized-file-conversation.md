@@ -20,3 +20,4 @@ The framing concern — `parse_message_descriptor` and the final-chunk condition
 cohesive group; the conversation loop is the rest. Engine-driven extraction
 (`code-restructuring`) after the stack lands, with `parse_message_descriptor`'s callers repointed.
 | 2026-09-28 | 522 | +10 more in PR #557 (`#subagent-control` 5/5): the replacement fields' framing in the same parse — inside the standing deferral (the stack's top node; split after landing) |
+| 2026-10-01 | 526 | **worse** by 4 over master's 522 in PR #560 (`#agent-worktree` 1/4): the `worktree_change: None` on a daemon-run turn's descriptor and its `TODO(agent-worktree)` comment. Inside the standing deferral (split after the stack lands) |

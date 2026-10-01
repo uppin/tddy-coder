@@ -18,10 +18,12 @@ use tokio::sync::mpsc;
 
 const SESSION_ID: &str = "host-relay-dispatch-session";
 
-/// Records every tool the relay asked it to run and echoes the tool name back.
+/// Records every tool the relay asked it to run, and the conversation each belonged to, and echoes
+/// the tool name back.
 #[derive(Clone, Default)]
 struct RecordingToolHandler {
     calls: Arc<Mutex<Vec<String>>>,
+    conversations: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait::async_trait]
@@ -29,10 +31,15 @@ impl HostToolHandler for RecordingToolHandler {
     async fn execute(
         &self,
         _session_id: &str,
+        conversation_id: &str,
         tool_name: &str,
         _args_json: &str,
     ) -> ExecuteToolResponse {
         self.calls.lock().unwrap().push(tool_name.to_string());
+        self.conversations
+            .lock()
+            .unwrap()
+            .push(conversation_id.to_string());
         ExecuteToolResponse {
             result_json: format!(r#"{{"tool":"{tool_name}"}}"#),
             is_error: false,
@@ -94,6 +101,31 @@ async fn dispatches_a_tool_request_to_the_injected_handler() {
     let responses = &captured.lock().unwrap().tool_responses;
     assert_eq!(responses.len(), 1);
     assert_eq!(responses[0].result_json, r#"{"tool":"Read"}"#);
+}
+
+/// A subagent conversation's tool call reaches the host handler still naming its conversation, so
+/// the daemon can run it in that conversation's worktree.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hands_the_conversation_of_a_jails_tool_call_to_the_handler() {
+    // Given
+    let (endpoint, captured) = serve_fake_over_tcp(Mode::PushConversationToolRequest {
+        tool_name: "Write".to_string(),
+        conversation_id: "explore".to_string(),
+    })
+    .await;
+    let handler = RecordingToolHandler::default();
+    let conversations = Arc::clone(&handler.conversations);
+    let (config, _terminal_rx) = relay_config();
+    let (_stdin_tx, stdin_rx) = mpsc::unbounded_channel::<Bytes>();
+
+    // When
+    let _relay = run_host_relay(connect(endpoint).await, handler, config, stdin_rx)
+        .await
+        .expect("start host relay");
+    await_captured(&captured, |c| !c.tool_responses.is_empty()).await;
+
+    // Then
+    assert_eq!(conversations.lock().unwrap().as_slice(), ["explore"]);
 }
 
 /// **dials_the_upstream_and_acks_a_connect_tunnel**: a `TunnelOpen` to a reachable host makes the

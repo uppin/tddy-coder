@@ -28,6 +28,7 @@ mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
+mod worktree_change;
 mod yield_condition;
 
 use transcript::Transcript;
@@ -36,6 +37,7 @@ pub use grep_context::{ContextLine, GrepContext, GREP_CONTEXT_LINE_CEILING};
 pub use repeated_calls::{RepeatedCall, RepeatedCalls, IDENTICAL_CALL_LIMIT};
 pub use replacement::{validate_replacement, Replacement, REPLACEMENT_RESULT_LIMIT};
 pub use result_summary::{summarize, ResultSummary, SUMMARY_FIRST_LINE_CHARS};
+pub use tddy_subagent_worktree::{FileCounts, LineCounts, WorktreeChange};
 pub use tool_arguments::{validate_tool_arguments, ArgumentProblem, ArgumentViolation};
 pub use transcript::{
     MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
@@ -1541,6 +1543,7 @@ impl SpecializedSubagentSession {
                         ),
                         produced_nothing,
                         result_summary,
+                        worktree_change::of(&dispatch),
                     );
                     if let Some(condition) = fired {
                         // The turn stops at this call, exactly as the condition asked: the

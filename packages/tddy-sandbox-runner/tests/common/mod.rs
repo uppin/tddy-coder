@@ -32,6 +32,11 @@ pub enum Mode {
     EchoOnly,
     /// Push one `ToolRequest` for `tool_name`.
     PushToolRequest { tool_name: String },
+    /// Push one `ToolRequest` for `tool_name` made by subagent conversation `conversation_id`.
+    PushConversationToolRequest {
+        tool_name: String,
+        conversation_id: String,
+    },
     /// Push one `TunnelOpen` for `host:port`.
     PushTunnelOpen { host: String, port: u16 },
     /// Push one `RpcRequest` for `service`/`method` with `payload`, so the host-relay RPC bridge
@@ -108,6 +113,21 @@ impl SandboxService for FakeSandboxService {
                             payload: Some(SessionPayload::ToolRequest(ExecuteToolRequest {
                                 tool_name: tool_name.clone(),
                                 args_json: "{}".to_string(),
+                                ..Default::default()
+                            })),
+                        }))
+                        .await;
+                }
+                Mode::PushConversationToolRequest {
+                    tool_name,
+                    conversation_id,
+                } => {
+                    let _ = tx
+                        .send(Ok(SessionFrame {
+                            payload: Some(SessionPayload::ToolRequest(ExecuteToolRequest {
+                                tool_name: tool_name.clone(),
+                                args_json: "{}".to_string(),
+                                conversation_id: conversation_id.clone(),
                                 ..Default::default()
                             })),
                         }))

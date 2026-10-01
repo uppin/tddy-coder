@@ -156,6 +156,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
                 daemon_instance_id: "local".to_string(),
                 tool_name: "Echo".to_string(),
                 args_json: "{}".to_string(),
+                conversation_id: String::new(),
             }
             .encode_to_vec(),
         ),
@@ -312,6 +313,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
                 daemon_instance_id: "local".to_string(),
                 tool_name: "Read".to_string(),
                 args_json: r#"{"path":"notes.txt"}"#.to_string(),
+                conversation_id: String::new(),
             }
             .encode_to_vec(),
         ),

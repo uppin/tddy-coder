@@ -32,29 +32,49 @@ use tddy_discovery::subagent_runtime::ProviderQueue;
 
 // --- The spawn environment ---
 
-/// Resolve how a subagent's internal READ/GLOB/GREP calls reach the codebase: explicit
-/// `TDDY_SUBAGENT_CODEBASE_ACCESS` override, else `Managed` when a session-tool transport is
-/// configured (mirrors the exec-tool gating in `server`), else `Local`.
-fn subagent_codebase_access_from_env() -> CodebaseAccess {
+/// Whether a subagent's internal tool calls reach the codebase through the session daemon
+/// (`Managed`) rather than this process's own filesystem: an explicit
+/// `TDDY_SUBAGENT_CODEBASE_ACCESS` override, else whenever a session-tool transport is configured
+/// (mirrors the exec-tool gating in `server`).
+pub(crate) fn subagent_access_is_managed() -> bool {
     match env_non_empty("TDDY_SUBAGENT_CODEBASE_ACCESS").as_deref() {
-        Some("local") => CodebaseAccess::Local,
-        Some("managed") => managed_codebase_access(),
-        _ => {
-            if crate::session_tool_client::detect_session_tool_transport().is_some() {
-                managed_codebase_access()
-            } else {
-                CodebaseAccess::Local
-            }
-        }
+        Some("local") => false,
+        Some("managed") => true,
+        _ => crate::session_tool_client::detect_session_tool_transport().is_some(),
     }
 }
 
-/// Wrap [`crate::session_tool_client::dispatch_session_tool`] as a `CodebaseAccess::Managed`
-/// dispatch fn — the same proxy transport the exec-tool catalog already uses.
-fn managed_codebase_access() -> CodebaseAccess {
-    CodebaseAccess::managed(|tool_name: String, args: serde_json::Value| {
+/// How a subagent's internal READ/GLOB/GREP calls reach the codebase — see
+/// [`subagent_access_is_managed`].
+///
+/// `conversation` names the conversation the calls belong to: a `Managed` call then carries it, and
+/// the daemon runs it in that conversation's own worktree. `None` is a call no conversation owns.
+fn subagent_codebase_access_from_env(conversation: Option<&str>) -> CodebaseAccess {
+    match subagent_access_is_managed() {
+        true => managed_codebase_access(conversation.map(str::to_string)),
+        false => CodebaseAccess::Local,
+    }
+}
+
+/// Wrap [`crate::session_tool_client::dispatch_session_tool`] — or, for a conversation,
+/// [`crate::session_tool_client::dispatch_conversation_tool`] naming it — as a
+/// `CodebaseAccess::Managed` dispatch fn: the same proxy transport the exec-tool catalog already
+/// uses.
+fn managed_codebase_access(conversation: Option<String>) -> CodebaseAccess {
+    CodebaseAccess::managed(move |tool_name: String, args: serde_json::Value| {
+        let conversation = conversation.clone();
         Box::pin(async move {
-            crate::session_tool_client::dispatch_session_tool(&tool_name, args).await
+            match conversation {
+                Some(conversation) => {
+                    crate::session_tool_client::dispatch_conversation_tool(
+                        &conversation,
+                        &tool_name,
+                        args,
+                    )
+                    .await
+                }
+                None => crate::session_tool_client::dispatch_session_tool(&tool_name, args).await,
+            }
         })
     })
 }
@@ -80,7 +100,15 @@ fn provider_queue() -> ProviderQueue {
 /// which queue its model calls wait in. Endpoint, model, credential and turn budget come from the
 /// def itself.
 pub(crate) fn subagent_config_from_env() -> SubagentConfig {
-    SubagentConfig::new(subagent_codebase_access_from_env()).with_provider_queue(provider_queue())
+    SubagentConfig::new(subagent_codebase_access_from_env(None))
+        .with_provider_queue(provider_queue())
+}
+
+/// [`subagent_config_from_env`] for the conversation `conversation_id`: its `Managed` calls name
+/// it, so the daemon runs them in its own worktree.
+pub(crate) fn subagent_config_for_conversation(conversation_id: &str) -> SubagentConfig {
+    SubagentConfig::new(subagent_codebase_access_from_env(Some(conversation_id)))
+        .with_provider_queue(provider_queue())
 }
 
 // --- The shape of an MCP tool ---

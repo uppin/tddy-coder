@@ -92,4 +92,20 @@ where
         .map_err(to_tonic_status)?;
         Ok(tonic::Response::new(resp.into_inner()))
     }
+
+    async fn conversation_worktree(
+        &self,
+        request: tonic::Request<ConversationWorktreeRequest>,
+    ) -> Result<tonic::Response<ConversationWorktreeResponse>, tonic::Status> {
+        let resp = ExecToolService::conversation_worktree(
+            &*self.inner,
+            tddy_rpc::Request::with_metadata(
+                request.into_inner(),
+                tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Grpc),
+            ),
+        )
+        .await
+        .map_err(to_tonic_status)?;
+        Ok(tonic::Response::new(resp.into_inner()))
+    }
 }

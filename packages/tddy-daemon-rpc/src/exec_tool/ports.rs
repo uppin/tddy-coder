@@ -10,9 +10,10 @@ use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id
 use tddy_daemon_livekit::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
-    ExecuteToolChunk, ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest,
-    ListExecToolsResponse, ListSessionToolCallsRequest, ListSessionToolCallsResponse,
-    ToolCallInfo as ExecToolCallInfo, ToolDef as ExecToolDef,
+    ConversationWorktreeRequest, ConversationWorktreeResponse, ExecuteToolChunk,
+    ExecuteToolRequest, ExecuteToolResponse, ListExecToolsRequest, ListExecToolsResponse,
+    ListSessionToolCallsRequest, ListSessionToolCallsResponse, ToolCallInfo as ExecToolCallInfo,
+    ToolDef as ExecToolDef,
 };
 use tddy_service::proto::exec_tools::{
     ExecuteToolChunk as ConnExecuteToolChunk, ExecuteToolRequest as ConnExecuteToolRequest,
@@ -21,7 +22,7 @@ use tddy_service::proto::exec_tools::{
     ListSessionToolCallsResponse as ConnListSessionToolCallsResponse,
 };
 use tddy_session_lifecycle::connection_service::{
-    authorize_exec_tool_caller, resolve_exec_tool_worktree, wire_same,
+    authorize_exec_tool_caller, resolve_exec_tool_worktree, run_conversation_worktree_op, wire_same,
 };
 use tddy_session_lifecycle::tool_engine;
 use tddy_tool_engine::EXEC_TOOL_SERVICE;
@@ -358,5 +359,54 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
             .collect();
 
         Ok(Response::new(ListSessionToolCallsResponse { tool_calls }))
+    }
+
+    /// `Pull` and `Remove` on a subagent conversation's worktree. Authorized exactly like
+    /// `ExecuteTool`, and the conversation worktree is resolved *under* the token-resolved session
+    /// worktree, so a conversation id can only ever name a directory inside the caller's own
+    /// session.
+    async fn conversation_worktree(
+        &self,
+        request: Request<ConversationWorktreeRequest>,
+    ) -> Result<Response<ConversationWorktreeResponse>, Status> {
+        self.rpc_activity.record();
+        let req = request.into_inner();
+
+        // Route BEFORE session lookup so a relay (which has no local sessions) can forward.
+        if let Some(answered) = self
+            .peer_routing
+            .rpc_served_by_peer(
+                EXEC_TOOL_SERVICE,
+                "ConversationWorktree",
+                &req.daemon_instance_id,
+                &req,
+            )
+            .await?
+        {
+            return Ok(Response::new(answered));
+        }
+
+        // The same credential and the same session lookup as `ExecuteTool`: only the tool name is
+        // absent, and nothing on this path reads it.
+        let as_exec_tool = ConnExecuteToolRequest {
+            session_token: req.session_token.clone(),
+            session_id: req.session_id.clone(),
+            daemon_instance_id: req.daemon_instance_id.clone(),
+            ..Default::default()
+        };
+        authorize_exec_tool_caller(&self.config, &self.user_resolver, &as_exec_tool)?;
+        let op = req
+            .op
+            .ok_or_else(|| Status::invalid_argument("ConversationWorktree carries no operation"))?;
+        let (_sessions_base, worktree_root) = resolve_exec_tool_worktree(
+            &self.config,
+            &self.user_resolver,
+            &self.tddy_data_dir,
+            &as_exec_tool,
+        )?;
+        let result_json =
+            run_conversation_worktree_op(&worktree_root, &req.session_id, &req.conversation_id, op)
+                .await?;
+        Ok(Response::new(ConversationWorktreeResponse { result_json }))
     }
 }

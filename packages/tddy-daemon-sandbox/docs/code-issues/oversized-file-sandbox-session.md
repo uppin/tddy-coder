@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-09-19 | 911 | first detection; 888 → 911 in PR #518 (`impl Drop for SandboxSessionState`) |
 | 2026-09-24 | 916 | 911 on the merge-base with `origin/master` (`4e7157d2`) → 916 after #509 (`#keyring` 2/9): the `RequestTransport::Pipe` stamp on the jail's stdio endpoint, which rustfmt wraps over several lines. Grown; decomposition deferred with the developer's consent (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). First test gate is `#[cfg(all(test, unix))]` at L917 — the real test module |
+| 2026-10-01 | 917 | **unchanged in kind** (+1 over master's 916) in PR #560 (`#agent-worktree` 1/4): `DaemonToolHandler::execute` now always calls `conversation_tool::execute_in_conversation` (which delegates on an empty conversation id), so the file carries no branch of its own; the conversation logic lives in `conversation_tool.rs`. Was +11 before that was folded. Decomposition still deferred |
 
 ## What the tool found
 

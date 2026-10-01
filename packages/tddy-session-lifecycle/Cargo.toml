@@ -65,6 +65,7 @@ tddy-task = { path = "../tddy-task" }
 tddy-pty = { path = "../tddy-pty" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
+tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"
 tddy-vm = { path = "../tddy-vm" }

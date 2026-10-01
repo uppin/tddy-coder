@@ -1,8 +1,8 @@
 //! Permission server implementing the approval_prompt MCP tool and GitHub PR REST tools.
 
 use crate::mcp_primitives::{
-    cancel_remote_conversation, open_remote_agent_session, schema_object, subagent_config_from_env,
-    subagent_route, RemoteToolDef,
+    cancel_remote_conversation, open_remote_agent_session, schema_object,
+    subagent_config_for_conversation, subagent_route, RemoteToolDef,
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -1778,7 +1778,7 @@ async fn subagent_new_session_tool(args: serde_json::Value) -> String {
     // the registry: it is what the turns queue on, and what their receipts name.
     let provider = def.base_url.clone();
     let registry = SubagentRegistry::from_defs(vec![def]);
-    let mut config = subagent_config_from_env();
+    let mut config = subagent_config_for_conversation(&session_id);
     if let Some(prompt) = system_prompt {
         config = config.with_system_prompt(prompt);
     }
@@ -2062,7 +2062,7 @@ async fn subagent_await_tool(args: serde_json::Value) -> String {
 }
 
 /// `subagent_cancel` (ACP `session/cancel`-shaped): closes an open session, if any.
-async fn subagent_cancel_tool(args: serde_json::Value) -> String {
+pub(crate) async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     let Some(session_id) = args.get("sessionId").and_then(|v| v.as_str()) else {
         return subagent_error_json("missing required field: sessionId");
     };
@@ -2094,6 +2094,11 @@ async fn subagent_cancel_tool(args: serde_json::Value) -> String {
     write_accounting_file(&sessions);
     drop(sessions);
     cancel_remote_conversation(remote).await;
+    // After the retire, so nothing can prompt a conversation whose worktree is going away. Only a
+    // conversation whose loop runs here has one: a daemon-run conversation never creates it.
+    if cancelled && reported_agent.is_some() {
+        crate::subagent_end::discard_conversation_worktree(session_id).await;
+    }
     if let Some(agent_id) = reported_agent.as_deref() {
         // Idle rather than left mid-turn: the conversation is gone, so a row still reporting a turn
         // in flight would be one nothing can ever finish.
@@ -2686,6 +2691,11 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
     router.add_route(subagent_route(cancel_tool, |args| {
         Box::pin(subagent_cancel_tool(args))
     }));
+
+    router.add_route(subagent_route(
+        crate::subagent_end::subagent_end_tool_definition(),
+        |args| Box::pin(crate::subagent_end::subagent_end_tool(args)),
+    ));
 
     let list_tool = rmcp::model::Tool::new(
         "subagent_list",

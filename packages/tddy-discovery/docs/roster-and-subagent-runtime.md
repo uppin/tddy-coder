@@ -85,6 +85,19 @@ Callers read the *answers* instead: `RosterStatusReport::{applied_rev, refusal}`
 from `resolve` and `check_tool_available`. Publishing an internal state machine would make those
 four states contract.
 
+## What a mutating call did to the conversation's worktree
+
+With Managed access the daemon runs a conversation's calls in that conversation's own worktree
+([`tddy-subagent-worktree`](../../tddy-subagent-worktree/README.md)) and answers a mutating call with
+the tool's own fields plus `worktreeChange` — files created, updated and removed, lines added and
+removed, and the short hash of the commit that recorded it (absent when the call changed nothing).
+`subagent::worktree_change` lifts it from the still-structured result at the transcript append site
+onto `MessageDescriptor::worktree_change`, which `prompt_outcome_json` serializes as `worktreeChange`
+beside `resultSummary`. It is a sibling of the summary rather than a field of it: it describes the
+worktree, not the tool's answer, and `SHELL` and `AWAIT` change files their own summaries never
+mention. A read, or a call outside a conversation worktree, carries none. The object is bounded — no
+paths — because it rides every mutating result of a turn.
+
 ## Features
 
 `livekit` is **off by default** and forwards to `tddy-session-tool-client`'s. A jail that reaches its
