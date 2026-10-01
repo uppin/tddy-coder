@@ -35,4 +35,4 @@ per-call rule runs with the real `tddy_tool_engine::execute_tool` as its executo
 
 ## Documentation
 
-Product: [PRD-2026-09-30-agent-worktree-isolated-edits.md](../../docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md).
+Product: [managed-codebase-subagents.md](../../docs/ft/coder/managed-codebase-subagents.md) § The conversation worktree.

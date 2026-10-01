@@ -67,6 +67,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [Activity log streaming](activity-log-streaming.md) | User **`User:`** / **`Queued:`** lines in the activity log; incremental agent tail; **`AgentOutput`** as the streaming channel for workflow chunks |
 | [Codex ACP backend](codex-acp-backend.md) | **`--agent codex-acp`**: ACP to **`codex-acp`** subprocess; resume via **`load_session`**; **`codex_thread_id`** parity with **`codex`**; OAuth retry via **`codex login`** and **`codex_oauth_authorize.url`** |
 | [Session participant RPC & metadata](session-participant-rpc.md) | The coder's LiveKit participant serves session-scoped **`ConnectionService`** (tools, control, VNC, screen-sharing) and publishes **`session`** metadata for the web sessions list; **`DeleteSession`/`SignalSession` are daemon-direct** (not served by the coder) |
+| [Managed-codebase subagents](managed-codebase-subagents.md) | Discovery and specialized subagents over MCP; a subagent that edits works in its own per-conversation worktree, one commit per mutating call, handed back by **`subagent_end`** |
 
 ## Active PRDs
 
@@ -76,7 +77,6 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
-| [A subagent edits its own worktree](1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md) | [Managed-codebase subagents](managed-codebase-subagents.md) — per-conversation worktree, one commit per mutating call, change facts in the tool summary, `subagent_end` / `subagent_cancel` hand-over |
 
 ## Integration Points
 

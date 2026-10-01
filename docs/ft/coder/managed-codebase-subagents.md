@@ -332,6 +332,80 @@ A second, narrower gap on the same path: a turn's `messages` list rides the fina
 and a long one can overflow the chunk-framing threshold —
 [`docs/dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md`](../../dev/todo/2026-09-26-a-turns-message-list-can-overflow-the-chunk-framing-threshold.md).
 
+## The conversation worktree: a subagent edits its own tree
+
+A subagent whose definition binds mutation tools (`WRITE`, `STR_REPLACE`, `DELETE`, `SHELL`) does
+not write its caller's worktree. Its edits land in a worktree of the **conversation's** own, one
+commit per mutating call, and come back to the caller when the conversation ends. This covers the
+in-process loop in `tddy-tools` running with Managed access; conversations whose loop the daemon
+runs are a [non-goal](#non-goals-out-of-scope-for-v1).
+
+- **Created lazily.** The conversation's first *mutating* call cuts branch
+  `tddy/subagent/<session id>/<conversation id>` and worktree
+  `<session worktree>/tmp/subagent-worktrees/<conversation id>` from the caller's `HEAD`. A
+  conversation that only reads never creates one. The directory is excluded through the repository's
+  `info/exclude`, so it never shows in the caller's `git status`.
+- **Seeded with the caller's uncommitted state.** Staged, unstaged and untracked (not ignored)
+  changes become **one commit** on the subagent branch; the caller's index, branch and files are left
+  as they were. That commit, or `HEAD` when the caller was clean, is the conversation's **base**.
+- **Every call of the conversation runs there once it exists**, reads included, so the subagent reads
+  what it wrote. Before the first write, a read runs in the session worktree.
+- **A conversation id** must be `[A-Za-z0-9._-]`, no leading `.`, at most 64 characters, and not
+  break a git ref rule; otherwise it is refused before any git state is created.
+- **One commit per mutating call that changed files**, its subject the tool's name, authored as
+  `tddy-subagent`. A call is mutating unless it is `READ`, `GLOB`, `GREP`, `SEMANTIC_SEARCH` or
+  `READ_LINTS`; the list is fail-closed, so `AWAIT` (a background `SHELL` job writes files while it
+  is awaited) and any unknown tool are mutating. A call that changed nothing makes no commit.
+- **`worktreeChange` on the tool result** of every mutating call, a sibling of `resultSummary`:
+
+  ```json
+  "worktreeChange": {
+    "commit": "3f9c2ab",
+    "files": { "created": 1, "updated": 2, "removed": 0 },
+    "lines": { "added": 41, "removed": 7 }
+  }
+  ```
+
+  `commit` is present only when a commit was made; a binary file counts as a file and adds no
+  lines; a read carries none. It is bounded — counts and a hash, never paths.
+- **`subagent_end { sessionId }`** applies everything committed since the base to the caller's
+  worktree as **uncommitted changes**, 3-way: where the caller changed the same lines since, the file
+  is written with conflict markers. It then deletes the worktree and branch and closes the
+  conversation, and answers
+  `{"ended": true, "pulled": {"files": {...}, "lines": {...}, "conflicts": ["src/lib.rs"]}}` —
+  `pulled` is `null` when the conversation never created a worktree. The caller's `HEAD` never moves
+  and no commit is made on the caller's branch. It is refused while a turn is running, naming the
+  turn; a failed pull leaves the conversation open so the caller can retry or cancel.
+- **`subagent_cancel`** deletes the worktree and branch; nothing reaches the caller.
+
+A subagent's edits therefore reach the caller only on `subagent_end`; a conversation that is
+cancelled loses them, which is the point, and the tool descriptions say so.
+
+Git runs on the facilitating daemon's host, never in the jail: a linked worktree's `.git` points into
+the repository's common directory, which a jail mounting only the checkout cannot see. The jail
+relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `Remove`) to
+the host. The automatic commits skip hooks and signing — every git call runs with
+`core.hooksPath=/dev/null` and `commit.gpgsign=false`, and the commit with `--no-verify` — so no
+developer hook runs on a subagent's behalf and a signing prompt cannot block a call. That is an
+implementation choice the developer has not confirmed; see
+[`docs/dev/todo/2026-10-01-subagent-commits-skip-hooks-and-signing-without-consent.md`](../../dev/todo/2026-10-01-subagent-commits-skip-hooks-and-signing-without-consent.md).
+Mechanics: [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
+
+### Known gaps
+
+- A `tddy-tools` process that dies without ending or cancelling its conversations leaves the branch
+  behind —
+  [`docs/dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md`](../../dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md).
+- Daemon-run conversations still write the session worktree —
+  [`docs/dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md`](../../dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md).
+- Over the jail host bridge the session a conversation request names is not checked host-side —
+  [`docs/dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md`](../../dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md).
+- `subagent_end` can race a prompt arriving between its pending check and the retire —
+  [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
+- A rewind does not reset the worktree, and there is no diff tool or range pull; a pull applies
+  everything since the base as one diff. Those belong to the `#agent-worktree` stack's later PRs
+  (rewind-reset, diff, range-pull).
+
 ## Acceptance Criteria
 
 ### Subagent session lifecycle (`tddy-discovery`)
@@ -547,6 +621,29 @@ fully migrated onto the array model.
     tool that reaches only one of them is advertised and uncallable — which reads to the main agent
     as an agent that is not registered.
 
+### Conversation worktree (`tddy-subagent-worktree`, `tddy-discovery`, `tddy-tools`, `tddy-sandbox-recipes`)
+
+47. A conversation that only reads never creates a worktree or a branch.
+48. The first mutating call creates `<session worktree>/tmp/subagent-worktrees/<conv>` on
+    `tddy/subagent/<session>/<conv>`, cut from the caller's `HEAD`; the caller's uncommitted changes,
+    untracked files included, are one commit on that branch, and the caller's index, branch and files
+    are unchanged. The worktree never appears in the caller's `git status`.
+49. After creation, reads see the subagent's own writes.
+50. Each mutating call that changed files makes exactly one commit; one that changed nothing makes
+    none. `AWAIT` and unknown tools are mutating.
+51. `worktreeChange` reports created / updated / removed files, added / removed lines, and the
+    commit's short hash when one was made; a read carries none.
+52. An unsafe conversation id is refused before any git state is created.
+53. `subagent_end` applies base..tip to the caller's worktree as uncommitted changes, 3-way, with
+    conflict markers and the conflicted paths reported; the caller's `HEAD` does not move. It deletes
+    the worktree and branch and closes the conversation, and is refused while a turn runs.
+54. `subagent_cancel` deletes the worktree and branch; the caller's worktree is unchanged.
+55. `subagent_end` is advertised beside `subagent_cancel` and allowlisted in the sandbox recipes
+    exactly where `subagent_cancel` is.
+
+Verified at the request seams and against real git repositories; **no test runs a real jail end to
+end** (this needs a sandbox the development host cannot start).
+
 ## Non-goals (out of scope for v1)
 
 - Live catalog fetch of subagent tool schemas over the transport (mirrors the existing
@@ -568,6 +665,11 @@ fully migrated onto the array model.
   subagents at all today — see `docs/dev/TODO.md`).
 - Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
   some file types only).
+- **Daemon-run conversations** (`open_local`, `open_owned`, a peer's `RemoteAgentSession`) have no
+  conversation worktree; their calls still run on the session worktree.
+- **Sweeping orphaned conversation worktrees and branches.**
+- **Resetting the worktree on a rewind, diffing, range pulls** — later PRs of the `#agent-worktree`
+  stack.
 
 ## Standalone launcher (`./claude-sandbox`)
 
