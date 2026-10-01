@@ -319,6 +319,26 @@ impl Transcript {
             .collect()
     }
 
+    /// Where a rewind to `id` takes the conversation's worktree: the commit of the last entry the
+    /// rewind keeps that made one — the cut extends over the tool results answering `id`, so a
+    /// call's commit is kept with its call — or [`ResetTarget::Base`] when no kept entry did. An id
+    /// this transcript does not hold is the same error [`Self::rewind_to`] gives.
+    pub(crate) fn commit_kept_by(
+        &self,
+        id: &MessageId,
+    ) -> Result<super::worktree_reset::ResetTarget, RewindError> {
+        let keep_through = self.last_kept_by(id)?;
+        let commit = self.entries[..=keep_through]
+            .iter()
+            .rev()
+            .find_map(|entry| entry.worktree_change.as_ref()?.commit.clone());
+        Ok(
+            commit.map_or(super::worktree_reset::ResetTarget::Base, |commit| {
+                super::worktree_reset::ResetTarget::Commit(commit)
+            }),
+        )
+    }
+
     /// Discard every message after `id`, so the conversation continues from there.
     ///
     /// An id this transcript does not hold is an error naming it, never a continue from the end:
@@ -333,6 +353,14 @@ impl Transcript {
     /// caller is trying to recover from a failure. Keeping the group whole is the smallest legal
     /// history that still honours the caller's point.
     pub(crate) fn rewind_to(&mut self, id: &MessageId) -> Result<(), RewindError> {
+        let keep_through = self.last_kept_by(id)?;
+        self.entries.truncate(keep_through + 1);
+        Ok(())
+    }
+
+    /// The index of the last entry a rewind to `id` keeps: `id` itself, extended forward over the
+    /// `tool` results that answer it.
+    fn last_kept_by(&self, id: &MessageId) -> Result<usize, RewindError> {
         let at = self
             .entries
             .iter()
@@ -346,8 +374,7 @@ impl Transcript {
         {
             keep_through += 1;
         }
-        self.entries.truncate(keep_through + 1);
-        Ok(())
+        Ok(keep_through)
     }
 }
 

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    ExecuteToolRequest, PullOp, RemoveOp,
+    ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -122,11 +122,19 @@ pub async fn dispatch_conversation_tool(
 /// Ask the facilitating daemon for `op` on `conversation_id`'s worktree; the answer's
 /// `result_json`, or a `{"error", "is_error": true}` body naming why it could not be asked.
 pub async fn conversation_worktree(conversation_id: &str, op: ConversationWorktreeOp) -> String {
+    ask_conversation_worktree(|envelope| {
+        conversation_worktree_request(&envelope, conversation_id, op)
+    })
+    .await
+}
+
+/// Send the `ConversationWorktree` request `request` builds, over whichever transport this process
+/// was given; the builder is handed the envelope that transport identifies the session by.
+async fn ask_conversation_worktree(
+    request: impl Fn(SessionToolEnvelope) -> ConversationWorktreeRequest,
+) -> String {
     let Some(transport) = detect_session_tool_transport() else {
         return not_configured_error();
-    };
-    let request = |envelope: SessionToolEnvelope| {
-        conversation_worktree_request(&envelope, conversation_id, op)
     };
     match transport {
         SessionToolTransport::SandboxIpc { socket_path } => {
@@ -265,6 +273,10 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
     match &request.op {
         Some(Op::Pull(_)) => fields.insert("pull".to_string(), serde_json::json!({})),
         Some(Op::Remove(_)) => fields.insert("remove".to_string(), serde_json::json!({})),
+        Some(Op::Reset(reset)) => fields.insert(
+            "reset".to_string(),
+            serde_json::json!({ "commit": reset.commit }),
+        ),
         None => None,
     };
     let body = serde_json::Value::Object(fields);
@@ -292,6 +304,30 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
 
 fn error_body(message: String) -> String {
     serde_json::json!({ "error": message, "is_error": true }).to_string()
+}
+
+/// Ask the facilitating daemon to reset `conversation_id`'s worktree to `commit`, or to its base
+/// when `commit` is `None`; the answer's `result_json` (`{"reset": {to, droppedCommits} | null}`)
+/// or a `{"error", "is_error": true}` body.
+pub async fn reset_conversation_worktree(conversation_id: &str, commit: Option<&str>) -> String {
+    ask_conversation_worktree(|envelope| {
+        conversation_reset_request(&envelope, conversation_id, commit)
+    })
+    .await
+}
+
+/// The `ConversationWorktree` request a reset sends; an empty `commit` names the base.
+pub(crate) fn conversation_reset_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    commit: Option<&str>,
+) -> ConversationWorktreeRequest {
+    ConversationWorktreeRequest {
+        op: Some(Op::Reset(ResetOp {
+            commit: commit.unwrap_or_default().to_string(),
+        })),
+        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
+    }
 }
 
 /// The `ExecuteTool` a conversation's call sends.
@@ -383,6 +419,26 @@ mod tests {
             )
             .op,
             Some(Op::Remove(RemoveOp {}))
+        );
+    }
+
+    #[test]
+    fn a_reset_to_a_commit_names_the_commit() {
+        assert_eq!(
+            conversation_reset_request(&an_envelope(), "explore", Some("3f9c2ab")).op,
+            Some(Op::Reset(ResetOp {
+                commit: "3f9c2ab".into()
+            }))
+        );
+    }
+
+    #[test]
+    fn a_reset_to_the_base_sends_an_empty_commit() {
+        assert_eq!(
+            conversation_reset_request(&an_envelope(), "explore", None).op,
+            Some(Op::Reset(ResetOp {
+                commit: String::new()
+            }))
         );
     }
 }

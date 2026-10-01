@@ -1889,6 +1889,10 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Some(correction) => request = request.with_correction(correction),
         None => {}
     }
+    let request = match crate::reset_worktree_choice::with_reset_worktree_choice(request, &args) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     let request = match turn_budget(&args, request) {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
@@ -2503,6 +2507,15 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                                 collect it with. Defaults to 25000; 0 defers immediately."
             },
             "maxTurns": max_turns_property(),
+            "resetWorktree": {
+                "type": "boolean",
+                "description": "With `fromMessageId`: also take the conversation's worktree back \
+                                to the commit of the last message the rewind keeps, or to its \
+                                base when none kept a commit. Defaults to true; false rewinds the \
+                                transcript only and keeps every file. The outcome's \
+                                `worktreeReset` says where the worktree now stands and which \
+                                commits were dropped."
+            },
         }
     }))
 }

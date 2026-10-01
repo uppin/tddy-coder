@@ -74,7 +74,15 @@ message ConversationWorktreeRequest {
   oneof op {
     PullOp   pull   = 10;
     RemoveOp remove = 11;
+    ResetOp  reset  = 12;
   }
+}
+
+// Hard-reset the conversation's worktree and branch to `commit` (a short hash on its branch), or
+// to its base when `commit` is empty. Answers `{"reset": {to, droppedCommits}}`, or
+// `{"reset": null}` when the conversation has no worktree.
+message ResetOp {
+  string commit = 1;
 }
 
 // Apply everything the conversation committed since its base to the session worktree as
@@ -86,7 +94,8 @@ message RemoveOp {}
 
 message ConversationWorktreeResponse {
   // The operation's answer: `{"pulled": {files, lines, conflicts} | null}` for `pull` (null when the
-  // conversation never created a worktree), `{"removed": bool}` for `remove`.
+  // conversation never created a worktree), `{"removed": bool}` for `remove`,
+  // `{"reset": {to, droppedCommits} | null}` for `reset`.
   string result_json = 1;
 }
 

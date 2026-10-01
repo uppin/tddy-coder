@@ -71,6 +71,15 @@ changes, closes the conversation as `subagent_cancel` does, and answers `{ended,
 `subagent_cancel` removes the worktree without pulling. A conversation whose loop runs on the daemon
 has no conversation worktree, so there is nothing to pull or remove.
 
+`subagent_resume { fromMessageId }` also takes the conversation's worktree back to the rewind point.
+The `resetWorktree` boolean (default `true`; `false` rewinds the transcript only; a non-boolean is
+refused by name) is read by `reset_worktree_choice` (`src/reset_worktree_choice.rs`, its own module
+because `server.rs` is over the file budget). Each Managed conversation is built with a
+`ConversationWorktreeResetPort` (`src/worktree_reset_port.rs`) beside its dispatch closure; it sends
+`ConversationWorktree { reset }` through `tddy_session_tool_client::reset_conversation_worktree` and
+maps the answer — `{"reset": {to, droppedCommits}}`, `{"reset": null}` for no worktree, or an error
+body that refuses the resume. The turn outcome then carries `worktreeReset`.
+
 ## The environment is the real interface
 
 Twenty-one `TDDY_*` variables, `TDDY_SOCKET` read at 43 sites, are how an in-jail agent reaches its

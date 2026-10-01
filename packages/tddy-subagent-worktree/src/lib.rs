@@ -20,6 +20,7 @@ mod change_facts;
 mod conversation_id;
 mod git;
 mod inherit;
+mod reset;
 mod run;
 mod serialise;
 mod tool_effect;
@@ -27,6 +28,7 @@ mod worktree;
 
 pub use change_facts::{FileCounts, LineCounts, WorktreeChange};
 pub use conversation_id::{ConversationId, UnsafeConversationId};
+pub use reset::{ResetTarget, WorktreeReset};
 pub use run::{run_in_conversation, with_worktree_change, ConversationRun, WORKTREE_CHANGE_KEY};
 pub use tool_effect::ToolEffect;
 pub use worktree::{

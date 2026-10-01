@@ -269,7 +269,7 @@ an over-long needle, or too many conditions.
 
 ### `subagent_resume` — carry on, or go back and correct
 
-`subagent_resume { sessionId, fromMessageId?, correction?, maxTurns?, graceMs? }` takes another turn
+`subagent_resume { sessionId, fromMessageId?, correction?, resetWorktree?, maxTurns?, graceMs? }` takes another turn
 on an open conversation and **sends no new prompt turn**.
 
 - With neither `fromMessageId` nor `correction` it continues the history as it stands, under a fresh
@@ -278,7 +278,8 @@ on an open conversation and **sends no new prompt turn**.
 - `fromMessageId` sends the conversation back to that message, discarding everything after it. A
   rewind landing between a tool call and its results **keeps the results**, so the history stays one
   the model accepts. An id the conversation does not hold is an error naming it, never a silent
-  continue; so is an unknown `sessionId`.
+  continue; so is an unknown `sessionId`. When the conversation has a worktree, the rewind takes its
+  files back too — see [A rewind takes the worktree back](#a-rewind-takes-the-worktree-back).
 - `correction` appends exactly one corrective instruction after the rewind point. It is what makes a
   rewind able to change anything at all: turns go out at `temperature: 0.0`, so re-sending identical
   context reproduces an identical turn. A rewind offered without a correction would be a feature
@@ -391,6 +392,42 @@ implementation choice the developer has not confirmed; see
 [`docs/dev/todo/2026-10-01-subagent-commits-skip-hooks-and-signing-without-consent.md`](../../dev/todo/2026-10-01-subagent-commits-skip-hooks-and-signing-without-consent.md).
 Mechanics: [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
 
+### A rewind takes the worktree back
+
+`subagent_resume { fromMessageId }` rewinds the transcript; without more, the edits the dropped
+messages made would stay in the worktree and the resumed subagent would read a tree its own history no
+longer explains. So a rewind **also resets the conversation's worktree**, by default.
+
+- **The target** is the commit of the **last entry the rewind keeps** that made one. The cut already
+  extends over the tool results answering the named message, so a call's commit is kept with its call.
+  When no kept entry made a commit, the target is the conversation's base.
+- **The reset is hard.** The worktree and its branch move to the target, commits past it are dropped
+  from the branch, and untracked files they created are removed. **Ignored files are kept**, so build
+  output under the worktree survives a reset.
+- **`resetWorktree: false`** opts out: the worktree and branch are left as they are, and later
+  commits build on them. Absent or `true` resets. A non-boolean is refused by name.
+- **The outcome reports it**, beside `messages`:
+
+  ```json
+  "worktreeReset": { "to": "3f9c2ab", "droppedCommits": ["9e01d4c", "a77b310"] }
+  ```
+
+  `droppedCommits` are short hashes, oldest first. The field is absent when nothing was reset: no
+  rewind, `resetWorktree: false`, or a conversation that never made a mutating call (so has no
+  worktree). A rewind on a conversation with no worktree resets nothing and creates nothing.
+- **It happens before the resumed turn's first model call**, so the subagent's first read sees the
+  reset tree.
+- **A failed reset refuses the resume** before the transcript is rewound: the conversation is exactly
+  as it was, and the error says why. A target that is not a commit of the conversation's branch is
+  refused before anything moves.
+- A caller's **`replacement`** is never dispatched, so it makes no commit; a reset to a point after a
+  replacement lands on the last real commit.
+- Nothing reaches the caller's worktree: the reset moves only the conversation's own tree, and
+  `subagent_end` still hands over what the branch then holds.
+
+Applies to the in-process loop with Managed access, like the rest of the worktree. Daemon-run
+conversations have no worktree to reset.
+
 ### Known gaps
 
 - A `tddy-tools` process that dies without ending or cancelling its conversations leaves the branch
@@ -402,9 +439,11 @@ Mechanics: [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/d
   [`docs/dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md`](../../dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md).
 - `subagent_end` can race a prompt arriving between its pending check and the retire —
   [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
-- A rewind does not reset the worktree, and there is no diff tool or range pull; a pull applies
-  everything since the base as one diff. Those belong to the `#agent-worktree` stack's later PRs
-  (rewind-reset, diff, range-pull).
+- There is no diff tool or range pull; a pull applies everything since the base as one diff. Those
+  belong to the `#agent-worktree` stack's later PRs
+  ([#562](https://github.com/uppin/tddy-coder/pull/562), [#563](https://github.com/uppin/tddy-coder/pull/563)).
+  Until the range pull lands, `worktreeReset` cannot say which dropped commits had already been
+  handed to the caller.
 
 ## Acceptance Criteria
 
@@ -621,7 +660,7 @@ fully migrated onto the array model.
     tool that reaches only one of them is advertised and uncallable — which reads to the main agent
     as an agent that is not registered.
 
-### Conversation worktree (`tddy-subagent-worktree`, `tddy-discovery`, `tddy-tools`, `tddy-sandbox-recipes`)
+### Conversation worktree (`tddy-subagent-worktree`, `tddy-discovery`, `tddy-tools`, `tddy-sandbox-recipes`, `tddy-session-lifecycle`)
 
 47. A conversation that only reads never creates a worktree or a branch.
 48. The first mutating call creates `<session worktree>/tmp/subagent-worktrees/<conv>` on
@@ -640,6 +679,15 @@ fully migrated onto the array model.
 54. `subagent_cancel` deletes the worktree and branch; the caller's worktree is unchanged.
 55. `subagent_end` is advertised beside `subagent_cancel` and allowlisted in the sandbox recipes
     exactly where `subagent_cancel` is.
+56. A rewind resets the worktree to the commit of the last kept entry that made one, and to the
+    conversation base when none did; untracked files the dropped calls created are removed and
+    ignored files are kept.
+57. The reset happens before the resumed turn's first model request, and the outcome reports
+    `worktreeReset { to, droppedCommits }` (short hashes, oldest first).
+58. `resetWorktree: false`, a resume without a rewind, and a conversation without a worktree ask for
+    no reset and report none; a rewind creates no worktree.
+59. A failed reset refuses the resume and leaves the transcript un-rewound.
+60. `subagent_resume` advertises `resetWorktree` as a boolean.
 
 Verified at the request seams and against real git repositories; **no test runs a real jail end to
 end** (this needs a sandbox the development host cannot start).

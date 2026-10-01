@@ -29,6 +29,7 @@ mod tool_arguments;
 mod transcript;
 mod turn_request;
 mod worktree_change;
+mod worktree_reset;
 mod yield_condition;
 
 use transcript::Transcript;
@@ -43,6 +44,7 @@ pub use transcript::{
     MessageDescriptor, MessageId, MessageRole, ToolCallDescriptor, MESSAGE_PREVIEW_CHARS,
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
+pub use worktree_reset::{ResetTarget, WorktreeReset, WorktreeResetPort};
 pub use yield_condition::{
     evaluate as evaluate_yield_condition, validate as validate_yield_conditions, OutcomeFact, When,
     YieldCondition, YIELD_CONDITION_LIMIT, YIELD_CONTAINS_LIMIT,
@@ -123,6 +125,10 @@ pub struct PromptOutcome {
     /// [`StopReason::YieldedToCaller`] — the id a resume-with-replacement names. `None` for
     /// every other stop reason.
     pub yielded_message_id: Option<MessageId>,
+    /// What a rewind did to the conversation's worktree — where it now stands and which commits it
+    /// dropped. `None` when the turn rewound nothing, the caller kept the worktree
+    /// (`resetWorktree: false`), or the conversation has no worktree.
+    pub worktree_reset: Option<WorktreeReset>,
 }
 
 impl PromptOutcome {
@@ -137,6 +143,7 @@ impl PromptOutcome {
             clamped_max_turns: None,
             fired_condition: None,
             yielded_message_id: None,
+            worktree_reset: None,
         }
     }
 }
@@ -785,6 +792,10 @@ pub struct SubagentConfig {
     ///
     /// `None` reaches the model directly, exactly as every conversation did before this existed.
     pub provider_queue: Option<crate::subagent_runtime::ProviderQueue>,
+    /// How a rewind reaches the host that owns this conversation's worktree. `None`: a rewind cuts
+    /// the transcript and touches no files — a conversation with no worktree, or a host that has
+    /// none to offer.
+    pub worktree_reset: Option<std::sync::Arc<dyn WorktreeResetPort>>,
 }
 
 impl SubagentConfig {
@@ -794,7 +805,15 @@ impl SubagentConfig {
             access,
             system_prompt: None,
             provider_queue: None,
+            worktree_reset: None,
         }
+    }
+
+    /// Let a rewind take this conversation's worktree back with its transcript, through `port`.
+    #[must_use]
+    pub fn with_worktree_reset(mut self, port: std::sync::Arc<dyn WorktreeResetPort>) -> Self {
+        self.worktree_reset = Some(port);
+        self
     }
 
     /// Make this conversation's model calls queue on `queue`, one at a time per endpoint.
@@ -1190,11 +1209,11 @@ async fn send_turn_and_check_final_answer(
         let answer = answer.to_string();
         return Ok((
             TurnStep::FinalAnswer {
-                outcome: PromptOutcome::new(
+                outcome: Box::new(PromptOutcome::new(
                     turn_stop_reason(cut_at_token_cap),
                     vec![ContentBlock::text(answer)],
                     turn_usage,
-                ),
+                )),
                 message: ChatMessage::assistant(message.content.clone(), None),
             },
             turn_usage,
@@ -1222,7 +1241,8 @@ fn turn_stop_reason(cut_at_token_cap: bool) -> StopReason {
 /// any history yet.
 enum TurnStep {
     FinalAnswer {
-        outcome: PromptOutcome,
+        /// Boxed: an outcome is several times the size of the `Continue` variant.
+        outcome: Box<PromptOutcome>,
         /// The assistant message that carried the answer, for the caller to record.
         message: ChatMessage,
     },
@@ -1373,6 +1393,8 @@ pub struct SpecializedSubagentSession {
     /// would have seen one fresh call each time. It is cleared when the caller brings something
     /// new — see [`SubagentSession::take_turn`].
     repeated_calls: RepeatedCalls,
+    /// Where a rewind asks for the worktree to follow the transcript; `None` resets nothing.
+    worktree_reset: Option<std::sync::Arc<dyn WorktreeResetPort>>,
 }
 
 impl SpecializedSubagentSession {
@@ -1400,7 +1422,17 @@ impl SpecializedSubagentSession {
             context_tokens: 0,
             admission: None,
             repeated_calls: RepeatedCalls::new(),
+            worktree_reset: None,
         }
+    }
+
+    /// Reset the conversation's worktree through `port` whenever a turn rewinds.
+    pub fn resetting_worktree_through(
+        mut self,
+        port: std::sync::Arc<dyn WorktreeResetPort>,
+    ) -> Self {
+        self.worktree_reset = Some(port);
+        self
     }
 
     /// Send every model call this conversation makes through `admission` — one call at a time on
@@ -1496,7 +1528,7 @@ impl SpecializedSubagentSession {
         let (message, cut_at_token_cap) = match step {
             TurnStep::FinalAnswer { outcome, message } => {
                 self.transcript.push(message);
-                return Ok((Some(outcome), turn_usage));
+                return Ok((Some(*outcome), turn_usage));
             }
             TurnStep::Continue {
                 message,
@@ -1893,7 +1925,17 @@ impl SubagentSession for SpecializedSubagentSession {
         {
             self.repeated_calls.forget_earlier_calls();
         }
+        // The worktree goes back first: a reset that fails refuses the resume with the history
+        // whole, which a reset after the cut could not promise.
+        let mut worktree_reset = None;
         if let Some(rewind_point) = request.rewind_point() {
+            if let (Some(port), true) = (&self.worktree_reset, request.resets_worktree()) {
+                let target = self
+                    .transcript
+                    .commit_kept_by(rewind_point)
+                    .map_err(|e| SubagentError(e.to_string()))?;
+                worktree_reset = port.reset(target).await?;
+            }
             self.transcript
                 .rewind_to(rewind_point)
                 .map_err(|e| SubagentError(e.to_string()))?;
@@ -1922,6 +1964,7 @@ impl SubagentSession for SpecializedSubagentSession {
             .await?;
         outcome.messages = self.transcript.descriptors_from(appended_from);
         outcome.clamped_max_turns = budget.clamped_to;
+        outcome.worktree_reset = worktree_reset;
         Ok(outcome)
     }
 
@@ -1996,6 +2039,9 @@ impl SubagentRegistry {
                     def.base_url.clone(),
                     format!("{}-{}", def.name, uuid::Uuid::new_v4()),
                 ));
+            }
+            if let Some(port) = config.worktree_reset {
+                session = session.resetting_worktree_through(port);
             }
             return Ok(Box::new(session));
         }

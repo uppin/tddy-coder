@@ -450,6 +450,9 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
             );
         }
     }
+    if let (Some(object), Some(reset)) = (body.as_object_mut(), &outcome.worktree_reset) {
+        object.insert("worktreeReset".to_string(), serde_json::json!(reset));
+    }
     body.to_string()
 }
 
