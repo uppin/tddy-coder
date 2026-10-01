@@ -51,19 +51,9 @@ impl ConversationWorktree {
                 stderr: format!("{from} is not an ancestor of {to}"),
             });
         }
-        let text = self.diff_output(&[], &from, &to).await?;
-        let name_status = self.diff_output(&["--name-status"], &from, &to).await?;
-        let numstat = self.diff_output(&["--numstat"], &from, &to).await?;
-        let (files, lines) = count_change(&name_status, &numstat);
+        let (text, files, lines) = self.range_changes(&from, &to).await?;
         let (diff, truncated) = cut_at_a_line(text, DIFF_TEXT_CAP_BYTES);
-        let mut shortened = self
-            .short_hashes(&[from.as_str(), to.as_str()])
-            .await?
-            .into_iter();
-        let (from, to) = (
-            shortened.next().unwrap_or_default(),
-            shortened.next().unwrap_or_default(),
-        );
+        let (from, to) = self.short_pair(&from, &to).await?;
         Ok(ConversationDiff {
             from,
             to,
@@ -72,6 +62,28 @@ impl ConversationWorktree {
             diff,
             truncated,
         })
+    }
+
+    /// The range's full diff text and its whole-range counts.
+    async fn range_changes(
+        &self,
+        from: &str,
+        to: &str,
+    ) -> Result<(String, FileCounts, LineCounts), WorktreeError> {
+        let text = self.diff_output(&[], from, to).await?;
+        let name_status = self.diff_output(&["--name-status"], from, to).await?;
+        let numstat = self.diff_output(&["--numstat"], from, to).await?;
+        let (files, lines) = count_change(&name_status, &numstat);
+        Ok((text, files, lines))
+    }
+
+    /// The short hashes of `from` and `to`.
+    async fn short_pair(&self, from: &str, to: &str) -> Result<(String, String), WorktreeError> {
+        let mut shortened = self.short_hashes(&[from, to]).await?.into_iter();
+        Ok((
+            shortened.next().unwrap_or_default(),
+            shortened.next().unwrap_or_default(),
+        ))
     }
 
     /// `git diff <format> from to`, with no external diff driver or text conversion run.

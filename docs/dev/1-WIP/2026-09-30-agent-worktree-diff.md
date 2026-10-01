@@ -89,9 +89,9 @@ See the PRD.
 
 ## Scope
 
-- [ ] **Implementation**: `diff`, `DiffOp`, `subagent_diff`
-- [ ] **Testing**: all acceptance tests below passing
-- [ ] **Package Documentation**: crate doc § diff, tddy-tools README tool table
+- [x] **Implementation**: `diff`, `DiffOp`, `subagent_diff`
+- [x] **Testing**: all acceptance tests below passing
+- [x] **Package Documentation**: crate doc § diff, tddy-tools README tool table
 - [ ] **Code Quality**: scoped clippy/fmt
 
 ## Technical Changes
@@ -106,7 +106,8 @@ way to read a change's content short of reading files.
 
 - `diff(from, to)`: resolve `from` (default base) and `to` (default tip); both must be on
   `base..tip` or be the base; `from` must be an ancestor of `to` (`merge-base --is-ancestor`); run
-  `git diff --binary --no-ext-diff --no-textconv from to` for the text (cut at the last line boundary
+  `git diff --no-ext-diff --no-textconv from to` for the text (no `--binary`: a binary change shows as git's
+  `Binary files … differ` line, which the PRD and `a_binary_change_shows_as_binary` pin) (cut at the last line boundary
   under `DIFF_TEXT_CAP_BYTES` = 64 KiB) and `--name-status` / `--numstat` for the counts.
 - Wire: `DiffOp { string from = 1; string to = 2; }`; result JSON as in the PRD.
 - MCP: `subagent_diff { sessionId, from?, to? }`, allowed while a turn is running (does not take the
@@ -122,9 +123,9 @@ way to read a change's content short of reading files.
 
 ## Implementation Milestones
 
-- [ ] `diff` green against real repositories
-- [ ] daemon arm green
-- [ ] MCP tool green; allowlist updated
+- [x] `diff` green against real repositories
+- [x] daemon arm green
+- [x] MCP tool green; allowlist updated
 
 ## Testing Plan
 
@@ -188,6 +189,14 @@ Scoped: `cargo clippy --all-targets -D warnings` clean over `tddy-subagent-workt
 ## Validation Results
 
 ### /validate-changes
+
+Stack gate: on the latest tip of `feature/agent-worktree/rewind-reset`; `origin/<base>..HEAD` is this PR's three commits. Boundaries held: `Dependencies` surfaces untouched, no `reset`/`pull` behaviour changed, `tddy-discovery` untouched, nothing deleted. No stub left under `## Responsibility`. 0 critical.
+
+- The daemon arm lives in `tddy-session-lifecycle` (`run_conversation_worktree_op`, shared by `tddy-daemon-rpc` and the jail bridge), not in `tddy-daemon-rpc` itself.
+- `reset.rs`: `resolve_commit` / `short_hashes` widened to `pub(crate)` for `diff` (visibility only).
+- `mcp_tool_advertisement_audit.rs` edited: `subagent_diff` added to the pinned tool set, counts 45/42 → 46/43.
+- ⚠ Every `WorktreeError` from `diff` maps to `FailedPrecondition`, including a genuine git I/O failure; a caller mistake and a daemon fault are indistinguishable by status.
+
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
@@ -202,7 +211,7 @@ Scoped: `cargo clippy --all-targets -D warnings` clean over `tddy-subagent-workt
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer waived the per-node gate for 2/4–4/4 on 2026-09-30)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests per touched package; full workspace on CI
 - [ ] Validate changes (/validate-changes)
