@@ -1,6 +1,6 @@
 //! Acceptance tests: `subagent_diff` over the real `tddy-tools --mcp` stdio wire.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-diff.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_diff` — read what a conversation changed
 //!
 //! What these tests cannot reach: a diff with content. With no session-tool transport configured the
 //! subagent reads through `CodebaseAccess::Local`, which refuses every write, so no conversation here

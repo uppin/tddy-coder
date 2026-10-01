@@ -503,7 +503,7 @@ mod tests {
     }
 
     /// `subagent_diff` is how a sandboxed Claude reads what a conversation changed before taking it.
-    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-diff.md
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_diff` — read what a conversation changed
     #[test]
     fn subagent_diff_is_allowlisted_wherever_subagent_cancel_is() {
         // Given

@@ -1,7 +1,7 @@
 //! Acceptance: `ConversationWorktree { diff }` answers with a conversation's changes between two of
 //! its commits.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-diff.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_diff` — read what a conversation changed
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

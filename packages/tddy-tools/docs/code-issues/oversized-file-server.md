@@ -20,6 +20,7 @@ subagent turn-control changeset
 | 2026-09-27 | 2,685 | **regressed** by 33. `subagent_new_session_tool` reads a `systemPrompt` override, refuses one aimed at a remotely-routed agent (it cannot reach the conversation over `OpenAgentConversation`), and `subagent_new_session_schema` advertises the parameter |
 | 2026-09-27 | 2,677 | −8. `pending_turn_json` and its test moved to `tddy_discovery::subagent_runtime`, beside `prompt_outcome_json` — the two answers a conversation tool can give now live together — against +17 for the provider a conversation and its turns are registered with |
 | 2026-10-01 | 2,764 | **worse** by 10 over master's 2,754 production lines in PR #560 (`#agent-worktree` 1/4): the `subagent_end` route, the per-conversation `subagent_config_for_conversation` call and `subagent_cancel`'s worktree discard; `subagent_end` itself is its own module (`subagent_end.rs`) |
+| 2026-10-01 | 2,782 | **worse** by 5 over the parent tip's 2,777 (the line before the test module) in PR #562 (`#agent-worktree` 3/4): the `subagent_diff` route. The tool itself is its own module (`subagent_diff.rs`). Split deferred with the rest of the file — see `docs/dev/todo/2026-09-26-seven-files-over-budget-deferred-by-the-subagent-turn-control-change.md`. The 2,764 row above was taken at #560 and is not re-measured on the same basis |
 
 ## What the tool found
 

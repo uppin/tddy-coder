@@ -62,6 +62,25 @@ conversation's transcript (`src/reset.rs`). `ResetTarget` is `Base` or `Commit(a
 Resetting to the tip drops nothing. The base ref under `refs/tddy/subagent-base/` is untouched, so a
 reset never loses the base.
 
+## Diff
+
+`diff(from, to)` reads what the conversation changed between two of its commits (`src/diff.rs`).
+Nothing is written to either worktree and it takes no lock, so it is safe while a call runs.
+
+1. `from` defaults to the base and `to` to the branch tip. Each must be the base or a commit on
+   `base..branch`, resolved through the commit lookup `reset_to` uses (`resolve_commit`); a commit
+   outside the conversation, or one a reset dropped from the branch, is refused with an error naming it.
+2. `from` must be an ancestor of `to` (`merge-base --is-ancestor`); otherwise it is refused.
+3. The text is `git diff --no-ext-diff --no-textconv from to`. It is deliberately **not** `--binary`:
+   a binary change shows as git's `Binary files … differ` line and carries no payload.
+4. The counts come from `--name-status` and `--numstat` over the same range, through the parser
+   `commit_changes` uses, so they match a turn's `worktreeChange`.
+5. Text past `DIFF_TEXT_CAP_BYTES` (64 KiB) is cut at the last whole line and `truncated` is set; the
+   counts still describe the whole range.
+
+It answers `ConversationDiff { from, to, files, lines, diff, truncated }` with `from` and `to` as
+short hashes. `from` is exclusive and `to` inclusive, git's `from..to`.
+
 ## Hand-over
 
 `pull_into_caller` applies `base..tip` to the caller's worktree with `git apply --3way`, as

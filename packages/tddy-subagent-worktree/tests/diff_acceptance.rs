@@ -1,6 +1,6 @@
 //! Reading the diff between two points of a conversation.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-diff.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_diff` — read what a conversation changed
 
 mod support;
 
