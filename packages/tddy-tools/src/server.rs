@@ -1889,12 +1889,10 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         Some(correction) => request = request.with_correction(correction),
         None => {}
     }
-    match args.get("resetWorktree") {
-        None => {}
-        Some(serde_json::Value::Bool(true)) => {}
-        Some(serde_json::Value::Bool(false)) => request = request.keeping_worktree(),
-        Some(_) => return subagent_error_json("resetWorktree must be a boolean"),
-    }
+    let request = match crate::reset_worktree_choice::with_reset_worktree_choice(request, &args) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     let request = match turn_budget(&args, request) {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),

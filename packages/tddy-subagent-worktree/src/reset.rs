@@ -42,24 +42,8 @@ impl ConversationWorktree {
         )
         .await?;
         let on_branch: Vec<&str> = on_branch.lines().collect();
-        let (target, dropped) = match target {
-            ResetTarget::Base => (self.base().to_string(), on_branch.as_slice()),
-            ResetTarget::Commit(commit) => {
-                let full = self.resolve_commit(commit).await?;
-                let kept = on_branch
-                    .iter()
-                    .position(|hash| *hash == full)
-                    .ok_or_else(|| WorktreeError::Git {
-                        args: vec!["reset".to_string(), commit.clone()],
-                        stderr: format!(
-                            "{commit} is not a commit of branch {} after its base",
-                            self.branch()
-                        ),
-                    })?;
-                (full, &on_branch[kept + 1..])
-            }
-        };
-        let dropped_commits = self.short_hashes(dropped).await?;
+        let (target, dropped) = self.resolve_reset(target, &on_branch).await?;
+        let dropped_commits = self.short_hashes(&dropped).await?;
         git(self.root(), ["reset", "-q", "--hard", &target], &[], None).await?;
         git(self.root(), ["clean", "-q", "-fd"], &[], None).await?;
         let to = self.short_hashes(&[target.as_str()]).await?.remove(0);
@@ -67,6 +51,31 @@ impl ConversationWorktree {
             to,
             dropped_commits,
         })
+    }
+
+    /// The full hash a reset to `target` lands on, and the entries of `on_branch` (oldest first)
+    /// it drops. A commit that is not in `on_branch` is refused.
+    async fn resolve_reset<'a>(
+        &self,
+        target: &ResetTarget,
+        on_branch: &[&'a str],
+    ) -> Result<(String, Vec<&'a str>), WorktreeError> {
+        let commit = match target {
+            ResetTarget::Base => return Ok((self.base().to_string(), on_branch.to_vec())),
+            ResetTarget::Commit(commit) => commit,
+        };
+        let full = self.resolve_commit(commit).await?;
+        let kept = on_branch
+            .iter()
+            .position(|hash| *hash == full)
+            .ok_or_else(|| WorktreeError::Git {
+                args: vec!["reset".to_string(), commit.clone()],
+                stderr: format!(
+                    "{commit} is not a commit of branch {} after its base",
+                    self.branch()
+                ),
+            })?;
+        Ok((full, on_branch[kept + 1..].to_vec()))
     }
 
     /// The full hash `abbreviation` names, which must name a commit.

@@ -14,6 +14,7 @@
 pub mod action_tools;
 pub mod list_models;
 pub mod mcp_primitives;
+mod reset_worktree_choice;
 pub mod server;
 pub mod session_actions_cli;
 mod subagent_end;

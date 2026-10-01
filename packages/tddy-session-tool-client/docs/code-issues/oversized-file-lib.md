@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-24 | 1,047 (gate: 602) | first detection. The size predates #509 (1,043 at merge-base `4e7157d2`; gate: 602). #509 changed 8 lines (6+/2−) in the request construction of `connect_sandbox_ipc`: it passes `tddy_rpc::RequestTransport::UnixSocket` to `StdioEndpoint::from_duplex`, and rustfmt spread the call across lines. That grew the true production count by **4 lines**. The gate missed the growth because it falls after the false stop |
 | 2026-10-01 | 1,107 | **worse** by 60 over master's 1,047 in PR #560 (`#agent-worktree` 1/4): the `dispatch_request_via_*` split — the per-transport dispatch gained a request-taking variant so a conversation's call can reuse each transport; the conversation module itself (`conversation.rs`) is separate. Seam B in the table above now also holds the new variants; extracting it is the cheaper fix. Deferral awaits developer consent |
+| 2026-10-01 | gate: 606 → 609 | **worse** by 3 in PR #561 (`#agent-worktree` 2/4): the `pub use` of `reset_conversation_worktree`. **Split deferred**: #560 (parent) and both dependents (#562, #563) also touch this file's export list — decompose after `#agent-worktree` lands. |
 
 ## What would close it — candidate seams (not proven)
 
