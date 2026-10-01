@@ -77,8 +77,6 @@ impl TurnRequest {
         self
     }
 
-    /// Spend at most `max_turns` model turns on this call, in place of the agent definition's own
-    /// budget — for this call only, and never above [`SUBAGENT_MAX_TURNS_CEILING`].
     /// Rewind the transcript only: the conversation's worktree keeps every file the dropped
     /// messages wrote, and later commits build on them.
     #[must_use]
@@ -92,6 +90,8 @@ impl TurnRequest {
         !self.keep_worktree
     }
 
+    /// Spend at most `max_turns` model turns on this call, in place of the agent definition's own
+    /// budget — for this call only, and never above [`SUBAGENT_MAX_TURNS_CEILING`].
     pub fn within_turns(mut self, max_turns: u32) -> Self {
         self.max_turns = Some(max_turns);
         self

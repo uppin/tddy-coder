@@ -114,10 +114,10 @@ See the PRD.
 
 ## Scope
 
-- [ ] **Implementation**: `reset_to`, `ResetOp`, the port, the `take_turn` step, the MCP property
-- [ ] **Testing**: all acceptance tests below passing
+- [x] **Implementation**: `reset_to`, `ResetOp`, the port, the `take_turn` step, the MCP property
+- [x] **Testing**: all acceptance tests below passing
 - [ ] **Package Documentation**: discovery runtime doc § rewind, new crate doc § reset
-- [ ] **Code Quality**: scoped clippy/fmt
+- [x] **Code Quality**: scoped clippy/fmt
 
 ## Technical Changes
 
@@ -142,21 +142,22 @@ take_turn(request)
   outcome.worktree_reset = reset (None when no worktree / opted out / no rewind)
 ```
 
-- `ResetTarget::{Base, Commit(String)}`; `WorktreeReset { to: String, dropped_commits: u32 }`;
+- `ResetTarget::{Base, Commit(String)}`; `WorktreeReset { to: String, dropped_commits: Vec<String> }` (short hashes, oldest first);
   `WorktreeResetPort::reset(&self, ResetTarget) -> Future<Result<Option<WorktreeReset>, SubagentError>>`
   (`None` = the conversation has no worktree). A session built without a port never resets.
-- Mechanics: `reset_to` resolves the target (`Base` → the base commit), counts `target..tip`,
-  `reset --hard target`, `clean -fd` (ignored files kept), and returns `ResetOutcome{to, dropped}`.
-  A commit that is not on `base..tip` is refused.
-- Wire: `ResetOp { string commit = 1; }` (empty = base); result `{"to", "droppedCommits"}` or
-  `{"noWorktree": true}`.
+- Mechanics: `reset_to` takes the worktree lock, lists `base..branch`, resolves the target (`Base` →
+  the base commit), `reset --hard target`, `clean -fd` (ignored files kept), and returns
+  `WorktreeReset{to, dropped_commits}`. A commit that is not on `base..branch` is refused before
+  anything moves.
+- Wire: `ResetOp { string commit = 1; }` (empty = base); result `{"reset": {"to", "droppedCommits"}}`, or
+  `{"reset": null}` when the conversation has no worktree.
 - MCP: `resetWorktree` boolean (default `true`); `worktreeReset` in `prompt_outcome_json`.
 
 ### Delta
 
-- **tddy-subagent-worktree** — `reset_to`, `ResetTarget`, `ResetOutcome`.
+- **tddy-subagent-worktree** — `reset_to`, `ResetTarget`, `WorktreeReset`.
 - **tddy-service** — `ResetOp reset = 12`.
-- **tddy-daemon-rpc** — the arm.
+- **tddy-session-lifecycle** — the `Reset` arm in `run_conversation_worktree_op`, shared by the exec-tool RPC (`tddy-daemon-rpc`) and the jail bridge.
 - **tddy-discovery** — `subagent/worktree_reset.rs`; `SubagentConfig::worktree_reset`;
   `Transcript::commit_kept_by`; `TurnRequest::{keeping_worktree, resets_worktree}`;
   `PromptOutcome::worktree_reset`; `prompt_outcome_json`.
@@ -165,10 +166,10 @@ take_turn(request)
 
 ## Implementation Milestones
 
-- [ ] `reset_to` green against real repositories
-- [ ] daemon `Reset` arm green
-- [ ] `commit_kept_by` and `take_turn` ordering green
-- [ ] MCP property and outcome JSON green
+- [x] `reset_to` green against real repositories
+- [x] daemon `Reset` arm green
+- [x] `commit_kept_by` and `take_turn` ordering green
+- [x] MCP property and outcome JSON green
 
 ## Testing Plan
 
@@ -242,6 +243,17 @@ Scoped: `cargo clippy --all-targets -D warnings` clean over `tddy-subagent-workt
 ## Validation Results
 
 ### /validate-changes
+
+Rebased onto `isolated-edits` @ `b2941c96`; `origin/<base>..HEAD` is this PR's commits only. No stubs
+left in `packages/*/src`, no deletions, no `## Dependencies` symbol re-implemented, no `## Boundaries`
+breach. Findings: the `take_turn` reset-before-rewind ordering holds (a failed reset leaves history
+whole); `commit_kept_by` and `rewind_to` share `last_kept_by`. Fixed in this pass: the
+`within_turns` doc comment had been captured by `keeping_worktree`
+(`turn_request.rs`); `packages/tddy-rust-typescript-tests/gen/exec_tools_pb.ts` lacked `ResetOp`
+after the base regenerated it (`generated-code.sh check` now clean); changeset prose said
+`dropped_commits: u32` / `{"noWorktree"}` where the code, tests and proto say a hash list and
+`{"reset": null}`.
+
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
