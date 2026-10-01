@@ -281,6 +281,14 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
             "diff".to_string(),
             serde_json::json!({ "from": diff.from, "to": diff.to }),
         ),
+        Some(Op::PullRange(range)) => fields.insert(
+            "pull_range".to_string(),
+            serde_json::json!({
+                "from": range.from,
+                "to": range.to,
+                "already_pulled": range.already_pulled
+            }),
+        ),
         None => None,
     };
     let body = serde_json::Value::Object(fields);
@@ -372,13 +380,13 @@ pub async fn pull_conversation_range(
     to: Option<&str>,
     already_pulled: &[String],
 ) -> String {
-    // TODO(range-pull): implement over the transports `conversation_worktree` uses
-    let _ = (conversation_id, from, to, already_pulled);
-    todo!("pull_conversation_range")
+    ask_conversation_worktree(|envelope| {
+        conversation_pull_range_request(&envelope, conversation_id, from, to, already_pulled)
+    })
+    .await
 }
 
 /// The `ConversationWorktree` request a range pull sends.
-#[allow(dead_code)] // TODO(range-pull): called by `pull_conversation_range`
 pub(crate) fn conversation_pull_range_request(
     envelope: &SessionToolEnvelope,
     conversation_id: &str,
@@ -386,16 +394,14 @@ pub(crate) fn conversation_pull_range_request(
     to: Option<&str>,
     already_pulled: &[String],
 ) -> ConversationWorktreeRequest {
-    // TODO(range-pull): implement
-    let _ = (
-        envelope,
-        conversation_id,
-        from,
-        to,
-        already_pulled,
-        PullRangeOp::default(),
-    );
-    todo!("conversation_pull_range_request")
+    ConversationWorktreeRequest {
+        op: Some(Op::PullRange(PullRangeOp {
+            from: from.unwrap_or_default().to_string(),
+            to: to.unwrap_or_default().to_string(),
+            already_pulled: already_pulled.to_vec(),
+        })),
+        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
+    }
 }
 
 /// The `ExecuteTool` a conversation's call sends.

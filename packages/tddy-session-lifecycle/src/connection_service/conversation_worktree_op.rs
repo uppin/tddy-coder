@@ -1,4 +1,4 @@
-//! `ConversationWorktree`'s operations — `Pull`, `Remove`, `Reset` and `Diff` — against a session's worktree.
+//! `ConversationWorktree`'s operations — `Pull`, `PullRange`, `Remove`, `Reset` and `Diff` — against a session's worktree.
 //!
 //! Shared by the exec-tool RPC (`tddy-daemon-rpc`, which authorizes the caller's token first) and
 //! the host bridge a jail's relayed call arrives on (which has no token and is bound to its session
@@ -7,10 +7,14 @@
 use std::path::Path;
 
 use prost::Message as _;
+use std::collections::BTreeSet;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::conversation_worktree_request::Op;
 use tddy_service::proto::exec_tools::{ConversationWorktreeRequest, ConversationWorktreeResponse};
-use tddy_subagent_worktree::{ConversationId, ConversationWorktrees, ResetTarget, WorktreeError};
+
+use tddy_subagent_worktree::{
+    ConversationId, ConversationWorktrees, PullRange, ResetTarget, WorktreeError,
+};
 
 use super::DaemonSessionHost;
 
@@ -18,7 +22,8 @@ use super::DaemonSessionHost;
 /// operation's `result_json`: `{"pulled": {files, lines, conflicts} | null}` for a pull (null when
 /// the conversation never created a worktree), `{"removed": bool}` for a remove, or
 /// `{"reset": {to, droppedCommits} | null}` for a reset (null likewise when there is no worktree),
-/// or `{"diff": {from, to, files, lines, diff, truncated}}` for a diff (a conversation without a
+/// `{"pulled": {commits, skipped, files, lines, conflicts} | null}` for a range pull (a bound the
+/// conversation does not have is `FailedPrecondition`), or `{"diff": {from, to, files, lines, diff, truncated}}` for a diff (a conversation without a
 /// worktree is `FailedPrecondition`).
 ///
 /// An id that could escape its directory or branch namespace is refused before anything is looked
@@ -37,6 +42,21 @@ pub async fn run_conversation_worktree_op(
         (Op::Pull(_), None) => serde_json::json!({ "pulled": null }),
         (Op::Pull(_), Some(worktree)) => {
             let outcome = worktree.pull_into_caller().await.map_err(internal)?;
+            serde_json::json!({ "pulled": outcome })
+        }
+        (Op::PullRange(_), None) => serde_json::json!({ "pulled": null }),
+        (Op::PullRange(pull), Some(worktree)) => {
+            // An empty bound is an omitted one: the first commit not yet pulled, the tip.
+            let bound = |bound: String| (!bound.is_empty()).then_some(bound);
+            let range = PullRange {
+                from: bound(pull.from),
+                to: bound(pull.to),
+            };
+            let already_pulled: BTreeSet<String> = pull.already_pulled.into_iter().collect();
+            let outcome = worktree
+                .pull_range(&range, &already_pulled)
+                .await
+                .map_err(refused)?;
             serde_json::json!({ "pulled": outcome })
         }
         (Op::Remove(_), None) => serde_json::json!({ "removed": false }),
@@ -72,9 +92,9 @@ pub async fn run_conversation_worktree_op(
     Ok(answer.to_string())
 }
 
-/// A diff bound the conversation does not have is the caller's mistake, not the daemon's.
+/// A diff or pull bound the conversation does not have is the caller's mistake, not the daemon's.
 fn refused(error: WorktreeError) -> Status {
-    log::warn!("ConversationWorktree diff: {error}");
+    log::warn!("ConversationWorktree: {error}");
     Status::failed_precondition(error.to_string())
 }
 

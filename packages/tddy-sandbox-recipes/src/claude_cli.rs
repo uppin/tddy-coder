@@ -186,6 +186,9 @@ const SUBAGENT_TOOLS: &[&str] = &[
     "mcp__tddy-tools__subagent_end",
     // Read-only, and how a sandboxed agent sees what a conversation changed before taking it.
     "mcp__tddy-tools__subagent_diff",
+    // Takes some of a conversation's work now, as `subagent_end` takes all of it at the close: an
+    // agent allowed one and not the other could only take work by ending the conversation.
+    "mcp__tddy-tools__subagent_pull",
 ];
 
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable

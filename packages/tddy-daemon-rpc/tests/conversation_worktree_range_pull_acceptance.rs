@@ -91,7 +91,6 @@ impl ADaemonWithASession {
             .expect("ConversationWorktree answers");
         serde_json::from_str(&response.get_ref().result_json).expect("result JSON")
     }
-
 }
 
 fn an_execute_tool(

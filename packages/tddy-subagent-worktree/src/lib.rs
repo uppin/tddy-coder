@@ -12,6 +12,9 @@
 //!   and removed, and the commit's short hash;
 //! - [`ConversationWorktree::pull_into_caller`] hands the result to the caller as uncommitted
 //!   changes, 3-way, and [`ConversationWorktree::remove`] deletes the worktree and its branch;
+//! - [`ConversationWorktree::pull_range`] hands the caller a chosen, inclusive range of the
+//!   conversation's commits instead, one commit at a time and 3-way, skipping the commits the caller
+//!   says it already took; the branch and the conversation's worktree are not touched;
 //! - [`ConversationWorktree::diff`] reads what the conversation changed between two of its commits
 //!   (git's `from..to`, the base and the tip by default), read-only, with counts over the whole range
 //!   and the text capped at [`DIFF_TEXT_CAP_BYTES`].
