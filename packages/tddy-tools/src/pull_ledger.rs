@@ -221,4 +221,24 @@ mod tests {
         // Then
         assert_eq!(outcome, before);
     }
+
+    #[test]
+    fn collecting_the_same_turn_again_reads_the_same_annotated_answer() {
+        // Given
+        let conversation = "ledger-test-collect-twice";
+        record_pulled(conversation, &hashes(&["c2"]));
+        let result =
+            json!({ "worktreeReset": { "to": "c1", "droppedCommits": ["c2"] } }).to_string();
+
+        // When
+        let first = annotated_turn_result(conversation, "r1", result.clone());
+        let second = annotated_turn_result(conversation, "r1", result);
+        forget_conversation(conversation);
+
+        // Then
+        assert_eq!(
+            (first.contains("droppedPulledCommits"), first == second),
+            (true, true)
+        );
+    }
 }

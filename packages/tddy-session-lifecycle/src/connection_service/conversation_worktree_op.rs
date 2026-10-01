@@ -4,14 +4,13 @@
 //! the host bridge a jail's relayed call arrives on (which has no token and is bound to its session
 //! by the runner instead).
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use prost::Message as _;
-use std::collections::BTreeSet;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::conversation_worktree_request::Op;
 use tddy_service::proto::exec_tools::{ConversationWorktreeRequest, ConversationWorktreeResponse};
-
 use tddy_subagent_worktree::{
     ConversationId, ConversationWorktrees, PullRange, ResetTarget, WorktreeError,
 };
@@ -23,7 +22,8 @@ use super::DaemonSessionHost;
 /// the conversation never created a worktree), `{"removed": bool}` for a remove, or
 /// `{"reset": {to, droppedCommits} | null}` for a reset (null likewise when there is no worktree),
 /// `{"pulled": {commits, skipped, files, lines, conflicts} | null}` for a range pull (a bound the
-/// conversation does not have is `FailedPrecondition`), or `{"diff": {from, to, files, lines, diff, truncated}}` for a diff (a conversation without a
+/// conversation does not have is `FailedPrecondition`), or
+/// `{"diff": {from, to, files, lines, diff, truncated}}` for a diff (a conversation without a
 /// worktree is `FailedPrecondition`).
 ///
 /// An id that could escape its directory or branch namespace is refused before anything is looked
