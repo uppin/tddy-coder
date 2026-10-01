@@ -89,9 +89,7 @@ impl TurnRequest {
 
     /// Whether a rewind by this request takes the conversation's worktree back too — the default.
     pub fn resets_worktree(&self) -> bool {
-        // TODO(rewind-reset): implement
-        let _ = self.keep_worktree;
-        todo!("resets_worktree")
+        !self.keep_worktree
     }
 
     pub fn within_turns(mut self, max_turns: u32) -> Self {

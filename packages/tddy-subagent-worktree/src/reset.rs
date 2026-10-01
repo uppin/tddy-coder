@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::git::git;
+use crate::serialise;
 use crate::worktree::{ConversationWorktree, WorktreeError};
 
 /// Where a reset goes.
@@ -30,7 +32,73 @@ impl ConversationWorktree {
     /// commits created (ignored files are kept — a reset must not delete a build's output). A commit
     /// that is neither the base nor on the branch after it is refused, and nothing moves.
     pub async fn reset_to(&self, target: &ResetTarget) -> Result<WorktreeReset, WorktreeError> {
-        // TODO(rewind-reset): implement
-        todo!("reset_to({target:?})")
+        let _exclusive = serialise::exclusive(self.root()).await;
+        let range = format!("{}..{}", self.base(), self.branch());
+        let on_branch = git(
+            self.root(),
+            ["rev-list", "--topo-order", "--reverse", &range],
+            &[],
+            None,
+        )
+        .await?;
+        let on_branch: Vec<&str> = on_branch.lines().collect();
+        let (target, dropped) = match target {
+            ResetTarget::Base => (self.base().to_string(), on_branch.as_slice()),
+            ResetTarget::Commit(commit) => {
+                let full = self.resolve_commit(commit).await?;
+                let kept = on_branch
+                    .iter()
+                    .position(|hash| *hash == full)
+                    .ok_or_else(|| WorktreeError::Git {
+                        args: vec!["reset".to_string(), commit.clone()],
+                        stderr: format!(
+                            "{commit} is not a commit of branch {} after its base",
+                            self.branch()
+                        ),
+                    })?;
+                (full, &on_branch[kept + 1..])
+            }
+        };
+        let dropped_commits = self.short_hashes(dropped).await?;
+        git(self.root(), ["reset", "-q", "--hard", &target], &[], None).await?;
+        git(self.root(), ["clean", "-q", "-fd"], &[], None).await?;
+        let to = self.short_hashes(&[target.as_str()]).await?.remove(0);
+        Ok(WorktreeReset {
+            to,
+            dropped_commits,
+        })
+    }
+
+    /// The full hash `abbreviation` names, which must name a commit.
+    async fn resolve_commit(&self, abbreviation: &str) -> Result<String, WorktreeError> {
+        let found = git(
+            self.root(),
+            [
+                "rev-parse",
+                "--verify",
+                &format!("{abbreviation}^{{commit}}"),
+            ],
+            &[],
+            None,
+        )
+        .await?;
+        Ok(found.trim().to_string())
+    }
+
+    /// The short form of each of `full`, in order.
+    async fn short_hashes(&self, full: &[&str]) -> Result<Vec<String>, WorktreeError> {
+        if full.is_empty() {
+            return Ok(Vec::new());
+        }
+        let shortened = git(
+            self.root(),
+            ["rev-list", "--no-walk=unsorted", "--abbrev-commit"]
+                .into_iter()
+                .chain(full.iter().copied()),
+            &[],
+            None,
+        )
+        .await?;
+        Ok(shortened.lines().map(str::to_string).collect())
     }
 }

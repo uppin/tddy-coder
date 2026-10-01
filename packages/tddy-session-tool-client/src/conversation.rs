@@ -122,11 +122,19 @@ pub async fn dispatch_conversation_tool(
 /// Ask the facilitating daemon for `op` on `conversation_id`'s worktree; the answer's
 /// `result_json`, or a `{"error", "is_error": true}` body naming why it could not be asked.
 pub async fn conversation_worktree(conversation_id: &str, op: ConversationWorktreeOp) -> String {
+    ask_conversation_worktree(|envelope| {
+        conversation_worktree_request(&envelope, conversation_id, op)
+    })
+    .await
+}
+
+/// Send the `ConversationWorktree` request `request` builds, over whichever transport this process
+/// was given; the builder is handed the envelope that transport identifies the session by.
+async fn ask_conversation_worktree(
+    request: impl Fn(SessionToolEnvelope) -> ConversationWorktreeRequest,
+) -> String {
     let Some(transport) = detect_session_tool_transport() else {
         return not_configured_error();
-    };
-    let request = |envelope: SessionToolEnvelope| {
-        conversation_worktree_request(&envelope, conversation_id, op)
     };
     match transport {
         SessionToolTransport::SandboxIpc { socket_path } => {
@@ -265,6 +273,10 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
     match &request.op {
         Some(Op::Pull(_)) => fields.insert("pull".to_string(), serde_json::json!({})),
         Some(Op::Remove(_)) => fields.insert("remove".to_string(), serde_json::json!({})),
+        Some(Op::Reset(reset)) => fields.insert(
+            "reset".to_string(),
+            serde_json::json!({ "commit": reset.commit }),
+        ),
         None => None,
     };
     let body = serde_json::Value::Object(fields);
@@ -298,21 +310,24 @@ fn error_body(message: String) -> String {
 /// when `commit` is `None`; the answer's `result_json` (`{"reset": {to, droppedCommits} | null}`)
 /// or a `{"error", "is_error": true}` body.
 pub async fn reset_conversation_worktree(conversation_id: &str, commit: Option<&str>) -> String {
-    // TODO(rewind-reset): implement over the transports `conversation_worktree` uses
-    let _ = (conversation_id, commit);
-    todo!("reset_conversation_worktree")
+    ask_conversation_worktree(|envelope| {
+        conversation_reset_request(&envelope, conversation_id, commit)
+    })
+    .await
 }
 
-/// The `ConversationWorktree` request a reset sends.
-#[allow(dead_code)] // TODO(rewind-reset): called by `reset_conversation_worktree`
+/// The `ConversationWorktree` request a reset sends; an empty `commit` names the base.
 pub(crate) fn conversation_reset_request(
     envelope: &SessionToolEnvelope,
     conversation_id: &str,
     commit: Option<&str>,
 ) -> ConversationWorktreeRequest {
-    // TODO(rewind-reset): implement
-    let _ = (envelope, conversation_id, commit, ResetOp::default());
-    todo!("conversation_reset_request")
+    ConversationWorktreeRequest {
+        op: Some(Op::Reset(ResetOp {
+            commit: commit.unwrap_or_default().to_string(),
+        })),
+        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
+    }
 }
 
 /// The `ExecuteTool` a conversation's call sends.

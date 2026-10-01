@@ -1925,11 +1925,17 @@ impl SubagentSession for SpecializedSubagentSession {
         {
             self.repeated_calls.forget_earlier_calls();
         }
-        // TODO(rewind-reset): when the request rewinds and `request.resets_worktree()`, ask
-        // `self.worktree_reset` for `self.transcript.commit_kept_by(point)` here — before the cut,
-        // so a failed reset leaves the history whole — and carry the answer to
-        // `outcome.worktree_reset`
+        // The worktree goes back first: a reset that fails refuses the resume with the history
+        // whole, which a reset after the cut could not promise.
+        let mut worktree_reset = None;
         if let Some(rewind_point) = request.rewind_point() {
+            if let (Some(port), true) = (&self.worktree_reset, request.resets_worktree()) {
+                let target = self
+                    .transcript
+                    .commit_kept_by(rewind_point)
+                    .map_err(|e| SubagentError(e.to_string()))?;
+                worktree_reset = port.reset(target).await?;
+            }
             self.transcript
                 .rewind_to(rewind_point)
                 .map_err(|e| SubagentError(e.to_string()))?;
@@ -1958,6 +1964,7 @@ impl SubagentSession for SpecializedSubagentSession {
             .await?;
         outcome.messages = self.transcript.descriptors_from(appended_from);
         outcome.clamped_max_turns = budget.clamped_to;
+        outcome.worktree_reset = worktree_reset;
         Ok(outcome)
     }
 

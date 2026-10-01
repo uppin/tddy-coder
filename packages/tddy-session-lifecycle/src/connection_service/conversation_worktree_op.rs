@@ -1,4 +1,4 @@
-//! `ConversationWorktree`'s two operations — `Pull` and `Remove` — against a session's worktree.
+//! `ConversationWorktree`'s operations — `Pull`, `Remove` and `Reset` — against a session's worktree.
 //!
 //! Shared by the exec-tool RPC (`tddy-daemon-rpc`, which authorizes the caller's token first) and
 //! the host bridge a jail's relayed call arrives on (which has no token and is bound to its session
@@ -10,13 +10,14 @@ use prost::Message as _;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::conversation_worktree_request::Op;
 use tddy_service::proto::exec_tools::{ConversationWorktreeRequest, ConversationWorktreeResponse};
-use tddy_subagent_worktree::{ConversationId, ConversationWorktrees, WorktreeError};
+use tddy_subagent_worktree::{ConversationId, ConversationWorktrees, ResetTarget, WorktreeError};
 
 use super::DaemonSessionHost;
 
 /// Run `op` on `conversation_id`'s worktree under `session_worktree` and answer with the
 /// operation's `result_json`: `{"pulled": {files, lines, conflicts} | null}` for a pull (null when
-/// the conversation never created a worktree) or `{"removed": bool}` for a remove.
+/// the conversation never created a worktree), `{"removed": bool}` for a remove, or
+/// `{"reset": {to, droppedCommits} | null}` for a reset (null likewise when there is no worktree).
 ///
 /// An id that could escape its directory or branch namespace is refused before anything is looked
 /// up.
@@ -40,6 +41,16 @@ pub async fn run_conversation_worktree_op(
         (Op::Remove(_), Some(worktree)) => {
             worktree.remove().await.map_err(internal)?;
             serde_json::json!({ "removed": true })
+        }
+        (Op::Reset(_), None) => serde_json::json!({ "reset": null }),
+        (Op::Reset(reset), Some(worktree)) => {
+            // An empty commit names the base.
+            let target = match reset.commit.as_str() {
+                "" => ResetTarget::Base,
+                commit => ResetTarget::Commit(commit.to_string()),
+            };
+            let outcome = worktree.reset_to(&target).await.map_err(internal)?;
+            serde_json::json!({ "reset": outcome })
         }
     };
     Ok(answer.to_string())
