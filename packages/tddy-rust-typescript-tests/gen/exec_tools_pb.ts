@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file exec_tools.proto.
  */
 export const file_exec_tools: GenFile = /*@__PURE__*/
-  fileDesc("ChBleGVjX3Rvb2xzLnByb3RvEgpleGVjX3Rvb2xzIoQBChBFeGVjdXRlVG9vbENodW5rEhQKDHJlc3VsdF9jaHVuaxgBIAEoDBIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCBIMCgRsYXN0GAYgASgIIoEBChJFeGVjdXRlVG9vbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRvb2xfbmFtZRgDIAEoCRIRCglhcmdzX2pzb24YBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJIngKE0V4ZWN1dGVUb29sUmVzcG9uc2USEwoLcmVzdWx0X2pzb24YASABKAkSEAoIaXNfZXJyb3IYAiABKAgSFQoNZXJyb3JfbWVzc2FnZRgDIAEoCRIOCgZqb2JfaWQYBCABKAkSEwoLam9iX3J1bm5pbmcYBSABKAgiSQoUTGlzdEV4ZWNUb29sc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkiOwoVTGlzdEV4ZWNUb29sc1Jlc3BvbnNlEiIKBXRvb2xzGAEgAygLMhMuZXhlY190b29scy5Ub29sRGVmImQKG0xpc3RTZXNzaW9uVG9vbENhbGxzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIkwKHExpc3RTZXNzaW9uVG9vbENhbGxzUmVzcG9uc2USLAoKdG9vbF9jYWxscxgBIAMoCzIYLmV4ZWNfdG9vbHMuVG9vbENhbGxJbmZvIrEBCgxUb29sQ2FsbEluZm8SDwoHdGFza19pZBgBIAEoCRIRCgl0b29sX25hbWUYAiABKAkSEQoJYXJnc19qc29uGAMgASgJEhMKC3Jlc3VsdF9qc29uGAQgASgJEhAKCGlzX2Vycm9yGAUgASgIEhUKDWVycm9yX21lc3NhZ2UYBiABKAkSEwoLam9iX3J1bm5pbmcYByABKAgSFwoPY3JlYXRlZF91bml4X21zGAggASgEIkcKB1Rvb2xEZWYSDAoEbmFtZRgBIAEoCRITCgtkZXNjcmlwdGlvbhgCIAEoCRIZChFpbnB1dF9zY2hlbWFfanNvbhgDIAEoCTL3AgoPRXhlY1Rvb2xTZXJ2aWNlEk4KC0V4ZWN1dGVUb29sEh4uZXhlY190b29scy5FeGVjdXRlVG9vbFJlcXVlc3QaHy5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sUmVzcG9uc2USUwoRU3RyZWFtRXhlY3V0ZVRvb2wSHi5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sUmVxdWVzdBocLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xDaHVuazABElQKDUxpc3RFeGVjVG9vbHMSIC5leGVjX3Rvb2xzLkxpc3RFeGVjVG9vbHNSZXF1ZXN0GiEuZXhlY190b29scy5MaXN0RXhlY1Rvb2xzUmVzcG9uc2USaQoUTGlzdFNlc3Npb25Ub29sQ2FsbHMSJy5leGVjX3Rvb2xzLkxpc3RTZXNzaW9uVG9vbENhbGxzUmVxdWVzdBooLmV4ZWNfdG9vbHMuTGlzdFNlc3Npb25Ub29sQ2FsbHNSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("ChBleGVjX3Rvb2xzLnByb3RvEgpleGVjX3Rvb2xzIoQBChBFeGVjdXRlVG9vbENodW5rEhQKDHJlc3VsdF9jaHVuaxgBIAEoDBIQCghpc19lcnJvchgCIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAMgASgJEg4KBmpvYl9pZBgEIAEoCRITCgtqb2JfcnVubmluZxgFIAEoCBIMCgRsYXN0GAYgASgIIpoBChJFeGVjdXRlVG9vbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRvb2xfbmFtZRgDIAEoCRIRCglhcmdzX2pzb24YBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEhcKD2NvbnZlcnNhdGlvbl9pZBgGIAEoCSLPAQobQ29udmVyc2F0aW9uV29ya3RyZWVSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkSFwoPY29udmVyc2F0aW9uX2lkGAQgASgJEiIKBHB1bGwYCiABKAsyEi5leGVjX3Rvb2xzLlB1bGxPcEgAEiYKBnJlbW92ZRgLIAEoCzIULmV4ZWNfdG9vbHMuUmVtb3ZlT3BIAEIECgJvcCIICgZQdWxsT3AiCgoIUmVtb3ZlT3AiMwocQ29udmVyc2F0aW9uV29ya3RyZWVSZXNwb25zZRITCgtyZXN1bHRfanNvbhgBIAEoCSJ4ChNFeGVjdXRlVG9vbFJlc3BvbnNlEhMKC3Jlc3VsdF9qc29uGAEgASgJEhAKCGlzX2Vycm9yGAIgASgIEhUKDWVycm9yX21lc3NhZ2UYAyABKAkSDgoGam9iX2lkGAQgASgJEhMKC2pvYl9ydW5uaW5nGAUgASgIIkkKFExpc3RFeGVjVG9vbHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIjsKFUxpc3RFeGVjVG9vbHNSZXNwb25zZRIiCgV0b29scxgBIAMoCzITLmV4ZWNfdG9vbHMuVG9vbERlZiJkChtMaXN0U2Vzc2lvblRvb2xDYWxsc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgDIAEoCSJMChxMaXN0U2Vzc2lvblRvb2xDYWxsc1Jlc3BvbnNlEiwKCnRvb2xfY2FsbHMYASADKAsyGC5leGVjX3Rvb2xzLlRvb2xDYWxsSW5mbyKxAQoMVG9vbENhbGxJbmZvEg8KB3Rhc2tfaWQYASABKAkSEQoJdG9vbF9uYW1lGAIgASgJEhEKCWFyZ3NfanNvbhgDIAEoCRITCgtyZXN1bHRfanNvbhgEIAEoCRIQCghpc19lcnJvchgFIAEoCBIVCg1lcnJvcl9tZXNzYWdlGAYgASgJEhMKC2pvYl9ydW5uaW5nGAcgASgIEhcKD2NyZWF0ZWRfdW5peF9tcxgIIAEoBCJHCgdUb29sRGVmEgwKBG5hbWUYASABKAkSEwoLZGVzY3JpcHRpb24YAiABKAkSGQoRaW5wdXRfc2NoZW1hX2pzb24YAyABKAky4gMKD0V4ZWNUb29sU2VydmljZRJOCgtFeGVjdXRlVG9vbBIeLmV4ZWNfdG9vbHMuRXhlY3V0ZVRvb2xSZXF1ZXN0Gh8uZXhlY190b29scy5FeGVjdXRlVG9vbFJlc3BvbnNlElMKEVN0cmVhbUV4ZWN1dGVUb29sEh4uZXhlY190b29scy5FeGVjdXRlVG9vbFJlcXVlc3QaHC5leGVjX3Rvb2xzLkV4ZWN1dGVUb29sQ2h1bmswARJUCg1MaXN0RXhlY1Rvb2xzEiAuZXhlY190b29scy5MaXN0RXhlY1Rvb2xzUmVxdWVzdBohLmV4ZWNfdG9vbHMuTGlzdEV4ZWNUb29sc1Jlc3BvbnNlEmkKFExpc3RTZXNzaW9uVG9vbENhbGxzEicuZXhlY190b29scy5MaXN0U2Vzc2lvblRvb2xDYWxsc1JlcXVlc3QaKC5leGVjX3Rvb2xzLkxpc3RTZXNzaW9uVG9vbENhbGxzUmVzcG9uc2USaQoUQ29udmVyc2F0aW9uV29ya3RyZWUSJy5leGVjX3Rvb2xzLkNvbnZlcnNhdGlvbldvcmt0cmVlUmVxdWVzdBooLmV4ZWNfdG9vbHMuQ29udmVyc2F0aW9uV29ya3RyZWVSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * One frame of a StreamExecuteTool response. The result is the concatenation of every frame's
@@ -93,6 +93,15 @@ export type ExecuteToolRequest = Message<"exec_tools.ExecuteToolRequest"> & {
    * @generated from field: string daemon_instance_id = 5;
    */
   daemonInstanceId: string;
+
+  /**
+   * The subagent conversation this call belongs to. Empty: the call runs in the session worktree,
+   * exactly as before. Set: it runs in that conversation's own worktree — created by its first
+   * mutating call — and a mutating call's result gains `worktreeChange`.
+   *
+   * @generated from field: string conversation_id = 6;
+   */
+  conversationId: string;
 };
 
 /**
@@ -101,6 +110,106 @@ export type ExecuteToolRequest = Message<"exec_tools.ExecuteToolRequest"> & {
  */
 export const ExecuteToolRequestSchema: GenMessage<ExecuteToolRequest> = /*@__PURE__*/
   messageDesc(file_exec_tools, 1);
+
+/**
+ * @generated from message exec_tools.ConversationWorktreeRequest
+ */
+export type ConversationWorktreeRequest = Message<"exec_tools.ConversationWorktreeRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 3;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string conversation_id = 4;
+   */
+  conversationId: string;
+
+  /**
+   * @generated from oneof exec_tools.ConversationWorktreeRequest.op
+   */
+  op: {
+    /**
+     * @generated from field: exec_tools.PullOp pull = 10;
+     */
+    value: PullOp;
+    case: "pull";
+  } | {
+    /**
+     * @generated from field: exec_tools.RemoveOp remove = 11;
+     */
+    value: RemoveOp;
+    case: "remove";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message exec_tools.ConversationWorktreeRequest.
+ * Use `create(ConversationWorktreeRequestSchema)` to create a new message.
+ */
+export const ConversationWorktreeRequestSchema: GenMessage<ConversationWorktreeRequest> = /*@__PURE__*/
+  messageDesc(file_exec_tools, 2);
+
+/**
+ * Apply everything the conversation committed since its base to the session worktree as
+ * uncommitted changes, 3-way; conflicted hunks are written with markers.
+ *
+ * @generated from message exec_tools.PullOp
+ */
+export type PullOp = Message<"exec_tools.PullOp"> & {
+};
+
+/**
+ * Describes the message exec_tools.PullOp.
+ * Use `create(PullOpSchema)` to create a new message.
+ */
+export const PullOpSchema: GenMessage<PullOp> = /*@__PURE__*/
+  messageDesc(file_exec_tools, 3);
+
+/**
+ * Delete the conversation's worktree, its branch and its base ref.
+ *
+ * @generated from message exec_tools.RemoveOp
+ */
+export type RemoveOp = Message<"exec_tools.RemoveOp"> & {
+};
+
+/**
+ * Describes the message exec_tools.RemoveOp.
+ * Use `create(RemoveOpSchema)` to create a new message.
+ */
+export const RemoveOpSchema: GenMessage<RemoveOp> = /*@__PURE__*/
+  messageDesc(file_exec_tools, 4);
+
+/**
+ * @generated from message exec_tools.ConversationWorktreeResponse
+ */
+export type ConversationWorktreeResponse = Message<"exec_tools.ConversationWorktreeResponse"> & {
+  /**
+   * The operation's answer: `{"pulled": {files, lines, conflicts} | null}` for `pull` (null when the
+   * conversation never created a worktree), `{"removed": bool}` for `remove`.
+   *
+   * @generated from field: string result_json = 1;
+   */
+  resultJson: string;
+};
+
+/**
+ * Describes the message exec_tools.ConversationWorktreeResponse.
+ * Use `create(ConversationWorktreeResponseSchema)` to create a new message.
+ */
+export const ConversationWorktreeResponseSchema: GenMessage<ConversationWorktreeResponse> = /*@__PURE__*/
+  messageDesc(file_exec_tools, 5);
 
 /**
  * @generated from message exec_tools.ExecuteToolResponse
@@ -137,7 +246,7 @@ export type ExecuteToolResponse = Message<"exec_tools.ExecuteToolResponse"> & {
  * Use `create(ExecuteToolResponseSchema)` to create a new message.
  */
 export const ExecuteToolResponseSchema: GenMessage<ExecuteToolResponse> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 2);
+  messageDesc(file_exec_tools, 6);
 
 /**
  * @generated from message exec_tools.ListExecToolsRequest
@@ -159,7 +268,7 @@ export type ListExecToolsRequest = Message<"exec_tools.ListExecToolsRequest"> & 
  * Use `create(ListExecToolsRequestSchema)` to create a new message.
  */
 export const ListExecToolsRequestSchema: GenMessage<ListExecToolsRequest> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 3);
+  messageDesc(file_exec_tools, 7);
 
 /**
  * @generated from message exec_tools.ListExecToolsResponse
@@ -176,7 +285,7 @@ export type ListExecToolsResponse = Message<"exec_tools.ListExecToolsResponse"> 
  * Use `create(ListExecToolsResponseSchema)` to create a new message.
  */
 export const ListExecToolsResponseSchema: GenMessage<ListExecToolsResponse> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 4);
+  messageDesc(file_exec_tools, 8);
 
 /**
  * @generated from message exec_tools.ListSessionToolCallsRequest
@@ -203,7 +312,7 @@ export type ListSessionToolCallsRequest = Message<"exec_tools.ListSessionToolCal
  * Use `create(ListSessionToolCallsRequestSchema)` to create a new message.
  */
 export const ListSessionToolCallsRequestSchema: GenMessage<ListSessionToolCallsRequest> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 5);
+  messageDesc(file_exec_tools, 9);
 
 /**
  * @generated from message exec_tools.ListSessionToolCallsResponse
@@ -220,7 +329,7 @@ export type ListSessionToolCallsResponse = Message<"exec_tools.ListSessionToolCa
  * Use `create(ListSessionToolCallsResponseSchema)` to create a new message.
  */
 export const ListSessionToolCallsResponseSchema: GenMessage<ListSessionToolCallsResponse> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 6);
+  messageDesc(file_exec_tools, 10);
 
 /**
  * @generated from message exec_tools.ToolCallInfo
@@ -272,7 +381,7 @@ export type ToolCallInfo = Message<"exec_tools.ToolCallInfo"> & {
  * Use `create(ToolCallInfoSchema)` to create a new message.
  */
 export const ToolCallInfoSchema: GenMessage<ToolCallInfo> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 7);
+  messageDesc(file_exec_tools, 11);
 
 /**
  * @generated from message exec_tools.ToolDef
@@ -299,7 +408,7 @@ export type ToolDef = Message<"exec_tools.ToolDef"> & {
  * Use `create(ToolDefSchema)` to create a new message.
  */
 export const ToolDefSchema: GenMessage<ToolDef> = /*@__PURE__*/
-  messageDesc(file_exec_tools, 8);
+  messageDesc(file_exec_tools, 12);
 
 /**
  * @generated from service exec_tools.ExecToolService
@@ -344,6 +453,19 @@ export const ExecToolService: GenService<{
     methodKind: "unary";
     input: typeof ListSessionToolCallsRequestSchema;
     output: typeof ListSessionToolCallsResponseSchema;
+  },
+  /**
+   * The conversation-worktree operations that are not tool calls: hand a subagent conversation's
+   * committed work to the session worktree, or delete the conversation's worktree and branch.
+   * The worktree itself is created, used and committed in by `ExecuteTool` carrying a
+   * `conversation_id` (docs/ft/coder/managed-codebase-subagents.md § The conversation worktree).
+   *
+   * @generated from rpc exec_tools.ExecToolService.ConversationWorktree
+   */
+  conversationWorktree: {
+    methodKind: "unary";
+    input: typeof ConversationWorktreeRequestSchema;
+    output: typeof ConversationWorktreeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_exec_tools, 0);
