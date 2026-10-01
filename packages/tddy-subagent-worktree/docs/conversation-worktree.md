@@ -93,6 +93,26 @@ listed in `PullOutcome::conflicts`. The caller's `HEAD` never moves.
 
 `remove` deletes the worktree (`git worktree remove --force`), the branch and the base ref.
 
+## Range pull
+
+`pull_range(&PullRange { from, to }, already_pulled)` hands a chosen part of the branch to the caller
+(`src/range_pull.rs`), commit by commit, and is how a pull happens mid-conversation. The branch and the
+conversation's worktree are not touched.
+
+1. The commits of `base..branch` are listed oldest first. `from` defaults to the first commit not in
+   `already_pulled` and `to` to the tip; both are inclusive and must each be a commit on that list (the
+   base is not), and `from` must not come after `to`. Otherwise the pull is refused naming the commit.
+2. `already_pulled` holds short hashes; a branch commit is pulled when one of them is its prefix. The
+   caller supplies it, so the worktree keeps no per-conversation state.
+3. Each commit in the range not already pulled is applied as `git diff --binary c^ c` through the
+   scratch-index `apply --3way` that `pull_into_caller` uses, so conflicts are attributable to one
+   commit. Commits already pulled are reported in `skipped`.
+4. The answer is `RangePullOutcome { commits, skipped, files, lines, conflicts }`: short hashes oldest
+   first, counts summed over the applied commits, conflicted paths deduplicated. A range with nothing
+   left to pull is an empty outcome, not an error.
+
+A git failure part-way leaves the commits applied so far in the caller's worktree.
+
 ## Git runs on the host
 
 A linked worktree's `.git` points into the repository's common dir, which a jail mounting only the

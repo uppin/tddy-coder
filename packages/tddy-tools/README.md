@@ -87,6 +87,17 @@ the conversation, so it answers while a turn runs. It sends `ConversationWorktre
 whole range. An unknown conversation, one that never wrote, and a commit the conversation does not
 have (a dropped one included) are refused by name.
 
+`subagent_pull { sessionId, from?, to? }` (`src/subagent_pull.rs`) takes a range of the conversation's
+commits into the caller's worktree while the conversation carries on; `subagent_end` takes the same
+`from` / `to`. Both bounds are **inclusive** (unlike `subagent_diff`'s `from..to`), `from` defaults to
+the earliest commit not yet pulled and `to` to the tip, and both send `ConversationWorktree { pull_range }`
+through `tddy_session_tool_client::pull_conversation_range`, answering `{pulled: {commits, skipped, files,
+lines, conflicts} | null}`. Each is refused while a turn is outstanding. The commits a conversation has
+pulled are its **ledger** (`PullLedger`, `src/pull_ledger.rs`): every pull carries it so the daemon skips
+what was taken, it is not persisted, and it is dropped when the conversation closes. When a rewind drops
+commits that were pulled, the turn outcome's `worktreeReset` gains `droppedPulledCommits` (what was
+pulled stays in the caller's worktree; nothing is un-applied).
+
 ## The environment is the real interface
 
 Twenty-one `TDDY_*` variables, `TDDY_SOCKET` read at 43 sites, are how an in-jail agent reaches its

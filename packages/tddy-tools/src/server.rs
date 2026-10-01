@@ -2025,7 +2025,7 @@ async fn take_a_turn(session_id: &str, request: TurnRequest, grace: std::time::D
                 .await
                 .pending
                 .forget(&response_id);
-            result
+            crate::pull_ledger::annotated_turn_result(session_id, &response_id, result)
         }
         // The queue is read under a fresh hold on the table, after the grace period rather than
         // before it: the caller is told what it is waiting behind now, not what it was waiting
@@ -2055,7 +2055,20 @@ async fn subagent_await_tool(args: serde_json::Value) -> String {
         return subagent_error_json(format!("unknown subagent response: {response_id}"));
     };
     match wait_for_turn(&mut watched, timeout).await {
-        Some(result) => result,
+        Some(result) => {
+            let conversation = subagent_sessions()
+                .lock()
+                .await
+                .pending
+                .conversation_of(response_id)
+                .map(str::to_string);
+            match conversation {
+                Some(conversation) => {
+                    crate::pull_ledger::annotated_turn_result(&conversation, response_id, result)
+                }
+                None => result,
+            }
+        }
         // Read after the wait, so a caller polling a queued turn sees its position fall as the
         // turns accepted ahead of it end — the question an await repeated on one id is asking.
         None => {
@@ -2708,6 +2721,11 @@ fn subagent_tool_router() -> rmcp::handler::server::router::tool::ToolRouter<Per
     router.add_route(subagent_route(
         crate::subagent_end::subagent_end_tool_definition(),
         |args| Box::pin(crate::subagent_end::subagent_end_tool(args)),
+    ));
+
+    router.add_route(subagent_route(
+        crate::subagent_pull::subagent_pull_tool_definition(),
+        |args| Box::pin(crate::subagent_pull::subagent_pull_tool(args)),
     ));
 
     router.add_route(subagent_route(

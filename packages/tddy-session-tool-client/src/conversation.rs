@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    DiffOp, ExecuteToolRequest, PullOp, RemoveOp, ResetOp,
+    DiffOp, ExecuteToolRequest, PullOp, PullRangeOp, RemoveOp, ResetOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -281,6 +281,14 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
             "diff".to_string(),
             serde_json::json!({ "from": diff.from, "to": diff.to }),
         ),
+        Some(Op::PullRange(range)) => fields.insert(
+            "pull_range".to_string(),
+            serde_json::json!({
+                "from": range.from,
+                "to": range.to,
+                "already_pulled": range.already_pulled
+            }),
+        ),
         None => None,
     };
     let body = serde_json::Value::Object(fields);
@@ -358,6 +366,39 @@ pub(crate) fn conversation_diff_request(
         op: Some(Op::Diff(DiffOp {
             from: from.unwrap_or_default().to_string(),
             to: to.unwrap_or_default().to_string(),
+        })),
+        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
+    }
+}
+
+/// Ask the facilitating daemon to apply `conversation_id`'s commits `from..=to` that are not in
+/// `already_pulled` to the session worktree; the answer's `result_json` (`{"pulled": {…} | null}`) or
+/// a `{"error", "is_error": true}` body.
+pub async fn pull_conversation_range(
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    already_pulled: &[String],
+) -> String {
+    ask_conversation_worktree(|envelope| {
+        conversation_pull_range_request(&envelope, conversation_id, from, to, already_pulled)
+    })
+    .await
+}
+
+/// The `ConversationWorktree` request a range pull sends.
+pub(crate) fn conversation_pull_range_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    already_pulled: &[String],
+) -> ConversationWorktreeRequest {
+    ConversationWorktreeRequest {
+        op: Some(Op::PullRange(PullRangeOp {
+            from: from.unwrap_or_default().to_string(),
+            to: to.unwrap_or_default().to_string(),
+            already_pulled: already_pulled.to_vec(),
         })),
         ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
     }
@@ -482,6 +523,25 @@ mod tests {
             Some(Op::Diff(DiffOp {
                 from: "3f9c2ab".into(),
                 to: String::new()
+            }))
+        );
+    }
+
+    #[test]
+    fn a_range_pull_carries_the_callers_ledger() {
+        assert_eq!(
+            conversation_pull_range_request(
+                &an_envelope(),
+                "explore",
+                None,
+                Some("9e01d4c"),
+                &["3f9c2ab".to_string()]
+            )
+            .op,
+            Some(Op::PullRange(PullRangeOp {
+                from: String::new(),
+                to: "9e01d4c".into(),
+                already_pulled: vec!["3f9c2ab".into()]
             }))
         );
     }

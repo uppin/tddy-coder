@@ -17,6 +17,7 @@
 | 2026-10-01 | 1,107 | **worse** by 60 over master's 1,047 in PR #560 (`#agent-worktree` 1/4): the `dispatch_request_via_*` split — the per-transport dispatch gained a request-taking variant so a conversation's call can reuse each transport; the conversation module itself (`conversation.rs`) is separate. Seam B in the table above now also holds the new variants; extracting it is the cheaper fix. Deferral awaits developer consent |
 | 2026-10-01 | gate: 606 → 609 | **worse** by 3 in PR #561 (`#agent-worktree` 2/4): the `pub use` of `reset_conversation_worktree`. **Split deferred**: #560 (parent) and both dependents (#562, #563) also touch this file's export list — decompose after `#agent-worktree` lands. |
 | 2026-10-01 | gate: 609 | **unchanged** in PR #562 (`#agent-worktree` 3/4): `diff_conversation_worktree` joins the existing `pub use` of `conversation`, which rustfmt re-wrapped over the same four lines. Split still deferred until `#agent-worktree` lands |
+| 2026-10-01 | gate: 609 | **unchanged** in PR #563 (`#agent-worktree` 4/4): `pull_conversation_range` joins the existing `pub use` of `conversation`, same lines; the new code is in `conversation.rs` (437 production lines). Split still deferred until `#agent-worktree` lands |
 
 ## What would close it — candidate seams (not proven)
 

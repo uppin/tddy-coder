@@ -186,6 +186,9 @@ const SUBAGENT_TOOLS: &[&str] = &[
     "mcp__tddy-tools__subagent_end",
     // Read-only, and how a sandboxed agent sees what a conversation changed before taking it.
     "mcp__tddy-tools__subagent_diff",
+    // Takes some of a conversation's work now, as `subagent_end` takes all of it at the close: an
+    // agent allowed one and not the other could only take work by ending the conversation.
+    "mcp__tddy-tools__subagent_pull",
 ];
 
 /// Claude-native aliases of exec-catalog tools: replacing the exec tool must also hard-disable
@@ -517,6 +520,26 @@ mod tests {
             (
                 allowed("mcp__tddy-tools__subagent_cancel"),
                 allowed("mcp__tddy-tools__subagent_diff")
+            ),
+            (true, true)
+        );
+    }
+
+    /// `subagent_pull` is how a sandboxed Claude takes part of a conversation's work before it ends.
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md § `subagent_pull` — take part of the work now
+    #[test]
+    fn subagent_pull_is_allowlisted_wherever_subagent_cancel_is() {
+        // Given
+        let allowlist = build_claude_allowlist(true, &[]);
+
+        // When
+        let allowed = |tool: &str| allowlist.iter().any(|entry| entry == tool);
+
+        // Then
+        assert_eq!(
+            (
+                allowed("mcp__tddy-tools__subagent_cancel"),
+                allowed("mcp__tddy-tools__subagent_pull")
             ),
             (true, true)
         );

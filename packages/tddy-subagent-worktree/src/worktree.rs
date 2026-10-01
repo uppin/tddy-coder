@@ -389,7 +389,11 @@ impl ConversationWorktree {
     /// index — exactly the caller's unstaged edits. So it runs against a scratch index in which
     /// the touched paths are refreshed from the working tree: the caller's own index is never read
     /// for its staging state and never written, and the pulled changes arrive unstaged.
-    async fn apply_3way(&self, patch: &[u8], touched: &[u8]) -> Result<Vec<String>, WorktreeError> {
+    pub(crate) async fn apply_3way(
+        &self,
+        patch: &[u8],
+        touched: &[u8],
+    ) -> Result<Vec<String>, WorktreeError> {
         let index = git(
             &self.caller,
             ["rev-parse", "--git-path", "index"],
