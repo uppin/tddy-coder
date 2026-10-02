@@ -113,7 +113,7 @@ un-re-pointed paths.
 - [x] Named per-destination facade
 - [x] Sorted `pub mod`
 - [x] Nested parent re-export rewrite (the rewrite; counting its items as reached from outside is not done)
-- [ ] Every-depth `use` re-point
+- [x] Every-depth `use` re-point
 - [x] Facade-aware test-binary move
 
 ## Technical Changes
@@ -140,9 +140,9 @@ destination.
 - [x] Facade accumulation + grouped line
 - [x] Sorted `pub mod`
 - [x] Nested parent line
-- [ ] Depth walk
+- [x] Depth walk (the survey's own walk; `use_items_at_every_depth` is a test-only adapter)
 - [x] Test-binary through facade
-- [ ] Clippy clean on every fixture after apply
+- [x] Clippy clean on every fixture after apply
 
 ## Testing Plan
 
@@ -162,9 +162,9 @@ Acceptance tests over multi-crate fixtures asserting the written text, the compi
 - `a_module_added_to_the_destination_root_is_declared_in_sorted_position` — today appended last
 - `moving_a_nested_module_rewrites_its_parents_glob_to_the_destination` — today `pub use inner::*;`
   is left dangling
-- `a_crate_use_inside_the_moved_files_mod_tests_is_read_like_a_root_level_one` — today the move
-  applies; read, the inner `crate::runtime` path is the same edge back into `origin` a root-level
-  `use` is refused for, so the move is refused before any write (see Decisions)
+- `a_crate_use_inside_the_moved_files_mod_tests_is_re_pointed_at_origin` — the inner
+  `crate::runtime::boot` becomes `origin::runtime::boot`, `origin` is a dev-dependency only, and the
+  destination's tests build (see Decisions)
 - `a_super_glob_inside_the_moved_files_mod_tests_is_left` — passes today; the gap-H guard the depth
   walk must keep holding
 - `a_test_binary_move_after_a_module_move_names_the_defining_crate` — today the moved test keeps
@@ -182,18 +182,22 @@ All fail at `TODO(move-facades)` or with the recorded defect.
 
 ## Technical Debt & Production Readiness
 
-- Draft-PR-contract stubs, all `#[allow(dead_code)]` until their callers switch: `TODO(move-facades)`
-  in `crate_move.rs` (`facade_lines_for_plan`), `crate_move/manifest_edits.rs`
-  (`insert_module_declaration_sorted`), `crate_move/header.rs` (`use_items_at_every_depth`),
-  `crate_move/module_home.rs` (`crate_root_facade_forwarding`).
+- Every draft-contract stub is implemented and live except `crate_move/header.rs`
+  `use_items_at_every_depth`: the survey (`move-paths`) already walks `use` items at every depth, so
+  it is a `#[cfg(test)]` adapter over `source_scan::sightings` that only its unit test calls.
+  FIXME: delete it, with `every_depth_tests`, once the developer agrees — the survey's own tests
+  cover the behaviour.
+- A parent re-export that is a glob names no items, so there is nothing to count as "reached from
+  outside"; only the rewrite is done.
 
 ## Decisions & Trade-offs
 
-- **A `crate::` path in the moved file's `mod tests` to a module staying behind is refused, not
-  re-pointed.** Re-pointed, it would be `destination → origin` — the same edge the move refuses for
-  a root-level `use`. The PRD's "re-pointed" holds for every path whose target moves or lives
-  elsewhere; for this one the consistent answer is the existing refusal, now reached before the
-  write instead of as a broken test build.
+- **A `crate::` path in the moved file's `mod tests` to a module staying behind is re-pointed at
+  `origin`, with `origin` a dev-dependency — it is not refused.** `move-paths` already decides that
+  a path under `#[cfg(test)]` is never an edge back (`a_test_module_naming_an_origin_item_is_not_an_edge_back`),
+  and a dev-dependency cycle is legal in cargo. The earlier plan to refuse it contradicted that rule
+  and would have refused a move with no real cycle; changing the rule is `move-paths`' to do, and
+  re-pointing yields a move whose tests build.
 
 - **Named facade over root glob** — names only what moved, so it cannot shadow; also removes the
   duplicate-line cosmetic defect in the same stroke.
@@ -219,7 +223,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p tddy-code-restructuring`); CI for the rest

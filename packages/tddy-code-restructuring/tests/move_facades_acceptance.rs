@@ -9,8 +9,9 @@
 mod harness;
 
 use harness::{
-    a_move_of, a_workspace_holding_files, applying_a_plan_of, assert_compiles, assert_lints_clean,
-    performing, resolving, DESTINATION_MANIFEST, SHARED_LIB, SHARED_MANIFEST, THREE_CRATES,
+    a_move_of, a_workspace_holding_files, applying_a_plan_of, assert_compiles,
+    assert_compiles_with_its_tests, assert_lints_clean, performing, DESTINATION_MANIFEST,
+    SHARED_LIB, SHARED_MANIFEST, THREE_CRATES,
 };
 use tddy_code_restructuring::{Anchor, Reexport, RefactorKind, RefactorOp};
 
@@ -184,11 +185,11 @@ async fn moving_a_nested_module_rewrites_its_parents_glob_to_the_destination() {
 }
 
 /// A `crate::` path inside the moved file's own `mod tests` changed meaning exactly as a root-level
-/// one does — once it is read. Today it is not, so the move applies and the destination's test
-/// build breaks. Read, it is the same edge back into `origin` the move refuses for a root-level
-/// `use`, and it is refused before anything is written.
+/// one does, so it is read and re-pointed. Because it sits under `#[cfg(test)]` it makes `origin`
+/// a dev-dependency of `destination` — never an edge back — so the move goes through and the
+/// destination's test build still resolves it.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_crate_use_inside_the_moved_files_mod_tests_is_read_like_a_root_level_one() {
+async fn a_crate_use_inside_the_moved_files_mod_tests_is_re_pointed_at_origin() {
     // Given a moved file whose `mod tests` imports a module that stays behind in `origin`
     let workspace = a_workspace_of(&[
         ("crates/origin/Cargo.toml", ORIGIN_OVER_SHARED),
@@ -212,23 +213,23 @@ pub mod runtime;
     ]);
 
     // When the file is moved into `destination`
-    let refusal = resolving(
+    performing(
         &workspace,
         a_move_of("crates/origin/src/host_registry.rs", "host_registry", None),
     )
     .await;
 
-    // Then it is refused naming the inner path — a prefix, because the rest of the message is the
-    // remedy text the refusal already carries for a root-level edge
+    // Then the test module names `origin` by crate, `origin` is a dev-dependency only, and the
+    // tests still build
+    let moved = workspace.read("crates/destination/src/host_registry.rs");
     assert!(
-        refusal
-            .expect_err("a move whose test module reaches back into origin is refused")
-            .starts_with(
-                "plan is malformed: `crates/origin/src/host_registry.rs` still names `origin` \
-                 (origin::runtime::boot)"
-            ),
-        "the refusal did not name the test module's path"
+        moved.contains("use origin::runtime::boot;"),
+        "the test module's path was not re-pointed at origin:\n{moved}"
     );
+    let manifest = workspace.read("crates/destination/Cargo.toml");
+    assert!(manifest.contains("[dev-dependencies]\norigin = { path = \"../origin\" }\n"));
+    assert!(!manifest.contains("[dependencies]\norigin"));
+    assert_compiles_with_its_tests(&workspace);
 }
 
 #[tokio::test(flavor = "multi_thread")]
