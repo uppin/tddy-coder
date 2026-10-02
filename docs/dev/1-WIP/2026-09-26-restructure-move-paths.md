@@ -206,8 +206,8 @@ defines is not read as a crate.
 - `crate_move/survey.rs` is `pub(crate)`: `check-parity` consumes it inside this crate.
 - `source_scan.rs` and the line-based scanner in `test_binary.rs` coexist; consolidating them
   belongs to `move-facades` or `check-parity`.
-- `cluster.rs` is 617 production lines (611 before this PR, budget 500) and `test_binary.rs` 966
-  (unchanged). The `cluster.rs` split is deferred with the developer's consent:
+- `cluster.rs` is 617 production lines (611 before this PR, budget 500), `source_scan.rs` (new) is
+  527 after the refactor, and `test_binary.rs` is 966 (unchanged). The `cluster.rs` split is deferred with the developer's consent:
   `docs/dev/todo/2026-10-02-cluster-rs-is-617-production-lines.md`.
 
 ## Decisions & Trade-offs
@@ -240,6 +240,7 @@ Scoped to `tddy-code-restructuring`; whole-workspace health is CI's.
   `unwrap`/`expect`.
 - **analyze-clean-code** — 7.5/10 before cleanups; `sightings` split, constants named, imports merged.
 - **File length** — `cluster.rs` 611 → 617 (deferred, see above); `test_binary.rs` 966 → 966.
+- CI on `703944e8`: all 9 checks pass — Rust tests 8046/8046, Web tests 2760/2760.
 - Final: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean; `crate_move::`
   unit tests 64 passed; `move_paths_acceptance` 11 passed; the other move suites pass.
 
@@ -254,19 +255,19 @@ Scoped to `tddy-code-restructuring`; whole-workspace health is CI's.
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p tddy-code-restructuring`); CI for the rest
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run scoped tests (`./test -p tddy-code-restructuring`); CI for the rest
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring -- -D warnings`, `cargo fmt`)
-- [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-09-26-restructure-move-paths-initial-discovery.md`
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p tddy-code-restructuring -- -D warnings`, `cargo fmt`)
+- [ ] Wrap documentation (/wrap-context-docs) — blocked until the parent `plan-store` (#538) is ready and wrapped (bottom-up); runs when this PR is set ready; also deletes `2026-09-26-restructure-move-paths-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

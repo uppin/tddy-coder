@@ -19,3 +19,10 @@ once the stack has landed, with `/code-restructuring` (`restructure check --budg
 `cluster.rs` under 500 production lines, split along seams the engine proves with
 `restructure check --deep`. `test_binary.rs` (966, unchanged by #540) has its own record,
 `packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md`.
+
+## Also deferred: `source_scan.rs` (new in #540)
+
+`crate_move/source_scan.rs` is 527 production lines (457 when first written; the validation refactor
+split `sightings` into `Scan` methods and named constants, which cost lines). It is under the same
+consent and the same reason. Natural seams: the token scanner, `use`-tree expansion, and the
+module-items listing. It could also absorb the line-based scanner in `test_binary.rs`.
