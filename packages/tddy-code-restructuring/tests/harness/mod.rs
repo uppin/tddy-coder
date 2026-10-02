@@ -2166,6 +2166,7 @@ pub fn assert_lints_clean(fixture: &AFixtureWorkspace) {
         "the workspace does not lint clean:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
 
 /// Re-resolve the store's anchors in `files` through a live rust-analyzer, as the daemon does when
 /// the tree changes underneath it.

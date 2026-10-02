@@ -11,7 +11,7 @@ Full codebase exploration that grounded this plan:
 
 ## Stack
 
-`#live-plan` 3/7 — branch `feature/live-plan/live-plans`, base `feature/live-plan/plan-store`.
+`#live-plan` 7/7 — branch `feature/live-plan/live-plans`, base `feature/live-plan/check-parity`.
 PR: [#539](https://github.com/uppin/tddy-coder/pull/539)
 
 ## Responsibility
@@ -47,6 +47,7 @@ purpose — the integration *is* the point — and they start failing on this no
 those two parents are green.
 
 | `plan-store` (2/7) | `PlanStore` per root, op ids, `refresh_after_op` for the applied plan, flush, `LoadPlans`/`UnloadPlans`/`ListPlans` | calls the same refresh for every other loaded plan; extends `ListPlans`/`PlanStatus` responses with stale ops; flushes through the store | change the store's load/unload/flush API, op-id rules, or the RPCs' existing fields |
+| `move-paths`, `move-facades`, `extraction-defects`, `check-parity` (3–6/7) | cross-crate move and extraction fixes | not consumed — below it because the line is the green waves concatenated and this node is the only wave-3 one | touch `crate_move/` or the extraction backends |
 
 ## Draft PR contract
 
@@ -72,7 +73,7 @@ store and applies one; greenable once `plan-store` is green.
 
 ## Successor PRs
 
-- `feature/live-plan/move-paths` — next in the line; no dependency on this node.
+None — the top of the stack.
 
 ## Prerequisites
 
