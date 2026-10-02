@@ -9,6 +9,7 @@
 
 use crate::edit::WorkspaceEdit;
 use crate::ledger::PositionLedger;
+use crate::plan::OpId;
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -27,6 +28,10 @@ pub struct JournalRecord {
     pub seq: usize,
     /// Index into the plan's operation list.
     pub op: usize,
+    /// The operation's stable id, which survives a reorder of the plan where the index does not.
+    /// Absent from a record written before operations had ids, or by a run with none to name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub op_id: Option<OpId>,
     pub status: OpStatus,
     /// The resolved edit — present once the operation completed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -50,10 +55,11 @@ pub struct JournalRecord {
 
 impl JournalRecord {
     /// Written before an operation touches disk, so a crash leaves evidence that it was attempted.
-    pub fn in_flight(op: usize, pre: BTreeMap<String, String>) -> Self {
+    pub fn in_flight(op: usize, op_id: Option<OpId>, pre: BTreeMap<String, String>) -> Self {
         Self {
             seq: 0,
             op,
+            op_id,
             status: OpStatus::InFlight,
             edit: None,
             report: Vec::new(),
@@ -66,6 +72,7 @@ impl JournalRecord {
     /// Written once the operation's edit has landed.
     pub fn completed(
         op: usize,
+        op_id: Option<OpId>,
         edit: WorkspaceEdit,
         pre: BTreeMap<String, String>,
         post: BTreeMap<String, String>,
@@ -75,6 +82,7 @@ impl JournalRecord {
         Self {
             seq: 0,
             op,
+            op_id,
             status: OpStatus::Completed,
             edit: Some(edit),
             pre,
@@ -270,6 +278,7 @@ mod tests {
         JournalRecord {
             seq,
             op,
+            op_id: None,
             status: OpStatus::Completed,
             edit: Some(edit),
             notes: Vec::new(),
@@ -336,6 +345,7 @@ mod tests {
             records: vec![
                 completed(0, 0, removal("src/shapes.ts", 10, 20)),
                 JournalRecord {
+                    op_id: None,
                     seq: 1,
                     op: 1,
                     status: OpStatus::InFlight,
@@ -384,6 +394,7 @@ mod tests {
         let digest = digest_of(contents);
         let journal = Journal {
             records: vec![JournalRecord {
+                op_id: None,
                 seq: 0,
                 op: 7,
                 status: OpStatus::InFlight,
@@ -408,6 +419,7 @@ mod tests {
         let digest = digest_of(contents);
         let journal = Journal {
             records: vec![JournalRecord {
+                op_id: None,
                 seq: 0,
                 op: 7,
                 status: OpStatus::InFlight,
@@ -434,6 +446,7 @@ mod tests {
         .unwrap();
         let journal = Journal {
             records: vec![JournalRecord {
+                op_id: None,
                 seq: 0,
                 op: 7,
                 status: OpStatus::InFlight,

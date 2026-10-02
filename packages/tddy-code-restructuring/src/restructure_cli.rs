@@ -31,8 +31,9 @@ use crate::runner::{Command, Options, Outcome};
 
 pub use crate::restructure_args::parse_position_range;
 pub use crate::restructure_args::{
-    RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
-    RestructurePlanArgs, RestructureSnapshotArgs, RestructureVerifyArgs,
+    OpRef, RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
+    RestructureLoadArgs, RestructurePlanArgs, RestructureSnapshotArgs, RestructureUnloadArgs,
+    RestructureVerifyArgs,
 };
 
 pub async fn run(args: RestructureArgs) -> Result<()> {

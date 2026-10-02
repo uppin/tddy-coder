@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
 use tddy_index_daemon::proto::code_index::{
     AnchorsRequest, ApplyRequest, CheckRequest, ComplexityRequest, CoverageRequest,
-    DuplicateTestsRequest, PlanStatusRequest, ReportRequest, SourcePosition, SourceRange,
-    VerifyRequest,
+    DuplicateTestsRequest, ListPlansRequest, LoadPlansRequest, PlanStatusRequest, ReportRequest,
+    SourcePosition, SourceRange, UnloadPlansRequest, VerifyRequest,
 };
 
 use crate::cli::analyze::AnalyzeCommand;
@@ -92,6 +92,12 @@ pub(crate) enum RestructureCommand {
     Status(PlanArgs),
     /// Compare the tree's statement multiset against a git ref.
     Verify(VerifyArgs),
+    /// Load plans into the root's store: read once, operations given ids.
+    Load(LoadArgs),
+    /// Flush and drop plans from the root's store.
+    Unload(UnloadArgs),
+    /// List the plans the root's store holds.
+    Plans(WorkspaceRoot),
 }
 
 /// The tree an operation names.
@@ -194,6 +200,30 @@ pub(crate) struct PlanArgs {
 }
 
 #[derive(Args)]
+pub(crate) struct LoadArgs {
+    #[command(flatten)]
+    pub(crate) root: WorkspaceRoot,
+
+    /// The plan JSONL files to load, absolute or relative to the workspace root.
+    #[arg(required = true)]
+    pub(crate) plans: Vec<PathBuf>,
+}
+
+#[derive(Args)]
+pub(crate) struct UnloadArgs {
+    #[command(flatten)]
+    pub(crate) root: WorkspaceRoot,
+
+    /// The plans to flush and drop, absolute or relative to the workspace root.
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub(crate) plans: Vec<PathBuf>,
+
+    /// Flush and drop every plan the root holds.
+    #[arg(long)]
+    pub(crate) all: bool,
+}
+
+#[derive(Args)]
 pub(crate) struct VerifyArgs {
     #[command(flatten)]
     pub(crate) root: WorkspaceRoot,
@@ -211,6 +241,9 @@ pub(crate) enum Requested {
     Anchors(AnchorsRequest),
     PlanStatus(PlanStatusRequest),
     Verify(VerifyRequest),
+    LoadPlans(LoadPlansRequest),
+    UnloadPlans(UnloadPlansRequest),
+    ListPlans(ListPlansRequest),
     Coverage(CoverageRequest),
     Report(ReportRequest),
     DuplicateTests(DuplicateTestsRequest),
@@ -327,6 +360,26 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
         RestructureCommand::Verify(verify) => Requested::Verify(VerifyRequest {
             workspace_root: named(&verify.root.workspace_root)?,
             against: verify.against,
+        }),
+        RestructureCommand::Load(load) => Requested::LoadPlans(LoadPlansRequest {
+            workspace_root: named(&load.root.workspace_root)?,
+            plans: load
+                .plans
+                .iter()
+                .map(|plan| named(plan))
+                .collect::<Result<_, _>>()?,
+        }),
+        RestructureCommand::Unload(unload) => Requested::UnloadPlans(UnloadPlansRequest {
+            workspace_root: named(&unload.root.workspace_root)?,
+            plans: unload
+                .plans
+                .iter()
+                .map(|plan| named(plan))
+                .collect::<Result<_, _>>()?,
+            all: unload.all,
+        }),
+        RestructureCommand::Plans(root) => Requested::ListPlans(ListPlansRequest {
+            workspace_root: named(&root.workspace_root)?,
         }),
     })
 }

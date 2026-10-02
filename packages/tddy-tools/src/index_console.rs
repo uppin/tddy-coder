@@ -31,7 +31,7 @@ use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::Comparison;
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
-    PlanStatusResponse, RestructureEvent, RunOutcome, VerifyResponse,
+    PlanStatusResponse, PlansResponse, RestructureEvent, RunOutcome, VerifyResponse,
 };
 
 /// One line of a run's answer, on the console this front end owns.
@@ -186,6 +186,18 @@ impl Rendered {
             return Ok(());
         }
         Err(anyhow::anyhow!(console::findings_refusal(self.findings)))
+    }
+}
+
+/// The plans a daemon's store holds.
+pub(crate) fn plans(response: &PlansResponse) {
+    let held: Vec<(&str, usize, bool)> = response
+        .plans
+        .iter()
+        .map(|plan| (plan.plan.as_str(), plan.ops as usize, plan.dirty))
+        .collect();
+    for line in console::loaded_plans(&held) {
+        say(&line);
     }
 }
 

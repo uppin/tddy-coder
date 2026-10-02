@@ -63,6 +63,8 @@ pub struct Options {
     pub dry_run: bool,
     pub resume: bool,
     pub from: Option<usize>,
+    /// `--from` as an operation's id rather than its index; at most one of the two is set.
+    pub from_id: Option<crate::plan::OpId>,
     pub stop_after: Option<usize>,
     /// Whether `check` resolves each operation through the language server as well as reading text.
     pub deep: bool,
@@ -108,6 +110,7 @@ impl Default for Options {
             dry_run: false,
             resume: false,
             from: None,
+            from_id: None,
             stop_after: None,
             deep: false,
             budget: None,
@@ -153,7 +156,7 @@ impl Options {
     /// Whether this run continues a journal an earlier run left (`--resume`, or `--from`), rather
     /// than starting the plan fresh.
     pub fn continues_a_journal(&self) -> bool {
-        self.resume || self.from.is_some()
+        self.resume || self.from.is_some() || self.from_id.is_some()
     }
 
     /// Absorb one argument, taking a value from `rest` for the flags that carry one.

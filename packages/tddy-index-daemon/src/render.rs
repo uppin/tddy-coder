@@ -17,8 +17,8 @@ use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::Comparison;
 use tddy_index_daemon::proto::code_index::{
     analyze_event, restructure_event, AnalyzeEvent, AnchorsResponse, ComplexityResponse,
-    DuplicateTestsFound, OperationApplied, PlanStatusResponse, ReportResponse, RestructureEvent,
-    RunOutcome, VerifyResponse,
+    DuplicateTestsFound, OperationApplied, PlanStatusResponse, PlansResponse, ReportResponse,
+    RestructureEvent, RunOutcome, VerifyResponse,
 };
 
 /// One event a running operation reported.
@@ -128,6 +128,18 @@ pub(crate) fn plan_status(response: &PlanStatusResponse) {
         pending: response.pending as usize,
         failed: response.failed as usize,
     }) {
+        log::info!(target: crate::MAIN, "{line}");
+    }
+}
+
+/// The plans a root's store holds.
+pub(crate) fn plans(response: &PlansResponse) {
+    let held: Vec<(&str, usize, bool)> = response
+        .plans
+        .iter()
+        .map(|plan| (plan.plan.as_str(), plan.ops as usize, plan.dirty))
+        .collect();
+    for line in console::loaded_plans(&held) {
         log::info!(target: crate::MAIN, "{line}");
     }
 }

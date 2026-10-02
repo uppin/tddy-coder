@@ -14,12 +14,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use tddy_code_restructuring::restructure_cli::{
-    RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
-    RestructurePlanArgs, RestructureVerifyArgs,
+    OpRef, RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
+    RestructureLoadArgs, RestructurePlanArgs, RestructureUnloadArgs, RestructureVerifyArgs,
 };
 use tddy_index_daemon::proto::code_index::{
-    AnchorsRequest, ApplyRequest, CheckRequest, PlanStatusRequest, SourcePosition, SourceRange,
-    VerifyRequest,
+    AnchorsRequest, ApplyRequest, CheckRequest, ListPlansRequest, LoadPlansRequest,
+    PlanStatusRequest, SourcePosition, SourceRange, UnloadPlansRequest, VerifyRequest,
 };
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tonic::transport::Channel;
@@ -107,10 +107,9 @@ async fn restructure_at(socket: &Path, args: RestructureArgs) -> Result<()> {
             })
             .await
         }
-        RestructureCommand::Load(_) | RestructureCommand::Unload(_) | RestructureCommand::Plans => {
-            // TODO(plan-store): implement — LoadPlans / UnloadPlans / ListPlans, rendered.
-            todo!("plan-store: route load, unload and plans to the daemon")
-        }
+        RestructureCommand::Load(load) => self::load(&mut client, root, load).await,
+        RestructureCommand::Unload(unload) => self::unload(&mut client, root, unload).await,
+        RestructureCommand::Plans => self::plans(&mut client, root).await,
     }
 }
 
@@ -167,7 +166,7 @@ async fn apply(
         plan: named(&args.plan)?,
         dry_run: args.dry_run,
         resume: args.resume,
-        from: args.from.map(|from| from as u32),
+        from: from_index(args.from)?,
         stop_after: args.stop_after.map(|stop_after| stop_after as u32),
     };
 
@@ -181,6 +180,82 @@ async fn apply(
     // an apply that performed nothing, or one whose terminal event never arrived, reached here and
     // exited zero.
     rendered.verdict_on_outcome()
+}
+
+/// `--from` as the request carries it: an index.
+///
+/// An id is refused rather than sent as a number: `ApplyRequest` has no field that names an
+/// operation by id, and reading one as an index would start the run somewhere the operator did not
+/// say.
+///
+/// TODO(plan-store): `ApplyRequest.from_op`, so `--from <id>` reaches the daemon the way it reaches
+/// a run with none. Left out of this change because the field breaks every exhaustive
+/// `ApplyRequest` literal in the daemon's acceptance suite.
+fn from_index(from: Option<OpRef>) -> Result<Option<u32>> {
+    match from {
+        None => Ok(None),
+        Some(OpRef::Index(index)) => Ok(Some(index as u32)),
+        Some(OpRef::Id(id)) => Err(anyhow::anyhow!(
+            "--from `{id}` names an operation by id, which the index daemon cannot be asked for yet \
+             — give its index, or unset {TDDY_INDEX_SOCKET} to run this without a daemon"
+        )),
+    }
+}
+
+/// Load plans into the daemon's store for this tree.
+async fn load(
+    client: &mut CodeIndexServiceClient<Channel>,
+    workspace_root: String,
+    args: RestructureLoadArgs,
+) -> Result<()> {
+    let response = client
+        .load_plans(LoadPlansRequest {
+            workspace_root,
+            plans: args
+                .plans
+                .iter()
+                .map(|plan| named(plan))
+                .collect::<Result<_>>()?,
+        })
+        .await
+        .map_err(refused)?
+        .into_inner();
+    index_console::plans(&response);
+    Ok(())
+}
+
+/// Flush and drop plans from the daemon's store for this tree.
+async fn unload(
+    client: &mut CodeIndexServiceClient<Channel>,
+    workspace_root: String,
+    args: RestructureUnloadArgs,
+) -> Result<()> {
+    let response = client
+        .unload_plans(UnloadPlansRequest {
+            workspace_root,
+            plans: args
+                .plans
+                .iter()
+                .map(|plan| named(plan))
+                .collect::<Result<_>>()?,
+            all: args.all,
+        })
+        .await
+        .map_err(refused)?
+        .into_inner();
+    index_console::plans(&response);
+    Ok(())
+}
+
+/// The plans the daemon's store holds for this tree.
+async fn plans(client: &mut CodeIndexServiceClient<Channel>, workspace_root: String) -> Result<()> {
+    let response = client
+        .list_plans(ListPlansRequest { workspace_root })
+        .await
+        .map_err(refused)?
+        .into_inner();
+    index_console::plans(&response);
+    Ok(())
 }
 
 /// How far a plan's journal got.

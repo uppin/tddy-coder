@@ -70,11 +70,39 @@ pub struct RestructurePlanArgs {
     #[arg(long)]
     pub resume: bool,
 
-    #[arg(long)]
-    pub from: Option<usize>,
+    /// Start at this operation — its index in the plan, or the id the plan store gave it.
+    #[arg(long, value_name = "INDEX|ID")]
+    pub from: Option<OpRef>,
 
     #[arg(long)]
     pub stop_after: Option<usize>,
+}
+
+/// An operation named the way `--from` takes it: by where it sits in the plan, or by the stable id
+/// that survives a reorder of the plan.
+///
+/// Digits are an index; anything else is an id. An id made only of digits therefore cannot be
+/// named, which is why the ids the store assigns are not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpRef {
+    Index(usize),
+    Id(String),
+}
+
+impl std::str::FromStr for OpRef {
+    type Err = String;
+
+    fn from_str(text: &str) -> std::result::Result<OpRef, String> {
+        if text.is_empty() {
+            return Err(
+                "an operation is named by its index or its id, and this names neither".into(),
+            );
+        }
+        Ok(match text.parse::<usize>() {
+            Ok(index) => OpRef::Index(index),
+            Err(_) => OpRef::Id(text.to_string()),
+        })
+    }
 }
 
 #[derive(Parser)]
@@ -154,7 +182,14 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             target: Some(plan.plan),
             dry_run: plan.dry_run,
             resume: plan.resume,
-            from: plan.from,
+            from: match &plan.from {
+                Some(OpRef::Index(index)) => Some(*index),
+                _ => None,
+            },
+            from_id: match plan.from {
+                Some(OpRef::Id(id)) => Some(crate::plan::OpId(id)),
+                _ => None,
+            },
             stop_after: plan.stop_after,
             ..Options::default()
         },

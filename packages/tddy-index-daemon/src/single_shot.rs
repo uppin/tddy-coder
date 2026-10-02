@@ -78,6 +78,17 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
                 Err(refusal) => refused(&refusal),
             }
         }
+        Requested::LoadPlans(request) => {
+            plans_answered(service.load_plans(tddy_rpc::Request::direct(request)).await)
+        }
+        Requested::UnloadPlans(request) => plans_answered(
+            service
+                .unload_plans(tddy_rpc::Request::direct(request))
+                .await,
+        ),
+        Requested::ListPlans(request) => {
+            plans_answered(service.list_plans(tddy_rpc::Request::direct(request)).await)
+        }
         Requested::Coverage(request) => {
             let streamed = service.coverage(tddy_rpc::Request::direct(request)).await;
             analysed(streamed, interrupted()).await
@@ -122,6 +133,22 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
                 Err(refusal) => refused(&refusal),
             }
         }
+    }
+}
+
+/// The plans a store held after one of the three plan requests, rendered.
+fn plans_answered(
+    answered: Result<
+        tddy_rpc::Response<tddy_index_daemon::proto::code_index::PlansResponse>,
+        tddy_rpc::Status,
+    >,
+) -> Verdict {
+    match answered {
+        Ok(response) => {
+            render::plans(&response.into_inner());
+            Verdict::Held
+        }
+        Err(refusal) => refused(&refusal),
     }
 }
 

@@ -144,6 +144,8 @@ message OperationApplied {
   repeated string visibility     = 6;
   // True when the run was a rehearsal and nothing was written.
   bool            rehearsed_only = 7;
+  // The operation's stable id in its plan — what survives a reorder, where `index` does not.
+  string          op_id          = 8;
 }
 
 message Finding {

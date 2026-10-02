@@ -53,6 +53,15 @@ impl CodeIndexServiceImpl {
             index: WorkspaceIndex::new(ports.servers),
         }
     }
+
+    /// Write every plan any root holds back to disk now, for a process about to stop.
+    ///
+    /// Plans are written back shortly after they change, but "shortly" is a delay, and a process
+    /// that exits inside it takes the change with it. Every plan is tried even when one cannot be
+    /// written; the first refusal is returned.
+    pub async fn flush_plans(&self) -> tddy_code_restructuring::Result<()> {
+        self.index.flush_plans().await
+    }
 }
 
 #[async_trait::async_trait]

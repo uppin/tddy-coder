@@ -238,6 +238,11 @@ impl PlanStore {
         self.write_all(due)
     }
 
+    /// Write one plan now if it is dirty — what a run does after each operation it commits.
+    pub fn flush(&mut self, key: &PlanKey) -> Result<()> {
+        self.write_back(key)
+    }
+
     /// Write every dirty plan now — end of run, unload, shutdown; the keys written.
     pub fn flush_all(&mut self) -> Result<Vec<PlanKey>> {
         self.write_all(self.dirty_since.keys().cloned().collect())
