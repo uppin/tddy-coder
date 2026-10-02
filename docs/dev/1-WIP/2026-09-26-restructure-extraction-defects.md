@@ -102,10 +102,10 @@ Each was hit on #526's plans; one wedged the warm daemon.
 
 ## Scope
 
-- [ ] Hover-bearing probe position + bound
-- [ ] Borrowed-place widening + by-value refusal
-- [ ] Unit-tail-after-return refusal (check + apply)
-- [ ] Function-local `use` carry (+ check report)
+- [x] Hover-bearing probe position + bound
+- [ ] Borrowed-place widening ✅ + by-value refusal ⚠️ not implemented (needs type information; see Validation Results)
+- [x] Unit-tail-after-return refusal (check + apply)
+- [x] Function-local `use` carry (+ check report, via progress — not a finding)
 
 ## Technical Changes
 
@@ -128,10 +128,10 @@ As in Responsibility.
 
 ## Implementation Milestones
 
-- [ ] Probe position; probe bound with `unusable` refusal
-- [ ] Borrow widening
-- [ ] Unit-tail refusal in check and apply
-- [ ] Local-use carry and check report
+- [x] Probe position; probe bound with `unusable` refusal (bound untested)
+- [x] Borrow widening
+- [x] Unit-tail refusal in check and apply
+- [x] Local-use carry and check report
 
 ## Testing Plan
 
@@ -191,7 +191,18 @@ Planned but not written as acceptance tests, with why:
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes (2026-10-02)
+
+Scoped to `tddy-code-restructuring`; CI owns the rest.
+
+- **Stack gate**: ✅ branch already on `move-facades`' tip; `origin/<base>..HEAD` is this PR's 5 commits only.
+- **Boundary**: ✅ only this PR's files; no deletions; nothing from `## Dependencies`; no `crate_move/` or anchor-resolution change; no stubs left.
+- **Build**: ✅ `cargo build -p tddy-code-restructuring`; clippy `--all-targets -D warnings` and fmt clean; `./test -p tddy-code-restructuring` green (lib 516, all integration suites 0 failed).
+- **Gap [WARNING]** — by-value refusal (PRD item 3, Responsibility bullet 2) is not implemented: an assist answer that still hoists a non-`Copy` place out of `&self` is not refused. Needs type information; the compile gate still catches `E0507`. Needs a decision: implement, or defer with consent and a `docs/dev/todo/` entry.
+- **Gap [WARNING]** — the 30 s probe bound (`READY_HOVER_BOUND`) has no test.
+- **Gap [INFO]** — the `check` report of carried `use` items goes through `progress` and has no test.
+- **[INFO]** — the carry copies the `use` and leaves the origin's, which can leave an unused-import warning.
+- **[INFO]** — new unit tests sit above `use super::*;` in `early_return.rs` and `imports.rs`.
 
 ## TODO
 
@@ -203,7 +214,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [~] TDD Green — implemented and pushed (96697ee7); by-value refusal outstanding
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p tddy-code-restructuring`); CI for the rest
