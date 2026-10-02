@@ -133,7 +133,7 @@ impl PositionLedger {
                 }
             }
             // Item anchors are lowered into range and symbol anchors at run open
-            // (`runner::resolve_item_anchors`), so the ledger only ever sees snapshot coordinates.
+            // (`item_anchor::resolve_item_anchors`), so the ledger only ever sees snapshot coordinates.
             Anchor::Item { .. } | Anchor::Items { .. } => {
                 return Err(crate::item_anchor::unlowered_item_anchor(
                     anchor,

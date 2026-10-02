@@ -1228,6 +1228,10 @@ async fn a_second_plan_applies_after_a_first_ran_under_the_same_root() {
     let entry = a_host_over_fake_language_servers();
     let _ =
         stream_at::<_, RestructureEvent>(&entry, "Apply", an_apply_of(&workspace, &first)).await;
+    assert!(
+        workspace.path().join(".restructure").is_dir(),
+        "the first plan left no run state, so the test would pass whatever keyed it"
+    );
 
     // When a different plan is applied under the same root
     let second_run: Result<Vec<RestructureEvent>, _> =

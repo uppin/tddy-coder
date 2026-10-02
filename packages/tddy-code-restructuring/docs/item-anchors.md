@@ -42,8 +42,7 @@ The resolver refuses — it never guesses and never searches another file — wh
 | a segment matches more than one outline node (two inherent impls, a trait-member collision) | `MalformedPlan`, asking for `<T as Trait>::m` |
 | a relative range lies outside its item | `MalformedPlan` |
 | the item's text no longer hashes to `fingerprint` | `ItemChanged { item, file }` — `FailedPrecondition` |
-| a continued run whose plan does not match what the journal recorded | `PlanOutOfSync { op }` — `FailedPrecondition` |
-| a continued run over a journal from before plans were written back | `PlanUnverifiable { applied }` — `FailedPrecondition` |
+| the run continues a journal that already applied operations | `ItemAnchorsOnContinuedRun { applied }` — `FailedPrecondition` |
 | no backend, or no item resolver | `NoBackend`, `UnsupportedOp` |
 
 `ItemChanged` names the item and its file. It does not name the operation, because it is raised while
@@ -60,16 +59,11 @@ apply loops use (the command line's and the daemon's): item anchors resolve, the
 `cargo check`, then `.restructure/` is written. An item refusal therefore surfaces before minutes of
 compiling and leaves no run state behind.
 
-**A continued run resolves item anchors against the tree it continues on.** The plan store writes the
-plan's pending anchors back after every operation — fingerprints and hints of items an operation
-edited recomputed, ranges moved — and the run translates through its own edits only, so a resumed
-run reads anchors that already describe the edited tree. Only the operations the run will execute
-are resolved; the completed ones' items were edited by the operations themselves. Before it reads
-anything, a continued run checks the plan against the journal: after each operation the run records
-a digest of the plan's pending anchors, *then* writes the plan, and a resume refuses
-(`PlanOutOfSync`) a plan that does not match — a crash between the two, or an anchor edited since.
-A journal written before plans were written back cannot vouch for an item-anchored plan
-(`PlanUnverifiable`); a plan of ranges and symbols resumes over it as it always did.
+**A continued run refuses item anchors.** The ledger translates coordinates read from the original
+tree; a run whose journal already holds completed operations no longer has that tree, and coordinates
+read from the edited one would be translated through those edits a second time. The refusal is its
+own error rather than a malformed plan, since nothing is wrong with the plan. The `#live-plan`
+stack's plan store (#538 onward) is what keeps item anchors current across runs.
 
 **Static `check` cannot examine item anchors.** A static check has no server to resolve with, so it
 reports each item-anchored operation as a finding saying to run `check --deep`; a plan of item

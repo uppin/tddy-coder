@@ -549,6 +549,17 @@ mod tests {
         }
     }
 
+    /// A resolver that no longer finds any item — the edit moved it out of its file.
+    struct AResolverThatFindsNothing;
+
+    impl ItemResolver for AResolverThatFindsNothing {
+        fn resolve_item(&mut self, _file: &str, item: &ItemPath) -> Result<ResolvedItem> {
+            Err(RestructureError::MalformedPlan(format!(
+                "`{item}` is not in the file"
+            )))
+        }
+    }
+
     fn a_store_holding(lines: &[&str]) -> (tempfile::TempDir, PlanStore, PlanKey) {
         let root = tempfile::tempdir().unwrap();
         let mut text = vec![HEADER.to_string()];
@@ -833,5 +844,47 @@ mod tests {
 
         // Then all are one key
         assert_eq!((named_absolutely, named_through_dots), (key.clone(), key));
+    }
+
+    #[test]
+    fn a_pending_item_anchor_the_edit_left_unresolvable_keeps_its_anchor_as_written() {
+        // Given a pending item anchor in the file the first op will edit
+        let (_root, mut store, key) = a_store_holding(&[
+            r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"A"},"name":"B"}"#,
+            r#"{"op":"extract_method","anchor":{"kind":"item","item":"a::f","file":"src/a.rs","start":{"line":2,"col":5},"end":{"line":3,"col":6},"fingerprint":"sha256:before","hint":{"line":20,"col":5}},"name":"g"}"#,
+        ]);
+        let first = the_id_of(&store, &key, 0);
+        let as_written = the_anchor_of(&store, &key, 1);
+
+        // When the first op's edit touched the file, and the item no longer resolves in it
+        let refreshed = store.refresh_after_op(
+            &key,
+            &first,
+            &three_lines_inserted_at_the_top_of("src/a.rs"),
+            &mut AResolverThatFindsNothing,
+        );
+
+        // Then the refresh succeeds and the anchor is exactly what the plan said
+        assert_eq!(
+            (refreshed.is_ok(), the_anchor_of(&store, &key, 1)),
+            (true, as_written)
+        );
+    }
+
+    #[test]
+    fn an_operation_is_found_by_its_id_whatever_its_place_in_the_plan() {
+        // Given a held plan of two operations
+        let (_root, store, key) = a_store_holding(&[
+            A_RENAME,
+            r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"C"},"name":"D"}"#,
+        ]);
+        let second = the_id_of(&store, &key, 1);
+
+        // When the second is looked up by its id, and an id the plan never gave is looked up
+        let found = store.op(&key, &second).map(|op| op.name.clone());
+        let missing = store.op(&key, &OpId("op-99".to_string()));
+
+        // Then the second operation is returned and the unknown id finds nothing
+        assert_eq!((found, missing), (Some(Some("D".to_string())), None));
     }
 }

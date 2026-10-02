@@ -294,13 +294,66 @@ repo-scoped journal).
 ## Refactoring Needed
 
 ### From @validate-changes (Change Validation)
+- DONE `packages/tddy-code-restructuring/docs/item-anchors.md` was edited directly in `4cc9d220`
+  (CLAUDE.md: `packages/*/docs/` changes go through the changeset). Reverted to the merge base; the
+  wrap carries the delta: replace the `ItemAnchorsOnContinuedRun` table row with `PlanOutOfSync { op }`
+  (a continued run whose plan does not match what the journal recorded) and `PlanUnverifiable
+  { applied }` (a journal from before write-back over an item-anchored plan), and replace the "A
+  continued run refuses item anchors" paragraph with: a continued run resolves item anchors against
+  the tree it continues on, over the operations it will execute, after checking the plan against the
+  journal's `plan_synced` digest.
+- DONE `ledger.rs:136` named the removed `runner::resolve_item_anchors`; now `item_anchor::resolve_item_anchors`.
+- OPEN, needs the developer: the `legacy` path (a journal from before write-back resumes a range/symbol
+  plan as it always did, unnumbered and not written back) is a compatibility branch; CLAUDE.md asks
+  consent before fallbacks. Recorded under Technical Debt; consent not confirmed.
+
 ### From @validate-tests (Test Quality)
+- DONE `sigterm_flushes_every_dirty_plan_before_exit`: `serving.wait()` was unbounded and the load result
+  was asserted before the process was reaped; now a bounded wait that kills a survivor, results asserted after.
+- DONE `a_second_plan_applies_after_a_first_ran_under_the_same_root`: the first run's result is discarded,
+  so the test could pass without ever having written run state; now asserts `.restructure/` exists first.
+- DONE added `an_operation_is_found_by_its_id_whatever_its_place_in_the_plan` (`PlanStore::op` had no
+  caller or test) and `a_pending_item_anchor_the_edit_left_unresolvable_keeps_its_anchor_as_written`
+  (the stale-item decision under Decisions had no test).
+- OPEN (INFO): `a_plan_file` and the `EXTRACT_*` constants are duplicated across `plan_store_acceptance.rs`
+  and `plan_store_resume_acceptance.rs`; moving them into `tests/harness/mod.rs` was left because #539 and
+  #540 both edit that file.
+
 ### From @prod-ready (Production Readiness)
+- No mock or dev fallback, no `println!`/`eprintln!` added to any `src/`. Lock `.expect("a root's plan
+  store")` on std mutexes means a panic while holding a store poisons it for the root (INFO).
+- `TODO(plan-store)` in `tddy-tools/src/index_client.rs` (`from_index`): `--from <id>` through the daemon.
+  Deliberately deferred (`ApplyRequest.from_op` would break every exhaustive `ApplyRequest` literal in
+  the daemon's acceptance suite); refused with an error naming the workaround. Owner: a follow-up that
+  edits that suite. No other marker remains.
+- `PlanStore::op` has no production caller yet; kept as the contract's lookup by `(plan, op id)`.
+
 ### From @analyze-clean-code (Code Quality)
+- Must refactor, not done here: `plan_store.rs::refreshed` (76 lines, nesting 5; #539 extends this file's
+  refresh, so it is not split under it), `runner/entry_points.rs::apply_held_plan` (151 lines, the
+  pre-existing apply loop) and `tddy-index-daemon/src/apply.rs::apply_held_plan` (136, same loop),
+  `record_applied_op` (7 parameters) and `commit_operation` (7).
+- File length: see Validation Results.
 
 ## Validation Results
 
-_(populated by validation commands)_
+**2026-10-02**
+
+- validate-changes (twice): stack gate clean (`origin/master..HEAD` is this PR's six commits); parent
+  surfaces (anchor kinds, resolver, v2 header) untouched; the one consented change is the removal of
+  `ItemAnchorsOnContinuedRun`/`runner::resolve_item_anchors`. No critical findings after the
+  `item-anchors.md` revert above.
+- validate-tests: the tests this PR added or changed were analysed; 0 critical; see Refactoring Needed.
+- validate-prod-ready: clean apart from the recorded `TODO(plan-store)`.
+- analyze-clean-code: overall C (3+ must-refactor items, all pre-existing loop bodies or in a file #539 owns).
+- File-length gate (production lines before the first `#[cfg(test)]`, merge base to HEAD):
+
+| File | Before | After | Record | Also in #539 / #540 |
+|---|---|---|---|---|
+| `tddy-code-restructuring/src/plan.rs` | 799 | 887 | `oversized-file-plan.md` (unclaimed) | no |
+| `tddy-code-restructuring/src/runner/entry_points.rs` | 602 | 814 | `oversized-file-runner-entry-points.md` (unclaimed) | no |
+| `tddy-code-restructuring/src/plan_store.rs` | new | 522 | none | #539 |
+| `tddy-code-restructuring/src/crate_move/cluster.rs` | 611 | 611 | n/a (one `id: None` literal in tests) | #540 |
 
 ## TODO
 
@@ -317,16 +370,16 @@ _(populated by validation commands)_
       `packages/*/docs/` is left to the wrap)
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [x] Run scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`); CI for the rest
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
+- [x] Validate tests (/validate-tests)
 - [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
+- [x] Validate production readiness (/validate-prod-ready)
 - [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
+- [x] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
+- [x] Final validation (/validate-changes)
 - [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`) — scoped to the three packages
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-09-26-index-daemon-plan-store-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps
