@@ -178,11 +178,14 @@ Stack gate: already current on `extraction-defects`, leak check clean (4 own com
 diff holds only this PR's files. Build: `tddy-code-restructuring` ✅ (scoped). Tests: package ✅ 0 failures.
 `## Responsibility` delivered; `## Dependencies` untouched (`survey.rs` unmodified); `## Boundaries` held.
 
-| Item | Severity | Finding |
+| Item | Severity | Finding → outcome |
 |---|---|---|
-| `stays_behind_through_a_body` is per operation | ⚠️ WARNING | A body path into a module an **earlier op of the same plan already moved** is flagged, so a plan the header pass accepts (`gone_by_then`) is refused here — and `move_preconditions` is also `apply`'s gate, so this refuses at apply, not only at check. Found by reading, **not reproduced**; no test covers it. |
-| `member_op` is unpinned | ⚠️ WARNING | Mutation check: replacing `member_op` with `with_anchor` leaves every test green. The bug it exists to prevent has no test. |
-| `TODO(check-parity)` at `header.rs:29` | ℹ️ INFO | Names this node. `header_origin_paths` is still read (`cluster.rs:385`), so the marker is half-resolved: bodies now come from the survey, the header finding is not unified onto it. Resolve or retag with a reason. |
+| `stays_behind_through_a_body` was per operation | ⚠️ WARNING → ✅ fixed | Reproduced first (red test: a body path into a module an **earlier op of the same plan** already moved was flagged). Fixed with a plan-aware `earlier` set (`moved_by_earlier_operations`: same origin crate, same `to`); three edge tests pin a later-op move and a different-destination move as still flagged. **Correction:** the first note said this also refused at `apply`; it does not — `move_preconditions` is reached only from `check`'s `unrunnable` and from `cluster.rs`, so the false refusal hit `check` and the stranded-sibling analysis. |
+| `member_op` was unpinned | ⚠️ WARNING → ✅ fixed | New test `a_cluster_member_reaching_the_module_that_anchors_the_cluster_in_a_body_is_no_finding`; goes RED when `member_op` is swapped for `with_anchor` (mutation verified twice, restored). |
+| `TODO(check-parity)` at `header.rs:29` | ℹ️ INFO → ⚠️ deferred | Retagged `TODO(check-parity-header)` with the reason: its only reader (`cluster::paths_naming_the_origin`, the stranded-sibling finding) deliberately reads the top-level `use` header; moving it to the survey would also report bodies and nested `use`, a behaviour change to a finding with its own tests and wording. |
+
+Scoped re-run after the fixes (`-p tddy-code-restructuring`): 699 passed, 0 failed, 33 suites; clippy `--all-targets -D warnings` clean; fmt clean.
+The 5 VM tests were not run here (`./vm-tests`); not touched by this change.
 
 ## TODO
 

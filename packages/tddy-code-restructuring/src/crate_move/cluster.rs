@@ -421,7 +421,8 @@ fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<
         .filter(|(_, op)| op.op.moves_across_crates())
         .flat_map(|(index, op)| op.anchors().map(move |anchor| (index, op, anchor)))
         .filter_map(|(index, op, anchor)| {
-            super::move_preconditions(workspace, &super::member_op(op, anchor)).ok()?;
+            let earlier = super::moved_by_earlier_operations(workspace, ops, index, anchor);
+            super::move_preconditions(workspace, &super::member_op(op, anchor), &earlier).ok()?;
             let source = anchor.file();
             let module = module_home::module_name(source).ok()?;
             let home = module_home::module_home(workspace, source, &module).ok()?;

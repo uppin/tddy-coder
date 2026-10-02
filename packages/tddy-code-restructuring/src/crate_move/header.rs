@@ -26,8 +26,13 @@ pub(crate) struct Header {
     pub(crate) origin_paths: Vec<String>,
     /// The subset of `origin_paths` written in the file's own top-level `use` header — the only
     /// ones `check` reads.
-    // TODO(check-parity): `check` reads bodies and nested `use` items too once it consumes the
-    // survey; this field then goes.
+    // TODO(check-parity-header): the one reader, `cluster::paths_naming_the_origin`, is the
+    // stranded-sibling finding, and it asks about the top-level `use` header alone. Reading
+    // `origin_paths` instead would also report bodies and nested `use` items, which `apply`'s
+    // cycle refusal (`refusals::refuse_a_dependency_cycle`) already reads — so the field goes when
+    // that finding is widened to match it on purpose, with its own tests and wording, not as a
+    // side effect of removing a field. Bodies are covered separately by
+    // `preconditions::stays_behind_through_a_body`.
     pub(crate) header_origin_paths: Vec<String>,
 }
 

@@ -56,7 +56,8 @@ pub(crate) fn unrunnable(
             continue;
         }
         for anchor in op.anchors() {
-            if let Err(refusal) = move_preconditions(workspace, &member_op(op, anchor)) {
+            let earlier = moved_by_earlier_operations(workspace, ops, index, anchor);
+            if let Err(refusal) = move_preconditions(workspace, &member_op(op, anchor), &earlier) {
                 findings.push((index, refusal.to_string()));
             }
         }
@@ -72,8 +73,10 @@ pub(crate) fn unrunnable(
 /// is a cycle. The finding never suggests `move_cluster_to_crate` — a body's reach into the code that
 /// hosts it is not a sibling that can come along.
 ///
-/// A path into a module the operation itself moves travels with it, and one the origin only
-/// re-exports from another crate is defined elsewhere; neither stays behind. A path under
+/// A path into a module the operation itself moves travels with it, one into a module in
+/// `earlier` — moved to this destination by an earlier operation of the plan — is already there by
+/// the time the operation runs, and one the origin only re-exports from another crate is defined
+/// elsewhere; none stays behind. A path under
 /// `#[cfg(test)]` is no edge either, the same reading the header pass takes.
 ///
 /// # Errors
@@ -82,9 +85,10 @@ pub(crate) fn unrunnable(
 pub(crate) fn stays_behind_through_a_body(
     workspace: &Workspace<'_>,
     op: &RefactorOp,
+    earlier: &BTreeSet<String>,
 ) -> Result<Option<String>> {
     let moving = moving::Move::read(workspace, op)?;
-    let mut travelling = BTreeSet::new();
+    let mut travelling = earlier.clone();
     for anchor in op.anchors() {
         let module = module_home::module_name(anchor.file())?;
         let home = module_home::module_home(workspace, anchor.file(), &module)?;
@@ -167,7 +171,13 @@ pub(crate) fn destination_already_has_the_module(
 }
 
 /// Every check [`resolve`] runs before it consults rust-analyzer.
-pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<()> {
+///
+/// `earlier` is what [`moved_by_earlier_operations`] reads for `op`'s place in its plan.
+pub(crate) fn move_preconditions(
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+    earlier: &BTreeSet<String>,
+) -> Result<()> {
     let moving = moving::Move::read(workspace, op)?;
     let text = workspace.read(&moving.home.declared_in)?;
     if manifest_edits::module_declaration(&text, &moving.module).is_none() {
@@ -187,7 +197,7 @@ pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> 
     if let Some(finding) = destination_already_has_the_module(workspace, op)? {
         return Err(malformed(finding));
     }
-    if let Some(finding) = stays_behind_through_a_body(workspace, op)? {
+    if let Some(finding) = stays_behind_through_a_body(workspace, op, earlier)? {
         return Err(malformed(finding));
     }
     Ok(())
@@ -208,4 +218,40 @@ pub(crate) fn member_op(op: &RefactorOp, anchor: &Anchor) -> RefactorOp {
             .collect(),
         ..op.with_anchor(anchor.clone())
     }
+}
+
+/// The module paths, in the crate `anchor`'s module leaves, that operations **before** `index`
+/// already move to the same destination — what `crate::<module>` can still name there when
+/// operation `index` runs.
+///
+/// The body check's counterpart of the header pass's `gone_by_then`: the same question, asked of the
+/// plan's operations directly. That one reads the list of modules the plan moves, and that list is
+/// built by running these preconditions, so it cannot be asked from inside them. An earlier
+/// operation that is itself unrunnable still counts: it is reported on its own, and naming the
+/// module it was meant to move again here would report one defect twice.
+///
+/// An anchor that is in no crate has no earlier operation to read.
+pub(crate) fn moved_by_earlier_operations(
+    workspace: &Workspace<'_>,
+    ops: &[RefactorOp],
+    index: usize,
+    anchor: &Anchor,
+) -> BTreeSet<String> {
+    let home_of = |anchor: &Anchor| {
+        let module = module_home::module_name(anchor.file()).ok()?;
+        module_home::module_home(workspace, anchor.file(), &module).ok()
+    };
+    let Some(here) = home_of(anchor) else {
+        return BTreeSet::new();
+    };
+    ops[..index]
+        .iter()
+        .filter(|earlier| {
+            earlier.op.moves_across_crates() && earlier.to.is_some() && earlier.to == ops[index].to
+        })
+        .flat_map(RefactorOp::anchors)
+        .filter_map(home_of)
+        .filter(|home| home.crate_dir == here.crate_dir)
+        .map(|home| home.path.join("::"))
+        .collect()
 }
