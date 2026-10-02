@@ -83,6 +83,7 @@ is a different shape from a module — cargo auto-discovers it, so there is no `
 nothing can reference it, so `reexport` is refused; and the destination gains
 `[dev-dependencies]`, not `[dependencies]`. See
 [docs/test-binary-moves.md](docs/test-binary-moves.md).
+[docs/facades.md](docs/facades.md) — the facade and `pub mod` a cross-crate move writes.
 
 Run state is keyed by the **plan**, at `<root>/.restructure/<plan stem>-<digest>/`, so one plan
 follows another under the same root without hand-archiving and `--resume` resumes the plan it was
