@@ -249,7 +249,15 @@ repo-scoped journal).
   runs is refused the same way; edits to anything else (`name`, `variant`) are not.
 - A journal from before write-back, resumed over a plan of ranges and symbols, runs as it did: its
   operations stay unnumbered and the plan is neither refreshed nor written back (mixing epochs in
-  one plan would leave anchors that match neither). Over an item-anchored plan it is refused.
+  one plan would leave anchors that match neither). Over an item-anchored plan it is refused. This
+  compatibility path is a deliberate fallback kept **with the developer's explicit consent
+  (2026-10-02)**, as CLAUDE.md requires for fallbacks.
+- File length, deferred with consent on 2026-10-02: `plan.rs` (799 -> 887) and
+  `runner/entry_points.rs` (602 -> 814) are not decomposed here; their code-issue records are narrowed
+  and `docs/dev/todo/2026-10-02-split-oversized-plan-rs.md` /
+  `...-runner-entry-points-rs.md` carry the follow-up. `plan_store.rs` (new, 522) is deferred until
+  the stack lands, because #539 also edits it: `oversized-file-plan-store.md`,
+  `docs/dev/todo/2026-10-02-split-oversized-plan-store-rs.md`.
 - New error variants: `PlanChangedOnDisk`, `NeedsIndexDaemon`, `PlanOutOfSync`, `PlanUnverifiable` (all `FailedPrecondition`); `ItemAnchorsOnContinuedRun` removed.
 - `RefactorOp.id` added; 14 struct literals across the crate and its tests gained `id: None`.
 
@@ -284,6 +292,11 @@ repo-scoped journal).
   before its first operation — its refusals say "nothing was written", so the plan file is left
   without the ids a load would have given it.
 
+- **The legacy-journal compatibility path is kept** — developer consent, 2026-10-02: a pre-write-back
+  journal resuming a range/symbol plan runs unnumbered with no write-back.
+- **Oversized files are deferred, not split** — developer consent, 2026-10-02 (`plan.rs`,
+  `runner/entry_points.rs`); `plan_store.rs` waits for the stack because #539 edits it.
+
 - **Store in the library, not the daemon** — one code path for served and one-shot runs, per the
   daemon crate's own "two lifetimes, one implementation" rule.
 - **Implicit load on `Apply`** — developer's choice; `load` exists for batch loading and `unload`
@@ -303,9 +316,9 @@ repo-scoped journal).
   the tree it continues on, over the operations it will execute, after checking the plan against the
   journal's `plan_synced` digest.
 - DONE `ledger.rs:136` named the removed `runner::resolve_item_anchors`; now `item_anchor::resolve_item_anchors`.
-- OPEN, needs the developer: the `legacy` path (a journal from before write-back resumes a range/symbol
-  plan as it always did, unnumbered and not written back) is a compatibility branch; CLAUDE.md asks
-  consent before fallbacks. Recorded under Technical Debt; consent not confirmed.
+- DONE (consent given): the `legacy` path (a journal from before write-back resumes a range/symbol
+  plan as it always did, unnumbered and not written back) is a compatibility branch. The developer
+  consented to KEEP it on 2026-10-02. Recorded under Technical Debt and Decisions.
 
 ### From @validate-tests (Test Quality)
 - DONE `sigterm_flushes_every_dirty_plan_before_exit`: `serving.wait()` was unbounded and the load result
@@ -350,9 +363,9 @@ repo-scoped journal).
 
 | File | Before | After | Record | Also in #539 / #540 |
 |---|---|---|---|---|
-| `tddy-code-restructuring/src/plan.rs` | 799 | 887 | `oversized-file-plan.md` (unclaimed) | no |
-| `tddy-code-restructuring/src/runner/entry_points.rs` | 602 | 814 | `oversized-file-runner-entry-points.md` (unclaimed) | no |
-| `tddy-code-restructuring/src/plan_store.rs` | new | 522 | none | #539 |
+| `tddy-code-restructuring/src/plan.rs` | 799 | 887 | `oversized-file-plan.md` (unclaimed, narrowed; deferral consented 2026-10-02) | no |
+| `tddy-code-restructuring/src/runner/entry_points.rs` | 602 | 814 | `oversized-file-runner-entry-points.md` (unclaimed, narrowed; deferral consented 2026-10-02) | no |
+| `tddy-code-restructuring/src/plan_store.rs` | new | 522 | `oversized-file-plan-store.md` (unclaimed) | #539 |
 | `tddy-code-restructuring/src/crate_move/cluster.rs` | 611 | 611 | n/a (one `id: None` literal in tests) | #540 |
 
 ## TODO
