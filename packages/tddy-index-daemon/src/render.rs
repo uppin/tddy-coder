@@ -106,15 +106,18 @@ pub(crate) fn findings(counted: usize) {
 /// carries the whole anchor — file, item paths and fingerprints included — so nothing is taken from
 /// the request. A response without one came from a daemon that predates item anchors, and is said
 /// to be that rather than rendered as a bare range a plan could no longer be trusted to carry.
-pub(crate) fn anchors(response: &AnchorsResponse) {
+///
+/// Whether there was an anchor to render: a run that printed no anchor must not report success.
+pub(crate) fn anchors(response: &AnchorsResponse) -> bool {
     if response.anchor_json.is_empty() {
         log::error!(
             target: crate::MAIN,
             "the anchor came back without its JSON — the answering daemon predates item anchors"
         );
-        return;
+        return false;
     }
     log::info!(target: crate::MAIN, "{}", response.anchor_json);
+    true
 }
 
 /// How far a plan's journal got.
@@ -275,4 +278,36 @@ pub(crate) fn interrupted() {
 /// A refusal, as the thing that failed the run.
 pub(crate) fn refusal(status: &tddy_rpc::Status) {
     log::error!(target: crate::MAIN, "{status}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_anchor_answer_without_its_json_is_not_a_rendered_anchor() {
+        // Given an answer from a daemon that predates item anchors
+        let response = AnchorsResponse::default();
+
+        // When it is rendered
+        let rendered = anchors(&response);
+
+        // Then nothing was printed for a plan to carry, and the run must not call that success
+        assert!(!rendered);
+    }
+
+    #[test]
+    fn an_anchor_answer_with_its_json_is_rendered() {
+        // Given an answer carrying the anchor a plan would hold
+        let response = AnchorsResponse {
+            anchor_json: r#"{"kind":"items"}"#.to_string(),
+            ..AnchorsResponse::default()
+        };
+
+        // When it is rendered
+        let rendered = anchors(&response);
+
+        // Then it was
+        assert!(rendered);
+    }
 }

@@ -74,8 +74,8 @@ pub struct RestructureAnchorsArgs {
     #[arg(long, value_delimiter = ',')]
     pub items: Vec<String>,
 
-    /// `LINE:COL` or `LINE:COL-LINE:COL`: anchor the innermost item enclosing this position, with
-    /// the range relative to it.
+    /// `LINE:COL` or `LINE:COL-LINE:COL`, one-based, columns counted in bytes (not characters):
+    /// anchor the innermost item enclosing this position, with the range relative to it.
     #[arg(long, value_parser = parse_position_range, conflicts_with = "items")]
     pub at: Option<crate::edit::Range>,
 }
@@ -184,6 +184,8 @@ fn normalised_items(items: Vec<String>) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn at_reads_a_caret_as_an_empty_range() {
         assert_eq!(
@@ -213,8 +215,6 @@ mod tests {
             Err("`188` is not LINE:COL or LINE:COL-LINE:COL".to_string())
         );
     }
-
-    use super::*;
 
     fn parse(argv: &[&str]) -> Options {
         let mut all = vec!["restructure"];

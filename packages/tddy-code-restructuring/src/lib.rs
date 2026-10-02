@@ -104,6 +104,22 @@ pub enum RestructureError {
          matches; re-anchor it with `restructure anchors`"
     )]
     ItemChanged { item: String, file: String },
+    /// A run that continues a journal was handed a plan that anchors by item.
+    ///
+    /// Item anchors are resolved against the tree the run starts on, which a continued run no
+    /// longer has: its tree already holds the edits of the operations the journal completed, and
+    /// coordinates read from it would be translated through those edits a second time. Nothing is
+    /// wrong with the plan — it is the plan *store* that does not exist yet.
+    ///
+    /// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
+    /// resolve them.
+    #[error(
+        "this run continues a journal that already applied {applied} operation(s), and the plan \
+         anchors by item: item anchors are resolved against the tree the run starts on, which a \
+         continued run no longer has — run the remainder from a plan of range anchors, or start \
+         the plan afresh"
+    )]
+    ItemAnchorsOnContinuedRun { applied: usize },
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
     /// The server stayed unable to answer one method, as distinct from the plan being wrong.

@@ -160,7 +160,8 @@ pub(crate) struct AnchorsArgs {
     #[arg(long, value_delimiter = ',', value_name = "NAMES")]
     pub(crate) items: Vec<String>,
 
-    /// `LINE:COL` or `LINE:COL-LINE:COL`: anchor the innermost item enclosing this position.
+    /// `LINE:COL` or `LINE:COL-LINE:COL`, one-based, columns counted in bytes (not characters):
+    /// anchor the innermost item enclosing this position.
     #[arg(
         long,
         value_parser = tddy_code_restructuring::restructure_cli::parse_position_range,

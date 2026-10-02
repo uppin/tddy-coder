@@ -11,8 +11,9 @@
 mod harness;
 
 use harness::{
-    a_crate_with_two_inherent_news_and_two_fmts, an_extract_method_at, an_item_anchor,
-    applying_a_plan_of, applying_the_plan_at, at, resolving_the_item, QUEUE_NEW, STACK_NEW,
+    a_crate_with_two_inherent_news_and_two_fmts, a_sink_that_keeps_what_it_hears,
+    an_extract_method_at, an_item_anchor, applying_a_plan_of, applying_the_plan_at,
+    applying_the_plan_with, at, checking_the_plan, resolving_the_item, QUEUE_NEW, STACK_NEW,
     WORKFLOW,
 };
 use tddy_code_restructuring::{Anchor, Position};
@@ -145,6 +146,10 @@ async fn an_edit_inside_the_anchored_item_is_refused_naming_the_item() {
         ))
     );
     assert_eq!(workspace.read(WORKFLOW), edited);
+    assert!(
+        !workspace.holds(".restructure"),
+        "a run refused for a changed item left its state directory behind"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -160,8 +165,17 @@ async fn an_edit_outside_the_anchored_item_is_not_refused() {
     // When the plan is applied
     let summary = applying_the_plan_at(&workspace, plan).await;
 
-    // Then it applies
+    // Then it applies: `Stack::new` lost its lets, and `Queue::new` keeps the edit made to it
     assert_eq!(summary.map(|run| run.applied), Ok(1));
+    let after = workspace.read(WORKFLOW);
+    assert!(
+        after.contains(STACK_NEW_AFTER_THE_EXTRACTION),
+        "Stack::new did not have its lets extracted:\n{after}"
+    );
+    assert!(
+        after.contains("Vec::with_capacity(8)"),
+        "the edit outside the anchored item was lost:\n{after}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -266,8 +280,17 @@ async fn a_v2_plan_with_unrelated_file_drift_runs() {
     // When it is applied
     let summary = applying_the_plan_at(&workspace, plan).await;
 
-    // Then the drifted hint does not refuse it
+    // Then the drifted hint does not refuse it, and the extraction landed in `Stack::new`
     assert_eq!(summary.map(|run| run.applied), Ok(1));
+    let after = workspace.read(WORKFLOW);
+    assert!(
+        after.contains(STACK_NEW_AFTER_THE_EXTRACTION),
+        "Stack::new did not have its lets extracted:\n{after}"
+    );
+    assert!(
+        after.contains("pub const UNRELATED: u32 = 1;"),
+        "the unrelated line was lost:\n{after}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -298,5 +321,130 @@ async fn a_v1_plan_with_the_same_drift_is_still_refused() {
             .expect_err("a v1 plan over a drifted file is refused")
             .starts_with(&format!("snapshot mismatch for {WORKFLOW}")),
         "the refusal was not the snapshot mismatch"
+    );
+}
+
+fn an_extraction_of_queue_news_first_let() -> tddy_code_restructuring::RefactorOp {
+    an_extract_method_at(
+        an_item_anchor(
+            WORKFLOW,
+            "stacks::workflow::Queue::new",
+            QUEUE_NEW,
+            Some((at(2, 9), at(2, 43))),
+            None,
+        ),
+        "fresh_queue_items",
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hinted_file_the_tree_has_since_lost_is_reported_as_drift_and_the_plan_runs() {
+    // Given a v2 plan that also hints at a file which has since been deleted
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = workspace.a_hinted_plan_of_a_tree_that_since_lost(
+        &[an_extraction_of_stack_news_lets(None)],
+        "crates/stacks/src/gone.rs",
+    );
+    let (progress, heard) = a_sink_that_keeps_what_it_hears();
+
+    // When it is applied
+    let summary =
+        applying_the_plan_with(&workspace, plan, |options| options.progress = progress).await;
+
+    // Then it runs, and said the file had drifted rather than refusing over it
+    assert_eq!(summary.map(|run| run.applied), Ok(1));
+    let heard = heard.lock().expect("the lines are readable").join("\n");
+    assert!(
+        heard.contains(
+            "crates/stacks/src/gone.rs has changed since the plan was written; item anchors do \
+             not depend on it"
+        ),
+        "the missing hinted file was not reported as drift:\n{heard}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resumed_run_of_a_plan_that_anchors_by_item_is_refused_as_what_it_is() {
+    // Given a two-operation item-anchored plan, stopped after its first operation
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = workspace.a_hinted_plan_of(&[
+        an_extraction_of_stack_news_lets(None),
+        an_extraction_of_queue_news_first_let(),
+    ]);
+    let first = applying_the_plan_with(&workspace, plan.clone(), |options| {
+        options.stop_after = Some(1);
+    })
+    .await;
+    assert_eq!(first.map(|run| run.applied), Ok(1));
+
+    // When the remainder is resumed
+    let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
+
+    // Then it is refused for what it is — a continued run — and not as a malformed plan
+    let refusal = resumed.expect_err("a continued run of an item-anchored plan is refused");
+    assert!(
+        refusal.starts_with("this run continues a journal that already applied 1 operation(s)"),
+        "the refusal was not the continued-run one:\n{refusal}"
+    );
+    assert!(!refusal.contains("malformed"), "{refusal}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_static_check_of_an_item_anchored_plan_is_not_green_because_it_examined_nothing() {
+    // Given a plan anchored by item
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = workspace.a_hinted_plan_of(&[an_extraction_of_stack_news_lets(None)]);
+
+    // When it is checked without a server
+    let findings = checking_the_plan(&workspace, plan, false).await;
+
+    // Then the operation is a finding, saying only a deep check can examine it
+    let findings = findings.expect("a static check of a parseable plan reports");
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert!(
+        findings[0].contains("anchors by item") && findings[0].contains("check --deep"),
+        "{findings:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deep_check_resolves_an_item_anchor_and_finds_a_sound_plan_sound() {
+    // Given a plan anchored by item over an untouched tree
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = workspace.a_hinted_plan_of(&[an_extraction_of_stack_news_lets(None)]);
+
+    // When it is checked deeply
+    let findings = checking_the_plan(&workspace, plan, true).await;
+
+    // Then the anchor resolved and nothing is found
+    assert_eq!(findings, Ok(Vec::new()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_deep_check_refuses_an_item_anchor_whose_item_is_not_in_its_file() {
+    // Given a plan anchored in an item the file does not declare
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let op = an_extract_method_at(
+        an_item_anchor(
+            WORKFLOW,
+            "stacks::workflow::Deque::new",
+            STACK_NEW,
+            Some((at(2, 9), at(3, 33))),
+            None,
+        ),
+        "fresh_items",
+    );
+    let plan = workspace.a_hinted_plan_of(&[op]);
+
+    // When it is checked deeply
+    let findings = checking_the_plan(&workspace, plan, true).await;
+
+    // Then resolution named the missing item, which only a resolving check could have
+    assert_eq!(
+        findings,
+        Err(format!(
+            "plan is malformed: `stacks::workflow::Deque::new` is not declared in {WORKFLOW}: \
+             nothing there is named `Deque`"
+        ))
     );
 }

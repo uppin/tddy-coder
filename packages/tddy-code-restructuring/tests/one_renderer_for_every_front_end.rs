@@ -12,9 +12,9 @@
 //! true and what lets the daemon, which logs, use it at all.
 
 use tddy_code_restructuring::console;
+use tddy_code_restructuring::plan::{Anchor, Fingerprint, ItemPath};
 use tddy_code_restructuring::runner::{Finding, Outcome, PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::Comparison;
-use tddy_code_restructuring::{Position, Range};
 
 #[test]
 fn renders_an_applied_run_for_a_front_end_that_never_started_a_language_server() {
@@ -133,14 +133,18 @@ fn renders_a_check_that_found_nothing_as_having_found_nothing() {
 
 #[test]
 fn renders_an_anchor_as_the_json_document_a_plan_carries_it_as() {
-    // Given the range a run of items sits at, in the file it was asked about
-    let outcome = Outcome::Anchored {
+    // Given the anchor over a run of two sibling items, as `restructure anchors --items` found it
+    let outcome = Outcome::ItemAnchored(Anchor::Items {
         file: "src/lib.rs".to_string(),
-        range: Range {
-            start: Position { line: 10, col: 1 },
-            end: Position { line: 24, col: 2 },
-        },
-    };
+        items: vec![
+            ItemPath::parse("stacks::workflow::Alpha").expect("a crate-rooted path"),
+            ItemPath::parse("stacks::workflow::Beta").expect("a crate-rooted path"),
+        ],
+        fingerprints: vec![
+            Fingerprint("sha256:aa".into()),
+            Fingerprint("sha256:bb".into()),
+        ],
+    });
 
     // When it is rendered
     let lines = console::outcome(&outcome, false);
@@ -149,7 +153,7 @@ fn renders_an_anchor_as_the_json_document_a_plan_carries_it_as() {
     assert_eq!(
         lines,
         vec![
-            r#"{"end":{"col":2,"line":24},"file":"src/lib.rs","kind":"range","start":{"col":1,"line":10}}"#
+            r#"{"kind":"items","file":"src/lib.rs","items":["stacks::workflow::Alpha","stacks::workflow::Beta"],"fingerprints":["sha256:aa","sha256:bb"]}"#
         ]
     );
 }

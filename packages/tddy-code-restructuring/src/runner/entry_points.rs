@@ -23,9 +23,10 @@ use super::comparison::verify;
 use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
 use super::{
-    commit_operation, open_run_after, parse_options, refuse_a_broken_baseline,
-    refuse_a_broken_result, refuse_repo_scoped_state, restore_ledger, AppliedRun, Command, Finding,
-    Options, Outcome, PlanProgress, RunSummary, SnapshotRewrite, StatePaths,
+    commit_operation, open_run_gated, parse_options, refuse_a_broken_baseline,
+    refuse_a_broken_result, refuse_repo_scoped_state, report_drifted_hints, restore_ledger,
+    AppliedRun, Command, Finding, Options, Outcome, PlanProgress, RunSummary, SnapshotRewrite,
+    StatePaths,
 };
 
 /// Dispatch a restructuring subcommand given a raw command line.
@@ -126,20 +127,19 @@ pub fn apply(
     let plan = read_plan(&plan_path)?;
     let paths = StatePaths::for_plan(root, &plan_path)?;
 
-    // The baseline compile check is the last refusal before anything is written: after the cheap
-    // ones (a plan they turn away is not worth minutes of `cargo check`), and before
-    // `.restructure/` exists, so its "Nothing was written" is true.
-    let mut journal = open_run_after(&plan, root, &paths, &options, || {
-        refuse_a_broken_baseline(root, &plan, &options, &cancel)
-    })?;
-    let mut ledger = restore_ledger(&journal, &paths)?;
+    // Item anchors resolve, and then the baseline compile check runs, both before `.restructure/`
+    // exists — see `open_run_resolving_anchors` for why in that order.
     let mut registry = registry_for(
         client,
         cancel.clone(),
         Arc::clone(&options.progress),
         options.trace,
     );
-    let plan = resolve_item_anchors(&plan, root, &journal, &mut registry)?;
+    let (mut journal, plan) =
+        open_run_resolving_anchors(&plan, root, &paths, &options, &mut registry, || {
+            refuse_a_broken_baseline(root, &plan, &options, &cancel)
+        })?;
+    let mut ledger = restore_ledger(&journal, &paths)?;
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let total = plan.ops.len();
     (options.progress)(&format!(
@@ -351,11 +351,7 @@ pub fn check(
 ) -> Result<Vec<Finding>> {
     let plan = read_plan(&options.plan()?)?;
     plan.verify_snapshot(root)?;
-    for drifted in plan.drifted_hints(root)? {
-        (options.progress)(&format!(
-            "{drifted} has changed since the plan was written; item anchors do not depend on it"
-        ));
-    }
+    report_drifted_hints(&plan, root, &options.progress);
 
     let mut registry = if options.deep {
         let client = client.ok_or_else(|| {
@@ -367,22 +363,20 @@ pub fn check(
     } else {
         registry_for_static()
     };
+    let mut findings: Vec<Finding> = Vec::new();
     // Resolved before anything reads an anchor, so every check below sees the ranges an apply would
-    // act on. A static check has no server to resolve them with, and says so rather than reading an
-    // item anchor as though it were a position.
+    // act on. A static check has no server to resolve them with, so it cannot vouch for an
+    // operation anchored by item: that is a finding for each, not a quiet skip, because a plan of
+    // item anchors passing `check` green would be a claim nothing examined.
     let plan = if !has_item_anchors(&plan) {
         plan
     } else if options.deep {
         item_anchor::resolve_item_anchors(&plan, root, &mut registry)?
     } else {
-        (options.account)(
-            "this plan anchors by item, which only a deep check can resolve — its lexical checks \
-             skip those anchors; run `check --deep`",
-        );
+        findings.extend(unresolvable_without_a_server(&plan));
         plan
     };
     let mut rehearsal = Rehearsal::default();
-    let mut findings: Vec<Finding> = Vec::new();
     let total = plan.ops.len();
     (options.progress)(&format!(
         "check: {total} operation(s){}",
@@ -460,39 +454,24 @@ pub fn check(
     Ok(findings)
 }
 
-/// The range anchor covering a named run of items, ready for a plan to carry.
-pub fn anchors(
-    root: &Path,
-    options: Options,
-    client: Option<Arc<LspClient>>,
-    cancel: CancellationToken,
-) -> Result<crate::edit::Range> {
-    let client = client.ok_or_else(|| {
-        RestructureError::MalformedPlan("anchors requires a rust-analyzer LSP session".into())
-    })?;
-    let source = options.source()?;
-    let file = source.to_string_lossy().to_string();
-
-    if options.items.is_empty() {
-        return Err(usage("anchors needs --items A,B,C"));
-    }
-
-    (options.progress)(&format!(
-        "anchors: `{file}` ({} item(s))",
-        options.items.len()
-    ));
-    let overlay = Overlay::new();
-    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
-    registry
-        .backend_for(&source, crate::plan::RefactorKind::ExtractModule)?
-        .anchor_for(
-            &file,
-            &options.items,
-            &Workspace {
-                root,
-                overlay: &overlay,
-            },
-        )
+/// A finding for each operation a static check cannot examine because an anchor of it names items.
+fn unresolvable_without_a_server(plan: &Plan) -> impl Iterator<Item = Finding> + '_ {
+    plan.ops
+        .iter()
+        .enumerate()
+        .filter(|(_, op)| {
+            op.anchors()
+                .any(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }))
+        })
+        .map(|(index, op)| Finding {
+            operation: index,
+            detail: format!(
+                "{:?} in `{}` anchors by item, which only a deep check can resolve, so this \
+                 static check did not examine it — run `check --deep`",
+                op.op,
+                op.anchor.file()
+            ),
+        })
 }
 
 /// The anchor `restructure anchors` emits: an `items` anchor over `options.items`, or — with
@@ -534,15 +513,45 @@ pub fn item_anchors(
     }
 }
 
-/// `plan` with every item anchor resolved against the tree it is about to run on.
+/// Open a run the way both apply loops must: item anchors resolved, then the baseline compile
+/// check, then `.restructure/` written — and the plan to run, with every anchor lowered to the
+/// snapshot coordinates the ledger translates, handed back beside the journal.
 ///
-/// Item anchors are resolved once, at run open, into the snapshot coordinates the ledger already
-/// translates through the run — so what resolves them has to see the snapshot. A run that continues
-/// a journal does not: its tree already holds the edits of the operations the journal completed, and
-/// coordinates read from it would be translated through those edits a second time.
+/// One function so the CLI's apply and the daemon's cannot diverge on the order. It is this order
+/// because resolving is cheap and refuses for the commonest reasons — an item edited since the plan
+/// was written, absent, or not in its file — while the baseline gate takes minutes of `cargo check`;
+/// and both come before the first write, so their refusals' "nothing was written" stays true and
+/// leaves no `.restructure/` behind.
+///
+/// Item anchors are resolved against the tree the run *starts* on, because that is the tree the
+/// ledger's coordinates are in. A run that continues a journal does not have it: the tree already
+/// holds the edits of the operations the journal completed, and coordinates read from it would be
+/// translated through those edits a second time. Such a run is refused here — once before the gate
+/// from the journal as found, and again against the journal the open returns, since opening a
+/// continued run may adopt a repository-scoped one the first look could not see.
 ///
 /// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
 /// resolve them; until then a resumed run of a plan that has item anchors is refused.
+pub fn open_run_resolving_anchors(
+    plan: &Plan,
+    root: &Path,
+    paths: &StatePaths,
+    options: &Options,
+    registry: &mut BackendRegistry,
+    baseline_gate: impl FnOnce() -> Result<()>,
+) -> Result<(Journal, Plan)> {
+    let (journal, resolved) = open_run_gated(plan, root, paths, options, || {
+        let found = Journal::load(&paths.journal)?;
+        let resolved = resolve_item_anchors(plan, root, &found, registry)?;
+        baseline_gate()?;
+        Ok(resolved)
+    })?;
+    refuse_a_continued_item_plan(plan, &journal)?;
+    Ok((journal, resolved))
+}
+
+/// `plan` with every item anchor resolved against the tree it is about to run on, refusing a run
+/// that continues a journal (see [`open_run_resolving_anchors`]).
 pub fn resolve_item_anchors(
     plan: &Plan,
     root: &Path,
@@ -552,15 +561,17 @@ pub fn resolve_item_anchors(
     if !has_item_anchors(plan) {
         return Ok(plan.clone());
     }
-    if journal.next_op() > 0 {
-        return Err(RestructureError::MalformedPlan(format!(
-            "this run continues a journal that already applied {} operation(s), and the plan \
-             anchors by item: item anchors are resolved against the tree the run starts on, which \
-             a continued run no longer has",
-            journal.next_op()
-        )));
-    }
+    refuse_a_continued_item_plan(plan, journal)?;
     item_anchor::resolve_item_anchors(plan, root, registry)
+}
+
+fn refuse_a_continued_item_plan(plan: &Plan, journal: &Journal) -> Result<()> {
+    if has_item_anchors(plan) && journal.next_op() > 0 {
+        return Err(RestructureError::ItemAnchorsOnContinuedRun {
+            applied: journal.next_op(),
+        });
+    }
+    Ok(())
 }
 
 fn read_plan(path: &Path) -> Result<Plan> {

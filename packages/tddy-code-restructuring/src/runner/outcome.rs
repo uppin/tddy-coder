@@ -64,11 +64,6 @@ pub enum Outcome {
     Applied(RunSummary),
     Status(PlanProgress),
     Checked(Vec<Finding>),
-    /// The range anchor a plan would carry, and the file it is a range in.
-    Anchored {
-        file: String,
-        range: crate::edit::Range,
-    },
     /// The anchor a plan would carry: `items` for named items, `item` for a position.
     ItemAnchored(crate::plan::Anchor),
     Verified(crate::verify::Comparison),

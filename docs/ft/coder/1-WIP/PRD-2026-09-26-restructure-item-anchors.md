@@ -89,8 +89,9 @@ that no longer refuses a plan on its own.
      position, with the relative range, fingerprint and hint filled in — the way an author turns a
      line they read into an anchor that survives.
    - `restructure snapshot <plan>` writes a v2 header for a v2 plan.
-7. **TypeScript**: the TypeScript backend refuses `item`/`items` anchors by name rather than
-   approximating them. Rust v1 only.
+7. **No backend, no approximation**: an `item`/`items` anchor in a file no backend can resolve items
+   for is refused by name (`NoBackend`, or `UnsupportedOp` for a backend that offers no resolver)
+   rather than approximated. Rust v1 only; the TypeScript sidecar is outside this crate.
 
 ### What's Staying the Same
 
@@ -125,8 +126,9 @@ somebody edited the very function it cuts — and then it says which one.
 - [ ] An `item` anchor whose `hint` is wrong by any amount resolves exactly; the hint is never read.
 - [ ] Two `impl` blocks both defining `new`: `…::A::new` and `…::B::new` resolve to their own
       methods; a trait-impl collision is refused until `<T as Trait>::m` is used.
-- [ ] An edit inside the anchored item is refused as `FailedPrecondition`, naming the item and the
-      op; an edit outside it is not.
+- [ ] An edit inside the anchored item is refused as `FailedPrecondition`, naming the item and its
+      file; an edit outside it is not. (The refusal does not name the operation: it is raised while
+      the plan is resolved as a whole, before any operation runs.)
 - [ ] An item absent from its `file`, or whose crate/module prefix does not match `file`, is refused;
       nothing searches another file.
 - [ ] A relative range reaching outside its item is refused as malformed.
@@ -137,7 +139,8 @@ somebody edited the very function it cuts — and then it says which one.
       range anchor.
 - [ ] A v2 plan whose per-file hash drifted for an unrelated edit runs; a v1 plan with the same
       drift is still refused with `snapshot mismatch`.
-- [ ] The TypeScript backend refuses an item anchor by name.
+- [ ] An item anchor in a file no backend can resolve items for is refused by name (`NoBackend`, or
+      `UnsupportedOp`).
 
 ## References
 

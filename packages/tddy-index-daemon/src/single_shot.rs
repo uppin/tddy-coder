@@ -57,8 +57,11 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
         Requested::Anchors(request) => {
             match service.anchors(tddy_rpc::Request::direct(request)).await {
                 Ok(response) => {
-                    render::anchors(&response.into_inner());
-                    Verdict::Held
+                    if render::anchors(&response.into_inner()) {
+                        Verdict::Held
+                    } else {
+                        Verdict::Refused
+                    }
                 }
                 Err(refusal) => refused(&refusal),
             }

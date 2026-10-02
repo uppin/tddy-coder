@@ -74,8 +74,13 @@ async fn anchor_covering(
         ..Options::default()
     };
 
+    // A unary handler has no stream to learn its caller left through, but it is dropped when the
+    // caller goes: the guard turns that drop into the cancellation the index waits listen to. Without
+    // it the wait runs on inside `spawn_blocking` holding `index.hold(root)`, and every later
+    // request for this workspace queues behind it.
+    let cancel = CancellationToken::new();
+    let _stop_when_dropped = cancel.clone().drop_guard();
     let (anchor, range) = tokio::task::spawn_blocking(move || {
-        let cancel = CancellationToken::new();
         let anchor = runner::item_anchors(
             &root,
             options,

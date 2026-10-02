@@ -4,7 +4,7 @@
 //! a sink. A host that called it would learn what the whole run amounted to and nothing about the
 //! operations that made it up — one event per operation, with the files it touched and the
 //! visibility it widened, is not something a line carries — which is why
-//! [`tddy_code_restructuring::runner::open_run_after`],
+//! [`tddy_code_restructuring::runner::open_run_resolving_anchors`],
 //! [`tddy_code_restructuring::runner::restore_ledger`] and
 //! [`tddy_code_restructuring::runner::commit_operation`] were promoted to public: the write-ahead
 //! sequence stays in the library, where a crash in the middle of it is still resumable, and the
@@ -44,14 +44,14 @@ pub(crate) fn apply_plan(
     let plan = Plan::parse(&std::fs::read_to_string(options.plan()?)?)?;
     let paths = StatePaths::under(root);
 
-    // The baseline compile check runs last among the refusals and before `.restructure/` is
-    // written — see `runner::open_run_after`.
-    let mut journal = runner::open_run_after(&plan, root, &paths, options, || {
-        runner::refuse_a_broken_baseline(root, &plan, options, &cancel)
-    })?;
-    let mut ledger = runner::restore_ledger(&journal, &paths)?;
+    // Item anchors resolve and then the baseline compile check runs, both before `.restructure/`
+    // is written — the one shared order, `runner::open_run_resolving_anchors`.
     let mut registry = runner::registry_for(client, cancel.clone(), progress, logged_trace);
-    let plan = runner::resolve_item_anchors(&plan, root, &journal, &mut registry)?;
+    let (mut journal, plan) =
+        runner::open_run_resolving_anchors(&plan, root, &paths, options, &mut registry, || {
+            runner::refuse_a_broken_baseline(root, &plan, options, &cancel)
+        })?;
+    let mut ledger = runner::restore_ledger(&journal, &paths)?;
     let start = options.from.unwrap_or_else(|| journal.next_op());
     let mut overlay = Overlay::new();
     let mut done = 0usize;

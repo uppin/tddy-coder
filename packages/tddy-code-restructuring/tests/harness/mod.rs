@@ -252,6 +252,27 @@ impl AFixtureWorkspace {
         plan
     }
 
+    /// [`Self::a_hinted_plan_of`], whose header also hints at `file`, which is then removed from the
+    /// tree — a hinted file that has since been deleted or moved.
+    pub fn a_hinted_plan_of_a_tree_that_since_lost(
+        &self,
+        ops: &[RefactorOp],
+        file: &str,
+    ) -> PathBuf {
+        self.rewriting(file, "pub const GONE: u32 = 0;\n");
+        let plan = self.a_hinted_plan_of(ops);
+        let hint = serde_json::json!({
+            "sha256": hash_file(&self.root.join(file)).expect("the file hashes"),
+        });
+        let text = std::fs::read_to_string(&plan).expect("the plan reads");
+        let (header, operations) = text.split_once('\n').expect("a header line");
+        let mut header: serde_json::Value = serde_json::from_str(header).expect("a header");
+        header["files"][file] = hint;
+        std::fs::write(&plan, format!("{header}\n{operations}")).expect("the plan is written");
+        self.removing(file);
+        plan
+    }
+
     pub fn removing(&self, relative: &str) {
         std::fs::remove_file(self.root.join(relative))
             .unwrap_or_else(|error| panic!("removing {relative}: {error}"));
@@ -1924,20 +1945,77 @@ pub async fn applying_the_plan_at(
     fixture: &AFixtureWorkspace,
     plan: PathBuf,
 ) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    applying_the_plan_with(fixture, plan, |_| {}).await
+}
+
+/// [`applying_the_plan_at`], with `adjust` given the run's options before it starts — for a run
+/// that stops early, resumes, or listens to what it reports.
+pub async fn applying_the_plan_with(
+    fixture: &AFixtureWorkspace,
+    plan: PathBuf,
+    adjust: impl FnOnce(&mut runner::Options),
+) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
     let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
     let root = fixture.path().to_path_buf();
     let client = a_rust_analyzer_rooted_at(&root).await;
     let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
-    let options = runner::Options {
+    let mut options = runner::Options {
         command: runner::Command::Apply,
         target: Some(plan),
         ..runner::Options::default()
     };
+    adjust(&mut options);
     tokio::task::spawn_blocking(move || {
         runner::apply(&root, options, Some(client), cancel).map_err(|error| error.to_string())
     })
     .await
     .expect("the blocking half of the apply joins")
+}
+
+/// What a `check` of the plan at `plan` found, as the lines a finding reads as — the static pass
+/// when `deep` is false, which needs no server, and the pass through rust-analyzer when it is true.
+pub async fn checking_the_plan(
+    fixture: &AFixtureWorkspace,
+    plan: PathBuf,
+    deep: bool,
+) -> Result<Vec<String>, String> {
+    let root = fixture.path().to_path_buf();
+    let options = runner::Options {
+        command: runner::Command::Check,
+        target: Some(plan),
+        deep,
+        ..runner::Options::default()
+    };
+    let found = if deep {
+        let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+        let client = a_rust_analyzer_rooted_at(&root).await;
+        let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+        tokio::task::spawn_blocking(move || runner::check(&root, options, Some(client), cancel))
+            .await
+            .expect("the blocking half of the check joins")
+    } else {
+        runner::check(&root, options, None, CancellationToken::new())
+    };
+    found
+        .map(|findings| findings.into_iter().map(|finding| finding.detail).collect())
+        .map_err(|error| error.to_string())
+}
+
+/// A progress sink that keeps every line it is given, and the handle to read them back.
+pub fn a_sink_that_keeps_what_it_hears() -> (
+    tddy_code_restructuring::backends::rust::ProgressSink,
+    Arc<std::sync::Mutex<Vec<String>>>,
+) {
+    let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keeper = Arc::clone(&heard);
+    let sink: tddy_code_restructuring::backends::rust::ProgressSink =
+        Arc::new(move |line: &str| {
+            keeper
+                .lock()
+                .expect("the sink's lines are readable")
+                .push(line.to_string());
+        });
+    (sink, heard)
 }
 
 /// Resolve `item` in `file` through rust-analyzer's outline.
@@ -1952,21 +2030,6 @@ pub async fn resolving_the_item(
         use tddy_code_restructuring::item_anchor::ItemResolver;
         backend
             .resolve_item(&file, &path)
-            .map_err(|error| error.to_string())
-    })
-    .await
-}
-
-/// The anchor `restructure anchors --at` would emit for `range` in `file`.
-pub async fn anchoring_at(
-    fixture: &AFixtureWorkspace,
-    file: &str,
-    range: tddy_code_restructuring::Range,
-) -> Result<Anchor, String> {
-    let root = fixture.path().to_path_buf();
-    let file = file.to_string();
-    with_a_rust_backend(fixture, move |backend| {
-        tddy_code_restructuring::item_anchor::item_anchor_at(&root, &file, range, backend)
             .map_err(|error| error.to_string())
     })
     .await

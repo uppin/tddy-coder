@@ -1468,11 +1468,23 @@ impl RustBackend {
 
     /// The document's outline, once the server is able to give one.
     ///
-    /// Until the server has loaded the workspace it answers `documentSymbol` for an open document
+    /// Until the server has loaded the workspace it may answer `documentSymbol` for an open document
     /// with no symbols at all, which reads exactly like a file that defines nothing. That is how
-    /// `restructure anchors` came to refuse every item of every file: it took the first answer. An
-    /// empty outline is only believed once the crate graph has been observed loaded — an outline
-    /// that has items in it is the server's real answer whenever it arrives.
+    /// `restructure anchors` came to refuse every item of every file: it took the first answer.
+    /// (`readiness.rs` notes the server otherwise answers this request from the syntax tree, so
+    /// *whether* a loading server answers early-empty is an unreproduced hypothesis here.)
+    ///
+    /// What *is* reproduced is the opposite hazard, which the original wait had: it looped while the
+    /// outline was empty and `indexed` unset, and nothing on the anchors path sets `indexed`, so a
+    /// file that genuinely defines nothing never returned — against a live rust-analyzer it ran
+    /// until the caller's token fired (180s in the acceptance harness).
+    ///
+    /// An outline with items in it is the server's real answer whenever it arrives. An empty one is
+    /// believed only once the graph has been *observed* loaded — [`Self::outline_is_the_servers_answer`]
+    /// — so a file that genuinely defines nothing (a `mod.rs` of `use` lines, a comments-only file)
+    /// is answered as soon as the server reports itself quiescent, and a degraded index refuses
+    /// rather than vouching for the emptiness. The wait is otherwise ended only by the caller's
+    /// cancellation, as for every other wait here, and then names where the index got to.
     fn settled_outline(&mut self, uri: &str) -> Result<Value> {
         let started = Instant::now();
         loop {
@@ -1480,13 +1492,20 @@ impl RustBackend {
                 "textDocument/documentSymbol",
                 json!({ "textDocument": { "uri": uri } }),
             )?;
-            if self.indexed || !outline_is_empty(&symbols) {
+            if self.outline_is_the_servers_answer(&symbols) {
+                self.refuse_degraded_index()?;
                 return Ok(symbols);
             }
             if !self.keep_waiting(INDEXING_POLL) {
                 return Err(self.incomplete_index(started.elapsed()));
             }
         }
+    }
+
+    /// Whether `symbols` is an answer about the file rather than the silence of a server still
+    /// loading: it has items, or the server has been seen to finish loading.
+    fn outline_is_the_servers_answer(&self, symbols: &Value) -> bool {
+        !outline_is_empty(symbols) || self.indexed || self.chatter.quiescent()
     }
 
     /// The file's module-level items, in the order they appear.
@@ -5723,6 +5742,55 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// sent, so what ends one is answerable without a language server at all.
     fn a_backend() -> RustBackend {
         RustBackend::new("/usr/bin/rust-analyzer", "/tmp", "/tmp")
+    }
+
+    fn a_server_status_saying_quiescent(quiescent: bool) -> Value {
+        json!({
+            "method": "experimental/serverStatus",
+            "params": { "health": "ok", "quiescent": quiescent }
+        })
+    }
+
+    #[test]
+    fn an_empty_outline_is_not_believed_before_the_server_has_been_seen_to_load() {
+        // Given a server that has said it is still loading
+        let mut backend = a_backend();
+        backend
+            .chatter
+            .absorb(&a_server_status_saying_quiescent(false));
+
+        // When it answers with no symbols
+        let believed = backend.outline_is_the_servers_answer(&json!([]));
+
+        // Then that is the silence of a loading server, not a file that defines nothing
+        assert!(!believed);
+    }
+
+    #[test]
+    fn an_empty_outline_is_believed_once_the_server_has_been_seen_to_finish_loading() {
+        // Given a server that has reported itself quiescent
+        let mut backend = a_backend();
+        backend
+            .chatter
+            .absorb(&a_server_status_saying_quiescent(true));
+
+        // When it answers with no symbols
+        let believed = backend.outline_is_the_servers_answer(&json!([]));
+
+        // Then the file genuinely defines nothing, and nothing waits for more
+        assert!(believed);
+    }
+
+    #[test]
+    fn an_outline_with_items_is_believed_whenever_it_arrives() {
+        // Given a server that has not said anything about its state
+        let backend = a_backend();
+
+        // When it answers with an item
+        let believed = backend.outline_is_the_servers_answer(&json!([{ "name": "Queue" }]));
+
+        // Then it is the real answer
+        assert!(believed);
     }
 
     /// The replacement for the budgets: nothing but the caller ends a wait, and it ends it at once

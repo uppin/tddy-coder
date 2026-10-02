@@ -25,7 +25,8 @@ PR: [#537](https://github.com/uppin/tddy-coder/pull/537)
 - The schema v2 header (`files.<path>.{sha256, modified}` hints) and v1 compatibility.
 - `restructure anchors --items` (working, emitting `items`) and `anchors --at` (new, emitting `item`),
   on the in-process path and through the daemon's `Anchors` RPC.
-- The TypeScript backend's refusal of item anchors.
+- The refusal of an item anchor in a file no backend can resolve items for (`NoBackend`,
+  `UnsupportedOp`); the TypeScript sidecar is outside this crate.
 
 ## Boundaries
 
@@ -75,12 +76,13 @@ Real dependency edges, as opposed to the branch line:
 
 Open items this change runs into.
 
-### ✅ RESOLVED HERE — `restructure anchors` resolves no item — [`broken-restructure-anchors-empty-outline.md`](../../../packages/tddy-code-restructuring/docs/code-issues/broken-restructure-anchors-empty-outline.md)
+### ⚠ PARTIALLY ADDRESSED HERE (record stays, narrowed) — `restructure anchors` resolves no item — [`broken-restructure-anchors-empty-outline.md`](../../../packages/tddy-code-restructuring/docs/code-issues/broken-restructure-anchors-empty-outline.md)
 
 Blocking: the item-path resolver walks the same `documentSymbol` outline that comes back empty. Every
 route around it is wrong — a second outline reader would duplicate the defect's cause, and parsing
-the file ourselves would bypass the LSP the anchor exists to trust. Fixed in this node; its wrap
-deletes the record.
+the file ourselves would bypass the LSP the anchor exists to trust. The empty-outline wait is reproduced and fixed in this node; the warm-path refusal and the cold-path
+`lsp server exited` are not shown fixed at repo scale, so the record stays, narrowed, and this node's
+wrap does **not** delete it.
 
 ### ℹ ANSWERED ELSEWHERE — `restructure snapshot` cannot rebase a stale plan — [`2026-09-24-restructure-snapshot-cannot-rebase-a-stale-plan.md`](../todo/2026-09-24-restructure-snapshot-cannot-rebase-a-stale-plan.md)
 
@@ -129,7 +131,7 @@ verbatim and corrected only inside one run. One unrelated PR made six #524 plans
 - [x] Schema v2 header; v1 unchanged
 - [x] `anchors --items` fixed (empty outline) and emitting `items`; `anchors --at` emitting `item`
 - [x] Daemon `Anchors` RPC and `tddy-tools` client carry the new shape
-- [x] TypeScript backend refuses item anchors
+- [x] An item anchor in a file no backend can resolve items for is refused by name
 - [x] Skill and plan-schema reference updated
 
 ## Technical Changes
@@ -164,9 +166,11 @@ verbatim and corrected only inside one run. One unrelated PR made six #524 plans
 - `plan.rs`: anchor kinds, `ItemPath`, v2 header, validation (range inside item, adjacency).
 - `backends/rust/item_path.rs` (new): resolver; `backends/rust.rs`: route item anchors, fix the
   outline read behind `places_of`.
-- `runner.rs`: `resolve_item_anchors` before `open_run_after`.
+- `runner.rs` / `runner/entry_points.rs`: `open_run_resolving_anchors` — item anchors resolve, then
+  the baseline compile gate, then `.restructure/` is written; shared by the CLI apply and the daemon's.
 - `restructure_args.rs` / `restructure_cli.rs`: `anchors --at`.
-- TypeScript backend: refuse item anchors.
+- Registry: an item anchor in a file no backend claims is `NoBackend`; a backend without an item
+  resolver is `UnsupportedOp`.
 
 #### tddy-index-daemon
 - `proto/code_index.proto`: `AnchorsRequest.at` (optional `SourceRange`), `AnchorsResponse.anchor_json`.
@@ -226,10 +230,10 @@ Every refusal the resolver can produce has a test naming it; every anchor field 
 
 - `anchors_at_carries_the_position_rather_than_items` — the daemon's command line carries `--at`
   into `AnchorsRequest.at`. The RPC's own behaviour is the library's `item_anchors`, which the two
-  acceptance suites above drive against a live server; the daemon's existing fake-server anchors test
-  now asserts `range` only, since the fake outline has no text to fingerprint.
+  acceptance suites above drive against a live server; the daemon's fake-server anchors tests assert
+  the `range` and the `anchor_json` a plan would carry, for `--items` and for `--at`.
 
-### Unit tests (red)
+### Unit tests
 
 - `plan.rs`: `an_item_path_names_its_crate_and_its_segments`,
   `a_trait_qualified_segment_names_its_type_and_its_trait`, `an_item_path_of_one_segment_is_refused`,
@@ -240,31 +244,43 @@ Every refusal the resolver can produce has a test naming it; every anchor field 
 - `backends/rust/item_path.rs`: outline walk (4).
 - `restructure_args.rs`: `--at` parsing (3).
 
-All fail at this node's own `TODO(item-anchors)` stubs; `a_v1_plan_with_the_same_drift_is_still_refused`
-passes today by design — it is the v1 regression guard.
+`a_v1_plan_with_the_same_drift_is_still_refused` is the v1 regression guard.
 
 ## Technical Debt & Production Readiness
 
 Green-phase notes (what the implementation settled, and what it left):
 
-- **Resumed runs refuse item anchors** — `runner::resolve_item_anchors` resolves against the tree the
-  run starts on, and a run whose journal already completed operations no longer has it (the ledger
-  would translate coordinates read from the edited tree a second time). `TODO(plan-store)` in
-  `runner/entry_points.rs`; the plan store's per-op refresh is what lifts it.
+- **Continued runs refuse item anchors** — item anchors resolve against the tree the run starts on,
+  and a run whose journal already completed operations no longer has it (the ledger would translate
+  coordinates read from the edited tree a second time). Refused as
+  `RestructureError::ItemAnchorsOnContinuedRun` (not a malformed plan: nothing is wrong with the
+  plan). `TODO(plan-store)` in `runner/entry_points.rs`; the plan store's per-op refresh is what
+  lifts it.
+- **Resolution precedes the baseline compile gate** — `open_run_resolving_anchors` is the one order
+  both apply loops use, so an item changed/absent/prefix refusal surfaces before minutes of
+  `cargo check` and leaves no `.restructure/` behind.
 - **`tddy-lsp`: `LspClient::root_uri()`** — `ItemResolver::resolve_item(file, item)` is given only a
   workspace-relative file, and a bridged backend holds only the client, so the client now reports the
   root it was initialized against. One accessor, no behaviour change.
-- **Static `check` skips item anchors** (says so on the account sink); `check --deep` resolves them
+- **Static `check` cannot examine item anchors**, so it reports each item-anchored operation as a
+  finding (a plan of item anchors never passes a static check green); `check --deep` resolves them
   first. A static check has no server to resolve with.
-- **TypeScript refusal** — this crate has no TypeScript backend, so "refuses by name" is the
-  registry's: `LanguageBackend::item_resolver` defaults to `None` and the registry answers
+- **No-resolver refusal** — this crate has no TypeScript backend (`Language` has only Rust), so
+  "refuses by name" is the registry's: `LanguageBackend::item_resolver` defaults to `None` and the registry answers
   `UnsupportedOp { op: "item anchors" }`; a file with no backend at all is `NoBackend`.
-- **The empty outline** — diagnosed from the server's contract, not reproduced: rust-analyzer answers
-  `documentSymbol` for an open document with no symbols until its VFS has loaded, and
-  `ensure_indexed` treats an empty outline as "nothing to warm up" and leaves `indexed` false, so the
-  first answer was taken as the file's. `settled_outline` now waits out an empty answer until the
-  graph is observed loaded. The fixture crates answer immediately, so no acceptance test exercises
-  the wait itself. The cold path's `lsp server exited` is not addressed — it is a server exit, not
+- **The empty outline** — two parts. *Reproduced:* the first `settled_outline` looped while the
+  outline was empty and `indexed` unset, and nothing on the anchors path sets `indexed`, so a file
+  that genuinely defines nothing never returned (a live rust-analyzer: the acceptance test ran to
+  its 180s token and failed `IndexingIncomplete`). *Still a hypothesis, not reproduced:* rust-analyzer is believed to answer
+  `documentSymbol` for an open document with no symbols until its VFS has loaded (`readiness.rs`
+  notes the server otherwise answers it from the syntax tree), and `ensure_indexed` treats an empty
+  outline as "nothing to warm up" and leaves `indexed` false, so the first answer was taken as the
+  file's. `settled_outline` now believes an empty answer only once the server has been *observed*
+  quiescent (or `indexed`), refuses a degraded index, and is otherwise ended only by the caller's
+  cancellation token — the daemon's anchors handler now carries one that fires when the request is
+  dropped. A genuinely empty file (comments only) is pinned by an acceptance test and by unit tests
+  of the decision. A server that never sends `experimental/serverStatus` still waits on an empty
+  outline until its caller stops waiting. The cold path's `lsp server exited` is not addressed — it is a server exit, not
   an outline.
 - **`walk_outline`** is the unit-test spelling of the walk; production calls the private `walk`
   and words its refusals with the file, which the signature does not carry.
@@ -272,8 +288,7 @@ Green-phase notes (what the implementation settled, and what it left):
   `Cargo.toml` — an item path is rooted in a package, and the fixture had none. Assertion untouched.
 
 - Draft-PR-contract stubs (all implemented; none remain): every `TODO(item-anchors)` in `plan.rs`, `item_anchor.rs`,
-  `backends/rust/item_path.rs` (with `#[allow(dead_code)]` on `walk_outline`/`OutlineHit` until
-  `resolve_item` calls them), `ledger.rs`, `backends/rust.rs` (`unlowered_item_anchor`),
+  `backends/rust/item_path.rs`, `ledger.rs`, `backends/rust.rs` (`unlowered_item_anchor`),
   `runner/entry_points.rs` (`item_anchors`), `restructure_args.rs` (`parse_position_range`),
   `tddy-index-daemon/src/queries.rs` (`anchor_json`), `tddy-tools/src/index_client.rs` (`--at`).
 - Fingerprint text is defined as the item's whole lines (indentation included), not the exact

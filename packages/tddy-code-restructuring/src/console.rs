@@ -22,7 +22,7 @@
 //! `ExitCode`. So the wording of each refusal is published ([`findings_refusal`],
 //! [`comparison_refusal`]) and the judgement stays with the caller that has to act on it.
 
-use crate::edit::{Range, VisibilityChange};
+use crate::edit::VisibilityChange;
 use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 use crate::verify::Comparison;
 
@@ -36,7 +36,6 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
         Outcome::Applied(summary) => run_summary(summary, rehearsal),
         Outcome::Status(progress) => plan_progress(progress),
         Outcome::Checked(found) => findings(found),
-        Outcome::Anchored { file, range } => vec![anchor(file, *range)],
         Outcome::ItemAnchored(found) => vec![item_anchor(found)],
         Outcome::Verified(comparison) => self::comparison(comparison),
         Outcome::Snapshotted(rewrite) => snapshot_rewrite(rewrite),
@@ -179,20 +178,6 @@ pub fn comparison_refusal(comparison: &Comparison) -> String {
         comparison.missing.len(),
         comparison.added.len()
     )
-}
-
-/// The anchor a run of items sits at, as the JSON document a plan carries it as.
-///
-/// JSON rather than prose because this answer is written to be pasted into a plan. `file` is
-/// carried alongside the range because a range without the file it is in is not an anchor.
-pub fn anchor(file: &str, range: Range) -> String {
-    serde_json::json!({
-        "kind": "range",
-        "file": file,
-        "start": { "line": range.start.line, "col": range.start.col },
-        "end": { "line": range.end.line, "col": range.end.col }
-    })
-    .to_string()
 }
 
 /// The anchor `restructure anchors` found, as the JSON document a plan carries it as.

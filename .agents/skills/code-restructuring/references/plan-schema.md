@@ -14,7 +14,8 @@ Schema **v2** replaces the refusing snapshot with per-file hints, and is what a 
 {"v":2,"files":{"<path>":{"sha256":"sha256:<digest>","modified":"<RFC 3339>"}, …}}
 ```
 
-A v2 header never refuses a run: a file whose hash drifted is reported on the progress line and the
+`modified` is informational and left out when the file's time is before the epoch. A v2 header never
+refuses a run: a file whose hash drifted, or which is gone, is reported on the progress line and the
 plan runs, because an item anchor does not depend on the rest of the file. A v1 plan is read exactly as
 before, including the `snapshot mismatch` refusal. `restructure snapshot` rewrites the header of
 whichever version the plan has.
@@ -63,10 +64,11 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 - A relative range reaching outside its item is `plan is malformed`; an item whose text no longer
   matches `fingerprint` is refused naming the item. `items` must be contiguous: only blank lines may
   separate them.
-- Item anchors are resolved once, **at run open**, against the tree the run starts on. A **resumed**
-  run (`--resume`, or one whose journal already completed operations) cannot resolve them and is
-  refused. A deep `check` resolves them; a plain `check` cannot and says so.
-- Rust only. A file no Rust backend claims refuses an item anchor by name.
+- Item anchors are resolved once, **at run open**, against the tree the run starts on. A run whose
+  journal already completed operations (a `--resume` or `--from` over a partly applied plan) no
+  longer has that tree and is refused when the plan anchors by item. A deep `check` resolves them; a
+  plain `check` cannot, so it reports each item-anchored operation as a finding rather than passing it.
+- Rust only. An item anchor in a file no backend can resolve items for is refused by name.
 
 ## Operations
 

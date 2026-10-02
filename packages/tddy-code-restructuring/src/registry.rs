@@ -343,4 +343,40 @@ mod tests {
 
         assert_eq!(edit, Resolution::default());
     }
+
+    fn an_item_path() -> ItemPath {
+        ItemPath::parse("styles::Button").expect("the item path parses")
+    }
+
+    #[test]
+    fn an_item_anchor_in_a_file_no_backend_claims_is_refused_by_extension() {
+        // Given a registry with no backend for `.css`
+        let mut registry = registry();
+
+        // When an item is resolved in a stylesheet
+        let resolved = registry.resolve_item("styles.css", &an_item_path());
+
+        // Then the file is refused as one nothing can resolve items for, naming its extension
+        match resolved {
+            Err(RestructureError::NoBackend { extension }) => assert_eq!(extension, "css"),
+            other => panic!("expected NoBackend, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn an_item_anchor_through_a_backend_without_a_resolver_is_refused_by_name() {
+        // Given a backend for `.rs` that offers no item resolver
+        let mut registry = registry();
+
+        // When an item is resolved in a Rust file
+        let resolved = registry.resolve_item("src/lib.rs", &an_item_path());
+
+        // Then it is refused as an unsupported operation, not read as though it were a range
+        match resolved {
+            Err(RestructureError::UnsupportedOp { backend, op }) => {
+                assert_eq!((backend.as_str(), op.as_str()), ("Rust", "item anchors"));
+            }
+            other => panic!("expected UnsupportedOp, got {:?}", other.err()),
+        }
+    }
 }

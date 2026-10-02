@@ -277,8 +277,10 @@ impl Fingerprint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileHint {
     pub sha256: String,
-    /// RFC 3339.
-    pub modified: String,
+    /// RFC 3339, when the file's modification time is one it can state — absent for a time before
+    /// the epoch rather than a date that is not the file's. Never read; it is there for a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
 }
 
 /// The operations a plan may contain.
@@ -579,14 +581,20 @@ impl Plan {
     /// Reported, never refused: an item anchor survives an edit outside its item, so a drifted file
     /// says only that the plan was written against an older tree. A v1 plan has no hints and
     /// reports nothing — its snapshot refuses through [`Plan::verify_snapshot`].
-    pub fn drifted_hints(&self, root: &std::path::Path) -> Result<Vec<String>> {
-        let mut drifted = Vec::new();
-        for (path, hint) in &self.files {
-            if crate::apply::hash_file(&root.join(path))? != hint.sha256 {
-                drifted.push(path.clone());
-            }
-        }
-        Ok(drifted)
+    ///
+    /// A hinted file that has been deleted, moved, or can no longer be read has drifted too — it is
+    /// the plainest case of "older tree" — so it is reported, never an error. (`hash_file` alone
+    /// would read a missing file as empty, and so miss one whose hint was of an empty file.)
+    pub fn drifted_hints(&self, root: &std::path::Path) -> Vec<String> {
+        self.files
+            .iter()
+            .filter(|(path, hint)| {
+                let file = root.join(path);
+                !file.is_file()
+                    || crate::apply::hash_file(&file).map_or(true, |hash| hash != hint.sha256)
+            })
+            .map(|(path, _)| path.clone())
+            .collect()
     }
 
     /// Verify every snapshot hash still matches the working tree. Fails loudly on drift.
@@ -616,11 +624,11 @@ fn hint_of(path: &std::path::Path) -> Result<FileHint> {
     })
 }
 
-/// `time` as an RFC 3339 UTC timestamp, to the second.
-fn rfc3339(time: std::time::SystemTime) -> String {
-    let seconds = time
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_secs() as i64);
+/// `time` as an RFC 3339 UTC timestamp, to the second — or `None` for a time this cannot state,
+/// which is one before the epoch. Answering `1970-01-01` for it would be a date that is not the
+/// file's, and the hint is never read, so leaving it out loses nothing.
+fn rfc3339(time: std::time::SystemTime) -> Option<String> {
+    let seconds = i64::try_from(time.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()?;
     let (days, within_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
 
     // Days since 1970-01-01 to a civil date: the era/day-of-era arithmetic of Howard Hinnant's
@@ -640,12 +648,12 @@ fn rfc3339(time: std::time::SystemTime) -> String {
     };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
 
-    format!(
+    Some(format!(
         "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
         within_day / 3_600,
         within_day % 3_600 / 60,
         within_day % 60
-    )
+    ))
 }
 
 /// The `v` a header line declares, read before the header's shape is known.
@@ -1312,7 +1320,7 @@ mod tests {
                 "src/lib.rs".to_string(),
                 FileHint {
                     sha256: "sha256:ab".to_string(),
-                    modified: "2026-09-26T00:00:00Z".to_string(),
+                    modified: Some("2026-09-26T00:00:00Z".to_string()),
                 }
             )])
         );
@@ -1374,7 +1382,7 @@ mod tests {
                 "lib.rs".to_string(),
                 FileHint {
                     sha256: "sha256:stale".to_string(),
-                    modified: "2020-01-01T00:00:00Z".to_string(),
+                    modified: Some("2020-01-01T00:00:00Z".to_string()),
                 },
             )]),
             ops: vec![],
@@ -1390,21 +1398,48 @@ mod tests {
             reread.files["lib.rs"].sha256,
             crate::apply::hash_file(&workspace.path().join("lib.rs")).unwrap()
         );
-        assert_eq!(
-            plan.drifted_hints(workspace.path()).unwrap(),
-            vec!["lib.rs"]
-        );
-        assert_eq!(
-            reread.drifted_hints(workspace.path()).unwrap(),
-            Vec::<String>::new()
-        );
+        assert_eq!(plan.drifted_hints(workspace.path()), vec!["lib.rs"]);
+        assert_eq!(reread.drifted_hints(workspace.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_hinted_file_that_is_gone_is_reported_as_drift_not_as_an_error() {
+        // Given a v2 plan hinting at a file the tree no longer has — even one hinted while empty,
+        // which hashes the same as a missing file
+        let workspace = tempfile::tempdir().unwrap();
+        let empty = crate::apply::hash_file(&workspace.path().join("absent.rs")).unwrap();
+        let plan = Plan {
+            version: 2,
+            snapshot: BTreeMap::new(),
+            files: BTreeMap::from([(
+                "gone.rs".to_string(),
+                FileHint {
+                    sha256: empty,
+                    modified: None,
+                },
+            )]),
+            ops: vec![],
+        };
+
+        // When the hints are compared with the tree
+        let drifted = plan.drifted_hints(workspace.path());
+
+        // Then the missing file is named as drifted
+        assert_eq!(drifted, vec!["gone.rs"]);
     }
 
     #[test]
     fn a_timestamp_is_written_as_rfc_3339_utc() {
         let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
 
-        assert_eq!(rfc3339(time), "2001-09-09T01:46:40Z");
+        assert_eq!(rfc3339(time).as_deref(), Some("2001-09-09T01:46:40Z"));
+    }
+
+    #[test]
+    fn a_time_before_the_epoch_is_left_out_rather_than_written_as_1970() {
+        let time = std::time::UNIX_EPOCH - std::time::Duration::from_secs(60);
+
+        assert_eq!(rfc3339(time), None);
     }
 
     #[test]
