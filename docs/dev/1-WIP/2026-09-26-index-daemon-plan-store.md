@@ -164,12 +164,14 @@ repo-scoped.
 
 ## Implementation Milestones
 
-- [ ] Op ids assigned, refused on duplicate, flushed
-- [ ] Store load/unload/list; Apply from the store; implicit load
-- [ ] Per-op refresh of the applied plan (v1 ranges through the ledger; item anchors re-relativized)
-- [ ] Flush policy + clobber refusal + shutdown flush
-- [ ] RPCs and CLI on both front ends
-- [ ] `StatePaths::for_plan` in the daemon
+- [x] Op ids assigned, refused on duplicate, flushed
+- [x] Store load/unload/list; Apply from the store; implicit load
+- [x] Per-op refresh of the applied plan (v1 ranges through the ledger; item anchors re-relativized)
+- [x] Flush policy + clobber refusal + shutdown flush
+- [x] RPCs and CLI on both front ends (`tddy-tools` and the `tddy-index-daemon` single-shot line)
+- [x] `StatePaths::for_plan` in the daemon (via `runner::open_plan_run`)
+- [ ] `--from <id>` over the wire — `ApplyRequest` has no field for it; refused with a `TODO(plan-store)`
+      in `tddy-tools/src/index_client.rs` (see Decisions)
 
 ## Testing Plan
 
@@ -190,6 +192,15 @@ harness fixtures. The RPCs, shutdown flush and code-issue fix are acceptance-tes
 - `a_flush_onto_a_plan_changed_on_disk_is_refused_and_leaves_the_file`
 - `apply_executes_the_loaded_ops_not_the_edited_file` (live rust-analyzer)
 - `apply_without_a_daemon_still_flushes_the_plan_at_exit` (live rust-analyzer)
+
+### tddy-code-restructuring — `tests/plan_store_resume_acceptance.rs` (added in green)
+
+- `the_plan_written_back_after_its_first_operation_anchors_the_second_below_where_it_was` (live
+  rust-analyzer)
+- `a_resumed_run_applies_the_second_operation_where_its_text_now_is` (live rust-analyzer)
+
+Not in the red phase: the changeset's `the_applied_plans_pending_op_follows_an_edit_inside_its_item`
+was never written — the stub-resolver unit test below pins the item-anchor refresh instead.
 
 ### tddy-code-restructuring — `src/plan_store.rs` (unit, no server — a stub `ItemResolver`)
 
@@ -226,16 +237,40 @@ repo-scoped journal).
 
 ## Technical Debt & Production Readiness
 
-- Draft-PR-contract stubs: `TODO(plan-store)` in `plan.rs` (`to_jsonl`), `plan_store.rs`,
-  `runner/entry_points.rs` (`apply_from_store`, the daemon-only command arms),
-  `tddy-index-daemon/src/queries.rs` (three RPCs answer `unimplemented`), `tddy-tools/src/index_client.rs`.
-- Still to add in green (no successor compiles against them): `load` / `unload` / `plans` on the
-  `tddy-index-daemon` single-shot command line (`cli.rs`), the store per root in `index.rs`, the
-  flush on shutdown in `serve.rs` / `main.rs`, `StatePaths::for_plan` in `apply.rs`.
+- Every `TODO(plan-store)` stub of the contract commit is implemented. One new marker remains:
+  `tddy-tools/src/index_client.rs` (`from_index`) — `--from <id>` through the daemon.
+- `ItemAnchorsOnContinuedRun` keeps its `TODO(plan-store)` and its refusal: `item_anchor_acceptance`
+  pins a resumed item-anchored run as refused, and lifting it means re-resolving item anchors against
+  an edited tree with the ledger already folded — a separate change (see Decisions).
+- A crash between the journal's `completed` record and the plan write-back leaves the file one
+  operation behind the journal; a resume then reads anchors from before that operation. The window
+  is one rename wide, and nothing detects it. A plan resumed from a journal written before this
+  change (anchors never written back) is read the same wrong way.
 - New error variants: `PlanChangedOnDisk`, `NeedsIndexDaemon` (both `FailedPrecondition`).
 - `RefactorOp.id` added; 14 struct literals across the crate and its tests gained `id: None`.
 
 ## Decisions & Trade-offs
+
+- **Anchors in the store are current, so a run translates through its own edits only.** After each
+  committed operation the pending operations are rewritten for the tree and the plan is flushed
+  synchronously (not left to the debounce), so the file never lags the journal by more than that one
+  step. `runner::open_plan_run` still verifies the ledger checkpoint against the journal but starts
+  the run's translation ledger empty: folding the journal would translate anchors through earlier
+  runs' edits a second time. Proven end to end by `plan_store_resume_acceptance`.
+- **A refresh leaves an item it can no longer resolve as written.** `MalformedPlan` from the
+  resolver (item absent, ambiguous, outside the file) is the stale-op case the boundaries put out of
+  scope; any other failure (cancelled, server defect) propagates.
+- **`unload` drops a plan whose file changed on disk without writing it**, since "unload it and load
+  it again" is how a refused flush tells the human to take their edit over the store's. Every other
+  write failure keeps the plan held.
+- **`load` is all or nothing**; naming a plan to `unload` that is not held is refused before anything
+  is dropped.
+- **`--from <id>` reaches runs with no daemon only.** `ApplyRequest.from_op` would break every
+  exhaustive `ApplyRequest` literal in the daemon's acceptance suite, which this change does not
+  edit. Journal records and `OperationApplied` events carry the op id (`op_id`).
+- **A dry run writes nothing**: no refresh, no flush, ids stay in memory. Neither does a run refused
+  before its first operation — its refusals say "nothing was written", so the plan file is left
+  without the ids a load would have given it.
 
 - **Store in the library, not the daemon** — one code path for served and one-shot runs, per the
   daemon crate's own "two lifetimes, one implementation" rule.
@@ -265,10 +300,11 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress (this changeset, the code-restructuring skill, module docs;
+      `packages/*/docs/` is left to the wrap)
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`); CI for the rest
+- [x] Run scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`); CI for the rest
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -279,6 +315,6 @@ _(populated by validation commands)_
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`) — scoped to the three packages
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-09-26-index-daemon-plan-store-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

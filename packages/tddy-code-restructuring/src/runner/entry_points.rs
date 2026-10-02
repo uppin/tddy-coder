@@ -103,7 +103,8 @@ pub fn dispatch(
 /// the journal's record of the operation, so a crash between the two leaves the file one operation
 /// behind the journal.
 ///
-/// A dry run writes nothing: no journal record, no refresh, no flush.
+/// A dry run writes nothing: no journal record, no refresh, no flush. Neither does a run that is
+/// refused before its first operation: the plan file is as it was.
 ///
 /// # Errors
 ///
@@ -120,15 +121,14 @@ pub fn apply_from_store(
     let client = client.ok_or_else(|| {
         RestructureError::MalformedPlan("apply requires a rust-analyzer LSP session".into())
     })?;
-    let applied = apply_held_plan(root, store, key, &options, client, &cancel);
-    if options.dry_run {
-        return applied;
+    let summary = apply_held_plan(root, store, key, &options, client, &cancel)?;
+    // A run that refused or failed writes nothing here: the operations it did commit wrote the plan
+    // as they landed ([`record_applied_op`]), and one that never started must leave the plan file
+    // as it found it — "nothing was written" is what its refusal says.
+    if !options.dry_run {
+        store.flush(key)?;
     }
-    // Written whatever the run came to: the operations it did commit are in the journal, and the
-    // plan has to say so. The run's own failure is the one reported.
-    let flushed = store.flush(key);
-    let summary = applied?;
-    flushed.map(|()| summary)
+    Ok(summary)
 }
 
 /// A run that has been opened: its journal, the plan it executes, and where in it to start.

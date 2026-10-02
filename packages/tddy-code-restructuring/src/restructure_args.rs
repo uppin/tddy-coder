@@ -402,4 +402,22 @@ mod tests {
         // Then clap refuses the run rather than parsing a number nothing honours
         assert!(parsed.is_err(), "the withdrawn flag was still accepted");
     }
+
+    #[test]
+    fn from_names_an_operation_by_its_index_or_by_its_id() {
+        // Given one apply resumed at an index and another at an id
+        let by_index = parse(&["apply", "plan.jsonl", "--from", "3"]);
+        let by_id = parse(&["apply", "plan.jsonl", "--from", "op-7"]);
+
+        // Then each reaches the runner as the kind of name it was
+        assert_eq!(
+            (by_index.from, by_index.from_id, by_id.from, by_id.from_id),
+            (
+                Some(3),
+                None,
+                None,
+                Some(crate::plan::OpId("op-7".to_string()))
+            )
+        );
+    }
 }

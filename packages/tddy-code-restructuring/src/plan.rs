@@ -1,4 +1,5 @@
-//! The plan: an immutable command log of named refactoring *intents*.
+//! The plan: a command log of named refactoring *intents*, which [`crate::plan_store`] writes back as
+//! operations apply.
 //!
 //! A plan never carries code. If an operation would need a code snippet, the op vocabulary is wrong
 //! and the plan is rejected — that rejection is what keeps hand-written code out of the pipeline.
@@ -1552,5 +1553,38 @@ mod tests {
 
         // Then it is the same text, line for line
         assert_eq!(written, jsonl);
+    }
+
+    #[test]
+    fn ids_are_numbered_past_the_highest_one_a_plan_already_uses() {
+        // Given a plan whose second operation was removed, leaving op-1 and op-3, and a new one
+        let jsonl = concat!(
+            r#"{"v":1,"snapshot":{}}"#,
+            "\n",
+            r#"{"id":"op-1","op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"A"},"name":"B"}"#,
+            "\n",
+            r#"{"id":"op-3","op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"C"},"name":"D"}"#,
+            "\n",
+            r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"E"},"name":"F"}"#,
+            "\n"
+        );
+        let mut plan = Plan::parse(jsonl).unwrap();
+
+        // When ids are assigned
+        let assigned = plan.assign_missing_op_ids();
+
+        // Then the new operation takes the next number, not the free one
+        let ids: Vec<_> = plan.ops.iter().filter_map(|op| op.id.clone()).collect();
+        assert_eq!(
+            (assigned, ids),
+            (
+                true,
+                vec![
+                    OpId("op-1".to_string()),
+                    OpId("op-3".to_string()),
+                    OpId("op-4".to_string())
+                ]
+            )
+        );
     }
 }

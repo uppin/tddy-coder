@@ -1,9 +1,10 @@
 //! The append-only event journal.
 //!
-//! `plan.jsonl` is the command log and is never rewritten. This journal is the event log: one
-//! record per operation, holding the [`WorkspaceEdit`] the operation actually produced. The
-//! [`crate::PositionLedger`] is `fold(journal)`, so the same code path serves a live run and a
-//! resume.
+//! `plan.jsonl` is the command log: the plan store rewrites its pending anchors as operations apply.
+//! This journal is the event log: one record per operation, holding the [`WorkspaceEdit`] the
+//! operation actually produced. The [`crate::PositionLedger`] is `fold(journal)`, which is what
+//! checkpoint verification compares against; a run translates anchors through its own edits only,
+//! because the plan's anchors already reflect the earlier ones.
 //!
 //! Write-ahead discipline: `InFlight` is recorded *before* the disk write, `Completed` *after*.
 

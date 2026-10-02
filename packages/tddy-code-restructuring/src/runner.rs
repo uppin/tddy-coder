@@ -1,8 +1,9 @@
 //! The entry points for restructuring subcommands, one per [`Command`].
 //!
-//! The plan is a command log and is never rewritten. Each operation's resolved edit is appended to
-//! an event journal, and the position ledger is a projection over that journal — which is what
-//! makes an interrupted run resumable.
+//! The plan is a command log the [`crate::plan_store`] keeps current: after each operation its
+//! pending anchors are rewritten for the tree and the plan is written back. Each operation's
+//! resolved edit is appended to an event journal, and the position ledger is a projection over that
+//! journal — which is what makes an interrupted run resumable.
 //!
 //! **Nothing here prints.** Every entry point returns its result — findings, progress, a summary,
 //! an anchor, a comparison — and its live account goes to the sinks its caller installed in

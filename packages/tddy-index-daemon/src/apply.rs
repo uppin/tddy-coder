@@ -66,15 +66,7 @@ pub(crate) fn apply_plan(
     progress: ProgressSink,
     events: &EventSender<RestructureEvent>,
 ) -> Result<()> {
-    let applied = apply_held_plan(root, held, options, client, &cancel, progress, events);
-    if options.dry_run {
-        return applied;
-    }
-    // Written whatever the run came to: the operations it did commit are in the journal and the
-    // plan has to say so. The run's own failure is the one reported.
-    let flushed = held.with_store(|store| store.flush(&held.key));
-    applied?;
-    flushed
+    apply_held_plan(root, held, options, client, &cancel, progress, events)
 }
 
 fn apply_held_plan(
@@ -189,8 +181,9 @@ fn apply_held_plan(
     };
     runner::refuse_a_broken_result(root, options, run, cancel)?;
     // Before the outcome, so a plan that could not be written back ends the stream with that and
-    // never with "applied N of N". [`apply_plan`] writes it again on every path that did not get
-    // here, where there is nothing left to tell the caller first.
+    // never with "applied N of N". A run that failed earlier writes nothing here: the operations it
+    // committed wrote the plan as they landed, and one refused before its first leaves the file as
+    // it was.
     if !options.dry_run {
         held.with_store(|store| store.flush(&held.key))?;
     }

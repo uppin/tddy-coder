@@ -723,4 +723,100 @@ mod tests {
             23
         );
     }
+
+    const A_RENAME: &str = r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"A"},"name":"B"}"#;
+
+    #[test]
+    fn unloading_writes_the_plan_back_and_drops_it() {
+        // Given a held plan made dirty by the ids its load gave
+        let (root, mut store, _key) = a_store_holding(&[A_RENAME]);
+
+        // When it is unloaded
+        store.unload(&[PathBuf::from("plan.jsonl")]).unwrap();
+
+        // Then the file carries the id and the store holds nothing
+        let written =
+            Plan::parse(&std::fs::read_to_string(root.path().join("plan.jsonl")).unwrap()).unwrap();
+        assert_eq!(
+            (written.ops[0].id.is_some(), store.list()),
+            (true, Vec::new())
+        );
+    }
+
+    #[test]
+    fn unloading_a_plan_whose_file_changed_on_disk_drops_it_and_leaves_the_file() {
+        // Given a held, dirty plan whose file was then edited by hand
+        let (root, mut store, _key) = a_store_holding(&[A_RENAME]);
+        std::fs::write(root.path().join("plan.jsonl"), format!("{HEADER}\n")).unwrap();
+
+        // When it is unloaded
+        store.unload(&[PathBuf::from("plan.jsonl")]).unwrap();
+
+        // Then the hand edit stands and the store no longer holds the plan
+        assert_eq!(
+            (
+                std::fs::read_to_string(root.path().join("plan.jsonl")).unwrap(),
+                store.list()
+            ),
+            (format!("{HEADER}\n"), Vec::new())
+        );
+    }
+
+    #[test]
+    fn unloading_a_plan_that_is_not_loaded_is_refused_and_drops_nothing() {
+        // Given a store holding one plan
+        let (_root, mut store, _key) = a_store_holding(&[A_RENAME]);
+
+        // When it is asked to unload that plan and another it never held
+        let unloaded = store.unload(&[PathBuf::from("plan.jsonl"), PathBuf::from("other.jsonl")]);
+
+        // Then it is refused naming the other, and the held plan is still held
+        assert_eq!(
+            (
+                unloaded.map_err(|error| error.to_string()),
+                store.list().len()
+            ),
+            (
+                Err("plan is malformed: other.jsonl is not loaded — load it first".to_string()),
+                1
+            )
+        );
+    }
+
+    #[test]
+    fn a_load_that_refuses_one_plan_loads_none_of_them() {
+        // Given a store and two plan files, the second malformed
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("good.jsonl"),
+            format!("{HEADER}\n{A_RENAME}\n"),
+        )
+        .unwrap();
+        std::fs::write(root.path().join("bad.jsonl"), "not a plan\n").unwrap();
+        let mut store = PlanStore::new(
+            root.path(),
+            FlushPolicy {
+                debounce: Duration::from_secs(3600),
+            },
+        );
+
+        // When both are loaded
+        let loaded = store.load(&[PathBuf::from("good.jsonl"), PathBuf::from("bad.jsonl")]);
+
+        // Then the load is refused and the good plan is not held either
+        assert_eq!((loaded.is_err(), store.list()), (true, Vec::new()));
+    }
+
+    #[test]
+    fn a_plan_is_keyed_the_same_whether_named_relatively_or_absolutely() {
+        // Given a store rooted at a directory
+        let (root, store, key) = a_store_holding(&[]);
+
+        // When the plan is named three ways
+        let named_absolutely = store.key_for(&root.path().join("plan.jsonl")).unwrap();
+        let named_through_dots = store.key_for(Path::new("./sub/../plan.jsonl")).unwrap();
+
+        // Then all are one key
+        assert_eq!((named_absolutely, named_through_dots), (key.clone(), key));
+    }
 }
