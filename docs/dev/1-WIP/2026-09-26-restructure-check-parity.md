@@ -1,7 +1,7 @@
 # Changeset: `check --deep` refuses the cross-crate moves `apply` cannot build
 
 **Date**: 2026-09-26
-**Status**: 🚧 In Progress
+**Status**: ✅ Green — pending validation
 **Type**: Bug Fix
 
 ## Initial Discovery
@@ -42,8 +42,8 @@ implementing one here collides with the PR that owns it.
 
 The first push after this commit (wave 2) publishes:
 
-- `crate_move/refusals.rs`: `Finding::StaysBehindThroughBody`, `Finding::DestinationAlreadyHasModule`
-  and their remedy text; `crate_move/preconditions.rs`: the two checks — `TODO(check-parity): implement`.
+- `crate_move/preconditions.rs`: the two checks (`stays_behind_through_a_body`,
+  `destination_already_has_the_module`) — published as stubs, now implemented.
 - The failing acceptance and unit tests below.
 
 ## Green wave
@@ -93,8 +93,8 @@ could not build.
 
 ## Scope
 
-- [ ] Stays-behind through body paths, from the survey
-- [ ] Destination-name-collision finding
+- [x] Stays-behind through body paths, from the survey
+- [x] Destination-name-collision finding
 
 ## Technical Changes
 
@@ -110,12 +110,13 @@ As in Responsibility.
 ### Delta
 
 #### tddy-code-restructuring
-- `crate_move/preconditions.rs`, `crate_move/refusals.rs`.
+- `crate_move/preconditions.rs` (both checks, `member_op`), `crate_move/cluster.rs` (uses `member_op`),
+  `crate_move/header.rs` (`travels_with` is `pub(crate)`).
 
 ## Implementation Milestones
 
-- [ ] Body-path stays-behind finding with host-aware remedy
-- [ ] Name-collision finding (static)
+- [x] Body-path stays-behind finding (remedy never suggests a cluster)
+- [x] Name-collision finding (static)
 
 ## Testing Plan
 
@@ -143,9 +144,16 @@ bodies; the two merge tests need nothing from any other node.
 
 ## Technical Debt & Production Readiness
 
-- Draft-PR-contract stubs, `#[allow(dead_code)]` until `move_preconditions` reports them:
-  `TODO(check-parity)` in `crate_move/preconditions.rs` (`stays_behind_through_a_body`,
-  `destination_already_has_the_module`).
+- No stubs remain: both checks are wired into `move_preconditions`. The draft contract's
+  `Finding::StaysBehindThroughBody` / `Finding::DestinationAlreadyHasModule` in `refusals.rs` were
+  never needed — a precondition is reported through `move_preconditions` returning `malformed(..)`,
+  the one mechanism the header-only finding already uses.
+- The body finding is per operation: a body path into a module an *earlier* operation of the same
+  plan already moved is still flagged, because the check has no plan context (the header path
+  handles that through `gone_by_then`). Needs a signature change if it matters.
+- `#[cfg(test)]` body paths are skipped, matching the header pass.
+- `RefactorOp::with_anchor` replaced the anchor and dropped it from the set; `member_op` keeps the
+  full set in `also`, so a cluster member's body path to its own anchor is not read as staying behind.
 - The body-path finding's text drops the PRD's "host-aware" wording for a simpler rule: it never
   suggests `move_cluster_to_crate`, since a body's reach into the code hosting it is never a sibling
   that can come along.
@@ -176,7 +184,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p tddy-code-restructuring`); CI for the rest

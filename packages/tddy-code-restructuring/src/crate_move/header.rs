@@ -258,7 +258,7 @@ fn written_prefix(from_head: &str) -> &str {
 /// and a member is named by the path that reaches it or by anything inside it — `spawn_worker` and
 /// `spawn_worker::Worker` both travel with `spawn_worker`, and `spawn_worker_pool` travels with
 /// nothing.
-fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a String> {
+pub(crate) fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a String> {
     co_moving
         .iter()
         .find(|member| rest == *member || rest.starts_with(&format!("{member}::")))

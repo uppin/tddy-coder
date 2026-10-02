@@ -1,10 +1,12 @@
+use std::collections::BTreeSet;
+
 use super::malformed;
 
-use crate::crate_move::{cluster, manifest_edits, moving};
+use crate::crate_move::{cluster, header, manifest_edits, module_home, moving, survey};
 
 use super::Result;
 
-use crate::plan::RefactorOp;
+use crate::plan::{Anchor, RefactorOp};
 
 use crate::registry::Workspace;
 
@@ -54,7 +56,7 @@ pub(crate) fn unrunnable(
             continue;
         }
         for anchor in op.anchors() {
-            if let Err(refusal) = move_preconditions(workspace, &op.with_anchor(anchor.clone())) {
+            if let Err(refusal) = move_preconditions(workspace, &member_op(op, anchor)) {
                 findings.push((index, refusal.to_string()));
             }
         }
@@ -69,27 +71,99 @@ pub(crate) fn unrunnable(
 /// build: after it, `crate::host` names nothing in the destination, and naming `origin` from there
 /// is a cycle. The finding never suggests `move_cluster_to_crate` — a body's reach into the code that
 /// hosts it is not a sibling that can come along.
-#[allow(dead_code)] // TODO(check-parity): `move_preconditions` reports this.
+///
+/// A path into a module the operation itself moves travels with it, and one the origin only
+/// re-exports from another crate is defined elsewhere; neither stays behind. A path under
+/// `#[cfg(test)]` is no edge either, the same reading the header pass takes.
+///
+/// # Errors
+///
+/// Refuses when the survey does.
 pub(crate) fn stays_behind_through_a_body(
     workspace: &Workspace<'_>,
     op: &RefactorOp,
 ) -> Result<Option<String>> {
-    // TODO(check-parity): implement over `crate_move::survey`
-    let _ = (workspace, op);
-    todo!("check-parity: a body path to a module staying behind")
+    let moving = moving::Move::read(workspace, op)?;
+    let mut travelling = BTreeSet::new();
+    for anchor in op.anchors() {
+        let module = module_home::module_name(anchor.file())?;
+        let home = module_home::module_home(workspace, anchor.file(), &module)?;
+        travelling.insert(home.path.join("::"));
+    }
+
+    let text = workspace.read(&moving.source)?;
+    let survey = survey::survey_moved_file(workspace, &text, &moving.origin, &moving.home.path)?;
+    let origin = &moving.origin.extern_name;
+
+    for path in survey
+        .paths
+        .iter()
+        .filter(|path| path.in_body && !path.in_test)
+    {
+        if path.defining_crate != *origin {
+            continue;
+        }
+        // `origin::host::project_root` is inside the module `host`; `origin::helper`, an item of the
+        // crate root, is inside none and is not this finding's to name.
+        let Some(inside) = path.defined_at.strip_prefix(&format!("{origin}::")) else {
+            continue;
+        };
+        let mut segments = inside.split("::");
+        let (Some(module), Some(_)) = (segments.next(), segments.next()) else {
+            continue;
+        };
+        if header::travels_with(inside, &travelling).is_some() {
+            continue;
+        }
+
+        return Ok(Some(format!(
+            "`{source}` reaches `{written}` in a body at line {line}, and `{module}` stays behind \
+             in `{origin}` — after the move that path names nothing in `{destination}`, and naming \
+             `{origin}` from there is a cycle. Cut the body's dependency on `{module}` before moving \
+             the module.",
+            source = moving.source,
+            written = path.written,
+            line = path.site.line,
+            origin = moving.origin.package,
+            destination = moving.destination.package,
+        )));
+    }
+    Ok(None)
 }
 
 /// The destination's root already binds the moved module's name — a `mod` declaration, or a file
 /// at the target path. Moving into it would be a **merge**, which no operation performs. Static: it
 /// needs no index, so a plain `check` reports it.
-#[allow(dead_code)] // TODO(check-parity): `move_preconditions` reports this.
+///
+/// # Errors
+///
+/// Refuses when the destination's root cannot be read.
 pub(crate) fn destination_already_has_the_module(
     workspace: &Workspace<'_>,
     op: &RefactorOp,
 ) -> Result<Option<String>> {
-    // TODO(check-parity): implement
-    let _ = (workspace, op);
-    todo!("check-parity: a module name the destination already has")
+    let moving = moving::Move::read(workspace, op)?;
+    let root = moving.destination_root();
+    let declared = workspace.read(&root)?;
+    if manifest_edits::module_declaration(&declared, &moving.module).is_some() {
+        return Ok(Some(format!(
+            "`{destination}` already declares `{module}` in {root} — moving `{module}` into it \
+             would be a merge, which no operation performs",
+            destination = moving.destination.package,
+            module = moving.module,
+        )));
+    }
+
+    let target = moving.moved_to();
+    if workspace.root.join(&target).exists() {
+        return Ok(Some(format!(
+            "`{destination}` already has {target} — moving `{module}` into it would be a merge, \
+             which no operation performs",
+            destination = moving.destination.package,
+            module = moving.module,
+        )));
+    }
+    Ok(None)
 }
 
 /// Every check [`resolve`] runs before it consults rust-analyzer.
@@ -110,5 +184,28 @@ pub(crate) fn move_preconditions(workspace: &Workspace<'_>, op: &RefactorOp) -> 
             where_declared = where_declared
         )));
     }
+    if let Some(finding) = destination_already_has_the_module(workspace, op)? {
+        return Err(malformed(finding));
+    }
+    if let Some(finding) = stays_behind_through_a_body(workspace, op)? {
+        return Err(malformed(finding));
+    }
     Ok(())
+}
+
+/// One member of a cluster as an operation of its own: addressed at `anchor`, with every other
+/// anchor of the set in `also`, so [`RefactorOp::anchors`] still lists the whole set.
+///
+/// [`RefactorOp::with_anchor`] swaps the anchor and keeps `also`, which drops the original anchor
+/// from the set when a member is checked — and a member's body reaching the module that anchors
+/// the cluster is a path that travels with it.
+pub(crate) fn member_op(op: &RefactorOp, anchor: &Anchor) -> RefactorOp {
+    RefactorOp {
+        also: op
+            .anchors()
+            .filter(|other| *other != anchor)
+            .cloned()
+            .collect(),
+        ..op.with_anchor(anchor.clone())
+    }
 }
