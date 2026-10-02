@@ -26,7 +26,10 @@ without it and writes it into the file, two operations sharing an id are refused
 journal, the apply events and `--from` name operations by it. After each applied operation the store
 rewrites the *pending* operations' anchors for the tree the operation left, and writes the plan back
 (a temporary file and a rename). It never overwrites a plan whose file changed since it was loaded:
-that is refused, naming the plan. A plan written back is normalised: keys in the executor's order,
+that is refused, naming the plan. Before writing it back the run journals a digest of the pending
+anchors, and a `--resume`/`--from` checks the plan against it: a mismatch (a crash between the two, or
+an anchor edited by hand) is refused as out of sync — run the remainder from a new plan file. A plan
+written back is normalised: keys in the executor's order,
 defaults omitted. Execution also appends to `.restructure/journal.jsonl` (the event log) and
 checkpoints the coordinate ledger to `.restructure/ledger.json`.
 

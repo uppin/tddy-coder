@@ -24,6 +24,7 @@ use super::budget::{budget_report, files_named_by, measured};
 use super::comparison::verify;
 use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
+use super::resume;
 use super::{
     commit_operation, open_run_gated, parse_options, refuse_a_broken_baseline,
     refuse_a_broken_result, refuse_repo_scoped_state, report_drifted_hints, restore_ledger,
@@ -141,9 +142,14 @@ pub struct PlanRun {
     /// starts on.
     pub plan: Plan,
     pub paths: StatePaths,
-    /// Translates `plan`'s anchors through the edits **this run** commits — and nothing earlier.
-    /// See [`apply_from_store`] for why it does not start from the journal.
+    /// Translates `plan`'s anchors: through the edits **this run** commits and nothing earlier, since
+    /// the plan was written back to match the tree — unless the journal `legacy`, in which case it
+    /// starts from the journal's own fold. See [`apply_from_store`].
     pub ledger: PositionLedger,
+    /// The journal was written before plans were kept current, so this run continues it as such: its
+    /// operations are journalled without ids and the plan is neither refreshed nor written back —
+    /// mixing the two epochs in one plan would leave anchors that match neither.
+    pub legacy: bool,
     /// The index of the first operation to execute.
     pub start: usize,
 }
@@ -168,31 +174,23 @@ pub fn open_plan_run(
         open_run_resolving_anchors(plan, root, &paths, options, registry, || {
             refuse_a_broken_baseline(root, plan, options, cancel)
         })?;
-    // Verified, then set aside: the checkpoint must still agree with the journal, but the anchors
-    // this run reads are current (see `apply_from_store`), so what translates them is this run's
-    // edits alone.
-    restore_ledger(&journal, &paths)?;
-    let start = match (options.from, &options.from_id) {
-        (Some(_), Some(_)) => {
-            return Err(usage("--from names an index or an id, not both"));
-        }
-        (Some(index), None) => index,
-        (None, Some(id)) => lowered
-            .ops
-            .iter()
-            .position(|op| op.id.as_ref() == Some(id))
-            .ok_or_else(|| {
-                RestructureError::MalformedPlan(format!(
-                    "--from names the operation `{id}`, which this plan does not have"
-                ))
-            })?,
-        (None, None) => journal.next_op(),
-    };
+    // The checkpoint must agree with the journal either way. What translates anchors differs:
+    // a journal that predates write-back left the plan in the coordinates the run began in, so the
+    // journal's own fold does it; any other leaves the plan current, and what translates is this
+    // run's edits alone.
+    let folded = restore_ledger(&journal, &paths)?;
+    let legacy = resume::predates_plan_write_back(&journal);
+    let start = resume::start_of(&lowered, options, &journal)?;
     Ok(PlanRun {
         journal,
         plan: lowered,
         paths,
-        ledger: PositionLedger::new(),
+        ledger: if legacy {
+            folded
+        } else {
+            PositionLedger::new()
+        },
+        legacy,
         start,
     })
 }
@@ -223,6 +221,7 @@ fn apply_held_plan(
         plan,
         paths,
         mut ledger,
+        legacy,
         start,
     } = open_plan_run(
         &plan,
@@ -302,14 +301,24 @@ fn apply_held_plan(
         ));
         commit_operation(
             index,
-            op.id.as_ref(),
+            op.id.as_ref().filter(|_| !legacy),
             &resolved,
             root,
             &paths,
             &mut journal,
             &mut ledger,
         )?;
-        record_applied_op(store, key, index, &resolved.edit, &mut registry)?;
+        if !legacy {
+            record_applied_op(
+                store,
+                key,
+                index,
+                &resolved,
+                &mut registry,
+                &mut journal,
+                &paths,
+            )?;
+        }
         // Reported *after* the commit, so a line in the account means the edit is on disk and in
         // the journal. An apply used to report nothing at all — the dry run, where nothing is at
         // stake, was the only mode that spoke.
@@ -338,18 +347,25 @@ fn apply_held_plan(
     })
 }
 
-/// Bring the plan `key` up to the tree after its operation `index` was committed, and write it
-/// back: pending anchors rewritten through the edit ([`PlanStore::refresh_after_op`]), then the
-/// flush, synchronously — the journal already says the operation landed, and a plan that lagged it
-/// would be read by a resume as describing the tree before the operation.
+/// Bring the plan `key` up to the tree after its operation `index` was committed, record that in
+/// the journal, and write the plan back: pending anchors rewritten through the edit
+/// ([`PlanStore::refresh_after_op`]), a digest of them journalled, then the flush.
+///
+/// The order is the point. The journal's `completed` record is already down, so a crash before the
+/// digest leaves an operation with no digest, and a crash after the digest and before the flush
+/// leaves a digest the plan on disk does not match — both of which a resume refuses
+/// ([`RestructureError::PlanOutOfSync`]) instead of reading anchors from a plan that is behind the
+/// tree. The flush is synchronous for the same reason: it is what makes the next resume's check pass.
 ///
 /// What every apply loop calls after [`commit_operation`], the command line's and the daemon's.
 pub fn record_applied_op(
     store: &mut PlanStore,
     key: &PlanKey,
     index: usize,
-    edit: &crate::WorkspaceEdit,
+    resolved: &crate::Resolution,
     resolver: &mut dyn crate::item_anchor::ItemResolver,
+    journal: &mut Journal,
+    paths: &StatePaths,
 ) -> Result<()> {
     let id = store
         .get(key)
@@ -360,7 +376,15 @@ pub fn record_applied_op(
                 "{key} has no operation {index} to refresh from"
             ))
         })?;
-    store.refresh_after_op(key, &id, edit, resolver)?;
+    store.refresh_after_op(key, &id, &resolved.edit, resolver)?;
+    let held = store.get(key).ok_or_else(|| {
+        RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
+    })?;
+    let digest = crate::plan_store::pending_digest(&held.plan, index);
+    journal.append(
+        &paths.journal,
+        crate::journal::JournalRecord::plan_synced(index, Some(id), digest),
+    )?;
     store.flush(key)
 }
 
@@ -725,9 +749,9 @@ pub fn item_anchors(
     }
 }
 
-/// Open a run the way both apply loops must: item anchors resolved, then the baseline compile
-/// check, then `.restructure/` written — and the plan to run, with every anchor lowered to the
-/// snapshot coordinates the ledger translates, handed back beside the journal.
+/// Open a run the way both apply loops must: the plan checked against the journal, item anchors
+/// resolved, then the baseline compile check, then `.restructure/` written — and the plan to run,
+/// with every anchor lowered to the coordinates the run translates, handed back beside the journal.
 ///
 /// One function so the CLI's apply and the daemon's cannot diverge on the order. It is this order
 /// because resolving is cheap and refuses for the commonest reasons — an item edited since the plan
@@ -735,15 +759,13 @@ pub fn item_anchors(
 /// and both come before the first write, so their refusals' "nothing was written" stays true and
 /// leaves no `.restructure/` behind.
 ///
-/// Item anchors are resolved against the tree the run *starts* on, because that is the tree the
-/// ledger's coordinates are in. A run that continues a journal does not have it: the tree already
-/// holds the edits of the operations the journal completed, and coordinates read from it would be
-/// translated through those edits a second time. Such a run is refused here — once before the gate
-/// from the journal as found, and again against the journal the open returns, since opening a
-/// continued run may adopt a repository-scoped one the first look could not see.
-///
-/// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
-/// resolve them; until then a resumed run of a plan that has item anchors is refused.
+/// Item anchors are resolved against the tree the run *starts* on, and only the operations the run
+/// will execute: a run that continues a journal starts on a tree that holds the journal's edits,
+/// and the plan's pending anchors were written back to describe exactly that tree
+/// ([`record_applied_op`]). What a continued run first has to know is that they were — see
+/// `resume::refuse_a_plan_the_journal_cannot_vouch_for` — and it asks twice: of the journal as
+/// found before the gate, and of the one the open returns, since opening a continued run may adopt
+/// a repository-scoped journal the first look could not see.
 pub fn open_run_resolving_anchors(
     plan: &Plan,
     root: &Path,
@@ -754,36 +776,14 @@ pub fn open_run_resolving_anchors(
 ) -> Result<(Journal, Plan)> {
     let (journal, resolved) = open_run_gated(plan, root, paths, options, || {
         let found = Journal::load(&paths.journal)?;
-        let resolved = resolve_item_anchors(plan, root, &found, registry)?;
+        resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &found)?;
+        let start = resume::start_of(plan, options, &found)?;
+        let resolved = resume::lower_pending(plan, start, root, registry)?;
         baseline_gate()?;
         Ok(resolved)
     })?;
-    refuse_a_continued_item_plan(plan, &journal)?;
+    resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &journal)?;
     Ok((journal, resolved))
-}
-
-/// `plan` with every item anchor resolved against the tree it is about to run on, refusing a run
-/// that continues a journal (see [`open_run_resolving_anchors`]).
-pub fn resolve_item_anchors(
-    plan: &Plan,
-    root: &Path,
-    journal: &Journal,
-    registry: &mut BackendRegistry,
-) -> Result<Plan> {
-    if !has_item_anchors(plan) {
-        return Ok(plan.clone());
-    }
-    refuse_a_continued_item_plan(plan, journal)?;
-    item_anchor::resolve_item_anchors(plan, root, registry)
-}
-
-fn refuse_a_continued_item_plan(plan: &Plan, journal: &Journal) -> Result<()> {
-    if has_item_anchors(plan) && journal.next_op() > 0 {
-        return Err(RestructureError::ItemAnchorsOnContinuedRun {
-            applied: journal.next_op(),
-        });
-    }
-    Ok(())
 }
 
 fn read_plan(path: &Path) -> Result<Plan> {

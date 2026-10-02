@@ -22,6 +22,10 @@ pub enum OpStatus {
     InFlight,
     Completed,
     Failed,
+    /// The plan's pending anchors were brought up to the tree after the operation completed, and the
+    /// plan is about to be written back — see [`JournalRecord::plan_digest`]. Not an operation's
+    /// own state: nothing that counts or folds operations reads it.
+    PlanSynced,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +56,14 @@ pub struct JournalRecord {
     /// that was only ever printed is a consequence nobody can audit afterwards.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// On a [`OpStatus::PlanSynced`] record: the digest of the plan's pending anchors as the run
+    /// is about to write them ([`crate::plan_store::pending_digest`]).
+    ///
+    /// What a resume compares the plan it reads against. The record is appended *before* the plan
+    /// is written, so a crash in between leaves a digest the file does not match — which the resume
+    /// refuses — rather than a file that is behind the journal with nothing to say so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_digest: Option<String>,
 }
 
 impl JournalRecord {
@@ -65,6 +77,7 @@ impl JournalRecord {
             edit: None,
             report: Vec::new(),
             notes: Vec::new(),
+            plan_digest: None,
             pre,
             post: BTreeMap::new(),
         }
@@ -90,6 +103,23 @@ impl JournalRecord {
             post,
             report,
             notes,
+            plan_digest: None,
+        }
+    }
+
+    /// Written after an operation's plan refresh and before the plan is written back.
+    pub fn plan_synced(op: usize, op_id: Option<OpId>, plan_digest: String) -> Self {
+        Self {
+            seq: 0,
+            op,
+            op_id,
+            status: OpStatus::PlanSynced,
+            edit: None,
+            pre: BTreeMap::new(),
+            post: BTreeMap::new(),
+            report: Vec::new(),
+            notes: Vec::new(),
+            plan_digest: Some(plan_digest),
         }
     }
 }
@@ -217,6 +247,20 @@ impl Journal {
         Ok(Some(decision))
     }
 
+    /// The completed operation furthest into the plan, if any completed.
+    pub fn last_completed(&self) -> Option<&JournalRecord> {
+        self.completed().max_by_key(|record| record.op)
+    }
+
+    /// The digest of the pending anchors the run recorded after operation `op`, if it recorded one.
+    pub fn plan_digest_after(&self, op: usize) -> Option<&str> {
+        self.records
+            .iter()
+            .rev()
+            .find(|record| record.status == OpStatus::PlanSynced && record.op == op)
+            .and_then(|record| record.plan_digest.as_deref())
+    }
+
     fn completed(&self) -> impl Iterator<Item = &JournalRecord> {
         self.records
             .iter()
@@ -280,6 +324,7 @@ mod tests {
             seq,
             op,
             op_id: None,
+            plan_digest: None,
             status: OpStatus::Completed,
             edit: Some(edit),
             notes: Vec::new(),
@@ -347,6 +392,7 @@ mod tests {
                 completed(0, 0, removal("src/shapes.ts", 10, 20)),
                 JournalRecord {
                     op_id: None,
+                    plan_digest: None,
                     seq: 1,
                     op: 1,
                     status: OpStatus::InFlight,
@@ -396,6 +442,7 @@ mod tests {
         let journal = Journal {
             records: vec![JournalRecord {
                 op_id: None,
+                plan_digest: None,
                 seq: 0,
                 op: 7,
                 status: OpStatus::InFlight,
@@ -421,6 +468,7 @@ mod tests {
         let journal = Journal {
             records: vec![JournalRecord {
                 op_id: None,
+                plan_digest: None,
                 seq: 0,
                 op: 7,
                 status: OpStatus::InFlight,
@@ -448,6 +496,7 @@ mod tests {
         let journal = Journal {
             records: vec![JournalRecord {
                 op_id: None,
+                plan_digest: None,
                 seq: 0,
                 op: 7,
                 status: OpStatus::InFlight,

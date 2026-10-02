@@ -37,6 +37,10 @@ PR: [#538](https://github.com/uppin/tddy-coder/pull/538)
 - Does **not** change `restructure snapshot`.
 - Does **not** change the anchor kinds, the resolver or the v2 header.
 
+Run-open handling of item anchors for **continued** runs moved into this PR (it was the parent's
+deferral): `ItemAnchorsOnContinuedRun` and `refuse_a_continued_item_plan` are gone, replaced by the
+journal check in `runner/resume.rs`. The resolver and the anchor kinds are untouched.
+
 ## Dependencies
 
 What each parent PR delivers that this PR consumes. These surfaces are **theirs to create**;
@@ -239,14 +243,14 @@ repo-scoped journal).
 
 - Every `TODO(plan-store)` stub of the contract commit is implemented. One new marker remains:
   `tddy-tools/src/index_client.rs` (`from_index`) — `--from <id>` through the daemon.
-- `ItemAnchorsOnContinuedRun` keeps its `TODO(plan-store)` and its refusal: `item_anchor_acceptance`
-  pins a resumed item-anchored run as refused, and lifting it means re-resolving item anchors against
-  an edited tree with the ledger already folded — a separate change (see Decisions).
-- A crash between the journal's `completed` record and the plan write-back leaves the file one
-  operation behind the journal; a resume then reads anchors from before that operation. The window
-  is one rename wide, and nothing detects it. A plan resumed from a journal written before this
-  change (anchors never written back) is read the same wrong way.
-- New error variants: `PlanChangedOnDisk`, `NeedsIndexDaemon` (both `FailedPrecondition`).
+- The crash window between a committed operation and its plan write-back is detected, not closed:
+  the next resume refuses (`PlanOutOfSync`) and the remainder must run from a new plan file. There
+  is no repair — the lost refresh is not reconstructed. A hand edit of a pending *anchor* between
+  runs is refused the same way; edits to anything else (`name`, `variant`) are not.
+- A journal from before write-back, resumed over a plan of ranges and symbols, runs as it did: its
+  operations stay unnumbered and the plan is neither refreshed nor written back (mixing epochs in
+  one plan would leave anchors that match neither). Over an item-anchored plan it is refused.
+- New error variants: `PlanChangedOnDisk`, `NeedsIndexDaemon`, `PlanOutOfSync`, `PlanUnverifiable` (all `FailedPrecondition`); `ItemAnchorsOnContinuedRun` removed.
 - `RefactorOp.id` added; 14 struct literals across the crate and its tests gained `id: None`.
 
 ## Decisions & Trade-offs
@@ -257,6 +261,14 @@ repo-scoped journal).
   step. `runner::open_plan_run` still verifies the ledger checkpoint against the journal but starts
   the run's translation ledger empty: folding the journal would translate anchors through earlier
   runs' edits a second time. Proven end to end by `plan_store_resume_acceptance`.
+- **Resume is verified by a journalled digest of the pending anchors, written between the operation
+  and the plan.** Order per operation: journal `completed` → refresh in memory → journal
+  `plan_synced` (digest of ops after this one: ids, anchors, `also`) → atomic plan write. A resume
+  recomputes the digest from the plan it holds and compares it with the last completed operation's
+  record. Every crash point refuses and none redoes or skips an operation: before the record there
+  is no digest (refused), between record and write the file does not match it (refused), after the
+  write it matches. "Written by this version" is read off the journal itself — such records carry
+  `op_id` — so no header changed. Item anchors are resolved only for the operations a run executes.
 - **A refresh leaves an item it can no longer resolve as written.** `MalformedPlan` from the
   resolver (item absent, ambiguous, outside the file) is the stale-op case the boundaries put out of
   scope; any other failure (cancelled, server defect) propagates.

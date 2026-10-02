@@ -73,3 +73,71 @@ async fn a_resumed_run_applies_the_second_operation_where_its_text_now_is() {
     assert_eq!(resumed.map(|run| run.applied), Ok(1));
     assert!(workspace.read(WORKFLOW).contains("fn sized_items"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_journal_from_before_plans_were_kept_current_still_resumes_a_plan_of_range_anchors() {
+    // Given a stopped plan of ranges, as an older binary left it: the plan still in the
+    // coordinates it started in, and a journal with no ids and no record of a write-back
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = a_plan_stopped_after_its_first_operation(&workspace).await;
+    a_plan_file(workspace.path(), &[EXTRACT_STACKS_LETS, EXTRACT_QUEUES_LET]);
+    workspace.with_the_journal_of_before_plans_were_kept_current(&plan);
+
+    // When the remainder is resumed
+    let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
+
+    // Then the journal's own ledger carried the second operation to where its text now is
+    assert_eq!(resumed.map(|run| run.applied), Ok(1));
+    assert!(workspace.read(WORKFLOW).contains("fn sized_items"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_of_ranges_whose_pending_anchor_was_changed_after_the_run_wrote_it_is_refused() {
+    // Given a stopped plan of ranges whose pending anchor was then moved by hand
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = a_plan_stopped_after_its_first_operation(&workspace).await;
+    let mut written = Plan::parse(&std::fs::read_to_string(&plan).unwrap()).unwrap();
+    if let Anchor::Range { start, .. } = &mut written.ops[1].anchor {
+        start.line += 1;
+    }
+    std::fs::write(&plan, written.to_jsonl()).unwrap();
+
+    // When the remainder is resumed
+    let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
+
+    // Then it is refused rather than applied at a position the tree does not hold
+    assert_eq!(
+        resumed.map(|run| run.applied).map_err(|refusal| refusal
+            .starts_with("the plan's pending anchors do not match what the run recorded")),
+        Err(true)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_run_that_stopped_between_an_operation_and_its_plan_record_is_refused_on_resume() {
+    // Given a stopped plan whose journal lost the record that the plan was written back — a crash
+    // after the operation was committed and before the record
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = a_plan_stopped_after_its_first_operation(&workspace).await;
+    let journal = tddy_code_restructuring::state_directory_for_plan(workspace.path(), &plan)
+        .unwrap()
+        .join("journal.jsonl");
+    let committed_only: Vec<String> = std::fs::read_to_string(&journal)
+        .unwrap()
+        .lines()
+        .filter(|record| !record.contains("\"plan_synced\""))
+        .map(str::to_string)
+        .collect();
+    std::fs::write(&journal, committed_only.join("\n") + "\n").unwrap();
+
+    // When the remainder is resumed
+    let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
+
+    // Then it is refused, and the second operation was not applied
+    assert_eq!(
+        resumed.map(|run| run.applied).map_err(|refusal| refusal
+            .starts_with("the plan's pending anchors do not match what the run recorded")),
+        Err(true)
+    );
+    assert!(!workspace.read(WORKFLOW).contains("fn sized_items"));
+}

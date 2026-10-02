@@ -351,6 +351,21 @@ impl PlanStore {
     }
 }
 
+/// A digest of the anchors of every operation after position `applied`: what a run records after
+/// each operation it commits, and what a resume checks the plan it reads against.
+///
+/// Anchors and ids only. A person may reword a pending operation's `name` between runs and the
+/// digest does not move; anything that could change *where* an operation lands does move it.
+pub fn pending_digest(plan: &Plan, applied: usize) -> String {
+    let pending: Vec<_> = plan
+        .ops
+        .iter()
+        .skip(applied + 1)
+        .map(|op| (&op.id, &op.anchor, &op.also))
+        .collect();
+    hash_of(&serde_json::to_vec(&pending).expect("anchors serialise"))
+}
+
 fn summary_of(held: &LoadedPlan) -> PlanSummary {
     PlanSummary {
         key: held.key.clone(),

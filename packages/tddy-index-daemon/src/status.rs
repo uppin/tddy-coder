@@ -36,7 +36,8 @@ pub fn status_of(error: &RestructureError) -> Status {
         RestructureError::SeamRefused(_)
         | RestructureError::SnapshotMismatch { .. }
         | RestructureError::ItemChanged { .. }
-        | RestructureError::ItemAnchorsOnContinuedRun { .. }
+        | RestructureError::PlanOutOfSync { .. }
+        | RestructureError::PlanUnverifiable { .. }
         | RestructureError::PlanChangedOnDisk { .. }
         | RestructureError::NeedsIndexDaemon { .. }
         | RestructureError::AnchorInvalidated { .. }

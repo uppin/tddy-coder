@@ -4,7 +4,7 @@
 //! a sink. A host that called it would learn what the whole run amounted to and nothing about the
 //! operations that made it up — one event per operation, with the files it touched and the
 //! visibility it widened, is not something a line carries — which is why
-//! [`tddy_code_restructuring::runner::open_run_resolving_anchors`],
+//! [`tddy_code_restructuring::runner::open_plan_run`],
 //! [`tddy_code_restructuring::runner::restore_ledger`] and
 //! [`tddy_code_restructuring::runner::commit_operation`] were promoted to public: the write-ahead
 //! sequence stays in the library, where a crash in the middle of it is still resumable, and the
@@ -98,6 +98,7 @@ fn apply_held_plan(
         plan,
         paths,
         mut ledger,
+        legacy,
         start,
     } = runner::open_plan_run(&plan, &plan_path, root, options, &mut registry, cancel)?;
     let mut overlay = Overlay::new();
@@ -142,16 +143,26 @@ fn apply_held_plan(
         } else {
             runner::commit_operation(
                 index,
-                op.id.as_ref(),
+                op.id.as_ref().filter(|_| !legacy),
                 &resolved,
                 root,
                 &paths,
                 &mut journal,
                 &mut ledger,
             )?;
-            held.with_store(|store| {
-                runner::record_applied_op(store, &held.key, index, &resolved.edit, &mut registry)
-            })?;
+            if !legacy {
+                held.with_store(|store| {
+                    runner::record_applied_op(
+                        store,
+                        &held.key,
+                        index,
+                        &resolved,
+                        &mut registry,
+                        &mut journal,
+                        &paths,
+                    )
+                })?;
+            }
         }
         done += 1;
 

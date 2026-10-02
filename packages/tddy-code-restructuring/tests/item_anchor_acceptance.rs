@@ -363,30 +363,91 @@ async fn a_hinted_file_the_tree_has_since_lost_is_reported_as_drift_and_the_plan
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_resumed_run_of_a_plan_that_anchors_by_item_is_refused_as_what_it_is() {
-    // Given a two-operation item-anchored plan, stopped after its first operation
-    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+/// A two-operation item-anchored plan, stopped after the extraction that adds a function above
+/// `Queue::new` — which moves the item the second operation is anchored in.
+async fn an_item_plan_stopped_after_its_first_operation(
+    workspace: &harness::AFixtureWorkspace,
+) -> std::path::PathBuf {
     let plan = workspace.a_hinted_plan_of(&[
         an_extraction_of_stack_news_lets(None),
         an_extraction_of_queue_news_first_let(),
     ]);
-    let first = applying_the_plan_with(&workspace, plan.clone(), |options| {
+    let first = applying_the_plan_with(workspace, plan.clone(), |options| {
         options.stop_after = Some(1);
     })
     .await;
     assert_eq!(first.map(|run| run.applied), Ok(1));
+    plan
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resumed_run_of_a_plan_that_anchors_by_item_applies_the_remainder_where_its_item_now_is()
+{
+    // Given an item-anchored plan stopped after an operation that moved the second one's item
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = an_item_plan_stopped_after_its_first_operation(&workspace).await;
 
     // When the remainder is resumed
     let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
 
-    // Then it is refused for what it is — a continued run — and not as a malformed plan
-    let refusal = resumed.expect_err("a continued run of an item-anchored plan is refused");
+    // Then the second extraction took `Queue::new`'s own line
+    assert_eq!(resumed.map(|run| run.applied), Ok(1));
     assert!(
-        refusal.starts_with("this run continues a journal that already applied 1 operation(s)"),
-        "the refusal was not the continued-run one:\n{refusal}"
+        workspace.read(WORKFLOW).contains("fn fresh_queue_items"),
+        "Queue::new did not have its let extracted:\n{}",
+        workspace.read(WORKFLOW)
     );
-    assert!(!refusal.contains("malformed"), "{refusal}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_whose_pending_anchor_was_changed_after_the_run_wrote_it_is_refused_on_resume() {
+    // Given a stopped item-anchored plan whose pending operation's hint was edited afterwards — the
+    // shape a plan that is behind its journal presents, since both differ from what was recorded
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = an_item_plan_stopped_after_its_first_operation(&workspace).await;
+    let mut written =
+        tddy_code_restructuring::Plan::parse(&std::fs::read_to_string(&plan).unwrap()).unwrap();
+    if let Anchor::Item { hint, .. } = &mut written.ops[1].anchor {
+        *hint = Some(at(1, 1));
+    }
+    std::fs::write(&plan, written.to_jsonl()).unwrap();
+
+    // When the remainder is resumed
+    let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
+
+    // Then it is refused naming the operation the record was made after, and nothing was applied
+    assert_eq!(
+        resumed
+            .map(|run| run.applied)
+            .map_err(|refusal| refusal.starts_with(
+                "the plan's pending anchors do not match what the run recorded after operation 0"
+            )),
+        Err(true)
+    );
+    assert!(!workspace.read(WORKFLOW).contains("fn fresh_queue_items"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_journal_from_before_plans_were_kept_current_cannot_resume_a_plan_that_anchors_by_item() {
+    // Given a stopped item-anchored plan whose journal reads as an older binary wrote it
+    let workspace = a_crate_with_two_inherent_news_and_two_fmts();
+    let plan = an_item_plan_stopped_after_its_first_operation(&workspace).await;
+    workspace.with_the_journal_of_before_plans_were_kept_current(&plan);
+
+    // When the remainder is resumed
+    let resumed = applying_the_plan_with(&workspace, plan, |options| options.resume = true).await;
+
+    // Then it is refused because the journal cannot vouch for the plan, and nothing was applied
+    assert_eq!(
+        resumed
+            .map(|run| run.applied)
+            .map_err(|refusal| refusal.starts_with(
+                "this run continues a journal that already applied 1 operation(s) before plans \
+                 were kept current"
+            )),
+        Err(true)
+    );
+    assert!(!workspace.read(WORKFLOW).contains("fn fresh_queue_items"));
 }
 
 #[tokio::test(flavor = "multi_thread")]

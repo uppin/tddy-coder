@@ -297,11 +297,12 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   rewrites what it left behind to reach the new module through qualified `module::Item` paths. The
   run reports which lines stayed. Author the anchor with `anchors --items` or `anchors --at` rather than by
   hand — a range that clips a helper is the usual way into this — and read the widening report the run prints.
-- **A continued run refuses item anchors.** Item anchors resolve against the tree the run starts on, and
-  a run whose journal already completed operations no longer has it. `--resume` and `--from` over a
-  partly applied plan of item anchors are refused (`FailedPrecondition`) with the remedy: run the
-  remainder from a plan of range anchors, or start the plan afresh. Keeping item anchors current across
-  runs belongs to the `#live-plan` stack's plan store ([#538](https://github.com/uppin/tddy-coder/pull/538) onward).
+- **A continued run refuses a plan the journal cannot vouch for.** `--resume` and `--from` over a partly
+  applied plan read anchors the plan store wrote back after each operation, and check them against a
+  digest the run journalled first. A plan whose pending anchors differ (the run stopped before the
+  write-back, or an anchor was edited by hand) is refused as out of sync, and an item-anchored plan
+  over a journal from before write-back cannot be verified; both say to run the remainder from a new
+  plan file. A plan of ranges and symbols over such an older journal resumes as before.
 - **`check` without `--deep` cannot examine item anchors.** A static check has no server to resolve
   them with, so it reports each item-anchored operation as a finding that says to run `check --deep`;
   a plan of item anchors never passes a static check green.

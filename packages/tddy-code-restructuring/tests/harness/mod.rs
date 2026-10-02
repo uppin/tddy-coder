@@ -252,6 +252,28 @@ impl AFixtureWorkspace {
         plan
     }
 
+    /// The journal of the run of `plan`, rewritten as a binary that predates plan write-back left it:
+    /// no operation ids, and no record that the plan was written back.
+    pub fn with_the_journal_of_before_plans_were_kept_current(&self, plan: &Path) {
+        let journal = tddy_code_restructuring::state_directory_for_plan(&self.root, plan)
+            .expect("the plan has a state directory")
+            .join("journal.jsonl");
+        let older: Vec<String> = std::fs::read_to_string(&journal)
+            .expect("the journal reads")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("a record parses"))
+            .filter(|record| record["status"] != "plan_synced")
+            .map(|mut record| {
+                record
+                    .as_object_mut()
+                    .expect("a record is an object")
+                    .remove("op_id");
+                record.to_string()
+            })
+            .collect();
+        std::fs::write(&journal, older.join("\n") + "\n").expect("the journal is rewritten");
+    }
+
     /// [`Self::a_hinted_plan_of`], whose header also hints at `file`, which is then removed from the
     /// tree — a hinted file that has since been deleted or moved.
     pub fn a_hinted_plan_of_a_tree_that_since_lost(

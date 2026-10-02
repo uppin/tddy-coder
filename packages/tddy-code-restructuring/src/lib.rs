@@ -106,22 +106,29 @@ pub enum RestructureError {
          matches; re-anchor it with `restructure anchors`"
     )]
     ItemChanged { item: String, file: String },
-    /// A run that continues a journal was handed a plan that anchors by item.
+    /// A continued run was handed a plan whose pending anchors are not the ones the run recorded.
     ///
-    /// Item anchors are resolved against the tree the run starts on, which a continued run no
-    /// longer has: its tree already holds the edits of the operations the journal completed, and
-    /// coordinates read from it would be translated through those edits a second time. Nothing is
-    /// wrong with the plan — it is the plan *store* that does not exist yet.
-    ///
-    /// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
-    /// resolve them.
+    /// After each operation the run records a digest of the plan's pending anchors, then writes the
+    /// plan back. A resume reads the plan and compares: a mismatch means the run stopped between
+    /// the two, or somebody edited an anchor since — and either way the anchors no longer say where
+    /// the tree's text is, so applying them would edit the wrong text. Refused, never repaired.
     #[error(
-        "this run continues a journal that already applied {applied} operation(s), and the plan \
-         anchors by item: item anchors are resolved against the tree the run starts on, which a \
-         continued run no longer has — run the remainder from a plan of range anchors, or start \
-         the plan afresh"
+        "the plan's pending anchors do not match what the run recorded after operation {op}: it \
+         stopped before the plan was written back, or an anchor was edited since. Resuming would \
+         read positions that do not match the tree — run the remainder from a new plan file whose \
+         anchors were written against the tree as it stands"
     )]
-    ItemAnchorsOnContinuedRun { applied: usize },
+    PlanOutOfSync { op: usize },
+    /// A continued run of a plan that anchors by item, over a journal that cannot vouch for it.
+    ///
+    /// The journal was written before plans were written back, so nothing says whether the plan's
+    /// anchors describe the tree before or after the operations it completed.
+    #[error(
+        "this run continues a journal that already applied {applied} operation(s) before plans \
+         were kept current, so the plan's item anchors cannot be checked against the tree — run \
+         the remainder from a new plan file, or start the plan afresh"
+    )]
+    PlanUnverifiable { applied: usize },
     /// A loaded plan's file changed on disk since the store read it, so writing the store's copy
     /// back would discard what somebody wrote.
     #[error(
