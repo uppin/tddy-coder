@@ -63,8 +63,9 @@ Four backlog entries, all from `#carve` 15/15 (#526):
 ### Technical Impact
 
 `packages/tddy-code-restructuring/src/crate_move.rs` and `crate_move/` (header pass, manifest
-pass); tests in `tests/move_module_to_crate_acceptance.rs`, `tests/cluster_move*.rs` with two- and
-three-crate fixtures under `tests/harness/`.
+pass); tests in `tests/move_paths_acceptance.rs` with three-crate fixtures under `tests/harness/`.
+`check` is unchanged here: it keeps reading the file's header, and `check-parity` moves it onto the
+survey, so "clean under `check --deep`" is that node's criterion.
 
 ### User Impact
 

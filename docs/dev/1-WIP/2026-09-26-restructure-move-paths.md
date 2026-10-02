@@ -49,8 +49,10 @@ tests use v1 anchors (`symbol`) exactly as the existing move suites do.
 The first push after this commit (wave 2) publishes:
 
 - `crate_move/survey.rs` (new): `PathSurvey`, `SurveyedPath { written, resolved, defining_crate,
-  in_test, site }`, `survey_moved_files(...) -> Result<PathSurvey>` — `TODO(move-paths): implement`.
-  **Owned here and consumed by `check-parity`.**
+  defined_at, in_test, in_body, site }`, `survey_moved_file(...) -> Result<PathSurvey>`.
+  **Owned here and consumed by `check-parity`.** `defined_at` (the crate-rooted path after
+  re-export following) was added in green: the rewrite needs the full followed path, which
+  `defining_crate` alone cannot carry.
 - The failing acceptance and unit tests below.
 
 ## Green wave
@@ -103,10 +105,10 @@ Four #526 defects, all caused by reading header `use` lines as strings.
 
 ## Scope
 
-- [ ] Path survey
-- [ ] Rewrite from the survey (headers and bodies)
-- [ ] Edge test from the survey
-- [ ] Manifest from the survey; self-dependency assertion
+- [x] Path survey
+- [x] Rewrite from the survey (headers and bodies)
+- [x] Edge test from the survey
+- [x] Manifest from the survey; self-dependency assertion
 
 ## Technical Changes
 
@@ -119,21 +121,38 @@ and manifest pass read the header only (`crate_move.rs`, `crate_move/manifest_ed
 ### State B (Target)
 
 One `PathSurvey` per operation, computed before any edit, feeding `header.rs` (rewrite),
-`preconditions.rs` (edges) and `manifest_edits.rs` (dependencies).
+`refusals.rs` / `crate_move.rs` (edges) and `moving.rs` (dependencies).
 
 ### Delta
 
 #### tddy-code-restructuring
-- `crate_move/survey.rs` (new); `crate_move/header.rs`, `crate_move/preconditions.rs`,
-  `crate_move/manifest_edits.rs`, `crate_move/module_home.rs`.
+- `crate_move/survey.rs`, `crate_move/source_scan.rs` (token scan: masking, `use` expansion,
+  `#[cfg(test)]` scope, a module's items) and `crate_move/reexports.rs` (re-export following to the
+  defining crate; real I/O errors refuse the move) — all new.
+- `crate_move/header.rs` (survey-driven rewrite), `crate_move/refusals.rs` (cycle refusal reads the
+  survey), `crate_move/moving.rs` (`[dependencies]` / `[dev-dependencies]`, self-dependency
+  assertion), `crate_move/cluster.rs` (wiring), `crate_move/test_binary.rs` (three helpers widened to
+  `pub(crate)`, no behaviour change), `crate_move.rs`.
+
+#### Behaviour changes in `apply`
+
+- Paths in bodies and in nested `use` items are surveyed and rewritten, not only the header.
+- A body `crate::` path reaching an origin-defined item is an edge back and can trigger the cycle
+  refusal.
+- Edges under `#[cfg(test)]` are not refused; they become `[dev-dependencies]`.
+- A `use` group whose members would need different qualifiers is refused: "write one `use` per path".
+- A `use` leaf whose last segment changes keeps its name with `as` (`use crate::records as roster;`).
+- The self-dependency assertion is an error from `destination_manifest`, not a panic.
+- `check` is unchanged: it reads `Header::header_origin_paths`, the header-only subset
+  (`TODO(check-parity)`).
 
 ## Implementation Milestones
 
-- [ ] Survey over headers + bodies, `self`/`super` resolution
-- [ ] Re-export following to the defining crate
-- [ ] Rewrites for destination / origin / third crate
-- [ ] Edges only for origin-defined, staying-behind items
-- [ ] Manifest from the survey; dev-deps; self-dependency assertion
+- [x] Survey over headers + bodies, `self`/`super` resolution
+- [x] Re-export following to the defining crate
+- [x] Rewrites for destination / origin / third crate
+- [x] Edges only for origin-defined, staying-behind items
+- [x] Manifest from the survey; dev-deps; self-dependency assertion
 
 ## Testing Plan
 
@@ -171,14 +190,25 @@ existing fixtures.)
 
 - `super_resolves_to_the_parent_module`, `super_super_climbs_two_modules`,
   `self_resolves_to_the_module_itself`, `crate_resolves_to_the_crate_root`,
-  `a_path_that_climbs_above_the_crate_root_is_refused`, `an_extern_path_is_left_as_written` — all
-  fail at `TODO(move-paths)`
+  `a_path_that_climbs_above_the_crate_root_is_refused`, `an_extern_path_is_left_as_written`;
+  `source_scan.rs` and `reexports.rs` carry their own unit tests (cycle safety, `NotFound` versus a
+  real read error, `cfg(all(test, ..))`).
+
+Added in green after validation, in `tests/move_paths_acceptance.rs`: a body `crate::` path to an
+origin item refuses the move; a `#[cfg(test)]` module naming an origin item is not an edge; a mixed
+qualifier `use` group is refused with the fix; a nested `use Kind::*;` over an enum the moved file
+defines is not read as a crate.
 
 ## Technical Debt & Production Readiness
 
-- Draft-PR-contract stubs: `TODO(move-paths)` in `crate_move/survey.rs` (`survey_moved_file`,
-  `resolved_against`, both `#[allow(dead_code)]` until the header pass reads them).
+- No `TODO(move-paths)` remains. The one marker this PR adds is `TODO(check-parity)` on
+  `Header::header_origin_paths`, which exists only because `check` does not read the survey yet.
 - `crate_move/survey.rs` is `pub(crate)`: `check-parity` consumes it inside this crate.
+- `source_scan.rs` and the line-based scanner in `test_binary.rs` coexist; consolidating them
+  belongs to `move-facades` or `check-parity`.
+- `cluster.rs` is 617 production lines (611 before this PR, budget 500) and `test_binary.rs` 966
+  (unchanged). The `cluster.rs` split is deferred with the developer's consent:
+  `docs/dev/todo/2026-10-02-cluster-rs-is-617-production-lines.md`.
 
 ## Decisions & Trade-offs
 
@@ -190,13 +220,28 @@ existing fixtures.)
 ## Refactoring Needed
 
 ### From @validate-changes (Change Validation)
+
+No blocking gaps. Applied: guard against empty `use` segments; a nested `use` of an item the moved
+file defines is bound, not a crate; `const fn` no longer records a defined name `fn`.
 ### From @validate-tests (Test Quality)
 ### From @prod-ready (Production Readiness)
 ### From @analyze-clean-code (Code Quality)
 
 ## Validation Results
 
-_(populated by validation commands)_
+Scoped to `tddy-code-restructuring`; whole-workspace health is CI's.
+
+- **validate-changes** — Responsibility delivered, Boundaries held, nothing from `## Dependencies`
+  implemented, every deletion maps to this changeset. No gaps.
+- **validate-tests** — three behaviour changes lacked acceptance tests and the roster test asserted
+  only `!contains`; all added or tightened.
+- **validate-prod-ready** — `child_source` swallowed read errors (a fallback): now only `NotFound`
+  means "no such file", any other error refuses the move. No `println!`, `#[allow]`, or non-test
+  `unwrap`/`expect`.
+- **analyze-clean-code** — 7.5/10 before cleanups; `sightings` split, constants named, imports merged.
+- **File length** — `cluster.rs` 611 → 617 (deferred, see above); `test_binary.rs` 966 → 966.
+- Final: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean; `crate_move::`
+  unit tests 64 passed; `move_paths_acceptance` 11 passed; the other move suites pass.
 
 ## TODO
 
