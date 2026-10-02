@@ -11,7 +11,7 @@ Full codebase exploration that grounded this plan:
 
 ## Stack
 
-`#live-plan` 6/7 — branch `feature/live-plan/extraction-defects`, base `feature/live-plan/move-facades`.
+`#live-plan` 5/7 — branch `feature/live-plan/extraction-defects`, base `feature/live-plan/move-facades`.
 PR: [#542](https://github.com/uppin/tddy-coder/pull/542)
 
 ## Responsibility
@@ -32,14 +32,16 @@ PR: [#542](https://github.com/uppin/tddy-coder/pull/542)
 
 ## Dependencies
 
-This node consumes **nothing** from its predecessors; it is after nodes 1–5 only because the line is
-linear. Its fixtures use `range` anchors, as the existing extraction suites do.
+This node consumes **nothing** from its predecessors; it is after nodes 1–4 only because the line is
+linear: `item-anchors` and `plan-store` were already in progress when it was re-ordered, and the
+wave-1 nodes `move-paths` and `move-facades` lead it. Its fixtures use `range` anchors, as the
+existing extraction suites do.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `item-anchors` (1/7) | item anchors, `backends/rust/item_path.rs` | not consumed; both edit `backends/rust.rs` — expect rebase conflicts, not a dependency | touch the resolver or item-anchor routing in `anchor_range` |
-| `plan-store`, `live-plans` (2–3/7) | plan storage | not consumed | touch the store |
-| `move-paths`, `move-facades` (4–5/7) | cross-crate move fixes | not consumed | touch `crate_move/` |
+| `plan-store` (2/7) | plan storage | not consumed | touch the store |
+| `move-paths`, `move-facades` (3–4/7) | cross-crate move fixes | not consumed | touch `crate_move/` |
 
 ## Draft PR contract
 
