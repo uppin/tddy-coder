@@ -11,7 +11,7 @@ Full codebase exploration that grounded this plan:
 
 ## Stack
 
-`#live-plan` 5/7 — branch `feature/live-plan/move-facades`, base `feature/live-plan/move-paths`.
+`#live-plan` 4/7 — branch `feature/live-plan/move-facades`, base `feature/live-plan/move-paths`.
 PR: [#541](https://github.com/uppin/tddy-coder/pull/541)
 
 ## Responsibility
@@ -40,8 +40,8 @@ implementing one here collides with the PR that owns it.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `move-paths` (4/7) | `PathSurvey` / `survey_moved_files` in `crate_move/survey.rs`; the survey-driven rewrite in `crate_move/header.rs` | `use` items found at depth are rewritten through that rewrite; the `[dev-dependencies]` rule for `#[cfg(test)]` crates is already its | change the survey, the rewrite rules or the manifest pass |
-| `item-anchors`, `plan-store`, `live-plans` (1–3/7) | anchors and plan storage | not consumed — ahead of it only because the line is linear | use item anchors or the store |
+| `move-paths` (3/7) | `PathSurvey` / `survey_moved_files` in `crate_move/survey.rs`; the survey-driven rewrite in `crate_move/header.rs` | `use` items found at depth are rewritten through that rewrite; the `[dev-dependencies]` rule for `#[cfg(test)]` crates is already its | change the survey, the rewrite rules or the manifest pass |
+| `item-anchors`, `plan-store` (1–2/7) | anchors and plan storage | not consumed — ahead of it because both were already in progress when the line was re-ordered | use item anchors or the store |
 
 Sequencing fact: no test here needs `move-paths`' *behaviour* for what it asserts — the facade, the
 `pub mod` order, the nested parent line and the test-binary re-point are decided by this node alone —
