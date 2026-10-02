@@ -13,17 +13,28 @@
 //! and it refuses to overwrite a file somebody changed underneath it.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant};
 
-use crate::edit::WorkspaceEdit;
-use crate::item_anchor::ItemResolver;
-use crate::plan::{OpId, Plan, RefactorOp};
-use crate::Result;
+use sha2::{Digest, Sha256};
+
+use crate::edit::{FileEdit, WorkspaceEdit};
+use crate::item_anchor::{absolute_range, ItemResolver};
+use crate::ledger::PositionLedger;
+use crate::plan::{Anchor, OpId, Plan, RefactorOp};
+use crate::{RestructureError, Result};
 
 /// A loaded plan's identity: its path relative to the workspace root.
+///
+/// A plan outside the root has no relative path to be known by, so it is keyed by its absolute one.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PlanKey(pub PathBuf);
+
+impl std::fmt::Display for PlanKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.display().fmt(formatter)
+    }
+}
 
 /// When a changed plan is written back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +68,9 @@ pub struct PlanStore {
     root: PathBuf,
     policy: FlushPolicy,
     plans: BTreeMap<PlanKey, LoadedPlan>,
+    /// When each dirty plan first became dirty — what the debounce is measured from. Kept beside
+    /// the plans rather than in them so [`LoadedPlan`] stays what a reader of the store sees.
+    dirty_since: BTreeMap<PlanKey, Instant>,
 }
 
 impl PlanStore {
@@ -65,43 +79,99 @@ impl PlanStore {
             root: root.to_path_buf(),
             policy,
             plans: BTreeMap::new(),
+            dirty_since: BTreeMap::new(),
         }
     }
 
     /// Read each plan, assign an id to every operation without one, and hold it.
     ///
     /// Two operations sharing an id are refused as malformed. Loading a plan already held reloads
-    /// nothing and reports it as held.
+    /// nothing and reports it as held. All or nothing: when one plan is refused, none of the others
+    /// named is loaded either, so a failed `load` leaves the store as it found it.
     pub fn load(&mut self, plans: &[PathBuf]) -> Result<Vec<PlanSummary>> {
-        // TODO(plan-store): implement
-        let _ = (plans, &self.root, self.policy);
-        todo!("plan-store: load plans")
+        let mut named = Vec::new();
+        let mut read: BTreeMap<PlanKey, LoadedPlan> = BTreeMap::new();
+        for plan in plans {
+            let key = self.key_for(plan)?;
+            if !self.plans.contains_key(&key) && !read.contains_key(&key) {
+                read.insert(key.clone(), self.read(&key)?);
+            }
+            named.push(key);
+        }
+
+        for (key, loaded) in read {
+            if loaded.dirty {
+                self.dirty_since.insert(key.clone(), Instant::now());
+            }
+            self.plans.insert(key, loaded);
+        }
+        Ok(named
+            .into_iter()
+            .filter_map(|key| self.plans.get(&key).map(summary_of))
+            .collect())
     }
 
     /// Flush and drop each named plan.
+    ///
+    /// A plan whose file changed on disk since it was loaded is dropped without being written: the
+    /// file is the human's source, and "unload it and load it again" is how a refused flush tells
+    /// them to take theirs over the store's. Every other failure to write keeps the plan held.
+    /// Naming a plan the store does not hold is refused, before anything is dropped.
     pub fn unload(&mut self, plans: &[PathBuf]) -> Result<()> {
-        // TODO(plan-store): implement
-        let _ = plans;
-        todo!("plan-store: unload plans")
+        let keys = plans
+            .iter()
+            .map(|plan| {
+                let key = self.key_for(plan)?;
+                self.held(&key).map(|_| key)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        for key in keys {
+            self.release(&key)?;
+        }
+        Ok(())
     }
 
     /// Flush and drop every plan this root holds.
+    ///
+    /// Every plan is tried even when one fails to be written; the first failure is returned.
     pub fn unload_all(&mut self) -> Result<()> {
-        // TODO(plan-store): implement
-        todo!("plan-store: unload every plan")
+        let keys: Vec<PlanKey> = self.plans.keys().cloned().collect();
+        let mut first_failure = None;
+        for key in keys {
+            if let Err(failure) = self.release(&key) {
+                first_failure.get_or_insert(failure);
+            }
+        }
+        first_failure.map_or(Ok(()), Err)
     }
 
     /// Every plan held, in path order.
     pub fn list(&self) -> Vec<PlanSummary> {
-        // TODO(plan-store): implement
-        todo!("plan-store: list plans")
+        self.plans.values().map(summary_of).collect()
     }
 
     /// The key a plan path is held under, relative to the root whatever form it was named in.
+    ///
+    /// Lexical, never canonical: the file need not exist to have a key, and `./a/../plan.jsonl`,
+    /// `plan.jsonl` and `<root>/plan.jsonl` are one plan.
     pub fn key_for(&self, plan: &Path) -> Result<PlanKey> {
-        // TODO(plan-store): implement
-        let _ = plan;
-        todo!("plan-store: a plan path's key")
+        let normalised = normalised(plan);
+        let key = normalised
+            .strip_prefix(&self.root)
+            .map(Path::to_path_buf)
+            .unwrap_or(normalised);
+        if key.file_name().is_none() {
+            return Err(RestructureError::MalformedPlan(format!(
+                "`{}` names no plan file",
+                plan.display()
+            )));
+        }
+        Ok(PlanKey(key))
+    }
+
+    /// Where the file a key names is, on disk.
+    pub fn path_of(&self, key: &PlanKey) -> PathBuf {
+        self.root.join(&key.0)
     }
 
     pub fn get(&self, key: &PlanKey) -> Option<&LoadedPlan> {
@@ -110,14 +180,22 @@ impl PlanStore {
 
     /// One operation of a held plan, by its id.
     pub fn op(&self, key: &PlanKey, id: &OpId) -> Option<&RefactorOp> {
-        // TODO(plan-store): implement
-        let _ = (key, id);
-        todo!("plan-store: an operation by id")
+        self.get(key)?
+            .plan
+            .ops
+            .iter()
+            .find(|op| op.id.as_ref() == Some(id))
     }
 
     /// Rewrite the pending operations of `key` after operation `applied` produced `edit`: hints and
     /// relative ranges translated through it, fingerprints of items it edited recomputed through
     /// `resolver`, `file` hints following a file it moved. Marks the plan dirty.
+    ///
+    /// Pending means after `applied` in the plan's order. The plan is changed only once every
+    /// pending operation has been refreshed, so a refusal part-way leaves it as it was.
+    ///
+    /// An item the edit left unresolvable — moved out of its file, say — keeps its anchor as
+    /// written: whether an operation is still valid is judged when it runs, not here.
     pub fn refresh_after_op(
         &mut self,
         key: &PlanKey,
@@ -125,21 +203,300 @@ impl PlanStore {
         edit: &WorkspaceEdit,
         resolver: &mut dyn ItemResolver,
     ) -> Result<()> {
-        // TODO(plan-store): implement
-        let _ = (key, applied, edit, resolver);
-        todo!("plan-store: refresh the applied plan's pending operations")
+        let held = self.held(key)?;
+        let position = held
+            .plan
+            .ops
+            .iter()
+            .position(|op| op.id.as_ref() == Some(applied))
+            .ok_or_else(|| {
+                RestructureError::MalformedPlan(format!(
+                    "{key} has no operation with the id `{applied}`"
+                ))
+            })?;
+
+        let mut refreshed = held.plan.ops.clone();
+        let changed = refresh_pending(&mut refreshed[position + 1..], edit, resolver)?;
+        if changed {
+            if let Some(held) = self.plans.get_mut(key) {
+                held.plan.ops = refreshed;
+            }
+            self.mark_dirty(key);
+        }
+        Ok(())
     }
 
     /// Write every plan dirty for longer than the debounce; the keys written.
     pub fn flush_dirty(&mut self) -> Result<Vec<PlanKey>> {
-        // TODO(plan-store): implement
-        todo!("plan-store: eventual flush")
+        let debounce = self.policy.debounce;
+        let due: Vec<PlanKey> = self
+            .dirty_since
+            .iter()
+            .filter(|(_, since)| since.elapsed() >= debounce)
+            .map(|(key, _)| key.clone())
+            .collect();
+        self.write_all(due)
     }
 
     /// Write every dirty plan now — end of run, unload, shutdown; the keys written.
     pub fn flush_all(&mut self) -> Result<Vec<PlanKey>> {
-        // TODO(plan-store): implement
-        todo!("plan-store: flush every dirty plan")
+        self.write_all(self.dirty_since.keys().cloned().collect())
+    }
+
+    /// Write each of `keys`, trying every one and returning the first failure.
+    fn write_all(&mut self, keys: Vec<PlanKey>) -> Result<Vec<PlanKey>> {
+        let mut written = Vec::new();
+        let mut first_failure = None;
+        for key in keys {
+            match self.write_back(&key) {
+                Ok(()) => written.push(key),
+                Err(failure) => {
+                    first_failure.get_or_insert(failure);
+                }
+            }
+        }
+        first_failure.map_or(Ok(written), Err)
+    }
+
+    /// Read a plan's file into a store entry: ids assigned, a repeated id refused.
+    fn read(&self, key: &PlanKey) -> Result<LoadedPlan> {
+        let bytes = std::fs::read(self.path_of(key))?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| {
+            RestructureError::MalformedPlan(format!("{key}: the plan is not UTF-8 text"))
+        })?;
+        let mut plan = Plan::parse(text)?;
+        if let Some(id) = plan.repeated_op_id() {
+            return Err(RestructureError::MalformedPlan(format!(
+                "{key}: two operations share the id `{id}`"
+            )));
+        }
+        let dirty = plan.assign_missing_op_ids();
+        Ok(LoadedPlan {
+            key: key.clone(),
+            plan,
+            dirty,
+            on_disk: hash_of(&bytes),
+        })
+    }
+
+    fn held(&self, key: &PlanKey) -> Result<&LoadedPlan> {
+        self.plans.get(key).ok_or_else(|| {
+            RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
+        })
+    }
+
+    fn mark_dirty(&mut self, key: &PlanKey) {
+        if let Some(held) = self.plans.get_mut(key) {
+            held.dirty = true;
+            self.dirty_since
+                .entry(key.clone())
+                .or_insert_with(Instant::now);
+        }
+    }
+
+    /// Write `key`'s plan back and drop it, unless the file moved on without the store.
+    fn release(&mut self, key: &PlanKey) -> Result<()> {
+        match self.write_back(key) {
+            Ok(()) | Err(RestructureError::PlanChangedOnDisk { .. }) => {}
+            Err(failure) => return Err(failure),
+        }
+        self.plans.remove(key);
+        self.dirty_since.remove(key);
+        Ok(())
+    }
+
+    /// Write `key`'s plan if it is dirty: a temporary file beside it, then a rename, so a reader
+    /// sees the old plan or the new one and never half of either.
+    ///
+    /// Refused, writing nothing, when the file's content is no longer what the store read or wrote
+    /// last. The check and the rename are two steps, not one: an edit landing between them would
+    /// still be replaced.
+    fn write_back(&mut self, key: &PlanKey) -> Result<()> {
+        let held = self.held(key)?;
+        if !held.dirty {
+            return Ok(());
+        }
+
+        let path = self.path_of(key);
+        let unchanged = std::fs::read(&path)
+            .map(|bytes| hash_of(&bytes) == held.on_disk)
+            .unwrap_or(false);
+        if !unchanged {
+            return Err(RestructureError::PlanChangedOnDisk {
+                plan: key.to_string(),
+            });
+        }
+
+        let text = held.plan.to_jsonl();
+        let mut staged = path.clone().into_os_string();
+        staged.push(format!(".{}.tmp", std::process::id()));
+        let staged = PathBuf::from(staged);
+        std::fs::write(&staged, &text)?;
+        if let Err(failure) = std::fs::rename(&staged, &path) {
+            let _ = std::fs::remove_file(&staged);
+            return Err(failure.into());
+        }
+
+        if let Some(held) = self.plans.get_mut(key) {
+            held.dirty = false;
+            held.on_disk = hash_of(text.as_bytes());
+        }
+        self.dirty_since.remove(key);
+        Ok(())
+    }
+}
+
+fn summary_of(held: &LoadedPlan) -> PlanSummary {
+    PlanSummary {
+        key: held.key.clone(),
+        ops: held.plan.ops.len(),
+        dirty: held.dirty,
+    }
+}
+
+/// `sha256:<hex>` of a file's bytes.
+fn hash_of(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
+
+/// `path` with `.` and `..` folded away lexically.
+fn normalised(path: &Path) -> PathBuf {
+    let mut folded = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                folded.pop();
+            }
+            other => folded.push(other),
+        }
+    }
+    folded
+}
+
+/// Bring each of `pending` up to the tree `edit` left behind; whether any of them changed.
+///
+/// Also what a dry run uses on a copy of the plan, where nothing is written and the edit is only
+/// rehearsed.
+pub(crate) fn refresh_pending(
+    pending: &mut [RefactorOp],
+    edit: &WorkspaceEdit,
+    resolver: &mut dyn ItemResolver,
+) -> Result<bool> {
+    let mut ledger = PositionLedger::new();
+    ledger.record(edit);
+    let edited: Vec<&str> = edit
+        .changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Change { path, .. } => Some(path.as_str()),
+            FileEdit::Create { .. } | FileEdit::Rename { .. } => None,
+        })
+        .collect();
+
+    let mut changed = false;
+    for op in pending {
+        let anchor = refreshed(&op.anchor, &ledger, &edited, resolver)?;
+        let also = op
+            .also
+            .iter()
+            .map(|member| refreshed(member, &ledger, &edited, resolver))
+            .collect::<Result<Vec<_>>>()?;
+        if anchor != op.anchor || also != op.also {
+            op.anchor = anchor;
+            op.also = also;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// One anchor as the tree the edit left behind reads it.
+fn refreshed(
+    anchor: &Anchor,
+    ledger: &PositionLedger,
+    edited: &[&str],
+    resolver: &mut dyn ItemResolver,
+) -> Result<Anchor> {
+    let followed = |file: &str| ledger.current_path(Path::new(file)).display().to_string();
+    match anchor {
+        Anchor::Symbol { .. } | Anchor::Range { .. } => ledger.translate_anchor(anchor),
+        Anchor::Item {
+            item,
+            file,
+            start,
+            end,
+            fingerprint,
+            hint,
+        } => {
+            let file = followed(file);
+            let mut anchor = Anchor::Item {
+                item: item.clone(),
+                file: file.clone(),
+                start: *start,
+                end: *end,
+                fingerprint: fingerprint.clone(),
+                hint: *hint,
+            };
+            if edited.contains(&file.as_str()) {
+                let Some(found) = resolved_or_left_as_written(resolver.resolve_item(&file, item))?
+                else {
+                    return Ok(anchor);
+                };
+                let Some(range) =
+                    resolved_or_left_as_written(absolute_range(&found, *start, *end))?
+                else {
+                    return Ok(anchor);
+                };
+                if let Anchor::Item {
+                    fingerprint, hint, ..
+                } = &mut anchor
+                {
+                    *fingerprint = found.fingerprint;
+                    *hint = Some(range.start);
+                }
+            }
+            Ok(anchor)
+        }
+        Anchor::Items {
+            file,
+            items,
+            fingerprints,
+        } => {
+            let file = followed(file);
+            let mut refreshed_fingerprints = Vec::with_capacity(items.len());
+            if edited.contains(&file.as_str()) {
+                for item in items {
+                    match resolved_or_left_as_written(resolver.resolve_item(&file, item))? {
+                        Some(found) => refreshed_fingerprints.push(found.fingerprint),
+                        None => {
+                            refreshed_fingerprints.clear();
+                            break;
+                        }
+                    }
+                }
+            }
+            Ok(Anchor::Items {
+                file,
+                items: items.clone(),
+                fingerprints: if refreshed_fingerprints.len() == items.len() {
+                    refreshed_fingerprints
+                } else {
+                    fingerprints.clone()
+                },
+            })
+        }
+    }
+}
+
+/// What an answer says, or `None` when it is the refusal of an item the edit left no longer
+/// resolvable. Every other failure — a server that did not answer, a caller that stopped waiting —
+/// is not about the item, and is returned.
+fn resolved_or_left_as_written<T>(answer: Result<T>) -> Result<Option<T>> {
+    match answer {
+        Ok(found) => Ok(Some(found)),
+        Err(RestructureError::MalformedPlan(_)) => Ok(None),
+        Err(failure) => Err(failure),
     }
 }
 

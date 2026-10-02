@@ -441,20 +441,23 @@ pub struct RefactorOp {
     pub op: RefactorKind,
     pub anchor: Anchor,
     /// New symbol name, for extractions and renames.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Destination path, for moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to: Option<String>,
     /// Which of several actions an engine offers for the same operation, where it offers more than
     /// one. The meaning is op-specific and is validated by the backend that honours it, since only
     /// the backend knows which forms exist. Absent means "whatever this operation did before".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<String>,
     /// Carry a symbol's private-only dependencies along with it.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub with_private_deps: bool,
     /// What to leave in the parent so paths that reached the relocated items keep resolving. Only
     /// `extract_module` can honour one, and an operation that cannot is refused rather than having
     /// the field ignored.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reexport: Option<Reexport>,
     /// Give the extracted module a file of its own, in the same operation that groups it.
     ///
@@ -462,15 +465,21 @@ pub struct RefactorOp {
     /// which no original coordinate maps to — a constraint on *anchors*, and it disappears when one
     /// operation performs both and never has to name that keyword. Each plan pays its own cold index,
     /// so the recipe a real split needs drops from four plans to two.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub to_file: bool,
     /// The modules travelling with the anchor's, for `move_cluster_to_crate`.
     ///
     /// Anchors rather than module names, so every member is addressed exactly the way the first one
     /// is and the [`crate::PositionLedger`] translates them all the same way. The anchor stays the
     /// first member so nothing that reads `op.anchor` has to learn about sets.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also: Vec<Anchor>,
+}
+
+/// Whether a flag is off — what keeps a default out of a plan written back, so an operation reads
+/// the way its author wrote it.
+fn is_false(flag: &bool) -> bool {
+    !*flag
 }
 
 impl RefactorOp {
@@ -617,9 +626,62 @@ impl Plan {
 
     /// This plan as JSONL: the header its schema version writes, then one line per operation in
     /// order — what the plan store flushes back to disk.
+    ///
+    /// A field an operation left at its default is not written, so an operation reads back the way
+    /// it was authored. Key order and whitespace are this crate's, not the author's.
     pub fn to_jsonl(&self) -> String {
-        // TODO(plan-store): implement
-        todo!("plan-store: serialise a plan back to JSONL")
+        let header = if self.version == HINTED_SCHEMA_VERSION {
+            serde_json::to_string(&HintedHeader {
+                v: self.version,
+                files: self.files.clone(),
+            })
+        } else {
+            serde_json::to_string(&SnapshotHeader {
+                v: self.version,
+                snapshot: self.snapshot.clone(),
+            })
+        }
+        .expect("a header of strings serialises");
+
+        let mut text = header;
+        text.push('\n');
+        for op in &self.ops {
+            text.push_str(&serde_json::to_string(op).expect("an operation serialises"));
+            text.push('\n');
+        }
+        text
+    }
+
+    /// The first id that two operations of this plan share, if any.
+    pub fn repeated_op_id(&self) -> Option<&OpId> {
+        let mut seen = std::collections::BTreeSet::new();
+        self.ops
+            .iter()
+            .filter_map(|op| op.id.as_ref())
+            .find(|id| !seen.insert(*id))
+    }
+
+    /// Give every operation without an id one, and say whether any was given.
+    ///
+    /// Ids are `op-<n>`, numbered past the highest the plan already uses, so an operation inserted
+    /// into a plan that has been loaded before never takes the id of one that was removed from the
+    /// middle of it.
+    pub fn assign_missing_op_ids(&mut self) -> bool {
+        let mut next = self
+            .ops
+            .iter()
+            .filter_map(|op| op.id.as_ref())
+            .filter_map(|id| id.0.strip_prefix("op-")?.parse::<u64>().ok())
+            .max()
+            .map_or(1, |highest| highest + 1);
+
+        let mut assigned = false;
+        for op in self.ops.iter_mut().filter(|op| op.id.is_none()) {
+            op.id = Some(OpId(format!("op-{next}")));
+            next += 1;
+            assigned = true;
+        }
+        assigned
     }
 
     /// Verify every snapshot hash still matches the working tree. Fails loudly on drift.
