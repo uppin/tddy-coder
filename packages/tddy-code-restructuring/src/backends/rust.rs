@@ -918,13 +918,21 @@ impl RustBackend {
         Ok(!hover.is_null())
     }
 
-    /// Ask for a named assist, waiting while the crate graph is still loading.
+    /// Ask for a named assist, waiting while the crate graph is still loading. `probe` is where the
+    /// server is asked whether inference is ready, which for a range must be a position that can
+    /// carry a hover.
     ///
     /// The wait ends on one of three things and never on a clock. The assist arrives, and that is
     /// the answer. Or the server is demonstrably ready *here* and still does not offer it, which is
     /// the range being wrong rather than the server being slow — and that readiness is the very
     /// evidence the old deadline used to gather once it had expired. Or the caller stops waiting.
-    fn assist(&mut self, uri: &str, range: Range, kind: RefactorKind) -> Result<Value> {
+    fn assist(
+        &mut self,
+        uri: &str,
+        range: Range,
+        kind: RefactorKind,
+        probe: Position,
+    ) -> Result<Value> {
         let assist = assist_for(kind)
             .ok_or_else(|| failure(format!("no rust-analyzer assist maps to {kind:?}")))?;
         let wanted = assist.title;
@@ -964,7 +972,7 @@ impl RustBackend {
             // says nothing about a body thousands of lines further down. So ask at the range
             // itself before blaming the plan.
             let inference = if assist.needs_inference {
-                Some(self.inference_ready_at(uri, target.start)?)
+                Some(self.inference_ready_at(uri, probe)?)
             } else {
                 None
             };
@@ -1036,6 +1044,12 @@ impl LanguageBackend for RustBackend {
                     .err()
                     .map(|e| e.to_string()),
             );
+            // Not a finding: the carry is what `apply` does about it, so the plan is sound.
+            for statement in imports::local_uses_to_carry(&text, planned) {
+                (self.progress)(&format!(
+                    "the extracted function will carry the function-local `{statement}`"
+                ));
+            }
         }
 
         if op.op == RefactorKind::ExtractModule {
@@ -1341,6 +1355,13 @@ impl RustBackend {
     ) -> Result<(String, Vec<VisibilityChange>, Vec<String>)> {
         (self.progress)(&format!("assist: {:?} in this file", op.op));
         let range = self.anchor_range(uri, op)?;
+        // A place selected under a borrow is bound as the borrow: the assist would otherwise bind
+        // it by value, which moves a non-`Copy` field out of `&self`.
+        let range = if op.op == RefactorKind::ExtractVariable {
+            selection::widened_to_its_borrow(original, range)
+        } else {
+            range
+        };
         let relocates = assist_for(op.op).is_some_and(|assist| assist.relocates_items);
         let reexport = op.reexport.unwrap_or(Reexport::None);
 
@@ -1349,8 +1370,8 @@ impl RustBackend {
         // A symbol anchor already waits inside `anchor_range`; a range anchor has nothing to wait on
         // there, because there is no symbol to resolve.
         if assist_for(op.op).is_some_and(|assist| assist.needs_inference) {
-            let start = lsp_range(range)["start"].clone();
-            self.wait_until_resolved(uri, &start)?;
+            let probe = selection::hover_bearing_position(original, range);
+            self.wait_until_resolved_within_bound(uri, &lsp_position(probe))?;
         }
 
         let moved = if relocates {
@@ -1397,6 +1418,13 @@ impl RustBackend {
         }
 
         if !relocates {
+            // The new function lands outside the one it came from, where that function's own `use`
+            // items are not in scope.
+            let named = if op.op == RefactorKind::ExtractMethod {
+                imports::carry_function_local_uses(original, &named, range, &name)
+            } else {
+                named
+            };
             return Ok((named, Vec::new(), Vec::new()));
         }
 
@@ -1735,7 +1763,12 @@ impl RustBackend {
             .clone();
         self.wait_until_resolved(produced.uri, &start)?;
 
-        let action = self.assist(produced.uri, caret, RefactorKind::ExtractModuleToFile)?;
+        let action = self.assist(
+            produced.uri,
+            caret,
+            RefactorKind::ExtractModuleToFile,
+            caret.start,
+        )?;
         let resolved = self.request_settled("codeAction/resolve", action)?;
         let workspace_edit = resolved.get("edit").unwrap_or(&resolved);
 
@@ -1797,7 +1830,7 @@ impl RustBackend {
         (self.progress)(&format!("assist: {:?} (multi-file)", op.op));
         let range = self.anchor_range(uri, op)?;
 
-        let action = self.assist(uri, range, op.op)?;
+        let action = self.assist(uri, range, op.op, range.start)?;
         let resolved = self.request_settled("codeAction/resolve", action)?;
         let workspace_edit = resolved.get("edit").unwrap_or(&resolved);
 
@@ -1934,7 +1967,12 @@ impl RustBackend {
         range: Range,
         kind: RefactorKind,
     ) -> Result<String> {
-        let action = self.assist(uri, range, kind)?;
+        let action = self.assist(
+            uri,
+            range,
+            kind,
+            selection::hover_bearing_position(original, range),
+        )?;
         let resolved = self.request_settled("codeAction/resolve", action)?;
         Ok(apply_lsp_edit(original, edits_for(&resolved, uri)?))
     }
