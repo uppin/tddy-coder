@@ -11,7 +11,7 @@ Full codebase exploration that grounded this plan:
 
 ## Stack
 
-`#live-plan` 7/7 — branch `feature/live-plan/check-parity`, base `feature/live-plan/extraction-defects`.
+`#live-plan` 6/7 — branch `feature/live-plan/check-parity`, base `feature/live-plan/extraction-defects`.
 PR: [#543](https://github.com/uppin/tddy-coder/pull/543)
 PR: _recorded in wave 2_
 
@@ -35,8 +35,8 @@ implementing one here collides with the PR that owns it.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `move-paths` (4/7) | `PathSurvey`, `SurveyedPath`, `survey_moved_files` in `crate_move/survey.rs`, reaching body paths | the stays-behind finding iterates the survey's origin-defined, staying-behind paths | add a second path reader, change the survey's fields, or change how it resolves `self`/`super`/re-exports |
-| `item-anchors`, `plan-store`, `live-plans`, `move-facades`, `extraction-defects` (1–3, 5–6/7) | — | not consumed; ahead of it only because the line is linear | touch their surfaces |
+| `move-paths` (3/7) | `PathSurvey`, `SurveyedPath`, `survey_moved_files` in `crate_move/survey.rs`, reaching body paths | the stays-behind finding iterates the survey's origin-defined, staying-behind paths | add a second path reader, change the survey's fields, or change how it resolves `self`/`super`/re-exports |
+| `item-anchors`, `plan-store`, `move-facades`, `extraction-defects` (1–2, 4–5/7) | — | not consumed; ahead of it only because the line is linear | touch their surfaces |
 
 ## Draft PR contract
 
@@ -56,6 +56,10 @@ go green only after `move-paths` is green.
 **Blocks:** nothing
 
     item-anchors → plan-store → live-plans      move-paths → check-parity
+
+## Successor PRs
+
+- `feature/live-plan/live-plans` — next and last in the line (wave 3); consumes nothing from this node.
 
 ## Prerequisites
 
