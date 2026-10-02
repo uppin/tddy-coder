@@ -18,29 +18,24 @@ pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::R
     None
 }
 
-/// Where a new `mod` declaration goes in a crate root: after the last one already there, and after
-/// the file's own header when it declares none.
+/// The edit that declares `line` (`pub mod host_registry;`) among the root's existing `mod` lines,
+/// in sorted position: before the first declared module that sorts after it, else after the last
+/// one, and after the file's own header when it declares none.
 ///
-/// Placed rather than sorted in, because a crate root's `mod` order is the author's and nothing
-/// here knows what it means.
-/// The edit that declares `line` (`pub mod host_registry;`) among the root's existing `mod` lines
-/// in sorted position, rather than after the last of them.
-#[allow(dead_code)] // TODO(move-facades): replaces `after_last_module_declaration` at its callers.
+/// Sorted rather than appended, because a root whose declarations are in order stays in order, and
+/// one that is not gets no worse — the new line lands where the sort puts it relative to its
+/// neighbours and nothing else is moved.
 pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str) -> TextEdit {
-    // TODO(move-facades): implement
-    let _ = (text, line);
-    todo!("move-facades: declare a module in sorted position")
-}
-
-pub(crate) fn after_last_module_declaration(text: &str) -> usize {
+    let named = declared_module_name(line);
     let mut offset = 0usize;
     let mut header_ends = 0usize;
     let mut in_header = true;
-    let mut last_declaration = None;
+    let mut after_last = None;
 
-    for line in text.split_inclusive('\n') {
-        offset += line.len();
-        let trimmed = line.trim();
+    for current in text.split_inclusive('\n') {
+        let start = offset;
+        offset += current.len();
+        let trimmed = current.trim();
 
         if in_header
             && (trimmed.is_empty() || trimmed.starts_with("//!") || trimmed.starts_with("#!"))
@@ -50,13 +45,34 @@ pub(crate) fn after_last_module_declaration(text: &str) -> usize {
             in_header = false;
         }
 
-        let declaration = trimmed.strip_prefix("pub ").unwrap_or(trimmed);
-        if declaration.starts_with("mod ") && declaration.ends_with(';') {
-            last_declaration = Some(offset);
+        let Some(declared) = declared_module_name(trimmed) else {
+            continue;
+        };
+        if named.is_some_and(|new| new < declared) {
+            return insertion(text, start, line);
         }
+        after_last = Some(offset);
     }
 
-    last_declaration.unwrap_or(header_ends)
+    insertion(text, after_last.unwrap_or(header_ends), line)
+}
+
+/// The identifier a `[pub ]mod <name>;` line declares.
+fn declared_module_name(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let line = line.strip_prefix("pub ").unwrap_or(line);
+    line.strip_prefix("mod ")?.strip_suffix(';').map(str::trim)
+}
+
+/// A line inserted at a byte offset, on a line of its own.
+fn insertion(text: &str, at: usize, line: &str) -> TextEdit {
+    let needs_a_break = at == text.len() && !text.is_empty() && !text.ends_with('\n');
+    let new_text = if needs_a_break {
+        format!("\n{line}\n")
+    } else {
+        format!("{line}\n")
+    };
+    replacement(text, at..at, &new_text)
 }
 
 /// Which dependency table of a manifest an edit reads or writes.

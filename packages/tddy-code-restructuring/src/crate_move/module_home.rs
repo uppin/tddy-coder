@@ -179,21 +179,8 @@ pub fn defining_crate(
 /// Whether `module` is defined in `origin` itself, or re-exported from another crate.
 ///
 /// `None` when the origin's own sources define it; `Some(extern_name)` when a `pub use` brings it
-/// in — by a re-export in the crate root, or by a module file that is nothing but a forwarding
-/// address.
-/// The crate a crate-root facade — `pub use <crate>::{…, module, …};` or `pub use <crate>::*;` —
-/// forwards `module` to, confirmed by `<crate>`'s own root declaring it.
-#[allow(dead_code)] // TODO(move-facades): `defining_module_in_crate` consults this.
-fn crate_root_facade_forwarding(
-    workspace: &Workspace<'_>,
-    root_text: &str,
-    module: &str,
-) -> Result<Option<String>> {
-    // TODO(move-facades): implement
-    let _ = (workspace, root_text, module);
-    todo!("move-facades: see a module through a crate-root facade")
-}
-
+/// in — by a re-export in the crate root, by a crate-root facade of the destination, or by a module
+/// file that is nothing but a forwarding address.
 fn defining_module_in_crate(
     workspace: &Workspace<'_>,
     origin: &destination::Destination,
@@ -210,6 +197,52 @@ fn defining_module_in_crate(
         return Ok(forwarded_by_the_module_file(workspace, origin, module));
     }
 
+    crate_root_facade_forwarding(workspace, origin, &text, module)
+}
+
+/// The crate a crate-root glob facade — `pub use <crate>::*;` — forwards `module` to, confirmed by
+/// `<crate>`'s own root declaring it.
+///
+/// A glob names nothing, so the root alone cannot say what it forwards; the crate it names has to
+/// be read. The crate is found where the origin's manifest says it is, by the `path` of the
+/// dependency of that name — a facade for a crate the origin does not depend on by path is not one
+/// this can follow.
+fn crate_root_facade_forwarding(
+    workspace: &Workspace<'_>,
+    origin: &destination::Destination,
+    root_text: &str,
+    module: &str,
+) -> Result<Option<String>> {
+    let manifest = workspace.read(&format!("{}/Cargo.toml", origin.dir))?;
+
+    for path in use_paths(root_text) {
+        let Some(crate_named) = path
+            .strip_suffix("::*")
+            .filter(|prefix| !prefix.contains("::"))
+            .and_then(extern_crate_of_use_path)
+        else {
+            continue;
+        };
+        let Some(declared) =
+            manifest_edits::dependency_line_from_either_table(&manifest, &crate_named)
+        else {
+            continue;
+        };
+        let Some(relative) = manifest_edits::declared_path(&declared) else {
+            continue;
+        };
+
+        let dependency_root = format!(
+            "{}/src/lib.rs",
+            manifest_edits::normalized(&format!("{}/{relative}", origin.dir))
+        );
+        let declares_it = workspace
+            .read(&dependency_root)
+            .is_ok_and(|text| manifest_edits::module_declaration(&text, module).is_some());
+        if declares_it {
+            return Ok(Some(crate_named));
+        }
+    }
     Ok(None)
 }
 

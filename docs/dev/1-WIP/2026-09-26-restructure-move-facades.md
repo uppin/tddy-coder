@@ -110,11 +110,11 @@ un-re-pointed paths.
 
 ## Scope
 
-- [ ] Named per-destination facade
-- [ ] Sorted `pub mod`
-- [ ] Nested parent re-export rewrite
+- [x] Named per-destination facade
+- [x] Sorted `pub mod`
+- [x] Nested parent re-export rewrite (the rewrite; counting its items as reached from outside is not done)
 - [ ] Every-depth `use` re-point
-- [ ] Facade-aware test-binary move
+- [x] Facade-aware test-binary move
 
 ## Technical Changes
 
@@ -137,11 +137,11 @@ destination.
 
 ## Implementation Milestones
 
-- [ ] Facade accumulation + grouped line
-- [ ] Sorted `pub mod`
-- [ ] Nested parent line
+- [x] Facade accumulation + grouped line
+- [x] Sorted `pub mod`
+- [x] Nested parent line
 - [ ] Depth walk
-- [ ] Test-binary through facade
+- [x] Test-binary through facade
 - [ ] Clippy clean on every fixture after apply
 
 ## Testing Plan

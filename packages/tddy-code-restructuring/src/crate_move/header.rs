@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+use super::source_scan;
 use super::survey::SurveyedPath;
 use super::{malformed, Move, Result};
 use crate::edit::{Position, TextEdit};
@@ -262,21 +264,34 @@ fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a S
         .find(|member| rest == *member || rest.starts_with(&format!("{member}::")))
 }
 
+/// Every `use` item of the file at any module depth — inline `mod tests { … }` included — with its
+/// byte offset, the tree it spells (`crate::runtime::boot`, `super::*`, `a::{b, c}`) and whether it
+/// sits under `#[cfg(test)]`.
+///
+/// Read off [`source_scan::sightings`], the walk the survey takes, so the two cannot disagree about
+/// which `use` items a file holds or where a `cfg(test)` module begins. The rewrite itself is the
+/// survey's: this lists the items, and re-points nothing.
+#[cfg(test)]
+pub(crate) fn use_items_at_every_depth(text: &str) -> Vec<(usize, &str, bool)> {
+    let mut items: Vec<(usize, &str, bool)> = Vec::new();
+    for sighting in source_scan::sightings(text).iter().filter(|s| s.in_use) {
+        // The leaves of one `use` tree share a site.
+        if items.last().is_some_and(|(at, ..)| *at == sighting.head_at) {
+            continue;
+        }
+        let tree = &text[sighting.head_at..];
+        let tree = tree.split(';').next().unwrap_or(tree).trim_end();
+        items.push((sighting.head_at, tree, sighting.in_test));
+    }
+    items
+}
+
 /// Every top-level `use` declaration in a file, as the byte offset of its path and the path itself.
 ///
 /// `pub(crate)` because a test binary's header is read the same way and re-pointed by different
 /// rules: what a moved test names and what a moved module names are different questions, but
 /// *which* text answers either is one question, and two scanners would disagree about an indented
 /// `use` before long.
-/// Every `use` item of the file at any module depth — inline `mod tests { … }` included — with its
-/// byte offset, and whether it sits under `#[cfg(test)]`.
-#[allow(dead_code)] // TODO(move-facades): the header pass walks these instead of root items only.
-pub(crate) fn use_items_at_every_depth(text: &str) -> Vec<(usize, &str, bool)> {
-    // TODO(move-facades): implement
-    let _ = text;
-    todo!("move-facades: every use item at any depth")
-}
-
 pub(crate) fn use_declarations(text: &str) -> Vec<(usize, &str)> {
     let mut declarations = Vec::new();
     let mut offset = 0usize;

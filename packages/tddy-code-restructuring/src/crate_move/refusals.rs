@@ -60,6 +60,10 @@ pub(crate) fn crates_still_naming_the_module(
     for rewrite in rewrites {
         crates.insert(crate_holding(workspace, &rewrite.path)?);
     }
+    // The parent's own `use <module>::*;`, rewritten to name the destination, is a caller too.
+    if moving.has_parent_reexport(workspace)? {
+        crates.insert(moving.origin.dir.clone());
+    }
     Ok(crates)
 }
 

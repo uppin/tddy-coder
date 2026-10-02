@@ -340,12 +340,28 @@ pub fn facade_line(
 /// A root glob per operation re-exported the destination's whole root — shadowing any name the
 /// origin already binds (`hidden_glob_reexports`) and repeating itself once per operation (`unused
 /// import`). Naming what moved can do neither.
-// TODO(move-facades): the move and cluster writers call this in place of `facade_line` per op.
-#[allow(dead_code)]
 pub(crate) fn facade_lines_for_plan(moved: &[(destination::Destination, String)]) -> Vec<String> {
-    // TODO(move-facades): implement
-    let _ = moved;
-    todo!("move-facades: one grouped facade per destination")
+    let mut destinations: Vec<(&str, BTreeSet<&str>)> = Vec::new();
+    for (destination, module) in moved {
+        let name = destination.extern_name.as_str();
+        match destinations.iter_mut().find(|(known, _)| *known == name) {
+            Some((_, modules)) => {
+                modules.insert(module);
+            }
+            None => destinations.push((name, BTreeSet::from([module.as_str()]))),
+        }
+    }
+
+    destinations
+        .into_iter()
+        .map(|(crate_name, modules)| {
+            let named = modules.into_iter().collect::<Vec<_>>();
+            match named.as_slice() {
+                [only] => format!("pub use {crate_name}::{only};"),
+                _ => format!("pub use {crate_name}::{{{}}};", named.join(", ")),
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -743,7 +759,7 @@ mod tests {
         );
     }
 
-    /// A glob facade takes the place of the `mod` line, so every path that reached the module
+    /// A facade naming the module takes the place of the `mod` line, so every path that reached the module
     /// through the crate root still resolves and no caller is rewritten at all.
     #[test]
     fn leaves_a_glob_facade_where_the_module_was_declared() {
@@ -759,7 +775,7 @@ mod tests {
         // Then
         assert_eq!(
             applied(&edit, ORIGIN_ROOT, &workspace),
-            "//! The daemon.\n\npub use tddy_host_service::*;\nmod runtime;\n"
+            "//! The daemon.\n\npub use tddy_host_service::host_registry;\nmod runtime;\n"
         );
     }
 
