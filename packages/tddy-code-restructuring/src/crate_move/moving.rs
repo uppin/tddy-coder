@@ -311,63 +311,42 @@ pub(crate) fn left_behind(
             .collect();
         changes.push(FileEdit::Change {
             path: path.to_string(),
-            edits: leaving(path, &text, &here)?,
+            edits: leaving(workspace, path, &text, &here)?,
         });
     }
     Ok(changes)
 }
 
 /// The edits one declaring file needs for the members it declares.
-fn leaving(path: &str, text: &str, members: &[(&Move, &Survey)]) -> Result<Vec<TextEdit>> {
+fn leaving(
+    workspace: &Workspace<'_>,
+    path: &str,
+    text: &str,
+    members: &[(&Move, &Survey)],
+) -> Result<Vec<TextEdit>> {
     let facade_members: Vec<&Move> = members
         .iter()
         .map(|(member, _)| *member)
         .filter(|member| member.reexport == Reexport::Glob)
         .collect();
-    let earlier = facade_members
-        .first()
-        .and_then(|member| written_facade(text, &member.destination.extern_name));
+    let moved: Vec<(destination::Destination, String)> = facade_members
+        .iter()
+        .map(|member| (member.destination.clone(), member.module.clone()))
+        .collect();
 
     let mut edits = Vec::new();
     let mut facade_written = false;
-    if let (Some(first), Some(earlier)) = (facade_members.first(), &earlier) {
-        let moved: Vec<_> = earlier
-            .modules
-            .iter()
-            .chain(facade_members.iter().map(|member| &member.module))
-            .map(|module| (first.destination.clone(), module.clone()))
-            .collect();
-        let line = facade_lines_for_plan(&moved).join("\n");
-        edits.push(manifest_edits::replacement(
-            text,
-            earlier.span.clone(),
-            &format!("{line}\n"),
-        ));
+    if let Some(earlier) = earlier_facade(workspace, text, &facade_members) {
+        edits.push(extended_facade(text, &earlier, &facade_members, &moved));
         facade_written = true;
     }
 
     for (member, survey) in members {
-        let span = manifest_edits::module_declaration(text, &member.module).ok_or_else(|| {
-            let where_declared = if member.home.is_top_level() {
-                "crate root"
-            } else {
-                "parent module"
-            };
-            malformed(format!(
-                "{path} declares no `mod {}` — a module this {where_declared} does not declare is \
-                 not this crate's to move",
-                member.module
-            ))
-        })?;
-
+        let span = declaration_of(path, text, member)?;
         let facade = match member.reexport {
             Reexport::Glob if facade_written => None,
             Reexport::Glob => {
                 facade_written = true;
-                let moved: Vec<_> = facade_members
-                    .iter()
-                    .map(|member| (member.destination.clone(), member.module.clone()))
-                    .collect();
                 Some(facade_lines_for_plan(&moved).join("\n"))
             }
             Reexport::Named | Reexport::None => facade_line(
@@ -379,18 +358,71 @@ fn leaving(path: &str, text: &str, members: &[(&Move, &Survey)]) -> Result<Vec<T
         // The declaration's line goes entirely, newline included, when nothing replaces it.
         let line = facade.map_or_else(String::new, |facade| format!("{facade}\n"));
         edits.push(manifest_edits::replacement(text, span, &line));
-
-        if member.reexport == Reexport::None {
-            for at in parent_reexports_of(text, &member.module) {
-                edits.push(manifest_edits::replacement(
-                    text,
-                    at..at + member.module.len(),
-                    &format!("{}::{}", member.destination.extern_name, member.module),
-                ));
-            }
-        }
+        edits.extend(parent_reexport_edits(text, member));
     }
     Ok(edits)
+}
+
+/// The facade an earlier operation of the plan wrote for the first facade member's destination.
+fn earlier_facade(
+    workspace: &Workspace<'_>,
+    text: &str,
+    facade_members: &[&Move],
+) -> Option<WrittenFacade> {
+    let first = facade_members.first()?;
+    let root = workspace.read(&first.destination_root()).ok()?;
+    written_facade(text, &first.destination.extern_name, &root)
+}
+
+/// The edit that rewrites an earlier facade line to also name the modules moving now.
+fn extended_facade(
+    text: &str,
+    earlier: &WrittenFacade,
+    facade_members: &[&Move],
+    moved: &[(destination::Destination, String)],
+) -> TextEdit {
+    let destination = &facade_members[0].destination;
+    let all: Vec<_> = earlier
+        .modules
+        .iter()
+        .map(|module| (destination.clone(), module.clone()))
+        .chain(moved.iter().cloned())
+        .collect();
+    let line = facade_lines_for_plan(&all).join("\n");
+    manifest_edits::replacement(text, earlier.span.clone(), &format!("{line}\n"))
+}
+
+/// Where the file declares `member`'s module, or the refusal when it does not.
+fn declaration_of(path: &str, text: &str, member: &Move) -> Result<std::ops::Range<usize>> {
+    manifest_edits::module_declaration(text, &member.module).ok_or_else(|| {
+        let where_declared = if member.home.is_top_level() {
+            "crate root"
+        } else {
+            "parent module"
+        };
+        malformed(format!(
+            "{path} declares no `mod {}` — a module this {where_declared} does not declare is \
+             not this crate's to move",
+            member.module
+        ))
+    })
+}
+
+/// The edits that point a moved-without-facade module's parent re-exports at the destination.
+fn parent_reexport_edits(text: &str, member: &Move) -> Vec<TextEdit> {
+    if member.reexport != Reexport::None {
+        return Vec::new();
+    }
+    parent_reexports_of(text, &member.module)
+        .into_iter()
+        .map(|at| {
+            manifest_edits::replacement(
+                text,
+                at..at + member.module.len(),
+                &format!("{}::{}", member.destination.extern_name, member.module),
+            )
+        })
+        .collect()
 }
 
 /// A grouped facade an earlier operation wrote for one destination.
@@ -400,9 +432,16 @@ struct WrittenFacade {
     modules: Vec<String>,
 }
 
-/// The `pub use <crate>::{a, b};` (or `pub use <crate>::a;`) line naming plain modules, if the file
-/// has one. A line re-exporting a path, a glob or an alias is someone's own and is left alone.
-fn written_facade(text: &str, extern_name: &str) -> Option<WrittenFacade> {
+/// The `pub use <crate>::{a, b};` (or `pub use <crate>::a;`) line this tool wrote, if the file has
+/// one.
+///
+/// Provenance is read off the destination: the tool declares every module it moves as a `pub mod`
+/// in the destination root (`destination_root`), so a line is extended only when **every** module it
+/// names is declared there. A `pub use <crate>::a;` the user wrote by hand for an item or a module
+/// the destination does not declare is left alone. A hand-written line naming only modules the
+/// destination does declare is indistinguishable from ours and is extended; that limit is pinned by
+/// a test.
+fn written_facade(text: &str, extern_name: &str, destination_root: &str) -> Option<WrittenFacade> {
     let prefix = format!("pub use {extern_name}::");
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
@@ -424,10 +463,12 @@ fn written_facade(text: &str, extern_name: &str) -> Option<WrittenFacade> {
             .split(',')
             .map(|name| name.trim().to_string())
             .collect();
-        if modules
-            .iter()
-            .all(|name| !name.is_empty() && name.chars().all(header::is_path_character))
-        {
+        let plain_and_declared = modules.iter().all(|name| {
+            !name.is_empty()
+                && name.chars().all(header::is_path_character)
+                && is_declared_pub(destination_root, name)
+        });
+        if plain_and_declared {
             return Some(WrittenFacade {
                 span: start..offset,
                 modules,
@@ -437,16 +478,32 @@ fn written_facade(text: &str, extern_name: &str) -> Option<WrittenFacade> {
     None
 }
 
-/// Where `module` starts in each `use module::*;` / `use module::{…};` of a file, whatever the
-/// visibility. A path to one item is not here: the caller survey sees it and re-points it.
+/// Whether the root declares `module` as `pub mod`, which is how the tool declares what it moves.
+fn is_declared_pub(root: &str, module: &str) -> bool {
+    manifest_edits::module_declaration(root, module)
+        .is_some_and(|span| root[span].trim_start().starts_with("pub mod "))
+}
+
+/// Where `module` starts in each top-level `use module::*;` / `use module::{…};` of a file, whatever
+/// the visibility. A path to one item is not here: the caller survey sees it and re-points it.
+///
+/// Only declarations at column 0 and outside any brace nesting count: a `use` inside an inline
+/// module or a function body names that scope's own `module`, not the parent's.
 fn parent_reexports_of(text: &str, module: &str) -> Vec<usize> {
     let mut found = Vec::new();
     let mut offset = 0usize;
+    let mut depth = 0i32;
     for line in text.split_inclusive('\n') {
         let start = offset;
         offset += line.len();
 
-        let line = line.trim_start();
+        let code = line.split("//").next().unwrap_or(line);
+        let top_level = depth == 0 && !line.starts_with(char::is_whitespace);
+        depth += code.matches('{').count() as i32 - code.matches('}').count() as i32;
+        if !top_level {
+            continue;
+        }
+
         let Some(tree) = after_visibility(line)
             .strip_prefix("use ")
             .map(str::trim_start)
@@ -460,7 +517,7 @@ fn parent_reexports_of(text: &str, module: &str) -> Vec<usize> {
             continue;
         };
         if rest.starts_with('*') || rest.starts_with('{') {
-            found.push(start + (text[start..offset].len() - tree.len()));
+            found.push(start + (line.len() - tree.len()));
         }
     }
     found
@@ -533,4 +590,103 @@ pub(crate) fn caller_changes(
         changes.push(FileEdit::Change { path, edits });
     }
     Ok(changes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DESTINATION_ROOT: &str = "pub mod alpha;\npub mod beta;\n";
+
+    /// A facade line naming modules the destination root declares is one this tool wrote.
+    #[test]
+    fn extends_a_facade_naming_only_modules_the_destination_declares() {
+        // Given a facade naming two modules the destination declares `pub mod`
+        let text = "pub use dest::{alpha, beta};\nmod runtime;\n";
+
+        // When the written facade is read
+        let facade = written_facade(text, "dest", DESTINATION_ROOT).expect("a facade");
+
+        // Then both modules are in it
+        assert_eq!(facade.modules, ["alpha", "beta"]);
+    }
+
+    /// A line the user wrote for something the destination does not declare is theirs.
+    #[test]
+    fn leaves_a_hand_written_re_export_of_an_item_alone() {
+        // Given a `pub use` of an item, not a module the destination declares
+        let text = "pub use dest::HostRegistry;\n";
+
+        // When the written facade is read
+        let facade = written_facade(text, "dest", DESTINATION_ROOT);
+
+        // Then there is none
+        assert!(facade.is_none());
+    }
+
+    /// The limit of provenance, pinned: a hand-written line naming only declared modules cannot be
+    /// told from ours.
+    #[test]
+    fn cannot_tell_a_hand_written_line_naming_declared_modules_from_its_own() {
+        // Given a user-written `pub use` of a module the destination declares
+        let text = "pub use dest::alpha;\n";
+
+        // When the written facade is read
+        let facade = written_facade(text, "dest", DESTINATION_ROOT);
+
+        // Then it is taken for ours
+        assert!(facade.is_some());
+    }
+
+    /// A private `mod` in the destination is not how this tool declares what it moves.
+    #[test]
+    fn leaves_a_line_naming_a_privately_declared_module_alone() {
+        // Given a destination declaring `alpha` without `pub`
+        let text = "pub use dest::alpha;\n";
+
+        // When the written facade is read
+        let facade = written_facade(text, "dest", "mod alpha;\n");
+
+        // Then there is none
+        assert!(facade.is_none());
+    }
+
+    /// The parent's own glob over the moved module is re-pointed.
+    #[test]
+    fn finds_a_top_level_glob_re_export_of_the_module() {
+        // Given
+        let text = "pub use host_registry::*;\nmod host_registry;\n";
+
+        // When
+        let found = parent_reexports_of(text, "host_registry");
+
+        // Then
+        assert_eq!(found, [8]);
+    }
+
+    /// An inline module's `use host_registry::*;` names that scope's own `host_registry`.
+    #[test]
+    fn ignores_a_use_inside_an_inline_module() {
+        // Given a glob import indented inside an inline module
+        let text = "mod inner {\n    use host_registry::*;\n}\n";
+
+        // When
+        let found = parent_reexports_of(text, "host_registry");
+
+        // Then nothing is re-pointed
+        assert!(found.is_empty());
+    }
+
+    /// Unformatted code puts a `use` at column 0 inside a brace; depth, not indentation, decides.
+    #[test]
+    fn ignores_an_unindented_use_inside_a_function_body() {
+        // Given
+        let text = "fn f() {\nuse host_registry::*;\n}\nuse host_registry::{a};\n";
+
+        // When
+        let found = parent_reexports_of(text, "host_registry");
+
+        // Then only the top-level one is found
+        assert_eq!(found, [text.rfind("host_registry").unwrap()]);
+    }
 }

@@ -232,6 +232,23 @@ pub(crate) fn declared_path(declared: &str) -> Option<&str> {
     (!path.starts_with('/')).then_some(path)
 }
 
+/// The `[lib] path` a manifest declares, relative to the manifest's directory.
+///
+/// `None` when the manifest has no `[lib]` table or the table declares no `path`: cargo then looks
+/// for `src/lib.rs`.
+pub(crate) fn lib_path(manifest: &str) -> Option<&str> {
+    let mut in_lib = false;
+    manifest.lines().map(str::trim).find_map(|line| {
+        if line.starts_with('[') {
+            in_lib = line == "[lib]";
+            return None;
+        }
+        let value = line.strip_prefix("path")?.trim_start().strip_prefix('=')?;
+        let path = value.trim().strip_prefix('"')?.split('"').next()?;
+        in_lib.then_some(path)
+    })
+}
+
 /// A slash-separated path with its `.` and `..` components resolved.
 pub(crate) fn normalized(path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
@@ -321,5 +338,28 @@ mod sorted_declaration_tests {
             apply_text_edits(root, &[edit]),
             "pub mod alpha;\npub mod beta;\npub mod gamma;\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod lib_path_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_path_of_the_lib_table() {
+        // Given a manifest whose `[lib]` names another root after its `name`
+        let manifest = "[package]\nname = \"x\"\n\n[lib]\nname = \"x\"\npath = \"src/root.rs\"\n";
+
+        // When / Then
+        assert_eq!(lib_path(manifest), Some("src/root.rs"));
+    }
+
+    #[test]
+    fn ignores_a_path_in_another_table() {
+        // Given a `path` that belongs to a dependency, not the library
+        let manifest = "[lib]\nname = \"x\"\n\n[dependencies]\ny = { version = \"1\" }\n[[bin]]\npath = \"src/main.rs\"\n";
+
+        // When / Then
+        assert_eq!(lib_path(manifest), None);
     }
 }

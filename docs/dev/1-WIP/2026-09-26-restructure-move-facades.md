@@ -56,7 +56,7 @@ The first push after this commit (wave 2) publishes:
 - `crate_move.rs`: `facade_lines_for_plan(...)` replacing the per-op `facade_line`;
   `crate_move/manifest_edits.rs`: `insert_module_declaration_sorted(...)`;
   `crate_move/header.rs`: `use_items_at_every_depth(...)`;
-  `crate_move/test_binary.rs`: facade-aware `defining_module_in_crate` — `TODO(move-facades): implement`.
+  `crate_move/module_home.rs`: `crate_root_facade_forwarding`, which the facade-aware `defining_module_in_crate` consults — `TODO(move-facades): implement`.
 - The failing acceptance and unit tests below.
 
 ## Green wave
@@ -211,7 +211,23 @@ All fail at `TODO(move-facades)` or with the recorded defect.
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes (2026-10-02)
+
+Stack gate: base `feature/live-plan/move-paths`, already current, `origin/<base>..HEAD` is this PR's five commits. Build: `cargo build -p tddy-code-restructuring` ✅. Scoped tests: 658 passed, 0 failed.
+
+Stack boundary: `## Responsibility` delivered except the "count a parent re-export's items as reached from outside" half (a glob names no items; recorded under Technical Debt). `## Dependencies` untouched (`survey.rs` unchanged; `header.rs` gained only a `#[cfg(test)]` adapter). No parent-owned file removed.
+
+| Severity | Where | Finding |
+|---|---|---|
+| WARNING | `crate_move/moving.rs` | 349 → 536 production lines: this PR crossed the 500 budget (pr-wrap step 3.5 decomposes it) |
+| WARNING | `moving.rs` `leaving` | ~70 lines; the `(destination, module)` list is built twice |
+| WARNING | `refusals.rs` | `crates_still_naming_the_module` now adds the origin for a rewritten parent re-export — touches edge inputs that `## Boundaries` leaves to `move-paths`; kept because the rewrite makes the parent a caller, flagged for review |
+| WARNING | `module_home.rs` `crate_root_facade_forwarding` | assumes the dependency's root is `src/lib.rs`; a `[lib] path` crate is silently treated as defining the module locally |
+| WARNING | `moving.rs` `written_facade` | a user's own plain `pub use <dest>::a;` is extended as if the plan had written it |
+| WARNING | `moving.rs` `parent_reexports_of` | line-based; a `use <module>::*;` inside an inline module or fn body would be rewritten too |
+| INFO | `header.rs` `use_items_at_every_depth` | test-only adapter without a production caller; FIXME in Technical Debt |
+| INFO | `crate_move.rs` `facade_line` | its `Glob` arm is no longer reached by the writers |
+
 
 ## TODO
 

@@ -271,6 +271,7 @@ fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a S
 /// Read off [`source_scan::sightings`], the walk the survey takes, so the two cannot disagree about
 /// which `use` items a file holds or where a `cfg(test)` module begins. The rewrite itself is the
 /// survey's: this lists the items, and re-points nothing.
+// FIXME(move-facades): test-only adapter over source_scan::sightings; delete with every_depth_tests once agreed
 #[cfg(test)]
 pub(crate) fn use_items_at_every_depth(text: &str) -> Vec<(usize, &str, bool)> {
     let mut items: Vec<(usize, &str, bool)> = Vec::new();

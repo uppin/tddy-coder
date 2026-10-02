@@ -303,11 +303,11 @@ mod manifest_edits;
 
 /// The `pub use` line a facade leaves in the crate the module left.
 ///
-/// [`Reexport::Glob`] is one line and legal whatever moved, for the same reason it is inside a
-/// parent module: a glob re-export caps at each item's own visibility rather than failing on a
-/// member less visible than itself. [`Reexport::Named`] names only the items something outside
-/// reaches, which the survey already knows. [`Reexport::None`] leaves nothing, and then every caller
-/// in the survey is rewritten instead.
+/// [`Reexport::Named`] names only the items something outside reaches, which the survey already
+/// knows. [`Reexport::None`] leaves nothing, and then every caller in the survey is rewritten
+/// instead. [`Reexport::Glob`] is not written here: a plan's globs are one grouped line per
+/// destination ([`facade_lines_for_plan`]), so a single operation cannot write its own, and `None`
+/// is returned for it.
 pub fn facade_line(
     destination: &destination::Destination,
     reexport: Reexport,
@@ -315,7 +315,6 @@ pub fn facade_line(
 ) -> Option<String> {
     let crate_name = &destination.extern_name;
     match reexport {
-        Reexport::Glob => Some(format!("pub use {crate_name}::*;")),
         // A group is ordered and de-duplicated so the same survey always writes the same line: the
         // reference set arrives in whatever order the server listed it, and a facade that reordered
         // itself between runs would show up as a diff nobody asked for.
@@ -329,7 +328,8 @@ pub fn facade_line(
                 named.into_iter().collect::<Vec<_>>().join(", ")
             ))
         }
-        Reexport::None => None,
+        // A glob facade is grouped per destination by `facade_lines_for_plan`, which the writers call.
+        Reexport::Glob | Reexport::None => None,
     }
 }
 
@@ -627,21 +627,6 @@ mod tests {
         // Then
         assert_eq!(destination.package, "tddy-host-service");
         assert_eq!(destination.extern_name, "tddy_host_service");
-    }
-
-    /// A glob facade is one line and legal whatever moved, for the same reason it is inside a parent
-    /// module: it caps at each item's own visibility rather than failing on a member less visible
-    /// than itself.
-    #[test]
-    fn writes_a_glob_facade_naming_only_the_crate() {
-        // Given
-        let destination = a_destination_named("tddy-host-service");
-
-        // When
-        let line = facade_line(&destination, Reexport::Glob, &["HostRegistry".to_string()]);
-
-        // Then
-        assert_eq!(line.as_deref(), Some("pub use tddy_host_service::*;"));
     }
 
     /// A named facade re-exports only what something outside actually reaches, which the survey
