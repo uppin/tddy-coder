@@ -175,8 +175,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 
 | Operation | Notes |
 |---|---|
-| `extract_method` | Range → new function |
-| `extract_variable` | Subexpression → binding |
+| `extract_method` | Range → new function. A function-local `use` the range needs is carried into the new function |
+| `extract_variable` | Subexpression → binding. A place selected under a `&` / `&mut` is bound as the borrow (`let x = &self.v;`) |
 | `rename_symbol` | LSP rename, applied to **every** document rust-analyzer returns edits for, not only the anchor's own file |
 | `extract_module` | `reexport`: glob / named / none; optional `to_file` |
 | `extract_module_to_file` | Move items to new file |
@@ -405,9 +405,22 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   a range that does not support the assist, versus a server that cannot yet type it.
 - **An `extract_method` range may not return from the function around it.** rust-analyzer copies a
   `return` verbatim into a function of another return type, so such a range is refused, naming the
-  lines, by `check`, `check --deep` and `apply` alike. A `return` inside a closure, an `async` block
-  or a nested `fn` does not count. The scan is lexical: a `return` a macro expands to (`bail!`) and a
+  lines, by `check`, `check --deep` and `apply` alike. The one exception is a range that runs to the
+  end of a function that returns a value, ending with its tail expression; a function returning `()`
+  has no such tail, so a range holding a `return` there is refused too. A `return` inside a closure,
+  an `async` block or a nested `fn` does not count. The scan is lexical: a `return` a macro expands to (`bail!`) and a
   `break`/`continue` leaving the range are not seen, and only `apply`'s compile gate catches them.
+- **An `extract_variable` does not hang.** The type probe asks at the first position of the range
+  that can carry a hover, skipping a leading `&`, `&mut`, `*`, `!`, `-` or `(`, and a hover that stays
+  silent for 30 seconds once the index is ready ends the operation as `rust-analyzer's answer was
+  unusable:`, naming the position, so the warm workspace answers the next request.
+- **An `extract_variable` never binds a borrowed place by value.** A place selected inside `&place`
+  or `&mut place` is widened to the borrow when both are on one line; otherwise the selection is
+  refused as `rust-analyzer's answer was unusable:`, advising to select the borrow including its `&`.
+  The refusal reads the text, not the type, so a `Copy` place under a borrow is refused as well.
+- **An `extract_method` carries a function-local `use`** the range names into the new function. The
+  origin keeps its own `use`, which is an unused-import warning when nothing there names it any more.
+  `check` reports the carried items on its progress line, not as a finding.
 - **Several `extract_method`s in one function compose only bottom-up**, last range first. The
   engine does not re-anchor a later operation through an earlier one's edit.
 - **`check --deep` does not compile.** It resolves every operation and writes nothing, but a clean

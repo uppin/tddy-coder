@@ -11,6 +11,7 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | A wait ended by the server's own diagnostics | `readiness.rs` (`wait_until_answerable`) | `SeamRefused` for an operation at inactive code or in a file no module tree reaches |
 | Documents closed after each entry point | `backends/rust/documents.rs` (`closing_what_it_opens`) | (refuses nothing; stops a shared server answering from a finished run's text) |
 | Health gate | `readiness.rs` (`refuse_degraded_index`), `ServerChatter::degraded` | `ServerDefect` |
+| Bounded type probe | `readiness.rs` (`wait_until_resolved_within_bound`, `READY_HOVER_BOUND`) | `ServerDefect` |
 | Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`) | `SeamRefused` |
 | Partial-cluster finding | `crate_move/cluster.rs` (`stranded_siblings`) | a static `check` finding: the cycle `apply` refuses (`refusals::refuse_a_dependency_cycle`) |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
@@ -54,6 +55,18 @@ still `null`, `wait_until_answerable` fetches that report, once per poll:
 
 Before the index is loaded, a missing diagnostic proves nothing, so the wait goes on. No timeout is
 involved: the server's own answer ends the wait.
+
+### The probe is bounded
+
+`extract_variable`'s type probe waits through `wait_until_resolved_within_bound`. A hover that stays
+`null` after the index is loaded and healthy, and that neither diagnostic above explains, will never
+change, so once the hover has been silent for `READY_HOVER_BOUND` (30 s) the operation ends as
+`rust-analyzer's answer was unusable:`, naming the position. Time spent before the index is ready
+does not count: the bound starts when readiness is declared, and `silent_past` is the decision, kept
+a pure function so it is tested without a server. The probe asks at a position that can carry a hover
+(see [assist-output-repairs.md](assist-output-repairs.md#where-extract_variable-asks-and-what-it-binds)),
+so the bound is the backstop and not the expected path. Waits that carry no bound (`wait_until_answerable`
+for a caller survey) end by the server's own diagnostics.
 
 ## Documents are closed when an operation ends
 
@@ -120,7 +133,8 @@ Detection is **lexical**:
 - only the range is scanned, from depth zero, so statements lifted out of a closure body cannot carry
   that closure's `return`.
 
-**Except a range that runs to the end of a named `fn`, ending with its tail expression**
+**Except a range that runs to the end of a named `fn` that returns a value, ending with its tail
+expression**
 (`runs_to_the_end_of_a_function`). There rust-analyzer keeps the `return` verbatim, gives the new
 function the caller's return type (the tail's), and the call replaces the range as the caller's tail,
 so a `return` means what it did; a `?` in that tail propagates the same error type. The range may not
@@ -132,6 +146,14 @@ the caller with no tail (`E0317`). A return type rust-analyzer spells differentl
 (an `impl Trait`) cannot be told from the text; the compile gate catches it. The refusal's remedy
 offers all three ways out: cut the range so it holds no `return`, end it before the first one, or run
 it to the end of the function's tail expression.
+
+**A function that returns `()` has no tail value to return**, so the exception does not apply to it
+(`ends_in_a_unit_tail`): rust-analyzer rewrites the early `return` into a `ControlFlow` it matches at
+the call, which names a type the tree does not import and leaves the caller a `return` that does
+nothing. A range holding a `return` and running to the end of a `()` function is refused like any
+other, in `check`, `check --deep` and `apply`, and the remedy is to start the range after the early
+exit. The rewrite is not repaired. Whether the function returns `()` is read from its header text, a
+`->` outside the parameters and generics and before any `where`.
 
 ## The partial-cluster finding
 
