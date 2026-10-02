@@ -172,7 +172,17 @@ bodies; the two merge tests need nothing from any other node.
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes (2026-10-02, via /pr-wrap)
+
+Stack gate: already current on `extraction-defects`, leak check clean (4 own commits), no deletions,
+diff holds only this PR's files. Build: `tddy-code-restructuring` ✅ (scoped). Tests: package ✅ 0 failures.
+`## Responsibility` delivered; `## Dependencies` untouched (`survey.rs` unmodified); `## Boundaries` held.
+
+| Item | Severity | Finding |
+|---|---|---|
+| `stays_behind_through_a_body` is per operation | ⚠️ WARNING | A body path into a module an **earlier op of the same plan already moved** is flagged, so a plan the header pass accepts (`gone_by_then`) is refused here — and `move_preconditions` is also `apply`'s gate, so this refuses at apply, not only at check. Found by reading, **not reproduced**; no test covers it. |
+| `member_op` is unpinned | ⚠️ WARNING | Mutation check: replacing `member_op` with `with_anchor` leaves every test green. The bug it exists to prevent has no test. |
+| `TODO(check-parity)` at `header.rs:29` | ℹ️ INFO | Names this node. `header_origin_paths` is still read (`cluster.rs:385`), so the marker is half-resolved: bodies now come from the survey, the header finding is not unified onto it. Resolve or retag with a reason. |
 
 ## TODO
 
