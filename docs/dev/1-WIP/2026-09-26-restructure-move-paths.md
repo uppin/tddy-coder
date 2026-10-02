@@ -208,7 +208,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p tddy-code-restructuring`); CI for the rest

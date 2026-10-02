@@ -26,15 +26,21 @@
 //! line, and the qualifier at the head of the moved file's own `use` declarations. None of those is
 //! a code transformation an engine could have offered.
 //!
-//! # What the header pass is, and is not
+//! # What the path pass is, and is not
 //!
 //! `extract_module` restores imports by asking the server which names went unresolved and which
 //! import fixes each — it can, because the items stay in the file it is holding open. A module that
 //! has left its crate cannot be typed until it is in the destination, so there is no equivalent
-//! answer to ask for here, and none is invented: what this rewrites is the `crate::`/`super::`
-//! qualifier at the head of the moved file's own `use` declarations, which changed meaning by
-//! definition when the file changed crates. A `crate::` path written inside a function body is a
-//! name in code and is left alone; a build after the move is what surfaces one.
+//! answer to ask for here, and none is invented. What this reads is every path the moved file
+//! *writes* — `use` items at any depth and paths in bodies — as one path survey (`survey.rs`), each
+//! resolved against the file's own module path and followed through the origin's re-exports to the
+//! crate that defines what it reaches. The rewrite, the test for an edge back into the origin and the
+//! destination's manifest are all derived from that one survey, so they cannot disagree about what
+//! the file names.
+//!
+//! What it does not do is type-check: it reads shapes, so a path it cannot place — a crate this
+//! workspace does not reach by a path dependency, a glob it cannot confirm — is left as written, and
+//! a build after the move is what surfaces it.
 //!
 //! # The facade
 //!
@@ -274,6 +280,10 @@ mod refusals;
 pub(crate) use refusals::*;
 
 mod header;
+
+mod reexports;
+
+mod source_scan;
 
 mod survey;
 

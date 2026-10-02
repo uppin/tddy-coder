@@ -13,7 +13,10 @@
 //! file names. `check-parity` reads it too, for the findings `check --deep` owes.
 
 use super::destination::Destination;
-use super::Result;
+use super::manifest_edits;
+use super::source_scan::sightings;
+use super::test_binary::{is_a_built_in_root, names_bound_in};
+use super::{malformed, reexports, Result};
 use crate::edit::Position;
 use crate::registry::Workspace;
 
@@ -27,12 +30,16 @@ pub(crate) struct SurveyedPath {
     pub(crate) resolved: String,
     /// The extern name of the crate that defines the item, after following re-exports.
     pub(crate) defining_crate: String,
+    /// The crate-rooted path of the item where it is defined, after following re-exports:
+    /// `destination::helper_mod::helper` for the `resolved` path above when `outer` globs it in.
+    /// Equal to `resolved` when the path is not the origin's to forward.
+    pub(crate) defined_at: String,
     /// Whether the path is written under a `#[cfg(test)]` item — what sends a crate to
     /// `[dev-dependencies]`.
     pub(crate) in_test: bool,
     /// Whether the path is in a body rather than a `use` item.
     pub(crate) in_body: bool,
-    /// Where it is written, one-based.
+    /// Where it is written, one-based. Every leaf of one `use` tree shares the tree's.
     pub(crate) site: Position,
 }
 
@@ -44,31 +51,104 @@ pub(crate) struct PathSurvey {
 
 /// Survey `text`, the moved file, which sits at `module_path` (`["outer", "inner"]`) inside
 /// `origin`.
-// TODO(move-paths): the header pass, the edge test and the manifest pass read this once
-// implemented; `check-parity` reads it for its findings.
-#[allow(dead_code)]
+///
+/// A path is surveyed when it is relative to the file's own crate (`crate`, `self`, `super`) or
+/// names a crate. A `use` item's first segment is a crate unless the file binds the name itself; in
+/// code a path is only read as one when the origin's manifest declares its first segment, because
+/// `PermissionMode::Plan` and `mpsc::channel` are paths too, and a dependency line for either would
+/// be a manifest edit nobody asked for.
+///
+/// # Errors
+///
+/// Refuses when a path climbs above the crate root, or a file the walk through the origin's
+/// re-exports must read cannot be.
 pub(crate) fn survey_moved_file(
     workspace: &Workspace<'_>,
     text: &str,
     origin: &Destination,
     module_path: &[String],
 ) -> Result<PathSurvey> {
-    // TODO(move-paths): implement
-    let _ = (workspace, text, origin, module_path);
-    todo!("move-paths: survey every path the moved file names")
+    let manifest = workspace.read(&format!("{}/Cargo.toml", origin.dir))?;
+    let bound = names_bound_in(text);
+    let mut paths = Vec::new();
+
+    for sighting in sightings(text) {
+        let head = sighting.segments[0].as_str();
+        let relative = matches!(head, "crate" | "self" | "super");
+        if !relative {
+            if is_a_built_in_root(head) || bound.contains(head) {
+                continue;
+            }
+            if !sighting.in_use
+                && !manifest_edits::declares_dependency_in_either_table(&manifest, head)
+            {
+                continue;
+            }
+        }
+
+        let written = sighting.segments.join("::");
+        let within: Vec<String> = module_path
+            .iter()
+            .chain(&sighting.modules)
+            .cloned()
+            .collect();
+        let resolved = resolved_against(&written, &origin.extern_name, &within)?;
+        let defined_at = reexports::followed(workspace, origin, &resolved)?;
+        let defining_crate = defined_at
+            .split("::")
+            .next()
+            .unwrap_or(origin.extern_name.as_str())
+            .to_string();
+
+        paths.push(SurveyedPath {
+            written,
+            resolved,
+            defining_crate,
+            defined_at,
+            in_test: sighting.in_test,
+            in_body: !sighting.in_use,
+            site: manifest_edits::position_of(text, sighting.head_at),
+        });
+    }
+
+    Ok(PathSurvey { paths })
 }
 
 /// `self::`, `super::` (any depth) and `crate::` resolved against `module_path` in `crate_name`,
 /// by segment — never by string prefix. A path that climbs above the crate root is refused.
-#[allow(dead_code)] // TODO(move-paths): called by `survey_moved_file`.
 pub(crate) fn resolved_against(
     written: &str,
     crate_name: &str,
     module_path: &[String],
 ) -> Result<String> {
-    // TODO(move-paths): implement
-    let _ = (written, crate_name, module_path);
-    todo!("move-paths: resolve a relative path against a module path")
+    let mut segments = written.split("::").map(str::trim).peekable();
+    let mut rooted: Vec<&str> = vec![crate_name];
+
+    match segments.peek().copied() {
+        Some("crate") => {
+            segments.next();
+        }
+        Some("self" | "super") => {
+            rooted.extend(module_path.iter().map(String::as_str));
+            if segments.peek() == Some(&"self") {
+                segments.next();
+            }
+            while segments.peek() == Some(&"super") {
+                segments.next();
+                if rooted.len() == 1 {
+                    return Err(malformed(format!(
+                        "`{written}` climbs above the root of `{crate_name}`, which has no parent \
+                         module"
+                    )));
+                }
+                rooted.pop();
+            }
+        }
+        _ => return Ok(segments.collect::<Vec<_>>().join("::")),
+    }
+
+    rooted.extend(segments);
+    Ok(rooted.join("::"))
 }
 
 #[cfg(test)]

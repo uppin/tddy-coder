@@ -13,6 +13,8 @@ use super::Survey;
 
 use super::malformed;
 
+use manifest_edits::Table;
+
 use super::Result;
 
 use crate::plan::RefactorOp;
@@ -152,26 +154,75 @@ impl Move {
 
     /// The destination's manifest, gaining every crate the moved code names.
     ///
-    /// Each dependency is copied from the manifest that already declares it rather than written
-    /// here: a version this operation invented would be a fact about the world it has no way to
-    /// know. The one it does author is the path back to the crate the module left, which is a fact
-    /// about this repository's own layout.
+    /// `named` goes to `[dependencies]`, and `dev_named` — what only `#[cfg(test)]` code names — to
+    /// `[dev-dependencies]`. Each dependency is copied from the manifest that already declares it
+    /// rather than written here: a version this operation invented would be a fact about the world
+    /// it has no way to know. The one it does author is the path back to the crate the module left,
+    /// which is a fact about this repository's own layout.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when a crate to carry is declared nowhere it could be copied from — and when the
+    /// destination is among them. That one is an assertion, not a filter: the survey reads the
+    /// destination's own items as `crate::`, so a destination reaching this far means the survey is
+    /// wrong, and dropping it here would hide that.
     pub(crate) fn destination_manifest(
         &self,
         workspace: &Workspace<'_>,
         named: &BTreeSet<String>,
+        dev_named: &BTreeSet<String>,
     ) -> Result<FileEdit> {
+        if named.contains(&self.destination.extern_name)
+            || dev_named.contains(&self.destination.extern_name)
+        {
+            return Err(malformed(format!(
+                "the survey of `{}` reports a dependency of `{}` on itself — its own items are \
+                 `crate::` paths, so the survey and the rewrite disagree about what the file names",
+                self.source, self.destination.package
+            )));
+        }
+
         let path = format!("{}/Cargo.toml", self.destination.dir);
         let text = workspace.read(&path)?;
         let origin = workspace.read(&format!("{}/Cargo.toml", self.origin.dir))?;
 
+        let dependencies = self.dependency_lines(&text, &origin, Table::Dependencies, named)?;
+        let dev_dependencies =
+            self.dependency_lines(&text, &origin, Table::DevDependencies, dev_named)?;
+
+        let mut edits =
+            manifest_edits::with_dependencies(&text, Table::Dependencies, &dependencies);
+        edits.extend(manifest_edits::with_dependencies(
+            &text,
+            Table::DevDependencies,
+            &dev_dependencies,
+        ));
+        Ok(FileEdit::Change { path, edits })
+    }
+
+    /// The lines `table` of the destination's manifest has to gain for `named`.
+    ///
+    /// A dev-dependency is already reachable from the destination's tests when either table declares
+    /// it, so it is skipped then; a dependency is only reachable from its code through
+    /// `[dependencies]`.
+    fn dependency_lines(
+        &self,
+        destination: &str,
+        origin: &str,
+        table: Table,
+        named: &BTreeSet<String>,
+    ) -> Result<Vec<String>> {
         let mut lines = Vec::new();
         for extern_name in named {
-            if manifest_edits::declares_dependency(
-                &text,
-                manifest_edits::Table::Dependencies,
-                extern_name,
-            ) {
+            let declared_already = match table {
+                Table::Dependencies => {
+                    manifest_edits::declares_dependency(destination, table, extern_name)
+                }
+                Table::DevDependencies => {
+                    manifest_edits::declares_dependency_in_either_table(destination, extern_name)
+                }
+            };
+            if declared_already {
                 continue;
             }
             if *extern_name == self.origin.extern_name {
@@ -182,11 +233,12 @@ impl Move {
                 ));
                 continue;
             }
-            let declared = manifest_edits::dependency_line(
-                &origin,
-                manifest_edits::Table::Dependencies,
-                extern_name,
-            )
+            let declared = match table {
+                Table::Dependencies => manifest_edits::dependency_line(origin, table, extern_name),
+                Table::DevDependencies => {
+                    manifest_edits::dependency_line_from_either_table(origin, extern_name)
+                }
+            }
             .ok_or_else(|| {
                 malformed(format!(
                     "the moved module names `{extern_name}`, which {}/Cargo.toml does not declare \
@@ -200,15 +252,7 @@ impl Move {
                 &self.destination.dir,
             ));
         }
-
-        Ok(FileEdit::Change {
-            path,
-            edits: manifest_edits::with_dependencies(
-                &text,
-                manifest_edits::Table::Dependencies,
-                &lines,
-            ),
-        })
+        Ok(lines)
     }
 
     /// Every manifest that has to gain a dependency on the destination.
