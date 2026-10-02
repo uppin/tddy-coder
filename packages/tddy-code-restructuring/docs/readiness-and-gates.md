@@ -141,7 +141,7 @@ back — through the facade, or, with `reexport: none`, from each caller `apply`
 `check` predicts that refusal statically, with no index (`stranded_siblings`), from the same pieces
 `apply` uses: `header::repointed_header` and `refusals::origin_named_dependencies`, with the plan's
 co-moving set and re-export resolution, so a path the origin only re-exports from another crate is
-not an edge. With a facade the finding fires whenever such a header path exists; with
+not an edge. The paths it reads are the file's top-level `use` header, taken from the [path survey](path-survey.md); bodies and nested `use` items are `apply`'s alone. With a facade the finding fires whenever such a header path exists; with
 `reexport: none`, only when some file staying behind names the moved module, and it lists them.
 
 **A module staying behind that names the moved one is not a finding.** A facade keeps its

@@ -182,8 +182,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `extract_module_to_file` | Move items to new file |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
-| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite its own `use crate::…` / `use super::…` header, re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves `pub use <dest_crate>::*;` in the origin, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
-| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
+| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves `pub use <dest_crate>::*;` in the origin, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
+| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
 
 Invariants: moves that need history use `git mv`; visibility widenings are reviewable output
@@ -333,6 +333,42 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 - [Feature prompt: agent skills](feature-prompt-agent-skills.md)
 - Package: [`packages/tddy-code-restructuring/README.md`](../../../packages/tddy-code-restructuring/README.md)
 
+## Path survey
+
+A cross-crate move decides everything it writes about the moved file from one **path survey**, taken
+before any edit: the rewrite of the file's own paths, the test for a dependency back on the crate it
+left, and the destination's manifest. The three cannot disagree about what the file names.
+
+- **What is read.** Every path the file writes — in `use` items at any depth (groups expanded) and in
+  bodies — whose first segment is `crate`, `self`, `super` or a crate. A `use` item's first segment is a
+  crate unless the file binds the name itself (a module it declares, something it imports, an item it
+  defines — `use Kind::*;` inside a function over the file's own `enum Kind`). In code a path counts
+  only when the origin's manifest declares its first segment.
+- **How it is resolved.** `self::`, `super::` (any depth) and `crate::` are resolved by segment against
+  the file's module path, never by string prefix; a `super::` that climbs above the crate root is
+  refused. The result is followed through the origin's re-exports — explicit `use` and glob, chained —
+  to the crate and item that **define** it.
+- **How it is rewritten.** A path to something the destination defines becomes `crate::…`, whether it
+  was written as `destination::…` or as a `crate::…` the origin only forwards there; one to something
+  staying in the origin names the origin; one to a third crate names that crate; a path to a co-moving
+  member stays `crate::`. Headers and bodies are rewritten alike. A `use` leaf whose last segment
+  changes keeps the name the body goes on using with `as` (`use crate::records as roster;`). A `use`
+  group whose members would need different qualifiers is refused with "write one `use` per path", since
+  a group has one prefix to write.
+- **What is an edge.** Only a path to an item the **origin** defines that stays behind makes the
+  destination depend on the crate it left — in a header or a body. A path the origin merely forwards from
+  another crate, a `super::` into the moved set, and anything under `#[cfg(test)]` are not edges: cargo
+  allows a dev-dependency cycle.
+- **The manifest.** Each crate the survey names is copied from the origin's manifest (a path dependency re-anchored) into the
+  destination's `[dependencies]`, or `[dev-dependencies]` when only `#[cfg(test)]` code names it. The
+  destination is never in its own manifest; the move asserts it, and a survey that reports one is
+  refused as inconsistent rather than filtered. A crate declared nowhere it could be copied from refuses
+  the move.
+- **Real read errors refuse.** A module file the walk through the re-exports must read and cannot is an
+  error naming it; only "no such file" means a name is not there.
+
+How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restructuring/docs/path-survey.md).
+
 ## Known limitations
 
 - **An assist may relocate less than the anchor asked for, and rewrite the remainder in place.**
@@ -400,13 +436,17 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   `<crate>/src/<parent>/<module>.rs` or `<crate>/src/<parent>/mod.rs` take the destination path from
   the plan's `path` and locate the parent's `mod` line in `<crate>/src/<parent>.rs` then
   `<crate>/src/<parent>/mod.rs`. Refused only when neither parent file exists.
-- **Registry dependencies are not carried, only path ones.** The destination manifest gains the
-  `path` dependencies the moved file needs and nothing else; a moved file that uses `chrono` or
-  `futures-util` leaves the destination short of it, and the build says so.
-- **The moved file's `use` header is re-pointed; its function bodies are not.** A `crate::` qualifier
-  at the head of a `use` declaration changed meaning by definition when the file changed crates, and
-  that is what the mechanical pass can prove. A `crate::` path inside a body is left alone, and the
-  build after the move is what surfaces it.
+- **The survey reads tokens, not types.** In code a path is read as a crate only when the origin's
+  manifest declares its first segment, so `mpsc::channel` and `PermissionMode::Plan` add no dependency
+  line. Items a macro generates and paths written inside a macro's arguments are not seen, `pub(in …)`
+  visibility is not interpreted, and a `#[path = "…"]` module is not followed. The `cfg(test)` marker is
+  recognised as `#[cfg(test)]` and `#[cfg(all(test, …))]`; any other spelling (`any(test, …)`,
+  `cfg_attr`) reads as ordinary code, which puts a crate in `[dependencies]` instead of leaving it out.
+  The build after the move surfaces whatever the survey could not see.
+- **`check` reads the moved file's top-level `use` header only.** Its stays-behind finding takes those
+  paths from the survey, resolved the way `apply` resolves them, but a path in a body or in a nested
+  `use` is not examined, so `check --deep` can pass a move `apply` refuses on such a path.
+  [#543](https://github.com/uppin/tddy-coder/pull/543) (`check-parity`) moves `check` onto the survey.
 - **A caller that imports the module rather than the item is not re-pointed.** The survey asks
   rust-analyzer for references per *item*, so a caller written `use crate::host_registry;` and then
   `host_registry::X` is outside the reference set. Covering it needs a second engine call on the
