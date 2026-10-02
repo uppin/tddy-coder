@@ -177,7 +177,9 @@ Every **writing** `apply`, on both apply paths (`runner::apply` for the CLI, and
   every file the plan names (snapshot and anchors). A failure is `BaselineDoesNotCompile`, and nothing
   is written, so a pre-broken tree is never blamed on the plan. It runs as the `before_writing` gate of
   `open_run_after`: after the cheap read-only refusals (git worktree, repo-scoped journal,
-  `JournalExists`, snapshot) and before `.restructure/` is created. It is skipped for a dry run and for
+  `JournalExists`, snapshot), after item anchors are resolved (`open_run_resolving_anchors`, the one
+  order both apply paths use — see [item-anchors.md](item-anchors.md)), and before `.restructure/` is
+  created. It is skipped for a dry run and for
   a run continuing a journal (`--resume`, `--from`), whose tree already holds the earlier run's edits.
 - **Result, after the last operation.** `refuse_a_broken_result` checks the packages owning every
   file the journal records a completed edit to, this run's and an earlier run's on resume. A failure

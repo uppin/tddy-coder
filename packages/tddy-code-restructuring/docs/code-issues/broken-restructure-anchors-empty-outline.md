@@ -6,6 +6,7 @@
 **Claimed by:** [#537](https://github.com/uppin/tddy-coder/pull/537) — `#live-plan 1/7`
 **Status:** Open — partially fixed in #537 (2026-10-02)
 **Lands after:** nothing — the stack's root
+**Remainder owned by:** unowned — needs a repo-scale cold and warm run of the command above; #537 does not finish it
 
 ## What happens
 

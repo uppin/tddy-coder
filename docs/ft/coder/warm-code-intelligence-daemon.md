@@ -73,7 +73,7 @@ would make it unanswerable.
 | `Warm` | server-streaming | Loads a root and reports progress. Idempotent |
 | `Check` | server-streaming | Every finding in a plan, no writes. Streams one `Finding` per finding |
 | `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation and outcome events |
-| `Anchors` | unary | A range anchor covering named items |
+| `Anchors` | unary | An anchor a plan can carry: `items` for named items, or the `item` anchor of the innermost item enclosing `at`. The response holds the anchor's JSON (`anchor_json`) and its absolute span (`range`) |
 | `PlanStatus` | unary | completed / in-flight / pending / failed |
 | `Verify` | unary | Statement-multiset comparison against a git ref |
 | `Workspaces` | unary | Which roots this process holds an index for |
