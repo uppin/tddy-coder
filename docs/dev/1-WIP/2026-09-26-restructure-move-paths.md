@@ -11,7 +11,7 @@ Full codebase exploration that grounded this plan:
 
 ## Stack
 
-`#live-plan` 4/7 — branch `feature/live-plan/move-paths`, base `feature/live-plan/live-plans`.
+`#live-plan` 3/7 — branch `feature/live-plan/move-paths`, base `feature/live-plan/plan-store`.
 PR: [#540](https://github.com/uppin/tddy-coder/pull/540)
 
 ## Responsibility
@@ -34,15 +34,15 @@ PR: [#540](https://github.com/uppin/tddy-coder/pull/540)
 
 ## Dependencies
 
-This node consumes **nothing** from its predecessors. It sits after `item-anchors`, `plan-store` and
-`live-plans` only because a registered stack is a line and the developer chose features first; its
+This node consumes **nothing** from its predecessors. It sits after `item-anchors` and `plan-store`
+only because those two were already in progress when the line was re-ordered into its waves (wave-1
+nodes first from position 3 on, `move-paths` leading them because `check-parity` waits on it); its
 tests use v1 anchors (`symbol`) exactly as the existing move suites do.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | `item-anchors` (1/7) | item anchors, resolver | not consumed | use item anchors in its fixtures, or touch `plan.rs` / `backends/rust/item_path.rs` |
 | `plan-store` (2/7) | plan store, op ids | not consumed | touch `plan_store.rs` or the daemon |
-| `live-plans` (3/7) | cross-plan refresh | not consumed | touch refresh or stale state |
 
 ## Draft PR contract
 
@@ -57,7 +57,7 @@ The first push after this commit (wave 2) publishes:
 
 **Wave:** 1 of 3
 **Greenable independently:** yes — two- and three-crate fixtures through the existing move suites;
-nothing from nodes 1–3 is exercised.
+nothing from nodes 1–2 is exercised.
 **Concurrent with:** `item-anchors`, `move-facades`, `extraction-defects`
 **Blocks:** `check-parity` (its body-path finding reads this survey)
 
