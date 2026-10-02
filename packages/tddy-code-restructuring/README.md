@@ -8,7 +8,8 @@ Replays a JSONL plan of named Rust refactoring intents via rust-analyzer through
 
 Exposed via `tddy-tools restructure`:
 
-- `apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]`
+- `apply <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]`
+- `load <plan.jsonl>...`, `unload <plan.jsonl>... | --all`, `plans` — hold plans in the index daemon's plan store (they need the daemon)
 - `status <plan.jsonl>`
 - `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that are longer than LINES, as a record rather than a gate
 - `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries
@@ -29,6 +30,10 @@ A plan anchors an operation by **item**: a crate-rooted path such as `tddy_core:
 plus a range relative to that item, resolved through rust-analyzer's outline when the run opens. An edit
 elsewhere in the file leaves the anchor correct; an edit to the item itself is refused, naming it. See
 [docs/item-anchors.md](docs/item-anchors.md).
+
+A plan is read through a **plan store** (`plan_store.rs`): operations carry stable ids, the applied plan's
+pending anchors are rewritten after each operation, and the plan is written back. See
+[docs/plan-store.md](docs/plan-store.md).
 
 Plans hold intents only — no source text (`text` / `code` / `content` refused). Unsupported operations are hard errors.
 

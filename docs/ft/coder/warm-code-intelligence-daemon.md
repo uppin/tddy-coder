@@ -61,10 +61,20 @@ resident on one machine compete for CPU. Measured: a second request on one warm 
 faster than its cold load; re-asking a root after a *different* root's graph loaded ranged from
 880 ms to 3.6 s against a 2.19 s cold load, the upper end slower than cold.
 
-Requests touching the tree or the journal are serialized per root, because `.restructure/` is keyed
-by root with no lock file and `open_run` refuses a second plan. `Warm`, `Workspaces` and `Complexity`
+Requests touching the tree or the journal are serialized per root, because two runs must not edit one
+tree at once. Run state is keyed by plan, so the queue serializes access to the tree, not to a journal. `Warm`, `Workspaces` and `Complexity`
 are not serialized: they touch neither, and queueing "is this root warm?" behind a 55-minute capture
 would make it unanswerable.
+
+## Plans the daemon holds
+
+Each root has one **plan store** (see [Rust code restructuring](rust-code-restructuring.md#plan-store)),
+kept across requests. `Check`, `Apply` and `PlanStatus` read the loaded plan; `Apply` loads one that is
+not loaded. The applied plan's pending operations are refreshed after every operation and the plan is
+written back; dirty plans reach disk within a second, and every dirty plan is flushed before a served
+daemon exits on `^C` or `SIGTERM`, and before a single-shot call returns. The single-shot command line
+carries `restructure load`, `unload` and `plans` as well. A write-back onto a plan whose file changed
+since it was loaded is refused (`FailedPrecondition`).
 
 ## The service
 
@@ -75,6 +85,9 @@ would make it unanswerable.
 | `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation and outcome events |
 | `Anchors` | unary | An anchor a plan can carry: `items` for named items, or the `item` anchor of the innermost item enclosing `at`. The response holds the anchor's JSON (`anchor_json`) and its absolute span (`range`) |
 | `PlanStatus` | unary | completed / in-flight / pending / failed |
+| `LoadPlans` | unary | Reads plans into the root's plan store, giving every operation an id. Answers the plans held, with operation counts and whether each is dirty |
+| `UnloadPlans` | unary | Flushes and drops named plans, or all of them. Answers what remains |
+| `ListPlans` | unary | The plans the root's store holds |
 | `Verify` | unary | Statement-multiset comparison against a git ref |
 | `Workspaces` | unary | Which roots this process holds an index for |
 | `Coverage` | server-streaming | Per-test coverage capture. Tens of minutes |
@@ -98,7 +111,7 @@ transports as two different codes and a new error variant is a compile error:
 | Class | Meaning to a caller |
 |---|---|
 | `InvalidArgument` | the request is wrong — a malformed plan, code text in a plan, an unsupported operation, a file no backend handles, unparseable Rust |
-| `FailedPrecondition` | the tree is wrong — an unreachable root, a relative root, a plan that is not there, a snapshot mismatch, an existing journal, a missing coverage capture |
+| `FailedPrecondition` | the tree is wrong — an unreachable root, a relative root, a plan that is not there, a snapshot mismatch, an existing journal, a plan that changed on disk since it was loaded, a continued run whose plan the journal cannot vouch for, a missing coverage capture |
 | `DeadlineExceeded` | the caller's own deadline expired, or it cancelled; the message says how far the index got |
 | `Unavailable` | the server asked to be asked again |
 | `Internal` | neither caused by the caller nor fixable by them |

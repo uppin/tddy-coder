@@ -16,7 +16,7 @@ trait method on it directly; each transport wraps the same `Arc`:
 its own `Arc` internally, so a process serving several transports takes the `Arc` one level up
 instead. Two implementations over one `LspRegistry` would share the language servers but **not**
 `WorkspaceIndex`'s per-root queue, and two clients on one root could then collide on
-`.restructure/journal.jsonl`.
+each plan's journal, and the one root's plan store would be split in two.
 
 Single-shot passes prost structs in and out with no encode or decode, which is what makes it the same
 code path rather than a second one.
@@ -25,12 +25,12 @@ code path rather than a second one.
 
 | Module | Responsibility |
 |---|---|
-| `service.rs` | The generated trait's seven restructuring and four analysis methods, each a one-line delegation. `CodeIndexPorts`, `build_code_index_entry`, `EventStream` |
+| `service.rs` | The generated trait's ten restructuring and four analysis methods, each a one-line delegation. `CodeIndexPorts`, `build_code_index_entry`, `EventStream` |
 | `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`) |
 | `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
-| `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink |
-| `queries.rs` | `Anchors`, `PlanStatus`, `Verify` — the unary half. `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
-| `apply.rs` | The host-driven apply loop over the promoted `StatePaths` / `open_run_resolving_anchors` / `restore_ledger` / `commit_operation`, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
+| `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded |
+| `queries.rs` | `Anchors`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `PlanStatus` reads the loaded plan. `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
+| `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
 | `activity.rs` | Composes what the daemon says about its own requests |
@@ -75,6 +75,7 @@ enclosing one. An unreadable manifest on the walk is a `FailedPrecondition`, not
 | Open-document versions | `LspClient`, per URI |
 | The source-tree snapshot taken at the previous request | `WorkspaceIndex`, per root, replaced together with the crate-graph latch |
 | Complexity scores | process-wide, keyed by a hash of the content scored |
+| Plan store (`PlanStore`) | `WorkspaceIndex`, per root, across requests; a background tick flushes plans dirty for over a second, and `serve.rs` / `main.rs` flush every plan at shutdown and exit |
 | `Overlay`, `PositionLedger`, `Journal` | per request, never shared |
 
 **A warm server is told what changed on disk between requests.** The client auto-acknowledges
