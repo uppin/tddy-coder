@@ -25,6 +25,11 @@ const UNLINKED_FILE: &str = "unlinked-file";
 /// minutes with the server idle.
 pub(super) const READY_HOVER_BOUND: Duration = Duration::from_secs(30);
 
+/// Whether a hover silent for `silent_for` has outlasted `bound`; no bound never does.
+fn silent_past(silent_for: Duration, bound: Option<Duration>) -> bool {
+    bound.is_some_and(|bound| silent_for >= bound)
+}
+
 /// Where a wait for one position ended.
 pub(super) enum Answerable {
     /// The server resolves names here.
@@ -171,7 +176,7 @@ impl RustBackend {
                 let silent_for = ready_and_silent_since
                     .get_or_insert_with(Instant::now)
                     .elapsed();
-                if bound.is_some_and(|bound| silent_for >= bound) {
+                if silent_past(silent_for, bound) {
                     return Err(server_defect(format!(
                         "the index is ready and rust-analyzer still gives no hover at {} after \
                          {silent_for:?}, so it cannot type this position. Start the range on an \
@@ -420,5 +425,41 @@ mod tests {
 
         // Then
         assert_eq!(said, None);
+    }
+
+    #[test]
+    fn a_hover_silent_for_exactly_the_bound_has_outlasted_it() {
+        // Given a ready index that has left the hover null for the whole bound
+        let silent_for = READY_HOVER_BOUND;
+
+        // When
+        let outlasted = silent_past(silent_for, Some(READY_HOVER_BOUND));
+
+        // Then
+        assert!(outlasted);
+    }
+
+    #[test]
+    fn a_hover_silent_for_less_than_the_bound_has_not_outlasted_it() {
+        // Given
+        let silent_for = READY_HOVER_BOUND - Duration::from_millis(1);
+
+        // When
+        let outlasted = silent_past(silent_for, Some(READY_HOVER_BOUND));
+
+        // Then
+        assert!(!outlasted);
+    }
+
+    #[test]
+    fn a_wait_without_a_bound_never_outlasts_it() {
+        // Given a hover silent for far longer than the bound
+        let silent_for = READY_HOVER_BOUND * 1000;
+
+        // When
+        let outlasted = silent_past(silent_for, None);
+
+        // Then
+        assert!(!outlasted);
     }
 }

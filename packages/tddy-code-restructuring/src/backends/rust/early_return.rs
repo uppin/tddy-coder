@@ -531,31 +531,6 @@ fn closure_parameters_end(code: &[u8], from: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_range_ending_in_the_tail_of_a_unit_function_ends_in_a_unit_tail() {
-        // Given `f`, which returns `()`, and a range from its `let` to its end
-        let text = "fn f(x: Option<u32>) {\n    let Some(v) = x else { return; };\n    \
-                    if v > 1 {\n        drop(v);\n    }\n}\n";
-        let range = Range {
-            start: crate::edit::Position { line: 2, col: 5 },
-            end: crate::edit::Position { line: 5, col: 6 },
-        };
-
-        assert!(ends_in_a_unit_tail(text, range));
-    }
-
-    #[test]
-    fn a_range_ending_in_the_tail_of_a_function_returning_a_value_does_not() {
-        let text = "fn f(x: Option<u32>) -> u32 {\n    let Some(v) = x else { return 0; };\n    \
-                    v + 1\n}\n";
-        let range = Range {
-            start: crate::edit::Position { line: 2, col: 5 },
-            end: crate::edit::Position { line: 3, col: 10 },
-        };
-
-        assert!(!ends_in_a_unit_tail(text, range));
-    }
-
     use super::*;
     use crate::edit::Position;
 
@@ -905,5 +880,30 @@ mod tests {
                  `return` means what it did."
                 .to_string())
         );
+    }
+
+    #[test]
+    fn a_range_ending_in_the_tail_of_a_unit_function_ends_in_a_unit_tail() {
+        // Given `f`, which returns `()`, and a range from its `let` to its end
+        let text = "fn f(x: Option<u32>) {\n    let Some(v) = x else { return; };\n    \
+                    if v > 1 {\n        drop(v);\n    }\n}\n";
+        let range = Range {
+            start: crate::edit::Position { line: 2, col: 5 },
+            end: crate::edit::Position { line: 5, col: 6 },
+        };
+
+        assert!(ends_in_a_unit_tail(text, range));
+    }
+
+    #[test]
+    fn a_range_ending_in_the_tail_of_a_function_returning_a_value_does_not() {
+        let text = "fn f(x: Option<u32>) -> u32 {\n    let Some(v) = x else { return 0; };\n    \
+                    v + 1\n}\n";
+        let range = Range {
+            start: crate::edit::Position { line: 2, col: 5 },
+            end: crate::edit::Position { line: 3, col: 10 },
+        };
+
+        assert!(!ends_in_a_unit_tail(text, range));
     }
 }

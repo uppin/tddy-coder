@@ -664,38 +664,6 @@ fn collect_bound(tree: &str, prefix: &str, names: &mut Vec<String>) {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_function_local_use_binding_a_name_the_range_reaches_is_carried() {
-        // Given a function whose body imports `BTreeMap` locally, and a range naming it
-        let text = "fn build() -> usize {\n    use std::collections::BTreeMap;\n    \
-                    let map: BTreeMap<u32, u32> = BTreeMap::new();\n    map.len()\n}\n";
-        let function = crate::edit::Range {
-            start: crate::edit::Position { line: 1, col: 1 },
-            end: crate::edit::Position { line: 5, col: 2 },
-        };
-
-        // Then that `use` is what the extracted function carries
-        assert_eq!(
-            function_local_uses_reaching(text, function, &["BTreeMap".to_string()]),
-            vec!["use std::collections::BTreeMap;".to_string()]
-        );
-    }
-
-    #[test]
-    fn a_function_local_use_binding_nothing_the_range_reaches_is_not_carried() {
-        let text = "fn build() -> usize {\n    use std::collections::BTreeMap;\n    \
-                    let n = 3;\n    n\n}\n";
-        let function = crate::edit::Range {
-            start: crate::edit::Position { line: 1, col: 1 },
-            end: crate::edit::Position { line: 5, col: 2 },
-        };
-
-        assert_eq!(
-            function_local_uses_reaching(text, function, &["n".to_string()]),
-            Vec::<String>::new()
-        );
-    }
-
     use super::*;
 
     #[test]
@@ -788,5 +756,37 @@ mod tests {
 
         // Then
         assert_eq!(rebased.as_deref(), Some("super::proto::Event"));
+    }
+
+    #[test]
+    fn a_function_local_use_binding_a_name_the_range_reaches_is_carried() {
+        // Given a function whose body imports `BTreeMap` locally, and a range naming it
+        let text = "fn build() -> usize {\n    use std::collections::BTreeMap;\n    \
+                    let map: BTreeMap<u32, u32> = BTreeMap::new();\n    map.len()\n}\n";
+        let function = crate::edit::Range {
+            start: crate::edit::Position { line: 1, col: 1 },
+            end: crate::edit::Position { line: 5, col: 2 },
+        };
+
+        // Then that `use` is what the extracted function carries
+        assert_eq!(
+            function_local_uses_reaching(text, function, &["BTreeMap".to_string()]),
+            vec!["use std::collections::BTreeMap;".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_function_local_use_binding_nothing_the_range_reaches_is_not_carried() {
+        let text = "fn build() -> usize {\n    use std::collections::BTreeMap;\n    \
+                    let n = 3;\n    n\n}\n";
+        let function = crate::edit::Range {
+            start: crate::edit::Position { line: 1, col: 1 },
+            end: crate::edit::Position { line: 5, col: 2 },
+        };
+
+        assert_eq!(
+            function_local_uses_reaching(text, function, &["n".to_string()]),
+            Vec::<String>::new()
+        );
     }
 }

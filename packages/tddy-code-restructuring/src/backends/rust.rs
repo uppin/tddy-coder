@@ -1356,9 +1356,12 @@ impl RustBackend {
         (self.progress)(&format!("assist: {:?} in this file", op.op));
         let range = self.anchor_range(uri, op)?;
         // A place selected under a borrow is bound as the borrow: the assist would otherwise bind
-        // it by value, which moves a non-`Copy` field out of `&self`.
+        // it by value, which moves a non-`Copy` field out of `&self`. Where the borrow cannot be
+        // included, the extraction is refused instead.
         let range = if op.op == RefactorKind::ExtractVariable {
-            selection::widened_to_its_borrow(original, range)
+            let widened = selection::widened_to_its_borrow(original, range);
+            selection::refuse_by_value_hoist(original, widened)?;
+            widened
         } else {
             range
         };
