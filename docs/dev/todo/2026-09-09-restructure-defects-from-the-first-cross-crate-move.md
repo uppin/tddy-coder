@@ -22,7 +22,7 @@ failure that destroys information.
 | Origin facades read as cycles (defining-crate attribution) | [#488](https://github.com/uppin/tddy-coder/pull/488) |
 | `check` not running `apply`'s preconditions | [#488](https://github.com/uppin/tddy-coder/pull/488) |
 | One module at a time / a plan carrying two modules that name each other | [#490](https://github.com/uppin/tddy-coder/pull/490) — `move_cluster_to_crate`; measured 2 of 2 entangled modules moved with `cargo check` clean |
-| Repo-scoped journal | [#490](https://github.com/uppin/tddy-coder/pull/490) for the tool's own `apply`/`status`; **`tddy-index-daemon`'s apply loop still opts out** — `packages/tddy-index-daemon/docs/code-issues/stale-repo-scoped-restructure-state-apply.md` |
+| Repo-scoped journal | [#490](https://github.com/uppin/tddy-coder/pull/490) for the tool's own `apply`/`status`; `tddy-index-daemon`'s apply loop followed in #538 (#live-plan 2/7), which runs it through plan-scoped state — see `docs/dev/changesets/2026-10-02-plan-store.md` |
 | `--indexing-budget`, `plan is malformed` as the wrong error class, ~20 min per plan | withdrawn / `SeamRefused`+`ServerDefect` / `./run-index-daemon` |
 | The two cosmetic defects | **re-filed**, unfixed, as [`2026-09-18-cross-crate-move-cosmetic-facade-and-mod-ordering.md`](./2026-09-18-cross-crate-move-cosmetic-facade-and-mod-ordering.md) |
 
