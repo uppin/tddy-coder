@@ -19,8 +19,9 @@ use std::collections::BTreeSet;
 use super::destination::Destination;
 use super::source_scan::{items_of_module, ChildModule, ModuleItems};
 use super::survey::resolved_against;
-use super::Result;
+use super::{malformed, Result};
 use crate::registry::Workspace;
+use crate::RestructureError;
 
 /// The crate-rooted path `path` is defined at, once every re-export on the way is followed.
 ///
@@ -31,8 +32,8 @@ use crate::registry::Workspace;
 ///
 /// # Errors
 ///
-/// Refuses when the origin's crate root cannot be read, or a `super::` in a source climbs above the
-/// crate root.
+/// Refuses when the origin's crate root cannot be read, a module file the path goes through exists
+/// and cannot be read, or a `super::` in a source climbs above the crate root.
 pub(crate) fn followed(
     workspace: &Workspace<'_>,
     origin: &Destination,
@@ -109,7 +110,7 @@ impl Walk<'_, '_> {
         };
 
         if let Some(child) = items.children.iter().find(|child| child.name == *name) {
-            return match self.child_source(module, child) {
+            return match self.child_source(module, child)? {
                 Some(source) => self.walk(krate, &source, tail),
                 None => Ok(None),
             };
@@ -124,8 +125,7 @@ impl Walk<'_, '_> {
             }
             let mut target = self.absolute(krate, module, &items.children, &leaf.segments)?;
             target.extend(tail.iter().cloned());
-            let followed = self.follow_absolute(krate, &target)?;
-            return Ok(Some(followed.unwrap_or_else(|| target.join("::"))));
+            return Ok(Some(self.followed_or_as_written(krate, target)?));
         }
 
         for leaf in items.uses.iter().filter(|leaf| leaf.glob) {
@@ -153,11 +153,20 @@ impl Walk<'_, '_> {
         if let ([only], true) = (items.uses.as_slice(), nothing_else) {
             if only.glob {
                 let target = self.absolute(krate, module, &[], &only.segments)?;
-                let followed = self.follow_absolute(krate, &target)?;
-                return Ok(Some(followed.unwrap_or_else(|| target.join("::"))));
+                return Ok(Some(self.followed_or_as_written(krate, target)?));
             }
         }
         Ok(Some(address(krate, &module.path, &[])))
+    }
+
+    /// `target` followed to where it is defined, or as written when the walk cannot see further.
+    fn followed_or_as_written(
+        &mut self,
+        krate: &Destination,
+        target: Vec<String>,
+    ) -> Result<String> {
+        let followed = self.follow_absolute(krate, &target)?;
+        Ok(followed.unwrap_or_else(|| target.join("::")))
     }
 
     /// A `use` path from inside `module`, written from the crate root by extern name.
@@ -190,8 +199,15 @@ impl Walk<'_, '_> {
         Ok(resolved.split("::").map(str::to_string).collect())
     }
 
-    /// A child module's own source, or `None` when no file for it can be read.
-    fn child_source(&self, parent: &ModuleSource, child: &ChildModule) -> Option<ModuleSource> {
+    /// A child module's own source, or `None` when no file for it exists.
+    ///
+    /// Only a file that is not there means "no such module here"; a file that is there and cannot be
+    /// read is an error, since answering `None` would let the move go on with a path it never saw.
+    fn child_source(
+        &self,
+        parent: &ModuleSource,
+        child: &ChildModule,
+    ) -> Result<Option<ModuleSource>> {
         let dir = format!("{}/{}", parent.dir, child.name);
         let path = parent
             .path
@@ -202,13 +218,33 @@ impl Walk<'_, '_> {
 
         let text = match &child.body {
             Some(body) => parent.text[body.clone()].to_string(),
-            None => self
-                .workspace
-                .read(&format!("{}/{}.rs", parent.dir, child.name))
-                .or_else(|_| self.workspace.read(&format!("{dir}/mod.rs")))
-                .ok()?,
+            None => {
+                let beside = format!("{}/{}.rs", parent.dir, child.name);
+                let inside = format!("{dir}/mod.rs");
+                match self.read_if_present(&beside)? {
+                    Some(text) => text,
+                    None => match self.read_if_present(&inside)? {
+                        Some(text) => text,
+                        None => return Ok(None),
+                    },
+                }
+            }
         };
-        Some(ModuleSource { text, dir, path })
+        Ok(Some(ModuleSource { text, dir, path }))
+    }
+
+    /// The file at `relative`, `None` when there is none, an error naming it when it cannot be read.
+    fn read_if_present(&self, relative: &str) -> Result<Option<String>> {
+        match self.workspace.read(relative) {
+            Ok(text) => Ok(Some(text)),
+            Err(RestructureError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(None)
+            }
+            Err(RestructureError::Io(error)) => Err(malformed(format!(
+                "`{relative}` cannot be read ({error}), so the paths it declares cannot be followed"
+            ))),
+            Err(other) => Err(other),
+        }
     }
 }
 
@@ -259,6 +295,17 @@ mod tests {
 
         /// Where `path` is defined once the origin's re-exports are followed.
         fn defining(&self, path: &str) -> String {
+            self.following(path).expect("the sources read")
+        }
+
+        /// Why following `path` was refused.
+        fn refusal_following(&self, path: &str) -> String {
+            self.following(path)
+                .expect_err("the walk was expected to refuse")
+                .to_string()
+        }
+
+        fn following(&self, path: &str) -> Result<String> {
             let overlay = Overlay::new();
             let workspace = Workspace {
                 root: self.directory.path(),
@@ -267,7 +314,7 @@ mod tests {
             let origin = Destination::read(self.directory.path(), "origin")
                 .expect("the origin has a manifest");
 
-            followed(&workspace, &origin, path).expect("the sources read")
+            followed(&workspace, &origin, path)
         }
     }
 
@@ -348,6 +395,34 @@ mod tests {
 
         // Then the path is returned as written
         assert_eq!(defined_at, "origin::missing");
+    }
+
+    #[test]
+    fn a_module_file_that_cannot_be_read_refuses_the_walk_instead_of_ending_it() {
+        // Given a module declared as a file, where a directory stands in the file's place
+        let workspace = a_workspace_of_origin_over_destination("pub mod broken;\n", "")
+            .writing("origin/src/broken.rs/placeholder", "");
+
+        // When a path through the module is followed
+        let refusal = workspace.refusal_following("origin::broken::item");
+
+        // Then the walk refuses, naming the file
+        assert!(
+            refusal.contains("origin/src/broken.rs"),
+            "the refusal did not name the unreadable file: {refusal}"
+        );
+    }
+
+    #[test]
+    fn a_module_with_no_file_ends_the_walk_where_it_was_written() {
+        // Given a module declared with no file behind it
+        let workspace = a_workspace_of_origin_over_destination("pub mod absent;\n", "");
+
+        // When a path through it is followed
+        let defined_at = workspace.defining("origin::absent::item");
+
+        // Then the path is returned as written
+        assert_eq!(defined_at, "origin::absent::item");
     }
 
     #[test]

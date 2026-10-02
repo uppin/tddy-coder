@@ -12,9 +12,11 @@
 //! rewrite, the edge test and the manifest pass all read it, so they cannot disagree about what the
 //! file names. `check-parity` reads it too, for the findings `check --deep` owes.
 
+use std::collections::BTreeSet;
+
 use super::destination::Destination;
 use super::manifest_edits;
-use super::source_scan::sightings;
+use super::source_scan::{items_of_module, sightings};
 use super::test_binary::{is_a_built_in_root, names_bound_in};
 use super::{malformed, reexports, Result};
 use crate::edit::Position;
@@ -69,11 +71,14 @@ pub(crate) fn survey_moved_file(
     module_path: &[String],
 ) -> Result<PathSurvey> {
     let manifest = workspace.read(&format!("{}/Cargo.toml", origin.dir))?;
-    let bound = names_bound_in(text);
+    let bound = names_bound_by(text);
     let mut paths = Vec::new();
 
     for sighting in sightings(text) {
-        let head = sighting.segments[0].as_str();
+        // A glob or group with nothing before it (`use *;`) names no path to resolve.
+        let Some(head) = sighting.segments.first().map(String::as_str) else {
+            continue;
+        };
         let relative = matches!(head, "crate" | "self" | "super");
         if !relative {
             if is_a_built_in_root(head) || bound.contains(head) {
@@ -112,6 +117,17 @@ pub(crate) fn survey_moved_file(
     }
 
     Ok(PathSurvey { paths })
+}
+
+/// What the file itself binds: the modules it declares, what its `use` items bring into scope, and
+/// the items it defines. A path starting with one of these is relative to the file, so its first
+/// segment is no crate — `use Kind::*;` in a function over an `enum Kind` of the same file.
+fn names_bound_by(text: &str) -> BTreeSet<String> {
+    let mut bound = names_bound_in(text);
+    let items = items_of_module(text);
+    bound.extend(items.defined);
+    bound.extend(items.children.into_iter().map(|child| child.name));
+    bound
 }
 
 /// `self::`, `super::` (any depth) and `crate::` resolved against `module_path` in `crate_name`,
@@ -154,68 +170,143 @@ pub(crate) fn resolved_against(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::overlay::Overlay;
 
     fn a_module_path(segments: &[&str]) -> Vec<String> {
         segments.iter().map(|segment| segment.to_string()).collect()
     }
 
+    /// The survey of `moved`, written at `origin/src/moved.rs`, over an origin with no dependencies.
+    fn surveying(moved: &str) -> PathSurvey {
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        std::fs::create_dir_all(directory.path().join("origin/src")).expect("the origin directory");
+        std::fs::write(
+            directory.path().join("origin/Cargo.toml"),
+            "[package]\nname = \"origin\"\n",
+        )
+        .expect("the manifest is written");
+        std::fs::write(
+            directory.path().join("origin/src/lib.rs"),
+            "pub mod moved;\n",
+        )
+        .expect("the crate root is written");
+
+        let overlay = Overlay::new();
+        let workspace = Workspace {
+            root: directory.path(),
+            overlay: &overlay,
+        };
+        let origin = Destination::read(directory.path(), "origin").expect("the origin's manifest");
+
+        survey_moved_file(&workspace, moved, &origin, &a_module_path(&["moved"]))
+            .expect("the file is surveyed")
+    }
+
     #[test]
     fn super_resolves_to_the_parent_module() {
+        // Given a path written from a module two deep
+        let module = a_module_path(&["outer", "inner"]);
+
+        // When it is resolved
+        let resolved = resolved_against("super::helper", "origin", &module);
+
+        // Then it names the parent's item
         assert_eq!(
-            resolved_against(
-                "super::helper",
-                "origin",
-                &a_module_path(&["outer", "inner"])
-            )
-            .ok(),
-            Some("origin::outer::helper".to_string())
+            resolved.expect("the path resolves"),
+            "origin::outer::helper"
         );
     }
 
     #[test]
     fn super_super_climbs_two_modules() {
-        assert_eq!(
-            resolved_against(
-                "super::super::helper",
-                "origin",
-                &a_module_path(&["a", "b", "c"])
-            )
-            .ok(),
-            Some("origin::a::helper".to_string())
-        );
+        // Given a path climbing twice from a module three deep
+        let module = a_module_path(&["a", "b", "c"]);
+
+        // When it is resolved
+        let resolved = resolved_against("super::super::helper", "origin", &module);
+
+        // Then it lands in the grandparent
+        assert_eq!(resolved.expect("the path resolves"), "origin::a::helper");
     }
 
     #[test]
     fn self_resolves_to_the_module_itself() {
+        // Given a `self::` path in a nested module
+        let module = a_module_path(&["outer", "inner"]);
+
+        // When it is resolved
+        let resolved = resolved_against("self::local", "origin", &module);
+
+        // Then it names an item of that module
         assert_eq!(
-            resolved_against("self::local", "origin", &a_module_path(&["outer", "inner"])).ok(),
-            Some("origin::outer::inner::local".to_string())
+            resolved.expect("the path resolves"),
+            "origin::outer::inner::local"
         );
     }
 
     #[test]
     fn crate_resolves_to_the_crate_root() {
+        // Given a `crate::` path written in a module
+        let module = a_module_path(&["outer"]);
+
+        // When it is resolved
+        let resolved = resolved_against("crate::config::DaemonConfig", "origin", &module);
+
+        // Then it is rooted at the crate, whatever module it was written in
         assert_eq!(
-            resolved_against(
-                "crate::config::DaemonConfig",
-                "origin",
-                &a_module_path(&["outer"])
-            )
-            .ok(),
-            Some("origin::config::DaemonConfig".to_string())
+            resolved.expect("the path resolves"),
+            "origin::config::DaemonConfig"
         );
     }
 
     #[test]
     fn a_path_that_climbs_above_the_crate_root_is_refused() {
-        assert!(resolved_against("super::super::x", "origin", &a_module_path(&["outer"])).is_err());
+        // Given a module one deep, and a path climbing twice
+        let module = a_module_path(&["outer"]);
+
+        // When it is resolved
+        let refusal = resolved_against("super::super::x", "origin", &module);
+
+        // Then it is refused
+        assert!(refusal
+            .expect_err("the path climbs too far")
+            .to_string()
+            .contains("climbs above the root of `origin`"));
     }
 
     #[test]
     fn an_extern_path_is_left_as_written() {
-        assert_eq!(
-            resolved_against("shared::Clock", "origin", &a_module_path(&["outer"])).ok(),
-            Some("shared::Clock".to_string())
-        );
+        // Given a path rooted in another crate
+        let module = a_module_path(&["outer"]);
+
+        // When it is resolved
+        let resolved = resolved_against("shared::Clock", "origin", &module);
+
+        // Then it is unchanged
+        assert_eq!(resolved.expect("the path resolves"), "shared::Clock");
+    }
+
+    #[test]
+    fn a_use_with_nothing_before_its_glob_names_no_path() {
+        // Given `use` items whose trees spell no path at all
+        let moved = "use *;\nuse {*};\n";
+
+        // When the file is surveyed
+        let survey = surveying(moved);
+
+        // Then there is nothing to resolve, and nothing went wrong
+        assert_eq!(survey.paths, Vec::new());
+    }
+
+    #[test]
+    fn an_item_the_file_defines_is_no_crate_for_a_nested_use() {
+        // Given a function importing the variants of an enum defined in the same file
+        let moved = "pub enum Kind {\n    Idle,\n}\n\npub fn idle() -> Kind {\n    use Kind::*;\n    Idle\n}\n";
+
+        // When the file is surveyed
+        let survey = surveying(moved);
+
+        // Then `Kind` is the file's own, not a path to carry
+        assert_eq!(survey.paths, Vec::new());
     }
 }

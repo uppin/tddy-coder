@@ -6,10 +6,24 @@
 //! the original text — and tokenised, and what is read out of the tokens is only ever *shapes*:
 //! `a::b::c` sequences, `use` trees, `mod` blocks and the attribute that marks an item `cfg(test)`.
 //! Nothing here resolves a name; [`super::survey`] and [`super::reexports`] do that.
+//!
+//! The `cfg(test)` marker is recognised as `#[cfg(test)]` and `#[cfg(all(test, …))]`. Any other
+//! spelling that only builds under test — `#[cfg(not(not(test)))]`, a `cfg_attr` — reads as ordinary
+//! code, which errs the safe way: a crate such a path names lands in `[dependencies]`, never missing
+//! from the build.
 
 use std::ops::Range;
 
 use super::test_binary::{readable_spans, Prose};
+
+/// The tokens that open a `cfg` attribute: `#[cfg(`.
+const CFG_OPEN: [&str; 4] = ["#", "[", "cfg", "("];
+/// The whole attribute `#[cfg(test)]`.
+const CFG_TEST: [&str; 7] = ["#", "[", "cfg", "(", "test", ")", "]"];
+/// The keywords that introduce an item with a name, as far as a module's top level is read.
+const DEFINING_KEYWORDS: [&str; 8] = [
+    "fn", "struct", "enum", "trait", "type", "const", "static", "union",
+];
 
 /// What a token is, as far as path reading needs to tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +82,81 @@ impl<'a> Scan<'a> {
                 .get(at + offset)
                 .is_some_and(|token| self.text(*token) == *word)
         })
+    }
+
+    /// How many tokens the attribute at `at` spans, when it marks the item after it `cfg(test)`:
+    /// `#[cfg(test)]`, or `#[cfg(all(test, …))]` with `test` one of the `all`'s own arguments.
+    fn cfg_test_attribute(&self, at: usize) -> Option<usize> {
+        if self.spells(at, &CFG_TEST) {
+            return Some(CFG_TEST.len());
+        }
+        if !self.spells(at, &CFG_OPEN) || !self.spells(at + CFG_OPEN.len(), &["all", "("]) {
+            return None;
+        }
+
+        let arguments = at + CFG_OPEN.len() + 2;
+        let mut depth = 0usize;
+        let mut names_test = false;
+        for index in arguments..self.tokens.len() {
+            match self.kind(index)? {
+                Kind::Punct(b'(' | b'[' | b'{') => depth += 1,
+                Kind::Punct(b')' | b']' | b'}') if depth == 0 => {
+                    let closes_the_attribute = self.is_punct(index, b')')
+                        && self.is_punct(index + 1, b')')
+                        && self.is_punct(index + 2, b']');
+                    return (names_test && closes_the_attribute).then_some(index + 3 - at);
+                }
+                Kind::Punct(b')' | b']' | b'}') => depth -= 1,
+                Kind::Ident if depth == 0 && self.text(self.tokens[index]) == "test" => {
+                    let opens_an_argument =
+                        self.is_punct(index - 1, b'(') || self.is_punct(index - 1, b',');
+                    let ends_an_argument =
+                        self.is_punct(index + 1, b',') || self.is_punct(index + 1, b')');
+                    names_test |= opens_an_argument && ends_an_argument;
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// The `use` item whose keyword is at `at`: where its tree starts as a byte offset, its leaves,
+    /// and the index of the token after the item.
+    fn use_item(&self, at: usize) -> (usize, Vec<UseLeaf>, usize) {
+        let mut cursor = at + 1;
+        let head = match self.kind(cursor) {
+            Some(Kind::Separator) => self.tokens.get(cursor + 1),
+            _ => self.tokens.get(cursor),
+        };
+        let head_at = head.map_or(self.tokens[at].end, |head| head.start);
+        let mut leaves = Vec::new();
+        self.use_tree(&mut cursor, Vec::new(), &mut leaves);
+        (head_at, leaves, self.statement_end(cursor) + 1)
+    }
+
+    /// Whether the identifier at `at` continues what precedes it rather than opening a path: it is
+    /// behind `::` a segment of a longer path, behind `.` a field or method, behind `$` a macro
+    /// variable and behind `'` a lifetime.
+    fn continues_a_path(&self, at: usize) -> bool {
+        at > 0
+            && matches!(
+                self.kind(at - 1),
+                Some(Kind::Separator | Kind::Punct(b'.' | b'$' | b'\''))
+            )
+    }
+
+    /// The path of identifiers joined by `::` that starts at `at`, and the index of its last token.
+    fn path_from(&self, at: usize) -> (Vec<String>, usize) {
+        let mut segments = vec![self.text(self.tokens[at]).to_string()];
+        let mut last = at;
+        while self.kind(last + 1) == Some(Kind::Separator) {
+            let Some(next) = self.ident(last + 2) else {
+                break;
+            };
+            segments.push(next.to_string());
+            last += 2;
+        }
+        (segments, last)
     }
 
     /// The index of the next `;` at or after `at`, or the end of the file.
@@ -279,10 +368,12 @@ pub(crate) fn sightings(text: &str) -> Vec<Sighting> {
         };
 
         match token.kind {
-            Kind::Punct(b'#') if scan.spells(at, &["#", "[", "cfg", "(", "test", ")", "]"]) => {
-                pending_test = true;
-                at += 7;
-                continue;
+            Kind::Punct(b'#') => {
+                if let Some(length) = scan.cfg_test_attribute(at) {
+                    pending_test = true;
+                    at += length;
+                    continue;
+                }
             }
             Kind::Punct(b'(' | b'[') => brackets += 1,
             Kind::Punct(b')' | b']') => brackets = brackets.saturating_sub(1),
@@ -317,15 +408,7 @@ pub(crate) fn sightings(text: &str) -> Vec<Sighting> {
                 }
             }
             Kind::Ident if scan.text(token) == "use" => {
-                let mut cursor = at + 1;
-                let head = match scan.kind(cursor) {
-                    Some(Kind::Separator) => scan.tokens.get(cursor + 1),
-                    _ => scan.tokens.get(cursor),
-                };
-                let head_at = head.map_or(token.end, |head| head.start);
-                let mut leaves = Vec::new();
-                scan.use_tree(&mut cursor, Vec::new(), &mut leaves);
-
+                let (head_at, leaves, next) = scan.use_item(at);
                 for leaf in leaves {
                     found.push(Sighting {
                         segments: leaf.segments,
@@ -336,29 +419,12 @@ pub(crate) fn sightings(text: &str) -> Vec<Sighting> {
                     });
                 }
                 pending_test = false;
-                at = scan.statement_end(cursor) + 1;
+                at = next;
                 continue;
             }
+            Kind::Ident if scan.continues_a_path(at) => {}
             Kind::Ident => {
-                let continues_a_path = at > 0
-                    && matches!(
-                        scan.kind(at - 1),
-                        Some(Kind::Separator | Kind::Punct(b'.' | b'$' | b'\''))
-                    );
-                if continues_a_path {
-                    at += 1;
-                    continue;
-                }
-
-                let mut segments = vec![scan.text(token).to_string()];
-                let mut last = at;
-                while scan.kind(last + 1) == Some(Kind::Separator) {
-                    let Some(next) = scan.ident(last + 2) else {
-                        break;
-                    };
-                    segments.push(next.to_string());
-                    last += 2;
-                }
+                let (segments, last) = scan.path_from(at);
                 if segments.len() >= 2 {
                     found.push(Sighting {
                         segments,
@@ -440,8 +506,12 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
                     at = scan.statement_end(cursor) + 1;
                     continue;
                 }
-                "fn" | "struct" | "enum" | "trait" | "type" | "const" | "static" | "union" => {
-                    items.defined.extend(scan.ident(at + 1).map(str::to_string));
+                keyword if DEFINING_KEYWORDS.contains(&keyword) => {
+                    // `const fn name` defines `name`, which the `fn` that follows reads.
+                    let name = scan.ident(at + 1).filter(|name| {
+                        keyword != "const" || !["fn", "unsafe", "async", "extern"].contains(name)
+                    });
+                    items.defined.extend(name.map(str::to_string));
                 }
                 "macro_rules" if scan.is_punct(at + 1, b'!') => {
                     items.defined.extend(scan.ident(at + 2).map(str::to_string));
@@ -563,5 +633,33 @@ mod tests {
         );
         assert_eq!(items.defined, vec!["open".to_string()]);
         assert_eq!(items.uses[0].bound_name(), Some("Renamed"));
+    }
+
+    #[test]
+    fn a_const_fn_defines_its_own_name_and_not_the_keyword() {
+        // Given a module with a `const fn` and a `const`
+        let text = "pub const fn limit() -> u32 {\n    3\n}\npub const MAX: u32 = 4;\n";
+
+        // When
+        let items = items_of_module(text);
+
+        // Then the names defined are the function's and the constant's
+        assert_eq!(items.defined, vec!["limit".to_string(), "MAX".to_string()]);
+    }
+
+    #[test]
+    fn a_path_under_cfg_all_test_is_marked_and_one_under_cfg_any_test_is_not() {
+        // Given an item gated by `all(test, …)` and one gated by `any(test, …)`
+        let text = "#[cfg(all(test, feature = \"slow\"))]\nmod slow {\n    fn a() {\n        shared::one();\n    }\n}\n\n#[cfg(any(test, unix))]\nmod either {\n    fn b() {\n        shared::two();\n    }\n}\n";
+
+        // When
+        let found = sightings(text);
+
+        // Then only the first is in a test
+        assert_eq!(written(&found), vec!["shared::one", "shared::two"]);
+        assert_eq!(
+            found.iter().map(|path| path.in_test).collect::<Vec<_>>(),
+            vec![true, false]
+        );
     }
 }

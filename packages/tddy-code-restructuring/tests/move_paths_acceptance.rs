@@ -12,13 +12,16 @@ mod harness;
 
 use harness::{
     a_move_of, a_workspace_holding_files, assert_compiles, assert_compiles_with_its_tests,
-    performing, DESTINATION_MANIFEST, ORIGIN_OVER_BOTH, SHARED_LIB, SHARED_MANIFEST, THREE_CRATES,
+    performing, refusal_from, DESTINATION_MANIFEST, ORIGIN_OVER_BOTH, SHARED_LIB, SHARED_MANIFEST,
+    THREE_CRATES,
 };
 use tddy_code_restructuring::Reexport;
 
 const MOVED: &str = "crates/origin/src/host_registry.rs";
 const ARRIVED: &str = "crates/destination/src/host_registry.rs";
 const DESTINATION_CARGO: &str = "crates/destination/Cargo.toml";
+const NESTED: &str = "crates/origin/src/outer/inner.rs";
+const NESTED_ARRIVED: &str = "crates/destination/src/inner.rs";
 
 /// A workspace where `origin/src/host_registry.rs` holds `moved`, `origin/src/lib.rs` holds
 /// `origin_lib`, and `destination/src/lib.rs` holds `destination_lib`.
@@ -142,9 +145,6 @@ async fn an_extern_crate_named_only_under_cfg_test_is_carried_to_dev_dependencie
     assert_compiles_with_its_tests(&workspace);
 }
 
-const NESTED: &str = "crates/origin/src/outer/inner.rs";
-const NESTED_ARRIVED: &str = "crates/destination/src/inner.rs";
-
 #[tokio::test(flavor = "multi_thread")]
 async fn a_super_import_resolved_through_a_glob_reexport_of_the_destination_is_not_an_edge() {
     // Given `origin::outer::inner` importing `super::helper`, where `outer` globs
@@ -193,8 +193,89 @@ async fn a_module_import_whose_items_the_destination_defines_is_rewritten_to_the
     // When the file moves into `destination`
     performing(&workspace, moving_the_host_registry()).await;
 
-    // Then it no longer reaches back through `origin`, and the tree builds
-    assert!(!workspace.read(ARRIVED).contains("crate::roster"));
-    assert!(!workspace.read(ARRIVED).contains("origin::"));
+    // Then it imports the destination's module under the name the body goes on using, and builds
+    assert_eq!(
+        workspace.read(ARRIVED),
+        "use crate::records as roster;\n\npub fn qualified() -> u32 {\n    \
+         roster::qualified_id()\n}\n"
+    );
+    assert_compiles(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_body_path_to_an_item_the_origin_defines_is_an_edge_back_and_refuses_the_move() {
+    // Given a moved file calling `crate::origin_clock`, which `origin` defines itself
+    let workspace = a_workspace_moving(
+        "pub fn now() -> u32 {\n    crate::origin_clock()\n}\n",
+        "pub mod host_registry;\n\npub fn origin_clock() -> u32 {\n    1\n}\n",
+        "",
+    );
+
+    // When the file is moved into `destination`
+    let refusal = refusal_from(&workspace, moving_the_host_registry()).await;
+
+    // Then the refusal names the origin item the destination would depend on
+    assert!(
+        refusal.contains("origin::origin_clock"),
+        "the refusal did not name the origin item: {refusal}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_test_module_naming_an_origin_item_is_not_an_edge_back() {
+    // Given a moved file whose test module names `crate::origin_clock`, which `origin` defines
+    let workspace = a_workspace_moving(
+        "pub fn one() -> u32 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    \
+         fn the_origin_ticks() {\n        assert_eq!(crate::origin_clock(), 1);\n    }\n}\n",
+        "pub mod host_registry;\n\npub fn origin_clock() -> u32 {\n    1\n}\n",
+        "",
+    );
+
+    // When the file moves into `destination`
+    performing(&workspace, moving_the_host_registry()).await;
+
+    // Then the move goes through, with `origin` a dev-dependency only
+    let manifest = workspace.read(DESTINATION_CARGO);
+    assert!(manifest.contains("[dev-dependencies]\norigin = { path = \"../origin\" }\n"));
+    assert!(!manifest.contains("[dependencies]\norigin"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_use_group_whose_members_land_in_different_crates_is_refused_with_the_fix() {
+    // Given one `use crate::{…}` naming an item `origin` forwards from `destination` and one it
+    // defines itself
+    let workspace = a_workspace_moving(
+        "use crate::{records::Id, OriginOwned};\n\npub fn pair() -> (Id, OriginOwned) {\n    \
+         (Id, OriginOwned)\n}\n",
+        "pub use destination::records;\npub mod host_registry;\n\npub struct OriginOwned;\n",
+        "pub mod records {\n    pub struct Id;\n}\n",
+    );
+
+    // When the file moves into `destination`
+    let refusal = refusal_from(&workspace, moving_the_host_registry()).await;
+
+    // Then the refusal says to write one `use` per path
+    assert!(
+        refusal.contains("write one `use` per path"),
+        "the refusal did not say how to fix the group: {refusal}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_nested_use_of_an_enum_the_moved_file_defines_is_not_read_as_a_crate() {
+    // Given a moved file whose function glob-imports the variants of an enum it defines itself
+    let workspace = a_workspace_moving(
+        "pub enum Kind {\n    Idle,\n    Busy,\n}\n\npub fn busy() -> Kind {\n    \
+         use Kind::*;\n    Busy\n}\n\npub fn idle() -> Kind {\n    use Kind::{Idle};\n    \
+         Idle\n}\n",
+        "pub mod host_registry;\n",
+        "",
+    );
+
+    // When the file moves into `destination`
+    performing(&workspace, moving_the_host_registry()).await;
+
+    // Then it moves as it was, the destination gains no dependency, and it builds
+    assert_eq!(workspace.read(DESTINATION_CARGO), DESTINATION_MANIFEST);
     assert_compiles(&workspace);
 }

@@ -1,25 +1,14 @@
-use super::Move;
+use std::collections::BTreeSet;
 
+use super::survey::SurveyedPath;
+use super::{malformed, Move, Result};
+use crate::edit::{Position, TextEdit};
+use crate::registry::Workspace;
+use crate::RestructureError;
 use crate::{
     apply::byte_offset,
     crate_move::{manifest_edits, survey, test_binary::segment_length},
 };
-
-use super::malformed;
-
-use super::survey::SurveyedPath;
-
-use crate::RestructureError;
-
-use crate::edit::Position;
-
-use super::Result;
-
-use crate::registry::Workspace;
-
-use std::collections::BTreeSet;
-
-use crate::edit::TextEdit;
 
 /// What the moved file's paths say about the crates it needs, and the edits that re-point them.
 pub(crate) struct Header {
@@ -143,8 +132,9 @@ fn reach(path: &SurveyedPath, moving: &Move, co_moving: &BTreeSet<String>) -> Re
     let origin = &moving.origin.extern_name;
 
     let inside_the_origin = path.resolved.strip_prefix(&format!("{origin}::"));
-    if let Some(member) = inside_the_origin.and_then(|rest| travels_with(rest, co_moving)) {
-        let rest = &path.resolved[origin.len() + "::".len()..];
+    if let Some((rest, member)) = inside_the_origin
+        .and_then(|rest| travels_with(rest, co_moving).map(|member| (rest, member)))
+    {
         let head = path.written.split("::").next().unwrap_or_default();
         let stays_inside_the_module =
             matches!(head, "self" | "super") && *member == moving.home.path.join("::");
