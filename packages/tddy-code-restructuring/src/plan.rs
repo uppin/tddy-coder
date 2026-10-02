@@ -21,14 +21,266 @@ pub enum Anchor {
         start: Position,
         end: Position,
     },
+    /// An item named by its crate-rooted path, resolved to an exact position through the language
+    /// server's outline — the anchor that survives edits outside the item.
+    ///
+    /// `file` says where to look and nothing searches elsewhere. `start`/`end` are relative to the
+    /// item's full range, attributes and doc comments included: `line` 1 is the item's first line
+    /// and `col` is the column on that line. Both absent means the item itself, at its name.
+    /// `fingerprint` is the item's text when the anchor was written, so an edit *to* the item is
+    /// refused rather than re-targeted. `hint` is the absolute position, for orientation only —
+    /// nothing resolves through it.
+    Item {
+        item: ItemPath,
+        file: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<Position>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<Position>,
+        fingerprint: Fingerprint,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hint: Option<Position>,
+    },
+    /// A contiguous run of sibling items, from the first one's first line to the last one's last,
+    /// trivia included — what `extract_module` groups.
+    Items {
+        file: String,
+        items: Vec<ItemPath>,
+        fingerprints: Vec<Fingerprint>,
+    },
 }
 
 impl Anchor {
-    pub fn file(&self) -> &str {
+    /// Refuse an anchor whose own fields contradict each other, before any tree is consulted.
+    ///
+    /// What cannot be judged here — whether a relative range lies inside its item — needs the item
+    /// found, and is refused when it is.
+    pub fn validate(&self) -> Result<()> {
         match self {
-            Anchor::Symbol { file, .. } | Anchor::Range { file, .. } => file,
+            Anchor::Symbol { .. } | Anchor::Range { .. } => Ok(()),
+            Anchor::Item {
+                item, start, end, ..
+            } => match (start, end) {
+                (None, None) => Ok(()),
+                (Some(start), Some(end)) => {
+                    let one_based = |position: &Position| position.line >= 1 && position.col >= 1;
+                    if !one_based(start) || !one_based(end) {
+                        return Err(malformed(format!(
+                            "the range of `{item}` counts lines and columns from 1"
+                        )));
+                    }
+                    if (start.line, start.col) > (end.line, end.col) {
+                        return Err(malformed(format!(
+                            "the range of `{item}` ends before it starts"
+                        )));
+                    }
+                    Ok(())
+                }
+                _ => Err(malformed(format!(
+                    "`{item}` gives one end of a relative range — give both `start` and `end`, \
+                     or neither to anchor the item itself"
+                ))),
+            },
+            Anchor::Items {
+                items,
+                fingerprints,
+                ..
+            } => {
+                if items.is_empty() {
+                    return Err(malformed("an `items` anchor names no items"));
+                }
+                if items.len() != fingerprints.len() {
+                    return Err(malformed(format!(
+                        "an `items` anchor names {} item(s) and {} fingerprint(s) — each item \
+                         carries its own",
+                        items.len(),
+                        fingerprints.len()
+                    )));
+                }
+                Ok(())
+            }
         }
     }
+
+    pub fn file(&self) -> &str {
+        match self {
+            Anchor::Symbol { file, .. }
+            | Anchor::Range { file, .. }
+            | Anchor::Item { file, .. }
+            | Anchor::Items { file, .. } => file,
+        }
+    }
+}
+
+/// A crate-rooted path to an item: the crate's name, its module path, then the item and member
+/// segments — `tddy_core::workflow::Stack::new`.
+///
+/// A member of a trait impl that shares its name with another member of the same type is addressed
+/// with the trait named, the way Rust's own qualified path does: `tddy_core::workflow::<Stack as
+/// Display>::fmt`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct ItemPath(String);
+
+/// One step of an [`ItemPath`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ItemSegment {
+    /// A module, type, function or member, by name.
+    Named(String),
+    /// A member reached through one trait impl of a type: `<Stack as Display>`.
+    TraitImpl {
+        self_type: String,
+        trait_name: String,
+    },
+}
+
+impl ItemPath {
+    /// Parse and validate a path; a path with fewer than two segments names no item in a crate.
+    pub fn parse(text: &str) -> Result<ItemPath> {
+        let pieces = split_path(text).filter(|pieces| {
+            pieces.len() >= 2
+                && matches!(read_segment(pieces[0]), Some(ItemSegment::Named(_)))
+                && pieces.iter().all(|piece| read_segment(piece).is_some())
+        });
+        if pieces.is_none() {
+            let last = text.rsplit("::").next().unwrap_or(text);
+            return Err(malformed(format!(
+                "`{text}` is not an item path — write it crate-rooted, as \
+                 `<crate>::<module>::{last}`"
+            )));
+        }
+        Ok(ItemPath(text.to_string()))
+    }
+
+    /// The crate the path is rooted in.
+    pub fn crate_name(&self) -> &str {
+        self.pieces()[0]
+    }
+
+    /// Every segment after the crate's.
+    pub fn segments(&self) -> Vec<ItemSegment> {
+        self.pieces()
+            .into_iter()
+            .skip(1)
+            .filter_map(read_segment)
+            .collect()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The path's pieces, which [`ItemPath::parse`] has already shown to be well formed.
+    fn pieces(&self) -> Vec<&str> {
+        split_path(&self.0).unwrap_or_default()
+    }
+}
+
+impl ItemSegment {
+    /// The segment as a path spells it: `Stack`, or `<Stack as Debug>`.
+    pub fn spelled(&self) -> String {
+        match self {
+            ItemSegment::Named(name) => name.clone(),
+            ItemSegment::TraitImpl {
+                self_type,
+                trait_name,
+            } => format!("<{self_type} as {trait_name}>"),
+        }
+    }
+}
+
+/// `text` split at every `::` outside angle brackets, or `None` when the brackets do not balance
+/// or a piece is empty.
+fn split_path(text: &str) -> Option<Vec<&str>> {
+    let mut pieces = Vec::new();
+    let mut depth = 0usize;
+    let mut from = 0usize;
+    let bytes = text.as_bytes();
+    let mut at = 0usize;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'<' => depth += 1,
+            b'>' => depth = depth.checked_sub(1)?,
+            b':' if depth == 0 && bytes.get(at + 1) == Some(&b':') => {
+                pieces.push(&text[from..at]);
+                at += 1;
+                from = at + 1;
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    if depth != 0 {
+        return None;
+    }
+    pieces.push(&text[from..]);
+    Some(pieces)
+}
+
+/// One piece of an item path as a segment: a plain name, or a `<Type as Trait>` qualification.
+fn read_segment(piece: &str) -> Option<ItemSegment> {
+    let plain = |name: &str| {
+        !name.is_empty()
+            && !name.contains(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | ':'))
+    };
+
+    let Some(qualified) = piece
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_suffix('>'))
+    else {
+        return plain(piece).then(|| ItemSegment::Named(piece.to_string()));
+    };
+    let (self_type, trait_name) = qualified.split_once(" as ")?;
+    let (self_type, trait_name) = (self_type.trim(), trait_name.trim());
+    (!self_type.is_empty() && !trait_name.is_empty()).then(|| ItemSegment::TraitImpl {
+        self_type: self_type.to_string(),
+        trait_name: trait_name.to_string(),
+    })
+}
+
+impl TryFrom<String> for ItemPath {
+    type Error = crate::RestructureError;
+
+    fn try_from(text: String) -> Result<ItemPath> {
+        ItemPath::parse(&text)
+    }
+}
+
+impl From<ItemPath> for String {
+    fn from(path: ItemPath) -> String {
+        path.0
+    }
+}
+
+impl std::fmt::Display for ItemPath {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+/// `sha256:<hex>` of an item's text: every line the item's full range touches, whole — leading
+/// indentation, outer attributes and doc comments included — joined by `\n`, without a trailing
+/// newline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Fingerprint(pub String);
+
+impl Fingerprint {
+    /// The fingerprint of `text`, exactly as the anchored item reads.
+    pub fn of(text: &str) -> Fingerprint {
+        use sha2::{Digest, Sha256};
+        Fingerprint(format!("sha256:{:x}", Sha256::digest(text.as_bytes())))
+    }
+}
+
+/// What a v2 header says about one file: a hint, never a refusal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileHint {
+    pub sha256: String,
+    /// RFC 3339, when the file's modification time is one it can state — absent for a time before
+    /// the epoch rather than a date that is not the file's. Never read; it is there for a person.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modified: Option<String>,
 }
 
 /// The operations a plan may contain.
@@ -227,11 +479,16 @@ pub struct Plan {
     pub version: u32,
     /// Content hash per file the plan touches, taken when the plan was written.
     pub snapshot: BTreeMap<String, String>,
+    /// Schema v2's per-file hints: a drifted hash is reported, never refused. Empty for a v1 plan.
+    pub files: BTreeMap<String, FileHint>,
     pub ops: Vec<RefactorOp>,
 }
 
 /// Schema version this executor understands.
 const SCHEMA_VERSION: u32 = 1;
+
+/// The schema whose header carries per-file hints instead of refusing snapshot hashes.
+const HINTED_SCHEMA_VERSION: u32 = 2;
 
 /// Fields that would carry source text. Their presence means the plan is trying to supply code the
 /// language engine should have produced, so the plan is refused rather than partially honoured.
@@ -243,12 +500,31 @@ struct SnapshotHeader {
     snapshot: BTreeMap<String, String>,
 }
 
+/// The header of a schema-v2 plan: per-file hints instead of a snapshot that refuses.
+#[derive(Serialize, Deserialize)]
+struct HintedHeader {
+    v: u32,
+    files: BTreeMap<String, FileHint>,
+}
+
 impl Plan {
     /// Parse a JSONL plan: line 1 is the snapshot header, every later line is one operation.
     pub fn parse(jsonl: &str) -> Result<Plan> {
         let mut lines = jsonl.lines().filter(|line| !line.trim().is_empty());
 
         let header = lines.next().ok_or_else(|| malformed("plan is empty"))?;
+        if header_version(header) == Some(HINTED_SCHEMA_VERSION) {
+            let header: HintedHeader = serde_json::from_str(header).map_err(|_| {
+                malformed("first line must be a v2 header carrying a `files` map of hints")
+            })?;
+            let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
+            return Ok(Plan {
+                version: header.v,
+                snapshot: BTreeMap::new(),
+                files: header.files,
+                ops,
+            });
+        }
         let header: SnapshotHeader = serde_json::from_str(header)
             .map_err(|_| malformed("first line must be a snapshot header"))?;
         if header.v != SCHEMA_VERSION {
@@ -263,6 +539,7 @@ impl Plan {
         Ok(Plan {
             version: header.v,
             snapshot: header.snapshot,
+            files: BTreeMap::new(),
             ops,
         })
     }
@@ -275,6 +552,18 @@ impl Plan {
     /// wrote the plan against, and [`Plan::verify_snapshot`] refuses the run when one of them has
     /// moved since. What this produces is that statement, restated about the tree as it stands.
     pub fn rehashed_header(&self, root: &std::path::Path) -> Result<String> {
+        if self.version == HINTED_SCHEMA_VERSION {
+            let mut files = BTreeMap::new();
+            for path in self.files.keys() {
+                files.insert(path.clone(), hint_of(&root.join(path))?);
+            }
+            return serde_json::to_string(&HintedHeader {
+                v: self.version,
+                files,
+            })
+            .map_err(|error| malformed(error.to_string()));
+        }
+
         let mut snapshot = BTreeMap::new();
         for path in self.snapshot.keys() {
             snapshot.insert(path.clone(), crate::apply::hash_file(&root.join(path))?);
@@ -285,6 +574,27 @@ impl Plan {
             snapshot,
         })
         .map_err(|error| malformed(error.to_string()))
+    }
+
+    /// The files a v2 header hinted at whose content no longer hashes to the hint.
+    ///
+    /// Reported, never refused: an item anchor survives an edit outside its item, so a drifted file
+    /// says only that the plan was written against an older tree. A v1 plan has no hints and
+    /// reports nothing — its snapshot refuses through [`Plan::verify_snapshot`].
+    ///
+    /// A hinted file that has been deleted, moved, or can no longer be read has drifted too — it is
+    /// the plainest case of "older tree" — so it is reported, never an error. (`hash_file` alone
+    /// would read a missing file as empty, and so miss one whose hint was of an empty file.)
+    pub fn drifted_hints(&self, root: &std::path::Path) -> Vec<String> {
+        self.files
+            .iter()
+            .filter(|(path, hint)| {
+                let file = root.join(path);
+                !file.is_file()
+                    || crate::apply::hash_file(&file).map_or(true, |hash| hash != hint.sha256)
+            })
+            .map(|(path, _)| path.clone())
+            .collect()
     }
 
     /// Verify every snapshot hash still matches the working tree. Fails loudly on drift.
@@ -301,6 +611,58 @@ impl Plan {
         }
         Ok(())
     }
+}
+
+/// What a v2 header says about the file at `path` as it stands: its hash and when it last changed.
+fn hint_of(path: &std::path::Path) -> Result<FileHint> {
+    let modified = std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|error| malformed(format!("{} could not be read: {error}", path.display())))?;
+    Ok(FileHint {
+        sha256: crate::apply::hash_file(path)?,
+        modified: rfc3339(modified),
+    })
+}
+
+/// `time` as an RFC 3339 UTC timestamp, to the second — or `None` for a time this cannot state,
+/// which is one before the epoch. Answering `1970-01-01` for it would be a date that is not the
+/// file's, and the hint is never read, so leaving it out loses nothing.
+fn rfc3339(time: std::time::SystemTime) -> Option<String> {
+    let seconds = i64::try_from(time.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs()).ok()?;
+    let (days, within_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+
+    // Days since 1970-01-01 to a civil date: the era/day-of-era arithmetic of Howard Hinnant's
+    // `civil_from_days`, which holds for every date the proleptic Gregorian calendar has.
+    let shifted = days + 719_468;
+    let era = shifted.div_euclid(146_097);
+    let day_of_era = shifted.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_index = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    };
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+
+    Some(format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        within_day / 3_600,
+        within_day % 3_600 / 60,
+        within_day % 60
+    ))
+}
+
+/// The `v` a header line declares, read before the header's shape is known.
+fn header_version(line: &str) -> Option<u32> {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()?
+        .get("v")?
+        .as_u64()
+        .map(|v| v as u32)
 }
 
 fn parse_op(line: &str) -> Result<RefactorOp> {
@@ -321,6 +683,10 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 
     let op: RefactorOp =
         serde_json::from_value(raw).map_err(|error| malformed(error.to_string()))?;
+
+    for anchor in op.anchors() {
+        anchor.validate()?;
+    }
 
     // Silently ignoring the field would be worse than refusing it: the plan author asked for a
     // facade, would not get one, and would read the resulting stranded-reference refusal as the
@@ -426,7 +792,7 @@ impl Anchor {
                 start: *start,
                 end: *end,
             }),
-            Anchor::Symbol { .. } => None,
+            Anchor::Symbol { .. } | Anchor::Item { .. } | Anchor::Items { .. } => None,
         }
     }
 }
@@ -490,7 +856,7 @@ mod tests {
 
     #[test]
     fn rejects_a_plan_written_for_a_different_schema_version() {
-        let jsonl = "{\"v\":2,\"snapshot\":{}}\n";
+        let jsonl = "{\"v\":3,\"snapshot\":{}}\n";
 
         let outcome = Plan::parse(jsonl);
 
@@ -549,6 +915,7 @@ mod tests {
         let plan = Plan {
             version: 1,
             snapshot: BTreeMap::from([("shapes.ts".to_string(), "sha256:stale".to_string())]),
+            files: BTreeMap::new(),
             ops: vec![],
         };
 
@@ -572,6 +939,7 @@ mod tests {
         let plan = Plan {
             version: 1,
             snapshot: BTreeMap::from([("shapes.ts".to_string(), digest)]),
+            files: BTreeMap::new(),
             ops: vec![],
         };
 
@@ -858,5 +1226,224 @@ mod tests {
             r#"{"op":"extract_module","anchor":{"kind":"range","file":"src/a.rs","start":{"line":1,"col":1},"end":{"line":9,"col":1}},"name":"api","reexport":"partial"}"#,
         ))
         .is_err());
+    }
+
+    #[test]
+    fn an_item_path_names_its_crate_and_its_segments() {
+        // Given a crate-rooted path to a method
+        let path = ItemPath::parse("tddy_core::workflow::Stack::new").unwrap();
+
+        // Then the crate and every later segment are read apart
+        assert_eq!(path.crate_name(), "tddy_core");
+        assert_eq!(
+            path.segments(),
+            vec![
+                ItemSegment::Named("workflow".to_string()),
+                ItemSegment::Named("Stack".to_string()),
+                ItemSegment::Named("new".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_trait_qualified_segment_names_its_type_and_its_trait() {
+        // Given a member reached through one trait impl
+        let path = ItemPath::parse("stacks::workflow::<Stack as Debug>::fmt").unwrap();
+
+        // Then the qualified segment carries both names
+        assert_eq!(
+            path.segments(),
+            vec![
+                ItemSegment::Named("workflow".to_string()),
+                ItemSegment::TraitImpl {
+                    self_type: "Stack".to_string(),
+                    trait_name: "Debug".to_string(),
+                },
+                ItemSegment::Named("fmt".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_item_path_of_one_segment_is_refused() {
+        // When a bare name is parsed as an item path
+        let parsed = ItemPath::parse("Stack");
+
+        // Then it is refused as naming no item in a crate
+        assert_eq!(
+            parsed.map_err(|error| error.to_string()),
+            Err(
+                "plan is malformed: `Stack` is not an item path — write it crate-rooted, as \
+                 `<crate>::<module>::Stack`"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn an_item_path_displays_as_it_was_written() {
+        let written = "stacks::workflow::<Stack as Debug>::fmt";
+
+        assert_eq!(ItemPath::parse(written).unwrap().to_string(), written);
+    }
+
+    #[test]
+    fn a_fingerprint_is_the_sha256_of_the_items_text() {
+        assert_eq!(
+            Fingerprint::of("pub struct A;"),
+            Fingerprint(
+                "sha256:29124c31393737708604d695f0300b693d832bc25a2fe272ec8e6ac9c9cc24b4"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_v2_header_carries_its_file_hints() {
+        // Given a v2 plan with one hinted file and one item-anchored op
+        let jsonl = concat!(
+            r#"{"v":2,"files":{"src/lib.rs":{"sha256":"sha256:ab","modified":"2026-09-26T00:00:00Z"}}}"#,
+            "\n",
+            r#"{"op":"rename_symbol","anchor":{"kind":"item","item":"a::b::C","file":"src/b.rs","fingerprint":"sha256:cd"},"name":"D"}"#,
+            "\n"
+        );
+
+        // When it is parsed
+        let plan = Plan::parse(jsonl).unwrap();
+
+        // Then the hint is kept and nothing is read as a refusing snapshot
+        assert_eq!(plan.version, 2);
+        assert_eq!(plan.snapshot, BTreeMap::new());
+        assert_eq!(
+            plan.files,
+            BTreeMap::from([(
+                "src/lib.rs".to_string(),
+                FileHint {
+                    sha256: "sha256:ab".to_string(),
+                    modified: Some("2026-09-26T00:00:00Z".to_string()),
+                }
+            )])
+        );
+    }
+
+    #[test]
+    fn an_item_anchor_round_trips_through_its_json() {
+        // Given an item anchor with a relative range and a hint
+        let line = r#"{"kind":"item","item":"a::b::C::f","file":"src/b.rs","start":{"line":2,"col":9},"end":{"line":3,"col":10},"fingerprint":"sha256:cd","hint":{"line":40,"col":9}}"#;
+
+        // When it is read and written back
+        let anchor: Anchor = serde_json::from_str(line).unwrap();
+
+        // Then it is the same line
+        assert_eq!(serde_json::to_string(&anchor).unwrap(), line);
+    }
+
+    #[test]
+    fn a_relative_range_with_only_one_end_is_refused() {
+        // Given an item anchor that gives a start and no end
+        let line = r#"{"op":"rename_symbol","anchor":{"kind":"item","item":"a::b::C","file":"src/b.rs","start":{"line":2,"col":1},"fingerprint":"sha256:cd"},"name":"D"}"#;
+        let jsonl = format!(r#"{{"v":2,"files":{{}}}}{}{line}"#, "\n");
+
+        // When the plan is parsed
+        let refused = Plan::parse(&jsonl)
+            .map(|_| ())
+            .map_err(|error| error.to_string());
+
+        // Then it is refused naming the item
+        assert_eq!(
+            refused,
+            Err(
+                "plan is malformed: `a::b::C` gives one end of a relative range — give both \
+                 `start` and `end`, or neither to anchor the item itself"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn an_items_anchor_with_a_fingerprint_missing_is_refused() {
+        let line = r#"{"op":"extract_module","anchor":{"kind":"items","file":"src/b.rs","items":["a::b::C","a::b::D"],"fingerprints":["sha256:cd"]},"name":"m"}"#;
+        let jsonl = format!(r#"{{"v":2,"files":{{}}}}{}{line}"#, "\n");
+
+        assert!(Plan::parse(&jsonl)
+            .err()
+            .is_some_and(|error| error.to_string().contains("2 item(s) and 1 fingerprint(s)")));
+    }
+
+    #[test]
+    fn a_v2_header_is_restated_with_the_hash_and_time_the_file_holds_now() {
+        // Given a v2 plan hinting at one file, and that file's content
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("lib.rs"), "pub struct A;\n").unwrap();
+        let plan = Plan {
+            version: 2,
+            snapshot: BTreeMap::new(),
+            files: BTreeMap::from([(
+                "lib.rs".to_string(),
+                FileHint {
+                    sha256: "sha256:stale".to_string(),
+                    modified: Some("2020-01-01T00:00:00Z".to_string()),
+                },
+            )]),
+            ops: vec![],
+        };
+
+        // When its header is rehashed
+        let header = plan.rehashed_header(workspace.path()).unwrap();
+
+        // Then it is a v2 header whose hint is the file as it stands
+        let reread = Plan::parse(&header).unwrap();
+        assert_eq!(reread.version, 2);
+        assert_eq!(
+            reread.files["lib.rs"].sha256,
+            crate::apply::hash_file(&workspace.path().join("lib.rs")).unwrap()
+        );
+        assert_eq!(plan.drifted_hints(workspace.path()), vec!["lib.rs"]);
+        assert_eq!(reread.drifted_hints(workspace.path()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_hinted_file_that_is_gone_is_reported_as_drift_not_as_an_error() {
+        // Given a v2 plan hinting at a file the tree no longer has — even one hinted while empty,
+        // which hashes the same as a missing file
+        let workspace = tempfile::tempdir().unwrap();
+        let empty = crate::apply::hash_file(&workspace.path().join("absent.rs")).unwrap();
+        let plan = Plan {
+            version: 2,
+            snapshot: BTreeMap::new(),
+            files: BTreeMap::from([(
+                "gone.rs".to_string(),
+                FileHint {
+                    sha256: empty,
+                    modified: None,
+                },
+            )]),
+            ops: vec![],
+        };
+
+        // When the hints are compared with the tree
+        let drifted = plan.drifted_hints(workspace.path());
+
+        // Then the missing file is named as drifted
+        assert_eq!(drifted, vec!["gone.rs"]);
+    }
+
+    #[test]
+    fn a_timestamp_is_written_as_rfc_3339_utc() {
+        let time = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+
+        assert_eq!(rfc3339(time).as_deref(), Some("2001-09-09T01:46:40Z"));
+    }
+
+    #[test]
+    fn a_time_before_the_epoch_is_left_out_rather_than_written_as_1970() {
+        let time = std::time::UNIX_EPOCH - std::time::Duration::from_secs(60);
+
+        assert_eq!(rfc3339(time), None);
+    }
+
+    #[test]
+    fn an_unbalanced_qualified_segment_is_not_an_item_path() {
+        assert!(ItemPath::parse("a::<Stack as Debug::fmt").is_err());
     }
 }

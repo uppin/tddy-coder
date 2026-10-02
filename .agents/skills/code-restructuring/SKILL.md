@@ -17,6 +17,7 @@ tddy-tools restructure status <plan.jsonl>
 tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
+tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
 tddy-tools restructure verify --against <git-ref>
 ```
 
@@ -26,12 +27,20 @@ tddy-tools restructure verify --against <git-ref>
 2. **Targeting** — run [`analyze-code-issues`](analyze-code-issues/SKILL.md); put CRAP note in changeset.
 3. **Understand shape** — LSP outline, references, cohesion; write `docs/dev/1-WIP/{slug}-initial-discovery.md`.
 4. **Changeset** — `Type: Refactor` at `docs/dev/1-WIP/YYYY-MM-DD-<name>.md`; see `references/restructure-changeset.md`.
-5. **Anchor** — `restructure anchors <file.rs> --items A,B,C`. **Do not hand-write line numbers.**
-   The command emits a range that covers whole items including their trivia; a hand-counted one
-   routinely clips a helper the moved code needs, and the assist then relocates part of the range and
-   rewrites the rest in place.
-6. **Snapshot** — `restructure snapshot plan.jsonl` writes the `sha256:` header from the working tree.
-   Re-run it after **every** edit to a snapshotted file, or the next command refuses on drift.
+5. **Anchor** — `restructure anchors <file.rs> --items A,B,C` emits an `items` anchor over whole
+   items, and `restructure anchors <file.rs> --at 188:9-198:11` emits an `item` anchor for the
+   innermost item enclosing the lines you read, with a range relative to it. **Do not hand-write line
+   numbers, and paste the emitted JSON as it is.** An item anchor names the item by its path and
+   resolves through rust-analyzer's outline, so an edit anywhere *outside* that item leaves it correct;
+   an edit *inside* it is refused (`the item … changed since the plan was written`) and the remedy is
+   to re-anchor. A hand-counted range routinely clips a helper the moved code needs, and the assist
+   then relocates part of the range and rewrites the rest in place. A trait-impl member shared by two
+   impls (`fmt`) is refused until the anchor names the trait: `crate::m::<Stack as Debug>::fmt`.
+6. **Snapshot** — a v1 plan (`{"v":1,"snapshot":…}`, `range`/`symbol` anchors) is refused on any
+   hash drift: `restructure snapshot plan.jsonl` rewrites the header from the working tree, and must
+   be re-run after **every** edit to a snapshotted file. A v2 plan (`{"v":2,"files":…}`, item
+   anchors) treats its per-file hashes as hints: drift is reported, never refused, so there is nothing
+   to re-run after an unrelated edit.
 7. **Plan** — JSONL intents only; see `references/plan-schema.md`.
 8. **Prove seams** — `restructure check plan.jsonl --deep`. **`--deep` is the gate, not an option.**
    A plain `check` reads text; only `--deep` resolves each operation through the same path `apply`

@@ -1,24 +1,74 @@
 # Plan schema
 
-A plan is JSONL. Line 1 is the snapshot header; every later line is one operation, applied in order.
+A plan is JSONL. Line 1 is the header; every later line is one operation, applied in order.
 
 ```jsonl
 {"v":1,"snapshot":{"<path>":"sha256:<digest>", …}}
 {"op":"<name>","anchor":{…}, …}
 ```
 
+Schema **v2** replaces the refusing snapshot with per-file hints, and is what a plan using `item` or
+`items` anchors is written with:
+
+```jsonl
+{"v":2,"files":{"<path>":{"sha256":"sha256:<digest>","modified":"<RFC 3339>"}, …}}
+```
+
+`modified` is informational and left out when the file's time is before the epoch. A v2 header never
+refuses a run: a file whose hash drifted, or which is gone, is reported on the progress line and the
+plan runs, because an item anchor does not depend on the rest of the file. A v1 plan is read exactly as
+before, including the `snapshot mismatch` refusal. `restructure snapshot` rewrites the header of
+whichever version the plan has.
+
 The plan is a **command log** and is never rewritten. Execution appends to `.restructure/journal.jsonl`
 (the event log) and checkpoints the coordinate ledger to `.restructure/ledger.json`.
 
 ## Anchors
 
-Both kinds are expressed in the coordinates of the snapshot, never adjusted for earlier operations.
+`symbol` and `range` anchors are expressed in the coordinates of the snapshot, never adjusted for
+earlier operations.
 
 ```jsonc
-{"kind":"symbol","file":"src/shapes.ts","path":"scaleBox"}   // preferred; survives edits above it
+{"kind":"symbol","file":"src/shapes.ts","path":"scaleBox"}   // a bare name: the FIRST match in the file
 {"kind":"range","file":"src/shapes.ts",
  "start":{"line":412,"col":5},"end":{"line":468,"col":6}}     // one-based line and column
 ```
+
+### Item anchors (Rust)
+
+An `item` anchor names the item by a crate-rooted path, and a range **relative to that item**. The
+path resolves through rust-analyzer's document outline at run open; the absolute position is a hint
+for readers and is never read.
+
+```jsonc
+{"kind":"item",
+ "item":"tddy_core::workflow::Stack::new",   // crate, module path, item, member
+ "file":"packages/tddy-core/src/workflow/stack.rs",
+ "start":{"line":4,"col":9},"end":{"line":14,"col":11},  // line 1 = the item's first line (attributes,
+                                                          // doc comments and attached comments included);
+                                                          // omit both for "the item itself, at its name"
+ "fingerprint":"sha256:…",                   // the item's whole lines when the anchor was written
+ "hint":{"line":188,"col":9}}                // absolute, orientation only
+{"kind":"items","file":"src/lib.rs",         // a run of sibling items, for extract_module
+ "items":["c::m::A","c::m::B"],"fingerprints":["sha256:…","sha256:…"]}
+```
+
+Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--items A,B` emit them.
+
+- The crate is the manifest `package.name` with `-` read as `_`; the module path is the file's place
+  under `src/` (`lib.rs`/`main.rs` are the root, `a.rs` and `a/mod.rs` are `a`). A path whose crate or
+  module prefix does not match `file` is refused, and an item the file does not declare is refused —
+  nothing searches another file.
+- A member of a trait impl is addressed with the trait when its name is shared:
+  `c::m::<Stack as Display>::fmt`. A bare `c::m::Stack::fmt` that two impls define is refused.
+- A relative range reaching outside its item is `plan is malformed`; an item whose text no longer
+  matches `fingerprint` is refused naming the item. `items` must be contiguous: only blank lines may
+  separate them.
+- Item anchors are resolved once, **at run open**, against the tree the run starts on. A run whose
+  journal already completed operations (a `--resume` or `--from` over a partly applied plan) no
+  longer has that tree and is refused when the plan anchors by item. A deep `check` resolves them; a
+  plain `check` cannot, so it reports each item-anchored operation as a finding rather than passing it.
+- Rust only. An item anchor in a file no backend can resolve items for is refused by name.
 
 ## Operations
 
@@ -30,7 +80,7 @@ Both kinds are expressed in the coordinates of the snapshot, never adjusted for 
 | `extract_class` | range over whole members | `name`, `to` | ⚠️ | — |
 | `move_symbol` | symbol | `to`, `with_private_deps` | ✅ | — |
 | `move_file` | symbol | `to` | ✅ | — |
-| `rename_symbol` | symbol or range | `name` | ✅ | ✅ |
+| `rename_symbol` | symbol, range or item | `name` | ✅ | ✅ |
 | `extract_module` | range over a selection of items | `name`, `reexport` = `glob` \| `named` \| `none`, `to_file` | — | ✅ |
 | `extract_module_to_file` | range at the `mod` keyword | — | — | ✅ |
 | `move_module_to_crate` | symbol | `to`, `reexport` = `glob` \| `none` | — | ✅ |

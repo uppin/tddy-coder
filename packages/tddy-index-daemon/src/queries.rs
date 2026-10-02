@@ -8,11 +8,10 @@
 //! They still take the root's queue, because each reads the tree or the `.restructure/` state a
 //! concurrent apply is writing.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use tddy_code_restructuring::registry::Workspace;
+use tddy_code_restructuring::item_anchor;
 use tddy_code_restructuring::runner::{self, Command, Options};
-use tddy_code_restructuring::{Overlay, RefactorKind};
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 
@@ -25,7 +24,7 @@ use crate::proto::code_index::{
 };
 use crate::status::status_of;
 
-/// The range anchor covering a named run of items, trivia included.
+/// The anchor a plan carries for a named run of items, or for the item enclosing a position.
 ///
 /// Split in two so the whole answer — refusal included — passes through
 /// [`Activity::recorded`]: the resolving happens in the inner function, and this one is the record
@@ -39,6 +38,9 @@ pub(crate) async fn serve_anchors(
 }
 
 /// The anchor itself, with the root already resolved and its arrival already recorded.
+///
+/// `anchor_json` is the anchor and `range` is where it lands in the tree as it stands now — the
+/// covering range of the named items, or the absolute form of the position's relative range.
 async fn anchor_covering(
     index: &WorkspaceIndex,
     root: PathBuf,
@@ -47,43 +49,54 @@ async fn anchor_covering(
     if request.file.trim().is_empty() {
         return Err(Status::invalid_argument("the request names no file"));
     }
-    if request.items.is_empty() {
+    let at = request.at.as_ref().map(position_range).transpose()?;
+    if request.items.is_empty() && at.is_none() {
         return Err(Status::invalid_argument(
             "the request names no items for the anchor to cover",
+        ));
+    }
+    if !request.items.is_empty() && at.is_some() {
+        return Err(Status::invalid_argument(
+            "the request names both items and a position — an anchor covers one or the other",
         ));
     }
 
     let _queued = index.hold(&root).await;
     let client = index.client_for(&root).await?;
-    let file = request.file;
-    let items = request.items;
+    let progress = logged_progress();
+    let options = Options {
+        command: Command::Anchors,
+        target: Some(PathBuf::from(&request.file)),
+        items: request.items,
+        at,
+        progress: std::sync::Arc::clone(&progress),
+        trace: logged_trace,
+        ..Options::default()
+    };
 
-    let range = tokio::task::spawn_blocking(move || {
-        // `ExtractModule` is not the operation being performed — there is none. It is how a file
-        // selects its backend, which is the same route `runner::anchors` takes.
-        let mut registry = runner::registry_for(
-            client,
-            CancellationToken::new(),
-            logged_progress(),
-            logged_trace,
-        );
-        let overlay = Overlay::new();
-        registry
-            .backend_for(Path::new(&file), RefactorKind::ExtractModule)?
-            .anchor_for(
-                &file,
-                &items,
-                &Workspace {
-                    root: &root,
-                    overlay: &overlay,
-                },
-            )
+    // A unary handler has no stream to learn its caller left through, but it is dropped when the
+    // caller goes: the guard turns that drop into the cancellation the index waits listen to. Without
+    // it the wait runs on inside `spawn_blocking` holding `index.hold(root)`, and every later
+    // request for this workspace queues behind it.
+    let cancel = CancellationToken::new();
+    let _stop_when_dropped = cancel.clone().drop_guard();
+    let (anchor, range) = tokio::task::spawn_blocking(move || {
+        let anchor = runner::item_anchors(
+            &root,
+            options,
+            Some(std::sync::Arc::clone(&client)),
+            cancel.clone(),
+        )?;
+        let mut registry = runner::registry_for(client, cancel, progress, logged_trace);
+        let range = item_anchor::span_of(&anchor, &root, &mut registry)?;
+        Ok((anchor, range))
     })
     .await
     .map_err(|failure| joined("anchors", &failure))?
-    .map_err(|refusal| status_of(&refusal))?;
+    .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))?;
 
     Ok(AnchorsResponse {
+        anchor_json: tddy_code_restructuring::console::item_anchor(&anchor),
         range: Some(SourceRange {
             start: Some(SourcePosition {
                 line: range.start.line,
@@ -94,6 +107,23 @@ async fn anchor_covering(
                 column: range.end.col,
             }),
         }),
+    })
+}
+
+/// A one-based range as the wire carries it, back into the library's.
+fn position_range(wire: &SourceRange) -> Result<tddy_code_restructuring::Range, Status> {
+    let (Some(start), Some(end)) = (&wire.start, &wire.end) else {
+        return Err(Status::invalid_argument(
+            "the position to anchor needs both a start and an end",
+        ));
+    };
+    let position = |at: &SourcePosition| tddy_code_restructuring::Position {
+        line: at.line,
+        col: at.column,
+    };
+    Ok(tddy_code_restructuring::Range {
+        start: position(start),
+        end: position(end),
     })
 }
 

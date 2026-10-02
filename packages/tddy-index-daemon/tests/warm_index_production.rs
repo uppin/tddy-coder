@@ -99,6 +99,7 @@ async fn anchoring(entry: &tddy_rpc::ServiceEntry, root: &Path) -> Duration {
         workspace_root: root.to_string_lossy().to_string(),
         file: "crates/subject/src/lib.rs".to_string(),
         items: vec!["scored".to_string()],
+        at: None,
     };
     let message = tddy_rpc::RpcMessage::new(
         request.encode_to_vec(),

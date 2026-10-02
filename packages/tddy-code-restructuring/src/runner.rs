@@ -21,7 +21,10 @@ mod rehearsal;
 
 pub use comparison::verify;
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
-pub use entry_points::{anchors, apply, check, dispatch, registry_for, run, snapshot, status};
+pub use entry_points::{
+    apply, check, dispatch, item_anchors, open_run_resolving_anchors, registry_for,
+    resolve_item_anchors, run, snapshot, status,
+};
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
@@ -126,6 +129,21 @@ pub fn open_run_after(
     options: &Options,
     before_writing: impl FnOnce() -> Result<()>,
 ) -> Result<Journal> {
+    open_run_gated(plan, root, paths, options, before_writing).map(|(journal, ())| journal)
+}
+
+/// [`open_run_after`], where the last refusal also *produces* something the run needs.
+///
+/// What it produces is handed back beside the journal, so a gate that computes — resolving item
+/// anchors, see [`open_run_resolving_anchors`] — does not have to stash its result
+/// in a captured variable and unwrap it afterwards.
+pub(crate) fn open_run_gated<T>(
+    plan: &Plan,
+    root: &Path,
+    paths: &StatePaths,
+    options: &Options,
+    before_writing: impl FnOnce() -> Result<T>,
+) -> Result<(Journal, T)> {
     ensure_git_worktree(root)?;
 
     let continuing = options.continues_a_journal();
@@ -137,8 +155,9 @@ pub fn open_run_after(
             return Err(RestructureError::JournalExists);
         }
         plan.verify_snapshot(root)?;
+        report_drifted_hints(plan, root, &options.progress);
     }
-    before_writing()?;
+    let gated = before_writing()?;
 
     paths.ensure_self_ignoring()?;
     if continuing {
@@ -149,7 +168,22 @@ pub fn open_run_after(
     if let Some(ResumeDecision::Abort(op)) = journal.resume_decision(root)? {
         return Err(RestructureError::IndeterminateJournal { op });
     }
-    Ok(journal)
+    Ok((journal, gated))
+}
+
+/// Say, for each file a v2 plan hinted at that has since changed, that it has — and that item
+/// anchors do not depend on it. Reported, never refused; one place, so a fresh run and a `check`
+/// cannot word it differently.
+pub(crate) fn report_drifted_hints(
+    plan: &Plan,
+    root: &Path,
+    progress: &crate::backends::rust::ProgressSink,
+) {
+    for drifted in plan.drifted_hints(root) {
+        progress(&format!(
+            "{drifted} has changed since the plan was written; item anchors do not depend on it"
+        ));
+    }
 }
 
 /// The position ledger a run continues from, folded out of the journal it has been given.

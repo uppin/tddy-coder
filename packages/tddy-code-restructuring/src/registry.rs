@@ -5,7 +5,9 @@
 
 use crate::crate_move::ModuleReferences;
 use crate::edit::Resolution;
+use crate::item_anchor::{ItemAtResolver, ItemResolver};
 use crate::overlay::Overlay;
+use crate::plan::ItemPath;
 use crate::plan::{RefactorKind, RefactorOp};
 use crate::Result;
 use std::path::Path;
@@ -74,6 +76,19 @@ pub trait LanguageBackend {
         None
     }
 
+    /// Where this backend finds an item by its path, if it can.
+    ///
+    /// Default `None`: a backend with no outline to walk cannot honour an `item` anchor, and
+    /// approximating one with a name search is the first-match guess the anchor exists to replace.
+    fn item_resolver(&mut self) -> Option<&mut dyn ItemResolver> {
+        None
+    }
+
+    /// Which item encloses a position, if this backend can say.
+    fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
+        None
+    }
+
     /// The range anchor covering a named, adjacent run of items, trivia included.
     ///
     /// Hand-computing a seam's extent is the busywork whose failures look like tool bugs: "start
@@ -117,6 +132,18 @@ impl BackendRegistry {
         path: &Path,
         kind: RefactorKind,
     ) -> Result<&mut dyn LanguageBackend> {
+        let backend = self.backend_of(path)?;
+        if !backend.supports(kind) {
+            return Err(crate::RestructureError::UnsupportedOp {
+                backend: format!("{:?}", backend.language()),
+                op: format!("{kind:?}"),
+            });
+        }
+        Ok(backend)
+    }
+
+    /// Find the backend for a file, whatever operation it is wanted for.
+    pub fn backend_of(&mut self, path: &Path) -> Result<&mut dyn LanguageBackend> {
         let extension = path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -130,14 +157,47 @@ impl BackendRegistry {
                 extension: extension.to_string(),
             })?;
 
-        let backend = &mut self.backends[index];
-        if !backend.supports(kind) {
-            return Err(crate::RestructureError::UnsupportedOp {
-                backend: format!("{:?}", backend.language()),
-                op: format!("{kind:?}"),
-            });
-        }
-        Ok(backend.as_mut())
+        Ok(self.backends[index].as_mut())
+    }
+}
+
+/// Item anchors resolved through whichever backend claims the file they name.
+///
+/// A language whose backend offers no item resolver refuses by name, so an item anchor in such a
+/// file is never read as though it were a range.
+impl ItemResolver for BackendRegistry {
+    fn resolve_item(
+        &mut self,
+        file: &str,
+        item: &ItemPath,
+    ) -> Result<crate::item_anchor::ResolvedItem> {
+        let backend = self.backend_of(Path::new(file))?;
+        let name = format!("{:?}", backend.language());
+        backend
+            .item_resolver()
+            .ok_or(crate::RestructureError::UnsupportedOp {
+                backend: name,
+                op: "item anchors".to_string(),
+            })?
+            .resolve_item(file, item)
+    }
+}
+
+impl ItemAtResolver for BackendRegistry {
+    fn item_enclosing(
+        &mut self,
+        file: &str,
+        range: crate::edit::Range,
+    ) -> Result<(ItemPath, crate::item_anchor::ResolvedItem)> {
+        let backend = self.backend_of(Path::new(file))?;
+        let name = format!("{:?}", backend.language());
+        backend
+            .item_locator()
+            .ok_or(crate::RestructureError::UnsupportedOp {
+                backend: name,
+                op: "item anchors".to_string(),
+            })?
+            .item_enclosing(file, range)
     }
 }
 
@@ -282,5 +342,41 @@ mod tests {
             .unwrap();
 
         assert_eq!(edit, Resolution::default());
+    }
+
+    fn an_item_path() -> ItemPath {
+        ItemPath::parse("styles::Button").expect("the item path parses")
+    }
+
+    #[test]
+    fn an_item_anchor_in_a_file_no_backend_claims_is_refused_by_extension() {
+        // Given a registry with no backend for `.css`
+        let mut registry = registry();
+
+        // When an item is resolved in a stylesheet
+        let resolved = registry.resolve_item("styles.css", &an_item_path());
+
+        // Then the file is refused as one nothing can resolve items for, naming its extension
+        match resolved {
+            Err(RestructureError::NoBackend { extension }) => assert_eq!(extension, "css"),
+            other => panic!("expected NoBackend, got {:?}", other.err()),
+        }
+    }
+
+    #[test]
+    fn an_item_anchor_through_a_backend_without_a_resolver_is_refused_by_name() {
+        // Given a backend for `.rs` that offers no item resolver
+        let mut registry = registry();
+
+        // When an item is resolved in a Rust file
+        let resolved = registry.resolve_item("src/lib.rs", &an_item_path());
+
+        // Then it is refused as an unsupported operation, not read as though it were a range
+        match resolved {
+            Err(RestructureError::UnsupportedOp { backend, op }) => {
+                assert_eq!((backend.as_str(), op.as_str()), ("Rust", "item anchors"));
+            }
+            other => panic!("expected UnsupportedOp, got {:?}", other.err()),
+        }
     }
 }

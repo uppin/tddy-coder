@@ -41,6 +41,7 @@ tddy-tools restructure status <plan.jsonl>
 tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES]
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
+tddy-tools restructure anchors <file.rs> --at L:C[-L:C]
 tddy-tools restructure verify --against <git-ref>
 ```
 
@@ -54,7 +55,7 @@ there is no budget to state. See [Waiting](#waiting).
 | `status` | completed / in_flight / pending / failed |
 | `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many lines — a report, never a gate |
 | `snapshot` | Rewrite the plan's line-1 `sha256:` header from the working tree, leaving every operation line byte-identical. No index, no language server |
-| `anchors` | Emit a correct range covering named items (including trivia) |
+| `anchors` | Emit an anchor a plan can carry. `--items A,B` emits an `items` anchor covering the named adjacent items (trivia included); `--at L:C[-L:C]` emits an `item` anchor for the innermost item enclosing that position, with its relative range, fingerprint and hint filled in. See [Item anchors](#item-anchors) |
 
 **A plain `check` is not a rehearsal.** It reads text. `--deep` resolves every operation through the
 same path `apply` takes and writes nothing, so it is the only form that reports an assist or import
@@ -65,11 +66,67 @@ apply that refused more than once — see
 
 ## Plan format
 
-Line 1 is a snapshot header: `{ "v": 1, "snapshot": { … } }` with `sha256:` content hashes.
+Line 1 is the header. Schema v1 is a snapshot, `{ "v": 1, "snapshot": { … } }` with `sha256:` content
+hashes, and a drifted file is refused (`snapshot mismatch`). Schema v2, which a plan using item anchors
+is written with, is a per-file hint: `{ "v": 2, "files": { "<path>": { "sha256": …, "modified": … } } }`.
+A v2 header never refuses a run; a file whose hash drifted, or which is gone, is reported on the
+progress line and the plan runs, because an item anchor does not depend on the rest of the file.
+`restructure snapshot` rewrites the header of whichever version the plan has.
 
 Subsequent lines are one `RefactorOp` each. Plans must not contain `text` / `code` / `content`, `create_file`, or `insert_text` — the parser refuses them. Unsupported operations are hard errors, not skips. Files appear because an operation caused them (`to_file` / `extract_module_to_file`), never because a plan declared them.
 
 See [`.agents/skills/code-restructuring/references/plan-schema.md`](../../../.agents/skills/code-restructuring/references/plan-schema.md).
+
+## Item anchors
+
+A plan names what an operation acts on in one of three ways:
+
+| Anchor | Names | Survives an edit elsewhere in the file |
+|---|---|---|
+| `symbol` | a bare name — the **first** outline node matching it | no: two `impl` blocks both defining `new` are whichever comes first |
+| `range` | absolute line and column, trusted exactly | no: it points at whatever now sits on those lines |
+| `item` | a crate-rooted item path plus a range relative to that item | yes |
+
+An `item` anchor looks like this:
+
+```jsonc
+{"kind":"item",
+ "item":"tddy_core::workflow::Stack::new",           // authoritative: the enclosing item
+ "file":"packages/tddy-core/src/workflow/stack.rs", // where to look; the resolver trusts it for lookup only
+ "start":{"line":4,"col":9},"end":{"line":14,"col":11}, // relative: line 1 = the item's first line
+ "fingerprint":"sha256:…",                           // the item's text when the anchor was written
+ "hint":{"line":188,"col":9}}                        // absolute, orientation only; never read
+```
+
+`item` is the crate's name, the module path, then the item and member segments. A member of a trait
+impl that two impls share is addressed with the trait, `…::<Stack as Display>::fmt`. `start`/`end`
+count from the item's first line, outer attributes and doc comments included; both omitted means the
+item itself, at its name, which is what `rename_symbol`, `move_module_to_crate` and `inline_method` act
+on. An `items` anchor, `{"kind":"items","file":…,"items":[…],"fingerprints":[…]}`, is a contiguous run
+of sibling items for `extract_module`, resolved to the span from the first item's first line to the
+last item's last line.
+
+**Resolution.** Every item anchor is resolved once, at run open, against the tree the run starts on,
+by walking rust-analyzer's document outline. A plan written against an older tree therefore runs as
+long as its items are intact: an edit anywhere outside an anchored item leaves the anchor correct.
+Resolution happens before the baseline compile gate, so a refusal costs no compile and leaves no
+`.restructure/` behind.
+
+**Refusals.** Nothing is guessed and nothing searches another file. An item is refused when its
+crate or module prefix does not match `file`, when a segment is absent from the file, when a segment
+matches more than one node (a trait-impl collision is refused until `<T as Trait>::m` is used), when a
+relative range reaches outside its item, and when the items of an `items` anchor are not adjacent. An
+edit **inside** the anchored item changes its fingerprint and is refused as `FailedPrecondition`,
+naming the item and its file; the message does not name the operation, because it is raised while the
+plan is resolved as a whole, before any operation runs. An item anchor in a file no backend can
+resolve items for is refused by name (`NoBackend`, or `UnsupportedOp` for a backend without an item
+resolver). Item anchors are Rust only.
+
+**Authoring.** Do not write these by hand. `anchors --at` turns a line the author read into an anchor
+that survives, and `anchors --items` does the same for a run of items. Applying an `extract_method`
+through an `--at` anchor produces the same edit as the equivalent range anchor.
+
+How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restructuring/docs/item-anchors.md).
 
 ## Rust operations (v1)
 
@@ -173,7 +230,7 @@ something about it. Read the class before the text.
 | `rust-analyzer's answer was unusable: …` | The server answered and the answer cannot be used — an extraction produced before inference, a mangled rewrite, a response with no edits | Retry against a warm server, or look at the server | `Internal` |
 | `rust-analyzer reports its index as degraded …` | The server said its own index is incomplete — usually build scripts or proc macros that failed to link in the environment it was started in | Restart the server (or `./run-index-daemon --stop && ./run-index-daemon`) from the dev shell's whole environment | `Internal` |
 | `rust-analyzer would not settle …` | The wait ended before the index did | Wait, or look at the server | `DeadlineExceeded` |
-| snapshot / journal / anchor mismatches | The tree is not in the state the plan was written against | Repair the tree, or re-snapshot | `FailedPrecondition` |
+| snapshot / journal / anchor mismatches, `the item … changed since the plan was written` | The tree is not in the state the plan was written against, or an anchored item's text is no longer the text its fingerprint names | Repair the tree, re-snapshot, or re-anchor the item with `restructure anchors` | `FailedPrecondition` |
 | `the tree does not compile before the plan runs …` | `apply`'s baseline `cargo check` failed; nothing was written | Make the tree compile, then apply again | `FailedPrecondition` |
 | `N of M operation(s) were applied, and the tree no longer compiles …` | Every operation was accepted and the compiler rejects the result. The edits are left on disk and in the journal | Fix the compiler-named errors by hand, or roll back as the message says (restore the touched paths from git, remove the journal) | `Internal` |
 
@@ -238,8 +295,18 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 - **An assist may relocate less than the anchor asked for, and rewrite the remainder in place.**
   rust-analyzer decides the extraction's real extent; when it moves part of the anchored range, it
   rewrites what it left behind to reach the new module through qualified `module::Item` paths. The
-  run reports which lines stayed. Author the anchor with `anchors --items` rather than by hand — a
-  range that clips a helper is the usual way into this — and read the widening report the run prints.
+  run reports which lines stayed. Author the anchor with `anchors --items` or `anchors --at` rather than by
+  hand — a range that clips a helper is the usual way into this — and read the widening report the run prints.
+- **A continued run refuses item anchors.** Item anchors resolve against the tree the run starts on, and
+  a run whose journal already completed operations no longer has it. `--resume` and `--from` over a
+  partly applied plan of item anchors are refused (`FailedPrecondition`) with the remedy: run the
+  remainder from a plan of range anchors, or start the plan afresh. Keeping item anchors current across
+  runs belongs to the `#live-plan` stack's plan store ([#538](https://github.com/uppin/tddy-coder/pull/538) onward).
+- **`check` without `--deep` cannot examine item anchors.** A static check has no server to resolve
+  them with, so it reports each item-anchored operation as a finding that says to run `check --deep`;
+  a plan of item anchors never passes a static check green.
+- **An item anchor's refusal names the item, not the operation.** It is raised while the plan is
+  resolved as a whole.
 - **`check` without `--deep` cannot predict every apply refusal.** The plain form reads text and
   runs `move_module_to_crate` preconditions (parent module present, crate layout) before any server
   starts; it still has returned `no findings` on plans that `apply` then refused for reasons only a

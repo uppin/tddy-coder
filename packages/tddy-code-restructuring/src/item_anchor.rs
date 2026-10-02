@@ -1,0 +1,696 @@
+//! Item anchors: from a crate-rooted item path to the exact coordinates the ledger translates.
+//!
+//! A plan's `item` and `items` anchors name *what* they act on, not *where* it sat when the plan was
+//! written. They are resolved once, at run open, against the tree the run starts on, and lowered
+//! into the `range` and `symbol` anchors every operation already understands. From there the
+//! [`crate::PositionLedger`] carries them through the run exactly as it carries a hand-written range.
+//!
+//! The language-specific half — reading an outline, walking it by segment — lives behind
+//! [`ItemResolver`]. What is here is what every language shares: which module a file is, how a
+//! relative range becomes an absolute one, and when a resolved item is refused.
+
+use std::path::{Path, PathBuf};
+
+use crate::edit::{Position, Range};
+use crate::plan::{Anchor, Fingerprint, ItemPath, Plan};
+use crate::{RestructureError, Result};
+
+/// An item the language server located.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedItem {
+    /// The item's full extent, attributes and doc comments included, in one-based coordinates.
+    pub range: Range,
+    /// Where the item's name is — the position symbol operations act on.
+    pub name: Position,
+    /// The fingerprint of the item's text as the tree holds it now.
+    pub fingerprint: Fingerprint,
+}
+
+/// A backend that can find an item by its path in one file.
+pub trait ItemResolver {
+    /// Locate `item` in `file` (relative to the workspace root).
+    ///
+    /// Refuses — never guesses — when the file's module path does not match the item's prefix, when
+    /// a segment is absent, or when a segment matches more than one outline node. Nothing searches a
+    /// file other than `file`.
+    fn resolve_item(&mut self, file: &str, item: &ItemPath) -> Result<ResolvedItem>;
+}
+
+/// The module path of a source file inside its package, as `[crate, module, …]`.
+///
+/// The crate is the package's `name` with `-` read as `_`; `src/lib.rs` and `src/main.rs` are the
+/// crate root, and `a/mod.rs` and `a.rs` are both module `a`. A file outside `src/` belongs to no
+/// module path this can name and is refused.
+pub fn module_path_of(root: &Path, file: &str) -> Result<Vec<String>> {
+    let (package_dir, package) = owning_package(root, file)?;
+    let source_dir = package_dir.join("src");
+    let within_src = Path::new(file).strip_prefix(&source_dir).map_err(|_| {
+        malformed(format!(
+            "{file} is not under {}, so it is no module of the package `{package}`",
+            source_dir.display()
+        ))
+    })?;
+
+    let mut modules: Vec<String> = within_src
+        .parent()
+        .into_iter()
+        .flat_map(Path::components)
+        .map(|part| part.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let stem = within_src
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // `lib.rs` and `main.rs` are the crate root only at the top of `src/`; `mod.rs` is the module
+    // its directory names, wherever it sits.
+    let is_root_file = modules.is_empty() && matches!(stem.as_str(), "lib" | "main");
+    if !is_root_file && stem != "mod" {
+        modules.push(stem);
+    }
+
+    let mut path = vec![package.replace('-', "_")];
+    path.extend(modules);
+    Ok(path)
+}
+
+/// The directory (relative to `root`) and `[package] name` of the nearest package that holds `file`.
+///
+/// A workspace manifest declares no package, so it is walked past rather than mistaken for one.
+fn owning_package(root: &Path, file: &str) -> Result<(PathBuf, String)> {
+    let mut directory = Path::new(file).parent();
+    while let Some(candidate) = directory {
+        if let Ok(manifest) = std::fs::read_to_string(root.join(candidate).join("Cargo.toml")) {
+            if let Some(name) = crate::crate_move::declared_package_name(&manifest) {
+                return Ok((candidate.to_path_buf(), name.to_string()));
+            }
+        }
+        directory = candidate.parent();
+    }
+    Err(malformed(format!(
+        "{file} is in no package: no `Cargo.toml` declaring a `[package]` sits above it"
+    )))
+}
+
+/// The absolute range an item anchor names, given where its item was found.
+///
+/// `start`/`end` absent means the item itself, at its name. A range reaching outside the item is
+/// refused as malformed.
+pub fn absolute_range(
+    resolved: &ResolvedItem,
+    start: Option<Position>,
+    end: Option<Position>,
+) -> Result<Range> {
+    range_within(None, resolved, start, end)
+}
+
+/// [`absolute_range`], refusing in the words of the item the anchor names.
+fn absolute_range_of(
+    item: &ItemPath,
+    resolved: &ResolvedItem,
+    start: Option<Position>,
+    end: Option<Position>,
+) -> Result<Range> {
+    range_within(Some(item), resolved, start, end)
+}
+
+fn range_within(
+    item: Option<&ItemPath>,
+    resolved: &ResolvedItem,
+    start: Option<Position>,
+    end: Option<Position>,
+) -> Result<Range> {
+    let (start, end) = match (start, end) {
+        (None, None) => {
+            return Ok(Range {
+                start: resolved.name,
+                end: resolved.name,
+            })
+        }
+        (Some(start), Some(end)) => (start, end),
+        _ => {
+            return Err(malformed(
+                "a relative range needs both a `start` and an `end`, or neither",
+            ))
+        }
+    };
+
+    let first_line = resolved.range.start.line;
+    let lines = resolved.range.end.line - first_line + 1;
+    let absolute = |relative: Position| Position {
+        line: first_line + relative.line - 1,
+        col: relative.col,
+    };
+    let (from, to) = (absolute(start), absolute(end));
+
+    let ends_after_the_item = (to.line, to.col) > (resolved.range.end.line, resolved.range.end.col);
+    if start.line < 1 || end.line < 1 || end.line > lines || ends_after_the_item {
+        return Err(malformed(format!(
+            "the range {}:{}–{}:{} reaches outside {}, which is {lines} line(s) long",
+            start.line,
+            start.col,
+            end.line,
+            end.col,
+            item.map_or_else(|| "the item".to_string(), |item| format!("`{item}`")),
+        )));
+    }
+    Ok(Range {
+        start: from,
+        end: to,
+    })
+}
+
+/// Every item anchor in `plan` resolved against the tree under `root` and lowered into the
+/// snapshot coordinates the ledger translates.
+///
+/// Every `v1` anchor passes through untouched, so a plan with no item anchors comes back equal.
+/// An item whose fingerprint no longer matches is refused with
+/// [`crate::RestructureError::ItemChanged`], naming it.
+pub fn resolve_item_anchors(
+    plan: &Plan,
+    root: &Path,
+    resolver: &mut dyn ItemResolver,
+) -> Result<Plan> {
+    let mut lowered = plan.clone();
+    for op in &mut lowered.ops {
+        op.anchor = lower(&op.anchor, root, resolver)?;
+        for member in &mut op.also {
+            *member = lower(member, root, resolver)?;
+        }
+    }
+    Ok(lowered)
+}
+
+/// The range `anchor` covers in the tree under `root`, the way a run would resolve it.
+///
+/// For a caller that reports where an anchor lands — an anchor it has just built, or one read out
+/// of a plan — without running the plan. An anchor that names no range (a `symbol`) is refused.
+pub fn span_of(anchor: &Anchor, root: &Path, resolver: &mut dyn ItemResolver) -> Result<Range> {
+    match lower(anchor, root, resolver)? {
+        Anchor::Range { start, end, .. } => Ok(Range { start, end }),
+        _ => Err(malformed("a `symbol` anchor names no range")),
+    }
+}
+
+/// Whether any anchor of any operation in `plan` is an item anchor, and so needs resolving.
+pub fn has_item_anchors(plan: &Plan) -> bool {
+    plan.ops
+        .iter()
+        .flat_map(|op| op.anchors())
+        .any(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }))
+}
+
+/// One anchor in snapshot coordinates: an item anchor becomes the range it names, anything else is
+/// already there.
+fn lower(anchor: &Anchor, root: &Path, resolver: &mut dyn ItemResolver) -> Result<Anchor> {
+    match anchor {
+        Anchor::Item {
+            item,
+            file,
+            start,
+            end,
+            fingerprint,
+            ..
+        } => {
+            let found = resolver.resolve_item(file, item)?;
+            refuse_if_changed(item, file, fingerprint, &found)?;
+            let range = absolute_range_of(item, &found, *start, *end)?;
+            Ok(Anchor::Range {
+                file: file.clone(),
+                start: range.start,
+                end: range.end,
+            })
+        }
+        Anchor::Items {
+            file,
+            items,
+            fingerprints,
+        } => {
+            let mut found = Vec::with_capacity(items.len());
+            for (item, fingerprint) in items.iter().zip(fingerprints) {
+                let resolved = resolver.resolve_item(file, item)?;
+                refuse_if_changed(item, file, fingerprint, &resolved)?;
+                found.push(resolved);
+            }
+            let range = covering_run(root, file, items, &found)?;
+            Ok(Anchor::Range {
+                file: file.clone(),
+                start: range.start,
+                end: range.end,
+            })
+        }
+        other => Ok(other.clone()),
+    }
+}
+
+fn refuse_if_changed(
+    item: &ItemPath,
+    file: &str,
+    fingerprint: &Fingerprint,
+    found: &ResolvedItem,
+) -> Result<()> {
+    if &found.fingerprint == fingerprint {
+        return Ok(());
+    }
+    Err(RestructureError::ItemChanged {
+        item: item.to_string(),
+        file: file.to_string(),
+    })
+}
+
+/// The one range from the first item's first line to the last item's last, refusing items with
+/// anything between them.
+///
+/// A seam is one contiguous range, so a span reaching from one item to a distant one would carry
+/// everything in between — silently, and with nothing in the plan to show it. Only blank lines may
+/// separate two items; the trivia that belongs to an item is already inside its own range.
+fn covering_run(
+    root: &Path,
+    file: &str,
+    items: &[ItemPath],
+    found: &[ResolvedItem],
+) -> Result<Range> {
+    let (Some(first), Some(last)) = (found.first(), found.last()) else {
+        return Err(malformed("an `items` anchor names no items"));
+    };
+
+    let text = std::fs::read_to_string(root.join(file))?;
+    let lines: Vec<&str> = text.split('\n').collect();
+    for (pair, names) in found.windows(2).zip(items.windows(2)) {
+        let (before, after) = (&pair[0].range, &pair[1].range);
+        let between = (before.end.line as usize)..(after.start.line as usize).saturating_sub(1);
+        let in_order = after.start.line > before.end.line;
+        let only_blank = lines
+            .get(between)
+            .is_some_and(|between| between.iter().all(|line| line.trim().is_empty()));
+        if !in_order || !only_blank {
+            return Err(RestructureError::SeamRefused(format!(
+                "the named items are not adjacent: `{}` and `{}` {}, and a seam is one \
+                 contiguous range — a span reaching from one to the other would carry everything \
+                 in between.",
+                names[0],
+                names[1],
+                if in_order {
+                    "have other lines between them"
+                } else {
+                    "are not in source order"
+                }
+            )));
+        }
+    }
+
+    Ok(Range {
+        start: Position {
+            line: first.range.start.line,
+            col: 1,
+        },
+        end: last.range.end,
+    })
+}
+
+/// The `items` anchor over `names`, items of the module `file` is — what `anchors --items` emits.
+///
+/// Each name is resolved like any other item path, so the anchor carries the fingerprints a later
+/// run checks it against; a name `file` does not define at module level is refused naming it.
+pub fn items_anchor(
+    root: &Path,
+    file: &str,
+    names: &[String],
+    resolver: &mut dyn ItemResolver,
+) -> Result<Anchor> {
+    let module = module_path_of(root, file)?.join("::");
+    let items = names
+        .iter()
+        .map(|name| ItemPath::parse(&format!("{module}::{name}")))
+        .collect::<Result<Vec<_>>>()?;
+
+    let found = items
+        .iter()
+        .map(|item| resolver.resolve_item(file, item))
+        .collect::<Result<Vec<_>>>()?;
+    covering_run(root, file, &items, &found)?;
+
+    Ok(Anchor::Items {
+        file: file.to_string(),
+        fingerprints: found.into_iter().map(|item| item.fingerprint).collect(),
+        items,
+    })
+}
+
+/// The item anchor for the innermost item enclosing `range` in `file` — what `anchors --at` emits.
+pub fn item_anchor_at(
+    root: &Path,
+    file: &str,
+    range: Range,
+    resolver: &mut dyn ItemAtResolver,
+) -> Result<Anchor> {
+    if !root.join(file).is_file() {
+        return Err(malformed(format!(
+            "{file} is not a file under {}",
+            root.display()
+        )));
+    }
+
+    let (item, found) = resolver.item_enclosing(file, range)?;
+    let first_line = found.range.start.line;
+    let relative = |position: Position| -> Result<Position> {
+        position
+            .line
+            .checked_sub(first_line)
+            .map(|above| Position {
+                line: above + 1,
+                col: position.col,
+            })
+            .ok_or_else(|| {
+                malformed(format!(
+                    "the position {}:{} lies above `{item}`, which starts at line {first_line}",
+                    position.line, position.col
+                ))
+            })
+    };
+
+    Ok(Anchor::Item {
+        start: Some(relative(range.start)?),
+        end: Some(relative(range.end)?),
+        fingerprint: found.fingerprint,
+        hint: Some(range.start),
+        item,
+        file: file.to_string(),
+    })
+}
+
+/// The refusal for an item anchor that reached `reached` without having been lowered at run open.
+///
+/// Arriving here is the caller's defect, never the plan's: every entry point that runs a plan lowers
+/// it through [`resolve_item_anchors`] first, and an anchor that slips past would be read as though
+/// its relative coordinates were absolute ones.
+pub(crate) fn unlowered_item_anchor(anchor: &Anchor, reached: &str) -> RestructureError {
+    let named = match anchor {
+        Anchor::Item { item, .. } => format!("`{item}`"),
+        Anchor::Items { items, .. } => items
+            .iter()
+            .map(|item| format!("`{item}`"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        Anchor::Symbol { .. } | Anchor::Range { .. } => "a position".to_string(),
+    };
+    RestructureError::ServerDefect(format!(
+        "the item anchor for {named} in {} reached {reached} without being resolved at run open",
+        anchor.file()
+    ))
+}
+
+fn malformed(reason: impl Into<String>) -> RestructureError {
+    RestructureError::MalformedPlan(reason.into())
+}
+
+/// A backend that can name the innermost item enclosing a position.
+pub trait ItemAtResolver {
+    /// The path of the innermost item in `file` whose full range contains `range`, and where it is.
+    fn item_enclosing(&mut self, file: &str, range: Range) -> Result<(ItemPath, ResolvedItem)>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn a_resolved_item(first_line: u32, last_line: u32) -> ResolvedItem {
+        ResolvedItem {
+            range: Range {
+                start: Position {
+                    line: first_line,
+                    col: 5,
+                },
+                end: Position {
+                    line: last_line,
+                    col: 6,
+                },
+            },
+            name: Position {
+                line: first_line,
+                col: 12,
+            },
+            fingerprint: Fingerprint("sha256:ab".to_string()),
+        }
+    }
+
+    fn a_package(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let root = tempfile::tempdir().unwrap();
+        for (path, text) in files {
+            let absolute = root.path().join(path);
+            std::fs::create_dir_all(absolute.parent().unwrap()).unwrap();
+            std::fs::write(absolute, text).unwrap();
+        }
+        root
+    }
+
+    const MANIFEST: &str = "[package]\nname = \"tddy-core\"\nversion = \"0.1.0\"\n";
+
+    #[test]
+    fn a_relative_range_is_counted_from_the_items_first_line() {
+        // Given an item on lines 40–50
+        let item = a_resolved_item(40, 50);
+
+        // When its lines 2–3 are made absolute
+        let range = absolute_range(
+            &item,
+            Some(Position { line: 2, col: 9 }),
+            Some(Position { line: 3, col: 33 }),
+        );
+
+        // Then they are lines 41–42, columns unchanged
+        assert_eq!(
+            range.ok(),
+            Some(Range {
+                start: Position { line: 41, col: 9 },
+                end: Position { line: 42, col: 33 },
+            })
+        );
+    }
+
+    #[test]
+    fn no_relative_range_names_the_item_at_its_name() {
+        let item = a_resolved_item(40, 50);
+
+        assert_eq!(
+            absolute_range(&item, None, None).ok(),
+            Some(Range {
+                start: Position { line: 40, col: 12 },
+                end: Position { line: 40, col: 12 },
+            })
+        );
+    }
+
+    #[test]
+    fn a_relative_range_past_the_items_last_line_is_refused() {
+        let item = a_resolved_item(40, 44);
+
+        let refused = absolute_range(
+            &item,
+            Some(Position { line: 2, col: 9 }),
+            Some(Position { line: 9, col: 1 }),
+        );
+
+        assert!(matches!(
+            refused,
+            Err(crate::RestructureError::MalformedPlan(_))
+        ));
+    }
+
+    #[test]
+    fn a_file_under_src_is_the_module_its_path_names() {
+        // Given a package named `tddy-core`
+        let root = a_package(&[
+            ("packages/core/Cargo.toml", MANIFEST),
+            ("packages/core/src/workflow/stack.rs", ""),
+        ]);
+
+        // When the module path of a nested file is asked for
+        let path = module_path_of(root.path(), "packages/core/src/workflow/stack.rs");
+
+        // Then the crate reads `-` as `_` and the directories are modules
+        assert_eq!(
+            path.ok(),
+            Some(vec![
+                "tddy_core".to_string(),
+                "workflow".to_string(),
+                "stack".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn a_mod_rs_is_the_module_its_directory_names() {
+        let root = a_package(&[
+            ("packages/core/Cargo.toml", MANIFEST),
+            ("packages/core/src/workflow/mod.rs", ""),
+        ]);
+
+        assert_eq!(
+            module_path_of(root.path(), "packages/core/src/workflow/mod.rs").ok(),
+            Some(vec!["tddy_core".to_string(), "workflow".to_string()])
+        );
+    }
+
+    #[test]
+    fn lib_rs_is_the_crate_root() {
+        let root = a_package(&[
+            ("packages/core/Cargo.toml", MANIFEST),
+            ("packages/core/src/lib.rs", ""),
+        ]);
+
+        assert_eq!(
+            module_path_of(root.path(), "packages/core/src/lib.rs").ok(),
+            Some(vec!["tddy_core".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_file_outside_src_is_refused() {
+        let root = a_package(&[
+            ("packages/core/Cargo.toml", MANIFEST),
+            ("packages/core/tests/golden.rs", ""),
+        ]);
+
+        assert!(matches!(
+            module_path_of(root.path(), "packages/core/tests/golden.rs"),
+            Err(crate::RestructureError::MalformedPlan(_))
+        ));
+    }
+
+    /// Resolves every item to the one `ResolvedItem` it was built with, whatever the file.
+    struct Resolving(Vec<(String, ResolvedItem)>);
+
+    impl ItemResolver for Resolving {
+        fn resolve_item(&mut self, _file: &str, item: &ItemPath) -> Result<ResolvedItem> {
+            self.0
+                .iter()
+                .find(|(path, _)| path == item.as_str())
+                .map(|(_, resolved)| resolved.clone())
+                .ok_or_else(|| malformed(format!("`{item}` is not declared")))
+        }
+    }
+
+    fn an_item_anchor(item: &str, fingerprint: &str, start: Option<Position>) -> Anchor {
+        Anchor::Item {
+            item: ItemPath::parse(item).unwrap(),
+            file: "src/lib.rs".to_string(),
+            start,
+            end: start,
+            fingerprint: Fingerprint(fingerprint.to_string()),
+            hint: None,
+        }
+    }
+
+    fn a_plan_anchored_at(anchor: Anchor) -> Plan {
+        let jsonl = format!(
+            "{{\"v\":2,\"files\":{{}}}}\n{{\"op\":\"rename_symbol\",\"anchor\":{},\"name\":\"B\"}}\n",
+            serde_json::to_string(&anchor).unwrap()
+        );
+        Plan::parse(&jsonl).unwrap()
+    }
+
+    #[test]
+    fn an_item_anchor_is_lowered_to_the_range_its_item_sits_at() {
+        // Given an item resolved at lines 40–50 and an anchor on its second line
+        let plan = a_plan_anchored_at(an_item_anchor(
+            "tddy_core::A::f",
+            "sha256:ab",
+            Some(Position { line: 2, col: 9 }),
+        ));
+        let mut resolver = Resolving(vec![(
+            "tddy_core::A::f".to_string(),
+            a_resolved_item(40, 50),
+        )]);
+
+        // When the plan is lowered
+        let lowered = resolve_item_anchors(&plan, Path::new("."), &mut resolver).unwrap();
+
+        // Then the anchor is the absolute range, in the file the item was found in
+        assert_eq!(
+            lowered.ops[0].anchor,
+            Anchor::Range {
+                file: "src/lib.rs".to_string(),
+                start: Position { line: 41, col: 9 },
+                end: Position { line: 41, col: 9 },
+            }
+        );
+    }
+
+    #[test]
+    fn a_plan_with_no_item_anchor_is_lowered_to_itself() {
+        let plan = Plan::parse(
+            r#"{"v":1,"snapshot":{}}
+{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/lib.rs","path":"A"},"name":"B"}
+"#,
+        )
+        .unwrap();
+
+        let lowered = resolve_item_anchors(&plan, Path::new("."), &mut Resolving(vec![]));
+
+        assert_eq!(lowered.ok(), Some(plan));
+    }
+
+    #[test]
+    fn an_item_whose_text_changed_is_refused_naming_it() {
+        // Given an anchor fingerprinted over text the item no longer has
+        let plan = a_plan_anchored_at(an_item_anchor("tddy_core::A::f", "sha256:old", None));
+        let mut resolver = Resolving(vec![("tddy_core::A::f".to_string(), a_resolved_item(1, 3))]);
+
+        // When the plan is lowered
+        let refused = resolve_item_anchors(&plan, Path::new("."), &mut resolver);
+
+        // Then the item and its file are named
+        assert_eq!(
+            refused.map(|_| ()).map_err(|error| error.to_string()),
+            Err(
+                "the item `tddy_core::A::f` in src/lib.rs changed since the plan was written — \
+                 its fingerprint no longer matches; re-anchor it with `restructure anchors`"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn items_with_other_code_between_them_are_not_one_run() {
+        // Given two items on lines 1–2 and 5–6, with a statement on line 3
+        let root = a_package(&[(
+            "src/lib.rs",
+            "struct A;\nstruct A2;\nconst X: u8 = 1;\n\nstruct B;\nstruct B2;\n",
+        )]);
+        let items = [
+            ItemPath::parse("c::A").unwrap(),
+            ItemPath::parse("c::B").unwrap(),
+        ];
+        let found = [a_resolved_item(1, 2), a_resolved_item(5, 6)];
+
+        // When they are asked to be covered as one run
+        let refused = covering_run(root.path(), "src/lib.rs", &items, &found);
+
+        // Then the gap is named
+        assert!(refused
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+            .unwrap_err()
+            .contains("`c::A` and `c::B` have other lines between them"),);
+    }
+
+    #[test]
+    fn items_separated_only_by_blank_lines_are_one_run() {
+        let root = a_package(&[("src/lib.rs", "struct A;\n\n\nstruct B;\n")]);
+        let items = [
+            ItemPath::parse("c::A").unwrap(),
+            ItemPath::parse("c::B").unwrap(),
+        ];
+        let found = [a_resolved_item(1, 1), a_resolved_item(4, 4)];
+
+        let run = covering_run(root.path(), "src/lib.rs", &items, &found);
+
+        assert_eq!(
+            run.ok(),
+            Some(Range {
+                start: Position { line: 1, col: 1 },
+                end: Position { line: 4, col: 6 },
+            })
+        );
+    }
+}

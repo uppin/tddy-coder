@@ -645,44 +645,116 @@ async fn refuses_an_apply_whose_plan_names_a_file_no_backend_handles() {
     );
 }
 
-/// The range comes from the language server's own outline — the fixture reports `foo` spanning
-/// lines 11 to 13 (zero-based 10 to 12) with its closing brace at column 1 — because hand-counting
-/// a seam's extent is the busywork the anchor query exists to remove.
-#[tokio::test(flavor = "multi_thread")]
-async fn emits_the_range_anchor_its_language_server_outlines_for_a_named_item() {
-    // Given a workspace whose language server can outline its source
-    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
-    let entry = a_host_over_fake_language_servers();
+/// A git worktree holding `source` as `src/lib.rs` of a package called `subject`, so an item path
+/// can be rooted in it.
+fn a_workspace_holding_a_package(source: &str) -> tempfile::TempDir {
+    let workspace = a_workspace_holding(source);
+    std::fs::write(
+        workspace.path().join("Cargo.toml"),
+        "[package]\nname = \"subject\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("a package manifest");
+    workspace
+}
 
-    // When the anchor covering one named item is asked for
-    let anchor: AnchorsResponse = unary_at(
+/// The anchor answer for `request` over `workspace` through the registered coordinate.
+async fn the_anchor_answer(
+    workspace: &tempfile::TempDir,
+    items: &[&str],
+    at: Option<SourceRange>,
+) -> AnchorsResponse {
+    let entry = a_host_over_fake_language_servers();
+    unary_at(
         &entry,
         "Anchors",
         AnchorsRequest {
             workspace_root: workspace.path().to_string_lossy().to_string(),
             file: "src/lib.rs".to_string(),
-            items: vec!["foo".to_string()],
+            items: items.iter().map(|item| item.to_string()).collect(),
+            at,
         },
     )
     .await
-    .expect("an outlined item has an anchor");
+    .expect("an outlined item has an anchor")
+}
 
-    // Then it covers that item, in the one-based byte coordinates a plan is written in
-    assert_eq!(
-        anchor,
-        AnchorsResponse {
-            range: Some(SourceRange {
-                start: Some(SourcePosition {
-                    line: 11,
-                    column: 1
-                }),
-                end: Some(SourcePosition {
-                    line: 13,
-                    column: 2
-                }),
-            }),
+fn the_range_of_foo() -> Option<SourceRange> {
+    Some(SourceRange {
+        start: Some(SourcePosition {
+            line: 11,
+            column: 1,
+        }),
+        end: Some(SourcePosition {
+            line: 13,
+            column: 2,
+        }),
+    })
+}
+
+/// The range comes from the language server's own outline — the fixture reports `foo` spanning
+/// lines 11 to 13 (zero-based 10 to 12) with its closing brace at column 1 — because hand-counting
+/// a seam's extent is the busywork the anchor query exists to remove.
+#[tokio::test(flavor = "multi_thread")]
+async fn emits_the_range_anchor_its_language_server_outlines_for_a_named_item() {
+    // Given a workspace whose language server can outline its source, in a package an item path
+    // can be rooted in
+    let workspace = a_workspace_holding_a_package("pub fn foo() -> u32 {\n    1\n}\n");
+
+    // When the anchor covering one named item is asked for
+    let answer = the_anchor_answer(&workspace, &["foo"], None).await;
+
+    // Then it covers that item, in the one-based byte coordinates a plan is written in, and the
+    // anchor a plan carries names it by its crate-rooted path
+    assert_eq!(answer.range, the_range_of_foo());
+    let carried: tddy_code_restructuring::Anchor =
+        serde_json::from_str(&answer.anchor_json).expect("the anchor is the JSON a plan carries");
+    match carried {
+        tddy_code_restructuring::Anchor::Items { file, items, .. } => {
+            assert_eq!(file, "src/lib.rs");
+            assert_eq!(
+                items.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                vec!["subject::foo".to_string()]
+            );
         }
+        other => panic!("expected an items anchor, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn emits_the_item_anchor_of_the_item_enclosing_a_position() {
+    // Given the same outlined source, and a position inside `foo`
+    let workspace = a_workspace_holding_a_package("pub fn foo() -> u32 {\n    1\n}\n");
+    let inside_foo = Some(SourceRange {
+        start: Some(SourcePosition {
+            line: 12,
+            column: 5,
+        }),
+        end: Some(SourcePosition {
+            line: 12,
+            column: 6,
+        }),
+    });
+
+    // When the anchor of the item enclosing it is asked for
+    let answer = the_anchor_answer(&workspace, &[], inside_foo).await;
+
+    // Then it is an `item` anchor on `foo`, and the range says where that item is
+    assert_eq!(
+        answer.range.as_ref().and_then(|range| range.start),
+        Some(SourcePosition {
+            line: 12,
+            column: 5
+        })
     );
+    let carried: tddy_code_restructuring::Anchor =
+        serde_json::from_str(&answer.anchor_json).expect("the anchor is the JSON a plan carries");
+    match carried {
+        tddy_code_restructuring::Anchor::Item { item, file, .. } => {
+            assert_eq!(file, "src/lib.rs");
+            assert_eq!(item.to_string(), "subject::foo");
+        }
+        other => panic!("expected an item anchor, got {other:?}"),
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

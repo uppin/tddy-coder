@@ -15,11 +15,10 @@
 use tddy_code_restructuring::console;
 use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::Comparison;
-use tddy_code_restructuring::{Position, Range};
 use tddy_index_daemon::proto::code_index::{
     analyze_event, restructure_event, AnalyzeEvent, AnchorsResponse, ComplexityResponse,
     DuplicateTestsFound, OperationApplied, PlanStatusResponse, ReportResponse, RestructureEvent,
-    RunOutcome, SourceRange, VerifyResponse,
+    RunOutcome, VerifyResponse,
 };
 
 /// One event a running operation reported.
@@ -101,32 +100,24 @@ pub(crate) fn findings(counted: usize) {
     log::error!(target: crate::MAIN, "{}", console::findings_refusal(counted));
 }
 
-/// The anchor a run of items sits at, as the JSON document a plan carries it as.
+/// The anchor the daemon found, as the JSON document a plan carries it as.
 ///
-/// JSON rather than prose because this answer is written to be pasted into a plan. `file` comes
-/// from the request rather than the answer — the schema's `AnchorsResponse` carries the range
-/// alone — because a range without the file it is in is not an anchor, and the document the other
-/// front ends emit names it.
-pub(crate) fn anchors(file: &str, response: &AnchorsResponse) {
-    let Some(SourceRange {
-        start: Some(start),
-        end: Some(end),
-    }) = &response.range
-    else {
-        log::error!(target: crate::MAIN, "the anchor came back without a range");
-        return;
-    };
-    log::info!(
-        target: crate::MAIN,
-        "{}",
-        console::anchor(
-            file,
-            Range {
-                start: Position { line: start.line, col: start.column },
-                end: Position { line: end.line, col: end.column },
-            }
-        )
-    );
+/// JSON rather than prose because this answer is written to be pasted into a plan. The response
+/// carries the whole anchor — file, item paths and fingerprints included — so nothing is taken from
+/// the request. A response without one came from a daemon that predates item anchors, and is said
+/// to be that rather than rendered as a bare range a plan could no longer be trusted to carry.
+///
+/// Whether there was an anchor to render: a run that printed no anchor must not report success.
+pub(crate) fn anchors(response: &AnchorsResponse) -> bool {
+    if response.anchor_json.is_empty() {
+        log::error!(
+            target: crate::MAIN,
+            "the anchor came back without its JSON — the answering daemon predates item anchors"
+        );
+        return false;
+    }
+    log::info!(target: crate::MAIN, "{}", response.anchor_json);
+    true
 }
 
 /// How far a plan's journal got.
@@ -287,4 +278,36 @@ pub(crate) fn interrupted() {
 /// A refusal, as the thing that failed the run.
 pub(crate) fn refusal(status: &tddy_rpc::Status) {
     log::error!(target: crate::MAIN, "{status}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_anchor_answer_without_its_json_is_not_a_rendered_anchor() {
+        // Given an answer from a daemon that predates item anchors
+        let response = AnchorsResponse::default();
+
+        // When it is rendered
+        let rendered = anchors(&response);
+
+        // Then nothing was printed for a plan to carry, and the run must not call that success
+        assert!(!rendered);
+    }
+
+    #[test]
+    fn an_anchor_answer_with_its_json_is_rendered() {
+        // Given an answer carrying the anchor a plan would hold
+        let response = AnchorsResponse {
+            anchor_json: r#"{"kind":"items"}"#.to_string(),
+            ..AnchorsResponse::default()
+        };
+
+        // When it is rendered
+        let rendered = anchors(&response);
+
+        // Then it was
+        assert!(rendered);
+    }
 }

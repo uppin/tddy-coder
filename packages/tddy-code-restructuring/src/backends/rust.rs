@@ -13,6 +13,7 @@ use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
 use crate::edit::{
     FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
 };
+use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
 use crate::{RestructureError, Result};
@@ -31,6 +32,7 @@ mod early_return;
 mod impl_seam;
 mod imports;
 mod introduced;
+mod item_path;
 mod nested_modules;
 mod readiness;
 
@@ -423,6 +425,8 @@ pub struct RustBackend {
     claimed: Vec<(String, String)>,
     /// The documents this backend has opened and not yet closed. See [`documents`].
     opened: Vec<String>,
+    /// The workspace root a self-spawned server was started in. A bridged client carries its own.
+    root: Option<PathBuf>,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -544,6 +548,7 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            root: None,
         }
     }
 
@@ -612,7 +617,22 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            root: None,
         }
+    }
+
+    /// The workspace root this backend's server is rooted at, which a workspace-relative path in a
+    /// plan is read against.
+    ///
+    /// A bridged client says so itself, having been initialized against it; a self-spawned server
+    /// is rooted wherever [`Self::start`] last started it.
+    fn workspace_root(&self) -> Result<PathBuf> {
+        if let Some(bridge) = &self.bridge {
+            return path_of(bridge.root_uri());
+        }
+        self.root.clone().ok_or_else(|| {
+            failure("this backend has no workspace root: no server has been started against one")
+        })
     }
 
     fn take_id(&mut self) -> u64 {
@@ -654,6 +674,7 @@ impl RustBackend {
     /// Start rust-analyzer and complete the initialize handshake, once per run.
     fn start(&mut self, root: &Path) -> Result<()> {
         (self.progress)("starting rust-analyzer session");
+        self.root = Some(root.to_path_buf());
         if let Some(bridge) = &self.bridge {
             // The handshake was someone else's, so the one thing that cannot be assumed is the
             // unit its columns are in. A server left on the LSP default counts utf-16 code
@@ -1066,6 +1087,14 @@ impl LanguageBackend for RustBackend {
     fn module_references(&mut self) -> Option<&mut dyn ModuleReferences> {
         Some(self)
     }
+
+    fn item_resolver(&mut self) -> Option<&mut dyn ItemResolver> {
+        Some(self)
+    }
+
+    fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
+        Some(self)
+    }
 }
 
 /// The engine half of a cross-crate move.
@@ -1437,12 +1466,51 @@ impl RustBackend {
         Ok(items)
     }
 
+    /// The document's outline, once the server is able to give one.
+    ///
+    /// Until the server has loaded the workspace it may answer `documentSymbol` for an open document
+    /// with no symbols at all, which reads exactly like a file that defines nothing. That is how
+    /// `restructure anchors` came to refuse every item of every file: it took the first answer.
+    /// (`readiness.rs` notes the server otherwise answers this request from the syntax tree, so
+    /// *whether* a loading server answers early-empty is an unreproduced hypothesis here.)
+    ///
+    /// What *is* reproduced is the opposite hazard, which the original wait had: it looped while the
+    /// outline was empty and `indexed` unset, and nothing on the anchors path sets `indexed`, so a
+    /// file that genuinely defines nothing never returned — against a live rust-analyzer it ran
+    /// until the caller's token fired (180s in the acceptance harness).
+    ///
+    /// An outline with items in it is the server's real answer whenever it arrives. An empty one is
+    /// believed only once the graph has been *observed* loaded — [`Self::outline_is_the_servers_answer`]
+    /// — so a file that genuinely defines nothing (a `mod.rs` of `use` lines, a comments-only file)
+    /// is answered as soon as the server reports itself quiescent, and a degraded index refuses
+    /// rather than vouching for the emptiness. The wait is otherwise ended only by the caller's
+    /// cancellation, as for every other wait here, and then names where the index got to.
+    fn settled_outline(&mut self, uri: &str) -> Result<Value> {
+        let started = Instant::now();
+        loop {
+            let symbols = self.request_settled(
+                "textDocument/documentSymbol",
+                json!({ "textDocument": { "uri": uri } }),
+            )?;
+            if self.outline_is_the_servers_answer(&symbols) {
+                self.refuse_degraded_index()?;
+                return Ok(symbols);
+            }
+            if !self.keep_waiting(INDEXING_POLL) {
+                return Err(self.incomplete_index(started.elapsed()));
+            }
+        }
+    }
+
+    /// Whether `symbols` is an answer about the file rather than the silence of a server still
+    /// loading: it has items, or the server has been seen to finish loading.
+    fn outline_is_the_servers_answer(&self, symbols: &Value) -> bool {
+        !outline_is_empty(symbols) || self.indexed || self.chatter.quiescent()
+    }
+
     /// The file's module-level items, in the order they appear.
     fn module_outline(&mut self, uri: &str) -> Result<Vec<OutlineItem>> {
-        let symbols = self.request_settled(
-            "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri } }),
-        )?;
+        let symbols = self.settled_outline(uri)?;
 
         let mut outline: Vec<OutlineItem> = symbols
             .as_array()
@@ -1769,6 +1837,9 @@ impl RustBackend {
                 };
                 Ok(Range { start, end: start })
             }
+            Anchor::Item { .. } | Anchor::Items { .. } => {
+                Err(unlowered_item_anchor(&op.anchor, &format!("{:?}", op.op)))
+            }
         }
     }
 
@@ -1798,6 +1869,9 @@ impl RustBackend {
                 json!({ "line": start.line - 1, "character": start.col - 1 })
             }
             Anchor::Symbol { path, .. } => self.locate_symbol(uri, path)?,
+            Anchor::Item { .. } | Anchor::Items { .. } => {
+                return Err(unlowered_item_anchor(&op.anchor, &format!("{:?}", op.op)))
+            }
         };
 
         self.wait_until_resolved(uri, &position)?;
@@ -5668,6 +5742,55 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// sent, so what ends one is answerable without a language server at all.
     fn a_backend() -> RustBackend {
         RustBackend::new("/usr/bin/rust-analyzer", "/tmp", "/tmp")
+    }
+
+    fn a_server_status_saying_quiescent(quiescent: bool) -> Value {
+        json!({
+            "method": "experimental/serverStatus",
+            "params": { "health": "ok", "quiescent": quiescent }
+        })
+    }
+
+    #[test]
+    fn an_empty_outline_is_not_believed_before_the_server_has_been_seen_to_load() {
+        // Given a server that has said it is still loading
+        let mut backend = a_backend();
+        backend
+            .chatter
+            .absorb(&a_server_status_saying_quiescent(false));
+
+        // When it answers with no symbols
+        let believed = backend.outline_is_the_servers_answer(&json!([]));
+
+        // Then that is the silence of a loading server, not a file that defines nothing
+        assert!(!believed);
+    }
+
+    #[test]
+    fn an_empty_outline_is_believed_once_the_server_has_been_seen_to_finish_loading() {
+        // Given a server that has reported itself quiescent
+        let mut backend = a_backend();
+        backend
+            .chatter
+            .absorb(&a_server_status_saying_quiescent(true));
+
+        // When it answers with no symbols
+        let believed = backend.outline_is_the_servers_answer(&json!([]));
+
+        // Then the file genuinely defines nothing, and nothing waits for more
+        assert!(believed);
+    }
+
+    #[test]
+    fn an_outline_with_items_is_believed_whenever_it_arrives() {
+        // Given a server that has not said anything about its state
+        let backend = a_backend();
+
+        // When it answers with an item
+        let believed = backend.outline_is_the_servers_answer(&json!([{ "name": "Queue" }]));
+
+        // Then it is the real answer
+        assert!(believed);
     }
 
     /// The replacement for the budgets: nothing but the caller ends a wait, and it ends it at once

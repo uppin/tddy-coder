@@ -29,8 +29,8 @@ code path rather than a second one.
 | `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`) |
 | `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink |
-| `queries.rs` | `Anchors`, `PlanStatus`, `Verify` — the unary half |
-| `apply.rs` | The host-driven apply loop over the promoted `StatePaths` / `open_run_after` / `restore_ledger` / `commit_operation`, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
+| `queries.rs` | `Anchors`, `PlanStatus`, `Verify` — the unary half. `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
+| `apply.rs` | The host-driven apply loop over the promoted `StatePaths` / `open_run_resolving_anchors` / `restore_ledger` / `commit_operation`, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
 | `activity.rs` | Composes what the daemon says about its own requests |

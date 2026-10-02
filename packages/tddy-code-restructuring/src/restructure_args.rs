@@ -26,7 +26,8 @@ pub enum RestructureCommand {
     Status(RestructurePlanArgs),
     /// Static (+ optional deep) preflight without writes.
     Check(RestructureCheckArgs),
-    /// Emit a range anchor covering named items.
+    /// Emit the anchor a plan carries: an `items` anchor over named items, or with `--at` the
+    /// `item` anchor of the innermost item enclosing a position.
     Anchors(RestructureAnchorsArgs),
     /// Compare statement multisets against a git ref.
     Verify(RestructureVerifyArgs),
@@ -72,6 +73,32 @@ pub struct RestructureAnchorsArgs {
 
     #[arg(long, value_delimiter = ',')]
     pub items: Vec<String>,
+
+    /// `LINE:COL` or `LINE:COL-LINE:COL`, one-based, columns counted in bytes (not characters):
+    /// anchor the innermost item enclosing this position, with the range relative to it.
+    #[arg(long, value_parser = parse_position_range, conflicts_with = "items")]
+    pub at: Option<crate::edit::Range>,
+}
+
+/// Read `LINE:COL` (a caret) or `LINE:COL-LINE:COL` (a range), one-based.
+pub fn parse_position_range(text: &str) -> std::result::Result<crate::edit::Range, String> {
+    let refused = || format!("`{text}` is not LINE:COL or LINE:COL-LINE:COL");
+    let position = |written: &str| -> Option<crate::edit::Position> {
+        let (line, col) = written.split_once(':')?;
+        let (line, col) = (line.trim().parse().ok()?, col.trim().parse().ok()?);
+        (line >= 1 && col >= 1).then_some(crate::edit::Position { line, col })
+    };
+
+    let (start, end) = match text.split_once('-') {
+        Some((start, end)) => (position(start), position(end)),
+        None => (position(text), position(text)),
+    };
+    match (start, end) {
+        (Some(start), Some(end)) if (start.line, start.col) <= (end.line, end.col) => {
+            Ok(crate::edit::Range { start, end })
+        }
+        _ => Err(refused()),
+    }
 }
 
 #[derive(Parser)]
@@ -123,6 +150,7 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             command: Command::Anchors,
             target: Some(anchors.file),
             items: normalised_items(anchors.items),
+            at: anchors.at,
             ..Options::default()
         },
         RestructureCommand::Verify(verify) => Options {
@@ -157,6 +185,36 @@ fn normalised_items(items: Vec<String>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn at_reads_a_caret_as_an_empty_range() {
+        assert_eq!(
+            parse_position_range("188:9"),
+            Ok(crate::edit::Range {
+                start: crate::edit::Position { line: 188, col: 9 },
+                end: crate::edit::Position { line: 188, col: 9 },
+            })
+        );
+    }
+
+    #[test]
+    fn at_reads_a_range_of_two_positions() {
+        assert_eq!(
+            parse_position_range("188:9-198:11"),
+            Ok(crate::edit::Range {
+                start: crate::edit::Position { line: 188, col: 9 },
+                end: crate::edit::Position { line: 198, col: 11 },
+            })
+        );
+    }
+
+    #[test]
+    fn at_refuses_a_position_without_a_column() {
+        assert_eq!(
+            parse_position_range("188"),
+            Err("`188` is not LINE:COL or LINE:COL-LINE:COL".to_string())
+        );
+    }
 
     fn parse(argv: &[&str]) -> Options {
         let mut all = vec!["restructure"];

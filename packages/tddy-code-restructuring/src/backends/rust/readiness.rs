@@ -160,7 +160,7 @@ impl RustBackend {
     /// backend started and on a warm one it was handed: the bridge folds in the server's latest
     /// status even when another consumer drained the transition. The reasoning for refusing on
     /// `warning` as well as `error` is at [`super::ServerChatter::degraded`].
-    fn refuse_degraded_index(&self) -> Result<()> {
+    pub(super) fn refuse_degraded_index(&self) -> Result<()> {
         match self.chatter.degraded() {
             Some(reason) => Err(server_defect(reason)),
             None => Ok(()),

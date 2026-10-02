@@ -55,13 +55,13 @@ pub(crate) async fn run_once(service: &CodeIndexServiceImpl, requested: Requeste
             applied(streamed, rehearsal).await
         }
         Requested::Anchors(request) => {
-            // Likewise: the anchor document names the file the range is in, and the answer carries
-            // the range alone.
-            let file = request.file.clone();
             match service.anchors(tddy_rpc::Request::direct(request)).await {
                 Ok(response) => {
-                    render::anchors(&file, &response.into_inner());
-                    Verdict::Held
+                    if render::anchors(&response.into_inner()) {
+                        Verdict::Held
+                    } else {
+                        Verdict::Refused
+                    }
                 }
                 Err(refusal) => refused(&refusal),
             }

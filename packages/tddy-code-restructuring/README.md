@@ -11,7 +11,7 @@ Exposed via `tddy-tools restructure`:
 - `apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]`
 - `status <plan.jsonl>`
 - `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that are longer than LINES, as a record rather than a gate
-- `anchors <file.rs> --items A,B,C`
+- `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries
 - `verify --against <git-ref>`
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
@@ -24,6 +24,11 @@ accepted operations left uncompilable fails the run, with the compiler's errors,
 disk and the way to roll them back. `check --deep` does not run the compiler, so a clean deep check
 is not a promise that the applied tree builds. See
 [docs/readiness-and-gates.md](docs/readiness-and-gates.md).
+
+A plan anchors an operation by **item**: a crate-rooted path such as `tddy_core::workflow::Stack::new`
+plus a range relative to that item, resolved through rust-analyzer's outline when the run opens. An edit
+elsewhere in the file leaves the anchor correct; an edit to the item itself is refused, naming it. See
+[docs/item-anchors.md](docs/item-anchors.md).
 
 Plans hold intents only — no source text (`text` / `code` / `content` refused). Unsupported operations are hard errors.
 

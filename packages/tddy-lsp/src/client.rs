@@ -74,6 +74,11 @@ pub struct LspClient {
     /// The server's `initialize` result, kept because what the server negotiated — its position
     /// encoding above all — decides whether a caller's coordinates mean what it thinks.
     handshake: Mutex<Value>,
+    /// The workspace root the handshake was made against, as the `file://` uri it was given.
+    ///
+    /// Kept because a caller handed only the client — the restructuring backend is — has no other
+    /// way to learn which tree a workspace-relative path in a plan belongs to.
+    root_uri: String,
     /// Server notifications this client does not consume itself, kept for a caller to drain.
     ///
     /// `$/progress` and `experimental/serverStatus` are the two that matter: they are the only
@@ -131,6 +136,7 @@ impl LspClient {
             reader,
             request_timeout_ms: AtomicU64::new(DEFAULT_REQUEST_TIMEOUT.as_millis() as u64),
             handshake: Mutex::new(Value::Null),
+            root_uri: root_uri.to_string(),
             notifications,
             documents: Mutex::new(HashMap::new()),
             activity: Mutex::new(None),
@@ -191,6 +197,11 @@ impl LspClient {
     /// attached. See [`NotificationStream`] for what a subscriber that falls behind is told.
     pub fn subscribe_notifications(&self) -> NotificationStream {
         self.notifications.subscribe()
+    }
+
+    /// The workspace root this client's server was initialized against, as a `file://` uri.
+    pub fn root_uri(&self) -> &str {
+        &self.root_uri
     }
 
     /// The server's `initialize` result, as it answered the handshake.

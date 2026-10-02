@@ -66,6 +66,11 @@ impl LspClientBridge {
         notifications
     }
 
+    /// The workspace root the shared client's server was initialized against, as a `file://` uri.
+    pub fn root_uri(&self) -> &str {
+        self.client.root_uri()
+    }
+
     /// The `initialize` result the shared client negotiated with the server.
     pub fn handshake(&self) -> Value {
         self.client.handshake()

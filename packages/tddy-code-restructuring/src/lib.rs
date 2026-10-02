@@ -10,6 +10,7 @@ pub mod backends;
 pub mod console;
 pub mod crate_move;
 pub mod edit;
+pub mod item_anchor;
 pub mod journal;
 pub mod ledger;
 pub mod overlay;
@@ -30,7 +31,9 @@ pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange
 pub use journal::{Journal, JournalRecord, OpStatus};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
-pub use plan::{Anchor, Plan, Reexport, RefactorKind, RefactorOp};
+pub use plan::{
+    Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, Plan, Reexport, RefactorKind, RefactorOp,
+};
 pub use registry::{BackendRegistry, LanguageBackend};
 pub use runner::state_directory_for_plan;
 
@@ -91,6 +94,32 @@ pub enum RestructureError {
          archive or remove it, or pass --resume to continue it as this plan's own journal"
     )]
     RepoScopedJournal { path: String },
+    /// The item an anchor names is no longer the text the anchor was written against.
+    ///
+    /// An edit *outside* an item moves it and leaves an item anchor correct; an edit *inside* it
+    /// could have moved or removed what the relative range names, so the operation is refused
+    /// rather than re-targeted. The remedy is to re-anchor, which is the author's to do.
+    #[error(
+        "the item `{item}` in {file} changed since the plan was written — its fingerprint no longer \
+         matches; re-anchor it with `restructure anchors`"
+    )]
+    ItemChanged { item: String, file: String },
+    /// A run that continues a journal was handed a plan that anchors by item.
+    ///
+    /// Item anchors are resolved against the tree the run starts on, which a continued run no
+    /// longer has: its tree already holds the edits of the operations the journal completed, and
+    /// coordinates read from it would be translated through those edits a second time. Nothing is
+    /// wrong with the plan — it is the plan *store* that does not exist yet.
+    ///
+    /// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
+    /// resolve them.
+    #[error(
+        "this run continues a journal that already applied {applied} operation(s), and the plan \
+         anchors by item: item anchors are resolved against the tree the run starts on, which a \
+         continued run no longer has — run the remainder from a plan of range anchors, or start \
+         the plan afresh"
+    )]
+    ItemAnchorsOnContinuedRun { applied: usize },
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
     /// The server stayed unable to answer one method, as distinct from the plan being wrong.
