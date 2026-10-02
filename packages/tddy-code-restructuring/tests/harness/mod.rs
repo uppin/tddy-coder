@@ -2136,6 +2136,7 @@ pub async fn applying_from_the_store(
     .await
     .expect("the blocking half of the apply joins")
 }
+
 /// A committed workspace holding exactly `files` — for a test whose shape no shared fixture has.
 pub fn a_workspace_holding_files(files: &[(&str, &str)]) -> AFixtureWorkspace {
     let mut fixture = an_empty_fixture();
