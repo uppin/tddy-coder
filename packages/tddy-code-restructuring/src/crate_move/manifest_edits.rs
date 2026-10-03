@@ -18,20 +18,24 @@ pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::R
     None
 }
 
-/// Where a new `mod` declaration goes in a crate root: after the last one already there, and after
-/// the file's own header when it declares none.
+/// The edit that declares `line` (`pub mod host_registry;`) among the root's existing `mod` lines,
+/// in sorted position: before the first declared module that sorts after it, else after the last
+/// one, and after the file's own header when it declares none.
 ///
-/// Placed rather than sorted in, because a crate root's `mod` order is the author's and nothing
-/// here knows what it means.
-pub(crate) fn after_last_module_declaration(text: &str) -> usize {
+/// Sorted rather than appended, because a root whose declarations are in order stays in order, and
+/// one that is not gets no worse — the new line lands where the sort puts it relative to its
+/// neighbours and nothing else is moved.
+pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str) -> TextEdit {
+    let named = declared_module_name(line);
     let mut offset = 0usize;
     let mut header_ends = 0usize;
     let mut in_header = true;
-    let mut last_declaration = None;
+    let mut after_last = None;
 
-    for line in text.split_inclusive('\n') {
-        offset += line.len();
-        let trimmed = line.trim();
+    for current in text.split_inclusive('\n') {
+        let start = offset;
+        offset += current.len();
+        let trimmed = current.trim();
 
         if in_header
             && (trimmed.is_empty() || trimmed.starts_with("//!") || trimmed.starts_with("#!"))
@@ -41,13 +45,34 @@ pub(crate) fn after_last_module_declaration(text: &str) -> usize {
             in_header = false;
         }
 
-        let declaration = trimmed.strip_prefix("pub ").unwrap_or(trimmed);
-        if declaration.starts_with("mod ") && declaration.ends_with(';') {
-            last_declaration = Some(offset);
+        let Some(declared) = declared_module_name(trimmed) else {
+            continue;
+        };
+        if named.is_some_and(|new| new < declared) {
+            return insertion(text, start, line);
         }
+        after_last = Some(offset);
     }
 
-    last_declaration.unwrap_or(header_ends)
+    insertion(text, after_last.unwrap_or(header_ends), line)
+}
+
+/// The identifier a `[pub ]mod <name>;` line declares.
+fn declared_module_name(line: &str) -> Option<&str> {
+    let line = line.trim();
+    let line = line.strip_prefix("pub ").unwrap_or(line);
+    line.strip_prefix("mod ")?.strip_suffix(';').map(str::trim)
+}
+
+/// A line inserted at a byte offset, on a line of its own.
+fn insertion(text: &str, at: usize, line: &str) -> TextEdit {
+    let needs_a_break = at == text.len() && !text.is_empty() && !text.ends_with('\n');
+    let new_text = if needs_a_break {
+        format!("\n{line}\n")
+    } else {
+        format!("{line}\n")
+    };
+    replacement(text, at..at, &new_text)
 }
 
 /// Which dependency table of a manifest an edit reads or writes.
@@ -207,6 +232,23 @@ pub(crate) fn declared_path(declared: &str) -> Option<&str> {
     (!path.starts_with('/')).then_some(path)
 }
 
+/// The `[lib] path` a manifest declares, relative to the manifest's directory.
+///
+/// `None` when the manifest has no `[lib]` table or the table declares no `path`: cargo then looks
+/// for `src/lib.rs`.
+pub(crate) fn lib_path(manifest: &str) -> Option<&str> {
+    let mut in_lib = false;
+    manifest.lines().map(str::trim).find_map(|line| {
+        if line.starts_with('[') {
+            in_lib = line == "[lib]";
+            return None;
+        }
+        let value = line.strip_prefix("path")?.trim_start().strip_prefix('=')?;
+        let path = value.trim().strip_prefix('"')?.split('"').next()?;
+        in_lib.then_some(path)
+    })
+}
+
 /// A slash-separated path with its `.` and `..` components resolved.
 pub(crate) fn normalized(path: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
@@ -259,5 +301,65 @@ pub(crate) fn position_of(text: &str, offset: usize) -> Position {
             .next()
             .map_or(0, |line| line.chars().count()) as u32
             + 1,
+    }
+}
+
+#[cfg(test)]
+mod sorted_declaration_tests {
+    use super::*;
+    use crate::apply::edited;
+
+    fn apply_text_edits(text: &str, edits: &[TextEdit]) -> String {
+        edited(text.to_string(), edits).unwrap()
+    }
+
+    #[test]
+    fn a_module_is_declared_between_the_ones_it_sorts_between() {
+        // Given a root declaring `alpha` and `zeta`
+        let root = "//! The crate.\n\npub mod alpha;\npub mod zeta;\n";
+
+        // When `host_registry` is declared
+        let edit = insert_module_declaration_sorted(root, "pub mod host_registry;");
+
+        // Then it lands between them
+        assert_eq!(
+            apply_text_edits(root, &[edit]),
+            "//! The crate.\n\npub mod alpha;\npub mod host_registry;\npub mod zeta;\n"
+        );
+    }
+
+    #[test]
+    fn a_module_that_sorts_last_is_declared_after_the_last() {
+        let root = "pub mod alpha;\npub mod beta;\n";
+
+        let edit = insert_module_declaration_sorted(root, "pub mod gamma;");
+
+        assert_eq!(
+            apply_text_edits(root, &[edit]),
+            "pub mod alpha;\npub mod beta;\npub mod gamma;\n"
+        );
+    }
+}
+
+#[cfg(test)]
+mod lib_path_tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_path_of_the_lib_table() {
+        // Given a manifest whose `[lib]` names another root after its `name`
+        let manifest = "[package]\nname = \"x\"\n\n[lib]\nname = \"x\"\npath = \"src/root.rs\"\n";
+
+        // When / Then
+        assert_eq!(lib_path(manifest), Some("src/root.rs"));
+    }
+
+    #[test]
+    fn ignores_a_path_in_another_table() {
+        // Given a `path` that belongs to a dependency, not the library
+        let manifest = "[lib]\nname = \"x\"\n\n[dependencies]\ny = { version = \"1\" }\n[[bin]]\npath = \"src/main.rs\"\n";
+
+        // When / Then
+        assert_eq!(lib_path(manifest), None);
     }
 }

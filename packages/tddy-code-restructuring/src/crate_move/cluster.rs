@@ -123,6 +123,7 @@ pub fn resolve_cluster(
     let mut crates_named = BTreeSet::new();
     let mut dev_crates_named = BTreeSet::new();
     let mut keeps_naming_it = BTreeSet::new();
+    let mut surveys = Vec::new();
 
     for member in &members {
         let (survey, rewrites) = super::surveyed(engine, workspace, member, &travelling)?;
@@ -138,8 +139,6 @@ pub fn resolve_cluster(
         crates_named.extend(header.crates_named);
         dev_crates_named.extend(header.dev_crates_named);
         merged.add(member.source.clone(), header.edits);
-        merged.absorb(member.left_behind(workspace, &survey)?);
-        merged.absorb(member.declared_in_destination(workspace)?);
         if member.reexport == Reexport::None {
             for change in moving::caller_changes(workspace, rewrites)? {
                 merged.absorb(change);
@@ -147,6 +146,14 @@ pub fn resolve_cluster(
         }
 
         keeps_naming_it.extend(naming_it);
+        surveys.push(survey);
+    }
+
+    for change in moving::left_behind(workspace, &members, &surveys)? {
+        merged.absorb(change);
+    }
+    for change in moving::declared_in_destination(workspace, &members)? {
+        merged.absorb(change);
     }
 
     // Read off the first member because every member shares them: `read_members` refuses a set

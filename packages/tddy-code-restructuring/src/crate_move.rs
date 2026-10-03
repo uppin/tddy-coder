@@ -303,11 +303,11 @@ mod manifest_edits;
 
 /// The `pub use` line a facade leaves in the crate the module left.
 ///
-/// [`Reexport::Glob`] is one line and legal whatever moved, for the same reason it is inside a
-/// parent module: a glob re-export caps at each item's own visibility rather than failing on a
-/// member less visible than itself. [`Reexport::Named`] names only the items something outside
-/// reaches, which the survey already knows. [`Reexport::None`] leaves nothing, and then every caller
-/// in the survey is rewritten instead.
+/// [`Reexport::Named`] names only the items something outside reaches, which the survey already
+/// knows. [`Reexport::None`] leaves nothing, and then every caller in the survey is rewritten
+/// instead. [`Reexport::Glob`] is not written here: a plan's globs are one grouped line per
+/// destination ([`facade_lines_for_plan`]), so a single operation cannot write its own, and `None`
+/// is returned for it.
 pub fn facade_line(
     destination: &destination::Destination,
     reexport: Reexport,
@@ -315,7 +315,6 @@ pub fn facade_line(
 ) -> Option<String> {
     let crate_name = &destination.extern_name;
     match reexport {
-        Reexport::Glob => Some(format!("pub use {crate_name}::*;")),
         // A group is ordered and de-duplicated so the same survey always writes the same line: the
         // reference set arrives in whatever order the server listed it, and a facade that reordered
         // itself between runs would show up as a diff nobody asked for.
@@ -329,7 +328,85 @@ pub fn facade_line(
                 named.into_iter().collect::<Vec<_>>().join(", ")
             ))
         }
-        Reexport::None => None,
+        // A glob facade is grouped per destination by `facade_lines_for_plan`, which the writers call.
+        Reexport::Glob | Reexport::None => None,
+    }
+}
+
+/// The facade lines a whole plan's cross-crate moves leave in the origin's root: **one grouped
+/// `pub use <dest>::{a, b};` per destination crate**, naming the modules that moved there, in the
+/// order destinations are first moved into and with the modules sorted.
+///
+/// A root glob per operation re-exported the destination's whole root — shadowing any name the
+/// origin already binds (`hidden_glob_reexports`) and repeating itself once per operation (`unused
+/// import`). Naming what moved can do neither.
+pub(crate) fn facade_lines_for_plan(moved: &[(destination::Destination, String)]) -> Vec<String> {
+    let mut destinations: Vec<(&str, BTreeSet<&str>)> = Vec::new();
+    for (destination, module) in moved {
+        let name = destination.extern_name.as_str();
+        match destinations.iter_mut().find(|(known, _)| *known == name) {
+            Some((_, modules)) => {
+                modules.insert(module);
+            }
+            None => destinations.push((name, BTreeSet::from([module.as_str()]))),
+        }
+    }
+
+    destinations
+        .into_iter()
+        .map(|(crate_name, modules)| {
+            let named = modules.into_iter().collect::<Vec<_>>();
+            match named.as_slice() {
+                [only] => format!("pub use {crate_name}::{only};"),
+                _ => format!("pub use {crate_name}::{{{}}};", named.join(", ")),
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod facade_tests {
+    use super::*;
+
+    fn a_destination(extern_name: &str) -> destination::Destination {
+        destination::Destination {
+            dir: format!("crates/{extern_name}"),
+            package: extern_name.to_string(),
+            extern_name: extern_name.to_string(),
+        }
+    }
+
+    #[test]
+    fn three_modules_moved_to_one_destination_leave_one_grouped_line() {
+        // Given a plan that moved three modules into `kernel`, in no particular order
+        let moved = [
+            (a_destination("kernel"), "config".to_string()),
+            (a_destination("kernel"), "auth".to_string()),
+            (a_destination("kernel"), "paths".to_string()),
+        ];
+
+        // Then the origin is left one line naming all three, sorted
+        assert_eq!(
+            facade_lines_for_plan(&moved),
+            vec!["pub use kernel::{auth, config, paths};".to_string()]
+        );
+    }
+
+    #[test]
+    fn two_destinations_leave_one_line_each_in_the_order_they_were_first_moved_into() {
+        let moved = [
+            (a_destination("sandbox"), "runtime".to_string()),
+            (a_destination("kernel"), "config".to_string()),
+            (a_destination("sandbox"), "jail".to_string()),
+        ];
+
+        assert_eq!(
+            facade_lines_for_plan(&moved),
+            vec![
+                "pub use sandbox::{jail, runtime};".to_string(),
+                "pub use kernel::config;".to_string(),
+            ]
+        );
     }
 }
 
@@ -552,21 +629,6 @@ mod tests {
         assert_eq!(destination.extern_name, "tddy_host_service");
     }
 
-    /// A glob facade is one line and legal whatever moved, for the same reason it is inside a parent
-    /// module: it caps at each item's own visibility rather than failing on a member less visible
-    /// than itself.
-    #[test]
-    fn writes_a_glob_facade_naming_only_the_crate() {
-        // Given
-        let destination = a_destination_named("tddy-host-service");
-
-        // When
-        let line = facade_line(&destination, Reexport::Glob, &["HostRegistry".to_string()]);
-
-        // Then
-        assert_eq!(line.as_deref(), Some("pub use tddy_host_service::*;"));
-    }
-
     /// A named facade re-exports only what something outside actually reaches, which the survey
     /// already knows — naming an item nothing reaches would force it public for no caller.
     #[test]
@@ -682,7 +744,7 @@ mod tests {
         );
     }
 
-    /// A glob facade takes the place of the `mod` line, so every path that reached the module
+    /// A facade naming the module takes the place of the `mod` line, so every path that reached the module
     /// through the crate root still resolves and no caller is rewritten at all.
     #[test]
     fn leaves_a_glob_facade_where_the_module_was_declared() {
@@ -698,7 +760,7 @@ mod tests {
         // Then
         assert_eq!(
             applied(&edit, ORIGIN_ROOT, &workspace),
-            "//! The daemon.\n\npub use tddy_host_service::*;\nmod runtime;\n"
+            "//! The daemon.\n\npub use tddy_host_service::host_registry;\nmod runtime;\n"
         );
     }
 

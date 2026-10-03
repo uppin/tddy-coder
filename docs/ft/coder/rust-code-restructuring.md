@@ -182,7 +182,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `extract_module_to_file` | Move items to new file |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
-| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves `pub use <dest_crate>::*;` in the origin, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
+| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
 
@@ -453,8 +453,25 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   `mod` declaration.
 - **A rewritten caller path keeps the module segment**: `crate::host_registry::HostRegistry` becomes
   `tddy_host_service::host_registry::HostRegistry`, never `tddy_host_service::HostRegistry`. That is
-  what makes the glob facade free — it re-exports the module, so the origin's own paths keep
+  what makes the facade free — it re-exports the module, so the origin's own paths keep
   resolving.
+- **A facade names what moved.** A root glob would re-export the destination's whole root, shadowing
+  any name the origin already binds (`hidden_glob_reexports`) and repeating once per operation
+  (`unused import`). The grouped line names the modules only, sorted, in the order destinations were
+  first moved into. A line an earlier operation of the plan wrote for the same destination is extended
+  in place; a `pub use` that re-exports an item, a glob or an alias is the author's and is left alone.
+- **The destination declares a moved module in sorted position** among the `mod` lines already in its
+  root; modules landing in the same gap keep the order the plan named them.
+- **A parent's re-export of the moved module follows it.** With no facade, `use <module>::*;` and
+  `use <module>::{…};` at the top level of the declaring file are rewritten to name the destination,
+  keeping their visibility, and the declaring crate then counts as depending on it. Indented `use`
+  lines, and lines inside an inline module or function body, are not rewritten.
+- **A `crate::` path in the moved file's `mod tests` is re-pointed like any other**, and a crate first
+  named under `#[cfg(test)]` is a `[dev-dependencies]` entry, never an edge back; a `super::` that stays
+  inside the moved file is left alone.
+- **A test-binary move sees through a crate-root `pub use <crate>::*;`.** The crate it names is found
+  by the `path` of the origin's dependency of that name (its `[lib] path` when the manifest sets one)
+  and confirmed by that crate's own root declaring the module.
 - **A move that would make the workspace cyclic is refused up front**, on both the facade and the
   no-facade path: a facade makes the origin depend on the destination, and a re-pointed caller does
   the same, so if the moved code still names the origin, cargo would reject the pair with an error
