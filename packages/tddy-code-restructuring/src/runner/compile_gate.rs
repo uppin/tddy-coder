@@ -31,7 +31,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::apply::touched_paths;
 use crate::crate_move::declared_package_name;
-use crate::journal::{Journal, OpStatus};
+use crate::journal::Journal;
 use crate::{Plan, RestructureError, Result};
 
 use super::tidy::{tidy, Tidied, Tidying};
@@ -159,9 +159,7 @@ fn tidy_a_complete_run(
 /// Every file a completed edit in the journal touched.
 pub(super) fn completed_edit_paths(journal: &Journal) -> BTreeSet<String> {
     journal
-        .records
-        .iter()
-        .filter(|record| record.status == OpStatus::Completed)
+        .completed()
         .filter_map(|record| record.edit.as_ref())
         .flat_map(touched_paths)
         .collect()
@@ -212,7 +210,7 @@ const CANCEL_CHECK: Duration = Duration::from_millis(100);
 ///
 /// Returns [`RestructureError::CallerStopped`] when `cancel` fires first, after killing the check:
 /// nothing about the tree is known then, so it is neither a pass nor a failure.
-fn failing_check(
+pub(super) fn failing_check(
     root: &Path,
     packages: &BTreeSet<String>,
     cancel: &CancellationToken,

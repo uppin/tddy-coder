@@ -51,9 +51,7 @@ impl Plan {
             let header: HintedHeader = serde_json::from_str(header).map_err(|_| {
                 malformed("first line must be a v2 header carrying a `files` map of hints")
             })?;
-            // TODO(transactional-groups): refuse a group whose members are not consecutive —
-            // pinned by `non_consecutive_members_of_one_group_are_refused`.
-            let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
+            let ops = parse_ops(lines)?;
             return Ok(Plan {
                 version: header.v,
                 snapshot: BTreeMap::new(),
@@ -70,9 +68,7 @@ impl Plan {
             )));
         }
 
-        // TODO(transactional-groups): refuse a group whose members are not consecutive — pinned by
-        // `non_consecutive_members_of_one_group_are_refused`.
-        let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
+        let ops = parse_ops(lines)?;
 
         Ok(Plan {
             version: header.v,
@@ -261,6 +257,37 @@ fn header_version(line: &str) -> Option<u32> {
         .get("v")?
         .as_u64()
         .map(|v| v as u32)
+}
+
+/// Every operation line, in order, with each group's members checked to be consecutive.
+fn parse_ops<'a>(lines: impl Iterator<Item = &'a str>) -> Result<Vec<RefactorOp>> {
+    let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
+    refuse_split_groups(&ops)?;
+    Ok(ops)
+}
+
+/// Refuse a group whose members have an operation of another group, or of none, between them: that
+/// operation would be applied inside a unit it is not part of, and rolled back with it.
+fn refuse_split_groups(ops: &[RefactorOp]) -> Result<()> {
+    let mut closed = std::collections::BTreeSet::new();
+    let mut current: Option<&str> = None;
+    for op in ops {
+        let group = op.group.as_deref();
+        if group == current {
+            continue;
+        }
+        if let Some(finished) = current {
+            closed.insert(finished);
+        }
+        if let Some(group) = group.filter(|group| closed.contains(group)) {
+            return Err(malformed(format!(
+                "group `{group}` is split: its members must be consecutive operations, and \
+                 another operation sits between them"
+            )));
+        }
+        current = group;
+    }
+    Ok(())
 }
 
 fn parse_op(line: &str) -> Result<RefactorOp> {

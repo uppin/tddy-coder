@@ -172,7 +172,13 @@ compared before and after.
 
 ## Decisions & Trade-offs
 
-_(populated during development)_
+- Group members are not refreshed/folded into the plan store while the group is open; they are refreshed in plan order at the group's end, after the gate passes. A rolled-back or crashed group leaves the store and plan file untouched.
+- `stop_after` is judged where a group would begin; all of a group's members count toward the limit.
+- A cancelled check leaves the group open in the journal; the next resume rolls it back. The daemon rolls back immediately on cancellation between members.
+- Rollback writes the ledger checkpoint before journalling `group_rolled_back` (a checkpoint behind the journal is accepted on resume, one ahead is refused), so a crash between the two stays resumable.
+- The CLI prints each member's "applied" line before the group's gate; only the daemon defers its events (`OperationApplied.group`) to the group's end.
+- Rollback removes a created file but leaves an empty directory it was created in. TODO(transactional-groups): remove created directories.
+- The stale-member refusal still waits on #539.
 
 ## Refactoring Needed
 
@@ -195,7 +201,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest

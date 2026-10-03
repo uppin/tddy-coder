@@ -10,7 +10,10 @@ use super::report_visibility;
 use crate::{
     plan_store::PlanStore,
     registry::Workspace,
-    runner::{entry_points::anchor_entry_points, restore_ledger, resume, AppliedRun, StatePaths},
+    runner::{
+        entry_points::anchor_entry_points, group_gate::GroupRun, restore_ledger, resume,
+        AppliedRun, StatePaths,
+    },
     BackendRegistry, Journal,
 };
 
@@ -202,14 +205,18 @@ fn apply_held_plan(
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
+    let mut group: Option<GroupRun> = None;
 
     for (index, op) in plan.ops.iter().enumerate().skip(start) {
         // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
         // than raising. Reporting it as a malformed plan — with a usage dump — described a
-        // successful partial run as a defective one.
-        if options
-            .stop_after
-            .is_some_and(|limit| index >= start + limit)
+        // successful partial run as a defective one. Never inside a group, though: a group stands
+        // or falls whole, so the limit is judged where a group would begin and its members all
+        // count toward it.
+        if group.is_none()
+            && options
+                .stop_after
+                .is_some_and(|limit| index >= start + limit)
         {
             (options.progress)(&format!(
                 "stopped after {} operation(s) as requested",
@@ -257,17 +264,49 @@ fn apply_held_plan(
         (options.progress)(&format!(
             "op {index} of {total}: applying {files} file(s) to disk"
         ));
+        let id = op.id.as_ref().filter(|_| !legacy);
+        if group.is_none() {
+            group = GroupRun::begin(&plan, index, &paths, &mut journal)?;
+        }
+        if let Some(open) = group.as_mut() {
+            open.pre_image(index, id, &resolved, root, &paths, &mut journal)?;
+        }
         commit_operation(
             index,
-            op.id.as_ref().filter(|_| !legacy),
+            id,
             &resolved,
             root,
             &paths,
             &mut journal,
             &mut ledger,
         )?;
-        if !legacy {
-            record_applied_op(
+        match group.take() {
+            // A group's members reach the plan store together, once the group has compiled.
+            Some(mut open) => {
+                open.applied(index, resolved.clone());
+                if open.closes_at(index) {
+                    (options.progress)(&format!(
+                        "op {index} of {total}: checking group `{}` compiles",
+                        open.name()
+                    ));
+                    for (member, applied) in open.finish(root, &paths, &mut journal, cancel)? {
+                        if !legacy {
+                            record_applied_op(
+                                store,
+                                key,
+                                member,
+                                &applied,
+                                &mut registry,
+                                &mut journal,
+                                &paths,
+                            )?;
+                        }
+                    }
+                } else {
+                    group = Some(open);
+                }
+            }
+            None if !legacy => record_applied_op(
                 store,
                 key,
                 index,
@@ -275,7 +314,8 @@ fn apply_held_plan(
                 &mut registry,
                 &mut journal,
                 &paths,
-            )?;
+            )?,
+            None => {}
         }
         // Reported *after* the commit, so a line in the account means the edit is on disk and in
         // the journal. An apply used to report nothing at all — the dry run, where nothing is at

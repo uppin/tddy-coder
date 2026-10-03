@@ -62,14 +62,37 @@ pub struct PreImage {
 
 impl PreImage {
     /// The file at `path` under `root` as it stands now, or its absence.
-    pub fn capture(_root: &Path, _path: &str) -> Result<PreImage> {
-        todo!("TODO(transactional-groups): read the file's bytes, or record that it is absent")
+    pub fn capture(root: &Path, path: &str) -> Result<PreImage> {
+        let contents = match std::fs::read_to_string(root.join(path)) {
+            Ok(contents) => Some(contents),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        Ok(PreImage {
+            path: path.to_string(),
+            contents,
+        })
     }
 
     /// Put the file at `path` under `root` back as it was captured: rewritten, or removed when it
     /// did not exist.
-    pub fn restore(&self, _root: &Path) -> Result<()> {
-        todo!("TODO(transactional-groups): write the captured bytes back, or remove the file")
+    pub fn restore(&self, root: &Path) -> Result<()> {
+        let file = root.join(&self.path);
+        match &self.contents {
+            Some(contents) => {
+                if let Some(parent) = file.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&file, contents)?;
+            }
+            None => match std::fs::remove_file(&file) {
+                Ok(()) => {}
+                // Already absent is the state being restored.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            },
+        }
+        Ok(())
     }
 }
 
@@ -390,12 +413,71 @@ impl Journal {
     /// The group this journal started and never completed or rolled back, with every pre-image its
     /// members journalled — what a resume rolls back before running anything.
     pub fn open_group(&self) -> Option<OpenGroup> {
-        todo!("TODO(transactional-groups): the last group_started with no group_completed or group_rolled_back after it")
+        let started = self
+            .records
+            .iter()
+            .rposition(|record| record.status == OpStatus::GroupStarted)?;
+        let records = &self.records[started..];
+        let group = records[0].group.clone()?;
+        let ended = records.iter().any(|record| {
+            matches!(
+                record.status,
+                OpStatus::GroupCompleted | OpStatus::GroupRolledBack
+            ) && record.group.as_deref() == Some(group.as_str())
+        });
+        if ended {
+            return None;
+        }
+        Some(OpenGroup {
+            members: records[0].members.clone(),
+            pre_images: pre_images_of(records),
+            group,
+        })
     }
 
-    fn completed(&self) -> impl Iterator<Item = &JournalRecord> {
+    /// The records of the group `group`'s most recent run, from its `group_started` on. Empty when
+    /// the journal never started it.
+    pub fn group_records(&self, group: &str) -> &[JournalRecord] {
+        match self.records.iter().rposition(|record| {
+            record.status == OpStatus::GroupStarted && record.group.as_deref() == Some(group)
+        }) {
+            Some(started) => &self.records[started..],
+            None => &[],
+        }
+    }
+
+    /// Every pre-image the records of group `group`'s latest run journalled, in the order written.
+    pub fn group_pre_images(&self, group: &str) -> Vec<PreImage> {
+        pre_images_of(self.group_records(group))
+    }
+
+    /// The records that still describe the tree: all of them but those of a group that was rolled
+    /// back, which the journal keeps as evidence and which no longer hold true of any file.
+    pub fn records_in_force(&self) -> impl Iterator<Item = &JournalRecord> {
+        let mut undone = vec![false; self.records.len()];
+        let mut started = None;
+        for (position, record) in self.records.iter().enumerate() {
+            match record.status {
+                OpStatus::GroupStarted => started = Some(position),
+                OpStatus::GroupCompleted => started = None,
+                OpStatus::GroupRolledBack => {
+                    if let Some(first) = started.take() {
+                        undone[first..=position].fill(true);
+                    }
+                }
+                _ => {}
+            }
+        }
         self.records
             .iter()
+            .zip(undone)
+            .filter(|(_, undone)| !undone)
+            .map(|(record, _)| record)
+    }
+
+    /// The operations that completed and were not rolled back with their group.
+    pub fn completed(&self) -> impl Iterator<Item = &JournalRecord> {
+        self.records_in_force()
             .filter(|record| record.status == OpStatus::Completed)
     }
 
@@ -408,6 +490,15 @@ impl Journal {
         }
         ledger
     }
+}
+
+/// The pre-images the `pre_imaged` records among `records` carry, in order.
+fn pre_images_of(records: &[JournalRecord]) -> Vec<PreImage> {
+    records
+        .iter()
+        .filter(|record| record.status == OpStatus::PreImaged)
+        .flat_map(|record| record.pre_images.iter().cloned())
+        .collect()
 }
 
 /// Whether every recorded hash still matches the file on disk. An empty record matches nothing —

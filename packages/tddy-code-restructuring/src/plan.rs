@@ -287,9 +287,12 @@ impl std::fmt::Display for OpId {
     }
 }
 
-// TODO(transactional-groups): refuse unknown operation fields (`#[serde(deny_unknown_fields)]`), so a
-// misspelt `group` cannot be silently dropped — pinned by `an_unknown_operation_field_is_refused`.
+/// One operation of a plan.
+///
+/// Unknown fields are refused rather than dropped: a misspelt `group` would otherwise run its
+/// operations ungrouped, with none of the rollback the author asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RefactorOp {
     /// This operation's stable id; absent only in a plan no store has loaded yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
