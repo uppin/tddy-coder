@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::edit::{Position, Range};
-use crate::plan::{Anchor, Fingerprint, ItemPath, Plan};
+use crate::plan::{split_path, Anchor, Fingerprint, ItemPath, Plan};
 use crate::{RestructureError, Result};
 
 /// An item the language server located.
@@ -345,7 +345,8 @@ fn qualified_in_module(module: &str, file: &str, name: &str) -> Result<String> {
     if name.starts_with(&own_prefix) {
         return Ok(name.to_string());
     }
-    if !name.contains("::") {
+    // `::` inside angle brackets (`<Pair<a::B, C>>`) belongs to a type, not to a module path.
+    if !name.contains("::") || split_path(name).is_some_and(|pieces| pieces.len() == 1) {
         return Ok(format!("{own_prefix}{name}"));
     }
     let bare = name.rsplit("::").next().unwrap_or(name);
@@ -779,6 +780,73 @@ mod tests {
                  names `packages/core/src/queue.rs` declares (`Alpha`) or full paths beginning \
                  with `tddy_core::queue::` (`tddy_core::queue::Alpha`)"
                 .to_string())
+        );
+    }
+
+    #[test]
+    fn a_struct_its_impl_block_and_a_function_after_it_are_one_run() {
+        let root = a_package(&[(
+            "src/lib.rs",
+            "struct A;
+
+impl A {
+    fn go(&self) {}
+}
+
+fn describe(a: &A) {}
+",
+        )]);
+        let items = ["c::A", "c::<A>", "c::describe"].map(|path| ItemPath::parse(path).unwrap());
+        let found = [
+            a_resolved_item(1, 1),
+            a_resolved_item(3, 5),
+            a_resolved_item(7, 7),
+        ];
+
+        let run = covering_run(root.path(), "src/lib.rs", &items, &found);
+
+        assert_eq!(
+            run.ok(),
+            Some(Range {
+                start: Position { line: 1, col: 1 },
+                end: Position { line: 7, col: 6 },
+            })
+        );
+    }
+
+    fn the_anchor_over_impl_names(root: &Path, names: &[&str]) -> Result<Anchor> {
+        let mut resolver = Resolving(
+            names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| {
+                    let line = index as u32 + 1;
+                    (
+                        format!("tddy_core::queue::{name}"),
+                        a_resolved_item(line, line),
+                    )
+                })
+                .collect(),
+        );
+        let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        items_anchor(root, "packages/core/src/queue.rs", &names, &mut resolver)
+    }
+
+    #[test]
+    fn an_inherent_impl_name_is_a_bare_item_name_of_the_files_module() {
+        let root = a_queue_module_declaring_one_struct();
+
+        let anchor = the_anchor_over_impl_names(root.path(), &["<Alpha>#2", "<Pair<a::B, C>>"]);
+
+        assert_eq!(
+            anchor.ok().map(|anchor| match anchor {
+                Anchor::Items { items, .. } => items.iter().map(ToString::to_string).collect(),
+                _ => Vec::new(),
+            }),
+            Some(vec![
+                "tddy_core::queue::<Alpha>#2".to_string(),
+                "tddy_core::queue::<Pair<a::B, C>>".to_string(),
+            ])
         );
     }
 }

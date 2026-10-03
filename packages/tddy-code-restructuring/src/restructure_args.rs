@@ -125,8 +125,11 @@ pub struct RestructureAnchorsArgs {
     pub file: PathBuf,
 
     /// Items of the file's module, comma-separated: bare names (`Alpha`) or full paths beginning
-    /// with the file's own module path (`krate::module::Alpha`).
-    #[arg(long, value_delimiter = ',')]
+    /// with the file's own module path (`krate::module::Alpha`). An inherent `impl` block is
+    /// `<Type>` (`<Type>#2` for the second of several, counted from 1) — `Counter,<Counter>,describe`
+    /// names a struct, its `impl Counter { .. }` and the function after it. Commas inside `<..>`
+    /// belong to the type (`<Pair<A, B>>`).
+    #[arg(long)]
     pub items: Vec<String>,
 
     /// `LINE:COL` or `LINE:COL-LINE:COL`, one-based, columns counted in bytes (not characters):
@@ -243,20 +246,42 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
     }
 }
 
-/// `--items` as the runner has always received it: trimmed, with empty elements dropped.
+/// `--items` as the runner has always received it: split at the commas outside angle brackets,
+/// trimmed, with empty elements dropped.
 ///
-/// clap's `value_delimiter = ','` splits on the comma and stops there, so `--items "One, Two"`
-/// would otherwise resolve an item literally named `" Two"` and `--items "A,,B"` would carry an
-/// empty one — a wrong answer with no error. `runner::comma_separated` did this normalisation
-/// while the dispatch lived in `tddy-tools`; the call site keeps doing it now that the parsed
-/// arguments cross no package boundary.
+/// clap's `value_delimiter = ','` would split inside a generic self type (`<Pair<A, B>>`), so the
+/// split is ours. Without this normalisation `--items "One, Two"` would resolve an item literally
+/// named `" Two"` and `--items "A,,B"` would carry an empty one — a wrong answer with no error.
+/// `runner::comma_separated` did this normalisation while the dispatch lived in `tddy-tools`; the
+/// call site keeps doing it now that the parsed arguments cross no package boundary.
 fn normalised_items(items: Vec<String>) -> Vec<String> {
     items
         .iter()
-        .map(|item| item.trim())
+        .flat_map(|list| split_outside_angle_brackets(list))
+        .map(str::trim)
         .filter(|item| !item.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// `list` split at every comma that is not inside `<..>`.
+fn split_outside_angle_brackets(list: &str) -> Vec<&str> {
+    let mut pieces = Vec::new();
+    let mut depth = 0usize;
+    let mut from = 0usize;
+    for (at, character) in list.char_indices() {
+        match character {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                pieces.push(&list[from..at]);
+                from = at + 1;
+            }
+            _ => {}
+        }
+    }
+    pieces.push(&list[from..]);
+    pieces
 }
 
 #[cfg(test)]
@@ -331,6 +356,20 @@ mod tests {
         assert_eq!(options.command, Command::Check);
         assert!(options.deep);
         assert_eq!(options.budget, Some(500));
+    }
+
+    #[test]
+    fn an_items_comma_inside_angle_brackets_does_not_split_the_name() {
+        // Given a generic self type, whose arguments are comma-separated
+        let options = parse(&[
+            "anchors",
+            "src/lib.rs",
+            "--items",
+            "Pair,<Pair<A, B>>,describe",
+        ]);
+
+        // Then the impl's name stays whole
+        assert_eq!(options.items, vec!["Pair", "<Pair<A, B>>", "describe"]);
     }
 
     #[test]

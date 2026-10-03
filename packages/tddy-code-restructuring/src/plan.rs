@@ -133,6 +133,12 @@ pub enum ItemSegment {
         self_type: String,
         trait_name: String,
     },
+    /// The inherent `impl` block(s) of a type: `<Stack>`, or `<Stack>#2` for the second in source
+    /// order. The type is written as the block writes it, generic arguments included.
+    InherentImpl {
+        self_type: String,
+        nth: Option<usize>,
+    },
 }
 
 impl ItemPath {
@@ -186,13 +192,17 @@ impl ItemSegment {
                 self_type,
                 trait_name,
             } => format!("<{self_type} as {trait_name}>"),
+            ItemSegment::InherentImpl { self_type, nth } => match nth {
+                Some(nth) => format!("<{self_type}>#{nth}"),
+                None => format!("<{self_type}>"),
+            },
         }
     }
 }
 
 /// `text` split at every `::` outside angle brackets, or `None` when the brackets do not balance
 /// or a piece is empty.
-fn split_path(text: &str) -> Option<Vec<&str>> {
+pub(crate) fn split_path(text: &str) -> Option<Vec<&str>> {
     let mut pieces = Vec::new();
     let mut depth = 0usize;
     let mut from = 0usize;
@@ -218,24 +228,63 @@ fn split_path(text: &str) -> Option<Vec<&str>> {
     Some(pieces)
 }
 
-/// One piece of an item path as a segment: a plain name, or a `<Type as Trait>` qualification.
+/// One piece of an item path as a segment: a plain name, a `<Type as Trait>` qualification, or a
+/// `<Type>` / `<Type>#N` inherent impl.
 fn read_segment(piece: &str) -> Option<ItemSegment> {
-    let plain = |name: &str| {
-        !name.is_empty()
-            && !name.contains(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | ':'))
-    };
+    if !piece.starts_with('<') {
+        return plain_name(piece).then(|| ItemSegment::Named(piece.to_string()));
+    }
+    let (bracketed, nth) = split_ordinal(piece)?;
+    let inside = bracketed.strip_prefix('<')?.strip_suffix('>')?;
+    match find_trait_separator(inside) {
+        Some(at) if nth.is_none() => read_trait_impl(&inside[..at], &inside[at + " as ".len()..]),
+        Some(_) => None,
+        None => read_inherent_impl(inside, nth),
+    }
+}
 
-    let Some(qualified) = piece
-        .strip_prefix('<')
-        .and_then(|rest| rest.strip_suffix('>'))
-    else {
-        return plain(piece).then(|| ItemSegment::Named(piece.to_string()));
-    };
-    let (self_type, trait_name) = qualified.split_once(" as ")?;
+fn plain_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | ':'))
+}
+
+/// `piece` without a trailing `#N` ordinal, and the ordinal: absent, or a number of at least one.
+/// `None` when a `#` is there but no such number follows it.
+fn split_ordinal(piece: &str) -> Option<(&str, Option<usize>)> {
+    let (bracketed, ordinal) = piece.split_at(piece.rfind('>')? + 1);
+    if ordinal.is_empty() {
+        return Some((bracketed, None));
+    }
+    let nth: usize = ordinal.strip_prefix('#')?.parse().ok()?;
+    (nth >= 1).then_some((bracketed, Some(nth)))
+}
+
+/// Where ` as ` separates a self type from a trait, outside any nested angle brackets.
+fn find_trait_separator(inside: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, character) in inside.char_indices() {
+        match character {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ' ' if depth == 0 && inside[at..].starts_with(" as ") => return Some(at),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn read_trait_impl(self_type: &str, trait_name: &str) -> Option<ItemSegment> {
     let (self_type, trait_name) = (self_type.trim(), trait_name.trim());
     (!self_type.is_empty() && !trait_name.is_empty()).then(|| ItemSegment::TraitImpl {
         self_type: self_type.to_string(),
         trait_name: trait_name.to_string(),
+    })
+}
+
+fn read_inherent_impl(self_type: &str, nth: Option<usize>) -> Option<ItemSegment> {
+    let self_type = self_type.trim();
+    (!self_type.is_empty()).then(|| ItemSegment::InherentImpl {
+        self_type: self_type.to_string(),
+        nth,
     })
 }
 
@@ -1350,6 +1399,98 @@ mod tests {
                 ItemSegment::Named("fmt".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn an_inherent_impl_segment_names_its_type() {
+        let path = ItemPath::parse("stacks::workflow::<Stack>").unwrap();
+
+        assert_eq!(
+            path.segments().last(),
+            Some(&ItemSegment::InherentImpl {
+                self_type: "Stack".to_string(),
+                nth: None,
+            })
+        );
+    }
+
+    #[test]
+    fn an_inherent_impl_segment_carries_its_one_based_ordinal() {
+        let path = ItemPath::parse("stacks::workflow::<Stack>#2").unwrap();
+
+        assert_eq!(
+            path.segments().last(),
+            Some(&ItemSegment::InherentImpl {
+                self_type: "Stack".to_string(),
+                nth: Some(2),
+            })
+        );
+    }
+
+    #[test]
+    fn an_inherent_impl_of_a_generic_type_keeps_its_arguments() {
+        let path = ItemPath::parse("c::m::<Wrapper<T>>").unwrap();
+
+        assert_eq!(
+            path.segments().last(),
+            Some(&ItemSegment::InherentImpl {
+                self_type: "Wrapper<T>".to_string(),
+                nth: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_lifetime_generic_self_type_parses_as_an_inherent_impl() {
+        let path = ItemPath::parse("c::m::<Foo<'a>>").unwrap();
+
+        assert_eq!(path.segments().len(), 2);
+        assert_eq!(path.segments()[1].spelled(), "<Foo<'a>>");
+    }
+
+    #[test]
+    fn a_trait_separator_inside_nested_brackets_is_not_the_impls_trait() {
+        let path = ItemPath::parse("c::m::<Wrapper<A as B>>").unwrap();
+
+        assert_eq!(
+            path.segments().last(),
+            Some(&ItemSegment::InherentImpl {
+                self_type: "Wrapper<A as B>".to_string(),
+                nth: None,
+            })
+        );
+    }
+
+    #[test]
+    fn inherent_impl_paths_round_trip_through_their_spelling_and_serde() {
+        for written in [
+            "crate::m::<Stack>",
+            "crate::m::<Stack>#2",
+            "crate::m::<Wrapper<T>>",
+            "crate::m::<Stack as Display>",
+        ] {
+            let path = ItemPath::parse(written).unwrap();
+            let spelled: Vec<String> = path.segments().iter().map(ItemSegment::spelled).collect();
+            let json = serde_json::to_string(&path).unwrap();
+
+            assert_eq!(format!("crate::{}", spelled.join("::")), written);
+            assert_eq!(
+                serde_json::from_str::<ItemPath>(&json).unwrap().to_string(),
+                written
+            );
+        }
+    }
+
+    #[test]
+    fn a_malformed_inherent_impl_segment_is_refused() {
+        for written in [
+            "crate::m::<>",
+            "crate::m::<Stack>#0",
+            "crate::m::<Stack>#x",
+            "crate::m::<Stack>#",
+        ] {
+            assert!(ItemPath::parse(written).is_err(), "{written} was accepted");
+        }
     }
 
     #[test]

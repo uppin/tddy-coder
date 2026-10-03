@@ -73,6 +73,16 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
   nothing searches another file.
 - A member of a trait impl is addressed with the trait when its name is shared:
   `c::m::<Stack as Display>::fmt`. A bare `c::m::Stack::fmt` that two impls define is refused.
+- An inherent `impl` block is itself an item, spelled `<Type>` (no ` as `): `c::m::<Stack>` — the
+  whole block, attributes and doc comments included. A generic type is written as the block writes it
+  (`c::m::<Wrapper<T>>`). With several inherent impls of one type, a bare `<Stack>` is refused as
+  ambiguous and `<Stack>#2` picks the second in source order (1-based; a number past the last is
+  refused saying how many exist). `<Stack>` never matches a trait impl of `Stack`. This is what lets
+  `items` name `struct Stack; impl Stack { … }; fn helper()` as one run:
+  `restructure anchors <file> --items Stack,'<Stack>',helper` (quote the `<`; a name is bare or
+  module-qualified, and commas inside `<…>` belong to the type: `<Pair<A, B>>`). `anchors --at`
+  inside an impl but outside its members emits the block's `<Type>` anchor; inside a member it still
+  emits the member. An `items` run cannot split an impl: the engine's impl-seam refusals stand.
 - A relative range reaching outside its item is `plan is malformed`; an item whose text no longer
   matches `fingerprint` is refused naming the item. `items` must be contiguous: only blank lines may
   separate them.
