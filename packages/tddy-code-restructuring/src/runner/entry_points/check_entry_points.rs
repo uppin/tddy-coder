@@ -145,8 +145,7 @@ pub fn status_of_plan(root: &Path, plan_path: &Path, plan: &Plan) -> Result<Plan
     let journal = Journal::load(&paths.journal)?;
     let counted = |wanted: OpStatus| {
         journal
-            .records
-            .iter()
+            .records_in_force()
             .filter(|record| record.status == wanted)
             .count()
     };
@@ -284,6 +283,8 @@ pub fn check_plan(
         }
     }
 
+    let findings = one_finding_per_refused_group(&plan, findings);
+
     if let Some(budget) = options.budget {
         for line in budget_report(&measured(root, &files_named_by(&plan))?, budget) {
             (options.account)(&line);
@@ -291,6 +292,46 @@ pub fn check_plan(
     }
 
     Ok(findings)
+}
+
+/// `findings`, with every group's findings merged into one that names the group.
+///
+/// A group stands or falls whole, so a refused member refuses the group: reporting one finding per
+/// member would read as though each could be fixed and applied alone. The merged finding sits where
+/// the group's first finding was, at that member's index, and lists each member's reason.
+fn one_finding_per_refused_group(plan: &Plan, findings: Vec<Finding>) -> Vec<Finding> {
+    let group_of = |finding: &Finding| {
+        plan.ops
+            .get(finding.operation)
+            .and_then(|op| op.group.as_deref())
+    };
+    let mut merged: Vec<Finding> = Vec::new();
+    let mut position_of_group: std::collections::BTreeMap<&str, usize> = Default::default();
+    let mut reasons: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for finding in &findings {
+        let Some(group) = group_of(finding) else {
+            merged.push(finding.clone());
+            continue;
+        };
+        reasons
+            .entry(group)
+            .or_default()
+            .push(format!("op {}: {}", finding.operation, finding.detail));
+        position_of_group.entry(group).or_insert_with(|| {
+            merged.push(Finding {
+                operation: finding.operation,
+                detail: String::new(),
+            });
+            merged.len() - 1
+        });
+    }
+    for (group, position) in position_of_group {
+        merged[position].detail = format!(
+            "group `{group}` is refused whole, because a member of it is: {}",
+            reasons[group].join("; ")
+        );
+    }
+    merged
 }
 
 /// A finding for each operation a static check cannot examine because an anchor of it names items.

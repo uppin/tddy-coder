@@ -155,6 +155,9 @@ message OperationApplied {
   bool            rehearsed_only = 7;
   // The operation's stable id in its plan — what survives a reorder, where `index` does not.
   string          op_id          = 8;
+  // The transactional group the operation belongs to, empty when it is ungrouped. A group's
+  // operations are reported together once its end gate has passed, never before.
+  string          group          = 9;
 }
 
 message Finding {

@@ -22,6 +22,7 @@ use std::sync::Arc;
 use tddy_code_restructuring::backends::rust::ProgressSink;
 use tddy_code_restructuring::plan_store::PlanKey;
 use tddy_code_restructuring::registry::Workspace;
+use tddy_code_restructuring::runner::group_gate::{self, GroupRun};
 use tddy_code_restructuring::runner::{self, Options, PlanRun};
 use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
@@ -107,6 +108,9 @@ fn apply_held_plan(
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
+    let mut group: Option<GroupRun> = None;
+    // A group's operations, reported once its end gate has passed rather than as they land.
+    let mut unreported: Vec<(usize, Resolution)> = Vec::new();
 
     for (index, op) in plan.ops.iter().enumerate().skip(start) {
         // Checked before the operation rather than only inside the index waits: the client that
@@ -117,13 +121,19 @@ fn apply_held_plan(
                 target: "tddy_index_daemon::apply",
                 "stopping after {done} operation(s): nobody is waiting for this run any more"
             );
+            // A group is never left half applied: nobody is left to judge it, so it is undone.
+            if let Some(open) = group.take() {
+                group_gate::roll_back_group(root, open.name(), &paths, &mut journal)?;
+            }
             break;
         }
         // Honouring `stop_after` is the run doing what it was told, so it ends the loop rather
-        // than raising: a successful partial run is not a defective one.
-        if options
-            .stop_after
-            .is_some_and(|limit| index >= start + limit)
+        // than raising: a successful partial run is not a defective one. Never inside a group,
+        // which stands or falls whole: the limit is judged where a group would begin.
+        if group.is_none()
+            && options
+                .stop_after
+                .is_some_and(|limit| index >= start + limit)
         {
             stopped_early = true;
             break;
@@ -144,17 +154,51 @@ fn apply_held_plan(
             ledger.record(&resolved.edit);
             overlay.record(root, &resolved.edit)?;
         } else {
+            let id = op.id.as_ref().filter(|_| !legacy);
+            if group.is_none() {
+                group = GroupRun::begin(&plan, index, &paths, &mut journal)?;
+            }
+            if let Some(open) = group.as_mut() {
+                open.pre_image(index, id, &resolved, root, &paths, &mut journal)?;
+            }
             runner::commit_operation(
                 index,
-                op.id.as_ref().filter(|_| !legacy),
+                id,
                 &resolved,
                 root,
                 &paths,
                 &mut journal,
                 &mut ledger,
             )?;
-            if !legacy {
-                held.with_store(|store| {
+            match group.take() {
+                // A group's members reach the plan store, and the caller's eyes, together, once the
+                // group has compiled.
+                Some(mut open) => {
+                    open.applied(index, resolved.clone());
+                    if open.closes_at(index) {
+                        for (member, applied) in open.finish(root, &paths, &mut journal, cancel)? {
+                            if !legacy {
+                                held.with_store(|store| {
+                                    runner::record_applied_op(
+                                        store,
+                                        &held.key,
+                                        member,
+                                        &applied,
+                                        &mut registry,
+                                        &mut journal,
+                                        &paths,
+                                    )
+                                })?;
+                            }
+                            unreported.push((member, applied));
+                        }
+                    } else {
+                        group = Some(open);
+                        done += 1;
+                        continue;
+                    }
+                }
+                None if !legacy => held.with_store(|store| {
                     runner::record_applied_op(
                         store,
                         &held.key,
@@ -164,23 +208,39 @@ fn apply_held_plan(
                         &mut journal,
                         &paths,
                     )
-                })?;
+                })?,
+                None => {}
             }
         }
         done += 1;
 
-        // Reported *after* the commit, so an event means the edit is on disk and in the journal.
-        emit(
-            events,
-            cancel,
-            operation_event(index, done, plan.ops.len(), op, &resolved, options.dry_run),
-        );
-        for note in &resolved.notes {
+        // Reported *after* the commit, so an event means the edit is on disk and in the journal —
+        // and, for a group member, that its group compiled.
+        if unreported.is_empty() {
+            unreported.push((index, resolved));
+        }
+        let reported = done - unreported.len();
+        for (offset, (member, resolution)) in unreported.drain(..).enumerate() {
+            let member_op = &plan.ops[member];
             emit(
                 events,
                 cancel,
-                note_event(&tddy_code_restructuring::console::note(note)),
+                operation_event(
+                    member,
+                    reported + offset + 1,
+                    plan.ops.len(),
+                    member_op,
+                    &resolution,
+                    options.dry_run,
+                ),
             );
+            for note in &resolution.notes {
+                emit(
+                    events,
+                    cancel,
+                    note_event(&tddy_code_restructuring::console::note(note)),
+                );
+            }
         }
     }
 
@@ -240,6 +300,7 @@ fn operation_event(
                 .map(tddy_code_restructuring::console::widening)
                 .collect(),
             rehearsed_only: dry_run,
+            group: op.group.clone().unwrap_or_default(),
         })),
     }
 }
