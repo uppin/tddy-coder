@@ -67,7 +67,7 @@ tddy-coder is a TDD-driven development CLI that orchestrates an LLM coding backe
 | [Activity log streaming](activity-log-streaming.md) | User **`User:`** / **`Queued:`** lines in the activity log; incremental agent tail; **`AgentOutput`** as the streaming channel for workflow chunks |
 | [Codex ACP backend](codex-acp-backend.md) | **`--agent codex-acp`**: ACP to **`codex-acp`** subprocess; resume via **`load_session`**; **`codex_thread_id`** parity with **`codex`**; OAuth retry via **`codex login`** and **`codex_oauth_authorize.url`** |
 | [Session participant RPC & metadata](session-participant-rpc.md) | The coder's LiveKit participant serves session-scoped **`ConnectionService`** (tools, control, VNC, screen-sharing) and publishes **`session`** metadata for the web sessions list; **`DeleteSession`/`SignalSession` are daemon-direct** (not served by the coder) |
-| [Managed-codebase subagents](managed-codebase-subagents.md) | Discovery and specialized subagents over MCP; a subagent that edits works in its own per-conversation worktree, one commit per mutating call, handed back by **`subagent_end`**; a rewind takes the worktree back with the transcript; **`subagent_diff`** reads the diff between any two points of the conversation; **`subagent_pull`** hands a range of its commits to the caller mid-conversation, and **`subagent_end`** takes a range, skipping what was pulled |
+| [Managed-codebase subagents](managed-codebase-subagents.md) | Discovery and specialized subagents over MCP; a subagent that edits works in its own per-conversation worktree, one commit per mutating call, handed back by **`subagent_end`**; a rewind takes the worktree back with the transcript; **`subagent_diff`** reads the diff between any two points of the conversation; **`subagent_pull`** hands a range of its commits to the caller mid-conversation, and **`subagent_end`** takes a range, skipping what was pulled; every prompt and resume first merges the caller's current files into the conversation's worktree (**`syncWorktree`**, **`worktreeSync`**), and a caller's merged changes are never counted as the subagent's work |
 
 ## Active PRDs
 
@@ -77,7 +77,6 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
-| [A resumed subagent works on the caller's current files](1-WIP/PRD-2026-10-03-agent-worktree-caller-sync.md) | [Managed-codebase subagents](managed-codebase-subagents.md) — every prompt/resume merges the caller's current files into the conversation worktree; `syncWorktree`, `worktreeSync`, the notice; a caller's merged changes are never the subagent's work |
 
 ## Integration Points
 

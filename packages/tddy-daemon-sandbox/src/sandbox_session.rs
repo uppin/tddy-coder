@@ -1133,7 +1133,7 @@ mod tests {
 
     /// A subagent conversation's call arriving over the jail's session channel runs in that
     /// conversation's own worktree, not in the session worktree, and its result carries the change.
-    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md
     #[tokio::test]
     async fn a_conversations_call_runs_in_the_conversations_worktree() {
         use tddy_sandbox_runner::HostToolHandler;

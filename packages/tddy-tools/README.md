@@ -80,15 +80,31 @@ because `server.rs` is over the file budget). Each Managed conversation is built
 maps the answer — `{"reset": {to, droppedCommits}}`, `{"reset": null}` for no worktree, or an error
 body that refuses the resume. The turn outcome then carries `worktreeReset`.
 
+Every `subagent_prompt` and `subagent_resume` first merges the caller's current files into the
+conversation's worktree. Each Managed conversation is also built with a
+`ConversationWorktreeSyncPort` (`src/worktree_sync_port.rs`), wired in
+`subagent_config_for_conversation`; it sends `ConversationWorktree { sync }` through
+`tddy_session_tool_client::sync_conversation_worktree` and maps the answer — `{"sync": {…}}` to a
+merge, `{"sync": null}` to nothing merged (no worktree yet, the caller unchanged, or a recorded merge
+that changed no file), `{"conflicts": [...], "moreConflicts": n}` to a conflict that refuses the turn,
+and an error body (or an answer it cannot read, quoted) to a refusal. The reset and sync ports share
+their answer parsing in `src/worktree_answer.rs`. The `syncWorktree` boolean on both tools (default
+`true`; `false` runs the turn on the worktree as it stands; a non-boolean is refused by name) is read
+by `with_sync_worktree_choice`, and its schema property written once by `sync_worktree_property`
+(`src/sync_worktree_choice.rs`, `SYNC_WORKTREE_ARG`). A turn that merged something carries
+`worktreeSync { commit, files, lines, paths, morePaths }` on its outcome, and the subagent got a notice
+naming the changed files.
+
 `subagent_diff { sessionId, from?, to? }` (`src/subagent_diff.rs`) is read-only and takes no lock on
 the conversation, so it answers while a turn runs. It sends `ConversationWorktree { diff }` through
 `tddy_session_tool_client::diff_conversation_worktree` and answers the daemon's `diff` object —
-`{from, to, files, lines, diff, truncated}`, the diff text capped at 64 KiB while the counts cover the
-whole range. An unknown conversation, one that never wrote, and a commit the conversation does not
-have (a dropped one included) are refused by name.
+`{from, to, files, lines, diff, truncated, includesCallerChanges}`, the diff text capped at 64 KiB while the counts cover the
+whole range; `includesCallerChanges` is `true` when the range spans a caller sync. An unknown
+conversation, one that never wrote, and a commit the conversation does not have (a dropped one or a
+sync merge included) are refused by name.
 
-`subagent_pull { sessionId, from?, to? }` (`src/subagent_pull.rs`) takes a range of the conversation's
-commits into the caller's worktree while the conversation carries on; `subagent_end` takes the same
+`subagent_pull { sessionId, from?, to? }` (`src/subagent_pull.rs`) takes a range of the subagent's
+commits — never a caller sync's merge — into the caller's worktree while the conversation carries on; `subagent_end` takes the same
 `from` / `to`. Both bounds are **inclusive** (unlike `subagent_diff`'s `from..to`), `from` defaults to
 the earliest commit not yet pulled and `to` to the tip, and both send `ConversationWorktree { pull_range }`
 through `tddy_session_tool_client::pull_conversation_range`, answering `{pulled: {commits, skipped, files,

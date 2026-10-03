@@ -2,7 +2,7 @@
 //! bridge — the route an in-jail `tddy-tools` takes over the sandbox session channel, which has no
 //! session token and is bound to its session by the runner instead.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 use std::path::Path;
 use std::process::Command;

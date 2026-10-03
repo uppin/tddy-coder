@@ -24,8 +24,8 @@ same `session/new` → `session/prompt` shape the codebase already uses for `Cla
 |---------------------------------------------------|----------------------------------------------------------------------|
 | `session/new` (`NewSessionRequest`)               | `subagent_new_session` — input `{ agent?, sessionId?, cwd? }` → `{ sessionId }` |
 | Client-chosen `SessionId`                         | `sessionId` input — the **main agent** decides the conversation id; a fresh id is generated only when omitted |
-| `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
-| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
+| `session/prompt` (`PromptRequest`)                | `subagent_prompt` — input `{ sessionId, prompt: [ContentBlock], graceMs?, maxTurns?, syncWorktree? }` → the turn's outcome, or `{ responseId, pending: true }` once `graceMs` elapses |
+| *(no ACP counterpart)*                            | `subagent_resume` — input `{ sessionId, fromMessageId?, correction?, replacement?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` → the same outcome shape, for a turn that resumes a yielded conversation with the caller's replacement call and result |
 | *(no ACP counterpart)*                            | `subagent_await` — input `{ responseId, timeoutMs? }` → the same outcome, or `{ responseId, pending: true }` again |
 | `PromptResponse.stopReason`                       | output field `stopReason`: `"end_turn"` \| `"max_turn_requests"` \| `"cancelled"` \| `"context_exhausted"` |
 | Response `content` (`ContentBlock[]`)             | output field `content`: `[{ "type": "text", "text": "..." }]` |
@@ -269,7 +269,7 @@ an over-long needle, or too many conditions.
 
 ### `subagent_resume` — carry on, or go back and correct
 
-`subagent_resume { sessionId, fromMessageId?, correction?, resetWorktree?, maxTurns?, graceMs? }` takes another turn
+`subagent_resume { sessionId, fromMessageId?, correction?, resetWorktree?, syncWorktree?, maxTurns?, graceMs? }` takes another turn
 on an open conversation and **sends no new prompt turn**.
 
 - With neither `fromMessageId` nor `correction` it continues the history as it stands, under a fresh
@@ -369,7 +369,7 @@ runs are a [non-goal](#non-goals-out-of-scope-for-v1).
 
   `commit` is present only when a commit was made; a binary file counts as a file and adds no
   lines; a read carries none. It is bounded — counts and a hash, never paths.
-- **`subagent_end { sessionId, from?, to? }`** applies the conversation's commits since the base
+- **`subagent_end { sessionId, from?, to? }`** applies the subagent's commits since the base
   (or the [range](#subagent_pull--take-part-of-the-work-now) named) to the caller's
   worktree as **uncommitted changes**, 3-way: where the caller changed the same lines since, the file
   is written with conflict markers. It then deletes the worktree and branch and closes the
@@ -380,18 +380,98 @@ runs are a [non-goal](#non-goals-out-of-scope-for-v1).
   turn; a failed pull leaves the conversation open so the caller can retry or cancel.
 - **`subagent_cancel`** deletes the worktree and branch; nothing reaches the caller.
 
-A subagent's edits therefore reach the caller only on `subagent_end`; a conversation that is
-cancelled loses them, which is the point, and the tool descriptions say so.
+A subagent's edits therefore reach the caller only through `subagent_pull` and `subagent_end`; a
+conversation that is cancelled loses them, which is the point, and the tool descriptions say so.
 
 Git runs on the facilitating daemon's host, never in the jail: a linked worktree's `.git` points into
 the repository's common directory, which a jail mounting only the checkout cannot see. The jail
-relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `PullRange`, `Remove`, `Reset`, `Diff`) to
-the host. The automatic commits skip hooks and signing — every git call runs with
+relays `ExecuteTool{conversation_id}` and the typed `ConversationWorktree` RPC (`Pull`, `PullRange`,
+`Remove`, `Reset`, `Diff`, `Sync`) to the host. The host bridge a jail relays on is **bound to the
+session the jail was built for**: a request naming any other session is refused with
+`PermissionDenied`, and the session's worktree is found the way the token route finds it — under the
+session owner's sessions base. The [caller sync](#every-turn-takes-in-the-callers-current-files)
+reads the session's uncommitted files, so without that binding the bridge would be a read path into
+another session. The host that owns the session worktree needs **git ≥ 2.40** (the sync's
+`git merge-tree --write-tree --merge-base`); with an older git every sync fails and refuses its
+turn, and `syncWorktree: false` still runs it. The automatic commits skip hooks and signing — every git call runs with
 `core.hooksPath=/dev/null` and `commit.gpgsign=false`, and the commit with `--no-verify` — so no
 developer hook runs on a subagent's behalf and a signing prompt cannot block a call. That is an
 implementation choice the developer has not confirmed; see
 [`docs/dev/todo/2026-10-01-subagent-commits-skip-hooks-and-signing-without-consent.md`](../../dev/todo/2026-10-01-subagent-commits-skip-hooks-and-signing-without-consent.md).
 Mechanics: [`tddy-subagent-worktree`](../../../packages/tddy-subagent-worktree/docs/conversation-worktree.md).
+
+### Every turn takes in the caller's current files
+
+The usual hand-off is: the subagent finishes a turn, the caller takes some of the work, edits files
+itself, and prompts or resumes the conversation. So **every** `subagent_prompt` and `subagent_resume`
+first brings the conversation's worktree up to the caller's current files — its `HEAD` plus staged,
+unstaged and untracked (not ignored) changes — and the subagent works on what the caller has now.
+
+- **When.** Before the turn's first model call; on a resume that rewinds, after the rewind's
+  [reset](#a-rewind-takes-the-worktree-back), so the caller's files merge into the worktree the turn
+  will run on.
+- **Nothing to do** when the conversation has no worktree yet (its reads already see the caller's
+  files), or when the caller's files are exactly what the last sync — or the conversation's start —
+  took in.
+- **A merge, not an overwrite.** The caller is snapshotted as the conversation's start snapshots it,
+  and a **merge commit** is recorded on the conversation's branch: first parent the subagent's tip,
+  second parent the caller snapshot, merged 3-way against **the last caller state the conversation
+  took in** (the newest sync's snapshot, or the base). The subagent's unpulled commits survive beside
+  the caller's changes, and changes the caller already pulled from the subagent are identical on both
+  sides and merge cleanly. The worktree is left checked out at the merge.
+- **The subagent's own uncommitted changes** (a background job that finished between turns) are
+  committed first as its own work, subject `Changes made outside a tool call`.
+- **The subagent is told.** When a merge changed files, one user message is appended **last** before
+  the turn runs — after any prompt, correction or replacement:
+
+  > The caller changed 3 files since your last turn (+41 −7): README.md, src/lib.rs, src/new.rs. Your
+  > worktree now has their versions — re-read before relying on what you read earlier.
+
+  At most 20 paths, then `and N more`; a path holding a control character is shown quoted. It appears
+  in the outcome's `messages` like any other message. A merge also lets the subagent read a file again
+  that it read before, without the read being refused as a repeat.
+- **The outcome reports it**, absent when nothing was merged:
+
+  ```json
+  "worktreeSync": {
+    "commit": "7d1e0aa",
+    "files": { "created": 1, "updated": 2, "removed": 0 },
+    "lines": { "added": 41, "removed": 7 },
+    "paths": ["README.md", "src/lib.rs", "src/new.rs"],
+    "morePaths": 0
+  }
+  ```
+
+  `paths` are sorted, at most 20; `morePaths` counts the rest. When the caller changed only by what it
+  had already pulled from the subagent, the merge is recorded (so the next sync merges against it) but
+  changes no file, and nothing is reported or announced.
+- **A conflict refuses the turn.** When the caller's changes and the subagent's unpulled work touch the
+  same lines, nothing is merged, the branch and worktree are left as they were (uncommitted work stays
+  uncommitted), and the turn does not run — no model call is made. The refusal names the conflicted
+  paths (at most 20, then `and N more`) and the ways forward: pull the subagent's commits first
+  (`subagent_pull`), change the files, or resume with `syncWorktree: false`. A resume that rewound
+  stays rewound (and its worktree reset), and the refusal says so — the conversation is consistent,
+  not as it was before the call.
+- **`syncWorktree`** (boolean, default `true`) on `subagent_prompt` and `subagent_resume`. `false` runs
+  the turn on the conversation worktree as it stands. A non-boolean is refused by name.
+- **The caller is only read.** Its worktree, index and branch are never touched by a sync.
+
+On the wire it is `ConversationWorktree { sync }` (`SyncOp`), answered `{"sync": {…}}`,
+`{"sync": null}` when nothing was merged, or `{"conflicts": [≤ 20 paths], "moreConflicts": n}`.
+
+### A caller's merged changes are never the subagent's work
+
+The subagent's commits are the branch's **first-parent line without merge commits**. Every operation
+that lists the subagent's work reads that one listing:
+
+- `subagent_pull` and `subagent_end` apply only subagent commits — never a sync merge — so the caller
+  is never handed its own changes back;
+- a rewind's reset targets subagent commits only, and `droppedCommits` names subagent commits only; a
+  reset past a sync drops that sync too, and the next turn's sync takes the caller's files in again;
+- `subagent_diff` takes subagent commits (or the base) as **named** bounds, and refuses a merge commit
+  as one; an omitted `to` is the branch tip even when the tip is a sync merge. The diff stays a tree
+  diff, so a range that spans a sync includes the caller's merged changes, and the answer says so with
+  `"includesCallerChanges": true`.
 
 ### A rewind takes the worktree back
 
@@ -419,8 +499,8 @@ longer explains. So a rewind **also resets the conversation's worktree**, by def
 - **It happens before the resumed turn's first model call**, so the subagent's first read sees the
   reset tree.
 - **A failed reset refuses the resume** before the transcript is rewound: the conversation is exactly
-  as it was, and the error says why. A target that is not a commit of the conversation's branch is
-  refused before anything moves.
+  as it was, and the error says why. A target that is not one of the subagent's commits — a sync merge
+  included — is refused before anything moves.
 - A caller's **`replacement`** is never dispatched, so it makes no commit; a reset to a point after a
   replacement lands on the last real commit.
 - Nothing reaches the caller's worktree: the reset moves only the conversation's own tree, and
@@ -440,7 +520,7 @@ recorded it; this tool shows the change itself, so a caller can look before it e
 - **`from` is exclusive, `to` is inclusive** — git's `from..to`, so the same two hashes given to
   `git diff` give the same answer. Both are short hashes: the conversation's base, or a
   `worktreeChange.commit` still on its branch. An omitted `from` is the base; an omitted `to` is the
-  branch tip, so no arguments diffs everything since the base.
+  branch tip — a sync merge included — so no arguments diffs everything since the base.
 - **The reply**:
 
   ```json
@@ -448,15 +528,19 @@ recorded it; this tool shows the change itself, so a caller can look before it e
     "files": { "created": 1, "updated": 2, "removed": 0 },
     "lines": { "added": 41, "removed": 7 },
     "diff": "diff --git a/src/lib.rs b/src/lib.rs\n…",
-    "truncated": false }
+    "truncated": false,
+    "includesCallerChanges": false }
   ```
+
+  `includesCallerChanges` is `true` when the range spans a [caller sync](#a-callers-merged-changes-are-never-the-subagents-work):
+  the text and the counts then include what the caller changed, not only what the subagent did.
 
 - **The text is capped at 64 KiB**, cut at a line boundary, with `truncated: true`. The counts always
   describe the whole range, so a truncated reply still says how large the change is.
 - **Binary changes** show as git's `Binary files … differ` line: the text is git's own, produced
   without `--binary`, so no binary payload is carried.
 - **Refusals**, each naming what was wrong: a commit that is not in the conversation, including one a
-  rewind dropped from the branch; a `from` that is not an ancestor of `to`; a conversation with no
+  rewind dropped from the branch, and a named sync merge; a `from` that is not an ancestor of `to`; a conversation with no
   worktree (it never made a mutating call); an unknown `sessionId`.
 - **Read-only.** Nothing is written to either worktree, and the tool takes no lock on the
   conversation, so it answers while a turn is running.
@@ -474,7 +558,7 @@ caller's worktree while the conversation carries on; `subagent_end` takes the sa
 
 - **Both bounds are inclusive** — the commits a pull names are the commits it applies (unlike
   `subagent_diff`'s `from..to`). Both are short hashes of commits on the conversation's branch,
-  `worktreeChange.commit` values; the base is not pullable. An omitted `from` is the earliest commit
+  `worktreeChange.commit` values; the base and a sync merge are not pullable. An omitted `from` is the earliest commit
   not yet pulled, an omitted `to` is the branch tip.
 - **Each commit is applied as its own 3-way apply**, in order, as uncommitted changes, so a conflict
   (markers in the file, path in `conflicts`) is attributable to one commit.
@@ -510,12 +594,17 @@ worktree without recording them in the ledger. Mechanics:
   [`docs/dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md`](../../dev/todo/2026-09-30-an-abandoned-subagent-conversation-leaves-its-branch.md).
 - Daemon-run conversations still write the session worktree —
   [`docs/dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md`](../../dev/todo/2026-09-30-daemon-run-subagent-conversations-still-write-the-session-worktree.md).
-- Over the jail host bridge the session a conversation request names is not checked host-side —
-  [`docs/dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md`](../../dev/todo/2026-10-01-a-jail-can-name-another-sessions-conversation-worktree-over-the-host-bridge.md).
 - `subagent_end` can race a prompt arriving between its pending check and the retire —
   [`docs/dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md`](../../dev/todo/2026-10-01-subagent-end-races-a-prompt-and-ignores-a-failed-cancel.md).
 - A range pull that fails part-way (a git error after some commits applied) reports the error and
   records none of the commits it applied, so a retry applies them again.
+- A background job the subagent started does not take the worktree's lock, so a write it makes while
+  a caller sync runs can be lost, or committed as a later turn's work — backlog entry *A background
+  job can race the caller sync*.
+- Every merge on the branch's first-parent line is read as a caller sync, so a merge a host-run
+  subagent made itself with `git merge` would be left out of every pull and taken as the last caller
+  state; a jailed subagent cannot make one — backlog entry *A merge the subagent makes itself is read
+  as a caller sync*.
 
 ## Acceptance Criteria
 
@@ -782,6 +871,31 @@ fully migrated onto the array model.
 71. `subagent_pull` is advertised and allowlisted in the sandbox recipes exactly where
     `subagent_cancel` is.
 
+### Caller sync (`tddy-subagent-worktree`, `tddy-discovery`, `tddy-tools`, `tddy-session-lifecycle`)
+
+72. ✅ A prompt or resume after the caller edited a file runs the turn on a worktree holding the
+    caller's edit.
+73. ✅ The subagent's unpulled commits survive the sync; the merge's first parent is the subagent's
+    tip.
+74. ✅ Changes the caller already pulled merge without conflict.
+75. ✅ Nothing is merged, and no notice is sent, when the caller's files have not changed since the
+    last sync — or when the conversation has no worktree.
+76. ✅ A conflict refuses the turn before any model call, names every conflicted path (at most 20,
+    then a count), and leaves the branch and worktree as they were; after a rewind the refusal says
+    the rewind stands.
+77. ✅ The notice names the changed paths (at most 20, then a count) and is the last message before
+    the turn.
+78. ✅ `worktreeSync` reports the merge commit, counts and paths; absent when nothing merged.
+79. ✅ `syncWorktree: false` on prompt or resume skips the sync; both tools advertise it as a boolean.
+80. ✅ A rewind's reset runs before the sync; a reset past a sync drops it and the next sync takes the
+    caller's files in again.
+81. ✅ Pulls never apply a sync merge; `droppedCommits` and reset targets are subagent commits only.
+82. ✅ `subagent_diff` refuses a merge commit as a named bound, diffs to a tip that is a sync merge
+    when `to` is omitted, and marks a range that spans a sync with `includesCallerChanges`.
+83. ✅ Uncommitted changes in the conversation worktree are committed as the subagent's before a sync.
+84. ✅ A relayed `ConversationWorktree` call naming a session other than its jail's is refused with
+    `PermissionDenied`, and nothing reaches that session's worktree.
+
 Verified at the request seams and against real git repositories; **no test runs a real jail end to
 end** (this needs a sandbox the development host cannot start).
 
@@ -807,7 +921,9 @@ end** (this needs a sandbox the development host cannot start).
 - Per-tool replacement policies beyond a flat replaced-set (e.g. partial replacement of `Grep` for
   some file types only).
 - **Daemon-run conversations** (`open_local`, `open_owned`, a peer's `RemoteAgentSession`) have no
-  conversation worktree; their calls still run on the session worktree.
+  conversation worktree; their calls still run on the session worktree, and nothing is synced.
+- Syncing **during** a turn — a caller editing while a turn runs is picked up by the next turn.
+- Resolving a caller-sync conflict automatically.
 - **Sweeping orphaned conversation worktrees and branches.**
 - Un-applying a pulled commit from the caller's worktree, and persisting the ledger across a `tddy-tools` restart.
 - Diffing against the caller's worktree, and path filters on `subagent_diff`.

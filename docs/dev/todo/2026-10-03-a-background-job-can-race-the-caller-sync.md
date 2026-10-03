@@ -1,7 +1,7 @@
 # 2026-10-03 — A background job can race the caller sync
 
 **Category:** Known gap — developer consented 2026-10-03
-**Source:** changeset [`2026-10-03-agent-worktree-caller-sync`](../1-WIP/2026-10-03-agent-worktree-caller-sync.md)
+**Source:** changeset [`2026-10-03-agent-worktree-caller-sync`](../changesets/2026-10-03-agent-worktree-caller-sync.md)
 (`/validate-changes` first pass, ⚠ warning)
 
 Before every subagent turn, `ConversationWorktree::sync_with_caller`

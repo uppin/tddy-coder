@@ -1,7 +1,7 @@
 //! Acceptance: `ConversationWorktree { sync }` merges the session worktree's current files into a
 //! conversation's worktree before a turn.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-03-agent-worktree-caller-sync.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

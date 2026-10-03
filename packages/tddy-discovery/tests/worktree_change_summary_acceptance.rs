@@ -4,7 +4,7 @@
 //! tool's result plus `worktreeChange`. These tests pin that the change reaches the caller — on the
 //! tool-role descriptor of the turn outcome — and that a read reports none.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 use std::pin::Pin;
 
