@@ -312,3 +312,92 @@ fn unresolvable_without_a_server(plan: &Plan) -> impl Iterator<Item = Finding> +
             ),
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A_SYMBOL_OP: &str = r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/a.rs","path":"A"},"name":"B"}"#;
+    const AN_ITEM_OP: &str = r#"{"op":"extract_method","anchor":{"kind":"item","item":"a::f","file":"src/a.rs","start":{"line":2,"col":5},"end":{"line":3,"col":6},"fingerprint":"sha256:written","hint":{"line":20,"col":5}},"name":"g"}"#;
+    const AN_ITEMS_OP: &str = r#"{"op":"extract_module","anchor":{"kind":"items","file":"src/a.rs","items":["a::f"],"fingerprints":["sha256:written"]},"name":"m"}"#;
+
+    /// A workspace holding `plan.jsonl` of the operations given, and the options that name it.
+    fn a_workspace_with_a_plan_of(ops: &[&str]) -> (tempfile::TempDir, Options) {
+        let root = tempfile::tempdir().unwrap();
+        let plan = root.path().join("plan.jsonl");
+        std::fs::write(
+            &plan,
+            format!("{{\"v\":1,\"snapshot\":{{}}}}\n{}\n", ops.join("\n")),
+        )
+        .unwrap();
+        let options = Options {
+            command: crate::runner::Command::Snapshot,
+            target: Some(plan),
+            ..Options::default()
+        };
+        (root, options)
+    }
+
+    fn snapshotted_without_a_server(
+        options: Options,
+        root: &Path,
+    ) -> std::result::Result<SnapshotRewrite, String> {
+        snapshot_resolving(root, options, None, CancellationToken::new())
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_plan_with_no_item_anchors_is_snapshotted_without_a_language_server() {
+        // Given a plan of a symbol anchor only, and no language server
+        let (root, options) = a_workspace_with_a_plan_of(&[A_SYMBOL_OP]);
+
+        // When it is snapshotted
+        let rewrite = snapshotted_without_a_server(options, root.path());
+
+        // Then it succeeds and reports no stale operations, because nothing was resolved
+        assert_eq!(rewrite.map(|rewrite| rewrite.stale), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_plan_with_an_item_anchor_is_not_snapshotted_without_a_language_server() {
+        // Given a plan with an item anchor, and no language server
+        let (root, options) = a_workspace_with_a_plan_of(&[A_SYMBOL_OP, AN_ITEM_OP]);
+        let before = std::fs::read_to_string(root.path().join("plan.jsonl")).unwrap();
+
+        // When it is snapshotted
+        let rewrite = snapshotted_without_a_server(options, root.path());
+
+        // Then it is refused for want of a server, and the plan file is as it was
+        assert_eq!(
+            rewrite.map(|rewrite| rewrite.stale),
+            Err(
+                "plan is malformed: snapshot of a plan with item anchors requires a rust-analyzer \
+                 LSP session"
+                    .to_string()
+            )
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("plan.jsonl")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn a_plan_with_an_items_anchor_is_not_snapshotted_without_a_language_server() {
+        // Given a plan whose only item anchor is a run of items, and no language server
+        let (root, options) = a_workspace_with_a_plan_of(&[AN_ITEMS_OP]);
+
+        // When it is snapshotted
+        let rewrite = snapshotted_without_a_server(options, root.path());
+
+        // Then it is refused for want of a server
+        assert_eq!(
+            rewrite.map(|rewrite| rewrite.stale),
+            Err(
+                "plan is malformed: snapshot of a plan with item anchors requires a rust-analyzer \
+                 LSP session"
+                    .to_string()
+            )
+        );
+    }
+}

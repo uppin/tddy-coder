@@ -399,4 +399,151 @@ mod tests {
             "   indexing: loading crate graph (42%)"
         );
     }
+
+    #[test]
+    fn lists_no_stale_lines_for_a_plan_with_no_stale_operations() {
+        // Given no stale operations
+        // When they are rendered
+        let lines = stale_operations(&[]);
+
+        // Then there is nothing to say
+        assert_eq!(lines, Vec::<String>::new());
+    }
+
+    #[test]
+    fn states_each_stale_operation_with_its_reason_on_a_line_of_its_own() {
+        // Given two stale operations
+        let stale = [("b1", "item changed"), ("b2", "edited by first.jsonl#a1")];
+
+        // When they are rendered
+        let lines = stale_operations(&stale);
+
+        // Then each reads as an indented `stale <operation>: <reason>` line
+        assert_eq!(
+            lines,
+            [
+                "  stale b1: item changed",
+                "  stale b2: edited by first.jsonl#a1"
+            ]
+        );
+    }
+
+    #[test]
+    fn says_so_when_no_plans_are_loaded() {
+        // Given a store holding nothing
+        // When its plans are listed
+        let lines = loaded_plans(&[]);
+
+        // Then the statement that it holds none is the whole answer
+        assert_eq!(lines, ["no plans loaded"]);
+    }
+
+    #[test]
+    fn lists_sound_plans_one_line_each_and_marks_one_not_yet_written_back() {
+        // Given a clean plan and a changed one, neither with stale operations
+        let held: [HeldPlanRow; 2] = [
+            ("first.jsonl", 3, false, Vec::new()),
+            ("second.jsonl", 1, true, Vec::new()),
+        ];
+
+        // When they are listed
+        let lines = loaded_plans(&held);
+
+        // Then each is one line, and only the changed one says it is not yet written back
+        assert_eq!(
+            lines,
+            [
+                "first.jsonl: 3 operation(s)",
+                "second.jsonl: 1 operation(s), not yet written back"
+            ]
+        );
+    }
+
+    #[test]
+    fn lists_a_plans_stale_operations_under_its_line() {
+        // Given a plan with two stale operations, and a sound one after it
+        let held: [HeldPlanRow; 2] = [
+            (
+                "second.jsonl",
+                4,
+                true,
+                vec![("b1", "item changed"), ("b3", "item not found in src/a.rs")],
+            ),
+            ("third.jsonl", 2, false, Vec::new()),
+        ];
+
+        // When they are listed
+        let lines = loaded_plans(&held);
+
+        // Then the stale operations follow their own plan's line and no other
+        assert_eq!(
+            lines,
+            [
+                "second.jsonl: 4 operation(s), not yet written back",
+                "  stale b1: item changed",
+                "  stale b3: item not found in src/a.rs",
+                "third.jsonl: 2 operation(s)"
+            ]
+        );
+    }
+
+    fn a_snapshot_rewrite(
+        rewritten: bool,
+        stale: Vec<crate::plan_store::OpStaleness>,
+    ) -> SnapshotRewrite {
+        SnapshotRewrite {
+            plan: "plan.jsonl".to_string(),
+            paths: 3,
+            rewritten,
+            stale,
+        }
+    }
+
+    #[test]
+    fn a_snapshot_of_a_plan_with_no_stale_operations_says_only_what_it_did_to_the_header() {
+        // Given a rewrite that changed the header and found nothing stale
+        let rewrite = a_snapshot_rewrite(true, Vec::new());
+
+        // When it is rendered
+        let lines = snapshot_rewrite(&rewrite);
+
+        // Then there is one line
+        assert_eq!(
+            lines,
+            ["rewrote the snapshot header of plan.jsonl over 3 file(s)"]
+        );
+    }
+
+    #[test]
+    fn a_snapshot_names_each_stale_operation_after_the_header_line() {
+        // Given a rewrite that left the header alone and found two operations stale
+        let rewrite = a_snapshot_rewrite(
+            false,
+            vec![
+                crate::plan_store::OpStaleness {
+                    op: crate::OpId("b1".to_string()),
+                    reason: crate::plan_store::StaleReason::ItemChanged,
+                },
+                crate::plan_store::OpStaleness {
+                    op: crate::OpId("b2".to_string()),
+                    reason: crate::plan_store::StaleReason::ItemNotFound {
+                        file: "src/a.rs".to_string(),
+                    },
+                },
+            ],
+        );
+
+        // When it is rendered
+        let lines = snapshot_rewrite(&rewrite);
+
+        // Then the header line is followed by one line per stale operation, in order
+        assert_eq!(
+            lines,
+            [
+                "plan.jsonl already snapshots the working tree over 3 file(s)",
+                "  stale b1: item changed",
+                "  stale b2: item not found in src/a.rs"
+            ]
+        );
+    }
 }

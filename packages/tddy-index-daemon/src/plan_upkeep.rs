@@ -29,19 +29,14 @@ use crate::tree_changes::FileChange;
 /// A deleted file is not passed on: nothing can be resolved in it.
 // TODO(live-plans): an item anchor in a deleted file should go stale as `item not found`; the
 // resolver has no answer for a file that is not there, so the store would have to be told apart
-// from "changed".
+// from "changed". See docs/dev/todo/2026-10-03-live-plans-three-gaps-in-staleness-reporting-and-snapshot-routing.md.
 pub(crate) async fn reresolve_loaded_plans(
     store: SharedPlanStore,
     root: &Path,
     client: &Arc<LspClient>,
     changes: &[(PathBuf, FileChange)],
 ) -> Result<(), Status> {
-    let files: Vec<String> = changes
-        .iter()
-        .filter(|(path, change)| *change != FileChange::Deleted && is_rust_source(path))
-        .filter_map(|(path, _)| path.strip_prefix(root).ok())
-        .map(|relative| relative.display().to_string())
-        .collect();
+    let files = rust_files_to_reresolve(root, changes);
     if files.is_empty() {
         return Ok(());
     }
@@ -67,6 +62,17 @@ pub(crate) async fn reresolve_loaded_plans(
     .map_err(|refusal| status_of(&refusal))
 }
 
+/// The files a re-resolution cares about, as paths relative to `root`: Rust sources the tree still
+/// has. A deleted file has nothing to resolve in, and a path outside `root` is not one a plan names.
+fn rust_files_to_reresolve(root: &Path, changes: &[(PathBuf, FileChange)]) -> Vec<String> {
+    changes
+        .iter()
+        .filter(|(path, change)| *change != FileChange::Deleted && is_rust_source(path))
+        .filter_map(|(path, _)| path.strip_prefix(root).ok())
+        .map(|relative| relative.display().to_string())
+        .collect()
+}
+
 fn is_rust_source(path: &Path) -> bool {
     path.extension().is_some_and(|extension| extension == "rs")
 }
@@ -79,4 +85,71 @@ fn logged_progress() -> tddy_code_restructuring::backends::rust::ProgressSink {
 
 fn logged_trace(line: &str) {
     log::debug!(target: "tddy_index_daemon::plan_upkeep", "trace: {line}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn changed(path: &str, change: FileChange) -> (PathBuf, FileChange) {
+        (PathBuf::from(path), change)
+    }
+
+    #[test]
+    fn a_created_or_changed_rust_file_is_re_resolved_by_its_path_under_the_root() {
+        // Given a created and a changed Rust source under the root
+        let changes = [
+            changed("/repo/src/new.rs", FileChange::Created),
+            changed("/repo/crates/a/src/lib.rs", FileChange::Changed),
+        ];
+
+        // When the files a re-resolution cares about are selected
+        let files = rust_files_to_reresolve(Path::new("/repo"), &changes);
+
+        // Then both are named relative to the root, in the order they changed
+        assert_eq!(files, ["src/new.rs", "crates/a/src/lib.rs"]);
+    }
+
+    #[test]
+    fn a_deleted_rust_file_is_not_re_resolved() {
+        // Given a Rust source that was deleted
+        let changes = [changed("/repo/src/gone.rs", FileChange::Deleted)];
+
+        // When the files a re-resolution cares about are selected
+        let files = rust_files_to_reresolve(Path::new("/repo"), &changes);
+
+        // Then nothing is selected, since nothing can be resolved in it
+        assert_eq!(files, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_file_that_is_not_rust_source_is_not_re_resolved() {
+        // Given a changed manifest, a changed plan and a file with no extension
+        let changes = [
+            changed("/repo/Cargo.toml", FileChange::Changed),
+            changed("/repo/plan.jsonl", FileChange::Changed),
+            changed("/repo/rs", FileChange::Changed),
+        ];
+
+        // When the files a re-resolution cares about are selected
+        let files = rust_files_to_reresolve(Path::new("/repo"), &changes);
+
+        // Then nothing is selected
+        assert_eq!(files, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_rust_file_outside_the_root_is_not_re_resolved() {
+        // Given a changed Rust source outside the root, and one inside
+        let changes = [
+            changed("/elsewhere/src/lib.rs", FileChange::Changed),
+            changed("/repo/src/lib.rs", FileChange::Changed),
+        ];
+
+        // When the files a re-resolution cares about are selected
+        let files = rust_files_to_reresolve(Path::new("/repo"), &changes);
+
+        // Then only the one inside is selected
+        assert_eq!(files, ["src/lib.rs"]);
+    }
 }

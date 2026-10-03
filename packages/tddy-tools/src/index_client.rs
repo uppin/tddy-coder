@@ -52,7 +52,7 @@ pub(crate) async fn run_restructure(args: RestructureArgs) -> Result<()> {
 /// through a language server, which this process starts for itself, cold, as an `apply` with no
 /// daemon does.
 // TODO(live-plans): a daemon holds that index warm; routing an item-anchored snapshot to it needs a
-// `Snapshot` RPC, which this change does not add.
+// `Snapshot` RPC, which this change does not add. See docs/dev/todo/2026-10-03-live-plans-three-gaps-in-staleness-reporting-and-snapshot-routing.md.
 fn answered_without_an_index(command: &RestructureCommand) -> bool {
     match command {
         RestructureCommand::Snapshot(_) => true,

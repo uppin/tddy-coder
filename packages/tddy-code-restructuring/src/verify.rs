@@ -76,6 +76,9 @@ impl Comparison {
 }
 
 mod statements;
+// Post-move fix: the engine's named facade left out this `pub` item because nothing references it,
+// which removed it from the crate's public path; see docs/dev/todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md § 7.
+pub use statements::statements;
 
 mod tokens;
 pub use tokens::token_difference;
