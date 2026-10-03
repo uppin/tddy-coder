@@ -13,12 +13,17 @@
 
 use std::sync::Arc;
 
+use tddy_index_daemon::proto::code_index as index;
+use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    CodeNavigationService, CodeNavigationServiceServer, DefinitionRequest, DefinitionResponse,
-    HoverRequest, HoverResponse, ReferencesRequest, ReferencesResponse,
+    CodeLocation, CodeNavigationService, CodeNavigationServiceServer, DefinitionRequest,
+    DefinitionResponse, HoverRequest, HoverResponse, ReferencesRequest, ReferencesResponse,
+    SourcePosition, SourceRange,
 };
+use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
+use tonic::transport::Channel;
 
 use crate::index_daemon::IndexDaemonRegistry;
 
@@ -31,12 +36,18 @@ pub const CODE_NAVIGATION_SERVICE: &str = "code_navigation.CodeNavigationService
 pub struct CodeNavigationServiceImpl {
     /// Whose `resolve_listed_worktree` gates every request, so this service can never reach a path
     /// the worktree service would refuse to read.
-    #[allow(dead_code)]
-    // TODO(code-navigation): read by the authorisation every method starts with.
     worktrees: Arc<WorktreeServiceImpl>,
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
-    #[allow(dead_code)] // TODO(code-navigation): dialled through `connect` by every forward.
     index_daemon: Option<IndexDaemonRegistry>,
+}
+
+/// An authorised request, ready to be asked of the index: a client on the index daemon's channel
+/// and the question in the index's own terms.
+struct Forward {
+    client: CodeIndexServiceClient<Channel>,
+    workspace_root: String,
+    file: String,
+    position: Option<index::SourcePosition>,
 }
 
 impl CodeNavigationServiceImpl {
@@ -51,6 +62,39 @@ impl CodeNavigationServiceImpl {
             index_daemon,
         }
     }
+
+    /// The one path every method takes: authorise the worktree as `WorktreeService` does, refuse a
+    /// `rel_path` that leaves it, require the index daemon, and dial it — which starts it on the
+    /// first request. Nothing is started for a request that fails an earlier step.
+    async fn authorise_and_connect(
+        &self,
+        session_token: &str,
+        project_id: &str,
+        worktree_path: &str,
+        rel_path: &str,
+        position: Option<SourcePosition>,
+    ) -> Result<Forward, Status> {
+        let root =
+            self.worktrees
+                .resolve_listed_worktree(session_token, project_id, worktree_path)?;
+        let file = validate_rel_path_shape(rel_path)?;
+        let registry = self.index_daemon.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "code navigation needs the index daemon, and this daemon has no `index_daemon:` \
+                 configuration section",
+            )
+        })?;
+        let channel = registry
+            .connect()
+            .await
+            .map_err(|err| Status::unavailable(format!("index daemon: {err}")))?;
+        Ok(Forward {
+            client: CodeIndexServiceClient::new(channel),
+            workspace_root: root.display().to_string(),
+            file,
+            position: position.map(index_position),
+        })
+    }
 }
 
 #[async_trait::async_trait]
@@ -58,35 +102,119 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
     /// Where the symbol at a position is defined.
     async fn definition(
         &self,
-        _request: Request<DefinitionRequest>,
+        request: Request<DefinitionRequest>,
     ) -> Result<Response<DefinitionResponse>, Status> {
-        // TODO(code-navigation): authorise, require the registry, `connect`, forward
-        // `code_index.Definition` with the listed worktree as `workspace_root`, map the answer.
-        Err(Status::unimplemented(
-            "Definition is not served yet — TODO(code-navigation)",
-        ))
+        let r = request.into_inner();
+        let mut forward = self
+            .authorise_and_connect(
+                &r.session_token,
+                &r.project_id,
+                &r.worktree_path,
+                &r.rel_path,
+                r.position,
+            )
+            .await?;
+        let answer = forward
+            .client
+            .definition(index::DefinitionRequest {
+                workspace_root: forward.workspace_root,
+                file: forward.file,
+                position: forward.position,
+            })
+            .await
+            .map_err(tddy_service::to_rpc_status)?
+            .into_inner();
+        Ok(Response::new(DefinitionResponse {
+            locations: answer.locations.into_iter().map(web_location).collect(),
+        }))
     }
 
     /// Every reference to the symbol at a position.
     async fn references(
         &self,
-        _request: Request<ReferencesRequest>,
+        request: Request<ReferencesRequest>,
     ) -> Result<Response<ReferencesResponse>, Status> {
-        // TODO(code-navigation): as `definition`, forwarding `code_index.References`.
-        Err(Status::unimplemented(
-            "References is not served yet — TODO(code-navigation)",
-        ))
+        let r = request.into_inner();
+        let mut forward = self
+            .authorise_and_connect(
+                &r.session_token,
+                &r.project_id,
+                &r.worktree_path,
+                &r.rel_path,
+                r.position,
+            )
+            .await?;
+        let answer = forward
+            .client
+            .references(index::ReferencesRequest {
+                workspace_root: forward.workspace_root,
+                file: forward.file,
+                position: forward.position,
+            })
+            .await
+            .map_err(tddy_service::to_rpc_status)?
+            .into_inner();
+        Ok(Response::new(ReferencesResponse {
+            locations: answer.locations.into_iter().map(web_location).collect(),
+        }))
     }
 
     /// The hover text of the symbol at a position.
     async fn hover(
         &self,
-        _request: Request<HoverRequest>,
+        request: Request<HoverRequest>,
     ) -> Result<Response<HoverResponse>, Status> {
-        // TODO(code-navigation): as `definition`, forwarding `code_index.Hover`.
-        Err(Status::unimplemented(
-            "Hover is not served yet — TODO(code-navigation)",
-        ))
+        let r = request.into_inner();
+        let mut forward = self
+            .authorise_and_connect(
+                &r.session_token,
+                &r.project_id,
+                &r.worktree_path,
+                &r.rel_path,
+                r.position,
+            )
+            .await?;
+        let answer = forward
+            .client
+            .hover(index::HoverRequest {
+                workspace_root: forward.workspace_root,
+                file: forward.file,
+                position: forward.position,
+            })
+            .await
+            .map_err(tddy_service::to_rpc_status)?
+            .into_inner();
+        Ok(Response::new(HoverResponse {
+            markdown: answer.markdown,
+        }))
+    }
+}
+
+fn index_position(position: SourcePosition) -> index::SourcePosition {
+    index::SourcePosition {
+        line: position.line,
+        column: position.column,
+    }
+}
+
+fn web_position(position: index::SourcePosition) -> SourcePosition {
+    SourcePosition {
+        line: position.line,
+        column: position.column,
+    }
+}
+
+/// The index's location in the web's vocabulary: `file` becomes `rel_path` and `outside_root`
+/// becomes `outside_worktree`; the path is already relative to the root when inside it and
+/// absolute otherwise, which is what `rel_path` is documented to hold.
+fn web_location(location: index::CodeLocation) -> CodeLocation {
+    CodeLocation {
+        rel_path: location.file,
+        range: location.range.map(|range| SourceRange {
+            start: range.start.map(web_position),
+            end: range.end.map(web_position),
+        }),
+        outside_worktree: location.outside_root,
     }
 }
 
@@ -97,5 +225,81 @@ pub fn build_code_navigation_entry(service: CodeNavigationServiceImpl) -> tddy_r
     tddy_rpc::ServiceEntry {
         name: CODE_NAVIGATION_SERVICE,
         service: Arc::new(server) as Arc<dyn tddy_rpc::RpcService>,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    #[test]
+    fn a_location_inside_the_root_maps_field_for_field() {
+        // Given an index location inside the workspace root
+        let inside = index::CodeLocation {
+            file: "src/lib.rs".to_string(),
+            range: Some(index::SourceRange {
+                start: Some(index::SourcePosition { line: 3, column: 1 }),
+                end: Some(index::SourcePosition { line: 3, column: 9 }),
+            }),
+            outside_root: false,
+        };
+
+        // When it is mapped for the web
+        let mapped = web_location(inside);
+
+        // Then it keeps its path and range and is not marked outside the worktree
+        assert_eq!(
+            mapped,
+            CodeLocation {
+                rel_path: "src/lib.rs".to_string(),
+                range: Some(SourceRange {
+                    start: Some(SourcePosition { line: 3, column: 1 }),
+                    end: Some(SourcePosition { line: 3, column: 9 }),
+                }),
+                outside_worktree: false,
+            }
+        );
+    }
+
+    #[test]
+    fn a_location_outside_the_root_is_marked_outside_the_worktree() {
+        // Given an index location in a dependency, which the index names by absolute path
+        let dependency = index::CodeLocation {
+            file: "/home/u/.cargo/registry/src/serde/lib.rs".to_string(),
+            range: None,
+            outside_root: true,
+        };
+
+        // When it is mapped for the web
+        let mapped = web_location(dependency);
+
+        // Then the pane is told not to offer opening it, and still gets the absolute path
+        assert!(mapped.outside_worktree);
+        assert_eq!(mapped.rel_path, "/home/u/.cargo/registry/src/serde/lib.rs");
+    }
+
+    #[test]
+    fn a_rel_path_that_leaves_the_worktree_is_refused_before_anything_is_forwarded() {
+        for escaping in ["../secret.rs", "src/../../secret.rs", "/etc/passwd"] {
+            // Given a rel_path that is traversal or absolute
+            // When its shape is checked, as every method does before dialling the index
+            let refusal = validate_rel_path_shape(escaping)
+                .expect_err("a path that leaves the worktree is refused");
+
+            // Then it is an invalid argument
+            assert_eq!(
+                refusal.code(),
+                tddy_rpc::Code::InvalidArgument,
+                "{escaping}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_plain_relative_path_is_accepted_as_it_is() {
+        let accepted = validate_rel_path_shape("src/main.rs").expect("a relative path");
+        assert_eq!(Path::new(&accepted), Path::new("src/main.rs"));
     }
 }

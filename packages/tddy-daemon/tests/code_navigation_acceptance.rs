@@ -29,7 +29,8 @@ use tddy_index_daemon::proto::code_index::{CodeIndexService, CodeIndexServiceTon
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_server::CodeIndexServiceServer as TonicCodeIndexServiceServer;
 use tddy_index_daemon::EventStream;
 use tddy_service::proto::code_navigation::{
-    CodeLocation, DefinitionRequest, DefinitionResponse, SourcePosition, SourceRange,
+    CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse,
+    ReferencesRequest, ReferencesResponse, SourcePosition, SourceRange,
 };
 use tddy_task::TaskRegistry;
 use tddy_worktree_service::project_storage::{self, ProjectData};
@@ -145,20 +146,28 @@ fn canonical(path: &Path) -> String {
 // ---------------------------------------------------------------------------------------------
 // The index daemon: a stand-in process in front of a fake `code_index` server
 
-/// A `code_index` server that answers `Definition` with one canned location and records every
-/// request it was asked. Nothing else on the service is part of what this suite exercises.
+/// A `code_index` server that answers `Definition` and `References` with one canned location list
+/// and `Hover` with one canned text, and records every request it was asked. Nothing else on the
+/// service is part of what this suite exercises.
 #[derive(Clone)]
 struct AFakeIndex {
     definition_answer: index::DefinitionResponse,
     definitions_asked: Arc<Mutex<Vec<index::DefinitionRequest>>>,
+    references_asked: Arc<Mutex<Vec<index::ReferencesRequest>>>,
+    hovers_asked: Arc<Mutex<Vec<index::HoverRequest>>>,
 }
 
 fn a_fake_index_answering_definitions_with(answer: index::DefinitionResponse) -> AFakeIndex {
     AFakeIndex {
         definition_answer: answer,
         definitions_asked: Arc::new(Mutex::new(Vec::new())),
+        references_asked: Arc::new(Mutex::new(Vec::new())),
+        hovers_asked: Arc::new(Mutex::new(Vec::new())),
     }
 }
+
+/// The hover text the fake index answers every hover with.
+const THE_INDEX_S_HOVER_OF_FOO: &str = "```rust\nfn foo()\n```";
 
 impl AFakeIndex {
     fn definitions_it_was_asked(&self) -> Vec<index::DefinitionRequest> {
@@ -166,6 +175,17 @@ impl AFakeIndex {
             .lock()
             .expect("the request log")
             .clone()
+    }
+
+    fn references_it_was_asked(&self) -> Vec<index::ReferencesRequest> {
+        self.references_asked
+            .lock()
+            .expect("the request log")
+            .clone()
+    }
+
+    fn hovers_it_was_asked(&self) -> Vec<index::HoverRequest> {
+        self.hovers_asked.lock().expect("the request log").clone()
     }
 }
 
@@ -194,16 +214,28 @@ impl CodeIndexService for AFakeIndex {
 
     async fn references(
         &self,
-        _request: tddy_rpc::Request<index::ReferencesRequest>,
+        request: tddy_rpc::Request<index::ReferencesRequest>,
     ) -> Result<tddy_rpc::Response<index::ReferencesResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.references_asked
+            .lock()
+            .expect("the request log")
+            .push(request.into_inner());
+        Ok(tddy_rpc::Response::new(index::ReferencesResponse {
+            locations: self.definition_answer.locations.clone(),
+        }))
     }
 
     async fn hover(
         &self,
-        _request: tddy_rpc::Request<index::HoverRequest>,
+        request: tddy_rpc::Request<index::HoverRequest>,
     ) -> Result<tddy_rpc::Response<index::HoverResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.hovers_asked
+            .lock()
+            .expect("the request log")
+            .push(request.into_inner());
+        Ok(tddy_rpc::Response::new(index::HoverResponse {
+            markdown: Some(THE_INDEX_S_HOVER_OF_FOO.to_string()),
+        }))
     }
 
     async fn warm(
@@ -581,4 +613,109 @@ async fn the_first_request_starts_the_index_daemon() {
             .map(|running| running.socket_path.clone()),
         Some(host.socket_path())
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_references_request_is_forwarded_and_answered_as_worktree_locations() {
+    // Given a session worktree and an index daemon that knows where `foo` is used
+    let project = a_project_with_a_worktree();
+    let fake = a_fake_index_answering_definitions_with(the_index_s_definition_of_foo());
+    let host = an_index_daemon_host_serving(fake.clone()).await;
+    let entry = the_entry_for(&project, Some(host.registry()));
+
+    // When the pane asks for the references to `foo`
+    let answer: ReferencesResponse = unary_at(
+        &entry,
+        "References",
+        ReferencesRequest {
+            session_token: TEST_TOKEN.to_string(),
+            project_id: project.project_id.clone(),
+            worktree_path: project.worktree_path.clone(),
+            rel_path: "src/main.rs".to_string(),
+            position: the_call_to_foo(),
+        },
+    )
+    .await
+    .expect("a listed worktree's references are answered");
+
+    // Then the index was asked about that file, rooted at the worktree, and its locations arrive
+    assert_eq!(
+        fake.references_it_was_asked(),
+        vec![index::ReferencesRequest {
+            workspace_root: project.worktree_path.clone(),
+            file: "src/main.rs".to_string(),
+            position: Some(index::SourcePosition { line: 2, column: 5 }),
+        }]
+    );
+    assert_eq!(
+        answer
+            .locations
+            .iter()
+            .map(|l| l.rel_path.as_str())
+            .collect::<Vec<_>>(),
+        vec!["src/lib.rs"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_hover_request_is_forwarded_and_its_markdown_returned() {
+    // Given a session worktree and an index daemon with something to say about `foo`
+    let project = a_project_with_a_worktree();
+    let fake = a_fake_index_answering_definitions_with(the_index_s_definition_of_foo());
+    let host = an_index_daemon_host_serving(fake.clone()).await;
+    let entry = the_entry_for(&project, Some(host.registry()));
+
+    // When the pane hovers the call to `foo`
+    let answer: HoverResponse = unary_at(
+        &entry,
+        "Hover",
+        HoverRequest {
+            session_token: TEST_TOKEN.to_string(),
+            project_id: project.project_id.clone(),
+            worktree_path: project.worktree_path.clone(),
+            rel_path: "src/main.rs".to_string(),
+            position: the_call_to_foo(),
+        },
+    )
+    .await
+    .expect("a listed worktree's hover is answered");
+
+    // Then the index was asked about that file, rooted at the worktree, and its text arrives
+    assert_eq!(
+        fake.hovers_it_was_asked(),
+        vec![index::HoverRequest {
+            workspace_root: project.worktree_path.clone(),
+            file: "src/main.rs".to_string(),
+            position: Some(index::SourcePosition { line: 2, column: 5 }),
+        }]
+    );
+    assert_eq!(answer.markdown.as_deref(), Some(THE_INDEX_S_HOVER_OF_FOO));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rel_path_leaving_the_worktree_is_refused_without_asking_the_index() {
+    // Given a listed worktree and a managed index daemon
+    let project = a_project_with_a_worktree();
+    let fake = a_fake_index_answering_definitions_with(the_index_s_definition_of_foo());
+    let host = an_index_daemon_host_serving(fake.clone()).await;
+    let registry = host.registry();
+    let entry = the_entry_for(&project, Some(registry.clone()));
+
+    for escaping in ["../secret.rs", "/etc/passwd"] {
+        // When the pane asks about a file outside the worktree
+        let mut request = a_definition_request(&project, &project.worktree_path);
+        request.rel_path = escaping.to_string();
+        let refusal = unary_at::<_, DefinitionResponse>(&entry, "Definition", request)
+            .await
+            .expect_err("a path leaving the worktree is refused");
+
+        // Then it is refused as invalid, and the index was neither asked nor started
+        assert_eq!(
+            refusal.code(),
+            tddy_rpc::Code::InvalidArgument,
+            "{escaping}"
+        );
+    }
+    assert_eq!(fake.definitions_it_was_asked(), vec![]);
+    assert!(registry.running().await.is_none());
 }
