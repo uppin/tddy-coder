@@ -287,6 +287,7 @@ async fn a_test_binary_move_after_a_module_move_names_the_defining_crate() {
         reexport: None,
         to_file: false,
         also: Vec::new(),
+        group: None,
     };
 
     // When the plan is applied

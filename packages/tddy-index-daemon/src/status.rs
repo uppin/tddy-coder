@@ -49,7 +49,11 @@ pub fn status_of(error: &RestructureError) -> Status {
         | RestructureError::NotAGitWorktree { .. }
         // A tree that did not compile before the plan ran: nothing was written, and the same
         // request fails identically until the tree is repaired.
-        | RestructureError::BaselineDoesNotCompile { .. } => Status::failed_precondition(refusal),
+        | RestructureError::BaselineDoesNotCompile { .. }
+        // A group that did not compile at its end was rolled back: the tree is as the operations
+        // before it left it, and the same request fails identically until the plan or the code
+        // changes.
+        | RestructureError::GroupDoesNotCompile { .. } => Status::failed_precondition(refusal),
         // The wait ended before the index was ready. Nothing here says the plan is wrong, which is
         // the distinction `docs/dev/todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md`
         // records as actively misleading when it is lost.
