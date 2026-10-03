@@ -393,5 +393,22 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         }
     }
 
+    // `type` and `expr` are the two fields that carry Rust syntax; each must be exactly one type or
+    // one expression, or the plan is refused before any server is spawned.
+    if let Some(type_) = op.type_.as_deref() {
+        super::rust_syntax::one_type(type_)?;
+    }
+    if let Some(expr) = op.expr.as_deref() {
+        super::rust_syntax::one_expr(expr)?;
+    }
+
+    // TODO(signature-rewrites): implement — refuse, as malformed and before any server is spawned:
+    // a `change_param_type` with no `name` or no `type`; an `add_param` with no `name`, `type` or
+    // position `variant`; a `reorder_params` / `reorder_call_args` with an empty `order`; a
+    // `change_return_type` with both or neither of `type` and `variant` (or a `variant` other than
+    // `wrap_result` / `wrap_option` / `unwrap`); a call-site op whose anchor is not an item anchor
+    // with a relative range; an `add_call_arg` / `change_call_arg` with no `expr`; and `type`,
+    // `expr` or `order` on an operation that cannot honour it.
+
     Ok(op)
 }

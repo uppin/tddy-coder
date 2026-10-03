@@ -58,7 +58,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 12] = [
+const SUPPORTED: [RefactorKind; 20] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -71,6 +71,14 @@ const SUPPORTED: [RefactorKind; 12] = [
     RefactorKind::MoveTestBinaryToCrate,
     RefactorKind::RemoveUnusedParam,
     RefactorKind::ConvertTupleReturnToStruct,
+    RefactorKind::ChangeParamType,
+    RefactorKind::AddParam,
+    RefactorKind::ReorderParams,
+    RefactorKind::ChangeReturnType,
+    RefactorKind::AddCallArg,
+    RefactorKind::RemoveCallArg,
+    RefactorKind::ChangeCallArg,
+    RefactorKind::ReorderCallArgs,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -349,6 +357,45 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             needs_inference: false,
             relocates_items: false,
         }),
+        _ => None,
+    }
+}
+
+/// The assists behind `change_return_type`'s `variant`, any of which may be the one offered.
+///
+/// One operation, several assists: which one rust-analyzer offers depends on what the declaration
+/// returns now (`unwrap` is `Unwrap Option return type` or `Unwrap Result return type`), so this is
+/// keyed by the variant rather than the kind, and is not one of [`assist_for`]'s arms. All of them
+/// rewrite the declaration and the function's own returns, in its own file; callers are left to the
+/// group's gate.
+///
+/// TODO(signature-rewrites): unverified — check the titles and kinds against the bundled
+/// rust-analyzer (the assist ids are `wrap_return_type` and `unwrap_return_type`, renamed in 2024
+/// from `wrap_return_type_in_result`/`_option`), and use it from `resolve_opening`'s
+/// `change_return_type` arm.
+#[allow(dead_code)]
+fn return_type_assists(variant: &str) -> Option<&'static [Assist]> {
+    const fn rewriting_the_return_type(title: &'static str) -> Assist {
+        Assist {
+            title,
+            kinds: &["refactor.rewrite"],
+            at_caret: true,
+            placeholder: None,
+            multi_file: false,
+            needs_inference: false,
+            relocates_items: false,
+        }
+    }
+    const WRAP_RESULT: [Assist; 1] = [rewriting_the_return_type("wrap return type in result")];
+    const WRAP_OPTION: [Assist; 1] = [rewriting_the_return_type("wrap return type in option")];
+    const UNWRAP: [Assist; 2] = [
+        rewriting_the_return_type("unwrap result return type"),
+        rewriting_the_return_type("unwrap option return type"),
+    ];
+    match variant {
+        "wrap_result" => Some(&WRAP_RESULT),
+        "wrap_option" => Some(&WRAP_OPTION),
+        "unwrap" => Some(&UNWRAP),
         _ => None,
     }
 }
@@ -1156,6 +1203,30 @@ impl RustBackend {
             return Ok(Resolution::of(crate_move::resolve_test_binary_move(
                 workspace, &moving,
             )?));
+        }
+
+        // TODO(signature-rewrites): implement, each from the server's own answers and never a text
+        // search —
+        // - `change_param_type` / `add_param` / `reorder_params` / `change_return_type` with `type`:
+        //   find the declaration through `documentSymbol` at the anchor, and rewrite only its
+        //   parameter list or `-> …` with the overlay + `minimal_edits` pattern `rename_symbol`
+        //   uses; `reorder_params` checks `order` with `plan::rust_syntax::permutation`;
+        // - `change_return_type` with `variant`: the assist `return_type_assists` names, offered
+        //   with the caret on the return type;
+        // - the four call-site ops: refuse a range that is not exactly one call expression ("… is
+        //   not a call expression"), then edit that call's argument list alone.
+        if matches!(
+            op.op,
+            RefactorKind::ChangeParamType
+                | RefactorKind::AddParam
+                | RefactorKind::ReorderParams
+                | RefactorKind::ChangeReturnType
+        ) || op.op.edits_a_call_site()
+        {
+            return Err(failure(format!(
+                "TODO(signature-rewrites): {:?} is not implemented yet",
+                op.op
+            )));
         }
 
         self.start(workspace.root)?;

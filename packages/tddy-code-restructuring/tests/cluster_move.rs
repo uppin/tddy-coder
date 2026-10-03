@@ -85,6 +85,9 @@ fn a_move_of(module: &str) -> RefactorOp {
         to_file: false,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
