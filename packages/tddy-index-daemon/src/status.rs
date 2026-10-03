@@ -72,6 +72,7 @@ pub fn status_of(error: &RestructureError) -> Status {
         // the executor produced it, and the caller asked for nothing it should not have.
         RestructureError::ServerDefect(_)
         | RestructureError::AppliedTreeDoesNotCompile { .. }
+        | RestructureError::FormatFailed { .. }
         | RestructureError::Io(_) => Status::internal(refusal),
     }
 }
