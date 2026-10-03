@@ -169,13 +169,19 @@ still built there, and its registry still drives the idle reaper.
 
 - `ReadLints` (`workspace_diagnostics`) has no index RPC — `Diagnostics` is per file. **Decided: a
   refusal** naming `LspDiagnostics` as the alternative, not a fall back to the local executor (a second
-  server would disagree with the index). TODO: a workspace-wide `Diagnostics` (empty `file`) would lift it.
+  server would disagree with the index). Pinned by
+  `read_lints_is_refused_through_the_index_and_not_answered_by_the_existing_executor`, which also
+  asserts the existing executor is not asked. TODO: a workspace-wide `Diagnostics` (empty `file`)
+  would lift it.
 - `LspReferences` / `LspHover` through the index are not tested here: they are the same shape as
   `LspDefinition` over code-navigation's RPCs, and adding them would only grow the fake.
 - `is_available` for the index-backed executor (it gates the tools' exposure) is not pinned: true when the worktree root holds a `Cargo.toml`.
 - No daemon-level test proves the hook selects the index executor: the process-global
   `register_lsp_executor` is first-wins per process, and the runtime registers before any test can
   observe it. `select_lsp_executor` is the tested seam.
+- The worktree binding (`bind_to_session_worktree`) and the index's `file_within` are both lexical
+  (`..` and absolute paths are refused), so a symlink inside the worktree that points outside it is
+  followed by neither. Not pinned and not closed here.
 - UTF-16 ↔ byte column conversion is implemented by reading the line from disk (inputs and answers) but pinned only on ASCII lines.
 
 **Dependency weight:** `tddy-lsp-executor` now depends on `tddy-index-daemon` (+ `tonic`,
@@ -196,19 +202,60 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
   already the host's — `execute_tool_with_env`'s `worktree_root`, resolved from the session (or the
   subagent conversation worktree under it). So `tddy-session-lifecycle` needs no change; the binding
   is that the queried `file` must lie inside it (`bind_to_session_worktree`).
+- **`navigation.rs` (code-navigation's file) was edited, minimally.** `symbols.rs` reuses its path check
+  and document sync rather than restating them, as the Dependencies section asks: `asked_document` is
+  split into `served_source` (the path check) and `synced_document` (read, URI, `client_for`,
+  `sync_document`), and `wire_position`, `code_location` and the two new helpers became `pub(crate)`.
+  Check order and error messages are unchanged. 🆕 Not in the original plan, which named only the
+  fake index in `code_navigation_acceptance.rs` as an edit to a parent's file.
+- **`tddy_lsp_executor::register` is no longer called by the daemon.** It builds its own executor, so
+  calling it after the selection would leave a second, unused one behind. The runtime builds one
+  `TddyLspExecutor`, takes its registry for the idle reaper, and registers
+  `select_lsp_executor(...)`'s result — the same three steps `register` performs.
 - **Test file named `lsp_tools_via_index.rs`** (not `…_acceptance.rs`): fluent-tests naming —
   `acceptance` is not a scope marker.
 
 ## Refactoring Needed
 
 ### From @validate-changes (Change Validation)
+
+- ✅ `ReadLints` refusal message carried ~24 stray spaces — fixed.
+- ✅ The `ReadLints` refusal was untested — pinned (see Technical Debt).
 ### From @validate-tests (Test Quality)
 ### From @prod-ready (Production Readiness)
 ### From @analyze-clean-code (Code Quality)
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes — 2026-10-03
+
+- **Stack gate:** base `feature/live-plan/transactional-groups`; current; `origin/<base>..HEAD` is this
+  PR's commits only. No unplanned deletions; the diff holds only this PR's files.
+- **Boundary:** nothing from `## Dependencies` implemented here (the Definition/References/Hover RPCs,
+  `navigation.rs`'s mapping and the registry's `connect` are consumed). One edit to a parent's file,
+  `navigation.rs` — a visibility change and an extract-function refactor, recorded under Decisions.
+  Nothing from `## Boundaries` crept in; the advertised tool set is unchanged (audit green).
+- **Responsibility:** delivered; no `TODO(session-lsp-tools)` stub remains. One deliberate refusal
+  (`ReadLints`), with its own `TODO`.
+- **Build:** `tddy-lsp-executor`, `tddy-index-daemon`, `tddy-daemon` build clean.
+- **Findings:** 2 warnings (stray whitespace in a user-visible message; untested refusal) — both fixed.
+  2 infos (lexical-only path binding; parent file edit) — recorded above.
+
+### Scoped gates — 2026-10-03 (packages touched only: `tddy-lsp-executor`, `tddy-index-daemon`, `tddy-daemon`)
+
+- `cargo fmt`: clean. `cargo clippy -p … --all-targets -- -D warnings`: clean.
+- `./test -p tddy-lsp-executor -p tddy-index-daemon`: **146 passed, 0 failed** (incl. 5
+  `lsp_tools_via_index`, 9 `index_backed` unit tests, 35 `code_index_service_acceptance`).
+- `tddy-daemon` `code_navigation_acceptance` (7) and `tddy-tools` `mcp_tool_advertisement_audit` (3)
+  passed in the implementer's run; not re-run here. Whole-workspace health is CI's.
+
+### File length gate (step 3.5)
+
+- 🔴 `packages/tddy-daemon/src/runtime.rs`: 1,631 → 1,645 production lines (+14). **Deferred with the
+  developer's consent** — #571, #573 and #574 touch the file. Recorded in
+  `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` and
+  `docs/dev/todo/2026-10-03-session-lsp-tools-grew-runtime-rs.md`.
+- Every other changed non-test file is under 500 (largest new: `index_backed.rs`, 385).
 
 ## TODO
 
@@ -220,12 +267,12 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues
@@ -234,6 +281,6 @@ _(populated by validation commands)_
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-session-lsp-tools-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps
