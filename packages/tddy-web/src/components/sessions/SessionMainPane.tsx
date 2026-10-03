@@ -492,6 +492,8 @@ export function SessionMainPane({
       {!isCreating && (
         <>
           {/* Header toggles — always visible when a session is selected */}
+          {/* TODO(indexing-indicators): render `SessionIndexingIndicator` for the selected session
+              here, on a `CodeNavigationService` client for its owning host. */}
           {selectedSession && (
             <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
               {/* One transcript per pane: the overlay replays exactly what the Activities view is

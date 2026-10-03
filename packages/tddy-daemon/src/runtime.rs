@@ -1292,6 +1292,11 @@ pub async fn build(
         // the worktree service above, so it reaches no path that service would refuse to read, and
         // answered by the index daemon this runtime manages; without an `index_daemon:` section it
         // has none, and says so.
+        //
+        // TODO(indexing-indicators): build one `code_index_warmup::SessionIndexProgress` here, hand
+        // it to this service (`with_index_progress`) and call `code_index_warmup::warm_for_session`
+        // with it once a started session's worktree exists, so `WatchCodeIndex` has something to
+        // follow.
         rpc_entries.push(crate::code_navigation::build_code_navigation_entry(
             crate::code_navigation::CodeNavigationServiceImpl::new(
                 Arc::clone(&worktree_service_impl),
