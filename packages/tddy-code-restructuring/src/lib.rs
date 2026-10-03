@@ -227,6 +227,11 @@ pub enum RestructureError {
         journal: String,
         errors: String,
     },
+    /// `rustfmt` could not format a file the run wrote, or the edition to format it with could not
+    /// be determined. The run is a failure rather than a skip: a file left unformatted is a CI
+    /// failure, and one that rustfmt cannot parse is source the engine should not have written.
+    #[error("the run's output could not be formatted: {file}: {errors}")]
+    FormatFailed { file: String, errors: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

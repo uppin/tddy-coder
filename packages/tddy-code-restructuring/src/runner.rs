@@ -20,6 +20,7 @@ mod options;
 mod outcome;
 mod rehearsal;
 mod resume;
+mod tidy;
 
 pub use comparison::verify;
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};

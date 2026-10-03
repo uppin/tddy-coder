@@ -194,6 +194,17 @@ impl AFixtureWorkspace {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 
+    /// Whether rustfmt would leave `relative` as it is, formatting it with edition 2021.
+    pub fn is_rustfmt_clean(&self, relative: &str) -> bool {
+        Command::new("rustfmt")
+            .args(["--check", "--edition", "2021", relative])
+            .current_dir(&self.root)
+            .output()
+            .expect("rustfmt runs")
+            .status
+            .success()
+    }
+
     /// Overwrite a file in a workspace that already exists.
     ///
     /// The builder's own `writing` consumes `self`, which is right while assembling a fixture and
@@ -1315,6 +1326,33 @@ pub fn a_workspace_whose_test_binary_stands_alone() -> AFixtureWorkspace {
     .tracked_by_git()
 }
 
+/// A test binary with an import nothing uses and a use group rustfmt would write differently —
+/// what a move leaves behind it: the lint gate and `cargo fmt --check` both fail on it.
+pub fn a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use(
+) -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Carries an import nothing reads.",
+        "use std::collections::HashMap;",
+        "use std::fmt::{Debug};",
+        "",
+        "fn shows(value: impl Debug) -> String {",
+        "    format!(\"{value:?}\")",
+        "}",
+        "",
+        "#[test]",
+        "fn doubles() {",
+        "    assert_eq!(shows(2), \"2\");",
+        "}",
+    ])
+    .tracked_by_git()
+}
+
+/// The unused import [`a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use`] holds.
+pub const THE_UNUSED_IMPORT: &str = "use std::collections::HashMap;";
+
+/// Where [`THE_TEST_BINARY`] lands.
+pub const THE_MOVED_TEST_BINARY: &str = "crates/destination/tests/golden.rs";
+
 fn a_workspace_with_a_test_binary(test: &[&str]) -> AFixtureWorkspace {
     a_workspace_of(&["origin", "destination"])
         .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
@@ -1338,6 +1376,18 @@ fn a_workspace_with_a_test_binary(test: &[&str]) -> AFixtureWorkspace {
 pub async fn applying_a_move_of_the_test_binary(
     fixture: &AFixtureWorkspace,
 ) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    moving_the_test_binary(fixture, false).await.0
+}
+
+/// [`applying_a_move_of_the_test_binary`], optionally as a `--dry-run`, with every line the run
+/// reported to its progress sink.
+pub async fn moving_the_test_binary(
+    fixture: &AFixtureWorkspace,
+    dry_run: bool,
+) -> (
+    Result<tddy_code_restructuring::runner::RunSummary, String>,
+    Vec<String>,
+) {
     let root = fixture.path().to_path_buf();
     let digest = tddy_code_restructuring::apply::hash_file(&root.join(THE_TEST_BINARY))
         .expect("the test binary hashes");
@@ -1353,12 +1403,18 @@ pub async fn applying_a_move_of_the_test_binary(
     .expect("the plan is written");
 
     let client = a_server_no_operation_asks(&root).await;
+    let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keeper = Arc::clone(&heard);
     let options = tddy_code_restructuring::runner::Options {
         command: tddy_code_restructuring::runner::Command::Apply,
         target: Some(plan),
+        dry_run,
+        progress: Arc::new(move |line: &str| {
+            keeper.lock().expect("lines").push(line.to_string());
+        }),
         ..tddy_code_restructuring::runner::Options::default()
     };
-    tokio::task::spawn_blocking(move || {
+    let outcome = tokio::task::spawn_blocking(move || {
         tddy_code_restructuring::runner::apply(
             &root,
             options,
@@ -1368,7 +1424,9 @@ pub async fn applying_a_move_of_the_test_binary(
         .map_err(|error| error.to_string())
     })
     .await
-    .expect("the blocking half of the apply joins")
+    .expect("the blocking half of the apply joins");
+    let said = heard.lock().expect("lines").clone();
+    (outcome, said)
 }
 
 /// The deterministic fake language server, for an operation that never asks it anything.
