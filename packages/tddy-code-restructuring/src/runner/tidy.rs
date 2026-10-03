@@ -10,10 +10,19 @@
 //! **Bounded.** Only files the run touched are edited, only a suggestion rustc marks
 //! `MachineApplicable` is applied, and the loop stops after [`MAX_ROUNDS`] rounds (removing one
 //! import can orphan another). Whatever the compiler still warns about is reported, never fixed.
-//! A tidy that leaves the tree not compiling fails the run; it is never silently reverted.
+//!
+//! **Imports only the tests use.** `unused_imports` fires per compilation unit, so an import that
+//! only a `#[cfg(test)] mod tests { use super::*; … }` reads is reported by the library unit, and
+//! removing it breaks the test unit. When a round's removals break the re-check, the files of that
+//! round are restored from the bytes held in memory and the round is redone with every import the
+//! errors *name* (a backtick-quoted identifier equal to the name the `use` bound) gated with
+//! `#[cfg(test)]` instead of removed — see [`gating`]. A nested group is left in place and
+//! reported. A round that still does not compile is undone the same way and fails the run, saying
+//! so: the tidy never leaves a broken tree behind, and never touches the plan's own edits.
 
 mod diagnostics;
 mod format;
+mod gating;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -23,8 +32,9 @@ use tokio_util::sync::CancellationToken;
 use super::compile_gate::{compiler_errors, described_check, run_check};
 use crate::backends::rust::ProgressSink;
 use crate::{RestructureError, Result};
-use diagnostics::{parse, Diagnostic, Fix};
+use diagnostics::{parse, Diagnostic, Fix, Span};
 use format::format_touched;
+use gating::{named_by_errors, place, quoted_in_errors, Placement};
 
 /// How many times unused imports are removed and the tree re-checked.
 const MAX_ROUNDS: usize = 3;
@@ -53,14 +63,17 @@ pub(super) fn tidy(tidying: &Tidying<'_>) -> Result<Tidied> {
     if tidying.packages.is_empty() {
         return Ok(Tidied::Compiles);
     }
-    let mut removed = BTreeMap::new();
-    let mut checked = tidy_imports(tidying, &mut removed)?;
-    report_removals(tidying, &removed);
+    let mut report = Report::default();
+    let mut checked = tidy_imports(tidying, &mut report)?;
+    report.say(tidying);
     if matches!(checked, Checked::Compiles(_)) && format_touched_files(tidying)? {
         checked = check(tidying)?;
     }
     match checked {
-        Checked::Broken { checked, errors } => Ok(Tidied::Broken { checked, errors }),
+        Checked::Broken(failure) => Ok(Tidied::Broken {
+            checked: failure.checked,
+            errors: failure.errors,
+        }),
         Checked::Compiles(diagnostics) => {
             report_remaining_warnings(tidying, &diagnostics);
             Ok(Tidied::Compiles)
@@ -71,7 +84,15 @@ pub(super) fn tidy(tidying: &Tidying<'_>) -> Result<Tidied> {
 /// A check's verdict: the warnings of a tree that compiles, or why it does not.
 enum Checked {
     Compiles(Vec<Diagnostic>),
-    Broken { checked: String, errors: String },
+    Broken(Failure),
+}
+
+/// Why a check failed: the check as a reader runs it, its errors, and every identifier those
+/// errors quote.
+struct Failure {
+    checked: String,
+    errors: String,
+    quoted: BTreeSet<String>,
 }
 
 /// Check the tree, telling the caller the run stopped when its token fires: the files may already
@@ -88,10 +109,11 @@ fn check(tidying: &Tidying<'_>) -> Result<Checked> {
     if output.succeeded {
         return Ok(Checked::Compiles(diagnostics));
     }
-    Ok(Checked::Broken {
+    Ok(Checked::Broken(Failure {
         checked: described_check(tidying.packages),
         errors: errors_of(&diagnostics, &output.stderr),
-    })
+        quoted: quoted_in_errors(&diagnostics),
+    }))
 }
 
 /// The errors of a failed check: `file:line: error[code]: message` per compiler error, or what
@@ -117,39 +139,206 @@ fn errors_of(diagnostics: &[Diagnostic], stderr: &str) -> String {
     }
 }
 
-/// Remove unused imports until the compiler reports none or [`MAX_ROUNDS`] removals have been
-/// made, counting what was removed per file. Returns the last check, which judged the tree as it
-/// now stands.
-fn tidy_imports(tidying: &Tidying<'_>, removed: &mut BTreeMap<String, usize>) -> Result<Checked> {
-    let mut round = 0;
-    loop {
-        let checked = check(tidying)?;
-        let Checked::Compiles(diagnostics) = &checked else {
-            return Ok(checked);
-        };
-        let unused = unused_imports(diagnostics, tidying.touched);
-        if unused.fixes.is_empty() || round == MAX_ROUNDS {
-            return Ok(checked);
+/// What the tidy says when it is done: imports removed, imports gated, imports it had to leave.
+#[derive(Default)]
+struct Report {
+    removed: BTreeMap<String, usize>,
+    gated: Vec<(String, String)>,
+    warnings: BTreeSet<String>,
+}
+
+impl Report {
+    /// A round whose result compiled: what it did is now fact.
+    fn accept(&mut self, round: Round) {
+        let removed = round
+            .unused
+            .primaries
+            .iter()
+            .filter(|span| round.removes(span));
+        for span in removed {
+            *self.removed.entry(span.file.clone()).or_default() += 1;
         }
-        apply_fixes(tidying.root, &unused.fixes)?;
-        for (file, count) in unused.imports {
-            *removed.entry(file).or_default() += count;
+        if let Some(placement) = round.placement {
+            self.gated.extend(placement.gated);
+            self.warnings.extend(placement.declined);
         }
-        round += 1;
+    }
+
+    fn say(&self, tidying: &Tidying<'_>) {
+        for (file, count) in self.removed.iter().filter(|(_, count)| **count > 0) {
+            (tidying.progress)(&format!(
+                "tidied: removed {count} unused import(s) from {file}"
+            ));
+        }
+        for (file, path) in &self.gated {
+            (tidying.progress)(&format!("gated for tests: {file}: use {path}"));
+        }
+        for warning in &self.warnings {
+            (tidying.progress)(warning);
+        }
     }
 }
 
-/// What the compiler says to remove: edits per file, and how many imports they remove.
+impl Round {
+    /// Whether an applied edit took the import at `span` out: it covers it and does not write its
+    /// text back, as a gated import's replacement does.
+    fn removes(&self, span: &Span) -> bool {
+        let text = gating::text_of(&self.before, span);
+        self.applied
+            .iter()
+            .filter(|edit| edit.covers(span))
+            .any(|edit| !gating::mentions(&edit.replacement, text))
+    }
+}
+
+/// One round of removals: the files as they were before it, what it removed, and — once a first
+/// attempt broke the tree — how it was redone.
+struct Round {
+    before: BTreeMap<String, Vec<u8>>,
+    unused: UnusedImports,
+    /// The edits that were applied, in the coordinates of `before`.
+    applied: Vec<Fix>,
+    placement: Option<Placement>,
+}
+
+/// Remove unused imports until the compiler reports none or [`MAX_ROUNDS`] removals have been
+/// made, counting what was removed per file. Returns the last check, which judged the tree as it
+/// now stands.
+fn tidy_imports(tidying: &Tidying<'_>, report: &mut Report) -> Result<Checked> {
+    let mut rounds = 0;
+    let mut pending: Option<Round> = None;
+    loop {
+        let diagnostics = match check(tidying)? {
+            Checked::Compiles(diagnostics) => {
+                pending
+                    .take()
+                    .into_iter()
+                    .for_each(|round| report.accept(round));
+                diagnostics
+            }
+            Checked::Broken(failure) => match pending.take() {
+                None => return Ok(Checked::Broken(failure)),
+                Some(round) => match repair(tidying, round, failure, report)? {
+                    Repair::Retry(round) => {
+                        pending = Some(round);
+                        continue;
+                    }
+                    Repair::Nothing => {
+                        rounds = MAX_ROUNDS;
+                        continue;
+                    }
+                    Repair::Failed(failure) => return Ok(Checked::Broken(failure)),
+                },
+            },
+        };
+        let unused = unused_imports(&diagnostics, tidying.touched);
+        if unused.fixes.is_empty() || rounds == MAX_ROUNDS {
+            return Ok(Checked::Compiles(diagnostics));
+        }
+        pending = Some(begin(tidying.root, unused)?);
+        rounds += 1;
+    }
+}
+
+/// Apply a round's removals, keeping the bytes of every file it edits.
+fn begin(root: &Path, unused: UnusedImports) -> Result<Round> {
+    let mut before = BTreeMap::new();
+    for file in unused.fixes.keys() {
+        before.insert(file.clone(), std::fs::read(root.join(file))?);
+    }
+    let applied = apply_fixes(root, &unused.fixes)?;
+    Ok(Round {
+        before,
+        unused,
+        applied,
+        placement: None,
+    })
+}
+
+/// What became of a round whose removals broke the tree.
+enum Repair {
+    /// Redone with imports gated; check it.
+    Retry(Round),
+    /// Every import it would have removed had to stay: the tree is as it was before the round.
+    Nothing,
+    /// Undone, and the tree still does not compile.
+    Failed(Failure),
+}
+
+/// Undo a round that broke the tree and redo it with the imports the errors name gated for tests.
+/// A round that was already redone is undone for good, loudly.
+fn repair(
+    tidying: &Tidying<'_>,
+    round: Round,
+    failure: Failure,
+    report: &mut Report,
+) -> Result<Repair> {
+    restore(tidying.root, &round.before)?;
+    let matched = named_by_errors(&round.unused.primaries, &round.before, &failure.quoted);
+    if round.placement.is_some() || matched.is_empty() {
+        return Ok(Repair::Failed(undone(&round, &matched, failure)));
+    }
+    let placement = place(
+        &round.unused.fixes,
+        &round.unused.primaries,
+        &round.before,
+        &matched,
+    );
+    if placement.fixes.values().all(BTreeSet::is_empty) {
+        report.warnings.extend(placement.declined);
+        return Ok(Repair::Nothing);
+    }
+    let applied = apply_fixes(tidying.root, &placement.fixes)?;
+    Ok(Repair::Retry(Round {
+        before: round.before,
+        unused: round.unused,
+        applied,
+        placement: Some(placement),
+    }))
+}
+
+/// The failure of a round that could not be placed, saying what was undone and which imports it
+/// could not place.
+fn undone(round: &Round, matched: &[&Span], failure: Failure) -> Failure {
+    let culprits: Vec<&Span> = if matched.is_empty() {
+        round.unused.primaries.iter().collect()
+    } else {
+        matched.to_vec()
+    };
+    let names: Vec<&str> = culprits
+        .iter()
+        .map(|span| gating::text_of(&round.before, span))
+        .collect();
+    Failure {
+        errors: format!(
+            "the tidy was undone: this round's import edits are restored, because neither removing \
+             nor gating for tests ({}) leaves a tree that compiles\n{}",
+            names.join(", "),
+            failure.errors
+        ),
+        ..failure
+    }
+}
+
+/// Put back the bytes a round started from.
+fn restore(root: &Path, before: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    for (file, bytes) in before {
+        std::fs::write(root.join(file), bytes)?;
+    }
+    Ok(())
+}
+
+/// What the compiler says to remove: edits per file, and the imports it reports.
 struct UnusedImports {
     fixes: BTreeMap<String, BTreeSet<Fix>>,
-    imports: BTreeMap<String, usize>,
+    primaries: BTreeSet<Span>,
 }
 
 /// The `unused_imports` removals in the touched files. Each target (library, tests) repeats a
 /// diagnostic for a file they share, so edits are kept as sets.
 fn unused_imports(diagnostics: &[Diagnostic], touched: &BTreeSet<String>) -> UnusedImports {
     let mut fixes: BTreeMap<String, BTreeSet<Fix>> = BTreeMap::new();
-    let mut spans: BTreeSet<(String, usize)> = BTreeSet::new();
+    let mut primaries: BTreeSet<Span> = BTreeSet::new();
     let unused = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.code.as_deref() == Some("unused_imports"));
@@ -164,21 +353,17 @@ fn unused_imports(diagnostics: &[Diagnostic], touched: &BTreeSet<String>) -> Unu
                 .or_default()
                 .insert(fix.clone());
         }
-        spans.extend(diagnostic.primaries.iter().cloned());
+        primaries.extend(diagnostic.primaries.iter().cloned());
     }
-    let mut imports: BTreeMap<String, usize> = BTreeMap::new();
-    for (file, _) in spans
-        .into_iter()
-        .filter(|(file, _)| fixes.contains_key(file))
-    {
-        *imports.entry(file).or_default() += 1;
-    }
-    UnusedImports { fixes, imports }
+    primaries.retain(|span| fixes.contains_key(&span.file));
+    UnusedImports { fixes, primaries }
 }
 
 /// Apply every file's edits from the highest offset down, so none moves another's coordinates. An
-/// edit overlapping one already applied is left for the next round to find again.
-fn apply_fixes(root: &Path, fixes: &BTreeMap<String, BTreeSet<Fix>>) -> Result<()> {
+/// edit overlapping one already applied is left for the next round to find again. Returns the
+/// spans of the edits that were applied.
+fn apply_fixes(root: &Path, fixes: &BTreeMap<String, BTreeSet<Fix>>) -> Result<Vec<Fix>> {
+    let mut applied = Vec::new();
     for (file, edits) in fixes {
         let path = root.join(file);
         let mut bytes = std::fs::read(&path)?;
@@ -189,18 +374,11 @@ fn apply_fixes(root: &Path, fixes: &BTreeMap<String, BTreeSet<Fix>>) -> Result<(
             }
             bytes.splice(edit.start..edit.end, edit.replacement.bytes());
             floor = edit.start;
+            applied.push(edit.clone());
         }
         std::fs::write(&path, bytes)?;
     }
-    Ok(())
-}
-
-fn report_removals(tidying: &Tidying<'_>, removed: &BTreeMap<String, usize>) {
-    for (file, count) in removed {
-        (tidying.progress)(&format!(
-            "tidied: removed {count} unused import(s) from {file}"
-        ));
-    }
+    Ok(applied)
 }
 
 /// Format the touched files; whether any changed, so the caller knows to check again.
@@ -251,6 +429,30 @@ mod tests {
     impl ACrate {
         fn read(&self, file: &str) -> String {
             std::fs::read_to_string(self.directory.path().join(file)).expect("a file is read")
+        }
+
+        /// Whether the crate compiles with its test targets, as the tidy's own check builds it.
+        fn compiles_with_its_tests(&self) -> std::result::Result<(), String> {
+            let output = std::process::Command::new("cargo")
+                .args(["check", "--all-targets", "--message-format", "short"])
+                .current_dir(self.directory.path())
+                .output()
+                .expect("cargo runs");
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(String::from_utf8_lossy(&output.stderr).into_owned())
+            }
+        }
+
+        /// Whether a check of every target still warns about an unused import.
+        fn warns_of_an_unused_import(&self) -> bool {
+            let output = std::process::Command::new("cargo")
+                .args(["check", "--all-targets", "--message-format", "short"])
+                .current_dir(self.directory.path())
+                .output()
+                .expect("cargo runs");
+            String::from_utf8_lossy(&output.stderr).contains("unused import")
         }
 
         /// Tidy `touched`, returning the verdict and every progress line.
@@ -392,6 +594,179 @@ mod tests {
             said.contains(&"tidied: removed 2 unused import(s) from src/lib.rs".to_string()),
             "{said:?}"
         );
+    }
+
+    /// A crate root whose tests, and only they, use what `imports` brings in.
+    const THE_TEST_MODULE: &str = "\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    \
+                                   #[test]\n    fn counts() {\n        \
+                                   assert_eq!(BTreeMap::<u8, u8>::new().len(), 0);\n    }\n}\n";
+
+    fn a_library_whose_only_tests_use(imports: &str) -> ACrate {
+        let source = format!("{imports}\n\npub fn two() -> u32 {{\n    2\n}}\n{THE_TEST_MODULE}");
+        a_crate_with(&[("src/lib.rs", &source)])
+    }
+
+    #[test]
+    fn keeps_an_import_only_the_test_module_uses_by_gating_it_for_tests() {
+        // Given an import that only the unit-test module uses, so the library unit reports it unused
+        let demo = a_library_whose_only_tests_use("use std::collections::BTreeMap;");
+
+        // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then the import stays, gated, the tree compiles with its tests and nothing is reported unused
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let source = demo.read("src/lib.rs");
+        assert!(
+            source.starts_with("#[cfg(test)]\nuse std::collections::BTreeMap;\n\npub fn two"),
+            "the import was not gated:\n{source}"
+        );
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(!demo.warns_of_an_unused_import());
+        assert!(
+            said.contains(
+                &"gated for tests: src/lib.rs: use std::collections::BTreeMap".to_string()
+            ),
+            "{said:?}"
+        );
+    }
+
+    #[test]
+    fn gates_one_member_of_a_group_and_removes_the_other() {
+        // Given a group whose `BTreeMap` only tests use and whose `BTreeSet` nothing uses
+        let demo = a_library_whose_only_tests_use("use std::collections::{BTreeMap, BTreeSet};");
+
+        // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then `BTreeSet` is gone, `BTreeMap` is gated in an item of its own, and the counts say so
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let source = demo.read("src/lib.rs");
+        assert!(
+            source.starts_with("#[cfg(test)]\nuse std::collections::BTreeMap;\n\npub fn two"),
+            "{source}"
+        );
+        assert!(!source.contains("BTreeSet"), "{source}");
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(
+            said.contains(&"tidied: removed 1 unused import(s) from src/lib.rs".to_string()),
+            "{said:?}"
+        );
+        assert!(said
+            .contains(&"gated for tests: src/lib.rs: use std::collections::BTreeMap".to_string()));
+    }
+
+    #[test]
+    fn gates_the_member_only_tests_use_and_keeps_the_one_production_code_uses() {
+        // Given what a split leaves: `FileEdit` only the tests use, `WorkspaceEdit` production code uses
+        let source = "mod edit {\n    pub struct FileEdit;\n    pub struct WorkspaceEdit;\n\n    \
+                      impl WorkspaceEdit {\n        pub fn len(&self) -> usize {\n            0\n        }\n    }\n}\n\n\
+                      use crate::edit::{FileEdit, WorkspaceEdit};\n\n\
+                      pub fn empty(edit: &WorkspaceEdit) -> bool {\n    edit.len() == 0\n}\n\n\
+                      #[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    \
+                      fn builds_a_file_edit() {\n        let _edit = FileEdit;\n    }\n}\n";
+        let demo = a_crate_with(&[("src/lib.rs", source)]);
+
+        // When its file is tidied
+        let (verdict, _) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then production keeps its member and the tests get theirs, gated
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let tidied = demo.read("src/lib.rs");
+        assert!(
+            tidied.contains("#[cfg(test)]\nuse crate::edit::FileEdit;\n")
+                && tidied.contains("use crate::edit::WorkspaceEdit;\n")
+                && !tidied.contains("{FileEdit"),
+            "{tidied}"
+        );
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(!demo.warns_of_an_unused_import());
+    }
+
+    #[test]
+    fn keeps_the_visibility_prefix_when_gating() {
+        // Given a `pub(crate)` import only the tests use
+        let demo = a_library_whose_only_tests_use("pub(crate) use std::collections::BTreeMap;");
+
+        // When its file is tidied
+        let (verdict, _) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then the gate sits above the whole statement, prefix intact
+        verdict.expect("the tidy runs");
+        let source = demo.read("src/lib.rs");
+        assert!(
+            source.starts_with("#[cfg(test)]\npub(crate) use std::collections::BTreeMap;\n"),
+            "{source}"
+        );
+        demo.compiles_with_its_tests().expect("the tree compiles");
+    }
+
+    #[test]
+    fn leaves_a_nested_group_member_in_place_and_reports_it() {
+        // Given a nested group whose inner member only the tests use
+        let demo = a_library_whose_only_tests_use(
+            "use std::collections::{btree_map::{BTreeMap}, BTreeSet};\n\n\
+             pub fn set() -> BTreeSet<u8> {\n    BTreeSet::new()\n}",
+        );
+
+        // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then the import is neither removed nor gated, the tree compiles, and the report says why
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let source = demo.read("src/lib.rs");
+        assert!(source.contains("btree_map::"), "{source}");
+        assert!(!source.contains("#[cfg(test)]\nuse"), "{source}");
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(
+            said.iter()
+                .any(|line| line.starts_with("warning remains: unused import ")
+                    && line.ends_with(" could not be gated for tests (nested group)")),
+            "{said:?}"
+        );
+    }
+
+    #[test]
+    fn still_removes_an_import_that_is_unused_everywhere_beside_a_test_module() {
+        // Given a test module that does not use the import either
+        let demo = a_crate_with(&[(
+            "src/lib.rs",
+            "use std::collections::HashMap;\n\npub fn two() -> u32 {\n    2\n}\n\n\
+             #[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn two_is_two() {\n        \
+             assert_eq!(two(), 2);\n    }\n}\n",
+        )]);
+
+        // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then it is removed, not gated
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        assert!(!demo.read("src/lib.rs").contains("HashMap"));
+        assert!(
+            !said.iter().any(|line| line.starts_with("gated for tests")),
+            "{said:?}"
+        );
+    }
+
+    #[test]
+    fn fails_loudly_and_undoes_the_tidy_when_gating_cannot_repair_the_tree() {
+        // Given a trait import only the tests need: the error names the method, never the trait
+        let source = "use std::fmt::Write;\n\npub fn two() -> u32 {\n    2\n}\n\n\
+                      #[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    \
+                      fn writes() {\n        let mut out = String::new();\n        \
+                      out.write_str(\"2\").unwrap();\n    }\n}\n";
+        let demo = a_crate_with(&[("src/lib.rs", source)]);
+
+        // When its file is tidied
+        let (verdict, _) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then the run fails, says the tidy was undone and names the import, and the file is as it was
+        let Tidied::Broken { errors, .. } = verdict.expect("the tidy runs") else {
+            panic!("the tidy reported a tree that compiles");
+        };
+        assert!(errors.contains("the tidy was undone"), "{errors}");
+        assert!(errors.contains("Write"), "{errors}");
+        assert_eq!(demo.read("src/lib.rs"), source);
     }
 
     #[test]

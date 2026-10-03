@@ -10,10 +10,18 @@ pub(super) struct Diagnostic {
     /// The first primary span: `(file, line)`. `None` for a summary line such as "1 warning
     /// emitted".
     pub location: Option<(String, u64)>,
-    /// Every primary span as `(file, byte_start)` — one per thing the message is about.
-    pub primaries: Vec<(String, usize)>,
+    /// Every primary span — one per thing the message is about.
+    pub primaries: Vec<Span>,
     /// The machine-applicable replacements its children suggest.
     pub fixes: Vec<Fix>,
+}
+
+/// Bytes `start..end` of `file`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct Span {
+    pub file: String,
+    pub start: usize,
+    pub end: usize,
 }
 
 /// Replace `start..end` of `file` with `replacement`.
@@ -23,6 +31,13 @@ pub(super) struct Fix {
     pub start: usize,
     pub end: usize,
     pub replacement: String,
+}
+
+impl Fix {
+    /// Whether the edit's range lies over `span` of the same file.
+    pub fn covers(&self, span: &Span) -> bool {
+        self.file == span.file && self.start <= span.start && span.end <= self.end
+    }
 }
 
 /// Every diagnostic in a check's stdout. Lines that are not compiler messages — artifacts, the
@@ -47,7 +62,7 @@ fn diagnostic_of(message: &Value) -> Diagnostic {
         level: text_of(&message["level"]),
         message: text_of(&message["message"]),
         location: primary.first().map(|span| location_of(span)),
-        primaries: primary.iter().map(|span| start_of(span)).collect(),
+        primaries: primary.iter().map(|span| span_of(span)).collect(),
         fixes: array_of(&message["children"])
             .iter()
             .flat_map(|child| array_of(&child["spans"]))
@@ -71,11 +86,12 @@ fn location_of(span: &Value) -> (String, u64) {
     )
 }
 
-fn start_of(span: &Value) -> (String, usize) {
-    (
-        text_of(&span["file_name"]),
-        span["byte_start"].as_u64().unwrap_or(0) as usize,
-    )
+fn span_of(span: &Value) -> Span {
+    Span {
+        file: text_of(&span["file_name"]),
+        start: span["byte_start"].as_u64().unwrap_or(0) as usize,
+        end: span["byte_end"].as_u64().unwrap_or(0) as usize,
+    }
 }
 
 /// The edit a span carries, when rustc is sure of it — `MachineApplicable` and nothing weaker.
