@@ -14,6 +14,8 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Bounded type probe | `readiness.rs` (`wait_until_resolved_within_bound`, `READY_HOVER_BOUND`) | `ServerDefect` |
 | Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`) | `SeamRefused` |
 | Partial-cluster finding | `crate_move/cluster.rs` (`stranded_siblings`) | a static `check` finding: the cycle `apply` refuses (`refusals::refuse_a_dependency_cycle`) |
+| Body-path finding | `crate_move/preconditions.rs` (`stays_behind_through_a_body`) | a static `check` finding: a body path to a module staying behind, which `apply` refuses as a dependency cycle |
+| Merge finding | `crate_move/preconditions.rs` (`destination_already_has_the_module`) | a static `check` finding: the destination already declares or holds the module |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
 | Compile gate | `runner/compile_gate.rs` | `BaselineDoesNotCompile`, `AppliedTreeDoesNotCompile` |
 
@@ -177,6 +179,29 @@ moves the sibling and giving `move_cluster_to_crate` (this module as anchor, the
 the remedy; the same set as one `move_cluster_to_crate` reports nothing. A module `move_preconditions`
 already refuses is left out of the set. The plan-level rule is in
 [plan-schema.md](../../../.agents/skills/code-restructuring/references/plan-schema.md).
+## The body-path and merge findings
+
+Both run in `move_preconditions`, which the static `check` tier and the partial-cluster analysis
+share, so `check` and `check --deep` report them without an index.
+
+**Body path.** `stays_behind_through_a_body` reads the moved file from the [path survey](path-survey.md)
+and takes the first path that is in a body, outside `#[cfg(test)]`, defined in the origin crate, and
+inside a module that stays behind. A path to an item at the crate root is inside no module and is not
+named; a path the origin only re-exports from another crate is defined elsewhere; a path under
+`#[cfg(test)]` is no edge. The finding names the file, the path as written, its line, the module and
+both crates, and its remedy is to cut the body's dependency — never a cluster.
+
+*What travels, and what has already left.* A module the operation itself moves — every anchor of a
+cluster, through `member_op`, which keeps the whole set in `also` — travels with it. A module an
+**earlier operation of the plan** moves to the same destination has left the origin too
+(`moved_by_earlier_operations`): a plan the header pass accepts is not refused here. That is the same
+question `gone_by_then` answers for the header, asked of the plan's operations directly, because
+`gone_by_then` reads a list built by running these preconditions and cannot be asked from inside them.
+
+**Merge.** `destination_already_has_the_module` reports a destination whose root already declares
+`mod <name>;`, or which already has a file at the target path. Moving into it would be a merge, which
+no operation performs, so the finding says that rather than suggesting a cluster.
+
 ## The inferred-placeholder post-condition
 
 An extract-method whose signature holds `_` (`fn resumed_session(req: _)`, `-> Vec<_>`,

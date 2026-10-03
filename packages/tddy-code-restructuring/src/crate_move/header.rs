@@ -26,8 +26,14 @@ pub(crate) struct Header {
     pub(crate) origin_paths: Vec<String>,
     /// The subset of `origin_paths` written in the file's own top-level `use` header — the only
     /// ones `check` reads.
-    // TODO(check-parity): `check` reads bodies and nested `use` items too once it consumes the
-    // survey; this field then goes.
+    // TODO(check-parity-header): see docs/dev/todo/2026-10-03-restructure-stranded-sibling-finding-reads-only-the-use-header.md.
+    // The one reader, `cluster::paths_naming_the_origin`, is the
+    // stranded-sibling finding, and it asks about the top-level `use` header alone. Reading
+    // `origin_paths` instead would also report bodies and nested `use` items, which `apply`'s
+    // cycle refusal (`refusals::refuse_a_dependency_cycle`) already reads — so the field goes when
+    // that finding is widened to match it on purpose, with its own tests and wording, not as a
+    // side effect of removing a field. Bodies are covered separately by
+    // `preconditions::stays_behind_through_a_body`.
     pub(crate) header_origin_paths: Vec<String>,
 }
 
@@ -258,7 +264,7 @@ fn written_prefix(from_head: &str) -> &str {
 /// and a member is named by the path that reaches it or by anything inside it — `spawn_worker` and
 /// `spawn_worker::Worker` both travel with `spawn_worker`, and `spawn_worker_pool` travels with
 /// nothing.
-fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a String> {
+pub(crate) fn travels_with<'a>(rest: &str, co_moving: &'a BTreeSet<String>) -> Option<&'a String> {
     co_moving
         .iter()
         .find(|member| rest == *member || rest.starts_with(&format!("{member}::")))

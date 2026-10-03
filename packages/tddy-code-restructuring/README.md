@@ -76,7 +76,9 @@ mutually-referencing group movable at all: moved one at a time, each module's re
 still in the origin would make the destination depend on the crate it left, and no ordering of
 one-module operations can resolve a cycle. A plain `check` reports such a set when a plan spreads it
 over separate moves, at its first operation — see
-[docs/readiness-and-gates.md](docs/readiness-and-gates.md#the-partial-cluster-finding).
+[docs/readiness-and-gates.md](docs/readiness-and-gates.md#the-partial-cluster-finding). It also reports a
+moved module's body path to a module that stays behind, and a destination that already has the module —
+see [the body-path and merge findings](docs/readiness-and-gates.md#the-body-path-and-merge-findings).
 
 `move_test_binary_to_crate` moves `<crate>/tests/<name>.rs` to the crate it exercises. A test binary
 is a different shape from a module — cargo auto-discovers it, so there is no `mod` line to remove;
