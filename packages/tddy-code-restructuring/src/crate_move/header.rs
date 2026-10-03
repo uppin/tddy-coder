@@ -26,7 +26,8 @@ pub(crate) struct Header {
     pub(crate) origin_paths: Vec<String>,
     /// The subset of `origin_paths` written in the file's own top-level `use` header — the only
     /// ones `check` reads.
-    // TODO(check-parity-header): the one reader, `cluster::paths_naming_the_origin`, is the
+    // TODO(check-parity-header): see docs/dev/todo/2026-10-03-restructure-stranded-sibling-finding-reads-only-the-use-header.md.
+    // The one reader, `cluster::paths_naming_the_origin`, is the
     // stranded-sibling finding, and it asks about the top-level `use` header alone. Reading
     // `origin_paths` instead would also report bodies and nested `use` items, which `apply`'s
     // cycle refusal (`refusals::refuse_a_dependency_cycle`) already reads — so the field goes when

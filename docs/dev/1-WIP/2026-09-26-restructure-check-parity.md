@@ -194,6 +194,21 @@ diff holds only this PR's files. Build: `tddy-code-restructuring` ✅ (scoped). 
 Scoped re-run after the fixes (`-p tddy-code-restructuring`): 699 passed, 0 failed, 33 suites; clippy `--all-targets -D warnings` clean; fmt clean.
 The 5 VM tests were not run here (`./vm-tests`); not touched by this change.
 
+### /validate-prod-ready (2026-10-03, via /pr-wrap)
+
+✅ Ready. 3 production files (`cluster.rs`, `header.rs`, `preconditions.rs`): no mock/fake code, no
+env-conditional or fallback paths, no debug output, no `unwrap`/`expect`, no `#[allow(dead_code)]`;
+the two draft-contract `todo!()` stubs are implemented and gone.
+
+- ⚠️ → ✅ One marker remains, `TODO(check-parity-header)` (`header.rs`). It had no tracker, so the wrap
+  would have orphaned it: now linked to the new backlog entry
+  [`2026-10-03-restructure-stranded-sibling-finding-reads-only-the-use-header.md`](../todo/2026-10-03-restructure-stranded-sibling-finding-reads-only-the-use-header.md)
+  (created here, **kept** by the wrap — it is not ✅ RESOLVED HERE).
+- ℹ️ Kept on purpose: `if path.defining_crate != *origin { continue }` in `stays_behind_through_a_body`
+  is redundant with the following `strip_prefix` today (removing it alone leaves all tests green), but
+  it states the invariant from the survey's own field instead of leaning on a string prefix of
+  `defined_at`, which `move-paths` owns.
+
 ### /validate-tests (2026-10-03, via /pr-wrap)
 
 `tests/check_precondition_parity.rs`: 12 tests analyzed (4 pre-existing, 8 this PR). No always-passing,
