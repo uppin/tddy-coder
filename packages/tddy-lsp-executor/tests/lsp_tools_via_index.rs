@@ -414,6 +414,18 @@ async fn the_agent_calls(
     .expect("the tool call ran to completion")
 }
 
+/// What the agent's `ReadLints` call against `worktree` answers, run on a blocking thread exactly
+/// as `tddy_tool_engine`'s `Lsp*` dispatch runs it.
+async fn the_agent_reads_lints(
+    executor: &Arc<dyn LspExecutor>,
+    worktree: PathBuf,
+) -> Result<Value, String> {
+    let executor = Arc::clone(executor);
+    tokio::task::spawn_blocking(move || executor.workspace_diagnostics(&worktree))
+        .await
+        .expect("the tool call ran to completion")
+}
+
 // ---------------------------------------------------------------------------------------------
 // Coordinates
 
@@ -649,4 +661,25 @@ async fn without_an_index_daemon_the_existing_executor_answers() {
         Ok(json!({ "answered_by": "the existing executor", "op": "definition" }))
     );
     assert_eq!(existing.what_it_was_asked(), vec!["definition".to_string()]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn read_lints_is_refused_through_the_index_and_not_answered_by_the_existing_executor() {
+    // Given a session worktree and a warm index, which answers diagnostics one file at a time
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_diagnostics_with(the_index_s_diagnostics_of_main());
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent reads the lints of the whole worktree
+    let answer = the_agent_reads_lints(&executor, worktree.root()).await;
+
+    // Then the call is refused, pointing the agent at `LspDiagnostics`
+    let refusal = answer.expect_err("ReadLints is not answered through the index");
+    assert!(
+        refusal.contains("LspDiagnostics"),
+        "the refusal should name LspDiagnostics, got: {refusal}"
+    );
+    // And the existing executor was not asked in the index's place
+    assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
 }
