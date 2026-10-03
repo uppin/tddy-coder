@@ -104,7 +104,7 @@ async fn narrate_until_loaded(
     graph: &mut crate::graph::GraphLoad,
     events: &EventSender<IndexProgress>,
 ) -> Ending {
-    let mut chatter = ServerChatter::default();
+    let mut chatter = ServerChatter::unthrottled();
     loop {
         if graph.is_loaded() {
             return Ending::Loaded;

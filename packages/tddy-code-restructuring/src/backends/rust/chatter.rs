@@ -48,6 +48,10 @@ pub struct ServerChatter {
     /// When a line was last shown for each token, which [`PROGRESS_INTERVAL`] is measured from.
     /// Per token, for the reason the titles are.
     shown_at: HashMap<String, Instant>,
+    /// Whether every distinct report is returned, with no [`PROGRESS_INTERVAL`] between them. For a
+    /// consumer that forwards the phases as data — the daemon's warm stream, whose clients read the
+    /// percentages — as opposed to one that prints them, which the interval exists for.
+    unthrottled: bool,
     /// Whether the server has reported itself quiescent — an extension, so never the only signal.
     pub(super) quiescent: bool,
     /// Whether the server has sent any `experimental/serverStatus` at all.
@@ -78,6 +82,16 @@ pub struct ServerChatter {
 }
 
 impl ServerChatter {
+    /// A chatter that returns every distinct report instead of one per [`PROGRESS_INTERVAL`] per
+    /// token. The default throttles, because its lines are printed; a stream of structured events
+    /// is not read a line at a time, and a client that wanted the 50% it was never sent cannot ask.
+    pub fn unthrottled() -> ServerChatter {
+        ServerChatter {
+            unthrottled: true,
+            ..ServerChatter::default()
+        }
+    }
+
     /// Fold one server-sent message in, and return the line worth printing for it.
     ///
     /// A message that answers a request carries no `method`, which is what keeps every result out
@@ -156,10 +170,11 @@ impl ServerChatter {
         if self.shown.get(&token) == Some(&key) {
             return None;
         }
-        let due = self
-            .shown_at
-            .get(&token)
-            .is_none_or(|at| now.duration_since(*at) >= PROGRESS_INTERVAL);
+        let due = self.unthrottled
+            || self
+                .shown_at
+                .get(&token)
+                .is_none_or(|at| now.duration_since(*at) >= PROGRESS_INTERVAL);
         if kind != "begin" && percentage.is_none_or(|pct| pct < 100) && !due {
             return None;
         }
@@ -611,5 +626,25 @@ mod tests {
 
         // Then
         assert!(!chatter.loading());
+    }
+    /// The daemon's warm stream forwards phases as data: every percentage the server reported has to
+    /// reach its client, however fast they arrive.
+    #[test]
+    fn an_unthrottled_chatter_returns_every_distinct_percentage_of_a_burst() {
+        // Given a phase that reports 25, 50 and 75 percent within one second
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        let at = |ms| t0 + Duration::from_millis(ms);
+        chatter.progress_at(&begin("t", "loading crate graph"), at(0));
+
+        // When each report is absorbed
+        let shown: Vec<Option<String>> = [(25, 100), (50, 200), (75, 300)]
+            .iter()
+            .map(|&(percentage, ms)| {
+                chatter.progress_at(&report("t", None, Some(percentage)), at(ms))
+            })
+            .collect();
+
+        // Then every one of them came back
+        assert!(shown.iter().all(Option::is_some), "{shown:?}");
     }
 }
