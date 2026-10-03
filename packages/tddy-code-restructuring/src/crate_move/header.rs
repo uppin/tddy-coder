@@ -1,111 +1,252 @@
-use super::Move;
-
-use crate::{
-    apply::byte_offset,
-    crate_move::{destination, manifest_edits, module_home},
-};
-
-use crate::edit::Position;
-
-use super::Result;
-
-use crate::registry::Workspace;
-
 use std::collections::BTreeSet;
 
-use crate::edit::TextEdit;
+use super::survey::SurveyedPath;
+use super::{malformed, Move, Result};
+use crate::edit::{Position, TextEdit};
+use crate::registry::Workspace;
+use crate::RestructureError;
+use crate::{
+    apply::byte_offset,
+    crate_move::{manifest_edits, survey, test_binary::segment_length},
+};
 
-/// What the moved file's `use` header says about the crates it needs.
+/// What the moved file's paths say about the crates it needs, and the edits that re-point them.
 pub(crate) struct Header {
     /// The edits that re-point it, empty when it names nothing that moved.
     pub(crate) edits: Vec<TextEdit>,
-    /// Every crate the header names once re-pointed, by extern name.
+    /// Every crate the file's code names once re-pointed, by extern name.
     pub(crate) crates_named: BTreeSet<String>,
-    /// The paths that now name the crate the module left, for a refusal that has to list them.
+    /// The crates only a `#[cfg(test)]` item names, which the destination needs as
+    /// `[dev-dependencies]`. A crate the rest of the file names too is in `crates_named` alone.
+    pub(crate) dev_crates_named: BTreeSet<String>,
+    /// The paths outside `#[cfg(test)]` that now name the crate the module left, for a refusal that
+    /// has to list them.
     pub(crate) origin_paths: Vec<String>,
+    /// The subset of `origin_paths` written in the file's own top-level `use` header — the only
+    /// ones `check` reads.
+    // TODO(check-parity): `check` reads bodies and nested `use` items too once it consumes the
+    // survey; this field then goes.
+    pub(crate) header_origin_paths: Vec<String>,
 }
 
-/// The moved file's own `use` header, re-pointed at the crates its paths will name afterwards.
+/// The moved file's paths, re-pointed at the crates they will name afterwards.
 ///
-/// Inside the module, `crate::` and a top-level `super::` both named the crate it is leaving; in the
-/// destination they would name the destination. Only the qualifier is rewritten, and only in a `use`
-/// declaration — see this module's own documentation for why that is the whole of the header pass.
+/// Every path comes from the survey, so a `use` at any depth and a path in a body are read the same
+/// way, and each is rewritten by where it *ends up*:
 ///
-/// Which crate a qualifier becomes is the co-moving set's to answer. A path reaching a module in
-/// `co_moving` goes on saying `crate::`, because the destination *is* `crate` for a file that has
-/// arrived in it — naming the destination by its package name from inside it is `E0433`, which is
-/// what a live `cargo check` says about the only alternative. A path reaching a module staying
-/// behind is re-pointed at the origin, resolving a re-export as [`module_home::defining_crate`]
-/// does. Without that distinction a reference to a sibling that is also moving becomes a
-/// `destination → origin` edge the operation authors itself, which is the mechanic that made a
-/// mutually-referencing set unmovable.
+/// - a path reaching a module in `co_moving` goes on saying `crate::`, because the destination
+///   *is* `crate` for a file that has arrived in it — naming the destination by its package name from
+///   inside it is `E0433`. A nested member is declared at the destination's root under its own last
+///   segment, so `crate::model_registry::store` arrives as `crate::store`. A `self::` or `super::`
+///   that stays inside the moved module still means the same thing and is left as written;
+/// - a path whose item the destination defines — whether written as `destination::…`, or as a
+///   `crate::…` the origin only forwards there — becomes `crate::…`;
+/// - a path whose item the origin defines names the origin, which makes it an edge back;
+/// - a path into any other crate names that crate.
 ///
-/// The segment after `crate::` can still change: a **nested** member is declared at the
-/// destination's root under its own last segment, so `crate::model_registry::store` arrives as
-/// `crate::store`.
+/// A path in `co_moving` or in the destination names no crate the destination has to depend on —
+/// least of all itself — and is no edge for a refusal to list. A path under `#[cfg(test)]` is no edge
+/// either: cargo allows a dev-dependency cycle, so its crates go to `dev_crates_named`.
 ///
-/// A co-moving path is recorded in neither [`Header::crates_named`] nor [`Header::origin_paths`]:
-/// it names no crate the destination has to depend on — least of all itself — and it is not an
-/// origin edge for a refusal to list.
+/// A name the `use` leaves bound is kept: where following a re-export changes the last segment —
+/// `use crate::roster;` over a module that is only `destination::records` — the new path is bound
+/// `as roster`, so the paths in the body that use the name go on resolving.
+///
+/// # Errors
+///
+/// Refuses a `use` group whose members would need different qualifiers, because one prefix is all a
+/// group has, and for everything the survey refuses.
 pub(crate) fn repointed_header(
     workspace: &Workspace<'_>,
     text: &str,
-    origin: &destination::Destination,
+    moving: &Move,
     co_moving: &BTreeSet<String>,
 ) -> Result<Header> {
+    let survey = survey::survey_moved_file(workspace, text, &moving.origin, &moving.home.path)?;
+    let header_lines: BTreeSet<u32> = use_declarations(text)
+        .into_iter()
+        .map(|(at, _)| manifest_edits::position_of(text, at).line)
+        .collect();
+
     let mut header = Header {
         edits: Vec::new(),
         crates_named: BTreeSet::new(),
+        dev_crates_named: BTreeSet::new(),
         origin_paths: Vec::new(),
+        header_origin_paths: Vec::new(),
     };
 
-    for (at, path) in use_declarations(text) {
-        let (qualifier, rest) = match path.split_once("::") {
-            Some(split) => split,
-            None => (path, ""),
-        };
+    // The leaves of one `use` tree share a site, and are adjacent in the survey.
+    for group in survey
+        .paths
+        .chunk_by(|one, other| !one.in_body && !other.in_body && one.site == other.site)
+    {
+        let reaches: Vec<Reach> = group
+            .iter()
+            .map(|path| reach(path, moving, co_moving))
+            .collect();
 
-        if matches!(qualifier, "crate" | "super") {
-            if let Some(member) = travels_with(rest, co_moving) {
-                let landing = member.rsplit("::").next().unwrap_or(member);
-                let written = format!("{qualifier}::{member}");
-                let arrives_as = format!("crate::{landing}");
-                if written != arrives_as {
-                    header.edits.push(manifest_edits::replacement(
-                        text,
-                        at..at + written.len(),
-                        &arrives_as,
-                    ));
-                }
+        for (path, reached) in group.iter().zip(&reaches) {
+            let Some(named) = &reached.names else {
+                continue;
+            };
+            if path.in_test {
+                header.dev_crates_named.insert(named.clone());
                 continue;
             }
-            let as_origin = format!("{}::{}", origin.extern_name, rest);
-            let (written_as, named) =
-                match module_home::defining_crate(workspace, origin, &as_origin)? {
-                    Some(defining) if defining != origin.extern_name => {
-                        (format!("{defining}::{rest}"), defining)
-                    }
-                    _ => (as_origin.clone(), origin.extern_name.clone()),
-                };
-            let new_qualifier = written_as
-                .split("::")
-                .next()
-                .unwrap_or(origin.extern_name.as_str());
-            header.edits.push(manifest_edits::replacement(
-                text,
-                at..at + qualifier.len(),
-                new_qualifier,
-            ));
-            header.crates_named.insert(named);
-            header.origin_paths.push(written_as);
-            continue;
+            header.crates_named.insert(named.clone());
+            if reached.edge_back {
+                push_once(&mut header.origin_paths, &path.defined_at);
+                if !path.in_body && header_lines.contains(&path.site.line) {
+                    push_once(&mut header.header_origin_paths, &path.defined_at);
+                }
+            }
         }
-        if !matches!(qualifier, "self" | "std" | "core" | "alloc") {
-            header.crates_named.insert(qualifier.to_string());
-        }
+
+        header.edits.extend(rewrite_of(text, group, &reaches)?);
     }
 
+    header
+        .dev_crates_named
+        .retain(|named| !header.crates_named.contains(named));
     Ok(header)
+}
+
+fn push_once(paths: &mut Vec<String>, path: &str) {
+    if !paths.iter().any(|known| known == path) {
+        paths.push(path.to_string());
+    }
+}
+
+/// Where one surveyed path ends up.
+struct Reach {
+    /// The path as the destination has to write it, `None` when what is written stays valid.
+    rewritten: Option<String>,
+    /// The crate the destination has to depend on for it, when it is one.
+    names: Option<String>,
+    /// Whether it makes the destination depend on the crate the module left.
+    edge_back: bool,
+}
+
+fn reach(path: &SurveyedPath, moving: &Move, co_moving: &BTreeSet<String>) -> Reach {
+    let origin = &moving.origin.extern_name;
+
+    let inside_the_origin = path.resolved.strip_prefix(&format!("{origin}::"));
+    if let Some((rest, member)) = inside_the_origin
+        .and_then(|rest| travels_with(rest, co_moving).map(|member| (rest, member)))
+    {
+        let head = path.written.split("::").next().unwrap_or_default();
+        let stays_inside_the_module =
+            matches!(head, "self" | "super") && *member == moving.home.path.join("::");
+        let landing = member.rsplit("::").next().unwrap_or(member);
+        return Reach {
+            rewritten: (!stays_inside_the_module)
+                .then(|| format!("crate::{landing}{}", &rest[member.len()..])),
+            names: None,
+            edge_back: false,
+        };
+    }
+
+    let named = &path.defining_crate;
+    if *named == moving.destination.extern_name {
+        return Reach {
+            rewritten: Some(format!("crate{}", &path.defined_at[named.len()..])),
+            names: None,
+            edge_back: false,
+        };
+    }
+    Reach {
+        rewritten: Some(path.defined_at.clone()),
+        names: Some(named.clone()),
+        edge_back: named == origin,
+    }
+}
+
+/// The one edit that re-points a `use` tree or a path in a body, if it needs one.
+///
+/// A tree is replaced by its **prefix**: `crate` in `use crate::{a, b};`. Every member has to agree
+/// on what that prefix becomes, since there is only one of it to write.
+fn rewrite_of(text: &str, group: &[SurveyedPath], reaches: &[Reach]) -> Result<Option<TextEdit>> {
+    let site = group[0].site;
+    let at = byte_offset(text, site.line, site.col)?;
+    let prefix = written_prefix(&text[at..]);
+    let prefix_segments = prefix.split("::").count();
+
+    let mut new_prefixes = BTreeSet::new();
+    for (path, reached) in group.iter().zip(reaches) {
+        let segments: Vec<&str> = path.written.split("::").collect();
+        if segments.len() < prefix_segments || segments[..prefix_segments].join("::") != prefix {
+            return Err(malformed(format!(
+                "`{}` is spelled across whitespace or comments, which the path rewrite cannot \
+                 address — write it on one line",
+                path.written
+            )));
+        }
+        let tail = segments[prefix_segments..].join("::");
+
+        let new_prefix = match (&reached.rewritten, tail.is_empty()) {
+            (None, _) => prefix.to_string(),
+            (Some(new), true) => new.clone(),
+            (Some(new), false) => new
+                .strip_suffix(&format!("::{tail}"))
+                .ok_or_else(|| one_use_per_path(path))?
+                .to_string(),
+        };
+        new_prefixes.insert(new_prefix);
+    }
+    if new_prefixes.len() != 1 {
+        return Err(one_use_per_path(&group[0]));
+    }
+    let new_prefix = new_prefixes.into_iter().next().unwrap_or_default();
+    if new_prefix == prefix {
+        return Ok(None);
+    }
+
+    let replacement = match keeps_its_name(text, at + prefix.len(), group, prefix, &new_prefix) {
+        Some(name) => format!("{new_prefix} as {name}"),
+        None => new_prefix,
+    };
+    Ok(Some(manifest_edits::replacement(
+        text,
+        at..at + prefix.len(),
+        &replacement,
+    )))
+}
+
+/// The name a plain `use` has to go on binding when re-pointing it changes its last segment.
+fn keeps_its_name<'a>(
+    text: &str,
+    after_prefix: usize,
+    group: &[SurveyedPath],
+    prefix: &'a str,
+    new_prefix: &str,
+) -> Option<&'a str> {
+    let plain_use = group.len() == 1 && !group[0].in_body && group[0].written == prefix;
+    let ends_there = text[after_prefix..].trim_start().starts_with(';');
+    let was = prefix.rsplit("::").next()?;
+    (plain_use && ends_there && new_prefix.rsplit("::").next()? != was).then_some(was)
+}
+
+fn one_use_per_path(path: &SurveyedPath) -> RestructureError {
+    malformed(format!(
+        "`{}` is one of several paths a single `use` writes, and moving the module gives them \
+         different qualifiers — write one `use` per path so each can be re-pointed on its own",
+        path.written
+    ))
+}
+
+/// The path written from the start of `from_head`, up to where a group, a glob, an alias or the end
+/// of the declaration begins.
+fn written_prefix(from_head: &str) -> &str {
+    let mut end = segment_length(from_head);
+    while let Some(after) = from_head[end..].strip_prefix("::") {
+        let length = segment_length(after);
+        if length == 0 {
+            break;
+        }
+        end += "::".len() + length;
+    }
+    &from_head[..end]
 }
 
 /// The member of the set a `crate::`-relative path reaches, if it reaches one — the caller

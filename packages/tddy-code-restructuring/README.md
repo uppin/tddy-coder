@@ -35,6 +35,12 @@ A plan is read through a **plan store** (`plan_store.rs`): operations carry stab
 pending anchors are rewritten after each operation, and the plan is written back. See
 [docs/plan-store.md](docs/plan-store.md).
 
+A cross-crate move (`move_module_to_crate`, `move_cluster_to_crate`) reads every path the moved file
+names — `use` items at any depth and bodies — from one **path survey** (`crate_move/survey.rs`), resolved
+by segment and followed through the origin's re-exports to the defining crate; the rewrite, the
+dependency-back test and the destination's manifest are all derived from it. See
+[docs/path-survey.md](docs/path-survey.md).
+
 Plans hold intents only — no source text (`text` / `code` / `content` refused). Unsupported operations are hard errors.
 
 ## Driving it from something other than a command line

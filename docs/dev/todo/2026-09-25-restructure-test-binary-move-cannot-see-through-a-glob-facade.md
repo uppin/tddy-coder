@@ -36,7 +36,7 @@ tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 That compiles, since cargo permits a dev-dependency cycle. But the receiver now depends on its
 origin, and the whole point of the move was to prevent that (`#carve` 15/15 Boundaries: "No
 receiver depends on `tddy-session-lifecycle`"). On this plan the compile gate failed on the
-[extern-name self-dependency](./2026-09-25-restructure-move-to-crate-leaves-the-destinations-own-extern-name.md)
+extern-name self-dependency (the destination written into its own manifest)
 instead, so this defect showed up only in the diff.
 
 ## Why

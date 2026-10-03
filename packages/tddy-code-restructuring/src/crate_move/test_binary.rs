@@ -312,7 +312,7 @@ fn record_crates_the_code_names(
 /// `crate`, `super` and `self` are the file's own crate under three names, and `std`, `core` and
 /// `alloc` are the crates every Rust file reaches without depending on them. None of the six is a
 /// crate the destination could gain a dependency on, and none of them is one to re-point.
-fn is_a_built_in_root(head: &str) -> bool {
+pub(crate) fn is_a_built_in_root(head: &str) -> bool {
     matches!(head, "crate" | "super" | "self" | "std" | "core" | "alloc")
 }
 
@@ -377,7 +377,7 @@ fn inside_a_declaration(declarations: &[(std::ops::Range<usize>, &str)], at: usi
 /// one here, because this pass reads paths from inside nested modules too — and everything its
 /// `use` declarations bring into scope, which is where the dangerous shadowing lives:
 /// `use tokio::sync::mpsc;` makes every later `mpsc::…` an imported module rather than a crate.
-fn names_bound_in(text: &str) -> BTreeSet<String> {
+pub(crate) fn names_bound_in(text: &str) -> BTreeSet<String> {
     let mut bound: BTreeSet<String> = text.lines().filter_map(module_declared_by).collect();
 
     for (_, tree) in use_trees(text) {
@@ -583,7 +583,7 @@ fn written_path_from(text: &str, at: usize, limit: usize) -> &str {
 }
 
 /// How much of `text` the path segment at its start occupies.
-fn segment_length(text: &str) -> usize {
+pub(crate) fn segment_length(text: &str) -> usize {
     text.find(|character: char| !header::is_path_character(character))
         .unwrap_or(text.len())
 }

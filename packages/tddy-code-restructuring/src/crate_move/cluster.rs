@@ -121,20 +121,22 @@ pub fn resolve_cluster(
 
     let mut merged = MergedChanges::default();
     let mut crates_named = BTreeSet::new();
+    let mut dev_crates_named = BTreeSet::new();
     let mut keeps_naming_it = BTreeSet::new();
 
     for member in &members {
         let (survey, rewrites) = super::surveyed(engine, workspace, member, &travelling)?;
         let moved = workspace.read(&member.source)?;
-        let header = header::repointed_header(workspace, &moved, &member.origin, &co_moving)?;
-        let names = refusals::crates_the_moved_code_names(workspace, &member.origin, &header)?;
+        let header = header::repointed_header(workspace, &moved, member, &co_moving)?;
         let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
-        refusals::refuse_a_dependency_cycle(workspace, member, &header, &naming_it)?;
+        refusals::refuse_a_dependency_cycle(member, &header, &naming_it)?;
 
         merged.absorb(FileEdit::Rename {
             from: member.source.clone(),
             to: member.moved_to(),
         });
+        crates_named.extend(header.crates_named);
+        dev_crates_named.extend(header.dev_crates_named);
         merged.add(member.source.clone(), header.edits);
         merged.absorb(member.left_behind(workspace, &survey)?);
         merged.absorb(member.declared_in_destination(workspace)?);
@@ -144,14 +146,18 @@ pub fn resolve_cluster(
             }
         }
 
-        crates_named.extend(names);
         keeps_naming_it.extend(naming_it);
     }
 
     // Read off the first member because every member shares them: `read_members` refuses a set
     // whose members leave different crates, and the destination is the set's own field.
     let across_the_set = &members[0];
-    merged.absorb(across_the_set.destination_manifest(workspace, &crates_named)?);
+    dev_crates_named.retain(|named| !crates_named.contains(named));
+    merged.absorb(across_the_set.destination_manifest(
+        workspace,
+        &crates_named,
+        &dev_crates_named,
+    )?);
     for change in across_the_set.dependents_on_the_destination(workspace, &keeps_naming_it)? {
         merged.absorb(change);
     }
@@ -368,8 +374,8 @@ fn paths_naming_the_origin(
         .map(|other| other.path().join("::"))
         .collect();
     let text = workspace.read(&module.source)?;
-    let header = header::repointed_header(workspace, &text, &module.moving.origin, &co_moving)?;
-    refusals::origin_named_dependencies(workspace, &module.moving, &header)
+    let header = header::repointed_header(workspace, &text, &module.moving, &co_moving)?;
+    Ok(header.header_origin_paths)
 }
 
 /// One module a plan moves out of the crate that holds it.
