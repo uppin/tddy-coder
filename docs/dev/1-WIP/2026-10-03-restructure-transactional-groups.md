@@ -133,12 +133,15 @@ a group fail its end gate. Run with `-- --test-threads=1`.
 
 | Test | Plan | Fails today because |
 |---|---|---|
-| `a_group_whose_members_compile_only_together_applies` | group `renames`: rename `level`, rename `depth` | applies, but the journal holds no `group_started` / `group_completed` |
+| `two_renames_in_a_group_apply_and_journal_the_group_as_started_then_completed` | group `renames`: rename `level`, rename `depth` | applies, but the journal holds no `group_started` / `group_completed` (it does not prove a tree that compiles only together) |
 | `a_group_that_does_not_compile_at_its_end_is_rolled_back_byte_for_byte` | group `relocation`: rename `level`, move the test binary | `AppliedTreeDoesNotCompile` ("2 of 2 … applied"), edits left on disk |
 | `earlier_operations_stay_applied_when_a_later_group_rolls_back` | ungrouped rename `level`, then group `relocation`: rename `depth`, move the binary | same — no group gate, no rollback |
 | `a_rolled_back_group_restores_created_and_renamed_files` | group `relocation`: `extract_module` `depth` with `to_file` (creates `depths.rs`), move the binary (a rename) | same |
 | `resume_inside_a_group_rolls_the_partial_group_back_and_reapplies_it` | group `renames` with ids; a crash faked after member 1 (`group_started`, `pre_imaged`, `runner::commit_operation`, `plan_synced`), then `--resume` | resumes at member 2; no `group_rolled_back` / re-`group_started` / `group_completed` |
 | `check_deep_reports_one_finding_for_a_group_with_a_refused_member` | group `shapes`: two renames of symbols the file does not declare | two findings, neither naming the group |
+| `a_group_member_that_cannot_be_resolved_rolls_the_whole_group_back` | ungrouped rename, then group `renames`: rename `depth`, rename `Circle` (not declared) | the first member stays on disk and the group stays open in the journal |
+| `a_rolled_back_group_reports_none_of_its_members_as_applied` | ungrouped rename, then group `relocation` (rename, move binary) | the account carries an "applied" line for the rolled-back rename |
+| `a_kept_group_reports_each_member_applied_with_its_group` | group `renames`: two renames | no `   group: renames` line in the account |
 | `an_ungrouped_failing_run_still_leaves_its_edits_on_disk` | ungrouped rename + ungrouped move | **passes by design** — guards today's contract |
 
 "Byte for byte" is the whole tree (workspace manifest + everything under `crates/`, path → text)
@@ -162,8 +165,8 @@ compared before and after.
   group-aware.
 - **Honest-fixture limitation**: no operation this engine has today produces a tree that compiles
   only once a later operation lands — every op compiles alone, and the caller-breaking signature
-  operations are `signature-rewrites`'. So `a_group_whose_members_compile_only_together_applies` is
-  the honest stand-in (two renames, gated once at the group's end), and every failing group fails
+  operations are `signature-rewrites`'. So `two_renames_in_a_group_apply_and_journal_the_group_as_started_then_completed`
+  is the honest stand-in (two renames, gated once at the group's end), and every failing group fails
   through `move_test_binary_to_crate` leaving its `include_str!` file behind. When
   `signature-rewrites` lands, a true "breaks between members, compiles at the end" pair should
   replace the stand-in.
@@ -176,7 +179,8 @@ compared before and after.
 - `stop_after` is judged where a group would begin; all of a group's members count toward the limit.
 - A cancelled check leaves the group open in the journal; the next resume rolls it back. The daemon rolls back immediately on cancellation between members.
 - Rollback writes the ledger checkpoint before journalling `group_rolled_back` (a checkpoint behind the journal is accepted on resume, one ahead is refused), so a crash between the two stays resumable.
-- The CLI prints each member's "applied" line before the group's gate; only the daemon defers its events (`OperationApplied.group`) to the group's end.
+- Both loops report a group's members only after the group is kept: the daemon as events (`OperationApplied.group`), the command line as the members' visibility and "applied" lines, each followed by `console::group`.
+- Any failure while a group is open (a member that cannot be resolved or committed, a gate that cannot run) rolls the whole group back and returns the original error; only `GroupDoesNotCompile` names the gate. `CallerStopped` is the exception: the group stays open for a resume to roll back.
 - Rollback removes a created file but leaves an empty directory it was created in. TODO(transactional-groups): remove created directories.
 - The stale-member refusal still waits on #539.
 

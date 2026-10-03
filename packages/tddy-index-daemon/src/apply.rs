@@ -136,91 +136,97 @@ fn apply_held_plan(
     // A group's operations, reported once its end gate has passed rather than as they land.
     let mut unreported: Vec<(usize, Resolution)> = Vec::new();
 
-    for (index, op) in plan.ops.iter().enumerate().skip(start) {
-        // Checked before the operation rather than only inside the index waits: the client that
-        // asked for this run has gone, and writing the rest of its plan into the tree anyway is
-        // the opposite of what its disconnect asked for. The journal makes the remainder resumable.
-        if cancel.is_cancelled() {
-            log::info!(
-                target: "tddy_index_daemon::apply",
-                "stopping after {done} operation(s): nobody is waiting for this run any more"
-            );
-            // A group is never left half applied: nobody is left to judge it, so it is undone.
-            if let Some(open) = group.take() {
-                group_gate::roll_back_group(root, open.name(), &paths, &mut journal)?;
+    let gate = GroupGate {
+        root,
+        paths: &paths,
+        cancel,
+    };
+    // Any failure inside the loop ends the group it is in, whole: see
+    // [`GroupRun::roll_back_on_failure`].
+    let ran = (|| -> Result<()> {
+        for (index, op) in plan.ops.iter().enumerate().skip(start) {
+            // Checked before the operation rather than only inside the index waits: the client that
+            // asked for this run has gone, and writing the rest of its plan into the tree anyway is
+            // the opposite of what its disconnect asked for. The journal makes the remainder resumable.
+            if cancel.is_cancelled() {
+                log::info!(
+                    target: "tddy_index_daemon::apply",
+                    "stopping after {done} operation(s): nobody is waiting for this run any more"
+                );
+                // A group is never left half applied: nobody is left to judge it, so it is undone.
+                if let Some(open) = group.take() {
+                    group_gate::roll_back_group(root, open.name(), &paths, &mut journal)?;
+                }
+                break;
             }
-            break;
-        }
-        // Honouring `stop_after` is the run doing what it was told, so it ends the loop rather
-        // than raising: a successful partial run is not a defective one. Never inside a group,
-        // which stands or falls whole: the limit is judged where a group would begin.
-        if group.is_none()
-            && options
-                .stop_after
-                .is_some_and(|limit| index >= start + limit)
-        {
-            stopped_early = true;
-            break;
-        }
+            // Honouring `stop_after` is the run doing what it was told, so it ends the loop rather
+            // than raising: a successful partial run is not a defective one. Never inside a group,
+            // which stands or falls whole: the limit is judged where a group would begin.
+            if group.is_none()
+                && options
+                    .stop_after
+                    .is_some_and(|limit| index >= start + limit)
+            {
+                stopped_early = true;
+                break;
+            }
 
-        let anchor = ledger.translate_anchor(&op.anchor)?;
-        let resolved = registry
-            .backend_for(Path::new(anchor.file()), op.op)?
-            .resolve(
-                &op.with_anchor(anchor),
-                &Workspace {
+            let anchor = ledger.translate_anchor(&op.anchor)?;
+            let resolved = registry
+                .backend_for(Path::new(anchor.file()), op.op)?
+                .resolve(
+                    &op.with_anchor(anchor),
+                    &Workspace {
+                        root,
+                        overlay: &overlay,
+                    },
+                )?;
+
+            if options.dry_run {
+                ledger.record(&resolved.edit);
+                overlay.record(root, &resolved.edit)?;
+                unreported.push((index, resolved));
+            } else {
+                let id = op.id.as_ref().filter(|_| !legacy);
+                GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
+                runner::commit_operation(
+                    index,
+                    id,
+                    &resolved,
                     root,
-                    overlay: &overlay,
-                },
-            )?;
-
-        if options.dry_run {
-            ledger.record(&resolved.edit);
-            overlay.record(root, &resolved.edit)?;
-            unreported.push((index, resolved));
-        } else {
-            let id = op.id.as_ref().filter(|_| !legacy);
-            let gate = GroupGate {
-                root,
-                paths: &paths,
-                cancel,
-            };
-            GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
-            runner::commit_operation(
-                index,
-                id,
-                &resolved,
-                root,
-                &paths,
-                &mut journal,
-                &mut ledger,
-            )?;
-            // A group's members reach the plan store, and the caller's eyes, together, once the
-            // group has compiled.
-            let settled =
-                GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, |_| {})?;
-            let Settled::Ready(ready) = settled else {
-                done += 1;
-                continue;
-            };
-            if !legacy {
-                refresh_held_plan(held, &ready, &mut registry, &mut journal, &paths)?;
+                    &paths,
+                    &mut journal,
+                    &mut ledger,
+                )?;
+                // A group's members reach the plan store, and the caller's eyes, together, once the
+                // group has compiled.
+                let settled =
+                    GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, |_| {})?;
+                let Settled::Ready(ready) = settled else {
+                    done += 1;
+                    continue;
+                };
+                if !legacy {
+                    refresh_held_plan(held, &ready, &mut registry, &mut journal, &paths)?;
+                }
+                unreported.extend(ready);
             }
-            unreported.extend(ready);
-        }
-        done += 1;
+            done += 1;
 
-        // Reported *after* the commit, so an event means the edit is on disk and in the journal —
-        // and, for a group member, that its group compiled.
-        report_applied(
-            events,
-            cancel,
-            &plan,
-            &mut unreported,
-            done,
-            options.dry_run,
-        );
-    }
+            // Reported *after* the commit, so an event means the edit is on disk and in the journal —
+            // and, for a group member, that its group compiled.
+            report_applied(
+                events,
+                cancel,
+                &plan,
+                &mut unreported,
+                done,
+                options.dry_run,
+            );
+        }
+        Ok(())
+    })();
+    GroupRun::roll_back_on_failure(&mut group, ran, &gate, &mut journal)?;
 
     // Judged before the outcome is sent, so a tree that does not compile ends the stream with the
     // refusal and never with "applied N of N" — the same gate, from the same library, as the cold

@@ -1,4 +1,5 @@
 use super::super::refuse_a_broken_result;
+use crate::backends::rust::ProgressSink;
 use crate::Result;
 
 use super::super::commit_operation;
@@ -203,6 +204,36 @@ fn refresh_plan(
     Ok(())
 }
 
+/// Tell the account about each of `settled`'s operations as applied, oldest first, a group member's
+/// line followed by the group it belongs to.
+///
+/// `done` counts everything applied so far, `settled` included.
+fn report_settled(
+    account: &ProgressSink,
+    plan: &Plan,
+    settled: &[(usize, Resolution)],
+    done: usize,
+) {
+    let reported = done - settled.len();
+    for (offset, (member, resolution)) in settled.iter().enumerate() {
+        let op = &plan.ops[*member];
+        if op.group.is_some() {
+            report_visibility(account, resolution);
+        }
+        account(&progress_line(
+            *member,
+            reported + offset,
+            plan.ops.len(),
+            op.op,
+            resolution.edit.changes.len(),
+            true,
+        ));
+        if let Some(name) = &op.group {
+            account(&crate::console::group(name));
+        }
+    }
+}
+
 fn apply_held_plan(
     root: &Path,
     store: &mut PlanStore,
@@ -246,94 +277,100 @@ fn apply_held_plan(
     let mut stopped_early = false;
     let mut group: Option<GroupRun> = None;
 
-    for (index, op) in plan.ops.iter().enumerate().skip(start) {
-        // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
-        // than raising. Reporting it as a malformed plan — with a usage dump — described a
-        // successful partial run as a defective one. Never inside a group, though: a group stands
-        // or falls whole, so the limit is judged where a group would begin and its members all
-        // count toward it.
-        if group.is_none() && stop_limit_reached(options, start, index) {
-            stopped_early = true;
-            break;
-        }
+    let gate = GroupGate {
+        root,
+        paths: &paths,
+        cancel,
+    };
+    // Any failure inside the loop ends the group it is in, whole: see
+    // [`GroupRun::roll_back_on_failure`].
+    let ran = (|| -> Result<()> {
+        for (index, op) in plan.ops.iter().enumerate().skip(start) {
+            // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
+            // than raising. Reporting it as a malformed plan — with a usage dump — described a
+            // successful partial run as a defective one. Never inside a group, though: a group stands
+            // or falls whole, so the limit is judged where a group would begin and its members all
+            // count toward it.
+            if group.is_none() && stop_limit_reached(options, start, index) {
+                stopped_early = true;
+                break;
+            }
 
-        let at = ledger.translate_op(op)?;
-        (options.progress)(&format!(
-            "op {index} of {total}: resolving {:?} in `{}`",
-            op.op,
-            at.anchor.file()
-        ));
-        let resolved = registry
-            .backend_for(Path::new(at.anchor.file()), op.op)?
-            .resolve(
-                &at,
-                &Workspace {
-                    root,
-                    overlay: &overlay,
-                },
-            )?;
-
-        report_visibility(&options.account, &resolved);
-
-        let files = resolved.edit.changes.len();
-        (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
-        if options.dry_run {
-            (options.account)(&progress_line(
-                index,
-                done,
-                plan.ops.len(),
-                op.op,
-                files,
-                false,
-            ));
-            ledger.record(&resolved.edit);
-            overlay.record(root, &resolved.edit)?;
-            done += 1;
-            continue;
-        }
-
-        (options.progress)(&format!(
-            "op {index} of {total}: applying {files} file(s) to disk"
-        ));
-        let id = op.id.as_ref().filter(|_| !legacy);
-        let gate = GroupGate {
-            root,
-            paths: &paths,
-            cancel,
-        };
-        GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
-        commit_operation(
-            index,
-            id,
-            &resolved,
-            root,
-            &paths,
-            &mut journal,
-            &mut ledger,
-        )?;
-        // A group's members reach the plan store together, once the group has compiled.
-        let on_check = |name: &str| {
+            let at = ledger.translate_op(op)?;
             (options.progress)(&format!(
-                "op {index} of {total}: checking group `{name}` compiles"
+                "op {index} of {total}: resolving {:?} in `{}`",
+                op.op,
+                at.anchor.file()
             ));
-        };
-        let settled = GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, on_check)?;
-        if let (Settled::Ready(ready), false) = (settled, legacy) {
-            refresh_plan(store, key, &ready, &mut registry, &mut journal, &paths)?;
+            let resolved = registry
+                .backend_for(Path::new(at.anchor.file()), op.op)?
+                .resolve(
+                    &at,
+                    &Workspace {
+                        root,
+                        overlay: &overlay,
+                    },
+                )?;
+
+            // A group member's account waits for its group to be kept: see below.
+            if op.group.is_none() || options.dry_run {
+                report_visibility(&options.account, &resolved);
+            }
+
+            let files = resolved.edit.changes.len();
+            (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
+            if options.dry_run {
+                (options.account)(&progress_line(
+                    index,
+                    done,
+                    plan.ops.len(),
+                    op.op,
+                    files,
+                    false,
+                ));
+                ledger.record(&resolved.edit);
+                overlay.record(root, &resolved.edit)?;
+                done += 1;
+                continue;
+            }
+
+            (options.progress)(&format!(
+                "op {index} of {total}: applying {files} file(s) to disk"
+            ));
+            let id = op.id.as_ref().filter(|_| !legacy);
+            GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
+            commit_operation(
+                index,
+                id,
+                &resolved,
+                root,
+                &paths,
+                &mut journal,
+                &mut ledger,
+            )?;
+            // A group's members reach the plan store together, once the group has compiled.
+            let on_check = |name: &str| {
+                (options.progress)(&format!(
+                    "op {index} of {total}: checking group `{name}` compiles"
+                ));
+            };
+            let settled =
+                GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, on_check)?;
+            done += 1;
+            let Settled::Ready(ready) = settled else {
+                continue;
+            };
+            if !legacy {
+                refresh_plan(store, key, &ready, &mut registry, &mut journal, &paths)?;
+            }
+            // Reported *after* the commit, so a line in the account means the edit is on disk and in
+            // the journal — and, for a group member, that its group compiled: a member's line waits
+            // for the group's end, so an edit a failed gate rolls back is never reported as applied.
+            report_settled(&options.account, &plan, &ready, done);
         }
-        // Reported *after* the commit, so a line in the account means the edit is on disk and in
-        // the journal. An apply used to report nothing at all — the dry run, where nothing is at
-        // stake, was the only mode that spoke.
-        (options.account)(&progress_line(
-            index,
-            done,
-            plan.ops.len(),
-            op.op,
-            files,
-            true,
-        ));
-        done += 1;
-    }
+        Ok(())
+    })();
+    GroupRun::roll_back_on_failure(&mut group, ran, &gate, &mut journal)?;
 
     let run = AppliedRun {
         journal: &journal,

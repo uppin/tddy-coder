@@ -862,6 +862,180 @@ mod tests {
         );
     }
 
+    fn a_journal_of(records: Vec<JournalRecord>) -> Journal {
+        Journal { records }
+    }
+
+    fn an_image(path: &str, contents: Option<&str>) -> group::PreImage {
+        group::PreImage {
+            path: path.to_string(),
+            contents: contents.map(str::to_string),
+        }
+    }
+
+    fn a_completed_op(op: usize) -> JournalRecord {
+        completed(0, op, removal("src/shapes.rs", 1, 2))
+    }
+
+    /// A group of the members `0` and `1` that journalled one pre-image for each, and completed
+    /// both.
+    fn a_group_run_through(group: &str, ending: JournalRecord) -> Vec<JournalRecord> {
+        vec![
+            JournalRecord::group_started(0, group.to_string(), vec![0, 1]),
+            JournalRecord::pre_imaged(
+                0,
+                None,
+                group.to_string(),
+                vec![an_image("a.rs", Some("a before"))],
+            ),
+            a_completed_op(0),
+            JournalRecord::pre_imaged(1, None, group.to_string(), vec![an_image("b.rs", None)]),
+            a_completed_op(1),
+            ending,
+        ]
+    }
+
+    #[test]
+    fn a_started_group_nothing_ended_is_open_with_its_members_and_pre_images_in_order() {
+        // Given a group that crashed after both members
+        let mut records = a_group_run_through("shapes", a_completed_op(1));
+        records.pop();
+        let journal = a_journal_of(records);
+
+        // When
+        let open = journal.open_group();
+
+        // Then
+        assert_eq!(
+            open,
+            Some(group::OpenGroup {
+                group: "shapes".to_string(),
+                members: vec![0, 1],
+                pre_images: vec![an_image("a.rs", Some("a before")), an_image("b.rs", None)],
+            })
+        );
+    }
+
+    #[test]
+    fn a_completed_group_is_not_open() {
+        let journal = a_journal_of(a_group_run_through(
+            "shapes",
+            JournalRecord::group_completed(1, "shapes".to_string()),
+        ));
+
+        assert_eq!(journal.open_group(), None);
+    }
+
+    #[test]
+    fn a_rolled_back_group_is_not_open() {
+        let journal = a_journal_of(a_group_run_through(
+            "shapes",
+            JournalRecord::group_rolled_back(1, "shapes".to_string()),
+        ));
+
+        assert_eq!(journal.open_group(), None);
+    }
+
+    #[test]
+    fn a_group_started_after_a_completed_one_is_the_open_one() {
+        // Given a completed group, then another that never ended
+        let mut records = a_group_run_through(
+            "first",
+            JournalRecord::group_completed(1, "first".to_string()),
+        );
+        records.push(JournalRecord::group_started(
+            2,
+            "second".to_string(),
+            vec![2],
+        ));
+        let journal = a_journal_of(records);
+
+        // When
+        let open = journal.open_group().map(|open| open.group);
+
+        // Then
+        assert_eq!(open, Some("second".to_string()));
+    }
+
+    #[test]
+    fn the_pre_images_of_a_group_are_those_of_its_latest_run_only() {
+        // Given another group completed, then `shapes` rolled back and run again
+        let mut records = a_group_run_through(
+            "other",
+            JournalRecord::group_completed(1, "other".to_string()),
+        );
+        records.extend(a_group_run_through(
+            "shapes",
+            JournalRecord::group_rolled_back(1, "shapes".to_string()),
+        ));
+        records.extend([
+            JournalRecord::group_started(0, "shapes".to_string(), vec![0]),
+            JournalRecord::pre_imaged(
+                0,
+                None,
+                "shapes".to_string(),
+                vec![an_image("c.rs", Some("c before"))],
+            ),
+        ]);
+        let journal = a_journal_of(records);
+
+        // When
+        let images = journal.group_pre_images("shapes");
+
+        // Then
+        assert_eq!(images, vec![an_image("c.rs", Some("c before"))]);
+    }
+
+    #[test]
+    fn the_operations_of_a_rolled_back_group_do_not_count_as_completed() {
+        // Given an ungrouped operation, then a group of two that was rolled back
+        let journal = a_journal_of(vec![
+            a_completed_op(0),
+            JournalRecord::group_started(1, "shapes".to_string(), vec![1, 2]),
+            a_completed_op(1),
+            a_completed_op(2),
+            JournalRecord::group_rolled_back(2, "shapes".to_string()),
+        ]);
+
+        // When
+        let completed: Vec<usize> = journal.completed().map(|record| record.op).collect();
+
+        // Then only the operation before the group counts
+        assert_eq!(completed, vec![0]);
+    }
+
+    #[test]
+    fn the_operations_of_a_completed_group_count_as_completed() {
+        let journal = a_journal_of(a_group_run_through(
+            "shapes",
+            JournalRecord::group_completed(1, "shapes".to_string()),
+        ));
+
+        let completed: Vec<usize> = journal.completed().map(|record| record.op).collect();
+
+        assert_eq!(completed, vec![0, 1]);
+    }
+
+    #[test]
+    fn records_in_force_drop_every_record_of_a_rolled_back_group_but_keep_the_rest() {
+        // Given a group rolled back, then an ungrouped operation
+        let mut records = a_group_run_through(
+            "shapes",
+            JournalRecord::group_rolled_back(1, "shapes".to_string()),
+        );
+        records.push(a_completed_op(2));
+        let journal = a_journal_of(records);
+
+        // When
+        let in_force: Vec<(OpStatus, usize)> = journal
+            .records_in_force()
+            .map(|record| (record.status, record.op))
+            .collect();
+
+        // Then
+        assert_eq!(in_force, vec![(OpStatus::Completed, 2)]);
+    }
+
     fn digest_of(contents: &str) -> String {
         use sha2::{Digest, Sha256};
         format!("sha256:{:x}", Sha256::digest(contents.as_bytes()))

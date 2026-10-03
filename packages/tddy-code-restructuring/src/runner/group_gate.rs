@@ -34,7 +34,8 @@ use super::StatePaths;
 /// the tree is known to compile.
 pub struct GroupRun {
     group: String,
-    members: Vec<usize>,
+    /// The plan index of the group's last member — where its end gate runs.
+    last: usize,
     captured: BTreeSet<String>,
     applied: Vec<(usize, Resolution)>,
 }
@@ -59,13 +60,16 @@ impl GroupRun {
             .take_while(|(_, op)| op.group.as_deref() == Some(group.as_str()))
             .map(|(member, _)| member)
             .collect();
+        let last = *members
+            .last()
+            .expect("a group holds at least the operation that opens it");
         journal.append(
             &paths.journal,
             JournalRecord::group_started(index, group.clone(), members.clone()),
         )?;
         Ok(Some(GroupRun {
             group,
-            members,
+            last,
             captured: BTreeSet::new(),
             applied: Vec::new(),
         }))
@@ -110,18 +114,19 @@ impl GroupRun {
 
     /// Whether member `index` is the last of the group.
     pub fn closes_at(&self, index: usize) -> bool {
-        self.members.last() == Some(&index)
+        self.last == index
     }
 
     /// Judge the group at its end. Passing journals `group_completed` and returns every member's
     /// resolution, in plan order, for the caller to refresh the plan store with; failing rolls the
-    /// group back and returns the refusal.
+    /// group back and returns the failure.
     ///
     /// # Errors
     ///
-    /// [`RestructureError::GroupDoesNotCompile`] once the group has been rolled back;
-    /// [`RestructureError::CallerStopped`] when `cancel` fired during the check — the group stays
-    /// open in the journal, which a resume rolls back before it runs anything.
+    /// [`RestructureError::GroupDoesNotCompile`] once the group has been rolled back; any other
+    /// error the check raised (a manifest that cannot be read, say) likewise after the rollback,
+    /// unchanged; [`RestructureError::CallerStopped`] when `cancel` fired during the check — the
+    /// group stays open in the journal, which a resume rolls back before it runs anything.
     pub fn finish(
         self,
         root: &Path,
@@ -131,18 +136,44 @@ impl GroupRun {
     ) -> Result<Vec<(usize, Resolution)>> {
         match gate_group(root, &self.group, journal, cancel) {
             Ok(()) => {
-                let last = self.members.last().copied().unwrap_or_default();
                 journal.append(
                     &paths.journal,
-                    JournalRecord::group_completed(last, self.group),
+                    JournalRecord::group_completed(self.last, self.group),
                 )?;
                 Ok(self.applied)
             }
-            Err(refusal @ RestructureError::GroupDoesNotCompile { .. }) => {
+            Err(RestructureError::CallerStopped) => Err(RestructureError::CallerStopped),
+            Err(failure) => {
                 roll_back_group(root, &self.group, paths, journal)?;
-                Err(refusal)
+                Err(failure)
             }
-            Err(other) => Err(other),
+        }
+    }
+
+    /// Pass `outcome` through, rolling back the group `slot` holds first when it is a failure.
+    ///
+    /// A group stands or falls whole, so a member that cannot be resolved or committed leaves the
+    /// members before it undone, not applied under a group the journal still shows open. The
+    /// failure returned is `outcome`'s own. A rollback that itself fails is returned instead: the
+    /// tree is then in a state only the group's pre-images can account for, and the group stays
+    /// open in the journal for a resume to roll back.
+    ///
+    /// [`RestructureError::CallerStopped`] is the exception, as at the group's end gate: nobody is
+    /// waiting, and the open group is what a resume rolls back.
+    pub fn roll_back_on_failure<T>(
+        slot: &mut Option<GroupRun>,
+        outcome: Result<T>,
+        gate: &GroupGate<'_>,
+        journal: &mut Journal,
+    ) -> Result<T> {
+        match outcome {
+            Err(failure) if !matches!(failure, RestructureError::CallerStopped) => {
+                if let Some(open) = slot.take() {
+                    roll_back_group(gate.root, open.name(), gate.paths, journal)?;
+                }
+                Err(failure)
+            }
+            outcome => outcome,
         }
     }
 }
@@ -266,7 +297,8 @@ pub fn roll_back_group(
             "the journal never started the group `{group}`, so there is nothing to roll back"
         )));
     };
-    let first_member = started.members.first().copied().unwrap_or(started.op);
+    // `group_started` is journalled at the group's first member.
+    let first_member = started.op;
     let reached = reached.op;
 
     for image in journal.group_pre_images(group).iter().rev() {
@@ -316,4 +348,200 @@ pub fn roll_back_an_open_group(
         open.group
     ));
     roll_back_group(root, &open.group, paths, journal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::edit::{FileEdit, Position, Range, TextEdit, WorkspaceEdit};
+
+    const THE_MEMBER: &str = concat!(
+        "{\"v\":1,\"snapshot\":{}}\n",
+        r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"pkg/src/lib.rs","path":"a"},"name":"b","group":"shapes"}"#,
+        "\n"
+    );
+
+    /// A run that is inside the group `shapes`, one member in, with `pkg/src/lib.rs` already rewritten.
+    struct AnOpenGroup {
+        root: tempfile::TempDir,
+        paths: StatePaths,
+        journal: Journal,
+        slot: Option<GroupRun>,
+    }
+
+    impl AnOpenGroup {
+        /// `pkg/src/lib.rs` held "before" when the member began and holds "after" now; `manifest` is
+        /// the text of the `pkg/Cargo.toml` owning it.
+        fn with_manifest(manifest: &[u8]) -> Self {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(root.path().join("pkg/src")).unwrap();
+            std::fs::write(root.path().join("pkg/Cargo.toml"), manifest).unwrap();
+            std::fs::write(root.path().join("pkg/src/lib.rs"), "before\n").unwrap();
+            let plan = Plan::parse(THE_MEMBER).unwrap();
+            let paths = StatePaths::under(root.path());
+            let mut journal = Journal::default();
+            let mut slot = GroupRun::begin(&plan, 0, &paths, &mut journal).unwrap();
+            let edit = WorkspaceEdit {
+                changes: vec![FileEdit::Change {
+                    path: "pkg/src/lib.rs".to_string(),
+                    edits: vec![TextEdit {
+                        range: Range {
+                            start: Position { line: 1, col: 1 },
+                            end: Position { line: 1, col: 7 },
+                        },
+                        new_text: "after".to_string(),
+                    }],
+                }],
+            };
+            let resolved = Resolution::of(edit.clone());
+            slot.as_mut()
+                .unwrap()
+                .pre_image(0, None, &resolved, root.path(), &paths, &mut journal)
+                .unwrap();
+            std::fs::write(root.path().join("pkg/src/lib.rs"), "after\n").unwrap();
+            journal
+                .append(
+                    &paths.journal,
+                    JournalRecord::completed(
+                        0,
+                        None,
+                        edit,
+                        Default::default(),
+                        Default::default(),
+                        Vec::new(),
+                        Vec::new(),
+                    ),
+                )
+                .unwrap();
+            slot.as_mut().unwrap().applied(0, resolved);
+            Self {
+                root,
+                paths,
+                journal,
+                slot,
+            }
+        }
+    }
+
+    fn the_library(root: &tempfile::TempDir) -> String {
+        std::fs::read_to_string(root.path().join("pkg/src/lib.rs")).unwrap()
+    }
+
+    fn last_status(journal: &Journal) -> Option<OpStatus> {
+        journal.records.last().map(|record| record.status)
+    }
+
+    #[test]
+    fn a_failure_inside_an_open_group_rolls_it_back_and_is_returned_as_it_was() {
+        // Given a group one member in
+        let AnOpenGroup {
+            root,
+            paths,
+            mut journal,
+            mut slot,
+        } = AnOpenGroup::with_manifest(b"[package]\nname = \"pkg\"\n");
+        let cancel = CancellationToken::new();
+        let gate = GroupGate {
+            root: root.path(),
+            paths: &paths,
+            cancel: &cancel,
+        };
+
+        // When the next member fails to resolve
+        let outcome = GroupRun::roll_back_on_failure(
+            &mut slot,
+            Err::<(), _>(RestructureError::MalformedPlan("no such symbol".into())),
+            &gate,
+            &mut journal,
+        );
+
+        // Then the failure is the member's own, the file is as it was and the group is closed
+        assert_eq!(
+            (
+                outcome.map_err(|error| error.to_string()),
+                the_library(&root),
+                slot.is_none(),
+                last_status(&journal),
+            ),
+            (
+                Err("plan is malformed: no such symbol".to_string()),
+                "before\n".to_string(),
+                true,
+                Some(OpStatus::GroupRolledBack),
+            )
+        );
+    }
+
+    #[test]
+    fn a_cancellation_leaves_the_open_group_for_a_resume_to_roll_back() {
+        // Given a group one member in
+        let AnOpenGroup {
+            root,
+            paths,
+            mut journal,
+            mut slot,
+        } = AnOpenGroup::with_manifest(b"[package]\nname = \"pkg\"\n");
+        let cancel = CancellationToken::new();
+        let gate = GroupGate {
+            root: root.path(),
+            paths: &paths,
+            cancel: &cancel,
+        };
+
+        // When the caller stops waiting
+        let outcome = GroupRun::roll_back_on_failure(
+            &mut slot,
+            Err::<(), _>(RestructureError::CallerStopped),
+            &gate,
+            &mut journal,
+        );
+
+        // Then the group is still open, in the run and in the journal, and the file is as the
+        // member left it
+        assert_eq!(
+            (
+                outcome.map_err(|error| error.to_string()),
+                the_library(&root),
+                slot.is_some(),
+                journal.open_group().map(|open| open.group),
+            ),
+            (
+                Err("the caller stopped waiting, so the request was abandoned".to_string()),
+                "after\n".to_string(),
+                true,
+                Some("shapes".to_string()),
+            )
+        );
+    }
+
+    #[test]
+    fn a_check_that_cannot_run_rolls_the_group_back_and_returns_its_own_error() {
+        // Given a group whose package manifest cannot be read as text, so the end gate cannot say
+        // which packages to check
+        let AnOpenGroup {
+            root,
+            paths,
+            mut journal,
+            slot,
+        } = AnOpenGroup::with_manifest(&[0xff, 0xfe]);
+        let open = slot.expect("the member opened the group");
+
+        // When the group is judged at its end
+        let outcome = open.finish(root.path(), &paths, &mut journal, &CancellationToken::new());
+
+        // Then the failure is the unreadable manifest's, not "does not compile", and the group is
+        // undone
+        assert_eq!(
+            (
+                matches!(outcome, Err(RestructureError::Io(_))),
+                the_library(&root),
+                last_status(&journal),
+            ),
+            (
+                true,
+                "before\n".to_string(),
+                Some(OpStatus::GroupRolledBack)
+            )
+        );
+    }
 }
