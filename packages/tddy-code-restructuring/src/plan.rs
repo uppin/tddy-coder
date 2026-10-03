@@ -287,6 +287,8 @@ impl std::fmt::Display for OpId {
     }
 }
 
+// TODO(transactional-groups): refuse unknown operation fields (`#[serde(deny_unknown_fields)]`), so a
+// misspelt `group` cannot be silently dropped — pinned by `an_unknown_operation_field_is_refused`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefactorOp {
     /// This operation's stable id; absent only in a plan no store has loaded yet.
@@ -328,6 +330,14 @@ pub struct RefactorOp {
     /// first member so nothing that reads `op.anchor` has to learn about sets.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also: Vec<Anchor>,
+    /// The transactional group this operation belongs to.
+    ///
+    /// Consecutive operations sharing a group id apply as one unit: `cargo check` runs at the
+    /// group's end over the packages it touched, and a group that does not compile there is rolled
+    /// back exactly ([`crate::RestructureError::GroupDoesNotCompile`]). Absent means the operation
+    /// stands alone, under the end-of-run gate it always had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
 }
 
 /// Whether a flag is off — what keeps a default out of a plan written back, so an operation reads
@@ -1221,5 +1231,59 @@ mod tests {
                 ]
             )
         );
+    }
+
+    /// A rename of `symbol` in `src/shapes.rs`, as one plan line, in `group` when it names one.
+    fn a_rename_line(symbol: &str, to: &str, group: Option<&str>) -> String {
+        let group = group.map_or(String::new(), |group| format!(r#","group":"{group}""#));
+        format!(
+            r#"{{"op":"rename_symbol","anchor":{{"kind":"symbol","file":"src/shapes.rs","path":"{symbol}"}},"name":"{to}"{group}}}"#
+        )
+    }
+
+    /// A group applies as one unit, so its members have to be one run of operations: an ungrouped
+    /// operation between two of them would be applied inside a unit it is not part of, and rolled
+    /// back with it.
+    #[test]
+    fn non_consecutive_members_of_one_group_are_refused() {
+        // Given a group whose two members have an ungrouped operation between them
+        let jsonl = format!(
+            "{HEADER}\n{}\n{}\n{}\n",
+            a_rename_line("Circle", "Disc", Some("shapes")),
+            a_rename_line("Square", "Block", None),
+            a_rename_line("Triangle", "Wedge", Some("shapes")),
+        );
+
+        // When
+        let outcome = Plan::parse(&jsonl);
+
+        // Then it is refused as malformed, naming the group
+        let refusal = outcome
+            .map(|plan| plan.ops.len())
+            .map_err(|error| match error {
+                RestructureError::MalformedPlan(reason) => reason.contains("`shapes`"),
+                _ => false,
+            });
+        assert_eq!(refusal, Err(true));
+    }
+
+    /// A misspelt field is how a group would be lost without a word: `"gruop"` parsed and was
+    /// dropped, and the operations ran ungrouped, with none of the rollback the author asked for.
+    #[test]
+    fn an_unknown_operation_field_is_refused() {
+        // Given an operation carrying a field the schema does not define
+        let line = r#"{"op":"rename_symbol","anchor":{"kind":"symbol","file":"src/shapes.rs","path":"Circle"},"name":"Disc","gruop":"shapes"}"#;
+
+        // When
+        let outcome = Plan::parse(&plan_with(line));
+
+        // Then it is refused as malformed, naming the field
+        let refusal = outcome
+            .map(|plan| plan.ops.len())
+            .map_err(|error| match error {
+                RestructureError::MalformedPlan(reason) => reason.contains("gruop"),
+                _ => false,
+            });
+        assert_eq!(refusal, Err(true));
     }
 }

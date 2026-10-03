@@ -325,6 +325,7 @@ mod tests {
             reexport: None,
             to_file: false,
             also: Vec::new(),
+            group: None,
         };
         let root = PathBuf::from("/tmp/workspace");
 

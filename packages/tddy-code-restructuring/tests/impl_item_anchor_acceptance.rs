@@ -59,6 +59,7 @@ fn a_move_to_a_file_of(anchor: Anchor) -> RefactorOp {
         reexport: Some(Reexport::Glob),
         to_file: true,
         also: Vec::new(),
+        group: None,
     }
 }
 

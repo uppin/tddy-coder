@@ -7,6 +7,13 @@
 //! because the plan's anchors already reflect the earlier ones.
 //!
 //! Write-ahead discipline: `InFlight` is recorded *before* the disk write, `Completed` *after*.
+//!
+//! A transactional group adds records around its members, in this order: `GroupStarted` naming every
+//! member, then per member a `PreImaged` record holding the bytes of each file it is about to touch
+//! for the first time in the group — written before that member's `InFlight` — and finally
+//! `GroupCompleted` once the group's end gate passes, or `GroupRolledBack` once its files were
+//! restored from those pre-images. Hashes say *whether* a file changed; only contents can put it
+//! back, which is what a rollback has to do.
 
 use crate::edit::WorkspaceEdit;
 use crate::ledger::PositionLedger;
@@ -26,6 +33,55 @@ pub enum OpStatus {
     /// plan is about to be written back — see [`JournalRecord::plan_digest`]. Not an operation's
     /// own state: nothing that counts or folds operations reads it.
     PlanSynced,
+    /// A transactional group began: [`JournalRecord::group`] names it and
+    /// [`JournalRecord::members`] lists the plan indices of every operation in it.
+    GroupStarted,
+    /// A group member is about to touch files for the first time in its group:
+    /// [`JournalRecord::pre_images`] holds their bytes as they were. Written before the member's
+    /// `InFlight`, so a crash anywhere inside the group leaves what a rollback needs.
+    PreImaged,
+    /// The group's end gate passed: its members stay applied.
+    GroupCompleted,
+    /// The group did not compile at its end, or a resume found it unfinished, and every file it
+    /// touched was restored from its pre-images.
+    GroupRolledBack,
+}
+
+/// The bytes of one file before a transactional group first touched it.
+///
+/// What a rollback writes back. A file the group created has no bytes to restore — `contents` is
+/// `None` — so restoring it removes the file; a file a member renamed is two pre-images, the source
+/// with its bytes and the destination with none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreImage {
+    /// Relative to the run's root.
+    pub path: String,
+    /// The file's text before the group touched it, or `None` when it did not exist.
+    pub contents: Option<String>,
+}
+
+impl PreImage {
+    /// The file at `path` under `root` as it stands now, or its absence.
+    pub fn capture(_root: &Path, _path: &str) -> Result<PreImage> {
+        todo!("TODO(transactional-groups): read the file's bytes, or record that it is absent")
+    }
+
+    /// Put the file at `path` under `root` back as it was captured: rewritten, or removed when it
+    /// did not exist.
+    pub fn restore(&self, _root: &Path) -> Result<()> {
+        todo!("TODO(transactional-groups): write the captured bytes back, or remove the file")
+    }
+}
+
+/// A group the journal started and neither completed nor rolled back — what a resume finds after a
+/// crash inside one, and must roll back before it runs anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenGroup {
+    pub group: String,
+    /// The plan indices of every member, in plan order.
+    pub members: Vec<usize>,
+    /// Every pre-image the group's members journalled, in the order they were written.
+    pub pre_images: Vec<PreImage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,6 +120,15 @@ pub struct JournalRecord {
     /// refuses — rather than a file that is behind the journal with nothing to say so.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_digest: Option<String>,
+    /// On a group record: the group's id, as the plan's operations name it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    /// On a [`OpStatus::GroupStarted`] record: the plan index of every member.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub members: Vec<usize>,
+    /// On a [`OpStatus::PreImaged`] record: the files the member is about to touch, as they were.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_images: Vec<PreImage>,
 }
 
 impl JournalRecord {
@@ -80,6 +145,9 @@ impl JournalRecord {
             plan_digest: None,
             pre,
             post: BTreeMap::new(),
+            group: None,
+            members: Vec::new(),
+            pre_images: Vec::new(),
         }
     }
 
@@ -104,6 +172,9 @@ impl JournalRecord {
             report,
             notes,
             plan_digest: None,
+            group: None,
+            members: Vec::new(),
+            pre_images: Vec::new(),
         }
     }
 
@@ -120,6 +191,61 @@ impl JournalRecord {
             report: Vec::new(),
             notes: Vec::new(),
             plan_digest: Some(plan_digest),
+            group: None,
+            members: Vec::new(),
+            pre_images: Vec::new(),
+        }
+    }
+
+    /// Written before a group's first member: the group, and the plan index of every member. `op`
+    /// is the first member's index.
+    pub fn group_started(op: usize, group: String, members: Vec<usize>) -> Self {
+        Self {
+            members,
+            ..Self::a_group_record(op, None, OpStatus::GroupStarted, group)
+        }
+    }
+
+    /// Written before member `op`'s `InFlight`: the files it is about to touch for the first time
+    /// in its group, as they were.
+    pub fn pre_imaged(
+        op: usize,
+        op_id: Option<OpId>,
+        group: String,
+        pre_images: Vec<PreImage>,
+    ) -> Self {
+        Self {
+            pre_images,
+            ..Self::a_group_record(op, op_id, OpStatus::PreImaged, group)
+        }
+    }
+
+    /// Written once the group's end gate passed. `op` is the last member's index.
+    pub fn group_completed(op: usize, group: String) -> Self {
+        Self::a_group_record(op, None, OpStatus::GroupCompleted, group)
+    }
+
+    /// Written once the group's files were restored from its pre-images. `op` is the member the
+    /// group had reached.
+    pub fn group_rolled_back(op: usize, group: String) -> Self {
+        Self::a_group_record(op, None, OpStatus::GroupRolledBack, group)
+    }
+
+    fn a_group_record(op: usize, op_id: Option<OpId>, status: OpStatus, group: String) -> Self {
+        Self {
+            seq: 0,
+            op,
+            op_id,
+            status,
+            edit: None,
+            pre: BTreeMap::new(),
+            post: BTreeMap::new(),
+            report: Vec::new(),
+            notes: Vec::new(),
+            plan_digest: None,
+            group: Some(group),
+            members: Vec::new(),
+            pre_images: Vec::new(),
         }
     }
 }
@@ -261,6 +387,12 @@ impl Journal {
             .and_then(|record| record.plan_digest.as_deref())
     }
 
+    /// The group this journal started and never completed or rolled back, with every pre-image its
+    /// members journalled — what a resume rolls back before running anything.
+    pub fn open_group(&self) -> Option<OpenGroup> {
+        todo!("TODO(transactional-groups): the last group_started with no group_completed or group_rolled_back after it")
+    }
+
     fn completed(&self) -> impl Iterator<Item = &JournalRecord> {
         self.records
             .iter()
@@ -331,6 +463,9 @@ mod tests {
             pre: BTreeMap::new(),
             post: BTreeMap::new(),
             report: Vec::new(),
+            group: None,
+            members: Vec::new(),
+            pre_images: Vec::new(),
         }
     }
 
@@ -401,6 +536,9 @@ mod tests {
                     pre: BTreeMap::new(),
                     post: BTreeMap::new(),
                     report: Vec::new(),
+                    group: None,
+                    members: Vec::new(),
+                    pre_images: Vec::new(),
                 },
             ],
         };
@@ -451,6 +589,9 @@ mod tests {
                 pre: BTreeMap::from([("shapes.ts".to_string(), digest)]),
                 post: BTreeMap::from([("shapes.ts".to_string(), "sha256:other".to_string())]),
                 report: Vec::new(),
+                group: None,
+                members: Vec::new(),
+                pre_images: Vec::new(),
             }],
         };
 
@@ -477,6 +618,9 @@ mod tests {
                 pre: BTreeMap::from([("shapes.ts".to_string(), "sha256:other".to_string())]),
                 post: BTreeMap::from([("shapes.ts".to_string(), digest)]),
                 report: Vec::new(),
+                group: None,
+                members: Vec::new(),
+                pre_images: Vec::new(),
             }],
         };
 
@@ -505,6 +649,9 @@ mod tests {
                 pre: BTreeMap::from([("shapes.ts".to_string(), "sha256:before".to_string())]),
                 post: BTreeMap::from([("shapes.ts".to_string(), "sha256:after".to_string())]),
                 report: Vec::new(),
+                group: None,
+                members: Vec::new(),
+                pre_images: Vec::new(),
             }],
         };
 
@@ -648,6 +795,37 @@ mod tests {
             Err(crate::RestructureError::CheckpointDivergence { op }) => assert_eq!(op, 1),
             other => panic!("expected a checkpoint divergence, got {other:?}"),
         }
+    }
+
+    /// A pre-image is the only thing a rollback has to write a file back from, so what goes into
+    /// the journal must come back out of it able to restore the file exactly.
+    #[test]
+    fn a_pre_image_round_trips_through_the_journal() {
+        // Given a file captured before a group member touched it
+        let workspace = tempfile::tempdir().unwrap();
+        let journal_path = workspace.path().join("journal.jsonl");
+        std::fs::write(workspace.path().join("shapes.rs"), "pub struct Circle;\n").unwrap();
+        let captured = PreImage::capture(workspace.path(), "shapes.rs").unwrap();
+        let mut journal = Journal::default();
+        journal
+            .append(
+                &journal_path,
+                JournalRecord::pre_imaged(0, None, "shapes".to_string(), vec![captured]),
+            )
+            .unwrap();
+        std::fs::write(workspace.path().join("shapes.rs"), "pub struct Disc;\n").unwrap();
+
+        // When the pre-image is read back from disk and restored
+        let reloaded = Journal::load(&journal_path).unwrap();
+        reloaded.records[0].pre_images[0]
+            .restore(workspace.path())
+            .unwrap();
+
+        // Then the file holds exactly what it held before
+        assert_eq!(
+            std::fs::read_to_string(workspace.path().join("shapes.rs")).unwrap(),
+            "pub struct Circle;\n"
+        );
     }
 
     fn digest_of(contents: &str) -> String {

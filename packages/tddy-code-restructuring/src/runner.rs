@@ -16,6 +16,7 @@ mod budget;
 mod comparison;
 mod compile_gate;
 mod entry_points;
+pub mod group_gate;
 mod options;
 mod outcome;
 mod rehearsal;

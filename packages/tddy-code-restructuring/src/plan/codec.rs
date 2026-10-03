@@ -51,6 +51,8 @@ impl Plan {
             let header: HintedHeader = serde_json::from_str(header).map_err(|_| {
                 malformed("first line must be a v2 header carrying a `files` map of hints")
             })?;
+            // TODO(transactional-groups): refuse a group whose members are not consecutive —
+            // pinned by `non_consecutive_members_of_one_group_are_refused`.
             let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
             return Ok(Plan {
                 version: header.v,
@@ -68,6 +70,8 @@ impl Plan {
             )));
         }
 
+        // TODO(transactional-groups): refuse a group whose members are not consecutive — pinned by
+        // `non_consecutive_members_of_one_group_are_refused`.
         let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
 
         Ok(Plan {
