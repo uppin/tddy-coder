@@ -19,6 +19,8 @@ tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-discovery = { path = "../tddy-discovery" }
 tddy-credentials = { path = "../tddy-credentials" }
 tddy-github = { path = "../tddy-github" }
+# The generated `code_index` client `CodeNavigationServiceImpl` forwards through.
+tddy-index-daemon = { path = "../tddy-index-daemon" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-projects = { path = "../tddy-projects" }
@@ -37,6 +39,8 @@ prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
+# `Channel`, the port's product; the version the daemon and the index daemon dial with.
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

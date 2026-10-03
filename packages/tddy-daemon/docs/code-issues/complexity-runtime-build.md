@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs:623` — `build`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **880 lines** (2026-09-24, #510 HEAD; 806 at detection) · **nesting depth 5** · 2 parameters · 20 branch/match lines · 15 early exits (the 2026-09-23 exit count; the first row's 10 used a different count)
+**Metrics:** **891 lines** (2026-10-03, #574 HEAD; 806 at detection) · **nesting depth 5** · 2 parameters · 20 branch/match lines · 15 early exits (the 2026-09-23 exit count; the first row's 10 used a different count)
 **Thresholds breached:** length 880 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-09-24 (806 → 879 lines since detection; +2 from #494, +45 from #508, +1 from #509, +1 from #510) — **unclaimed**
+**Status:** Open — regressed 2026-09-24 (806 → 891 lines since detection; +2 from #494, +45 from #508, +1 from #509, +1 from #510, +11 from #574) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -20,6 +20,7 @@
 | 2026-09-24 | 879 | 5 | 20 | 15 | 878 on the merge-base with `origin/master` (`4e7157d2`) → 879 after #509 (`#keyring` 2/9): `build_auth_entries_with` became `build_auth_entries_admitting`, taking `first_login_enrolment(&config, &options)?` as a fifth argument (+1 line, +1 `?`). The enrolment decision itself went into a new free function above `build`, not into it. Branches unchanged; nesting by indentation identical. Split deferred with the developer's consent to a follow-up after `#keyring` lands, as for `oversized-file-runtime` |
 | 2026-09-24 | 880 | 5 | 20 | 15 | 879 on `origin/master` (`35cf2913`) → 880 after #510 (`#keyring` 3/9): the `if let Some(store) = auth_result.github_token_store` injection becomes `if let Some(vaults) = auth_result.credential_vaults` and gains one line, `tddy_daemon_auth::pending_logins::spawn_pending_login_sweep(&vaults)` — the pending-login expiry sweep. The vaults' construction and the sweep's body went into `tddy-daemon-auth`'s `pending_logins.rs`, not here. Branches, exits and nesting unchanged (the `if let` was already there; no `?` added). Split deferred with the developer's consent to a follow-up after `#keyring` lands (`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`) |
 | 2026-09-24 | 880 | 5 | 20 | 15 | touched by #510's post-wrap follow-up and **unchanged**: the sweep line is renamed to `vault_lifetimes::spawn_credential_sweep(&vaults)`, which also covers idle open vaults. Same line, no branch, exit or nesting change |
+| 2026-10-03 | 891 | 5 | — | — | 880 on `origin/feature/live-plan/live-plans` → 891 after #574 (`#live-plan` 8/15): the `CodeNavigationServiceImpl` construction and its `rpc_entries.push`, inside `build` (+11 lines, comment included). Nesting by indentation unchanged; branches and exits not re-derived. Split deferred with the developer's consent (`docs/dev/todo/2026-10-03-code-navigation-grew-four-oversized-files.md`), as for `oversized-file-runtime` |
 
 ## What the tool found
 

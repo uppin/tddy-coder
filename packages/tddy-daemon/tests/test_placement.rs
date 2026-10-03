@@ -37,14 +37,14 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
 
 /// The suites that genuinely exercise this crate's own production modules — `runtime`, `server`,
 /// `startup`, `daemon_settings`, `daemon_config_service`, `local_socket_server`, `relay_idle`,
-/// `index_daemon` — plus this file.
+/// `index_daemon`, `code_navigation` — plus this file.
 ///
 /// Membership is not a matter of taste. A suite belongs here when it names a module this crate
 /// **defines**, or when it asserts about this package's own `src/` or `Cargo.toml` — the second
 /// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
 /// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
 /// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
-const BELONGS_HERE: [&str; 25] = [
+const BELONGS_HERE: [&str; 26] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
@@ -68,6 +68,8 @@ const BELONGS_HERE: [&str; 25] = [
     "first_login_enrolment_acceptance.rs",
     // Names `tddy_daemon::index_daemon`, which this crate defines.
     "index_daemon_lifecycle_acceptance.rs",
+    // Names `tddy_daemon::code_navigation` and `tddy_daemon::index_daemon`, which this crate defines.
+    "code_navigation_acceptance.rs",
     // Name `tddy_daemon::common_room_key_directory` and `tddy_daemon::runtime::build`.
     "common_room_key_trust_acceptance.rs",
     "runtime_signing_identity_acceptance.rs",

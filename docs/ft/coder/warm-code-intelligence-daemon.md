@@ -104,6 +104,14 @@ touched.
 | `Report` | unary | CRAP leaderboard over a capture |
 | `DuplicateTests` | server-streaming | Identical and subset coverage signatures |
 | `Complexity` | unary | Per-function cyclomatic complexity of one file |
+| `Definition` | unary | Where the symbol at a one-based line and byte column of a Rust file is defined |
+| `References` | unary | Every reference to that symbol, its declaration included |
+| `Hover` | unary | The language server's hover markdown for that symbol; unset when it has none |
+
+The navigation calls answer in the service's own coordinates (one-based line, one-based byte column)
+and return each location relative to `workspace_root`, or as an absolute path marked `outside_root`
+when it lies in a dependency or the standard library. They serve Rust files only: any other file is
+refused with `InvalidArgument`, as is a path that is absolute or climbs out of the root.
 
 The long operations stream for two reasons. Progress happens *while* a call is in flight and has
 nowhere else to go; and a stream is the only back-channel a handler gets, so **a send failing into a
@@ -197,6 +205,11 @@ stream, never to the log, and nothing in the process writes to stdout.
 exits, stopped when every root has gone idle, and cancelled rather than orphaned on shutdown. It is
 off unless the daemon's configuration carries an `index_daemon:` section, so an existing deployment
 is unaffected, and it also requires a user resolver, like every other service the daemon assembles.
+
+Its first consumer is the web's [session code pane](../web/session-code-pane.md): tddy-daemon
+forwards the pane's go-to-definition, references and hover requests to it, starting it on the first
+one. The daemon authorises each request and answers `FailedPrecondition` when no `index_daemon:`
+section is configured; nothing falls back to another language server.
 
 A developer can equally start the same binary by hand with `run-index-daemon`, which is the only
 path that exists without a daemon installed.

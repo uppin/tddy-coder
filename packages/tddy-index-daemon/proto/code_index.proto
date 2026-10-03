@@ -67,6 +67,15 @@ service CodeIndexService {
 
   // Which workspace roots this process currently holds an index for.
   rpc Workspaces(WorkspacesRequest) returns (WorkspacesResponse);
+
+  // Where the symbol at a position is defined, answered by the root's warm language server.
+  rpc Definition(DefinitionRequest) returns (DefinitionResponse);
+
+  // Every reference to the symbol at a position, its declaration included.
+  rpc References(ReferencesRequest) returns (ReferencesResponse);
+
+  // The hover text — signature and docs — of the symbol at a position.
+  rpc Hover(HoverRequest) returns (HoverResponse);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -406,4 +415,53 @@ message WarmWorkspace {
   // Seconds since this root's index last served a request, which is what its idle reaping is
   // measured against.
   uint64 idle_seconds   = 3;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Navigation
+//
+// Positions are the service's own: one-based line, one-based byte column (`SourcePosition`). The
+// language server speaks zero-based coordinates; the conversion is this service's, so no caller
+// ever sees an LSP position.
+
+message DefinitionRequest {
+  string         workspace_root = 1;
+  // The file the position is in, relative to `workspace_root`.
+  string         file           = 2;
+  SourcePosition position       = 3;
+}
+
+message DefinitionResponse {
+  repeated CodeLocation locations = 1;
+}
+
+message ReferencesRequest {
+  string         workspace_root = 1;
+  string         file           = 2;
+  SourcePosition position       = 3;
+}
+
+message ReferencesResponse {
+  repeated CodeLocation locations = 1;
+}
+
+message HoverRequest {
+  string         workspace_root = 1;
+  string         file           = 2;
+  SourcePosition position       = 3;
+}
+
+message HoverResponse {
+  // The server's hover markdown; unset when it has nothing to say about the position.
+  optional string markdown = 1;
+}
+
+// A place in the source a navigation answer points at.
+message CodeLocation {
+  // Relative to `workspace_root` when the location is inside it; the absolute path otherwise.
+  string      file         = 1;
+  SourceRange range        = 2;
+  // True when the location lies outside `workspace_root` — a dependency or the standard library —
+  // which a caller that can only open files of the root must not offer to open.
+  bool        outside_root = 3;
 }

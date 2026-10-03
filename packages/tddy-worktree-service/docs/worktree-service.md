@@ -48,6 +48,12 @@ metadata directory — it powers the web [Code pane](../../../docs/ft/web/sessio
   among them, cannot be read — and applies traversal rejection (`..`/absolute) plus
   canonicalize-and-contain under the worktree root.
 
+**`resolve_listed_worktree` is the authorisation other services reuse.** It is `pub` on
+`WorktreeServiceImpl`: it resolves the token to an OS user, the project to its main repo on this host,
+and returns the worktree root only when the path appears in that repo's `git worktree list`.
+`tddy-daemon`'s [code navigation service](../../tddy-daemon/docs/code-navigation-service.md) calls it, so
+go-to-definition can never reach a worktree this service would refuse to read.
+
 **Agent context files are a separate reader, deliberately.** `tddy-daemon`'s `context_files` serves
 a session's agent configuration, which is routinely gitignored (`.claude/settings.local.json`,
 `**/.cursor/mcp.json`), so git's listing cannot be its gate. The two share only the traversal and

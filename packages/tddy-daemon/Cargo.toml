@@ -138,3 +138,7 @@ tddy-session-files = { path = "../tddy-session-files" }
 # tddy-daemon's own remaining tests and by no file in `src/`.
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-sandbox = { path = "../tddy-sandbox" }
+# The code-navigation suite stands a fake `code_index` service up with it, and serves it over a
+# `UnixListener`.
+tddy-index-daemon = { path = "../tddy-index-daemon" }
+tokio-stream = { version = "0.1", features = ["net"] }

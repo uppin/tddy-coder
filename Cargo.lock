@@ -12147,6 +12147,7 @@ dependencies = [
  "tddy-discovery",
  "tddy-github",
  "tddy-host-service",
+ "tddy-index-daemon",
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-lsp",
@@ -12293,6 +12294,7 @@ dependencies = [
  "tddy-discovery",
  "tddy-github",
  "tddy-host-service",
+ "tddy-index-daemon",
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-model-registry",
@@ -12312,6 +12314,7 @@ dependencies = [
  "tddy-worktree-service",
  "tempfile",
  "tokio",
+ "tonic 0.12.3",
  "uuid",
 ]
 

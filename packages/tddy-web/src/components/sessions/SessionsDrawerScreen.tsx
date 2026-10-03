@@ -11,6 +11,7 @@ import { PrStackService } from "../../gen/pr_stack_pb";
 import { SessionAgentService } from "../../gen/session_agents_pb";
 import { SessionFilesService } from "../../gen/session_files_pb";
 import { TerminalSessionService } from "../../gen/terminal_session_pb";
+import { CodeNavigationService } from "../../gen/code_navigation_pb";
 import { WorktreeService } from "../../gen/worktree_pb";
 import { useHttpClient } from "../../rpc/transportProvider";
 import { useHostConnection, useHostConnector } from "../../rpc/connections/registry";
@@ -480,6 +481,7 @@ export function SessionsDrawerScreen({
   );
   const activeClient = useDaemonClientFor(SessionService, selectedOwningHost);
   const activeWorktreeClient = useDaemonClientFor(WorktreeService, selectedOwningHost);
+  const activeCodeNavigationClient = useDaemonClientFor(CodeNavigationService, selectedOwningHost);
   const activeTerminalClient = useDaemonClientFor(TerminalSessionService, selectedOwningHost);
   const activeSessionFilesClient = useDaemonClientFor(SessionFilesService, selectedOwningHost);
   const activeSessionAgentClient = useDaemonClientFor(SessionAgentService, selectedOwningHost);
@@ -896,6 +898,7 @@ export function SessionsDrawerScreen({
                   ? (worktreeClient ?? undefined)
                   : (activeWorktreeClient ?? worktreeClient ?? undefined)
               }
+              codeNavigationClient={activeCodeNavigationClient ?? undefined}
               terminalClient={
                 mode === "creating"
                   ? (terminalClient ?? undefined)
