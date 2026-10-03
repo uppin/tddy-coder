@@ -25,6 +25,7 @@ const COORDINATE: (&str, &str) = ("exec_tools.ExecToolService", "ConversationWor
 
 struct ADaemonWithAGitSession {
     _sessions: tempfile::TempDir,
+    session_dir: std::path::PathBuf,
     _worktree: tempfile::TempDir,
     worktree: std::path::PathBuf,
     daemon: tddy_daemon_rpc::test_util::TestDaemon,
@@ -54,6 +55,7 @@ fn a_daemon_with_a_git_session() -> ADaemonWithAGitSession {
     daemon.as_arc().install_sandbox_rpc_bridge();
     ADaemonWithAGitSession {
         _sessions: sessions,
+        session_dir,
         _worktree: worktree_dir,
         worktree,
         daemon,
@@ -81,16 +83,26 @@ impl ADaemonWithAGitSession {
         &self,
         conversation_id: &str,
     ) -> Result<serde_json::Value, tddy_rpc::Status> {
+        self.pull_naming_session(SESSION_ID, conversation_id).await
+    }
+
+    /// A pull sent to the bridge of the jail built for `SESSION_ID`, naming `session_id` — what
+    /// a process inside the jail that bypassed the runner's rewrite could send.
+    async fn pull_naming_session(
+        &self,
+        session_id: &str,
+        conversation_id: &str,
+    ) -> Result<serde_json::Value, tddy_rpc::Status> {
         let request = ConversationWorktreeRequest {
             session_token: String::new(),
-            session_id: SESSION_ID.to_string(),
+            session_id: session_id.to_string(),
             daemon_instance_id: String::new(),
             conversation_id: conversation_id.to_string(),
             op: Some(Op::Pull(PullOp {})),
         };
         let RpcResult::Unary(answer) = self
             .daemon
-            .sandbox_rpc_handler()
+            .sandbox_rpc_handler(SESSION_ID, &self.session_dir)
             .handle_rpc(COORDINATE.0, COORDINATE.1, &request.encode_to_vec())
             .await
         else {
@@ -141,6 +153,25 @@ async fn a_relayed_call_naming_an_unsafe_conversation_is_refused() {
 
     // Then
     assert_eq!(refused.code(), Code::InvalidArgument);
+}
+
+#[tokio::test]
+async fn a_relayed_call_naming_another_session_is_refused() {
+    // Given — the conversation has work the session worktree has not pulled
+    let host = a_daemon_with_a_git_session();
+    host.a_conversation_that_wrote("explore").await;
+
+    // When
+    let refused = host
+        .pull_naming_session("another-session", "explore")
+        .await
+        .expect_err("a session other than the jail's own is refused");
+
+    // Then
+    assert_eq!(
+        (refused.code(), host.worktree.join("src/new.rs").exists()),
+        (Code::PermissionDenied, false)
+    );
 }
 
 fn git(dir: &Path, args: &[&str]) {

@@ -50,17 +50,27 @@ pub(crate) async fn exclude_conversation_worktrees(common: &Path) -> Result<(), 
 
 /// The commit a conversation starts from: the caller's `HEAD` when the caller is clean, else a commit
 /// on top of `HEAD` holding the caller's uncommitted state — staged, unstaged and untracked, not
-/// ignored. Built through a scratch index seeded from the caller's own, so the caller's index,
-/// branch and files are never touched.
+/// ignored. The caller's index, branch and files are never touched.
 pub(crate) async fn base_commit(caller: &Path) -> Result<String, WorktreeError> {
-    let head = git(caller, ["rev-parse", "HEAD"], &[], None)
+    uncommitted_state_as_commit(caller, "Uncommitted changes inherited from the caller").await
+}
+
+/// `dir`'s `HEAD` when `dir` is clean, else a commit on top of `HEAD`, with `subject`, holding its
+/// uncommitted state — staged, unstaged and untracked, not ignored. No branch points at the commit.
+/// Built through a scratch index seeded from `dir`'s own, so `dir`'s index, branch and files are
+/// never touched.
+pub(crate) async fn uncommitted_state_as_commit(
+    dir: &Path,
+    subject: &str,
+) -> Result<String, WorktreeError> {
+    let head = git(dir, ["rev-parse", "HEAD"], &[], None)
         .await?
         .trim()
         .to_string();
-    let index = git(caller, ["rev-parse", "--git-path", "index"], &[], None).await?;
-    let index = caller.join(index.trim());
+    let index = git(dir, ["rev-parse", "--git-path", "index"], &[], None).await?;
+    let index = dir.join(index.trim());
     let scratch = scratch_path(&index);
-    let result = snapshot_tree(caller, &index, &scratch, &head).await;
+    let result = snapshot_tree(dir, &index, &scratch, &head, subject).await;
     // Best effort: a scratch file left behind is harmless, and must not mask the snapshot's result.
     if let Err(error) = tokio::fs::remove_file(&scratch).await {
         log::debug!("scratch index {} not removed: {error}", scratch.display());
@@ -69,10 +79,11 @@ pub(crate) async fn base_commit(caller: &Path) -> Result<String, WorktreeError> 
 }
 
 async fn snapshot_tree(
-    caller: &Path,
+    dir: &Path,
     index: &Path,
     scratch: &Path,
     head: &str,
+    subject: &str,
 ) -> Result<String, WorktreeError> {
     tokio::fs::copy(index, scratch)
         .await
@@ -84,23 +95,16 @@ async fn snapshot_tree(
     // The conversation worktrees are kept out by `info/exclude`, which `ensure` writes first. An
     // explicit `:(exclude)` pathspec for the same directory makes `git add` refuse once that
     // directory exists but is empty ("paths are ignored"), as it is after a worktree was deleted.
-    git(caller, ["add", "-A", "--", "."], &env, None).await?;
-    let tree = git(caller, ["write-tree"], &env, None).await?;
+    git(dir, ["add", "-A", "--", "."], &env, None).await?;
+    let tree = git(dir, ["write-tree"], &env, None).await?;
     let tree = tree.trim();
-    let head_tree = git(caller, ["rev-parse", "HEAD^{tree}"], &[], None).await?;
+    let head_tree = git(dir, ["rev-parse", "HEAD^{tree}"], &[], None).await?;
     if tree == head_tree.trim() {
         return Ok(head.to_string());
     }
     let commit = git(
-        caller,
-        [
-            "commit-tree",
-            tree,
-            "-p",
-            head,
-            "-m",
-            "Uncommitted changes inherited from the caller",
-        ],
+        dir,
+        ["commit-tree", tree, "-p", head, "-m", subject],
         &[],
         None,
     )

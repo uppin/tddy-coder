@@ -42,6 +42,9 @@ pub struct TurnRequest {
     /// The caller asked that a rewind leave the conversation's worktree as it is
     /// (`resetWorktree: false`).
     keep_worktree: bool,
+    /// The caller asked that this turn run on the conversation worktree as it stands, without taking
+    /// in the caller's current files (`syncWorktree: false`).
+    skip_sync: bool,
 }
 
 impl TurnRequest {
@@ -83,6 +86,19 @@ impl TurnRequest {
     pub fn keeping_worktree(mut self) -> Self {
         self.keep_worktree = true;
         self
+    }
+
+    /// Run this turn on the conversation worktree as it stands: the caller's current files are not
+    /// merged in first.
+    #[must_use]
+    pub fn without_sync(mut self) -> Self {
+        self.skip_sync = true;
+        self
+    }
+
+    /// Whether this turn first takes in the caller's current files — the default.
+    pub fn syncs_worktree(&self) -> bool {
+        !self.skip_sync
     }
 
     /// Whether a rewind by this request takes the conversation's worktree back too — the default.
@@ -255,5 +271,15 @@ mod tests {
             .from_message(MessageId::from("m3".to_string()))
             .keeping_worktree()
             .resets_worktree());
+    }
+
+    #[test]
+    fn a_turn_takes_in_the_callers_files_by_default() {
+        assert!(TurnRequest::prompting("go on").syncs_worktree());
+    }
+
+    #[test]
+    fn without_sync_turns_the_sync_off() {
+        assert!(!TurnRequest::resuming().without_sync().syncs_worktree());
     }
 }

@@ -453,6 +453,9 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     if let (Some(object), Some(reset)) = (body.as_object_mut(), &outcome.worktree_reset) {
         object.insert("worktreeReset".to_string(), serde_json::json!(reset));
     }
+    if let (Some(object), Some(sync)) = (body.as_object_mut(), &outcome.worktree_sync) {
+        object.insert("worktreeSync".to_string(), serde_json::json!(sync));
+    }
     body.to_string()
 }
 
@@ -1028,5 +1031,49 @@ mod tests {
             pending.watch("response-1").is_none(),
             "a response id the caller was never given must not be retained"
         );
+    }
+
+    #[test]
+    fn a_turn_that_took_in_the_callers_files_reports_the_sync() {
+        // Given
+        let mut outcome = an_end_turn_outcome("done");
+        outcome.worktree_sync = Some(crate::subagent::WorktreeSync {
+            commit: "7d1e0aa".to_string(),
+            files: crate::subagent::FileCounts {
+                created: 1,
+                updated: 2,
+                removed: 3,
+            },
+            lines: crate::subagent::LineCounts {
+                added: 41,
+                removed: 7,
+            },
+            paths: vec!["src/lib.rs".to_string()],
+            more_paths: 5,
+        });
+
+        // When
+        let body: serde_json::Value = serde_json::from_str(&prompt_outcome_json(outcome)).unwrap();
+
+        // Then
+        assert_eq!(
+            body["worktreeSync"],
+            serde_json::json!({
+                "commit": "7d1e0aa",
+                "files": { "created": 1, "updated": 2, "removed": 3 },
+                "lines": { "added": 41, "removed": 7 },
+                "paths": ["src/lib.rs"],
+                "morePaths": 5
+            })
+        );
+    }
+
+    /// Guards the plain turn: nothing merged, no `worktreeSync` key.
+    #[test]
+    fn a_turn_that_took_nothing_in_has_no_sync_key() {
+        let body: serde_json::Value =
+            serde_json::from_str(&prompt_outcome_json(an_end_turn_outcome("done"))).unwrap();
+
+        assert_eq!(body.get("worktreeSync"), None);
     }
 }

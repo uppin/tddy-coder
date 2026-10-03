@@ -268,9 +268,15 @@ pub fn resolve_worktree_root_for_session(
     sessions_base: &Path,
     session_id: &str,
 ) -> Result<PathBuf, Status> {
-    let session_dir =
-        tddy_core::session_lifecycle::unified_session_dir_path(sessions_base, session_id);
-    let meta = tddy_core::read_session_metadata(&session_dir)
+    resolve_worktree_root_in_session_dir(&tddy_core::session_lifecycle::unified_session_dir_path(
+        sessions_base,
+        session_id,
+    ))
+}
+
+/// The worktree root the `.session.yaml` in `session_dir` records.
+pub(crate) fn resolve_worktree_root_in_session_dir(session_dir: &Path) -> Result<PathBuf, Status> {
+    let meta = tddy_core::read_session_metadata(session_dir)
         .map_err(|_| Status::failed_precondition("session not found or .session.yaml missing"))?;
     meta.repo_path
         .as_ref()

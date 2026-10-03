@@ -336,7 +336,10 @@ async fn a_seatbelt_jail_bridged_to(daemon: &DaemonServingOneAgent) -> BridgedJa
             Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             // The real handler, not `NullRpcHandler`: this suite's whole subject is what it
             // answers, and it is the same object the three sandboxed-session spawn paths build.
-            daemon.service.sandbox_rpc_handler(),
+            daemon.service.sandbox_rpc_handler(
+                session_id,
+                &unified_session_dir_path(daemon.data_dir.path(), session_id),
+            ),
         ),
     )
     .await
@@ -488,7 +491,7 @@ struct DaemonServingOneAgent {
     service: Arc<DaemonSessionHost>,
     session_id: String,
     agent_id: String,
-    _data_dir: tempfile::TempDir,
+    data_dir: tempfile::TempDir,
 }
 
 /// A daemon whose `agents/` directory defines one agent pointed at `model_base_url`, attached to a
@@ -537,7 +540,7 @@ async fn a_daemon_with_one_agent_attached(model_base_url: &str) -> DaemonServing
         service,
         session_id,
         agent_id,
-        _data_dir: data_dir,
+        data_dir,
     }
 }
 

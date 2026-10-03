@@ -30,52 +30,47 @@ pub struct WorktreeReset {
 impl ConversationWorktree {
     /// Hard-reset the worktree and its branch to `target`, removing untracked files the dropped
     /// commits created (ignored files are kept — a reset must not delete a build's output). A commit
-    /// that is neither the base nor on the branch after it is refused, and nothing moves.
+    /// that is neither the base nor one of the subagent's commits after it — a sync merge included —
+    /// is refused, and nothing moves. A reset past a sync drops it, and lists only the subagent's
+    /// commits as dropped.
     pub async fn reset_to(&self, target: &ResetTarget) -> Result<WorktreeReset, WorktreeError> {
         let _exclusive = serialise::exclusive(self.root()).await;
-        let range = format!("{}..{}", self.base(), self.branch());
-        let on_branch = git(
-            self.root(),
-            ["rev-list", "--topo-order", "--reverse", &range],
-            &[],
-            None,
-        )
-        .await?;
-        let on_branch: Vec<&str> = on_branch.lines().collect();
-        let (target, dropped) = self.resolve_reset(target, &on_branch).await?;
+        let subagent_commits = self.subagent_commits().await?;
+        let subagent_commits: Vec<&str> = subagent_commits.iter().map(String::as_str).collect();
+        let (target, dropped) = self.resolve_reset(target, &subagent_commits).await?;
         let dropped_commits = self.short_hashes(&dropped).await?;
         git(self.root(), ["reset", "-q", "--hard", &target], &[], None).await?;
         git(self.root(), ["clean", "-q", "-fd"], &[], None).await?;
-        let to = self.short_hashes(&[target.as_str()]).await?.remove(0);
+        let to = self.short_hash(&target).await?;
         Ok(WorktreeReset {
             to,
             dropped_commits,
         })
     }
 
-    /// The full hash a reset to `target` lands on, and the entries of `on_branch` (oldest first)
-    /// it drops. A commit that is not in `on_branch` is refused.
+    /// The full hash a reset to `target` lands on, and the entries of `subagent_commits` (oldest
+    /// first) it drops. A commit that is not in `subagent_commits` is refused.
     async fn resolve_reset<'a>(
         &self,
         target: &ResetTarget,
-        on_branch: &[&'a str],
+        subagent_commits: &[&'a str],
     ) -> Result<(String, Vec<&'a str>), WorktreeError> {
         let commit = match target {
-            ResetTarget::Base => return Ok((self.base().to_string(), on_branch.to_vec())),
+            ResetTarget::Base => return Ok((self.base().to_string(), subagent_commits.to_vec())),
             ResetTarget::Commit(commit) => commit,
         };
         let full = self.resolve_commit(commit).await?;
-        let kept = on_branch
+        let kept = subagent_commits
             .iter()
             .position(|hash| *hash == full)
             .ok_or_else(|| WorktreeError::Git {
                 args: vec!["reset".to_string(), commit.clone()],
                 stderr: format!(
-                    "{commit} is not a commit of branch {} after its base",
+                    "{commit} is not one of the subagent's commits on branch {}",
                     self.branch()
                 ),
             })?;
-        Ok((full, on_branch[kept + 1..].to_vec()))
+        Ok((full, subagent_commits[kept + 1..].to_vec()))
     }
 
     /// The full hash `abbreviation` names, which must name a commit.
@@ -92,6 +87,18 @@ impl ConversationWorktree {
         )
         .await?;
         Ok(found.trim().to_string())
+    }
+
+    /// The short form of `full`.
+    pub(crate) async fn short_hash(&self, full: &str) -> Result<String, WorktreeError> {
+        self.short_hashes(&[full])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| WorktreeError::Git {
+                args: vec!["rev-list".to_string(), full.to_string()],
+                stderr: format!("git listed no short hash for {full}"),
+            })
     }
 
     /// The short form of each of `full`, in order.

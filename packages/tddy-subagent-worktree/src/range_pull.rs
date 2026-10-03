@@ -33,8 +33,10 @@ pub struct RangePullOutcome {
 impl ConversationWorktree {
     /// Apply each commit of `range` not in `already_pulled`, oldest first, each as its own 3-way
     /// apply into the caller's worktree as uncommitted changes. The branch and the conversation's
-    /// worktree are not touched. A bound that is not on the branch, or a `from` after `to`, is refused;
-    /// a range with nothing left to pull applies nothing and is not an error.
+    /// worktree are not touched. A bound that is not one of the subagent's commits, or a `from`
+    /// after `to`, is refused; a range with nothing left to pull applies nothing and is not an
+    /// error. Only the subagent's commits ([`Self::subagent_commits`]) are pullable: a sync merge is
+    /// the caller's own work.
     ///
     /// `files` and `lines` are the sum of what each applied commit changed.
     pub async fn pull_range(
@@ -42,22 +44,22 @@ impl ConversationWorktree {
         range: &PullRange,
         already_pulled: &BTreeSet<String>,
     ) -> Result<RangePullOutcome, WorktreeError> {
-        let on_branch = self.commits_after_base().await?;
+        let subagent_commits = self.subagent_commits().await?;
         let is_pulled = |full: &str| {
             already_pulled
                 .iter()
                 .any(|pulled| !pulled.is_empty() && full.starts_with(pulled.as_str()))
         };
         let lower = match range.from.as_deref() {
-            Some(named) => self.position_on(named, &on_branch).await?,
-            None => match on_branch.iter().position(|full| !is_pulled(full)) {
+            Some(named) => self.position_on(named, &subagent_commits).await?,
+            None => match subagent_commits.iter().position(|full| !is_pulled(full)) {
                 Some(first) => first,
                 None => return Ok(RangePullOutcome::default()),
             },
         };
         let upper = match range.to.as_deref() {
-            Some(named) => self.position_on(named, &on_branch).await?,
-            None => match on_branch.len().checked_sub(1) {
+            Some(named) => self.position_on(named, &subagent_commits).await?,
+            None => match subagent_commits.len().checked_sub(1) {
                 Some(tip) => tip,
                 None => return Ok(RangePullOutcome::default()),
             },
@@ -65,13 +67,16 @@ impl ConversationWorktree {
         if lower > upper {
             return Err(WorktreeError::Git {
                 args: vec!["pull_range".to_string()],
-                stderr: format!("from {} is after to {}", on_branch[lower], on_branch[upper]),
+                stderr: format!(
+                    "from {} is after to {}",
+                    subagent_commits[lower], subagent_commits[upper]
+                ),
             });
         }
         let mut applied = Vec::new();
         let mut skipped = Vec::new();
         let mut outcome = RangePullOutcome::default();
-        for full in &on_branch[lower..=upper] {
+        for full in &subagent_commits[lower..=upper] {
             if is_pulled(full) {
                 skipped.push(full.clone());
                 continue;
@@ -86,29 +91,27 @@ impl ConversationWorktree {
         Ok(outcome)
     }
 
-    /// Full hashes of the commits after the base, oldest first.
-    async fn commits_after_base(&self) -> Result<Vec<String>, WorktreeError> {
-        let range = format!("{}..{}", self.base(), self.branch());
-        let listed = git(self.root(), ["rev-list", "--reverse", &range], &[], None).await?;
-        Ok(listed.lines().map(str::to_string).collect())
-    }
-
-    /// Where `named` sits in `on_branch`; a name that is not one of those commits is refused.
-    async fn position_on(&self, named: &str, on_branch: &[String]) -> Result<usize, WorktreeError> {
+    /// Where `named` sits in `subagent_commits`; a name that is not one of them is refused.
+    async fn position_on(
+        &self,
+        named: &str,
+        subagent_commits: &[String],
+    ) -> Result<usize, WorktreeError> {
         let full = self.resolve_commit(named).await?;
-        on_branch
+        subagent_commits
             .iter()
             .position(|commit| *commit == full)
             .ok_or_else(|| WorktreeError::Git {
                 args: vec!["pull_range".to_string(), named.to_string()],
                 stderr: format!(
-                    "{named} is not a commit of branch {} after its base",
+                    "{named} is not one of the subagent's commits on branch {}",
                     self.branch()
                 ),
             })
     }
 
     /// Apply the one commit `full` to the caller's worktree, 3-way, adding what it changed to `outcome`.
+    /// `full` is a subagent commit, never a merge, so `full^` is the one parent it was made on.
     async fn pull_commit(
         &self,
         full: &str,

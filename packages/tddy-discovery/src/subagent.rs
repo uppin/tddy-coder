@@ -28,8 +28,10 @@ mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
+mod turn_start;
 mod worktree_change;
 mod worktree_reset;
+mod worktree_sync;
 mod yield_condition;
 
 use transcript::Transcript;
@@ -45,6 +47,10 @@ pub use transcript::{
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 pub use worktree_reset::{ResetTarget, WorktreeReset, WorktreeResetPort};
+pub use worktree_sync::{
+    sync_notice, sync_refusal, RewindApplied, SyncAnswer, WorktreeSync, WorktreeSyncPort,
+    SYNC_NOTICE_PATHS,
+};
 pub use yield_condition::{
     evaluate as evaluate_yield_condition, validate as validate_yield_conditions, OutcomeFact, When,
     YieldCondition, YIELD_CONDITION_LIMIT, YIELD_CONTAINS_LIMIT,
@@ -129,6 +135,9 @@ pub struct PromptOutcome {
     /// dropped. `None` when the turn rewound nothing, the caller kept the worktree
     /// (`resetWorktree: false`), or the conversation has no worktree.
     pub worktree_reset: Option<WorktreeReset>,
+    /// What the turn's sync merged from the caller before it ran — `None` when nothing was merged
+    /// (no worktree, an unchanged caller, or `syncWorktree: false`).
+    pub worktree_sync: Option<WorktreeSync>,
 }
 
 impl PromptOutcome {
@@ -144,6 +153,7 @@ impl PromptOutcome {
             fired_condition: None,
             yielded_message_id: None,
             worktree_reset: None,
+            worktree_sync: None,
         }
     }
 }
@@ -796,6 +806,9 @@ pub struct SubagentConfig {
     /// the transcript and touches no files — a conversation with no worktree, or a host that has
     /// none to offer.
     pub worktree_reset: Option<std::sync::Arc<dyn WorktreeResetPort>>,
+    /// How a turn takes in the caller's current files before it runs. `None`: no sync — a
+    /// conversation with no worktree, or a host that has none to offer.
+    pub worktree_sync: Option<std::sync::Arc<dyn WorktreeSyncPort>>,
 }
 
 impl SubagentConfig {
@@ -806,7 +819,16 @@ impl SubagentConfig {
             system_prompt: None,
             provider_queue: None,
             worktree_reset: None,
+            worktree_sync: None,
         }
+    }
+
+    /// Bring this conversation's worktree up to the caller's current files before every turn,
+    /// through `port`.
+    #[must_use]
+    pub fn with_worktree_sync(mut self, port: std::sync::Arc<dyn WorktreeSyncPort>) -> Self {
+        self.worktree_sync = Some(port);
+        self
     }
 
     /// Let a rewind take this conversation's worktree back with its transcript, through `port`.
@@ -1395,6 +1417,8 @@ pub struct SpecializedSubagentSession {
     repeated_calls: RepeatedCalls,
     /// Where a rewind asks for the worktree to follow the transcript; `None` resets nothing.
     worktree_reset: Option<std::sync::Arc<dyn WorktreeResetPort>>,
+    /// Where a turn asks for the caller's current files before it runs; `None` syncs nothing.
+    worktree_sync: Option<std::sync::Arc<dyn WorktreeSyncPort>>,
 }
 
 impl SpecializedSubagentSession {
@@ -1423,7 +1447,14 @@ impl SpecializedSubagentSession {
             admission: None,
             repeated_calls: RepeatedCalls::new(),
             worktree_reset: None,
+            worktree_sync: None,
         }
+    }
+
+    /// Take the caller's current files in through `port` before every turn.
+    pub fn syncing_worktree_through(mut self, port: std::sync::Arc<dyn WorktreeSyncPort>) -> Self {
+        self.worktree_sync = Some(port);
+        self
     }
 
     /// Reset the conversation's worktree through `port` whenever a turn rewinds.
@@ -1905,8 +1936,8 @@ impl SubagentSession for SpecializedSubagentSession {
     /// spending a turn on a request that was never valid is the silent-continue this refuses to be
     /// (AC17).
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
-        // First of all — before the rewind below, before anything is appended, before a single
-        // model call: a malformed condition list is refused with the history untouched, so a
+        // First of all — before the rewind (`prepare_turn`), before anything is appended, before a
+        // single model call: a malformed condition list is refused with the history untouched, so a
         // malformed request costs no model turn (AC5). The replacement is refused on the same
         // discipline, for the same reason.
         validate_yield_conditions(request.yield_conditions()).map_err(SubagentError)?;
@@ -1914,57 +1945,19 @@ impl SubagentSession for SpecializedSubagentSession {
             validate_replacement(replacement).map_err(SubagentError)?;
         }
         let budget = request.budget_within(self.max_turns);
-        // Anything that changes the conversation from outside the loop — a new question, a
-        // correction, a rewind that discards answers it was holding, a replacement appended
-        // after the yield — invalidates the premise the repeat ledger rests on (see
-        // [`RepeatedCalls::forget_earlier_calls`]).
-        if request.prompt_text().is_some()
-            || request.correction().is_some()
-            || request.rewind_point().is_some()
-            || request.replacement().is_some()
-        {
-            self.repeated_calls.forget_earlier_calls();
-        }
-        // The worktree goes back first: a reset that fails refuses the resume with the history
-        // whole, which a reset after the cut could not promise.
-        let mut worktree_reset = None;
-        if let Some(rewind_point) = request.rewind_point() {
-            if let (Some(port), true) = (&self.worktree_reset, request.resets_worktree()) {
-                let target = self
-                    .transcript
-                    .commit_kept_by(rewind_point)
-                    .map_err(|e| SubagentError(e.to_string()))?;
-                worktree_reset = port.reset(target).await?;
-            }
-            self.transcript
-                .rewind_to(rewind_point)
-                .map_err(|e| SubagentError(e.to_string()))?;
-        }
+        let worktree = self.prepare_turn(&request).await?;
         // Taken after the rewind: what this turn appended is what is new relative to the history
         // it actually ran against.
         let appended_from = self.transcript.len();
-        if let Some(text) = request.prompt_text() {
-            self.transcript.push(ChatMessage::user(text.to_string()));
-        }
-        if let Some(correction) = request.correction() {
-            self.transcript
-                .push(ChatMessage::user(correction.to_string()));
-        }
-        // The caller's replacement call and its result, appended after any rewind and correction —
-        // in that order, so all three can be given. Resume-only: a fresh prompt never carries one
-        // (a prompt has nothing to replace), enforced where the RPC shapes are built. Validated
-        // before the rewind above, so a malformed one never reshapes the history it was refused
-        // from. The append never dispatches — the result is the caller's text, verbatim.
-        if let Some(replacement) = request.replacement() {
-            self.transcript.append_replacement(replacement);
-        }
+        self.append_turn_messages(&request, worktree.sync.as_ref());
 
         let mut outcome = self
             .run_turn_loop(budget.turns, request.yield_conditions())
             .await?;
         outcome.messages = self.transcript.descriptors_from(appended_from);
         outcome.clamped_max_turns = budget.clamped_to;
-        outcome.worktree_reset = worktree_reset;
+        outcome.worktree_reset = worktree.reset;
+        outcome.worktree_sync = worktree.sync;
         Ok(outcome)
     }
 
@@ -2042,6 +2035,9 @@ impl SubagentRegistry {
             }
             if let Some(port) = config.worktree_reset {
                 session = session.resetting_worktree_through(port);
+            }
+            if let Some(port) = config.worktree_sync {
+                session = session.syncing_worktree_through(port);
             }
             return Ok(Box::new(session));
         }

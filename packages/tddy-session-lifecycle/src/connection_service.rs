@@ -193,8 +193,9 @@ pub struct DaemonSessionHost {
     /// nothing is listening: publishing is skipped, and `StreamSessionNotifications` has no feed to
     /// hand a client.
     session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
-    /// Sandbox-IPC bridge installed once the top-level `Arc` exists (`runtime::build`).
-    sandbox_rpc_bridge: Arc<std::sync::OnceLock<Arc<dyn tddy_sandbox_runner::HostRpcHandler>>>,
+    /// This host's own handle, installed once the top-level `Arc` exists (`runtime::build`), from
+    /// which each jail's sandbox-IPC bridge is built. Weak: it is a field of the host itself.
+    sandbox_rpc_bridge: Arc<std::sync::OnceLock<std::sync::Weak<DaemonSessionHost>>>,
     /// The RPC families served above this crate, installed last by the composition root with
     /// [`Self::with_rpc_families`]. `None` until then, and [`Self::rpc_families`] refuses rather
     /// than serving a room without them — see [`crate::rpc_families`], which owns it (hence
@@ -357,8 +358,14 @@ pub use svc_session_agent_ports::PeerRoutedSessionAgents;
 /// the daemon would never drop, its `WorkspaceSandboxRegistry` would never drop, and every jail
 /// it holds would outlive it as an orphaned `tddy-sandbox-runner` on the host. The host owns the
 /// bridge; the bridge only borrows the host.
+///
+/// Each jail gets its own handler, **bound to the session the jail was built for**: a
+/// `ConversationWorktree` request naming any other session is refused, and the session's worktree
+/// is read from the session directory the daemon itself resolved for that jail — never from an id
+/// the request carries.
 struct DaemonRpcHandler {
     conn: std::sync::Weak<DaemonSessionHost>,
+    bound: daemon_rpc_handler::BoundJailSession,
 }
 
 impl DaemonRpcHandler {
