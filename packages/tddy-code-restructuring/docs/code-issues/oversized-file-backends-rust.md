@@ -5,7 +5,7 @@
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
 **Metrics:** **4,475 production lines** (2026-10-02, #542; 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
-**Status:** Open — regressed 2026-10-03 (+39 in #569, `#live-plan` 9/15, 4483 → 4522 production lines), and 2026-10-02 (+42 in #542, `#live-plan` 5/7; +74 in #537, `#live-plan` 1/7; +18 in #526, `#carve` 15/21); pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
+**Status:** Open — regressed 2026-10-02 (+42 in #542, `#live-plan` 5/7; +74 in #537, `#live-plan` 1/7; +18 in #526, `#carve` 15/21); pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
 
 ## Measurement history
 

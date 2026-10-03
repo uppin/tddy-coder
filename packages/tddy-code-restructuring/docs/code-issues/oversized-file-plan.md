@@ -5,7 +5,7 @@
 **Detected:** 2026-10-02 by the `/pr-wrap` file-length gate on #537
 **Metrics:** **887 production lines** (2026-10-02, #538) · budget 500 · measured before the first `#[cfg(test)]`
 **Restructure:** required — `extract_module --to_file` × 2 (`/code-restructuring` territory)
-**Status:** Open — regressed 2026-10-03 (+28 in #569, `#live-plan` 9/15, 936 → 964 production lines), and 2026-10-02 (#538 grew it 799 → 887); split deferred with consent; later `#live-plan` nodes touch this file
+**Status:** Open — regressed 2026-10-02 (#538 grew it 799 → 887); split deferred with consent; later `#live-plan` nodes touch this file
 
 ## Measurement history
 

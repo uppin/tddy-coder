@@ -8,9 +8,10 @@
 //! introduces the name the plan asked for.
 
 use super::early_return::masked_to_code;
+use super::lsp_edits::{position_at, workspace_edits_for};
 use super::{
-    apply_lsp_edit, document_changes, edits_in, failure, minimal_edits, position_at, relative_path,
-    relative_to, seam_refusal, server_defect, uri_of, workspace_edits_for, RustBackend,
+    apply_lsp_edit, document_changes, edits_in, failure, minimal_edits, relative_path, relative_to,
+    seam_refusal, server_defect, uri_of, RustBackend,
 };
 use crate::edit::{FileEdit, Position, Range, WorkspaceEdit};
 use crate::plan::{RefactorKind, RefactorOp};
