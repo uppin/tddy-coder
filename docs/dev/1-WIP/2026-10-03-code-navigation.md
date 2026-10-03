@@ -134,26 +134,29 @@ All three fail today at `worktree-code-identifier-4-26` never rendering (`CodeBl
 
 ## Technical Debt & Production Readiness
 
-`TODO(code-navigation)` stubs left by the contract commit (green replaces each):
+Every `TODO(code-navigation)` stub the contract commit left is resolved: the index-daemon handlers
+(`navigation.rs`), `CodeNavigationServiceImpl` (`code_navigation.rs`, `tddy-index-daemon` now a
+`[dependencies]` entry), `createCodeNavigationApi`, `CodeBlock` positions and the pane / drawer
+wiring. Still open:
 
-- `packages/tddy-index-daemon/src/navigation.rs` — `serve_definition`, `serve_references`, `serve_hover` answer `Unimplemented`.
-- `packages/tddy-daemon/src/code_navigation.rs` — `CodeNavigationServiceImpl::{definition, references, hover}` answer `Unimplemented`; both fields carry `#[allow(dead_code)] // TODO(code-navigation)`.
-- `packages/tddy-daemon/Cargo.toml` — `tddy-index-daemon` (and `tokio-stream` `net`) is a **dev**-dependency for now; it moves to `[dependencies]` when the forward lands (`test_placement.rs` refuses a runtime dependency no `src/` file names).
-- `packages/tddy-web/src/components/session/codeNavigationApi.ts` — `createCodeNavigationApi` rejects every call.
-- `packages/tddy-web/src/components/session/CodeBlock.tsx` — `onNavigate`, `onHover`, `focusLine` props declared, not rendered (no per-line / per-identifier positions yet).
-- `packages/tddy-web/src/components/session/WorktreeCodePane.tsx` — `navigationClient` prop declared, unused; `SessionMainPane` / `SessionsDrawerScreen` do not yet create a `CodeNavigationService` client (`useDaemonClientFor`) — the Cypress spec needs that wiring.
-
-Planned but not written as tests here:
-
-- References / Hover through the daemon (only `Definition` is pinned end-to-end at the daemon; the three share one authorise-and-forward path).
-- `rel_path` traversal refusal (`../`) and `outside_root` → `outside_worktree` mapping — green should add a unit test with the forward.
-- Cmd-click (macOS) — the spec pins ctrl-click; the handler should accept `metaKey` too.
+- **Navigation is offered on every highlighted language**, but the index daemon announces every
+  document to its one language server as `rust` (`navigation.rs` `LANGUAGE_ID`). Either the web gates
+  `onNavigate`/`onHover` on `.rs` or the index daemon refuses other extensions — a decision for the
+  developer; no fallback has been added.
+- **The outgoing `file://` URI is not percent-encoded** (`navigation.rs` `asked_document`), while
+  answered URIs are decoded — a worktree path with a space or `#` is announced wrongly.
+- The hover card is a fixed card at the bottom of the preview, not anchored to the identifier.
+- Hover markdown renders as a pre-wrapped `<pre>`: `renderSimpleMarkdown` has no code-fence support,
+  so rust-analyzer's fences show as raw ```.
+- No web unit test for the meta-click handler (the spec pins ctrl-click).
 
 Contract deviations from the plan:
 
 - `WorktreeServiceImpl::resolve_listed_worktree` was private; it is now `pub` so the daemon reuses the exact authorisation instead of copying it.
 - The web-facing `CodeLocation` names its fields `rel_path` / `outside_worktree` (worktree vocabulary); the index's `CodeLocation` keeps `file` / `outside_root`.
 - `code_navigation.proto` is built with an RPC-server pass only (no tonic adapter), like `session_files.proto`: nothing reaches it over the local gRPC socket.
+- The index daemon does no UTF-16 conversion: the LSP client negotiates `positionEncoding: utf-8` and refuses a server that does not, so the wire column is `character + 1`.
+- `WorktreeCodePaneNavigation.cy.tsx` `beforeEach` sets the token inside `cy.then(...)`: the queued `cy.clearLocalStorage()` otherwise ran after the synchronous `setItem` and emptied it. No assertion changed.
 
 ## Decisions & Trade-offs
 
@@ -168,7 +171,17 @@ _(populated during development)_
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes (2026-10-03)
+
+Stack gate: base `feature/live-plan/live-plans`, already current, `origin/<base>..HEAD` is this PR's five commits only. Critical 0 · Warning 2 · Info 3.
+
+- `cargo build -p tddy-index-daemon -p tddy-daemon -p tddy-service -p tddy-worktree-service`: ✅ clean, no warnings.
+- Responsibility delivered (index RPCs, daemon service, web navigation); `## Dependencies` none; `## Boundaries` respected (no `Lsp*` agent tools, no plan/warm-progress calls, no `tddy_lsp_executor` fallback); no deletions.
+- ⚠️ `navigation.rs` announces every document as `rust`; the web offers navigation for every highlighted language (see Technical Debt).
+- ⚠️ `navigation.rs` builds the outgoing `file://` URI without percent-encoding.
+- ℹ️ `CodeBlock` wraps every identifier in a span even when no handler is given (DOM weight on large plain previews).
+- ℹ️ `code_navigation.rs` `root.display().to_string()` is lossy for non-UTF-8 worktree paths.
+- ℹ️ Pre-existing failures in `tddy-index-daemon`, reproduced with `navigation.rs` reverted: `warming_a_root_forwards…`, `exits_non_zero_when_the_tree_no_longer_holds_against_the_ref`, `a_test_binary_move_in_plan_a_moves_plan_bs_file_hint`.
 
 ## TODO
 
