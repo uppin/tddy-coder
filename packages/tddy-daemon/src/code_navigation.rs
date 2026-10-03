@@ -18,8 +18,9 @@ use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeI
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
     CodeIndexProgress, CodeLocation, CodeNavigationService, CodeNavigationServiceServer,
-    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, ReferencesRequest,
-    ReferencesResponse, SourcePosition, SourceRange, WatchCodeIndexRequest,
+    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, OpenPlanRequest,
+    PlanRunEvent, PlanSnapshot, ReferencesRequest, ReferencesResponse, RunPlanRequest,
+    SourcePosition, SourceRange, WatchCodeIndexRequest, WatchPlanRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
@@ -114,6 +115,8 @@ impl CodeNavigationServiceImpl {
 #[async_trait::async_trait]
 impl CodeNavigationService for CodeNavigationServiceImpl {
     type WatchCodeIndexStream = ReceiverStream<Result<CodeIndexProgress, Status>>;
+    type WatchPlanStream = ReceiverStream<Result<PlanSnapshot, Status>>;
+    type RunPlanStream = ReceiverStream<Result<PlanRunEvent, Status>>;
 
     /// Where the symbol at a position is defined.
     async fn definition(
@@ -215,6 +218,76 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         // `index_progress.watch(session_id)` onto the stream, and end it after `ready` or `error`.
         Err(Status::unimplemented(
             "WatchCodeIndex is not served yet — TODO(indexing-indicators)",
+        ))
+    }
+
+    /// Open a plan file of the session's worktree: load it into the index's plan store and answer
+    /// its operations with their status and staleness.
+    async fn open_plan(
+        &self,
+        request: Request<OpenPlanRequest>,
+    ) -> Result<Response<PlanSnapshot>, Status> {
+        let r = request.into_inner();
+        let _forward = self
+            .authorise_and_connect(
+                &r.session_token,
+                &r.project_id,
+                &r.worktree_path,
+                &r.rel_path,
+                None,
+            )
+            .await?;
+        // TODO(plan-dialog): `LoadPlans` the plan for `_forward.workspace_root`, read its operations
+        // (id, kind, anchor item and file, group) in plan order, and fold in each one's status and
+        // the store's stale reasons.
+        Err(Status::unimplemented(
+            "OpenPlan is not served yet — TODO(plan-dialog)",
+        ))
+    }
+
+    /// A plan's operations as their status and staleness change.
+    async fn watch_plan(
+        &self,
+        request: Request<WatchPlanRequest>,
+    ) -> Result<Response<Self::WatchPlanStream>, Status> {
+        let r = request.into_inner();
+        let _forward = self
+            .authorise_and_connect(
+                &r.session_token,
+                &r.project_id,
+                &r.worktree_path,
+                &r.rel_path,
+                None,
+            )
+            .await?;
+        // TODO(plan-dialog): send the current snapshot, then a new one whenever `PlanStatus` /
+        // `ListPlans` for the worktree report a changed status or stale reason, until the client
+        // goes away.
+        Err(Status::unimplemented(
+            "WatchPlan is not served yet — TODO(plan-dialog)",
+        ))
+    }
+
+    /// Apply a plan through the warm index, streaming each operation's outcome.
+    async fn run_plan(
+        &self,
+        request: Request<RunPlanRequest>,
+    ) -> Result<Response<Self::RunPlanStream>, Status> {
+        let r = request.into_inner();
+        let _forward = self
+            .authorise_and_connect(
+                &r.session_token,
+                &r.project_id,
+                &r.worktree_path,
+                &r.rel_path,
+                None,
+            )
+            .await?;
+        // TODO(plan-dialog): forward to `code_index.Apply` for the worktree and map each
+        // `RestructureEvent` — operation, note, outcome — onto the stream, ending a failed run with a
+        // `failure` naming the group that rolled back.
+        Err(Status::unimplemented(
+            "RunPlan is not served yet — TODO(plan-dialog)",
         ))
     }
 }
