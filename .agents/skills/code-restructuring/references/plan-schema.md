@@ -110,6 +110,8 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `move_test_binary_to_crate` | the test binary's path | `to` | — | ✅ |
 | `extract_trait` | range at the `impl` keyword | `name` | — | ✅ |
 | `inline_method` | symbol | — | — | ✅ |
+| `remove_unused_param` | symbol or item (the function) | `name` (the parameter) | — | ✅ |
+| `convert_tuple_return_to_struct` | symbol or item (the function) | `name` (the new struct) | — | ✅ |
 | `organize_imports` | symbol | — | ✅ | — |
 | `add_missing_imports` | symbol | — | ✅ | — |
 
@@ -376,6 +378,15 @@ not define is refused rather than ignored.
   rewritten them all.** A call sitting inside a macro invocation — `format!("{}", scaled(x))` — is
   one rust-analyzer will not rewrite, and the inline then leaves both that caller and the definition
   in place.
+- **`remove_unused_param` drops one parameter from the declaration and from every call site, in
+  every file.** `name` is the parameter. rust-analyzer offers the removal only for a parameter the
+  body never reads, so naming a used one is refused — the refusal names the parameter and says it is
+  used, and no file is written. A `name` that is not a parameter of the function is refused too.
+- **`convert_tuple_return_to_struct` turns `-> (A, B)` into `-> Name`**, a new tuple struct that keeps
+  the function's visibility, and rewrites every destructuring caller (`let (a, b) = f()` becomes
+  `let Name(a, b) = f()`). rust-analyzer names the struct after the function; the engine has the
+  server rename it to `name`, declaration and callers together. A function with no return type is
+  refused. Both operations need `name`; a plan without it is malformed.
 - **`extract_method` with `variant: "module"` is refused on a range that reads `this`.** TypeScript
   omits the module scope for such a range rather than reporting it inapplicable, so the operation
   refuses instead of quietly extracting a method.

@@ -178,7 +178,7 @@ async fn converting_a_tuple_return_to_a_struct_rewrites_destructuring_callers_an
     assert_eq!(summary.map(|run| run.applied), Ok(1));
     let pricing = workspace.read(PRICING);
     assert!(
-        pricing.contains("struct Halves(u32, u32);"),
+        pricing.contains("pub struct Halves(pub u32, pub u32);"),
         "no `Halves` tuple struct was declared:\n{pricing}"
     );
     assert!(

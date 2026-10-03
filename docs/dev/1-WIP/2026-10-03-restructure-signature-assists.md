@@ -90,7 +90,7 @@ As in `## Responsibility` and the PRD's Proposed Changes.
 
 - `removing_an_unused_parameter_rewrites_every_call_site_and_compiles` — `ledger::pricing::total(price, quantity, note)` called from `checkout.rs` and `lib.rs`; asserts all three files exactly and `cargo check`.
 - `removing_a_used_parameter_is_refused_naming_it` — `discount` read by the body; the refusal names `` `discount` `` and says it "is used"; both files unchanged.
-- `converting_a_tuple_return_to_a_struct_rewrites_destructuring_callers_and_compiles` — `split -> (u32, u32)` into `Halves`; asserts `struct Halves(u32, u32);`, `-> Halves {`, `let Halves(first, second) = split(7);`, and `cargo check`.
+- `converting_a_tuple_return_to_a_struct_rewrites_destructuring_callers_and_compiles` — `split -> (u32, u32)` into `Halves`; asserts `pub struct Halves(pub u32, pub u32);` (rust-analyzer keeps the function's visibility), `-> Halves {`, `let Halves(first, second) = split(7);`, and `cargo check`.
 - `a_missing_name_is_refused_as_malformed` — parse-level (no server), `remove_unused_param` with no `name`; exact message `` plan is malformed: `remove_unused_param` needs `name`: the parameter to remove ``.
 
 ### tddy-code-restructuring — `src/plan.rs` unit tests
@@ -134,7 +134,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
