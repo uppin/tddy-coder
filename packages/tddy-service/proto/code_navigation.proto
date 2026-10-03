@@ -23,6 +23,37 @@ service CodeNavigationService {
 
   // The hover text — signature and docs — of the symbol at a position.
   rpc Hover(HoverRequest) returns (HoverResponse);
+
+  // The warm-up of a session's code index, for the session header's indexing indicator.
+  //
+  // Once a session's worktree exists the daemon starts `code_index.Warm` for it in the background
+  // and keeps the latest progress per session. This stream opens with that latest progress (when
+  // there is any), follows it, and ends after the message carrying `ready` or `error`. A session
+  // nothing warmed — no `index_daemon:` section, or not a Rust worktree — ends with no message, so
+  // no indicator shows. Warming never blocks the session: navigation answers whenever the index
+  // can, and a failed warm is only reported here.
+  rpc WatchCodeIndex(WatchCodeIndexRequest) returns (stream CodeIndexProgress);
+}
+
+message WatchCodeIndexRequest {
+  string session_token = 1;
+  // The session whose worktree's index to follow.
+  string session_id    = 2;
+}
+
+// `code_index.IndexProgress` as the session header reads it, plus the reason a warm failed.
+message CodeIndexProgress {
+  // The index's own one-line account of what it is doing.
+  string line       = 1;
+  // The language server's progress phase, e.g. "Indexing" or "Loading".
+  string phase      = 2;
+  uint32 percentage = 3;
+  // The highest percentage seen in any phase.
+  string furthest   = 4;
+  // True on the last message of a warm that finished: the index is loaded and queryable.
+  bool   ready      = 5;
+  // Set on the last message of a warm that failed: why. The session itself is unaffected.
+  string error      = 6;
 }
 
 // One-based line, one-based column counted in bytes — the coordinates `code_index` speaks.

@@ -108,6 +108,10 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
 
+    // TODO(indexing-indicators): thread the start's `AttachmentProgressSink` down to here and report
+    // `StartStep::Worktree` begin/end around the cut, `StartStep::SemanticIndex` around the index
+    // `managed_claude_cli_launch` builds when `semantic_index` is set, and `StartStep::Agent` around
+    // the spawn — so `StreamStartSession` says which slow step the host is in.
     // Create the real git worktree (blocking: involves git fetch + git worktree add), or materialize
     // on an SSH target when `ssh_config_host` is set.
     let ssh_alias = ssh_config_host.trim();

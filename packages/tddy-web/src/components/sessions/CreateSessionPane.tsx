@@ -34,6 +34,7 @@ import { CreateSessionHostAndProjectFields } from "./CreateSessionHostAndProject
 import { CreateSessionAttachmentsSection } from "./CreateSessionAttachmentsSection";
 import { CreateSessionPermissionFields } from "./CreateSessionPermissionFields";
 import { CreateSessionActions } from "./CreateSessionActions";
+import { CreateSessionStartPhase } from "./CreateSessionStartPhase";
 import { CreateSessionStackParentSelect } from "./CreateSessionStackParentSelect";
 import { useProjectBranches } from "./useProjectBranches";
 import { useCreateSessionCatalogs } from "./useCreateSessionCatalogs";
@@ -412,13 +413,14 @@ export function CreateSessionPane({
     sessionDaemonInstanceId: daemonInstanceId,
     initialAttachments: initialValues?.attachments,
   });
-  // The four the pane itself reads; the rest are the attachments section's, which takes the whole
+  // The five the pane itself reads; the rest are the attachments section's, which takes the whole
   // hook result rather than fifteen props.
   const {
     problem: attachmentProblem,
     resetProgress: resetAttachmentProgress,
     stageAttachments,
     startSessionStreamed,
+    startPhase,
   } = sessionAttachments;
 
   const isSubmitEnabled = (() => {
@@ -754,6 +756,9 @@ export function CreateSessionPane({
         projects={projects}
         projectId={projectId}
       />
+
+      {/* The step of the start the host is in, while it is streaming one. */}
+      <CreateSessionStartPhase step={startPhase} />
 
       <CreateSessionActions
         error={error}

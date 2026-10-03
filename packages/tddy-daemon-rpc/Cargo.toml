@@ -39,6 +39,8 @@ prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
+# `ReceiverStream`, the type `code_navigation.WatchCodeIndex` streams its progress through.
+tokio-stream = "0.1"
 # `Channel`, the port's product; the version the daemon and the index daemon dial with.
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4"] }
