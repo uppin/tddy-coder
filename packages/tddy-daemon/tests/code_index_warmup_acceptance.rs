@@ -212,6 +212,20 @@ impl CodeIndexService for AFakeIndex {
         Err(not_part_of_this_fake())
     }
 
+    async fn symbols(
+        &self,
+        _request: tddy_rpc::Request<index::SymbolsRequest>,
+    ) -> Result<tddy_rpc::Response<index::SymbolsResponse>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
+    async fn diagnostics(
+        &self,
+        _request: tddy_rpc::Request<index::DiagnosticsRequest>,
+    ) -> Result<tddy_rpc::Response<index::DiagnosticsResponse>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
     async fn check(
         &self,
         _request: tddy_rpc::Request<index::CheckRequest>,
