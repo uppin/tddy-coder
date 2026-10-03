@@ -122,7 +122,10 @@ Not written in the red phase: the plan-schema skill reference rows for the two o
 
 ## Validation Results
 
-_(populated by validation commands)_
+**/validate-changes (2026-10-03):** stack gate ✅ (on base tip, `origin/<base>..HEAD` is this PR only); no stubs left in this node's scope, no deletions, `## Dependencies` and `## Boundaries` held; `cargo build -p tddy-code-restructuring` ✅.
+**Refactor:** `name_converted_struct` and the caret/refusal helpers moved into `backends/rust/signature.rs` and split under 40 lines; unbalanced-source guards added with tests.
+**Scoped gates (`tddy-code-restructuring`):** `signature_assists_acceptance` 4/4 ✅; lib 651 passed, 7 failed — all `plan_store::live_plans_tests` on the base branch's `todo!` stubs (live-plans node), not this change; clippy `--all-targets -D warnings` ✅; fmt ✅.
+**File length (production lines, before → after):** `backends/rust.rs` 4483 → 4522 (+39, was 4523 → 4680 before the move); `backends/rust/signature.rs` 0 → 402; `plan.rs` 936 → 964. Splits of `rust.rs`/`plan.rs` deferred: every `#live-plan` node touches both.
 
 ## TODO
 
