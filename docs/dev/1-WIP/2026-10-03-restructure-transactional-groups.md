@@ -212,6 +212,15 @@ compared before and after.
 
 The group handling in both apply loops moved into `GroupRun::enter` / `GroupRun::settle` (`runner/group_gate.rs`, with `GroupGate` and `Settled`), plus small helpers in each loop file. `apply_held_plan`: daemon 198 → 139 lines, command line 188 → 145 (before this PR: 139 and 151).
 
+`runner/entry_points/store_run.rs` crossed the budget too (471 before this PR, 513 after the group handling). Split the same way (one `extract_module`, `to_file`, `reexport: glob`, `check --deep` first, applied by the engine; nothing moved by hand):
+
+| File | Production lines before | after |
+|------|------------------------:|------:|
+| `packages/tddy-code-restructuring/src/runner/entry_points/store_run.rs` | 513 | 426 |
+| `packages/tddy-code-restructuring/src/runner/entry_points/store_run/applied_op_record.rs` (new: `record_applied_op`, `settle_folded_plans`, `record_resynced_digest`) | — | 104 |
+
+`store_run.rs` re-exports `applied_op_record::*`, so `entry_points.rs`, `runner.rs` and every consumer keep their paths. Post-move build fixes made by hand (no code moved): the engine emitted `pub(crate) use applied_op_record::*`, which the public re-export of `record_applied_op` rejects (E0364), changed to `pub use` (an engine defect, filed as `docs/dev/todo/2026-10-03-restructure-glob-reexport-is-narrower-than-the-moved-items-need.md`; the same one-token fix was made in `journal.rs`); and three imports the engine left unused in the new file (its tidy does not run when the compile gate fails) were deleted. The engine also widened `settle_folded_plans` and `record_resynced_digest` to `pub(crate)`, which they need to stay reachable from the parent.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-03-restructure-transactional-groups-initial-discovery.md`)
