@@ -114,7 +114,8 @@ pub struct RestructureCheckArgs {
     #[arg(long)]
     pub deep: bool,
 
-    /// Report every file the plan names that is longer than this many lines.
+    /// Report every file the plan names with more than this many production lines (a Rust file's
+    /// lines before its `#[cfg(test)]` module; any other file's lines in full).
     #[arg(long)]
     pub budget: Option<usize>,
 }
@@ -123,6 +124,8 @@ pub struct RestructureCheckArgs {
 pub struct RestructureAnchorsArgs {
     pub file: PathBuf,
 
+    /// Items of the file's module, comma-separated: bare names (`Alpha`) or full paths beginning
+    /// with the file's own module path (`krate::module::Alpha`).
     #[arg(long, value_delimiter = ',')]
     pub items: Vec<String>,
 

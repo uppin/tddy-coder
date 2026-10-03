@@ -309,7 +309,9 @@ fn covering_run(
 
 /// The `items` anchor over `names`, items of the module `file` is — what `anchors --items` emits.
 ///
-/// Each name is resolved like any other item path, so the anchor carries the fingerprints a later
+/// A name is bare (`Alpha`) or already begins with the file's own module path (`krate::m::Alpha`),
+/// which is not prefixed a second time; any other name containing `::` is refused saying what to
+/// pass. Each is resolved like any other item path, so the anchor carries the fingerprints a later
 /// run checks it against; a name `file` does not define at module level is refused naming it.
 pub fn items_anchor(
     root: &Path,
@@ -320,7 +322,7 @@ pub fn items_anchor(
     let module = module_path_of(root, file)?.join("::");
     let items = names
         .iter()
-        .map(|name| ItemPath::parse(&format!("{module}::{name}")))
+        .map(|name| ItemPath::parse(&qualified_in_module(&module, file, name)?))
         .collect::<Result<Vec<_>>>()?;
 
     let found = items
@@ -334,6 +336,23 @@ pub fn items_anchor(
         fingerprints: found.into_iter().map(|item| item.fingerprint).collect(),
         items,
     })
+}
+
+/// `name` as a full item path of `module`: bare names get the prefix, names that already carry it
+/// keep it, and a name qualified by anything else is refused.
+fn qualified_in_module(module: &str, file: &str, name: &str) -> Result<String> {
+    let own_prefix = format!("{module}::");
+    if name.starts_with(&own_prefix) {
+        return Ok(name.to_string());
+    }
+    if !name.contains("::") {
+        return Ok(format!("{own_prefix}{name}"));
+    }
+    let bare = name.rsplit("::").next().unwrap_or(name);
+    Err(malformed(format!(
+        "`{name}` is not a bare item name of module `{module}`: pass the names `{file}` declares \
+         (`{bare}`) or full paths beginning with `{own_prefix}` (`{own_prefix}{bare}`)"
+    )))
 }
 
 /// The item anchor for the innermost item enclosing `range` in `file` — what `anchors --at` emits.
@@ -691,6 +710,75 @@ mod tests {
                 start: Position { line: 1, col: 1 },
                 end: Position { line: 4, col: 6 },
             })
+        );
+    }
+
+    fn a_queue_module_declaring_one_struct() -> tempfile::TempDir {
+        a_package(&[
+            ("packages/core/Cargo.toml", MANIFEST),
+            ("packages/core/src/queue.rs", "pub struct Alpha;\n"),
+        ])
+    }
+
+    fn the_anchor_over(root: &Path, name: &str) -> Result<Anchor> {
+        let mut resolver = Resolving(vec![(
+            "tddy_core::queue::Alpha".to_string(),
+            a_resolved_item(1, 1),
+        )]);
+        items_anchor(
+            root,
+            "packages/core/src/queue.rs",
+            &[name.to_string()],
+            &mut resolver,
+        )
+    }
+
+    #[test]
+    fn a_bare_item_name_is_taken_as_an_item_of_the_files_module() {
+        // Given a module `tddy_core::queue` declaring `Alpha`
+        let root = a_queue_module_declaring_one_struct();
+
+        // When the anchor is asked for over the bare name
+        let anchor = the_anchor_over(root.path(), "Alpha");
+
+        // Then it names the item by its full path
+        assert_eq!(
+            anchor.ok(),
+            Some(Anchor::Items {
+                file: "packages/core/src/queue.rs".to_string(),
+                items: vec![ItemPath::parse("tddy_core::queue::Alpha").unwrap()],
+                fingerprints: vec![Fingerprint("sha256:ab".to_string())],
+            })
+        );
+    }
+
+    #[test]
+    fn a_name_already_qualified_by_the_files_module_is_not_prefixed_twice() {
+        // Given a module `tddy_core::queue` declaring `Alpha`
+        let root = a_queue_module_declaring_one_struct();
+
+        // When the anchor is asked for over the fully qualified name
+        let qualified = the_anchor_over(root.path(), "tddy_core::queue::Alpha");
+
+        // Then it is the very anchor the bare name gives
+        assert_eq!(qualified.ok(), the_anchor_over(root.path(), "Alpha").ok());
+    }
+
+    #[test]
+    fn a_name_qualified_by_another_module_is_refused_saying_what_to_pass() {
+        // Given a module `tddy_core::queue` declaring `Alpha`
+        let root = a_queue_module_declaring_one_struct();
+
+        // When the anchor is asked for over a path in some other module
+        let refused = the_anchor_over(root.path(), "other::Alpha");
+
+        // Then the refusal names the module and both accepted spellings
+        assert_eq!(
+            refused.map(|_| ()).map_err(|error| error.to_string()),
+            Err("plan is malformed: `other::Alpha` is not a bare item name of module `tddy_core::queue`: pass the \
+                 names `packages/core/src/queue.rs` declares (`Alpha`) or full paths beginning \
+                 with `tddy_core::queue::` (`tddy_core::queue::Alpha`)"
+                .to_string())
         );
     }
 }

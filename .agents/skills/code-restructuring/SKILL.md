@@ -14,7 +14,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 ```bash
 tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]
 tddy-tools restructure status <plan.jsonl>
-tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]
+tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]   # LINES counts production lines (before `#[cfg(test)] mod`)
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
