@@ -1286,12 +1286,17 @@ pub async fn build(
         // the worktree service above, so it reaches no path that service would refuse to read, and
         // answered by the index daemon this runtime manages; without an `index_daemon:` section it
         // has none, and says so.
-        rpc_entries.push(crate::code_navigation::build_code_navigation_entry(
-            crate::code_navigation::CodeNavigationServiceImpl::new(
-                Arc::clone(&worktree_service_impl),
-                index_daemon_registry.clone(),
+        rpc_entries.push(
+            tddy_daemon_rpc::code_navigation::build_code_navigation_entry(
+                tddy_daemon_rpc::code_navigation::CodeNavigationServiceImpl::new(
+                    Arc::clone(&worktree_service_impl),
+                    index_daemon_registry.clone().map(|registry| {
+                        Arc::new(registry)
+                            as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>
+                    }),
+                ),
             ),
-        ));
+        );
 
         // ModelRegistryService — this daemon's providers, models and assistants. Rides the same
         // entries as every other service, so it is reachable over HTTP `/rpc` and LiveKit alike.

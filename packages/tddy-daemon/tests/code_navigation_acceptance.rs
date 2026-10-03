@@ -21,9 +21,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use prost::Message;
-use tddy_daemon::code_navigation::{build_code_navigation_entry, CodeNavigationServiceImpl};
 use tddy_daemon::index_daemon::{IndexDaemonRegistry, IndexDaemonSpawn};
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
+use tddy_daemon_rpc::code_navigation::{
+    build_code_navigation_entry, CodeNavigationServiceImpl, IndexChannelSource,
+};
 use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::code_index::{CodeIndexService, CodeIndexServiceTonicAdapter};
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_server::CodeIndexServiceServer as TonicCodeIndexServiceServer;
@@ -421,7 +423,7 @@ fn the_entry_for(
 ) -> tddy_rpc::ServiceEntry {
     build_code_navigation_entry(CodeNavigationServiceImpl::new(
         Arc::new(project.worktree_service.clone()),
-        index_daemon,
+        index_daemon.map(|registry| Arc::new(registry) as Arc<dyn IndexChannelSource>),
     ))
 }
 

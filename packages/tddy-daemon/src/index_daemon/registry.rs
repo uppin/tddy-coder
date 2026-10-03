@@ -309,6 +309,19 @@ impl IndexDaemonRegistry {
     }
 }
 
+/// The registry is the channel source `code_navigation.CodeNavigationService` dials through: the
+/// service is `tddy-daemon-rpc`'s, and this crate wires the process manager to its port.
+#[async_trait::async_trait]
+impl tddy_daemon_rpc::code_navigation::IndexChannelSource for IndexDaemonRegistry {
+    async fn connect(
+        &self,
+    ) -> Result<tonic::transport::Channel, tddy_daemon_rpc::code_navigation::IndexChannelError>
+    {
+        // The inherent method, not this one: inherent methods win the path lookup.
+        Ok(IndexDaemonRegistry::connect(self).await?)
+    }
+}
+
 /// How a task that has reached a terminal state got there, or `None` while it is still running.
 fn how_it_died(handle: &Arc<TaskHandle>) -> Option<String> {
     match handle.status() {

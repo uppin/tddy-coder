@@ -17,6 +17,17 @@ The session family (`session.SessionService`), the session-files, session-agents
 terminal and demo-VM families, and the dispatch layer (`daemon_rpc_handler`, `family_proto_bridge`)
 are served from `tddy-session-lifecycle`.
 
+## Code navigation
+
+`CodeNavigationServiceImpl` serves `code_navigation.CodeNavigationService` (go to definition,
+references, hover for the web's code pane). It is not a `from_host` family: it holds the daemon's
+`WorktreeServiceImpl`, whose `resolve_listed_worktree` authorises every request, and an optional
+`Arc<dyn IndexChannelSource>` — the port through which it dials the warm code-intelligence index. The
+daemon implements the port for the registry that manages the index daemon process, so this crate
+never names that registry and `tddy-daemon` keeps only wiring. Without a source every method answers
+`FailedPrecondition`; there is no fallback to another language server. The request path and the
+end-to-end test are in [tddy-daemon's code-navigation-service.md](../../tddy-daemon/docs/code-navigation-service.md).
+
 ## Why a crate above the lifecycle crate
 
 Each handler's body needs session-host state *and* crates that sit between the lifecycle crate and

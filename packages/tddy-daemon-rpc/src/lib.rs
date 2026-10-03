@@ -11,6 +11,7 @@
 //! `DaemonRpcFamilies` port, which the composition root fills.
 
 pub mod catalog;
+pub mod code_navigation;
 pub mod exec_tool;
 pub mod families;
 pub mod pr_stack;

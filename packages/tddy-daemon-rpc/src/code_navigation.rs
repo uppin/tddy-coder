@@ -5,9 +5,11 @@
 //! authorises a file read ([`WorktreeServiceImpl::resolve_listed_worktree`]: token → OS user →
 //! project main repo on this host → `git worktree list` membership), then forwarded to
 //! `code_index.CodeIndexService` with the listed worktree as its workspace root, over the channel
-//! [`IndexDaemonRegistry::connect`] dials — which starts the index daemon on the first request.
+//! [`IndexChannelSource::connect`] dials — which, for the daemon's registry, starts the index daemon
+//! on the first request. The port keeps this crate from naming the registry, which stays with the
+//! daemon's wiring.
 //!
-//! Without an `index_daemon:` configuration section there is no registry, and every method answers
+//! Without an `index_daemon:` configuration section there is no source, and every method answers
 //! `FAILED_PRECONDITION` naming that section. There is deliberately no fallback to the agent-tool
 //! language server: two indexes answering the same pane would disagree.
 
@@ -25,11 +27,20 @@ use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
 use tonic::transport::Channel;
 
-use crate::index_daemon::IndexDaemonRegistry;
-
 /// The coordinate the web addresses this service at: `package code_navigation` +
 /// `service CodeNavigationService` in `tddy-service/proto/code_navigation.proto`.
 pub const CODE_NAVIGATION_SERVICE: &str = "code_navigation.CodeNavigationService";
+
+/// The error a source reports when it cannot hand out a channel; only its `Display` is surfaced.
+pub type IndexChannelError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Where the index daemon's channel comes from. The daemon implements it for the registry that
+/// manages the index daemon process; this crate only dials through it.
+#[async_trait::async_trait]
+pub trait IndexChannelSource: Send + Sync {
+    /// A channel to the index daemon, starting it if nothing has yet.
+    async fn connect(&self) -> Result<Channel, IndexChannelError>;
+}
 
 /// `code_navigation.CodeNavigationService`, over this daemon's worktree authorisation and its
 /// managed index daemon.
@@ -38,7 +49,7 @@ pub struct CodeNavigationServiceImpl {
     /// the worktree service would refuse to read.
     worktrees: Arc<WorktreeServiceImpl>,
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
-    index_daemon: Option<IndexDaemonRegistry>,
+    index_daemon: Option<Arc<dyn IndexChannelSource>>,
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel
@@ -55,7 +66,7 @@ impl CodeNavigationServiceImpl {
     #[must_use]
     pub fn new(
         worktrees: Arc<WorktreeServiceImpl>,
-        index_daemon: Option<IndexDaemonRegistry>,
+        index_daemon: Option<Arc<dyn IndexChannelSource>>,
     ) -> Self {
         Self {
             worktrees,
@@ -78,13 +89,13 @@ impl CodeNavigationServiceImpl {
             self.worktrees
                 .resolve_listed_worktree(session_token, project_id, worktree_path)?;
         let file = validate_rel_path_shape(rel_path)?;
-        let registry = self.index_daemon.as_ref().ok_or_else(|| {
+        let source = self.index_daemon.as_ref().ok_or_else(|| {
             Status::failed_precondition(
                 "code navigation needs the index daemon, and this daemon has no `index_daemon:` \
                  configuration section",
             )
         })?;
-        let channel = registry
+        let channel = source
             .connect()
             .await
             .map_err(|err| Status::unavailable(format!("index daemon: {err}")))?;

@@ -1,8 +1,9 @@
 # `code_navigation.CodeNavigationService`
 
 Go-to-definition, references and hover for the web's [session code pane](../../../docs/ft/web/session-code-pane.md),
-served by `tddy-daemon` and answered by the warm code-intelligence index. The service owns no index:
-it authorises a request, then forwards it.
+answered by the warm code-intelligence index. The service owns no index: it authorises a request,
+then forwards it. `tddy-daemon` wires it; the handler itself is
+[`tddy-daemon-rpc`'s `CodeNavigationServiceImpl`](../../tddy-daemon-rpc/docs/architecture.md#code-navigation).
 
 | RPC | Purpose |
 |-----|---------|
@@ -11,8 +12,10 @@ it authorises a request, then forwards it.
 | `Hover` | The language server's hover markdown for it; unset when there is none |
 
 The wire contract is [`tddy-service/proto/code_navigation.proto`](../../tddy-service/docs/code-navigation-proto.md).
-`CodeNavigationServiceImpl` lives in `src/code_navigation.rs`, and `runtime.rs` registers its entry
-beside the worktree service it borrows.
+`runtime.rs` builds `CodeNavigationServiceImpl` from the daemon's `WorktreeServiceImpl` and, when an
+`index_daemon:` section exists, its `IndexDaemonRegistry` — handed over as the handler's
+`IndexChannelSource` port, which `index_daemon/registry.rs` implements — and registers the entry
+beside the worktree service it borrows. The daemon holds no RPC method of its own for this service.
 
 ## The path every request takes
 
@@ -24,10 +27,10 @@ beside the worktree service it borrows.
 2. **Refuse a `rel_path` that leaves the worktree**, with the same shape check the file RPCs apply
    (`validate_rel_path_shape`: no `..`, no absolute path); the refusal is `InvalidArgument`.
 3. **Require the index daemon.** Without an `index_daemon:` section the daemon holds no
-   `IndexDaemonRegistry`, and every method answers `FailedPrecondition` naming that section. There is
+   `IndexDaemonRegistry`, so the handler has no channel source and every method answers `FailedPrecondition` naming that section. There is
    no fallback to `tddy_lsp_executor` or any other language server: two indexes answering the same
    pane would disagree.
-4. **Dial it.** `IndexDaemonRegistry::connect` starts the index daemon on the first request and returns
+4. **Dial it.** The channel source — in the daemon, `IndexDaemonRegistry::connect` — starts the index daemon on the first request and returns
    a channel to it. A start or dial failure is `Unavailable`. Nothing is started for a request that
    failed an earlier step.
 5. **Forward** a `code_index.CodeIndexService` call with the listed worktree as `workspace_root`, the
@@ -37,8 +40,9 @@ beside the worktree service it borrows.
    `CodeLocation{rel_path, range, outside_worktree}`. A refusal from the index (a non-`.rs` file, an
    unreadable file, a language-server failure) reaches the caller with the index's status.
 
-`tddy-index-daemon` is therefore a dependency of this crate, and `IndexDaemonRegistry::connect` has
-this service as its production caller.
+`IndexDaemonRegistry::connect` has this service as its production caller. `tddy-index-daemon` is a
+dependency of `tddy-daemon-rpc` (for the generated `code_index` client), and only a dev-dependency of
+this crate.
 
 ## Transport
 
@@ -48,7 +52,8 @@ local gRPC socket.
 
 ## Testing
 
-`tests/code_navigation_acceptance.rs` runs the production `IndexDaemonRegistry` against a stand-in
+The handler's unit tests (path shape, location mapping) live in `tddy-daemon-rpc`;
+`tests/code_navigation_acceptance.rs` here runs the production `IndexDaemonRegistry` against a stand-in
 program that binds a fake `code_index` server over a Unix socket, so the lazy start, readiness wait
 and dial are the production ones.
 
