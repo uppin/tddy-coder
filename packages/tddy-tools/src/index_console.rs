@@ -26,7 +26,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use tddy_code_restructuring::console;
-use tddy_code_restructuring::restructure_cli::step_delta;
+use tddy_code_restructuring::restructure_cli::Narrator;
 use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::Comparison;
 use tddy_index_daemon::proto::code_index::{
@@ -61,14 +61,15 @@ pub(crate) struct Rendered {
     /// The terminal event, once it has arrived. `None` is itself an answer — see
     /// [`Self::verdict_on_outcome`].
     outcome: Option<RunOutcome>,
-    /// When this run last narrated something, which is what the next line's stamp is measured
-    /// against.
+    /// What this run has narrated: the throttle that drops per-item progress, and when a line was
+    /// last printed, which is what the next line's stamp is measured against.
     ///
     /// The clock belongs to the run, exactly as the cold path's belongs to its sink: one
     /// `Rendered` per run, so two runs in one process — or two runs served by one daemon — cannot
-    /// interleave their deltas through a shared instant. `None` until the first line, which is
-    /// therefore stamped `+0ms` rather than with the age of the process.
-    narrated: Option<Instant>,
+    /// interleave their deltas through a shared instant. The first line is stamped `+0ms` rather
+    /// than with the age of the process. The same [`Narrator`] serves the cold path, so the two
+    /// front ends cannot drift on which lines they show.
+    narrator: Narrator,
 }
 
 impl Rendered {
@@ -77,7 +78,7 @@ impl Rendered {
             rehearsal,
             findings: 0,
             outcome: None,
-            narrated: None,
+            narrator: Narrator::default(),
         }
     }
 
@@ -110,14 +111,15 @@ impl Rendered {
     /// against this run's own clock, rather than carried on the event: it is how long this console
     /// has been waiting, which is the question a reader of it is asking.
     fn indexing(&mut self, progress: &IndexProgress) {
-        let now = Instant::now();
-        let stamp = step_delta(self.narrated, now);
-        self.narrated = Some(now);
-        aside(&console::narration(
-            "indexing",
-            Some(&stamp),
-            &progress.line,
-        ));
+        if let Some(line) = self.narration_line(&progress.line, Instant::now()) {
+            aside(&line);
+        }
+    }
+
+    /// The console line for one narration at `now`, or `None` when the throttle drops it as
+    /// per-item progress. The stamp is the time since the last line actually printed.
+    fn narration_line(&mut self, line: &str, now: Instant) -> Option<String> {
+        self.narrator.narrate("indexing", line, now)
     }
 
     /// What one operation of a plan amounted to, and what it had to widen to get there.
@@ -275,6 +277,34 @@ fn a_comparison(response: &VerifyResponse) -> Comparison {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
+    /// A cold deep check reports one progress token per proc-macro, hundreds in a few seconds, and
+    /// they buried the lines that matter.
+    #[test]
+    fn a_burst_of_per_item_progress_prints_at_most_two_lines_and_the_ready_line_still_prints() {
+        // Given a rendered run and 200 proc-macro lines inside one second, then the ready line
+        let mut rendered = Rendered::new(false);
+        let t0 = Instant::now();
+
+        // When they are narrated
+        let mut printed: Vec<String> = (0..200)
+            .filter_map(|n| {
+                let at = t0 + Duration::from_millis(n * 5);
+                rendered.narration_line(&format!("working: proc-macro m{n} built"), at)
+            })
+            .collect();
+        printed.extend(rendered.narration_line("crate index ready", t0 + Duration::from_secs(1)));
+
+        // Then one working line and the ready line printed, stamped since the line before them
+        assert_eq!(
+            printed,
+            [
+                "   indexing (+0ms): working: proc-macro m0 built",
+                "   indexing (+1.0s): crate index ready",
+            ]
+        );
+    }
 
     /// A check with findings is an answered call whose answer is a failed run, which is what
     /// becomes the exit status — the same judgement the cold path makes.
