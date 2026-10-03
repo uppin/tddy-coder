@@ -359,6 +359,15 @@ left, and the destination's manifest. The three cannot disagree about what the f
   destination depend on the crate it left — in a header or a body. A path the origin merely forwards from
   another crate, a `super::` into the moved set, and anything under `#[cfg(test)]` are not edges: cargo
   allows a dev-dependency cycle.
+- **`check` reports what `apply` cannot build, from the same reading.** Two static findings, needing no
+  index, so `check` and `check --deep` both give them. A moved module whose **body** reaches
+  `crate::host::f(…)`, with `host` staying behind in the origin, is reported with the file, the path as
+  written and its line; the remedy is to cut the body's dependency, never `move_cluster_to_crate`, since a
+  body's reach into the code that hosts it is not a sibling that can come along. A module staying behind
+  is read at the operation's point in the plan: one an earlier operation already moved to the same
+  destination has left, one a later operation moves has not, and one moved elsewhere has not. A destination
+  whose root already declares the module's name, or already holds a file at the target path, is reported as
+  a **merge**, which no operation performs.
 - **The manifest.** Each crate the survey names is copied from the origin's manifest (a path dependency re-anchored) into the
   destination's `[dependencies]`, or `[dev-dependencies]` when only `#[cfg(test)]` code names it. The
   destination is never in its own manifest; the move asserts it, and a survey that reports one is
@@ -456,10 +465,11 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   recognised as `#[cfg(test)]` and `#[cfg(all(test, …))]`; any other spelling (`any(test, …)`,
   `cfg_attr`) reads as ordinary code, which puts a crate in `[dependencies]` instead of leaving it out.
   The build after the move surfaces whatever the survey could not see.
-- **`check` reads the moved file's top-level `use` header only.** Its stays-behind finding takes those
-  paths from the survey, resolved the way `apply` resolves them, but a path in a body or in a nested
-  `use` is not examined, so `check --deep` can pass a move `apply` refuses on such a path.
-  [#543](https://github.com/uppin/tddy-coder/pull/543) (`check-parity`) moves `check` onto the survey.
+- **`check` does not read a nested `use`, and a cluster's stranded-sibling finding reads the header only.**
+  A body path to a module staying behind is a finding of its own, but a `use` nested inside a function is
+  read by neither, and the stranded-sibling finding takes only the file's top-level `use` header from the
+  survey. So `check --deep` can pass a move `apply` refuses on a path inside a nested `use`, or on a body
+  path that only that finding would have named with a cluster as the remedy.
 - **A caller that imports the module rather than the item is not re-pointed.** The survey asks
   rust-analyzer for references per *item*, so a caller written `use crate::host_registry;` and then
   `host_registry::X` is outside the reference set. Covering it needs a second engine call on the

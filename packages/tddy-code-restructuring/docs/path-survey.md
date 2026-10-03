@@ -103,9 +103,10 @@ records.
   results.
 - **Only the origin's re-exports are followed.** A path through another crate's re-export is left at
   that crate.
-- **`check` reads the top-level `use` header only.** `Header::header_origin_paths` is the header subset
-  of the edges, kept for `check`'s stays-behind finding; it goes when `check-parity` moves `check` onto
-  the whole survey.
+- **`check`'s stranded-sibling finding reads the top-level `use` header only.**
+  `Header::header_origin_paths` is the header subset of the edges, kept for that finding. The
+  body-path finding (`stays_behind_through_a_body`) reads the survey's body paths directly; a `use`
+  nested in a function is `in_use`, not `in_body`, so neither reads it.
 - **`survey.rs` is `pub(crate)`.** Its consumers are inside this crate.
 
 ## Testing
