@@ -48,6 +48,10 @@ impl DaemonSessionHost {
     /// `progress` is where attachment materialization reports to: the stream's sender for the
     /// streaming entry point, [`AttachmentProgressSink::discarding`] for the unary one. Nothing
     /// else differs between the two, so the unary path stays byte-for-byte what it was.
+    ///
+    /// TODO(indexing-indicators): the start's phases (`StartPhase`: worktree, semantic index,
+    /// agent) are reported through the same sink — `begin_phase` / `end_phase` — by each session
+    /// type's start; none reports them yet, so today's stream is unchanged.
     pub(crate) async fn start_session_core(
         &self,
         req: StartSessionRequest,

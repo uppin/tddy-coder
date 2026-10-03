@@ -567,6 +567,8 @@ async fn stream_start_session_reports_progress_for_each_attachment_then_one_term
                 progressed.push(progress.basename);
             }
             StartEvent::Result(result) => results.push(result.session_id),
+            // Start phases are pinned by `start_phase_acceptance.rs`.
+            StartEvent::Phase(_) => {}
         }
     }
 

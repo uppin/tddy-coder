@@ -12,7 +12,85 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file code_navigation.proto.
  */
 export const file_code_navigation: GenFile = /*@__PURE__*/
-  fileDesc("ChVjb2RlX25hdmlnYXRpb24ucHJvdG8SD2NvZGVfbmF2aWdhdGlvbiIuCg5Tb3VyY2VQb3NpdGlvbhIMCgRsaW5lGAEgASgNEg4KBmNvbHVtbhgCIAEoDSJrCgtTb3VyY2VSYW5nZRIuCgVzdGFydBgBIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbhIsCgNlbmQYAiABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24imgEKEURlZmluaXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIkYKEkRlZmluaXRpb25SZXNwb25zZRIwCglsb2NhdGlvbnMYASADKAsyHS5jb2RlX25hdmlnYXRpb24uQ29kZUxvY2F0aW9uIpoBChFSZWZlcmVuY2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCRIxCghwb3NpdGlvbhgFIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbiJGChJSZWZlcmVuY2VzUmVzcG9uc2USMAoJbG9jYXRpb25zGAEgAygLMh0uY29kZV9uYXZpZ2F0aW9uLkNvZGVMb2NhdGlvbiKVAQoMSG92ZXJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIjMKDUhvdmVyUmVzcG9uc2USFQoIbWFya2Rvd24YASABKAlIAIgBAUILCglfbWFya2Rvd24iZwoMQ29kZUxvY2F0aW9uEhAKCHJlbF9wYXRoGAEgASgJEisKBXJhbmdlGAIgASgLMhwuY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVJhbmdlEhgKEG91dHNpZGVfd29ya3RyZWUYAyABKAgyjQIKFUNvZGVOYXZpZ2F0aW9uU2VydmljZRJVCgpEZWZpbml0aW9uEiIuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXNwb25zZRJVCgpSZWZlcmVuY2VzEiIuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXNwb25zZRJGCgVIb3ZlchIdLmNvZGVfbmF2aWdhdGlvbi5Ib3ZlclJlcXVlc3QaHi5jb2RlX25hdmlnYXRpb24uSG92ZXJSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("ChVjb2RlX25hdmlnYXRpb24ucHJvdG8SD2NvZGVfbmF2aWdhdGlvbiJCChVXYXRjaENvZGVJbmRleFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJInQKEUNvZGVJbmRleFByb2dyZXNzEgwKBGxpbmUYASABKAkSDQoFcGhhc2UYAiABKAkSEgoKcGVyY2VudGFnZRgDIAEoDRIQCghmdXJ0aGVzdBgEIAEoCRINCgVyZWFkeRgFIAEoCBINCgVlcnJvchgGIAEoCSIuCg5Tb3VyY2VQb3NpdGlvbhIMCgRsaW5lGAEgASgNEg4KBmNvbHVtbhgCIAEoDSJrCgtTb3VyY2VSYW5nZRIuCgVzdGFydBgBIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbhIsCgNlbmQYAiABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24imgEKEURlZmluaXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIkYKEkRlZmluaXRpb25SZXNwb25zZRIwCglsb2NhdGlvbnMYASADKAsyHS5jb2RlX25hdmlnYXRpb24uQ29kZUxvY2F0aW9uIpoBChFSZWZlcmVuY2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCRIxCghwb3NpdGlvbhgFIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbiJGChJSZWZlcmVuY2VzUmVzcG9uc2USMAoJbG9jYXRpb25zGAEgAygLMh0uY29kZV9uYXZpZ2F0aW9uLkNvZGVMb2NhdGlvbiKVAQoMSG92ZXJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIjMKDUhvdmVyUmVzcG9uc2USFQoIbWFya2Rvd24YASABKAlIAIgBAUILCglfbWFya2Rvd24iZwoMQ29kZUxvY2F0aW9uEhAKCHJlbF9wYXRoGAEgASgJEisKBXJhbmdlGAIgASgLMhwuY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVJhbmdlEhgKEG91dHNpZGVfd29ya3RyZWUYAyABKAgy7QIKFUNvZGVOYXZpZ2F0aW9uU2VydmljZRJVCgpEZWZpbml0aW9uEiIuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXNwb25zZRJVCgpSZWZlcmVuY2VzEiIuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXNwb25zZRJGCgVIb3ZlchIdLmNvZGVfbmF2aWdhdGlvbi5Ib3ZlclJlcXVlc3QaHi5jb2RlX25hdmlnYXRpb24uSG92ZXJSZXNwb25zZRJeCg5XYXRjaENvZGVJbmRleBImLmNvZGVfbmF2aWdhdGlvbi5XYXRjaENvZGVJbmRleFJlcXVlc3QaIi5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4UHJvZ3Jlc3MwAWIGcHJvdG8z");
+
+/**
+ * @generated from message code_navigation.WatchCodeIndexRequest
+ */
+export type WatchCodeIndexRequest = Message<"code_navigation.WatchCodeIndexRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * The session whose worktree's index to follow.
+   *
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message code_navigation.WatchCodeIndexRequest.
+ * Use `create(WatchCodeIndexRequestSchema)` to create a new message.
+ */
+export const WatchCodeIndexRequestSchema: GenMessage<WatchCodeIndexRequest> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 0);
+
+/**
+ * `code_index.IndexProgress` as the session header reads it, plus the reason a warm failed.
+ *
+ * @generated from message code_navigation.CodeIndexProgress
+ */
+export type CodeIndexProgress = Message<"code_navigation.CodeIndexProgress"> & {
+  /**
+   * The index's own one-line account of what it is doing.
+   *
+   * @generated from field: string line = 1;
+   */
+  line: string;
+
+  /**
+   * The language server's progress phase, e.g. "Indexing" or "Loading".
+   *
+   * @generated from field: string phase = 2;
+   */
+  phase: string;
+
+  /**
+   * @generated from field: uint32 percentage = 3;
+   */
+  percentage: number;
+
+  /**
+   * The highest percentage seen in any phase.
+   *
+   * @generated from field: string furthest = 4;
+   */
+  furthest: string;
+
+  /**
+   * True on the last message of a warm that finished: the index is loaded and queryable.
+   *
+   * @generated from field: bool ready = 5;
+   */
+  ready: boolean;
+
+  /**
+   * Set on the last message of a warm that failed: why. The session itself is unaffected.
+   *
+   * @generated from field: string error = 6;
+   */
+  error: string;
+};
+
+/**
+ * Describes the message code_navigation.CodeIndexProgress.
+ * Use `create(CodeIndexProgressSchema)` to create a new message.
+ */
+export const CodeIndexProgressSchema: GenMessage<CodeIndexProgress> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 1);
 
 /**
  * One-based line, one-based column counted in bytes — the coordinates `code_index` speaks.
@@ -36,7 +114,7 @@ export type SourcePosition = Message<"code_navigation.SourcePosition"> & {
  * Use `create(SourcePositionSchema)` to create a new message.
  */
 export const SourcePositionSchema: GenMessage<SourcePosition> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 0);
+  messageDesc(file_code_navigation, 2);
 
 /**
  * @generated from message code_navigation.SourceRange
@@ -58,7 +136,7 @@ export type SourceRange = Message<"code_navigation.SourceRange"> & {
  * Use `create(SourceRangeSchema)` to create a new message.
  */
 export const SourceRangeSchema: GenMessage<SourceRange> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 1);
+  messageDesc(file_code_navigation, 3);
 
 /**
  * @generated from message code_navigation.DefinitionRequest
@@ -99,7 +177,7 @@ export type DefinitionRequest = Message<"code_navigation.DefinitionRequest"> & {
  * Use `create(DefinitionRequestSchema)` to create a new message.
  */
 export const DefinitionRequestSchema: GenMessage<DefinitionRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 2);
+  messageDesc(file_code_navigation, 4);
 
 /**
  * @generated from message code_navigation.DefinitionResponse
@@ -116,7 +194,7 @@ export type DefinitionResponse = Message<"code_navigation.DefinitionResponse"> &
  * Use `create(DefinitionResponseSchema)` to create a new message.
  */
 export const DefinitionResponseSchema: GenMessage<DefinitionResponse> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 3);
+  messageDesc(file_code_navigation, 5);
 
 /**
  * @generated from message code_navigation.ReferencesRequest
@@ -153,7 +231,7 @@ export type ReferencesRequest = Message<"code_navigation.ReferencesRequest"> & {
  * Use `create(ReferencesRequestSchema)` to create a new message.
  */
 export const ReferencesRequestSchema: GenMessage<ReferencesRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 4);
+  messageDesc(file_code_navigation, 6);
 
 /**
  * @generated from message code_navigation.ReferencesResponse
@@ -170,7 +248,7 @@ export type ReferencesResponse = Message<"code_navigation.ReferencesResponse"> &
  * Use `create(ReferencesResponseSchema)` to create a new message.
  */
 export const ReferencesResponseSchema: GenMessage<ReferencesResponse> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 5);
+  messageDesc(file_code_navigation, 7);
 
 /**
  * @generated from message code_navigation.HoverRequest
@@ -207,7 +285,7 @@ export type HoverRequest = Message<"code_navigation.HoverRequest"> & {
  * Use `create(HoverRequestSchema)` to create a new message.
  */
 export const HoverRequestSchema: GenMessage<HoverRequest> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 6);
+  messageDesc(file_code_navigation, 8);
 
 /**
  * @generated from message code_navigation.HoverResponse
@@ -226,7 +304,7 @@ export type HoverResponse = Message<"code_navigation.HoverResponse"> & {
  * Use `create(HoverResponseSchema)` to create a new message.
  */
 export const HoverResponseSchema: GenMessage<HoverResponse> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 7);
+  messageDesc(file_code_navigation, 9);
 
 /**
  * A place in the worktree a navigation answer points at.
@@ -260,7 +338,7 @@ export type CodeLocation = Message<"code_navigation.CodeLocation"> & {
  * Use `create(CodeLocationSchema)` to create a new message.
  */
 export const CodeLocationSchema: GenMessage<CodeLocation> = /*@__PURE__*/
-  messageDesc(file_code_navigation, 8);
+  messageDesc(file_code_navigation, 10);
 
 /**
  * CodeNavigationService: go-to-definition, references and hover over a session's worktree, for the
@@ -307,6 +385,23 @@ export const CodeNavigationService: GenService<{
     methodKind: "unary";
     input: typeof HoverRequestSchema;
     output: typeof HoverResponseSchema;
+  },
+  /**
+   * The warm-up of a session's code index, for the session header's indexing indicator.
+   *
+   * Once a session's worktree exists the daemon starts `code_index.Warm` for it in the background
+   * and keeps the latest progress per session. This stream opens with that latest progress (when
+   * there is any), follows it, and ends after the message carrying `ready` or `error`. A session
+   * nothing warmed — no `index_daemon:` section, or not a Rust worktree — ends with no message, so
+   * no indicator shows. Warming never blocks the session: navigation answers whenever the index
+   * can, and a failed warm is only reported here.
+   *
+   * @generated from rpc code_navigation.CodeNavigationService.WatchCodeIndex
+   */
+  watchCodeIndex: {
+    methodKind: "server_streaming";
+    input: typeof WatchCodeIndexRequestSchema;
+    output: typeof CodeIndexProgressSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_code_navigation, 0);

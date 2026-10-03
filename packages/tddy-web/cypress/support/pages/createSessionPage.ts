@@ -378,6 +378,10 @@ export const createSessionPage = {
   /** The form-level error strip, shown when the daemon refuses the creation. */
   error: () => byTestId(TEST_IDS.createSessionError),
 
+  /** The line naming the step of the start the host is in, while a creation is streaming. */
+  startPhase: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.createSessionStartPhase, options),
+
   // ---------------------------------------------------------------------------
   // Attachments (docs/ft/coder/session-attachments.md)
   // ---------------------------------------------------------------------------
