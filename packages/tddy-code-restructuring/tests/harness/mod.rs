@@ -772,6 +772,9 @@ pub fn a_cluster_move_of(modules: &[&str], reexport: Option<Reexport>) -> Refact
         to_file: false,
         also: anchors.collect(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
@@ -796,6 +799,9 @@ pub fn a_move_of(
         to_file: false,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
@@ -847,6 +853,9 @@ pub fn a_move_of_the_host_registry(
         to_file: false,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
@@ -872,6 +881,9 @@ pub fn a_rename_in(file: &str, symbol: &str, to: &str) -> RefactorOp {
         to_file: false,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
@@ -1694,6 +1706,9 @@ fn an_extraction(op: RefactorKind, anchor: Anchor, name: &str) -> RefactorOp {
         to_file: false,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
