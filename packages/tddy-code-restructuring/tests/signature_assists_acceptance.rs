@@ -93,6 +93,7 @@ fn a_signature_op(kind: RefactorKind, item: &str, item_text: &str, name: &str) -
         reexport: None,
         to_file: false,
         also: Vec::new(),
+        group: None,
     }
 }
 

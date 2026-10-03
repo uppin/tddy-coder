@@ -888,6 +888,7 @@ mod tests {
             reexport: Some(Reexport::Glob),
             to_file: false,
             also: Vec::new(),
+            group: None,
         }
     }
 
