@@ -264,6 +264,11 @@ not define is refused rather than ignored.
   file's existing imports decide — by an exact path match, then by a module the file already imports
   from, then by the **crate** the file binds that same name from. Where none of the three settles it,
   the operation refuses and names the candidates rather than guessing.
+  The paths written inline in the moved code are re-rooted for the module being one level deeper:
+  `super::x` gains one `super::` (`self::x` becomes `super::x`), except where the path stays inside
+  a module the moved code itself declares; strings, comments and `use` items are untouched, and a
+  `pub(super)` field of a moved struct is rebased like a `pub(super)` item. The count is reported as
+  a `paths: N super:: path(s) re-rooted for the new module` note.
 
   A second, lexical step then carries across every name the parent binds by `use` that the moved code
   uses and the module does not bind: the server cannot report a name unresolved when the prelude

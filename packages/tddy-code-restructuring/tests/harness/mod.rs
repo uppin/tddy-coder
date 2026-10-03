@@ -2036,6 +2036,81 @@ pub fn a_crate_whose_module_declares_a_function_visible_in_its_parent() -> AFixt
         .tracked_by_git()
 }
 
+/// A module file whose `pub(super)` struct has a `pub(super)` field the crate root reads.
+///
+/// `Gauge` and `gauge` are lines 3-9 of [`OUTER_MODULE`].
+pub fn a_crate_whose_struct_has_a_field_visible_in_its_parent() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The parent of `outer`, which reads a field `outer` shows it.",
+                "",
+                "mod outer;",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::gauge().level",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! A struct with a field visible in its parent.",
+                "",
+                "pub(super) struct Gauge {",
+                "    pub(super) level: u32,",
+                "}",
+                "",
+                "pub(super) fn gauge() -> Gauge {",
+                "    Gauge { level: 3 }",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// A module file whose last function reaches its surroundings through inline `super::`, `self::`
+/// and `crate::` paths, beside a `sibling` that stays behind.
+///
+/// `caller` is lines 7-9 of [`OUTER_MODULE`]; `super::` from `outer` is the crate root.
+pub fn a_crate_whose_moved_function_calls_through_relative_paths() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The parent of `outer`, which also owns `top_level`.",
+                "",
+                "mod outer;",
+                "",
+                "pub fn top_level() -> u32 {",
+                "    5",
+                "}",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::caller() + outer::sibling()",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! Reaches the root, itself and the crate by path.",
+                "",
+                "pub(crate) fn sibling() -> u32 {",
+                "    1",
+                "}",
+                "",
+                "pub(crate) fn caller() -> u32 {",
+                "    super::top_level() + crate::top_level() + self::sibling()",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
 /// The module file [`a_crate_whose_module_declares_a_function_visible_in_its_parent`] splits.
 pub const OUTER_MODULE: &str = "crates/origin/src/outer.rs";
 

@@ -32,6 +32,7 @@ mod early_return;
 mod escaping_types;
 mod impl_seam;
 mod imports;
+mod inline_paths;
 mod introduced;
 mod item_path;
 mod nested_modules;
@@ -1445,6 +1446,7 @@ impl RustBackend {
         let imported = self.restore_imports(uri, original, &pruned, &name, &moved, reexport)?;
         let imported = prelude_shadow::carry_shadowed_imports(original, &imported, &name)?;
         let (preserved, mut report) = restore_visibility(&imported, &name, &moved)?;
+        let (preserved, rerooted) = inline_paths::rerooted_module(&preserved, &name)?;
 
         // The widenings the pass above cannot see, because the survey feeding it stops above an
         // `impl`. Read off the text the assist actually produced, so a member it left alone is not
@@ -1459,6 +1461,7 @@ impl RustBackend {
         let facade = facade_lines(&name, &moved, reexport)?;
         let notes = empty_facade_note(&name, &facade, reexport)
             .into_iter()
+            .chain(inline_paths::note(rerooted))
             .collect();
 
         Ok((
@@ -4147,6 +4150,8 @@ fn restore_visibility(
     let escaping = escaping_types::kept_widened(&source, &block, &outside, module, items);
 
     for item in items {
+        relative_visibility::rebase_field_visibilities(&mut source, &block, item);
+
         // The assist never narrows, so an item written `pub` has nothing to answer for.
         if item.visibility == "pub" {
             continue;

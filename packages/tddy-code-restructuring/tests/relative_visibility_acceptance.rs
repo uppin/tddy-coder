@@ -11,8 +11,9 @@
 mod harness;
 
 use harness::{
-    a_crate_whose_module_declares_a_function_visible_in_its_parent, an_extract_module_of,
-    assert_compiles, performing_once_settled, OUTER_MODULE,
+    a_crate_whose_module_declares_a_function_visible_in_its_parent,
+    a_crate_whose_struct_has_a_field_visible_in_its_parent, an_extract_module_of, assert_compiles,
+    performing_once_settled, OUTER_MODULE,
 };
 use tddy_code_restructuring::Reexport;
 
@@ -65,5 +66,27 @@ async fn leaves_a_pub_crate_function_as_it_was_written() {
     assert!(
         moved.contains("pub(crate) fn shared() -> u32 {"),
         "the `pub(crate)` function was rewritten:\n{moved}"
+    );
+}
+
+/// The same one level down for a field: `pub(super) level` written in `outer::inner` is visible in
+/// `outer` only, and the crate root's read of it is `E0616`.
+#[tokio::test(flavor = "multi_thread")]
+async fn keeps_a_pub_super_field_visible_in_the_module_it_was_visible_in() {
+    // Given
+    let workspace = a_crate_whose_struct_has_a_field_visible_in_its_parent();
+    let mut seam = an_extract_module_of(&workspace, OUTER_MODULE, 3..=9, "inner");
+    seam.reexport = Some(Reexport::Named);
+    seam.to_file = true;
+
+    // When
+    performing_once_settled(&workspace, seam).await;
+
+    // Then
+    assert_compiles(&workspace);
+    let moved = workspace.read(THE_MOVED_FILE);
+    assert!(
+        moved.contains("pub(in super::super) level: u32,"),
+        "the moved field does not read as visible in `outer`'s parent:\n{moved}"
     );
 }

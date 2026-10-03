@@ -110,6 +110,48 @@ pub(super) fn rebase_left_as_written(
     true
 }
 
+/// Rebase the relative visibility of every field line in the body of the moved struct `item`, and
+/// say how many it rewrote.
+///
+/// The assist leaves a `pub(super)` field as written, like a `pub(super)` item, so it reads one
+/// module too shallow in the new child. Only a block-form struct body is read: a field line is one
+/// indented deeper than the declaration, before the line that closes it.
+pub(super) fn rebase_field_visibilities(
+    source: &mut [String],
+    block: &ModuleBlock,
+    item: &MovedItem,
+) -> usize {
+    if !item.within.is_empty() {
+        return 0;
+    }
+    let Some(opened) = (block.opened..block.closed)
+        .find(|&index| declares_struct(&source[index], &item.name) && source[index].ends_with('{'))
+    else {
+        return 0;
+    };
+    let indent = source[opened].len() - source[opened].trim_start().len();
+
+    let mut rewritten = 0;
+    for line in source[opened + 1..block.closed].iter_mut() {
+        if line.len() - line.trim_start().len() <= indent && !line.trim().is_empty() {
+            break;
+        }
+        let rebased = rebased_declaration(line);
+        if rebased != *line {
+            *line = rebased;
+            rewritten += 1;
+        }
+    }
+    rewritten
+}
+
+fn declares_struct(line: &str, name: &str) -> bool {
+    let rest = line.trim_start();
+    let rest = rest[visibility_in(rest).len()..].trim_start();
+    rest.strip_prefix("struct ")
+        .is_some_and(|after| declares_item(&format!("struct {after}"), name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,5 +288,47 @@ mod tests {
             put_back(widened, &moved("pub(super)", &["inner"])),
             "        pub(super) fn helper() -> u32 {"
         );
+    }
+
+    fn lines_of(text: &str) -> Vec<String> {
+        text.split('\n').map(str::to_string).collect()
+    }
+
+    fn named(name: &str) -> MovedItem {
+        MovedItem {
+            name: name.to_string(),
+            ..moved("", &[])
+        }
+    }
+
+    #[test]
+    fn rebases_a_pub_super_field_of_a_moved_struct() {
+        let mut source = lines_of(
+            "mod inner {\n    pub(crate) struct Gauge {\n        pub(super) level: u32,\n        pub(in super::x) scale: u32,\n        pub(crate) kept: u32,\n        private: u32,\n    }\n}",
+        );
+        let block = block_of(&source);
+
+        let rewritten = rebase_field_visibilities(&mut source, &block, &named("Gauge"));
+
+        assert_eq!(rewritten, 2);
+        assert_eq!(source[2], "        pub(in super::super) level: u32,");
+        assert_eq!(source[3], "        pub(in super::super::x) scale: u32,");
+        assert_eq!(source[4], "        pub(crate) kept: u32,");
+        assert_eq!(source[5], "        private: u32,");
+    }
+
+    #[test]
+    fn leaves_the_fields_of_a_struct_that_was_not_moved_and_comments_alone() {
+        let mut source = lines_of(
+            "mod inner {\n    struct Other {\n        // pub(super) a: u32,\n        pub(super) b: u32,\n    }\n    pub(super) fn f() {}\n}",
+        );
+        let block = block_of(&source);
+        let before = source.clone();
+
+        assert_eq!(
+            rebase_field_visibilities(&mut source, &block, &named("Gauge")),
+            0
+        );
+        assert_eq!(source, before);
     }
 }
