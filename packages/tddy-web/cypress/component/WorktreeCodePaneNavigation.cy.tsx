@@ -2,7 +2,7 @@
  * Acceptance tests: code navigation in the session Code pane — ctrl/cmd-click goes to a definition,
  * hover shows an identifier's type, and the references list navigates to a reference.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-03-code-navigation.md.
+ * Feature: docs/ft/web/session-code-pane.md (Code navigation).
  *
  * All RPC calls flow through the in-memory backend — no HTTP intercepts. Navigation is answered by
  * `code_navigation.CodeNavigationService`; positions on the wire are one-based lines and one-based

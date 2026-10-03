@@ -210,7 +210,7 @@ export const TEST_IDS = {
   worktreeFileTree: "worktree-file-tree",
   worktreeFilePreview: "worktree-file-preview",
   worktreeCodeHighlight: "worktree-code-highlight",
-  // Code navigation in the preview (docs/ft/web/1-WIP/PRD-2026-10-03-code-navigation.md)
+  // Code navigation in the preview (docs/ft/web/session-code-pane.md)
   worktreeCodeHover: "worktree-code-hover",
   worktreeCodeReferencesAction: "worktree-code-references-action",
   worktreeCodeReferences: "worktree-code-references",
