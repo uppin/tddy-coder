@@ -10,6 +10,7 @@ pub mod catalog;
 pub(crate) mod contained_shell;
 pub(crate) mod edited_region;
 pub(crate) mod read_window;
+pub(crate) mod restructure_tools;
 pub(crate) mod search_window;
 pub mod shell;
 
@@ -245,6 +246,9 @@ pub async fn execute_tool_with_env(
             tool_lsp(worktree_root, tool_name, &args).await
         }
         "ReadLints" => tool_read_lints(worktree_root).await,
+        name if tddy_core::toolcall::restructure::is_restructure_tool(name) => {
+            restructure_tools::tool_restructure(worktree_root, tool_name, &args).await
+        }
         _ => {
             // Sync tool — run inline, then register as a terminal task for observability.
             let mut outcome = match tool_name {

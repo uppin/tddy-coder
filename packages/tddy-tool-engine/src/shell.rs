@@ -251,6 +251,9 @@ async fn execute_tool_on_remote_shell(
             ToolOutcome::err(format!("{tool_name}: not available over RemoteShell"))
         }
         "SemanticSearch" => ToolOutcome::err("SemanticSearch: not available over RemoteShell"),
+        name if tddy_core::toolcall::restructure::is_restructure_tool(name) => {
+            ToolOutcome::err(format!("{tool_name}: not available over RemoteShell"))
+        }
         other => ToolOutcome::err(format!("unknown tool: {other}")),
     };
 
