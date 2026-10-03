@@ -82,6 +82,7 @@ its changeset wraps.
 | [Transactional groups in restructure plans](1-WIP/PRD-2026-10-03-transactional-groups.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Session LSP tools answered by the warm index](1-WIP/PRD-2026-10-03-session-lsp-tools.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 | [Restructure tool calls in sessions](1-WIP/PRD-2026-10-03-session-restructure-tools.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
+| [Signature and call-site operations for transactional groups](1-WIP/PRD-2026-10-03-signature-rewrites.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 
 ## Integration Points
 
