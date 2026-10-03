@@ -87,12 +87,24 @@ const EVERY_ADVERTISED_TOOL: [&str; 47] = [
 /// The three tools a host must claim before they are advertised at all.
 const ACTION_TOOLS: [&str; 3] = ["invoke_action", "list_actions", "request_action"];
 
+/// The six tools a host that manages a warm index claims with `TDDY_RESTRUCTURE_TOOLS`. Not part of
+/// [`EVERY_ADVERTISED_TOOL`]: no host sets the gate yet, so the surface every other test pins is the
+/// one a session actually gets.
+const RESTRUCTURE_TOOLS: [&str; 6] = [
+    "restructure_anchors",
+    "restructure_apply",
+    "restructure_check",
+    "restructure_load",
+    "restructure_plans",
+    "restructure_status",
+];
+
 // ─── The session under audit ──────────────────────────────────────────────────
 
 /// Every variable that decides what `tools/list` answers. Cleared before each spawn so a test
 /// states its own environment — one leaked from the developer's shell would otherwise change the
 /// advertised set.
-const ADVERTISEMENT_ENV_KEYS: [&str; 10] = [
+const ADVERTISEMENT_ENV_KEYS: [&str; 11] = [
     "TDDY_SANDBOX_TOOL_IPC",
     "TDDY_REMOTE_LIVEKIT_URL",
     "TDDY_REMOTE_LIVEKIT_ROOM",
@@ -103,6 +115,7 @@ const ADVERTISEMENT_ENV_KEYS: [&str; 10] = [
     "TDDY_SUBAGENTS_JSON",
     "TDDY_SUBAGENT_ROSTER_STATIC",
     "TDDY_LSP_TOOLS",
+    "TDDY_RESTRUCTURE_TOOLS",
 ];
 
 /// The environment of a session that has every optional tool surface: a reachable session-tool
@@ -141,6 +154,12 @@ impl FullyConfiguredSession {
     fn whose_host_serves_the_action_tools(mut self) -> Self {
         self.env
             .push(("TDDY_SESSION_ACTION_TOOLS", "1".to_string()));
+        self
+    }
+
+    /// A host that manages a warm index and so answers the `restructure_*` tools.
+    fn whose_host_serves_the_restructure_tools(mut self) -> Self {
+        self.env.push(("TDDY_RESTRUCTURE_TOOLS", "1".to_string()));
         self
     }
 
@@ -311,5 +330,35 @@ async fn withholds_exactly_the_three_action_tools_where_the_host_does_not_claim_
         without_the_claim.is_subset(&with_the_claim),
         "the claim may only add tools, never change or remove one; \
          got {without_the_claim:?} against {with_the_claim:?}"
+    );
+}
+
+/// The restructure tools follow the `Lsp*` precedent: a host that manages a warm index says so with
+/// `TDDY_RESTRUCTURE_TOOLS`, and only then are the six advertised. Asserted as a difference, like the
+/// action tools: the gate must add exactly these six and change nothing else.
+#[tokio::test]
+async fn restructure_tools_are_advertised_only_when_the_host_sets_the_gate() {
+    // Given
+    let indexing_host = a_fully_configured_session().whose_host_serves_the_restructure_tools();
+    let host_without_an_index = a_fully_configured_session();
+
+    // When
+    let with_the_gate = indexing_host.advertised_tool_names().await;
+    let without_the_gate = host_without_an_index.advertised_tool_names().await;
+
+    // Then
+    let added: BTreeSet<String> = with_the_gate
+        .difference(&without_the_gate)
+        .cloned()
+        .collect();
+    assert_eq!(
+        added,
+        names(&RESTRUCTURE_TOOLS),
+        "the gate must add exactly the six restructure tools"
+    );
+    assert!(
+        without_the_gate.is_subset(&with_the_gate),
+        "the gate may only add tools, never change or remove one; \
+         got {without_the_gate:?} against {with_the_gate:?}"
     );
 }

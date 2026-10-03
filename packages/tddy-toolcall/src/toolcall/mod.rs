@@ -11,6 +11,7 @@ mod client;
 mod client_wire;
 mod listener;
 pub mod lsp;
+pub mod restructure;
 pub mod transition;
 
 pub use build::{
@@ -28,6 +29,7 @@ pub use listener::{
     ToolcallRpcService,
 };
 pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
+pub use restructure::{register_restructure_executor, restructure_executor, RestructureExecutor};
 pub use transition::{
     clear_transition_handler, register_transition_handler, transition_handler, TransitionHandler,
     TransitionRelayOutcome,

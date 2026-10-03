@@ -6,6 +6,7 @@
 
 pub mod index_backed;
 pub mod lsp_tools;
+pub mod restructure_via_index;
 
 use std::path::Path;
 use std::sync::Arc;
