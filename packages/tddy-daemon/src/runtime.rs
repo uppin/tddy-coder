@@ -1131,6 +1131,11 @@ pub async fn build(
                 index_daemon.socket_path().display()
             );
             tasks.index_daemon = Some(index_daemon.clone());
+            // TODO(session-restructure-tools): register
+            // `tddy_lsp_executor::restructure_via_index::IndexRestructureExecutor::new(registry)`
+            // with `tddy_core::toolcall::restructure::register_restructure_executor`, so a
+            // session's `restructure_*` tool calls ask this index; without `index_daemon:` nothing
+            // is registered and the tools are not advertised.
             index_daemon_registry = Some(index_daemon);
         }
 
