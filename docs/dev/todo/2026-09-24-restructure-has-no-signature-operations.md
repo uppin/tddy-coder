@@ -4,20 +4,21 @@
 **Source:** `#carve` 13/15 wrap, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
 [`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
-The Rust backend supports ten operations: `extract_method`, `extract_variable`, `extract_module`,
-`extract_module_to_file`, `extract_trait`, `inline_method`, `rename_symbol`,
-`move_module_to_crate`, `move_cluster_to_crate` and `move_test_binary_to_crate`
-(`backends/rust.rs`, `SUPPORTED`). None of them changes a signature, and the plan schema has no
-field that could describe a new one.
+The Rust backend supports twelve operations (`backends/rust.rs`, `SUPPORTED`). Two change a signature
+together with every caller, by driving rust-analyzer's own assists: `remove_unused_param` and
+`convert_tuple_return_to_struct`, documented in
+[`signature-assists.md`](../../packages/tddy-code-restructuring/docs/signature-assists.md). No operation
+adds, reorders or retypes a parameter, or changes a return type in any other way, and the plan schema has
+no field that could describe a new parameter list.
 
 | Change | Today |
 |---|---|
 | Rename a parameter | ✅ `rename_symbol` with a **range** anchor on the parameter's name. rust-analyzer's outline does not list parameters, so no symbol anchor names one. Not documented in `plan-schema.md` |
-| Remove a parameter | ❌ |
+| Remove a parameter | ✅ `remove_unused_param`, for a parameter the body never reads; a used one is refused |
 | Add a parameter | ❌ |
 | Reorder parameters | ❌ |
 | Change a parameter's type | ❌ |
-| Change the return type | ❌ |
+| Change the return type | ❌ — except `convert_tuple_return_to_struct`, which turns a tuple return into a named struct and rewrites destructuring callers |
 
 ## Why this was deferred
 
@@ -33,10 +34,10 @@ ids against the rust-analyzer the dev shell ships; some were renamed in 2024, e.
 
 | Assist | What it does | Callers |
 |---|---|---|
-| `remove_unused_param` | removes a parameter the body does not use | ✅ rewrites every call site |
+| `remove_unused_param` | removes a parameter the body does not use | ✅ rewrites every call site — **delivered** as the `remove_unused_param` operation |
 | `wrap_return_type` (`Option` / `Result`) | `-> T` becomes `-> Result<T, _>`, with the tail wrapped in `Ok(…)` | ❌ callers are left to the compiler |
 | `unwrap_return_type` | the reverse | ❌ |
-| `convert_tuple_return_type_to_struct` | `-> (u32, String)` becomes `-> Named { … }`, with a new struct | ✅ destructuring call sites rewritten |
+| `convert_tuple_return_type_to_struct` | `-> (u32, String)` becomes `-> Named { … }`, with a new struct | ✅ destructuring call sites rewritten — **delivered** as the `convert_tuple_return_to_struct` operation |
 | `bool_to_enum` | a `bool` parameter or local becomes a two-variant enum | ✅ |
 | a quick fix on a call passing too many arguments (**unverified**: check the bundled rust-analyzer before relying on it) | adds the parameter to the declaration | only the one call it was offered on |
 
@@ -45,29 +46,7 @@ type.
 
 ## What would close it
 
-### 1. `remove_unused_param`, backed by the assist
-
-This is the cheapest. It slots in like `inline_method`: a symbol anchor on the function, plus the
-parameter's name.
-
-```jsonl
-{"op":"remove_unused_param","anchor":{"kind":"symbol","file":"src/spawn.rs","path":"build_claude_argv"},"name":"initial_prompt"}
-```
-
-```rust
-// before
-pub fn build_claude_argv(binary_path: &str, model: &str, initial_prompt: Option<&str>) -> Vec<String> { … }
-let argv = Self::build_claude_argv(binary, model, None);
-
-// after
-pub fn build_claude_argv(binary_path: &str, model: &str) -> Vec<String> { … }
-let argv = Self::build_claude_argv(binary, model);
-```
-
-Refuse when the parameter is used: rust-analyzer does not offer the assist then, and the refusal
-should say so.
-
-### 2. `change_return_type` (the developer asked for this)
+### 1. `change_return_type` (the developer asked for this)
 
 Two tiers.
 
@@ -96,7 +75,7 @@ Two tiers.
   - report every caller through `textDocument/references`, so the gate's errors can be read against
     a known list.
 
-  `tuple → struct` stays the `convert_tuple_return_type_to_struct` assist.
+  `tuple → struct` is the `convert_tuple_return_to_struct` operation.
 
   ```rust
   // before
@@ -106,7 +85,7 @@ Two tiers.
   fn resolve_placement(&self, req: &StartSessionRequest) -> Placement { … }
   ```
 
-### 3. `change_signature`, for adding, reordering and retyping parameters (no assist behind it)
+### 2. `change_signature`, for adding, reordering and retyping parameters (no assist behind it)
 
 This is the same shape as `move_module_to_crate`: engine-informed rather than engine-performed.
 Every call site comes from a real `textDocument/references` result, never a text search. The plan
@@ -139,7 +118,7 @@ What it must refuse rather than approximate:
 declaration is rewritten, and the call-site arguments are left to the compile gate, as for a return
 type.
 
-### 4. Document parameter renames
+### 3. Document parameter renames
 
 `plan-schema.md`'s `rename_symbol` row should say that a parameter is renamed through a **range**
 anchor on its name, since no symbol anchor names one.
