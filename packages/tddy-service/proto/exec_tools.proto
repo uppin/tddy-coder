@@ -77,8 +77,16 @@ message ConversationWorktreeRequest {
     ResetOp  reset  = 12;
     DiffOp   diff   = 13;
     PullRangeOp pull_range = 14;
+    SyncOp   sync   = 15;
   }
 }
+
+// Merge the session worktree's current files (HEAD + staged, unstaged and untracked changes) into
+// the conversation's branch as a merge commit, before a turn. Answers `{"sync": {commit, files,
+// lines, paths, morePaths}}`, `{"sync": null}` when the conversation has no worktree or the session
+// worktree has not changed since the last sync, or `{"conflicts": [paths]}` when the caller's changes
+// and the subagent's unpulled work touch the same lines (nothing is merged then).
+message SyncOp {}
 
 // Apply the conversation's commits `from`..=`to` (short hashes, both inclusive; empty `from` is the
 // earliest commit not in `already_pulled`, empty `to` the tip) that are not in `already_pulled`, each

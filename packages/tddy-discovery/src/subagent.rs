@@ -30,6 +30,7 @@ mod transcript;
 mod turn_request;
 mod worktree_change;
 mod worktree_reset;
+mod worktree_sync;
 mod yield_condition;
 
 use transcript::Transcript;
@@ -45,6 +46,9 @@ pub use transcript::{
 };
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 pub use worktree_reset::{ResetTarget, WorktreeReset, WorktreeResetPort};
+pub use worktree_sync::{
+    sync_notice, sync_refusal, SyncAnswer, WorktreeSync, WorktreeSyncPort, SYNC_NOTICE_PATHS,
+};
 pub use yield_condition::{
     evaluate as evaluate_yield_condition, validate as validate_yield_conditions, OutcomeFact, When,
     YieldCondition, YIELD_CONDITION_LIMIT, YIELD_CONTAINS_LIMIT,
@@ -129,6 +133,9 @@ pub struct PromptOutcome {
     /// dropped. `None` when the turn rewound nothing, the caller kept the worktree
     /// (`resetWorktree: false`), or the conversation has no worktree.
     pub worktree_reset: Option<WorktreeReset>,
+    /// What the turn's sync merged from the caller before it ran — `None` when nothing was merged
+    /// (no worktree, an unchanged caller, or `syncWorktree: false`).
+    pub worktree_sync: Option<WorktreeSync>,
 }
 
 impl PromptOutcome {
@@ -144,6 +151,7 @@ impl PromptOutcome {
             fired_condition: None,
             yielded_message_id: None,
             worktree_reset: None,
+            worktree_sync: None,
         }
     }
 }
@@ -796,6 +804,9 @@ pub struct SubagentConfig {
     /// the transcript and touches no files — a conversation with no worktree, or a host that has
     /// none to offer.
     pub worktree_reset: Option<std::sync::Arc<dyn WorktreeResetPort>>,
+    /// How a turn takes in the caller's current files before it runs. `None`: no sync — a
+    /// conversation with no worktree, or a host that has none to offer.
+    pub worktree_sync: Option<std::sync::Arc<dyn WorktreeSyncPort>>,
 }
 
 impl SubagentConfig {
@@ -806,7 +817,16 @@ impl SubagentConfig {
             system_prompt: None,
             provider_queue: None,
             worktree_reset: None,
+            worktree_sync: None,
         }
+    }
+
+    /// Bring this conversation's worktree up to the caller's current files before every turn,
+    /// through `port`.
+    #[must_use]
+    pub fn with_worktree_sync(mut self, port: std::sync::Arc<dyn WorktreeSyncPort>) -> Self {
+        self.worktree_sync = Some(port);
+        self
     }
 
     /// Let a rewind take this conversation's worktree back with its transcript, through `port`.
@@ -1395,6 +1415,8 @@ pub struct SpecializedSubagentSession {
     repeated_calls: RepeatedCalls,
     /// Where a rewind asks for the worktree to follow the transcript; `None` resets nothing.
     worktree_reset: Option<std::sync::Arc<dyn WorktreeResetPort>>,
+    /// Where a turn asks for the caller's current files before it runs; `None` syncs nothing.
+    worktree_sync: Option<std::sync::Arc<dyn WorktreeSyncPort>>,
 }
 
 impl SpecializedSubagentSession {
@@ -1423,7 +1445,14 @@ impl SpecializedSubagentSession {
             admission: None,
             repeated_calls: RepeatedCalls::new(),
             worktree_reset: None,
+            worktree_sync: None,
         }
+    }
+
+    /// Take the caller's current files in through `port` before every turn.
+    pub fn syncing_worktree_through(mut self, port: std::sync::Arc<dyn WorktreeSyncPort>) -> Self {
+        self.worktree_sync = Some(port);
+        self
     }
 
     /// Reset the conversation's worktree through `port` whenever a turn rewinds.
@@ -1965,6 +1994,10 @@ impl SubagentSession for SpecializedSubagentSession {
         outcome.messages = self.transcript.descriptors_from(appended_from);
         outcome.clamped_max_turns = budget.clamped_to;
         outcome.worktree_reset = worktree_reset;
+        // TODO(caller-sync): after `rewind_to`, when `request.syncs_worktree()` and
+        // `self.worktree_sync` is set — `Merged` forgets earlier calls, remembers the sync for the
+        // notice (pushed last, after prompt / correction / replacement) and for
+        // `outcome.worktree_sync`; `Conflicted` refuses with `sync_refusal` before any model call
         Ok(outcome)
     }
 
@@ -2042,6 +2075,9 @@ impl SubagentRegistry {
             }
             if let Some(port) = config.worktree_reset {
                 session = session.resetting_worktree_through(port);
+            }
+            if let Some(port) = config.worktree_sync {
+                session = session.syncing_worktree_through(port);
             }
             return Ok(Box::new(session));
         }

@@ -453,6 +453,7 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     if let (Some(object), Some(reset)) = (body.as_object_mut(), &outcome.worktree_reset) {
         object.insert("worktreeReset".to_string(), serde_json::json!(reset));
     }
+    // TODO(caller-sync): `worktreeSync` from `outcome.worktree_sync`
     body.to_string()
 }
 
@@ -1028,5 +1029,40 @@ mod tests {
             pending.watch("response-1").is_none(),
             "a response id the caller was never given must not be retained"
         );
+    }
+
+    #[test]
+    fn a_turn_that_took_in_the_callers_files_reports_the_sync() {
+        // Given
+        let mut outcome = an_end_turn_outcome("done");
+        outcome.worktree_sync = Some(crate::subagent::WorktreeSync {
+            commit: "7d1e0aa".to_string(),
+            paths: vec!["src/lib.rs".to_string()],
+            ..Default::default()
+        });
+
+        // When
+        let body: serde_json::Value = serde_json::from_str(&prompt_outcome_json(outcome)).unwrap();
+
+        // Then
+        assert_eq!(
+            body["worktreeSync"],
+            serde_json::json!({
+                "commit": "7d1e0aa",
+                "files": { "created": 0, "updated": 0, "removed": 0 },
+                "lines": { "added": 0, "removed": 0 },
+                "paths": ["src/lib.rs"],
+                "morePaths": 0
+            })
+        );
+    }
+
+    /// Guards the plain turn: nothing merged, no `worktreeSync` key.
+    #[test]
+    fn a_turn_that_took_nothing_in_has_no_sync_key() {
+        let body: serde_json::Value =
+            serde_json::from_str(&prompt_outcome_json(an_end_turn_outcome("done"))).unwrap();
+
+        assert_eq!(body.get("worktreeSync"), None);
     }
 }

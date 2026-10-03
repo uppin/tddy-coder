@@ -22,6 +22,10 @@ pub struct ConversationDiff {
     /// Unified diff text (a binary file shows as git's `Binary files … differ`).
     pub diff: String,
     pub truncated: bool,
+    /// The range spans a sync — a merge of the caller's changes — so `diff` and the counts include
+    /// what the caller changed, not only what the subagent did.
+    #[serde(rename = "includesCallerChanges")]
+    pub includes_caller_changes: bool,
 }
 
 impl ConversationWorktree {
@@ -61,6 +65,8 @@ impl ConversationWorktree {
             lines,
             diff,
             truncated,
+            // TODO(caller-sync): true when a sync merge lies on the first-parent line in `from..to`
+            includes_caller_changes: false,
         })
     }
 

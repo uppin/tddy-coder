@@ -10,7 +10,7 @@ use std::sync::Arc;
 use prost::Message as _;
 use tddy_service::proto::exec_tools::{
     conversation_worktree_request::Op, ConversationWorktreeRequest, ConversationWorktreeResponse,
-    DiffOp, ExecuteToolRequest, PullOp, PullRangeOp, RemoveOp, ResetOp,
+    DiffOp, ExecuteToolRequest, PullOp, PullRangeOp, RemoveOp, ResetOp, SyncOp,
 };
 
 #[cfg(feature = "livekit")]
@@ -254,7 +254,32 @@ async fn ask_daemon(
 
 /// The same call over the daemon's HTTP Connect endpoint.
 async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRequest) -> String {
-    // The Connect JSON body: the request's fields, and the chosen operation as a key of its own.
+    let body = connect_json_body(request);
+    let url = format!(
+        "{}/exec_tools.ExecToolService/ConversationWorktree",
+        daemon_url.trim_end_matches('/')
+    );
+    let answered = reqwest::Client::new()
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await;
+    match answered {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(body) => match body.get("result_json").and_then(|v| v.as_str()) {
+                Some(result) => result.to_string(),
+                None => error_body(format!("relay answered without a result: {body}")),
+            },
+            Err(e) => error_body(format!("relay parse error: {e}")),
+        },
+        Err(e) => error_body(format!("relay connection error: {e}")),
+    }
+}
+
+/// The Connect JSON body of a `ConversationWorktree` request: the request's fields, and the chosen
+/// operation as a key of its own.
+pub(crate) fn connect_json_body(request: &ConversationWorktreeRequest) -> serde_json::Value {
     let mut fields = serde_json::Map::from_iter([
         (
             "session_token".to_string(),
@@ -289,33 +314,35 @@ async fn ask_daemon_over_http(daemon_url: &str, request: &ConversationWorktreeRe
                 "already_pulled": range.already_pulled
             }),
         ),
+        // TODO(caller-sync): `{"sync": {}}`
+        Some(Op::Sync(_)) => None,
         None => None,
     };
-    let body = serde_json::Value::Object(fields);
-    let url = format!(
-        "{}/exec_tools.ExecToolService/ConversationWorktree",
-        daemon_url.trim_end_matches('/')
-    );
-    let answered = reqwest::Client::new()
-        .post(&url)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await;
-    match answered {
-        Ok(resp) => match resp.json::<serde_json::Value>().await {
-            Ok(body) => match body.get("result_json").and_then(|v| v.as_str()) {
-                Some(result) => result.to_string(),
-                None => error_body(format!("relay answered without a result: {body}")),
-            },
-            Err(e) => error_body(format!("relay parse error: {e}")),
-        },
-        Err(e) => error_body(format!("relay connection error: {e}")),
-    }
+    serde_json::Value::Object(fields)
 }
 
 fn error_body(message: String) -> String {
     serde_json::json!({ "error": message, "is_error": true }).to_string()
+}
+
+/// Ask the facilitating daemon to merge the session worktree's current files into
+/// `conversation_id`'s worktree before a turn; the answer's `result_json` (`{"sync": {…} | null}` or
+/// `{"conflicts": […]}`) or a `{"error", "is_error": true}` body.
+pub async fn sync_conversation_worktree(conversation_id: &str) -> String {
+    // TODO(caller-sync): implement through `ask_conversation_worktree`
+    let _ = conversation_id;
+    todo!("sync_conversation_worktree")
+}
+
+/// The `ConversationWorktree` request a sync sends.
+#[allow(dead_code)] // TODO(caller-sync): called by `sync_conversation_worktree`
+pub(crate) fn conversation_sync_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+) -> ConversationWorktreeRequest {
+    // TODO(caller-sync): implement
+    let _ = (envelope, conversation_id, SyncOp {});
+    todo!("conversation_sync_request")
 }
 
 /// Ask the facilitating daemon to reset `conversation_id`'s worktree to `commit`, or to its base
@@ -544,5 +571,49 @@ mod tests {
                 already_pulled: vec!["3f9c2ab".into()]
             }))
         );
+    }
+
+    #[test]
+    fn a_sync_names_its_conversation_and_asks_for_a_sync() {
+        assert_eq!(
+            conversation_sync_request(&an_envelope(), "explore"),
+            ConversationWorktreeRequest {
+                session_token: "token-1".into(),
+                session_id: "sess-1".into(),
+                daemon_instance_id: "daemon-a".into(),
+                conversation_id: "explore".into(),
+                op: Some(Op::Sync(SyncOp {})),
+            }
+        );
+    }
+
+    #[test]
+    fn a_sync_travels_over_http_as_its_own_key() {
+        // Given
+        let request = ConversationWorktreeRequest {
+            session_token: "token-1".into(),
+            session_id: "sess-1".into(),
+            daemon_instance_id: "daemon-a".into(),
+            conversation_id: "explore".into(),
+            op: Some(Op::Sync(SyncOp {})),
+        };
+
+        // When
+        let body = connect_json_body(&request);
+
+        // Then
+        assert_eq!(body["sync"], serde_json::json!({}));
+    }
+
+    /// Guards the extraction: an existing op keeps its encoding.
+    #[test]
+    fn a_reset_still_travels_over_http_with_its_commit() {
+        let body = connect_json_body(&conversation_reset_request(
+            &an_envelope(),
+            "explore",
+            Some("3f9c2ab"),
+        ));
+
+        assert_eq!(body["reset"], serde_json::json!({ "commit": "3f9c2ab" }));
     }
 }

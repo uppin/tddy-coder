@@ -65,6 +65,13 @@ pub async fn run_conversation_worktree_op(
             serde_json::json!({ "removed": true })
         }
         (Op::Reset(_), None) => serde_json::json!({ "reset": null }),
+        (Op::Sync(_), _) => {
+            // TODO(caller-sync): `{"sync": null}` without a worktree; otherwise
+            // `sync_with_caller` → `{"sync": …}` / `{"sync": null}` / `{"conflicts": […]}`
+            return Err(Status::unimplemented(
+                "ConversationWorktree sync is not implemented yet",
+            ));
+        }
         (Op::Diff(_), None) => {
             return Err(Status::failed_precondition(format!(
                 "conversation {conversation_id} has no worktree: nothing has been committed yet"

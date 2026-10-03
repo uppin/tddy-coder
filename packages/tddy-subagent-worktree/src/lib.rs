@@ -27,10 +27,12 @@ mod conversation_id;
 mod diff;
 mod git;
 mod inherit;
+mod lineage;
 mod range_pull;
 mod reset;
 mod run;
 mod serialise;
+mod sync;
 mod tool_effect;
 mod worktree;
 
@@ -40,6 +42,9 @@ pub use diff::{ConversationDiff, DIFF_TEXT_CAP_BYTES};
 pub use range_pull::{PullRange, RangePullOutcome};
 pub use reset::{ResetTarget, WorktreeReset};
 pub use run::{run_in_conversation, with_worktree_change, ConversationRun, WORKTREE_CHANGE_KEY};
+pub use sync::{
+    SyncOutcome, WorktreeSync, OUTSIDE_A_TOOL_CALL_SUBJECT, SYNC_MERGE_SUBJECT, SYNC_NOTICE_PATHS,
+};
 pub use tool_effect::ToolEffect;
 pub use worktree::{
     ConversationWorktree, ConversationWorktrees, PullOutcome, WorktreeError, SUBAGENT_WORKTREES_DIR,
