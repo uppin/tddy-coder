@@ -17,14 +17,16 @@ use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    CodeLocation, CodeNavigationService, CodeNavigationServiceServer, DefinitionRequest,
-    DefinitionResponse, HoverRequest, HoverResponse, ReferencesRequest, ReferencesResponse,
-    SourcePosition, SourceRange,
+    CodeIndexProgress, CodeLocation, CodeNavigationService, CodeNavigationServiceServer,
+    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, ReferencesRequest,
+    ReferencesResponse, SourcePosition, SourceRange, WatchCodeIndexRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
 
+use crate::code_index_warmup::SessionIndexProgress;
 use crate::index_daemon::IndexDaemonRegistry;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
@@ -39,6 +41,9 @@ pub struct CodeNavigationServiceImpl {
     worktrees: Arc<WorktreeServiceImpl>,
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
     index_daemon: Option<IndexDaemonRegistry>,
+    /// Each session's latest code-index warm-up progress, which `WatchCodeIndex` follows.
+    #[allow(dead_code)] // TODO(indexing-indicators): read by `watch_code_index`.
+    index_progress: SessionIndexProgress,
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel
@@ -60,6 +65,7 @@ impl CodeNavigationServiceImpl {
         Self {
             worktrees,
             index_daemon,
+            index_progress: SessionIndexProgress::new(),
         }
     }
 
@@ -95,10 +101,20 @@ impl CodeNavigationServiceImpl {
             position: position.map(index_position),
         })
     }
+
+    /// The same service, reporting warm-up progress from `index_progress` — the holder
+    /// [`crate::code_index_warmup::warm_for_session`] records into.
+    #[must_use]
+    pub fn with_index_progress(mut self, index_progress: SessionIndexProgress) -> Self {
+        self.index_progress = index_progress;
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl CodeNavigationService for CodeNavigationServiceImpl {
+    type WatchCodeIndexStream = ReceiverStream<Result<CodeIndexProgress, Status>>;
+
     /// Where the symbol at a position is defined.
     async fn definition(
         &self,
@@ -187,6 +203,19 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         Ok(Response::new(HoverResponse {
             markdown: answer.markdown,
         }))
+    }
+
+    /// A session's code-index warm-up: its latest progress, then each change, ending after `ready`
+    /// or `error` — or at once, for a session nothing warmed.
+    async fn watch_code_index(
+        &self,
+        _request: Request<WatchCodeIndexRequest>,
+    ) -> Result<Response<Self::WatchCodeIndexStream>, Status> {
+        // TODO(indexing-indicators): authorise the token against the session's owner, follow
+        // `index_progress.watch(session_id)` onto the stream, and end it after `ready` or `error`.
+        Err(Status::unimplemented(
+            "WatchCodeIndex is not served yet — TODO(indexing-indicators)",
+        ))
     }
 }
 

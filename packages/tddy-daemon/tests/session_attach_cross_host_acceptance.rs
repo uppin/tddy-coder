@@ -672,6 +672,8 @@ async fn stream_start_session_forwards_to_the_peer_that_runs_the_session() {
         match event.event.expect("every event must carry a variant") {
             StartEvent::AttachmentProgress(progress) => progressed.push(progress.basename),
             StartEvent::Result(result) => results.push(result.session_id),
+            // Start phases are pinned by tddy-session-lifecycle's `start_phase_acceptance.rs`.
+            StartEvent::Phase(_) => {}
         }
     }
 
@@ -812,6 +814,8 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
         match event.event.expect("every event must carry a variant") {
             StartEvent::AttachmentProgress(reported) => progress.push(progress_row(reported)),
             StartEvent::Result(result) => results.push(result.session_id),
+            // Start phases are pinned by tddy-session-lifecycle's `start_phase_acceptance.rs`.
+            StartEvent::Phase(_) => {}
         }
     }
 

@@ -29,6 +29,10 @@ service SessionService {
   // exactly one terminal StartSessionResponse. A failure terminates the stream with the error and
   // never emits a result; the partial attachments are rolled back first. Unary StartSession stays
   // the entry point for every non-interactive caller.
+  //
+  // Around the slow steps of a start it also emits a StartPhase as each begins and ends — the
+  // worktree, the semantic index when one was asked for, the agent — so the create pane can say
+  // what the host is doing (docs/ft/web/1-WIP/PRD-2026-10-03-indexing-indicators.md).
   rpc StreamStartSession(StartSessionRequest) returns (stream StartSessionEvent);
   rpc ConnectSession(ConnectSessionRequest) returns (ConnectSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
@@ -83,6 +87,29 @@ message AttachmentMaterializationProgress {
   // Bytes of this attachment materialized so far, and its full size.
   uint64 bytes_done = 4;
   uint64 bytes_total = 5;
+}
+
+// One slow step of a session start beginning or ending.
+//
+// A step that fails sends no END: the stream terminates with the failure instead, so the last BEGIN
+// a consumer saw names the step that failed.
+message StartPhase {
+  enum Step {
+    STEP_UNSPECIFIED = 0;
+    // Fetching the project and cutting the session's git worktree.
+    STEP_WORKTREE = 1;
+    // Building the session's semantic index over that worktree; only when the request asked for it.
+    STEP_SEMANTIC_INDEX = 2;
+    // Launching the session's agent in the worktree.
+    STEP_AGENT = 3;
+  }
+  enum Boundary {
+    BOUNDARY_UNSPECIFIED = 0;
+    BOUNDARY_BEGIN = 1;
+    BOUNDARY_END = 2;
+  }
+  Step step = 1;
+  Boundary boundary = 2;
 }
 
 // A refused session creation: the requested new branch is already owned by another session.
@@ -363,13 +390,14 @@ message StagedAttachmentRef {
   string file_name = 3;
 }
 
-// One event of a StreamStartSession response: progress while attachments materialize, then exactly
-// one terminal result. The result is always the last event; a failure terminates the stream with a
-// status instead, never with a result.
+// One event of a StreamStartSession response: progress while attachments materialize and the start's
+// phases begin and end, then exactly one terminal result. The result is always the last event; a
+// failure terminates the stream with a status instead, never with a result.
 message StartSessionEvent {
   oneof event {
     AttachmentMaterializationProgress attachment_progress = 1;
     StartSessionResponse result = 2;
+    StartPhase phase = 3;
   }
 }
 

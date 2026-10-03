@@ -1,6 +1,9 @@
 //! `tddy-daemon` endpoint — wiring, configuration, and transport only.
 
 pub mod agent_tool_socket;
+/// Background warm-up of a session's code index and its latest progress — see
+/// [`code_index_warmup::warm_for_session`].
+pub mod code_index_warmup;
 pub mod code_navigation;
 pub mod common_room_key_directory;
 pub mod config;

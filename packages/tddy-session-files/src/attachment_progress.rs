@@ -3,7 +3,10 @@ use tddy_service::proto::session::start_session_event::Event as StartSessionEven
 
 use std::path::PathBuf;
 
-use tddy_service::proto::session::AttachmentMaterializationProgress;
+use tddy_service::proto::session::start_phase::{
+    Boundary as StartPhaseBoundary, Step as StartStep,
+};
+use tddy_service::proto::session::{AttachmentMaterializationProgress, StartPhase};
 
 use tddy_rpc::Status;
 
@@ -33,7 +36,8 @@ pub fn attachment_size_bytes(session_dir: &Path, basename: &str) -> u64 {
         .unwrap_or(0)
 }
 
-/// Where attachment-materialization progress goes while a start-session request is being served.
+/// Where a start-session request's progress goes while it is being served: attachment
+/// materialization, and the start's phases ([`StartPhase`]) beginning and ending.
 ///
 /// `StreamStartSession` supplies the stream's sender; unary `StartSession` supplies
 /// [`AttachmentProgressSink::discarding`], so the two entry points run the identical code path and
@@ -62,6 +66,30 @@ impl AttachmentProgressSink {
         };
         let _ = tx.send(Ok(StartSessionEvent {
             event: Some(StartSessionEventKind::AttachmentProgress(progress)),
+        }));
+    }
+
+    /// Reports that `step` of the start has begun.
+    pub fn begin_phase(&self, step: StartStep) {
+        self.report_phase(step, StartPhaseBoundary::Begin);
+    }
+
+    /// Reports that `step` of the start has finished. A step that fails reports no end: the stream
+    /// terminates with the failure instead.
+    pub fn end_phase(&self, step: StartStep) {
+        self.report_phase(step, StartPhaseBoundary::End);
+    }
+
+    /// A closed receiver is ignored, as for [`Self::report`].
+    fn report_phase(&self, step: StartStep, boundary: StartPhaseBoundary) {
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::Phase(StartPhase {
+                step: step as i32,
+                boundary: boundary as i32,
+            })),
         }));
     }
 }
