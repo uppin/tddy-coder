@@ -33,6 +33,18 @@ written back is normalised: keys in the executor's order,
 defaults omitted. Execution also appends to `.restructure/journal.jsonl` (the event log) and
 checkpoints the coordinate ledger to `.restructure/ledger.json`.
 
+### Transactional groups
+
+An operation may carry `"group": "<name>"`. **Consecutive** operations sharing a name are one group:
+`cargo check --all-targets` runs once at the group's end, over the packages the group touched, instead of
+only at the end of the run. A group that does not compile is rolled back byte for byte (edited files
+restored, created files removed, renames undone) and the run stops naming the group and the compiler's
+errors; everything before the group stays applied. Use a group when the operations break the build
+between them and only compile together (a change followed by the edits that adapt to it). Members that are
+not adjacent are refused as malformed, and so is any field an operation does not define (a misspelt
+`group` would otherwise run ungrouped). `check --deep` reports one finding for a group with a refused
+member. Ungrouped operations are unchanged: the end-of-run gate, edits left on disk if it fails.
+
 ## Anchors
 
 `symbol` and `range` anchors are expressed in the coordinates of the tree the plan runs on. Within a

@@ -18,6 +18,7 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Merge finding | `crate_move/preconditions.rs` (`destination_already_has_the_module`) | a static `check` finding: the destination already declares or holds the module |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
 | Compile gate | `runner/compile_gate.rs` | `BaselineDoesNotCompile`, `AppliedTreeDoesNotCompile` |
+| Group gate | `runner/group_gate.rs` | `GroupDoesNotCompile` (the group is rolled back) |
 
 There is **no opt-out flag** for any of them.
 
@@ -241,7 +242,7 @@ a test target; a lib-only check passes exactly the breakage these operations cau
 (`declared_package_name`), because a file a rename moved away no longer exists for `cargo metadata`
 to place.
 
-**Nothing is rolled back.** The edits stay on disk and in the journal for inspection, and no rollback
+**Nothing is rolled back** for an ungrouped operation (a [transactional group](#transactional-groups) is rolled back). The edits stay on disk and in the journal for inspection, and no rollback
 command exists. The message says how: restore the touched paths from git (`git checkout HEAD --` what
 HEAD holds, delete what the run created, `git reset` what it staged) and remove the journal so the
 plan can run again.
@@ -260,6 +261,54 @@ reported in full rather than masked.
 is its own `RestructureError` variant. `tddy-index-daemon`'s `status_of` maps the baseline to
 `FailedPrecondition` (the same request fails until the tree is repaired) and the applied tree to
 `Internal` (the executor produced it).
+
+
+## Transactional groups
+
+Some refactors only compile once several operations have landed. A plan gives such operations the
+same `"group"` (`RefactorOp.group`); the members must be **consecutive**, or `Plan::parse` refuses the
+plan as malformed. `RefactorOp` refuses any field it does not define (`deny_unknown_fields`), so a
+misspelt `group` is an error rather than a plan that runs ungrouped. Ungrouped operations keep the
+end-of-run compile gate above and its leave-on-disk contract.
+
+**Journal.** A group writes, in this order: `group_started` (the group's id and the plan index of every
+member), then for each member `pre_imaged` — the text, before the group first touched it, of every file
+the member's edit touches that no earlier member has (`PreImage { path, contents: Option<String> }`;
+`None` for a file the group creates, so restoring it removes the file; a rename is two pre-images) —
+written **before** that member's `in_flight`, and finally `group_completed` or `group_rolled_back`.
+Records are serde-default, so a journal without groups loads and an ungrouped record serialises as
+before. `Journal::open_group` returns the group started and never closed, with its pre-images.
+
+**The gate.** `GroupRun` (`runner/group_gate.rs`) is what both apply loops carry from a group's first
+member to its last: `enter` begins the group and captures pre-images, `settle` records the member and,
+at the last one, runs `gate_group`: `cargo check --all-targets` over the packages owning every file the
+members journalled an edit to, under the run's `CancellationToken`. On a pass it journals
+`group_completed` and hands every member's resolution back, in plan order, for the plan store to refresh
+together; members are not refreshed while the group is open. A group-less operation is `Settled::Ready`
+at once.
+
+**The rollback.** `roll_back_group` restores the pre-images in reverse order (contents rewritten, created
+files removed, renamed files moved back), puts the ledger checkpoint back to the last operation before
+the group, and only then journals `group_rolled_back`: a checkpoint behind the journal is the lag a resume
+accepts, one ahead of it is refused, so a crash between the two stays resumable. An empty directory a
+created file lived in is left behind.
+
+**What rolls back.** Any failure while a group is open: a failed gate (`GroupDoesNotCompile { group,
+errors }`, the compiler's error lines), a member that cannot be resolved or committed, a check that cannot
+run. The original error is returned; only the gate's names the group. `CallerStopped` is the exception: the
+group stays open in the journal, and the daemon, which sees a cancelled token between members, rolls it
+back immediately.
+
+**Resume.** `roll_back_an_open_group` runs before a continued run (`--resume`, `--from`) reads a single
+anchor, so the gate judges members one run applied: the partial group is undone and applied again whole.
+
+**Reporting.** A group's members are reported as applied only after the group is kept: the command line
+as the members' visibility lines and "applied" lines each followed by `console::group` (`   group: <name>`),
+the daemon as `OperationApplied` events with `group` set. A rolled-back group reports none of its members.
+
+**Elsewhere.** `check --deep` merges the findings of a group's members into one naming the group
+(`one_finding_per_refused_group`, `check_entry_points.rs`). `stop_after` is judged where a group would
+begin; all members count toward the limit.
 
 ## The tidy
 

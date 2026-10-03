@@ -24,6 +24,8 @@ subcommand nor a transport is an error rather than a default.
   and when files change underneath it (`plan_upkeep.rs`, fed by `tree_changes.rs`) it re-resolves the
   loaded plans' item anchors in them. A stale operation is reported by `ListPlans` and `PlanStatus` (proto
   `StaleOp`) and refused by `Apply`; plans nobody loaded are never touched.
+- **Transactional groups**: `Apply` gates each plan group at its end and rolls it back exactly when it
+  does not compile; a group's `OperationApplied` events (field `group`) are sent only once it is kept.
 - **Navigation**: `Definition`, `References` and `Hover` answer from the root's warm rust-analyzer in
   the service's one-based byte coordinates. Locations come back relative to the root, or absolute and
   marked `outside_root`. Rust sources only; any other file is refused.
