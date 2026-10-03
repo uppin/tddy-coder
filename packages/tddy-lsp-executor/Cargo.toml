@@ -16,14 +16,29 @@ name = "fake_lsp"
 path = "../tddy-lsp/tests/bin/fake_lsp.rs"
 
 [dependencies]
+# `index_backed::IndexChannel` is an async port (the daemon's registry dials asynchronously).
+async-trait = "0.1"
 tddy-core = { path = "../tddy-core" }
+# The `code_index` client the index-backed executor asks. No cycle: `tddy-index-daemon` depends on
+# `tddy-lsp`, never on this crate.
+tddy-index-daemon = { path = "../tddy-index-daemon" }
 tddy-lsp = { path = "../tddy-lsp" }
 tddy-build = { path = "../tddy-build" }
 tddy-task = { path = "../tddy-task" }
 log = "0.4"
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time"] }
+# The channel type `IndexChannel::connect` hands out — the one `tddy-index-daemon`'s generated
+# client takes.
+tonic = "0.12"
 
 [dev-dependencies]
+# A fake `code_index` server over an AF_UNIX socket, dialled the way the daemon dials the real one.
+hyper-util = { version = "0.1", features = ["tokio"] }
+pretty_assertions = { workspace = true }
+tddy-rpc = { path = "../tddy-rpc" }
+tempfile = "3"
+tokio-stream = { version = "0.1", features = ["net"] }
+tower = "0.5"
 serial_test = "3"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "net"] }

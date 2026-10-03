@@ -335,6 +335,20 @@ impl CodeIndexService for AFakeIndex {
     ) -> Result<tddy_rpc::Response<index::WorkspacesResponse>, tddy_rpc::Status> {
         Err(not_part_of_this_fake())
     }
+
+    async fn symbols(
+        &self,
+        _request: tddy_rpc::Request<index::SymbolsRequest>,
+    ) -> Result<tddy_rpc::Response<index::SymbolsResponse>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
+    async fn diagnostics(
+        &self,
+        _request: tddy_rpc::Request<index::DiagnosticsRequest>,
+    ) -> Result<tddy_rpc::Response<index::DiagnosticsResponse>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
 }
 
 /// Where the managed index daemon lives: the stand-in program the registry starts, the socket it
