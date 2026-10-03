@@ -17,7 +17,7 @@ fact, so the layout, the seam order and the baseline all have to be on paper bef
 | **Related Feature Documentation** | `None — behaviour-preserving restructure.` State it explicitly; do not go looking for a PRD to link, and do not write one. |
 | **Summary** | What moves and what stays reachable. The reachability half is the part reviewers check. |
 | **Background** | Why this file is a problem *now* — size, the seam that exists, the class-member blind spot from step 2. |
-| **Scope** | Testing means the recorded baseline re-run at zero regressions. There are no acceptance tests (see the rule in `SKILL.md`). |
+| **Scope** | Testing means the recorded baseline re-run at zero regressions — **once, after the last plan of the changeset is applied** (`SKILL.md` § Testing cadence), compared by failing-test *name*. There are no acceptance tests (see the rule in `SKILL.md`). |
 | **Technical Changes** | State A is the tree as it is, by line and symbol count. State B is the layout table. The Delta is the seam list in dependency order. |
 | **Callers** | Required. The files *outside* the target that the restructure rewrites, and whether a facade absorbs them. This is the blast radius, and it is not inferable from the layout. |
 | **Testing Plan** | Replaced by **Baseline**. There is no strategy to choose; there are numbers to match. |

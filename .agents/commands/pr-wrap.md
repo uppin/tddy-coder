@@ -184,7 +184,8 @@ a silent pass:
 - **Rust**: load the [`code-restructuring`](../skills/code-restructuring/SKILL.md) skill. You do not
   write the moved code: plan intents, prove the seams with `restructure check --deep`, then apply.
   `restructure check --budget LINES` takes the budget directly. Its execution discipline applies in
-  full — green baseline before (`./test -p <pkg>`), engine-driven intents, same green after.
+  full — green baseline before (`./test -p <pkg>`), engine-driven intents, same green after the whole
+  plan is applied (one run at the end, not between plans).
 - **TypeScript (and anything else the skill rejects — v1 is Rust-only)**: split by hand under the same
   discipline — green baseline before, mechanical moves only (no behaviour change), imports updated,
   same green after.

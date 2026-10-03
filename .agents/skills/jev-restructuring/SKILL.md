@@ -62,7 +62,8 @@ check it carries no key — it should not, but check.
 
 ### The rest
 
-- A **green baseline** for the crate: `./test -p <crate>`. Do not target a red tree.
+- A **green baseline** for the crate: `./test -p <crate>`, run once now. Do not target a red tree. Do
+  not re-run it between passes: one run after the last pass is applied is the check.
 - For pass 3 only, a **warm index**: `eval $(./run-index-daemon | grep '^export ')`.
 
 ## Workflow
