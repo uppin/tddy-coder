@@ -261,8 +261,60 @@ is its own `RestructureError` variant. `tddy-index-daemon`'s `status_of` maps th
 `FailedPrecondition` (the same request fails until the tree is repaired) and the applied tree to
 `Internal` (the executor produced it).
 
+## The tidy
+
+After the result check passes, `apply` tidies the files it wrote (`runner/tidy.rs`, with
+`runner/tidy/{diagnostics,gating,format}.rs`). An operation orphans `use` lines, and the lint gate
+(`cargo clippy -- -D warnings`) fails on every one, so the tidy runs where the compile gate has just
+proved the tree builds.
+
+**The compiler decides.** The engine never prunes an import on its own reading of a file, because a
+trait import can be needed invisibly (`use std::fmt::Write;` has no name in the source that uses it).
+rustc's `unused_imports` lint is trait-aware and carries machine-applicable removal suggestions, so
+those are the evidence. Only files the run wrote are edited, only a suggestion rustc marks
+`MachineApplicable` is applied, and the loop is bounded by `MAX_ROUNDS` (removing one import can orphan
+another). Whatever the compiler still warns about is reported, never fixed.
+
+**An import only tests use.** `unused_imports` fires per compilation unit, so an import that only a
+`#[cfg(test)] mod tests { use super::*; … }` reads is reported by the library unit, and removing it breaks
+the test unit. Such an import is gated `#[cfg(test)]` instead; a group member becomes its own gated item
+(`gating.rs`).
+
+**Statements are rewritten from sets, not from spans.** A library is checked as itself and with its
+tests, and each unit words its removal of one group its own way (`a, ` here, `, b` there), so the member
+edits of the two units overlap. The tidy counts the units (one `compiler-artifact` per unit for a
+`target.src_path`) and rebuilds a statement the units disagree on from the *names*:
+
+| Reported unused by | Result |
+|---|---|
+| every unit | removed |
+| fewer units than build the file | read by the rest: gated in a repair, kept otherwise |
+| none | kept |
+
+Nothing is applied as two overlapping edits, and `apply_fixes` fails loudly on an edit it cannot apply
+instead of dropping it.
+
+**A repair iterates while it improves.** When a round's edits break the re-check, the round's files are
+restored from the bytes held in memory and redone with every name the errors quote gated (and, in a
+repair, every name some unit reads). The redo is repeated while each redo leaves fewer quoted names
+failing, at most `MAX_REPAIRS` times; a redo that stops improving is undone and **fails the run**,
+saying so. A nested group is left in place and reported. The tidy never leaves a broken tree behind and
+never touches the plan's own edits.
+
+**Formatting.** `rustfmt` runs over every file the run wrote, with its package's edition, so the
+`cargo fmt --all --check` step of CI's lint job finds nothing the engine left.
+
+**The shape that defeated the first version.** A split into nine modules left eleven wide `named`
+facade groups; the library unit and the test unit reported different name sets for each. The two units'
+member spans overlapped, one of them was skipped silently, a name stayed in a group that the failed
+re-check never quoted, and the redo then removed it, which broke the tests that read it. A redone round
+was never repaired a second time, so the run failed after a correct split.
+
 ## Known limitations
 
+- **An import only a trait method needs, used only by tests,** is not gated: an error that names a
+  method (`write_str`) never names the trait, so the tidy cannot match it and fails the run loudly
+  instead.
 - **A `return` a macro expands to is not seen** (`bail!`, `ensure!`). `apply`'s compile gate catches
   it; `check --deep` does not.
 - **A leading `|` in a match arm** (`match x { | A => … }`) is misread as a closure, so a `return` in

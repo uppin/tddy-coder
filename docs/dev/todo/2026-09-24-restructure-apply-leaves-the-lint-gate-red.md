@@ -87,6 +87,24 @@ That extract-method also takes 22 parameters, so it trips `clippy::too_many_argu
 the plan's job, not the engine's: DRY #2 folds it into a `ToolSpawnPlan`. Until then it carries
 `#[allow(clippy::too_many_arguments)]`, the crate's existing pattern.
 
+## Status 2026-10-03 — N1, N2 and N4 closed; N3 half closed
+
+`#live-plan` 7/15 ([#539](https://github.com/uppin/tddy-coder/pull/539)) added the tidy the last
+section's candidates describe: after the last operation of a writing run, once the tree compiles, the
+files the run wrote have the imports rustc reports unused removed (trait-aware, bounded), an import only
+the parent's tests use gated `#[cfg(test)]`, and `rustfmt` run over them; what the compiler still warns
+about is reported, never fixed. Seven real splits applied lint-clean with no hand edit.
+
+- **N1** (the parent keeps imports only the moved code used) and **N2** (a glob facade re-exporting a
+  module of only `impl` blocks) — closed: both are `unused_imports`.
+- **N4** (neither the moved code nor the restored imports are formatted) — closed by the `rustfmt` pass.
+- **N3** (an import lands in the sibling seam that does not use it) — the *unused* half is closed by the
+  same removal. **Still open:** the other half of the shape, a seam **missing** an import its code needs
+  (`prost::Message` for `encode_to_vec`), is a compile error the apply's gate reports but the engine does
+  not repair; the import pass keys on names the server reports unresolved.
+
+What remains is only that half of N3. Everything above this section describes the defect as found.
+
 ## What was done by hand on #524
 
 Each unused import and empty group was deleted, the unused glob re-exports were dropped (the

@@ -26,11 +26,12 @@ code path rather than a second one.
 | Module | Responsibility |
 |---|---|
 | `service.rs` | The generated trait's ten restructuring and four analysis methods, each a one-line delegation. `CodeIndexPorts`, `build_code_index_entry`, `EventStream` |
-| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`) |
+| `index.rs` | `WorkspaceIndex`: root validation, the per-root request queue, warm-root enumeration, the process-wide complexity cache, and telling a warm server what changed on disk before a request reaches it (`client_for`), then handing the same changes to `plan_upkeep` |
+| `plan_upkeep.rs` | Keeping the root's loaded plans current when the tree changes behind the daemon: the Rust files `tree_changes` reports changed are passed to `PlanStore::reresolve_files`, which skips the files the daemon's own runs wrote. A deleted file is not passed on |
 | `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded |
-| `queries.rs` | `Anchors`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `PlanStatus` reads the loaded plan. `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
-| `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
+| `queries.rs` | `Anchors`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `PlanStatus` reads the loaded plan and, like `ListPlans`, lists its stale operations (`StaleOp { op, reason }`). `Verify` answers the three excused-statement counts (`repointed`, `visibility_normalised`, `cfg_test_gates`). `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
+| `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
 | `activity.rs` | Composes what the daemon says about its own requests |
@@ -76,6 +77,7 @@ enclosing one. An unreadable manifest on the walk is a `FailedPrecondition`, not
 | The source-tree snapshot taken at the previous request | `WorkspaceIndex`, per root, replaced together with the crate-graph latch |
 | Complexity scores | process-wide, keyed by a hash of the content scored |
 | Plan store (`PlanStore`) | `WorkspaceIndex`, per root, across requests; a background tick flushes plans dirty for over a second, and `serve.rs` / `main.rs` flush every plan at shutdown and exit |
+| Stale operations of the loaded plans | the plan store, in memory, for the life of a load; never serialised into a plan |
 | `Overlay`, `PositionLedger`, `Journal` | per request, never shared |
 
 **A warm server is told what changed on disk between requests.** The client auto-acknowledges
@@ -89,6 +91,19 @@ and rust-analyzer re-reads each one; a newly spawned server is sent nothing, sin
 itself. It is a notification rather than an open and close, so a document some request holds open is
 unaffected. A tree that cannot be read is a `FailedPrecondition`. The walk costs about 0.2 s per
 request on this repository (1,843 files). No filesystem-watching dependency is taken.
+
+**Loaded plans are kept current from the same comparison.** The files `client_for` finds changed since
+the previous request are also what a person or a pull changed, and a loaded plan's item anchors in them
+may have moved or stopped meaning what they meant. `plan_upkeep` hands the `.rs` files to the store to
+re-resolve, through the warm client; the files the daemon's own applies wrote are discounted, because
+the apply already folded each operation into every loaded plan. Resolver refusals become stale reasons
+(`item changed`, `item not found in <file>`). A server reaped while idle reports nothing changed, so
+edits made in that window are caught at apply by the resolver's fingerprint refusal rather than by
+`ListPlans`.
+
+**`Warm` streams every phase.** The activity stream is structured events, not a console, so its
+`ServerChatter` is `unthrottled()`: a client that wanted the 50% it was never sent cannot ask again. The
+printed progress of the single-shot console is throttled to one line per token every two seconds.
 
 ## Cancellation
 
@@ -137,6 +152,7 @@ Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached th
 | `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc`, plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema — and an `Apply` the compile gate fails |
 | `dual_transport_acceptance.rs` | The binary as a process: single-shot exit codes, both transports concurrently, stdout silence under `--stdio`, fail-fast with no transport |
 | `tree_changes_acceptance.rs` | A warm server told of a module written since its last request (created and changed), of one removed (deleted), of each change once, and of nothing when the tree has not changed — against `fake_lsp`, which replays the notifications it received as `tddy/watchedFileChanges` |
+| `live_plans_acceptance.rs` | The apply loop folding a test-binary move into another loaded plan's file hint and flushing it, and an unloaded plan staying byte-identical after another plan applies |
 | `activity_log_acceptance.rs` | The whole journal of one request, through a capturing logger — which caught a double-logged outcome that no test of the pure composer could see |
 | `warm_index_production.rs` | `#[ignore]`. Real rust-analyzer; the index-reuse claim, asserted as a ratio against the cold run the test creates itself |
 | `detached_daemon_production.rs` | `#[ignore]`. The real `run-index-daemon` script: the daemon outlives its starting shell, runs with the dev shell's whole environment, and a restart announces the daemon it started rather than the previous one's log line. A drop guard owns the runtime directory and runs `--stop` when a test ends, pass or panic. The restart test guards a scheduling race it cannot force, so a pass is evidence, not proof |

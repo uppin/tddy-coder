@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-code-restructuring/src/crate_move/test_binary.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **966 production lines** (0 before this PR) · budget 500
+**Metrics:** **967 production lines** (966 before #539) (0 before this PR) · budget 500
 **Restructure:** required — `extract_module --to_file` along the three seams below
 **Status:** Open — deferred from #498 with explicit developer consent
 **Deferred by:** #498 — `#carve` 4/10 `test-homes`, see `docs/dev/todo/2026-09-19-test-binary-rs-is-950-production-lines.md`
@@ -16,6 +16,8 @@
 | 2026-09-19 | 966 | after `/pr-wrap`'s function-level refactor: two oversized functions split, +16 lines of doc comment. Function sizes improved, file size did not — which is why the decomposition below still stands |
 | 2026-09-24 | 966 | unchanged by #527, which touched the file: `Prose` and `readable_spans` widened to `pub(crate)` because `backends/rust/early_return.rs` masks strings and comments with the same scanner. That is a second consumer of the scanner outside this file, which strengthens the case for extracting it below |
 | 2026-10-02 | 966 | unchanged by #540 (`move-paths`), which widened `is_a_built_in_root`, `names_bound_in` and `segment_length` to `pub(crate)` for the new `source_scan.rs`. A second scanner now sits beside this file's line-based one, which strengthens the case for extracting it below |
+
+| 2026-10-03 | 967 | 966 to 967, touched by #539 (`#live-plan` 7/15): a two-line non-ASCII fix in `readable_spans` (a whole character, not a byte, per step). Unchanged in kind; the decomposition below still stands |
 
 ## What the gate found
 

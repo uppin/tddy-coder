@@ -8,10 +8,10 @@ way (T1–T24) are in that PR's change history; this lists only what remains.
 
 ## 1. `backends/rust.rs` — the impl-member seams (still ~2.6k production lines)
 
-The free-item runs are expressible and were planned as `plan-rust1` (nine modules: `line_diff`,
-`placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`,
-`server_process`). What remains **after** them is the methods of the three `impl RustBackend` blocks and
-the trait impls, which only the impl-member seam of `extract_module` can move:
+The free-item runs are done (nine modules: `line_diff`, `placeholder_checks`, `lsp_edits`,
+`import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`; `rust.rs` went
+from 4,475 to 2,666 production lines). What remains is the methods of the three `impl RustBackend`
+blocks and the trait impls, which only the impl-member seam of `extract_module` can move:
 
 | Run | Members | Lines |
 |---|---|---:|
@@ -32,7 +32,7 @@ recording the final number.
 A `named` facade re-exports every item "reached from outside the new module", and the parent's own
 tests count as outside, so a split leaves wide `use module::{…}` groups of which most names are unused in
 the library build (13 findings over 11 groups for `plan-rust1`). The tidy now cleans them
-(`2026-10-03-restructure-tidy-gives-up-on-the-wide-facade-groups-a-split-leaves.md`), but the engine
+(root cause in `docs/dev/changesets/2026-10-03-index-daemon-live-plans.md`), but the engine
 should not write them. Design (60–90 lines in `rust.rs` plus tests): `reach_of` records whether any
 same-file reference lies outside a `#[cfg(test)]` module; `MovedItem` carries `reached_from_production`;
 `facade_lines` / `facade_will_bind` emit production-reached names as today and the rest under
@@ -68,7 +68,28 @@ The skill now documents the behaviour (`code-restructuring` § Testing cadence);
 - **`restructure_args` / daemon `--items`.** Four front ends now share `parse_item_list`; a fifth
   (anything that builds an `AnchorsRequest` by hand) would have to call it too.
 
-## 6. Process: tooling fixes were validated on the failing split, not on a corpus
+## 6. `verify` reports one `)` lost when a call is reflowed into a block
+
+The token pass drops the structural closer lines (`})`) before it counts tokens, so a call rustfmt
+turned from `.filter(|m| …)` into `.filter(|m| { … })` reports one `)` lost although nothing is. It
+appeared on the `rust.rs` split. Count the parentheses and brackets of the excused structural lines on
+both sides in the token pass, so layout moves them without changing the balance.
+
+## 7. A split drops a `pub` item nothing references from the crate's public path
+
+A named facade lists the items "reached from outside the new module". An item declared `pub` that
+nothing in the workspace calls is not reached, so it is left out, and the moved `pub fn` ends up
+public in a *private* module: unreachable by any path, and a dead-code warning on the library build.
+It showed on the `verify.rs` split (`pub fn statements`, no callers); the tidy reported the warning and
+the apply was clean otherwise. Fixed there by hand (one `pub use`, marked as a post-move fix).
+
+**What would close it.** `facade_lines` / `facade_will_bind` must include every item the moved run
+declares `pub` (and, for a `pub(crate)` run, `pub(crate)` items another module of the crate can see),
+whether or not the reference survey finds a caller — the public path is part of the crate's interface,
+and removing it is not something a move is allowed to do. Test: extract a contiguous run containing an
+unreferenced `pub fn` with `reexport: named` and assert it is still reachable through the old path.
+
+## 8. Process: tooling fixes were validated on the failing split, not on a corpus
 
 Each of T7b, T15, T19–T24 was found by a real split and proven by a fixture written after the fact.
 There is no corpus of real splits the engine is replayed against, so a change to the import or

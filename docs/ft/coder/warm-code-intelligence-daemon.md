@@ -2,7 +2,7 @@
 
 **Product area:** Coder / tddy-tools
 **Status:** Active
-**Updated:** 2026-09-16
+**Updated:** 2026-10-03
 
 ## Summary
 
@@ -76,19 +76,29 @@ daemon exits on `^C` or `SIGTERM`, and before a single-shot call returns. The si
 carries `restructure load`, `unload` and `plans` as well. A write-back onto a plan whose file changed
 since it was loaded is refused (`FailedPrecondition`).
 
+**Every loaded plan stays current**, not only the one being applied (see [Live
+plans](rust-code-restructuring.md#live-plans)). After each operation the daemon folds its edits into
+every other plan loaded for the root, and flushes those plans too. When files change underneath it —
+a checkout, a rebase, a hand edit — it compares the tree with the snapshot it took at the previous
+request, tells the language server, and re-resolves each loaded plan's item anchors in the changed
+files, skipping the files its own runs wrote. An operation whose item changed, vanished, or was
+edited by another plan is **stale**: `ListPlans` and `PlanStatus` report it with the reason, `Check`
+reports it as a finding, and `Apply` refuses it before any write. Plans nobody loaded are never
+touched.
+
 ## The service
 
 | RPC | Shape | Notes |
 |---|---|---|
-| `Warm` | server-streaming | Loads a root and reports progress. Idempotent |
+| `Warm` | server-streaming | Loads a root and reports progress. Idempotent. Every phase the server reports reaches the stream; only the printed console is throttled |
 | `Check` | server-streaming | Every finding in a plan, no writes. Streams one `Finding` per finding |
 | `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation and outcome events |
 | `Anchors` | unary | An anchor a plan can carry: `items` for named items, or the `item` anchor of the innermost item enclosing `at`. The response holds the anchor's JSON (`anchor_json`) and its absolute span (`range`) |
-| `PlanStatus` | unary | completed / in-flight / pending / failed |
+| `PlanStatus` | unary | completed / in-flight / pending / failed, and the plan's stale operations with their reasons |
 | `LoadPlans` | unary | Reads plans into the root's plan store, giving every operation an id. Answers the plans held, with operation counts and whether each is dirty |
 | `UnloadPlans` | unary | Flushes and drops named plans, or all of them. Answers what remains |
-| `ListPlans` | unary | The plans the root's store holds |
-| `Verify` | unary | Statement-multiset comparison against a git ref |
+| `ListPlans` | unary | The plans the root's store holds, each with its stale operations and their reasons |
+| `Verify` | unary | Logical-statement comparison against a git ref; the response counts what it excused (`repointed`, `visibility_normalised`, `cfg_test_gates`) |
 | `Workspaces` | unary | Which roots this process holds an index for |
 | `Coverage` | server-streaming | Per-test coverage capture. Tens of minutes |
 | `Report` | unary | CRAP leaderboard over a capture |
@@ -111,7 +121,7 @@ transports as two different codes and a new error variant is a compile error:
 | Class | Meaning to a caller |
 |---|---|
 | `InvalidArgument` | the request is wrong — a malformed plan, code text in a plan, an unsupported operation, a file no backend handles, unparseable Rust |
-| `FailedPrecondition` | the tree is wrong — an unreachable root, a relative root, a plan that is not there, a snapshot mismatch, an existing journal, a plan that changed on disk since it was loaded, a continued run whose plan the journal cannot vouch for, a missing coverage capture |
+| `FailedPrecondition` | the tree is wrong — an unreachable root, a relative root, a plan that is not there, a snapshot mismatch, a stale operation at or after the run's start, an existing journal, a plan that changed on disk since it was loaded, a continued run whose plan the journal cannot vouch for, a missing coverage capture |
 | `DeadlineExceeded` | the caller's own deadline expired, or it cancelled; the message says how far the index got |
 | `Unavailable` | the server asked to be asked again |
 | `Internal` | neither caused by the caller nor fixable by them |
@@ -123,7 +133,14 @@ eval $(./run-index-daemon | grep '^export ')   # exports TDDY_INDEX_SOCKET
 tddy-tools restructure check plan.jsonl        # now costs the assist, not the index
 ./run-index-daemon --status                    # dials the socket; non-zero if nothing answers
 ./run-index-daemon --stop
+TDDY_INDEX_DAEMON_BIN=/path/to/tddy-index-daemon ./run-index-daemon   # run a prebuilt daemon
 ```
+
+**A prebuilt daemon outlives rebuilds.** By default the script builds and runs this checkout's
+`target/debug/tddy-index-daemon`, so rebuilding the checkout replaces the binary a long carve is
+using. `TDDY_INDEX_DAEMON_BIN` names a binary to run instead — a release build, or a copy outside
+`target/`. Nothing is built when it is set, and a path that is not an executable file is an error, never a
+quiet fall back to the debug build.
 
 **The daemon is started in a session of its own**, via `setsid` from the dev shell, and its pid is
 written from inside the process that becomes the daemon rather than read from the starting shell's
@@ -201,5 +218,10 @@ path that exists without a daemon installed.
   test of a capture and one signature of a duplicate-test detection, and the instrumented build is
   a single unit that cannot be interrupted once it has begun — so a disconnect during the build
   costs the rest of the build.
+- **Staleness is held in memory for the life of a load.** A daemon restart, or an unload and reload,
+  forgets which operations were stale; item anchors are still refused at apply by the resolver's
+  fingerprint check. A file deleted underneath the daemon does not make its item anchors stale, and
+  `ListPlans` / `PlanStatus` see a hand edit only after the next `Check`, `Apply` or `Anchors`
+  request has compared the tree.
 - **Warming several worktrees at once narrows the per-root benefit**, because the resident
   rust-analyzers compete for CPU.

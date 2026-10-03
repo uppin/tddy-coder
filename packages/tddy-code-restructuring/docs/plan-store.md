@@ -17,6 +17,7 @@ path, so a served run and a one-shot run cannot disagree about what a plan means
 | `FlushPolicy { debounce }` | How long a plan may stay dirty before `flush_dirty` writes it (the daemon uses one second) |
 | `PlanStore::{load, unload, unload_all, list, get, op}` | The registry; `op` looks an operation up by `(plan, op id)` |
 | `PlanStore::refresh_after_op` | Rewrites the applied plan's pending operations for the tree the operation left |
+| `PlanStore::{fold_foreign_op, reresolve_files, stale_ops}` | Keep every *other* loaded plan current, and say which of its operations are stale; see [Live plans](#live-plans) |
 | `PlanStore::{flush_dirty, flush, flush_all}` | The write-back |
 | `pending_digest` | A digest of the operations after the one just applied: ids, anchors, `also` |
 
@@ -31,7 +32,7 @@ journal and the `OperationApplied` event carry `op_id` beside the index; `--from
 ## The refresh
 
 After each committed operation `refresh_after_op` translates the *pending* operations of the plan
-being applied, and no other plan:
+being applied; the other loaded plans are carried through the same edit by [the fold](#live-plans):
 
 | Pending anchor | Becomes |
 |---|---|
@@ -45,6 +46,55 @@ keeps its anchor as written, for the next run to refuse; any other resolver fail
 `runner::open_plan_run` verifies the ledger checkpoint against the journal but starts the run's
 translation ledger empty. Folding the journal would translate anchors that already describe the
 edited tree through earlier runs' edits a second time.
+
+## Live plans
+
+Two things move a held plan's anchors besides its own operations: an operation of **another** held
+plan, and a change nobody here made. Both rewrite what is safe to rewrite and mark the rest **stale**.
+Neither re-targets a stale operation: an edit that overlaps an anchored range could have removed what
+the range names, so the author re-anchors it.
+
+| Module | Holds |
+|---|---|
+| `plan_store.rs` | `PlanStore::{fold_foreign_op, reresolve_files, stale_ops}` (delegations), `StaleReason`, `OpStaleness` |
+| `plan_store/live.rs` | `Liveness` (the stale reasons and the files the store's own runs wrote), re-resolution, `stale_ops`, the per-file hint refresh |
+| `plan_store/live/fold.rs` | The foreign-op fold |
+| `plan_store/refresh.rs` | `refresh_after_op`, `refresh_pending`, and `rebase_plan_file` (the `snapshot` re-resolution) |
+
+**`fold_foreign_op(from, op, edit, resolver)`** judges every operation of every plan except `from`,
+line by line, against the edit the operation produced, in the coordinates of the text it was made
+against. A range anchor the edit only moves is translated through the edit's line deltas; an item
+anchor's hint and relative range follow, and its fingerprint is recomputed where the edit touched an
+item outside the anchored range. A `file` hint follows a rename or move. An edit that **overlaps** an
+anchored range marks the operation `StaleReason::EditedBy { plan, op }` and leaves it as written.
+Nothing changes unless every plan could be folded.
+
+**`reresolve_files(files, resolver)`** re-resolves every held item anchor in `files`. An intact item
+rewrites its hint and the plan's per-file hint (`sha256`, `modified`); an item whose text changed is
+`ItemChanged`; one the file no longer declares is `ItemNotFound { file }`. Re-resolution clears `ItemChanged` / `ItemNotFound` once the tree says
+the item is intact again, but never `EditedBy`. Files the store's own runs wrote since the last call are
+skipped: the run already carried every plan through those edits.
+
+**Staleness is derived and held in memory** beside the plans in `Liveness`, dropped when a plan is
+unloaded, never serialised: the plan on disk stays a plan, and a stale operation's anchor keeps its
+pre-edit coordinates. An unloaded plan is not reached by either entry point.
+
+**Who calls them.**
+
+| Caller | What it does |
+|---|---|
+| `runner::record_applied_op` | After each committed operation, settles the plan that ran (refresh, journal digest, flush) and only then folds the operation into every other held plan and writes those back, so a failure folding another plan never leaves the plan that ran with an edit on disk and no digest. The daemon's apply loop and a one-shot `apply` both call it |
+| `tddy-index-daemon/src/plan_upkeep.rs` | For the files the tree comparison reports changed that the daemon did not write, calls `reresolve_files` |
+| `runner::refuse_a_stale_pending_op` | Before any read or write of an apply, in both apply loops: `RestructureError::StaleOperation` (`FailedPrecondition`) for the first stale operation at or after the run's start, up to `--stop-after`; a dry run is not refused |
+| `runner::stale_findings` | One `check` finding per stale operation |
+| `runner::snapshot_resolving` | `restructure snapshot` of an item-anchored plan, through `rebase_plan_file` |
+| `console::stale_operations` | The one renderer for stale operations: the in-process CLI, the daemon and `tddy-tools` all call it |
+
+**Not covered.** A file the daemon sees deleted is not re-resolved; the store holds no record of which
+operations a plan has already run, so a foreign edit overlapping an already-applied operation's old
+anchor marks it stale (`apply` ignores it, `ListPlans` shows it); the applied plan's own v2 file hints
+are not rewritten by `refresh_after_op`; and `restructure snapshot` of an item-anchored plan through
+`tddy-tools` starts its own language server, there being no `Snapshot` RPC.
 
 ## Order per operation, and what a crash leaves
 
@@ -95,8 +145,12 @@ that takes minutes. A lock held while a store operation panics poisons that root
 `tests/plan_store_acceptance.rs` (ids assigned and flushed, duplicates refused, clobber refused, apply
 from the loaded ops, a no-daemon run still flushing) and `tests/plan_store_resume_acceptance.rs` (a
 two-operation plan written back after its first operation, and a resumed run applying the second where
-its text now is) run against a real rust-analyzer. The refresh is pinned in `plan_store.rs` unit tests
+its text now is) run against a real rust-analyzer. The refresh and the live-plan fold and re-resolution are pinned in `plan_store.rs` unit tests
 over a stub `ItemResolver`, because the lines an extraction inserts are rust-analyzer's to choose. The
 daemon's RPCs, the periodic flush and the plan-scoped run state are in
 `tddy-index-daemon/tests/code_index_service_acceptance.rs`; `SIGTERM` flushing is in
-`dual_transport_acceptance.rs`.
+`dual_transport_acceptance.rs`. `tests/live_plans_acceptance.rs` runs two plans in one store against a
+real rust-analyzer (the fold keeping a second plan's anchor on its item, an edit inside it marking the
+operation stale, the refusal before any write, hand edits above and inside an item, `snapshot`
+re-resolution); the daemon's `tests/live_plans_acceptance.rs` covers the apply loop folding a test
+binary move into another plan's file hint and an unloaded plan staying byte-identical.

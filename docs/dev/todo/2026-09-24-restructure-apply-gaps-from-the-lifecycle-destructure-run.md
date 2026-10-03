@@ -364,5 +364,5 @@ git clean -fdq packages/tddy-session-lifecycle
 rm -rf .restructure
 ```
 
-Plans `01`, `05` and `07` had to be re-anchored after #508 edited their files; see
-[2026-09-24-restructure-snapshot-cannot-rebase-a-stale-plan](./2026-09-24-restructure-snapshot-cannot-rebase-a-stale-plan.md).
+Plans `01`, `05` and `07` had to be re-anchored after #508 edited their files; `restructure snapshot` of an item-anchored plan now re-resolves its anchors
+(change history `docs/dev/changesets/2026-10-03-index-daemon-live-plans.md`).

@@ -11,7 +11,10 @@ vouch for.
 
 | Module (`src/backends/rust/`) | Holds |
 |---|---|
-| `imports.rs` | `restore_imports`, `next_import`, the verified reconstructions, the seam-lost filter, `names_bound`, `rebased_for_child` |
+| `imports.rs` (with `imports/bound_names.rs`, `imports/local_uses.rs`) | `restore_imports`, `next_import`, the verified reconstructions, the seam-lost filter, `names_bound`, `rebased_for_child`, the function-local `use` carry |
+| `prelude_shadow.rs` | the lexical carry of a parent's `use`-bound name the moved code uses, even when it shadows a prelude name |
+| `relative_visibility.rs` | rebasing a relative visibility one module deeper |
+| `inline_paths.rs` | re-rooting inline `super::` / `self::` paths and paths through a module the parent declares |
 | `impl_seam.rs` | `refuse_impl_sibling_references`, `is_inherent_impl`, `with_method_calls_restored`, `reached_through_the_type` |
 | `nested_modules.rs` | `with_nested_references_restored`, and the brace-depth module reader behind it |
 | `introduced.rs` | finding the `let` binding `extract_variable`'s assist introduced, so it can be renamed to the plan's `name` |
@@ -74,6 +77,31 @@ which a pass that makes progress on every round never reaches.
 
 A bare path through an item the parent declares (`sibling::X`, 2018 uniform paths) cannot be told
 from an extern crate by reading, so it is left as written, and verification refuses it by name.
+
+## Code that changes meaning one module deeper
+
+The assist moves text into a child of the module that held it. Three things written in the parent mean
+something else in the child, and none of them is something rust-analyzer reports unresolved.
+
+**A parent's `use` that shadows a prelude name.** A parent that binds `Result` to the crate's
+one-generic alias gives moved code the alias; in the child the prelude's two-generic
+`std::result::Result` resolves the same word, so the child silently means a different type and the
+compiler is the first to say so. `prelude_shadow.rs` reads the parent's `use` declarations and the
+moved text, and carries across every binding the moved code names that the module does not already
+have. It over-imports on purpose; [the tidy](readiness-and-gates.md#the-tidy) removes what is unused.
+Alongside it, a type the move widened stays widened when a widened item's signature names it.
+
+**Relative visibility.** `pub(super)` written in `imports` means "visible in the parent"; the same text
+in the child means "visible in `imports`". `rebased_for_child` rewrites it one level deeper:
+`pub(super)` becomes `pub(in super::super)`, `pub(self)` becomes `pub(super)`, and a relative
+`pub(in …)` path gains a `super::`. Absolute forms are unchanged. The rewrite applies to a moved item
+and to the fields of a moved struct.
+
+**Inline paths.** `inline_paths::rerooted_module` re-roots the `super::` and `self::` paths written
+inline in the moved code (calls, types, struct literals, patterns), and writes a path whose first
+segment is a module the parent declares as `super::<module>::…`, unless the moved code could bind that
+name itself. Only code is read: strings, characters and comments are masked, and a `use` item is left
+to the imports pass. The run reports `paths: N path(s) re-rooted for the new module`.
 
 ## A function-local `use` the extracted function needs
 
@@ -215,8 +243,8 @@ operand and is not refused.
 - **A trait `impl` cut with no sibling reference is not refused**, though it is E0119 all the same.
 - **A borrow on another line is refused, not widened.** The widening is single-line; a selection
   whose `&` is on an earlier line is refused by the by-value check, so the plan selects the borrow.
-- **The carried `use` is not removed from the origin**, so a `use` whose only reader moved leaves an
-  unused-import warning there.
+- **The carried `use` is removed from the origin only if rustc reports it unused**, by [the
+  tidy](readiness-and-gates.md#the-tidy); a `use` it cannot prove unused stays.
 - **The module reader is lexical.** It counts braces over masked text rather than asking the server
   for the module tree, so a shape the lexer does not know (a brace a macro produces, for example)
   could mislead it. The compile gate on `apply` (see [readiness-and-gates.md](readiness-and-gates.md))

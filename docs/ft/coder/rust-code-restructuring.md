@@ -2,7 +2,7 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-09-19
+**Updated:** 2026-10-03
 
 ## Summary
 
@@ -57,16 +57,17 @@ there is no budget to state. See [Waiting](#waiting).
 | | Run state is **keyed by the plan** — `<root>/.restructure/<plan stem>-<digest>/` — so a completed plan does not block the next one under the same root, and `--resume` resumes the plan it was given rather than whichever ran last. Every multi-layer restructuring is several plans in one repository, which is why this is not an implementation detail. A journal left at `<root>/.restructure/` by an older run is adopted when resuming, and otherwise refused by name; it is never silently taken over by a different plan |
 | `load` / `unload` / `plans` | Hold plans in the index daemon's [plan store](#plan-store): `load` reads each plan once and gives every operation an id, `unload` writes changed plans back and drops them (`--all` for every plan of the tree), `plans` lists what is held. All three need the index daemon (`TDDY_INDEX_SOCKET`) and are refused without one |
 | `status` | completed / in_flight / pending / failed |
-| `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many lines — a report, never a gate |
-| `snapshot` | Rewrite the plan's line-1 `sha256:` header from the working tree, leaving every operation line byte-identical. No index, no language server |
+| `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many **production lines** — lines before the first `#[cfg(test)]` that opens a `mod`, so a file's inline tests are not counted; other languages count every line — a report, never a gate |
+| `snapshot` | Rewrite the plan's line-1 header from the working tree. A plan of range and symbol anchors keeps every operation line byte-identical and needs no index. A plan of **item** anchors is also re-resolved against the current tree through rust-analyzer: hints and the fingerprints of unchanged items are rewritten, and each operation whose item changed or is gone is reported and left as written (see [Live plans](#live-plans)) |
 | `anchors` | Emit an anchor a plan can carry. `--items A,B` emits an `items` anchor covering the named adjacent items (trivia included); `--at L:C[-L:C]` emits an `item` anchor for the innermost item enclosing that position, with its relative range, fingerprint and hint filled in. See [Item anchors](#item-anchors) |
+| | `--items` names are bare (`Alpha`), module-qualified (`krate::module::Alpha`), or `<Type>` / `<Type>#N` for an inherent `impl` block (the Nth when a type has several); a comma inside `<…>` belongs to the type, so `<Pair<A, B>>` is one item. One rule (`item_anchor::parse_item_list`) reads the list for the in-process CLI, the daemon's command line and `tddy-tools` alike |
 
 **A plain `check` is not a rehearsal.** It reads text. `--deep` resolves every operation through the
 same path `apply` takes and writes nothing, so it is the only form that reports an assist or import
 refusal before an index has been paid for. `no findings` from a plain `check` has been followed by an
 apply that refused more than once — see
 [§ Known limitations](#known-limitations).
-| `verify` | Statement-multiset comparison against a git ref |
+| `verify` | Logical-statement comparison against a git ref; see [Verify](#verify) |
 
 ## Plan format
 
@@ -99,7 +100,7 @@ requests, and a one-shot `restructure apply` or `check` keeps one for the length
   edits, fingerprints of items the operation edited are recomputed, range anchors move with the lines
   inserted above them, and `file` hints follow a file the operation moved. A pending item anchor the edit
   left unresolvable is kept as written, for the next run to refuse. Only the plan being applied is
-  refreshed.
+  refreshed here; every *other* loaded plan is kept current by [Live plans](#live-plans).
 - **Write-back.** A changed plan is written (temporary file and rename) within a second of changing, and
   always at the end of a run, on `unload`, and on shutdown of a served daemon (`^C` or `SIGTERM`). After
   an operation the plan is written synchronously, so the file never lags the journal by more than that
@@ -119,6 +120,43 @@ requests, and a one-shot `restructure apply` or `check` keeps one for the length
   where a first completed through the daemon applies without `--resume`.
 
 How the crate delivers this: [plan-store.md](../../../packages/tddy-code-restructuring/docs/plan-store.md).
+
+## Live plans
+
+A carve is several plans applied in sequence under one root, and applying the first moves the lines,
+files and items the others anchor into. Every plan the index daemon holds for a root is therefore kept
+current, not only the one being applied.
+
+- **A foreign operation is folded in.** After each applied operation, the store folds that operation's
+  edits and renames into every **other** loaded plan of the root. Ranges are translated through the
+  edit's line deltas, and `file` hints follow a file the operation renamed or moved. An edit that
+  *overlaps* an anchored range is never translated, since it could have removed what the range names:
+  the operation is marked stale, `edited by <plan>#<op id>`.
+- **A change nobody here made is re-resolved.** When files change underneath the daemon — a checkout,
+  a rebase, a hand edit — each loaded plan's item anchors in those files are re-resolved through the
+  item path. An intact item rewrites its hint; an item whose text changed is stale as `item changed`;
+  one that is gone is stale as `item not found in <file>`. The files the daemon's own runs wrote are
+  skipped, because the run that wrote them already carried every held plan through the edit.
+- **Per-file hints follow.** The v2 `files` hints (`sha256`, `modified`) of a folded or re-resolved
+  plan are rewritten on a refresh, and the plan is flushed through the store's ordinary write-back.
+- **Stale operations are reported.** `ListPlans` and `PlanStatus` list each stale operation with its
+  reason, and `check` reports one as a finding. A stale operation is never silently re-targeted; the
+  author re-anchors it (`restructure anchors`).
+- **`apply` refuses a stale operation** at or after the run's start, before any write, with
+  `FailedPrecondition`, naming the operation and why. Only the operations the run would reach count:
+  with `--stop-after N` a stale operation beyond the stop is not refused, and a `--dry-run`, which
+  writes nothing, is not refused at all.
+- **`restructure snapshot` of an item-anchored plan** does the same re-resolution once for a plan
+  that is not loaded, so a plan written before a rebase runs again without hand re-anchoring; a v1
+  range plan is told to convert with `anchors --at`.
+- **Derived, held for a load, never touched unloaded.** Staleness is worked out by re-resolution and
+  kept in memory for as long as the plan is loaded; the flushed plan stays a plan. A plan nobody
+  loaded is never touched, byte for byte. An unloaded item-anchored plan is judged when it is applied,
+  by the resolver's fingerprint refusal; a v2 plan's drift is reported and never refused, as ever.
+
+One renderer prints the stale operations for the in-process CLI, the daemon and `tddy-tools`.
+
+How the crate delivers this: [plan-store.md](../../../packages/tddy-code-restructuring/docs/plan-store.md#live-plans).
 
 ## Item anchors
 
@@ -245,6 +283,11 @@ line, or the host cancelling on shutdown. Cancellation is checked **inside** the
 than awaited, because the engine is synchronous and runs under `spawn_blocking`, where dropping the
 calling future stops nothing.
 
+**Progress is throttled where it is printed.** A server reports far more often than a person reads, so
+the printed stream shows one line per token every two seconds. The daemon's structured warm stream
+does not throttle: a client that wanted the 50% it was never sent cannot ask for it again, so every
+phase reaches it.
+
 A cancelled wait still reports **how far the index got** — the last phase plus the furthest
 percentage — because a stall at 12% and a stop at 99% want opposite responses. A server that stays
 unable to answer one method is `ServerNotSettled`, kept distinct from a malformed plan: the first is
@@ -297,6 +340,8 @@ cannot answer, reads the parent's own `use` tree:
 | A **module** binding (`use crate::tool_engine;`) | reconstructed the same way; `Import` is offered for items, never for a bare module path |
 | A name the seam's own facade will re-export | left to the facade — a named import here would be private and would shadow it |
 | A relative path in a reconstructed declaration (`use super::Failure as HostFailure;`) | rebased for the new module, which is the parent's child: `super::X` → `super::super::X`, `self::X` → `super::X`. `crate::`, `::` and extern-crate paths are unchanged |
+| A name the parent binds by `use` that shadows a prelude name (`use crate::Result;` over `std::result::Result`) | carried by a lexical pass over the parent's `use` declarations and the moved text. The server never reports such a name unresolved — the prelude resolves it, to a different type — so the compiler would be the first to notice. The pass over-imports on purpose and the [tidy](#the-tidy) removes what is unused |
+| A type widened by the move that a widened item's signature names | stays widened, so the item's signature does not name a type less visible than itself |
 | A name the parent bound in a group the assist emptied (`use tokio::sync::{…, mpsc, …};`) | the choice reads the file as it was before the assist together with the current text, so the binding the assist removed still decides |
 
 Only the names **the seam lost** are weighed: every unresolved occurrence inside the new module, and
@@ -312,6 +357,63 @@ A facade is emitted at the widest visibility the relocated items carry — `pub 
 something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what it relocates to
 `pub(crate)` and a `pub` glob over none of it re-exports nothing.
 
+### Moved code that changes meaning one module deeper
+
+`extract_module` puts the items in a new child of the module that held them, and text that was correct
+there can mean something else one level down. Three rewrites keep the meaning:
+
+- **Relative visibility is rebased.** `pub(super)` becomes `pub(in super::super)` and `pub(self)`
+  becomes `pub(super)`, on a moved item and on the fields of a moved struct; `pub`, `pub(crate)` and
+  `pub(in crate::…)` mean the same anywhere and are unchanged.
+- **Inline `super::` and `self::` paths are re-rooted** in the moved code — calls, types, struct
+  literals, patterns — so `super::f()` still names the original parent's `f`.
+- **A path through a module the parent declares** (`visibility::WIDENED`, written next to `mod
+  visibility;`) is written `super::visibility::WIDENED` in the new module, unless the moved code could
+  bind that name itself.
+
+A run that re-roots paths says so in one note line, `paths: N path(s) re-rooted for the new module`.
+
+## The tidy
+
+A successful `apply` ends with a **tidy** over the files it wrote, once the tree compiles:
+
+1. **Unused imports are removed.** The evidence is rustc's own `unused_imports` report — trait-aware,
+   so `use std::fmt::Write;` is never judged by its name — and only machine-applicable suggestions are
+   applied, over the files the run wrote, in a bounded number of rounds (removing one import can orphan
+   another).
+2. **An import only the parent's tests use is gated** `#[cfg(test)]` instead of removed; a member of a
+   group becomes its own gated item.
+3. **Both compile units are read.** A library checked with its tests is built twice and each build
+   reports its own unused set. They are composed per `use` statement: unused in both, removed; unused
+   only in the library build, gated; otherwise kept. The compiler's own member spans are never applied
+   to a statement the units disagree on, because they overlap.
+4. **Formatting.** `rustfmt` runs over every file the run wrote, with its package's edition.
+5. **A failed check is repaired while it improves.** A round that does not compile is undone and
+   redone with the names the errors quote gated, and again while each redo leaves fewer names
+   failing (at most five times). Overlapping edits are an error, never a silent skip.
+6. **Whatever the compiler still warns about is reported**, never fixed.
+
+A tidy that cannot repair a round undoes it and fails the run, saying so; it never leaves a broken
+tree, and never touches the plan's own edits.
+
+## Verify
+
+`restructure verify --against <git-ref>` compares the working tree with a ref **statement by
+statement**, as a multiset across the crate, so the one thing nothing else sees — a comment attached to
+no item, which rust-analyzer carries nowhere — surfaces. What an `extract_module` always causes is
+excused, counted, and summarised in one line, so the exit status is a signal:
+
+- a multi-line `use` item is compared as its first line, and a `#[cfg(test)]` directly above a `use`
+  is dropped;
+- a leading visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(in …)`) is ignored;
+- a call re-pointed through a lowercase module qualifier (`f(` becoming `m::f(`) pairs with its
+  original, and a statement `rustfmt` wrapped is joined back before comparing;
+- what is left is compared last as a **token multiset**; equal multisets mean reflow only.
+
+`VerifyResponse` carries the counts as `repointed`, `visibility_normalised` and `cfg_test_gates`. A
+real loss prints `verify: tokens lost: …; tokens gained: …`, and a lost comment is still reported. One
+real loss anywhere keeps the reflow of the other leftovers reported beside it.
+
 ## Workflow
 
 1. Green baseline — `./test -p <crate>`.
@@ -319,7 +421,7 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
 3. Author intents in JSONL; `restructure check` (optionally `--deep`) before apply.
 4. `apply --dry-run`, then apply; `verify --against HEAD` after successful extract operations.
    `apply` runs `cargo check --all-targets` over the touched packages before and after, and fails the
-   run when the result does not compile.
+   run when the result does not compile, and ends with [the tidy](#the-tidy).
 5. `cargo fmt --all`, then the baseline suite. Relocated bodies sit at a new indentation, and a body
    correctly wrapped at one indentation is not correctly wrapped at another — at any scale beyond a
    few items this is every run, and `cargo fmt --all --check` is the first thing CI's lint step does.
@@ -395,6 +497,21 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   resume refuses as out of sync; the lost refresh is not reconstructed, so the remainder runs from a new
   plan file. A hand edit of a pending *anchor* between runs is refused the same way; an edit to anything
   else (`name`, `variant`) is not.
+- **Staleness does not outlive a load.** After an unload and reload, or a daemon restart, an operation
+  that was `edited by` another plan is not reported stale. An item anchor is still caught at
+  apply by the fingerprint refusal; a `range` or `symbol` anchor in a v2 plan is not fingerprinted and
+  runs at its old coordinates, which is how v2 plans behave (drift reported, never refused).
+- **An item anchor in a file deleted underneath the daemon does not go stale**, and hand-edit
+  staleness is picked up by the next `Check`, `Apply` or `Anchors` request, not by `ListPlans` or
+  `PlanStatus`.
+- **A foreign edit overlapping an operation the plan already ran** marks that operation stale in
+  `ListPlans`; `apply` ignores it, since it refuses only operations at or after its start. The
+  applied plan's own v2 `files` hints are not rewritten by its own apply.
+- **`tddy-tools restructure snapshot` of an item-anchored plan starts a cold language server**, even
+  with a daemon running; there is no `Snapshot` RPC.
+- **An apply consumes its plan file.** A run rewrites the plan as it goes, so a plan whose apply
+  failed and was rolled back is stale; re-running it is refused as an item that changed. Regenerate
+  the plan.
 - **`--from <id>` does not reach the daemon.** `ApplyRequest` carries no field for it, so the daemon path
   refuses it, naming the workaround. Journal records and `OperationApplied` events carry `op_id`.
 - **`check` without `--deep` cannot examine item anchors.** A static check has no server to resolve
@@ -428,7 +545,7 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   refused as `rust-analyzer's answer was unusable:`, advising to select the borrow including its `&`.
   The refusal reads the text, not the type, so a `Copy` place under a borrow is refused as well.
 - **An `extract_method` carries a function-local `use`** the range names into the new function. The
-  origin keeps its own `use`, which is an unused-import warning when nothing there names it any more.
+  origin keeps its own `use`, which [the tidy](#the-tidy) removes when rustc reports it unused.
   `check` reports the carried items on its progress line, not as a finding.
 - **Several `extract_method`s in one function compose only bottom-up**, last range first. The
   engine does not re-anchor a later operation through an earlier one's edit.

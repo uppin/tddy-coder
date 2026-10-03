@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **4,475 production lines** (2026-10-02, #542; 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
+**Metrics:** **2,666 production lines** (2026-10-03, #539; 4,475 before; 4,475 after #542, 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
-**Status:** Open — regressed 2026-10-02 (+42 in #542, `#live-plan` 5/7; +74 in #537, `#live-plan` 1/7; +18 in #526, `#carve` 15/21); pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
+**Status:** Open — partially fixed (the impl-member seams remain). #539 (`#live-plan` 7/15) moved the free-item runs out (4,475 to 2,666); #527 had already taken 472 net
 
 ## Measurement history
 
@@ -19,6 +19,7 @@
 | 2026-09-26 | 4,360 | #526 (`#carve` 15/21): +18 by this wrap's re-implementation of the inline-test-block rule, which reads `2688227f` as 4,340 and `22787218` as 4,358. +5 in `5446cec6` (the inactive-code answer threaded through the caller survey) and +13 in `cb367ac6` (`carries_placeholder_type` reading `'_` as a lifetime); `cc19d3a4` net 0 (the `extract_variable` naming went to a new sibling, `introduced.rs`). Regressed slightly; none of its own seams were cut |
 | 2026-10-02 | 4,433 | #537 (`#live-plan` 1/7): +74 by the same rule (merge base 4,359 → 4,433). Item-anchor resolution through the LSP outline (including the outline-readiness check `outline_is_the_servers_answer`); the split is deferred because later `#live-plan` nodes touch this file. None of its own seams were cut |
 | 2026-10-02 | 4,475 | #542 (`#live-plan` 5/7): +42 by the same rule (merge base 4,433 → 4,475). `assist` takes a probe position, `assisted_edit` widens/refuses a borrowed selection, probes within the bound and carries function-local `use` items, and `check` reports the carry; the logic itself went to `selection.rs` (new), `imports.rs`, `early_return.rs` and `readiness.rs`. Split deferred: #543 (`check-parity`, the dependent) touches this file. None of its own seams were cut |
+| 2026-10-03 | 2,666 | #539 (`#live-plan` 7/15): 4,475 to 2,666 (−1,809) by engine moves only. Nine modules took the free-item runs: `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`. What is left is the methods of the three `impl RustBackend` blocks and the trait impls, which only the engine's impl-member seam can move |
 
 ## What the gate found
 
@@ -34,6 +35,11 @@ in flight and turn its diff into a conflict.
 
 ## What would close it
 
-A decomposition on a follow-up branch **after the `#carve` stack lands**, not inside it. The obvious
-seams are the assist-driven operations, the hand-authored cross-crate moves, and the LSP session
-plumbing.
+The free-item seams are cut. What remains is inside `impl RustBackend` and its trait impls
+(`Drop`, `LanguageBackend`, `ModuleReferences`): five member runs of roughly 120 to 330 lines each —
+the session plumbing, the transport (`start` … `assist`), the extraction methods (`assisted_edit` …
+`reach_of`), the assist-driven operations (`prune_assist_imports` … `rename_placeholder`), and the whole
+trait impls. They need the engine's impl-member seam, a probe first for each, and a decision about the
+`pub(crate)` a moved private method keeps. The sizes, the risks found and the order are in
+`docs/dev/todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md` § 1;
+when they are moved, re-measure and delete this record with the final number in the change history.

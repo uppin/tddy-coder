@@ -11,13 +11,18 @@ Exposed via `tddy-tools restructure`:
 - `apply <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]`
 - `load <plan.jsonl>...`, `unload <plan.jsonl>... | --all`, `plans` — hold plans in the index daemon's plan store (they need the daemon)
 - `status <plan.jsonl>`
-- `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that are longer than LINES, as a record rather than a gate
-- `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries
-- `verify --against <git-ref>`
+- `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that have more than LINES **production lines** (before the first `#[cfg(test)]` that opens a `mod`), as a record rather than a gate
+- `snapshot <plan.jsonl>` — rewrites the plan's header; for a plan of item anchors it also re-resolves them against the current tree
+- `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries; `--items` takes bare names, `krate::module::Alpha`, and `<Type>` / `<Type>#N` for an inherent `impl` block (`item_anchor::parse_item_list` is the one rule for every front end)
+- `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
 "Ready" means rust-analyzer has reported itself quiescent (or never sends the status at all) **and**
 healthy: an index whose health is anything but `ok` is refused, quoting the server's message.
+
+Every writing `apply` ends with a **tidy** once the tree compiles: the imports rustc reports unused are
+removed, an import only the parent's tests use is gated `#[cfg(test)]`, and every file written is
+formatted. See [docs/readiness-and-gates.md](docs/readiness-and-gates.md#the-tidy).
 
 Every writing `apply` is bracketed by `cargo check --all-targets` over the packages it touches. A
 tree that did not compile before the plan is refused with nothing written; a tree the plan's
@@ -34,6 +39,12 @@ elsewhere in the file leaves the anchor correct; an edit to the item itself is r
 A plan is read through a **plan store** (`plan_store.rs`): operations carry stable ids, the applied plan's
 pending anchors are rewritten after each operation, and the plan is written back. See
 [docs/plan-store.md](docs/plan-store.md).
+
+The plan store also keeps **every other loaded plan** current (`PlanStore::{fold_foreign_op,
+reresolve_files, stale_ops}`): an operation applied from one plan is folded into the rest, files that
+change underneath the daemon are re-resolved, and an operation whose item changed or was edited by
+another plan is **stale** — reported by `ListPlans`, `PlanStatus` and `check`, and refused by `apply`
+before any write. See [docs/plan-store.md](docs/plan-store.md#live-plans).
 
 A cross-crate move (`move_module_to_crate`, `move_cluster_to_crate`) reads every path the moved file
 names — `use` items at any depth and bodies — from one **path survey** (`crate_move/survey.rs`), resolved
@@ -90,6 +101,25 @@ nothing can reference it, so `reexport` is refused; and the destination gains
 Run state is keyed by the **plan**, at `<root>/.restructure/<plan stem>-<digest>/`, so one plan
 follows another under the same root without hand-archiving and `--resume` resumes the plan it was
 given.
+
+## Where the code lives
+
+`src/` is organised by what a file decides, and no file goes over the 500 production-line budget
+except `backends/rust.rs` and `crate_move/test_binary.rs` (see their records in `docs/code-issues/`).
+
+| Area | Modules |
+|---|---|
+| Plan vocabulary | `plan.rs`, `plan/codec.rs` (header codec, `hint_of`), `plan/item_path.rs` |
+| Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
+| Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
+| Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs` |
+| Rust backend | `backends/rust.rs`, and beside it `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
+| Cross-crate moves | `crate_move/{moving,cluster,source_scan}.rs` with `moving/facade_writer.rs`, `cluster/stranded.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs` |
+
+Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream
+(`ServerChatter`'s default); a host that serves structured events builds `ServerChatter::unthrottled()`
+so every phase reaches its clients. The scanners that mask strings and comments handle non-ASCII
+identifiers.
 
 ## Authored transformations
 

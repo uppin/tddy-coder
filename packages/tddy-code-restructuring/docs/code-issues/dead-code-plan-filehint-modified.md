@@ -1,9 +1,9 @@
 # dead-code: FileHint.modified — written into the v2 header, read by nothing
 
-**Location:** `packages/tddy-code-restructuring/src/plan.rs:283` — `FileHint::modified`
+**Location:** `packages/tddy-code-restructuring/src/plan.rs:127` — `FileHint::modified`
 **Category:** dead-code
 **Detected:** 2026-10-02 by the `/pr-wrap` validation of #537
-**Metrics:** 1 field · 1 write site (`hint_of`, `plan.rs:618`) · 0 read sites outside tests
+**Metrics:** 1 field · 1 write site (`hint_of`, `plan/codec.rs:217`) · 0 read sites outside tests
 **Restructure:** no — delete the field and its serialisation, or give it a reader
 **Status:** Open
 
@@ -12,6 +12,7 @@
 | Run | Read sites | Note |
 |---|---|---|
 | 2026-10-02 | 0 | first detection |
+| 2026-10-03 | 0 | #539 (`#live-plan` 7/15) rewrites the field whenever it refreshes a plan's file hints, and still reads it nowhere: the drift report and the live-plan comparisons use `sha256` only. The field's doc comment says "never read; it is there for a person". `hint_of` moved to `plan/codec.rs` in the carve |
 
 ## What the tool found
 

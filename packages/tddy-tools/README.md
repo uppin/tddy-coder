@@ -98,6 +98,18 @@ what was taken, it is not persisted, and it is dropped when the conversation clo
 commits that were pulled, the turn outcome's `worktreeReset` gains `droppedPulledCommits` (what was
 pulled stays in the caller's worktree; nothing is un-applied).
 
+## `restructure`
+
+`restructure` is `tddy_code_restructuring::restructure_cli` for the command line, or the
+`code_index.CodeIndexService` of a running `tddy-index-daemon` when **`TDDY_INDEX_SOCKET`** is set
+(`index_client.rs`, rendered by `index_console.rs`). `load`, `unload` and `plans` need the daemon;
+`snapshot` stays in process, so a `snapshot` of an item-anchored plan starts its own language server
+even with a daemon running. `--items` is read by `tddy_code_restructuring::item_anchor::parse_item_list`,
+the same rule as the other front ends. The stale operations a daemon reports on `ListPlans`,
+`PlanStatus` and `Check` are printed by `console::stale_operations`, the renderer the in-process CLI
+uses, so the two paths read alike; `Apply` refuses a stale operation (`FailedPrecondition`) before
+writing anything. See [Rust code restructuring](../../docs/ft/coder/rust-code-restructuring.md#live-plans).
+
 ## The environment is the real interface
 
 Twenty-one `TDDY_*` variables, `TDDY_SOCKET` read at 43 sites, are how an in-jail agent reaches its
