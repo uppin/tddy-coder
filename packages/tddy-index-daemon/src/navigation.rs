@@ -23,6 +23,10 @@ use crate::status::status_of_lsp;
 /// The language id a document of this host's one language server is announced under.
 const LANGUAGE_ID: &str = "rust";
 
+/// The extension of the files [`LANGUAGE_ID`]'s server can answer for; any other file is refused
+/// rather than announced to it as Rust.
+const SOURCE_EXTENSION: &str = "rs";
+
 /// Where the symbol at the request's position is defined.
 pub(crate) async fn serve_definition(
     index: &WorkspaceIndex,
@@ -127,18 +131,27 @@ async fn asked_document(
     position: Option<SourcePosition>,
 ) -> Result<AskedDocument, Status> {
     let path = file_within(root, file)?;
+    if !is_served_source(&path) {
+        return Err(Status::invalid_argument(format!(
+            "`{file}` is not a `.{SOURCE_EXTENSION}` file; this index serves {LANGUAGE_ID} only"
+        )));
+    }
     let position =
         position.ok_or_else(|| Status::invalid_argument("the request names no position"))?;
     let at = server_position(position)?;
     let text = std::fs::read_to_string(&path)
         .map_err(|err| Status::not_found(format!("`{file}` cannot be read: {err}")))?;
-    let uri = format!("file://{}", path.display());
+    let uri = uri_of_path(&path)?;
     let client = index.client_for(root).await?;
     client
         .sync_document(&uri, LANGUAGE_ID, &text)
         .await
         .map_err(|failure| status_of_lsp(&failure))?;
     Ok(AskedDocument { client, uri, at })
+}
+
+fn is_served_source(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some(SOURCE_EXTENSION)
 }
 
 /// `file` resolved against `root`, refused when it is empty, absolute or climbs out of the root.
@@ -200,6 +213,24 @@ fn code_location(root: &Path, location: &Location) -> Result<CodeLocation, Statu
     })
 }
 
+/// The `file://` URI naming `path`, every byte outside the URI's unreserved set and `/`
+/// percent-escaped — the inverse of [`path_of_uri`].
+fn uri_of_path(path: &Path) -> Result<String, Status> {
+    let text = path.to_str().ok_or_else(|| {
+        Status::invalid_argument(format!("`{}` is not a UTF-8 path", path.display()))
+    })?;
+    let mut uri = String::from("file://");
+    for byte in text.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                uri.push(char::from(byte));
+            }
+            other => uri.push_str(&format!("%{other:02X}")),
+        }
+    }
+    Ok(uri)
+}
+
 /// The filesystem path a `file://` URI names, its percent-escapes decoded.
 fn path_of_uri(uri: &str) -> Result<PathBuf, Status> {
     let escaped = uri.strip_prefix("file://").ok_or_else(|| {
@@ -253,6 +284,23 @@ mod tests {
         let refusal = file_within(Path::new("/work"), "../secret.rs").expect_err("traversal");
 
         assert_eq!(refusal.code, tddy_rpc::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn a_path_with_a_space_and_a_hash_is_percent_escaped_and_round_trips() {
+        let path = Path::new("/work tree/a#b/src/lib.rs");
+
+        let uri = uri_of_path(path).expect("utf-8 path");
+
+        assert_eq!(uri, "file:///work%20tree/a%23b/src/lib.rs");
+        assert_eq!(path_of_uri(&uri).expect("decodes"), path);
+    }
+
+    #[test]
+    fn only_rust_sources_are_served() {
+        assert!(is_served_source(Path::new("/work/src/lib.rs")));
+        assert!(!is_served_source(Path::new("/work/src/app.ts")));
+        assert!(!is_served_source(Path::new("/work/Makefile")));
     }
 
     #[test]

@@ -157,6 +157,9 @@ export function WorktreeCodePane({
       .catch(showNavigationError("Find references"));
   }, [navigation, hover]);
 
+  // The index serves Rust only; offering ctrl-click and hover on other languages would ask it
+  // questions it refuses.
+  const navigable = navigation !== null && selected !== null && selected.relPath.endsWith(".rs");
   const previewKind =
     selected && !selected.error ? workflowPreviewKind(selected.relPath) : "plain";
 
@@ -188,8 +191,8 @@ export function WorktreeCodePane({
             <CodeBlock
               content={selected.content}
               relPath={selected.relPath}
-              onNavigate={navigation ? handleNavigate : undefined}
-              onHover={navigation ? handleHover : undefined}
+              onNavigate={navigable ? handleNavigate : undefined}
+              onHover={navigable ? handleHover : undefined}
               focusLine={selected.focusLine}
             />
           )}
