@@ -153,33 +153,39 @@ reaches); the session-start → warm hook is a `runtime.rs` TODO (see Technical 
 | `the create pane shows the current start phase` | :235 | `[data-testid='create-session-start-phase']` never appears — `useSessionAttachments.startPhase` is always `null` |
 | `the session header shows indexing until ready` | :252 | `[data-testid='session-indexing-indicator']` never appears — `SessionIndexingIndicator` renders `null` |
 
-The create-pane test attaches one file, because the form streams a start only when something is
-attached (no-attachment starts stay on unary `StartSession`, pinned by
-`CreateSessionAttachmentProgress.cy.tsx`). Whether every start should stream so phases show without
-attachments is a **green decision** that would change that pinned test — flagged, not decided here.
+The create-pane test attaches one file, because at the contract the form streamed a start only when
+something was attached. **Decided in green:** every start streams, so phases show without
+attachments; the pinned no-attachment test in `CreateSessionAttachmentProgress.cy.tsx` now pins the
+streamed start instead of the unary one.
 
 ## Technical Debt & Production Readiness
 
-**Stubs (`TODO(indexing-indicators)`) published by the draft-PR contract:**
+**Stubs published by the draft-PR contract — state after green:**
 
-- `tddy-session-files` `AttachmentProgressSink::{begin_phase, end_phase}` exist and send
-  `StartSessionEvent.phase`; **no start calls them** (`svc_start_session_core.rs` doc,
-  `claude_cli_spawn.rs` at the worktree cut), so today's stream is byte-identical. Green threads the
-  sink into each session type's start (claude-cli, cursor-cli, workspace, tool, sandboxed variants).
-- `tddy-daemon` `code_index_warmup::warm_for_session` returns `None` and starts nothing;
-  `SessionIndexProgress` (per-session `watch` channel of the latest `CodeIndexProgress`) is
-  implemented — it is a holder, not behaviour.
-- `CodeNavigationServiceImpl::watch_code_index` answers `Unimplemented`; `index_progress` is
-  `#[allow(dead_code)]` until it reads it.
-- `runtime.rs`: building one `SessionIndexProgress`, handing it to the service and calling
-  `warm_for_session` when a started session's worktree exists — a comment only. **Open design
-  point for green:** the start lives in `tddy-session-lifecycle`, which cannot name `tddy-daemon`;
-  the trigger needs a port on `DaemonSessionHost` (a "session worktree ready" observer the runtime
-  installs) — not drafted here, to avoid inventing a signature no test pins.
-- `WatchCodeIndex` authorisation (token → OS user → the session is theirs) is unwritten.
-- Web: `useSessionAttachments.startPhase` is always `null`; `SessionIndexingIndicator` renders
-  `null`; `SessionMainPane` carries a TODO where the header renders it. `CreateSessionStartPhase`
-  (the text per step) is implemented.
+- ✅ Start phases: claude-cli, cursor-cli and workspace starts report worktree / semantic index /
+  agent through `AttachmentProgressSink::{begin_phase, end_phase}`. ⚠ The sandboxed claude-cli and
+  cursor-cli, tool and split starts do **not** yet — `TODO(indexing-indicators)` in
+  `svc_start_session_core.rs`.
+- ✅ `code_index_warmup::warm_for_session` warms through `IndexDaemonRegistry::connect`; a failed or
+  short warm ends with `error` set; a first `Starting` record is written before the task spawns.
+- ✅ `watch_code_index` follows `SessionIndexProgress` to `ready` / `error`; `index_progress`'s
+  `#[allow(dead_code)]` is gone.
+- ✅ Runtime hook: new port `SessionWorktreeObserver` (`tddy-session-lifecycle`), installed with
+  `DaemonSessionHost::with_worktree_observer`, implemented by the daemon's `IndexWarmupObserver`;
+  installed only when `index_daemon:` is configured. The index-daemon block in `runtime.rs` moved
+  above the session host so the observer can hold the registry (same task registry as before).
+- ⚠ `WatchCodeIndex` authorisation checks the **token** (`WorktreeServiceImpl::authorize`, made
+  `pub`) but **not session ownership**: `warm_for_session` takes no user and the acceptance test
+  watches a session with no directory. **Open decision for the developer.**
+- ✅ Web: `startPhase` follows the stream's `phase` events; `SessionIndexingIndicator` follows
+  `watchCodeIndex`, shows `error`, cleans up on unmount; rendered in `SessionMainPane`'s header
+  through `codeNavigationClient` (`SessionsDrawerScreen` passes the owning host's client).
+- 🆕 **Every start now streams** (developer decision): `CreateSessionPane` always uses
+  `startSessionStreamed`; `CreateSessionAttachmentProgress.cy.tsx`'s pinned unary test was rewritten
+  to pin the streamed start. Component specs that stub only unary `startSession` keep working through
+  `registerServerStreamFallback` in `tddy-connectrpc-testkit` (registered in `cypress/support/component.ts`).
+- 🆕 `session_coordinate_handlers.rs`: the terminal event is sent only after the progress forwarding
+  task has drained, so `Result` can no longer overtake a phase's `Ended`.
 
 **Not written, and why:**
 
@@ -214,7 +220,20 @@ attachments is a **green decision** that would change that pinned test — flagg
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes (2026-10-03, head `e05c49bc`)
+
+**Stack gate:** current with `feature/live-plan/session-lsp-tools`; `origin/<base>..HEAD` is this PR's six commits only; no deletions; nothing from `## Dependencies` reimplemented (`WatchCodeIndex` is the addition the changeset names). **Build:** `cargo build -p tddy-daemon -p tddy-session-lifecycle -p tddy-worktree-service -p tddy-session-files -p tddy-service` clean, no warnings (scoped).
+
+**Tests (scoped):** `start_phase_acceptance` 2/2, `code_index_warmup_acceptance` 4/4 (re-run); web: `SessionStartAndIndexingProgress`, `CreateSessionAttachmentProgress`, `CreateSessionAcceptance`, `CreateSessionBranchConflictAcceptance`, `CreateSessionAutoClosesDrawer`, `PrStackStartSessionModalAcceptance`, `CreateSessionCodebaseHostAcceptance` all pass. ⚠ Not compared with a clean base: `./test -p tddy-session-lifecycle` 22 failures (16 sandboxed-session / macOS sandbox-bridge gap, 6 `session_sync_livekit_acceptance`), `./test -p tddy-daemon` 1 failure (`unbundle_endpoint`, names modules this round did not add). ~30 other specs using `startSession` are left to CI.
+
+| Severity | Where | Finding |
+|---|---|---|
+| WARNING | `code_navigation.rs` `watch_code_index` | token authorised, session ownership not — any signed-in user can follow any session's progress (and `error` text, which may carry paths) |
+| WARNING | `svc_start_session_core.rs:58` | own `TODO(indexing-indicators)`: sandboxed, tool and split starts report no phases and trigger no warm |
+| INFO | `code_index_warmup.rs` `SessionIndexProgress` | one map entry per session id ever watched, never freed |
+| INFO | `tddy-worktree-service` `authorize` | widened to `pub` for one caller |
+| INFO | `tddy-connectrpc-testkit` | outside the planned surface; test infrastructure, process-wide registration |
+| INFO | `CreateSessionAcceptance.cy.tsx` | failed 15/15 once in a batch run during a full-disk episode, passed alone; cause not found |
 
 ## TODO
 
@@ -226,11 +245,11 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code (⚠ sandboxed / tool / split starts and session-ownership authorisation remain — see Technical Debt)
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest — local scoped run done; CI not yet read
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
