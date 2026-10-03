@@ -184,6 +184,9 @@ fn an_extraction_of_the_function_body() -> RefactorOp {
         to_file: false,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 

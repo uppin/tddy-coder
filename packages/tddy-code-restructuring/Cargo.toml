@@ -22,6 +22,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror = "2"
+# `type` and `expr` are the only Rust syntax a plan carries; each is parsed as exactly one
+# `syn::Type` / `syn::Expr` (`full`), and an expression is walked for statements (`visit`).
+syn = { version = "2", features = ["full", "visit"] }
 tddy-lsp = { path = "../tddy-lsp" }
 # `signal` is what lets the CLI cancel its own run on `^C`: with no budget to expire, the
 # operator interrupting the command is how a one-shot caller says it has stopped waiting.

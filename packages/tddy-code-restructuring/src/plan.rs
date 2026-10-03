@@ -3,11 +3,17 @@
 //!
 //! A plan never carries code. If an operation would need a code snippet, the op vocabulary is wrong
 //! and the plan is rejected — that rejection is what keeps hand-written code out of the pipeline.
+//!
+//! The two exceptions are `type` and `expr`, which a signature change and a call-site repair cannot
+//! be stated without. Each is exactly one Rust type or one Rust expression and nothing more —
+//! [`rust_syntax`] refuses anything else.
 
 use crate::edit::{Position, Range};
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+pub mod rust_syntax;
 
 /// Where an operation applies. Anchors are always expressed in *original snapshot* coordinates;
 /// the [`crate::PositionLedger`] translates them to current coordinates at execution time.
@@ -221,9 +227,50 @@ pub enum RefactorKind {
     /// tuple struct, and every destructuring caller is rewritten to match. Anchored on the function;
     /// `name` is the new struct's, given to the assist's placeholder through the server's rename.
     ConvertTupleReturnToStruct,
+    /// Changes one parameter's type in the declaration, and nothing else: every caller is its own
+    /// call-site operation, normally in the same transactional group. Anchored on the function;
+    /// `name` is the parameter, `type` the new type.
+    ChangeParamType,
+    /// Adds a parameter to the declaration only. Anchored on the function; `name` and `type` are the
+    /// new parameter's, `variant` its position — `first`, `last` or `after:<param>`.
+    AddParam,
+    /// Reorders the declaration's parameters only. Anchored on the function; `order` names every
+    /// parameter once, in the new order.
+    ReorderParams,
+    /// Changes the declaration's return type. Anchored on the function; either `type`, the new
+    /// return type written into the declaration (the body and callers are left to the group's gate),
+    /// or `variant` = `wrap_result` / `wrap_option` / `unwrap`, backed by rust-analyzer's
+    /// `wrap_return_type` / `unwrap_return_type` assists, which also rewrite the function's own
+    /// returns.
+    ChangeReturnType,
+    /// Inserts one argument into one call expression. Anchored on the caller with a relative range
+    /// on the call; `expr` is the argument, `variant` its position — `first`, `last` or a one-based
+    /// index.
+    AddCallArg,
+    /// Removes one argument from one call expression; `variant` is its position.
+    RemoveCallArg,
+    /// Replaces one argument of one call expression; `variant` is its position, `expr` the new
+    /// argument.
+    ChangeCallArg,
+    /// Reorders the arguments of one call expression; `order` lists the current one-based argument
+    /// positions in their new order.
+    ReorderCallArgs,
 }
 
 impl RefactorKind {
+    /// Whether this operation edits one call expression rather than a declaration — the four whose
+    /// anchor must land on a call.
+    #[must_use]
+    pub fn edits_a_call_site(self) -> bool {
+        matches!(
+            self,
+            RefactorKind::AddCallArg
+                | RefactorKind::RemoveCallArg
+                | RefactorKind::ChangeCallArg
+                | RefactorKind::ReorderCallArgs
+        )
+    }
+
     /// Whether this operation moves modules out of the crate that holds them.
     ///
     /// The two cross-crate moves differ only in how many modules travel, so every decision taken
@@ -338,6 +385,40 @@ pub struct RefactorOp {
     /// stands alone, under the end-of-run gate it always had.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// A Rust type, for `change_param_type`, `add_param` and `change_return_type`.
+    ///
+    /// The one place besides `expr` a plan carries Rust syntax: it is parsed as exactly one
+    /// [`syn::Type`] and refused otherwise (see [`rust_syntax::one_type`]), so it can carry neither
+    /// statements nor items.
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub type_: Option<String>,
+    /// A Rust expression, for `add_call_arg` and `change_call_arg`: parsed as exactly one
+    /// [`syn::Expr`] carrying no statement, and refused otherwise (see [`rust_syntax::one_expr`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expr: Option<String>,
+    /// The new order, for `reorder_params` (parameter names) and `reorder_call_args` (current
+    /// one-based argument positions).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<OrderKey>,
+}
+
+/// One entry of an operation's `order`: a parameter's name, or an argument's one-based position.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum OrderKey {
+    /// A call argument's current one-based position.
+    Position(u32),
+    /// A parameter's name.
+    Name(String),
+}
+
+impl std::fmt::Display for OrderKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OrderKey::Position(position) => write!(formatter, "{position}"),
+            OrderKey::Name(name) => write!(formatter, "`{name}`"),
+        }
+    }
 }
 
 /// Whether a flag is off — what keeps a default out of a plan written back, so an operation reads
@@ -673,6 +754,85 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "plan is malformed: `convert_tuple_return_to_struct` needs `name`: the new struct's name"
+        );
+    }
+
+    /// The refusal `Plan::parse` gives for a single operation line, as text.
+    fn the_refusal_of(op_line: &str) -> String {
+        Plan::parse(&plan_with(op_line))
+            .map(|plan| plan.ops.len())
+            .expect_err("the operation is refused")
+            .to_string()
+    }
+
+    /// A `type` is one Rust type: two of them side by side are code, not a type.
+    #[test]
+    fn a_type_that_is_not_one_rust_type_is_refused() {
+        // Given a parameter-type change whose `type` is two types
+        let line = r#"{"op":"change_param_type","anchor":{"kind":"symbol","file":"src/pricing.rs","path":"label"},"name":"count","type":"u32 u32"}"#;
+
+        // When it is parsed
+        let refusal = the_refusal_of(line);
+
+        // Then it is refused as malformed, naming the text
+        assert_eq!(
+            refusal,
+            "plan is malformed: `type` must be exactly one Rust type, and `u32 u32` is not"
+        );
+    }
+
+    /// An `expr` is one Rust expression: two calls separated by `;` are statements.
+    #[test]
+    fn an_expr_that_is_not_one_expression_is_refused() {
+        // Given a call-argument change whose `expr` is two expressions
+        let line = r#"{"op":"change_call_arg","anchor":{"kind":"symbol","file":"src/checkout.rs","path":"basket"},"variant":"first","expr":"total(1); total(2)"}"#;
+
+        // When it is parsed
+        let refusal = the_refusal_of(line);
+
+        // Then it is refused as malformed, naming the text
+        assert_eq!(
+            refusal,
+            "plan is malformed: `expr` must be exactly one Rust expression, and `total(1); total(2)` is not"
+        );
+    }
+
+    /// A block is one expression, but the `let` inside it is a statement — code the engine should
+    /// have produced, smuggled in as an argument.
+    #[test]
+    fn an_expr_carrying_a_statement_is_refused() {
+        // Given a call-argument addition whose `expr` is a block holding a `let`
+        let line = r#"{"op":"add_call_arg","anchor":{"kind":"symbol","file":"src/checkout.rs","path":"basket"},"variant":"last","expr":"{ let unit = \"items\"; unit }"}"#;
+
+        // When it is parsed
+        let refusal = the_refusal_of(line);
+
+        // Then it is refused as malformed, saying it carries a statement
+        assert_eq!(
+            refusal,
+            "plan is malformed: `expr` may carry no statement, and `{ let unit = \"items\"; unit }` carries one"
+        );
+    }
+
+    /// The JSON field is `type`; the Rust field is `type_`.
+    #[test]
+    fn reads_a_parameter_type_change_naming_its_parameter_and_type() {
+        // Given a plan changing `count` to `&str`, written the way a plan author writes it
+        let jsonl = plan_with(
+            r#"{"op":"change_param_type","anchor":{"kind":"symbol","file":"src/pricing.rs","path":"label"},"name":"count","type":"&str"}"#,
+        );
+
+        // When it is parsed
+        let plan = Plan::parse(&jsonl).unwrap();
+
+        // Then the operation carries the parameter and its new type
+        assert_eq!(
+            (
+                plan.ops[0].op,
+                plan.ops[0].name.as_deref(),
+                plan.ops[0].type_.as_deref()
+            ),
+            (RefactorKind::ChangeParamType, Some("count"), Some("&str"))
         );
     }
 
