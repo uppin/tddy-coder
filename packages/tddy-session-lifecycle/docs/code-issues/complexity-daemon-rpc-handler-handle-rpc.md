@@ -16,6 +16,7 @@
 | 2026-09-24 | 147 | 8 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: five `Request::new` → `Request::direct` (in-process calls stamped as such), same line count and nesting. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD |
 | 2026-09-24 | 147 | — | re-measured for #524 (2026-09-24): unchanged, and not touched by it |
 | 2026-10-01 | 182 | 8 | **worse** by 3 (179 → 182, same fn-line-to-closing-brace count on `master` and HEAD; the 147 above predates growth that was not recorded) in PR #560 (`#agent-worktree` 1/4): one more arm, `(EXEC_TOOL_SERVICE, "ConversationWorktree")`, delegating to `conversation_worktree_from_jail`. Nesting unchanged |
+| 2026-10-03 | 185 | 8 | **worse** by 3 (182 → 185, fn line to closing brace on `0ce696aa` and `4f2a3b66`) in PR #576 (caller sync): the `ConversationWorktree` arm passes the jail's bound session, `conversation_worktree_from_jail(&self.bound, payload)`, which rustfmt wraps over four lines. The handler is per jail (`BoundJailSession`); no arm added, nesting unchanged |
 
 ## What the tool found
 

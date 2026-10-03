@@ -2,9 +2,10 @@
 //! (taking the worktree back first), take in the caller's current files, then append the turn's
 //! messages.
 //!
-//! The order is the contract (PRD-2026-10-03-agent-worktree-caller-sync): a reset that fails refuses
-//! the resume with the history whole; the sync runs on the worktree the turn will run on, and a
-//! conflict refuses the turn before anything is appended or sent; the sync's notice is appended last.
+//! The order is the contract (`docs/ft/coder/managed-codebase-subagents.md` § Every turn takes in
+//! the caller's current files): a reset that fails refuses the resume with the history whole; the
+//! sync runs on the worktree the turn will run on, and a conflict refuses the turn before anything
+//! is appended or sent; the sync's notice is appended last.
 
 use crate::openai::ChatMessage;
 

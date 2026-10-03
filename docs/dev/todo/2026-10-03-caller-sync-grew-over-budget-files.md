@@ -1,7 +1,7 @@
 # 2026-10-03 — Files the caller-sync change grew past the file budget; splits deferred
 
 **Category:** Deferred — developer consented 2026-10-03
-**Source:** changeset [`2026-10-03-agent-worktree-caller-sync`](../1-WIP/2026-10-03-agent-worktree-caller-sync.md)
+**Source:** changeset [`2026-10-03-agent-worktree-caller-sync`](../changesets/2026-10-03-agent-worktree-caller-sync.md)
 (`/analyze-clean-code` first pass, file-length gate)
 
 The plan was "new logic goes into new modules; the over-budget files grow by wiring lines only".

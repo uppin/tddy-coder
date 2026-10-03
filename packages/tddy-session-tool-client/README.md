@@ -35,11 +35,21 @@ conversation named on the wire, so the daemon runs the call in that conversation
 `conversation_worktree(conversation, op)` asks for `ConversationWorktreeOp::{Pull, Remove}` over the
 same four transports; `reset_conversation_worktree(conversation, commit)` sends the `Reset` op (an
 empty commit names the conversation's base) and `diff_conversation_worktree(conversation, from, to)`
-sends the `Diff` op (an omitted bound is sent empty: the base for `from`, the tip for `to`). Both are
-functions beside them rather than `ConversationWorktreeOp` variants, because that enum is `Copy` and
-they carry data. All four live in `src/conversation.rs`, and the transports'
-request-taking cores
-(`dispatch_request_via_*`) are shared with the unchanged `dispatch_via_*` entry points.
+sends the `Diff` op (an omitted bound is sent empty: the base for `from`, the tip for `to`);
+`pull_conversation_range(conversation, from, to, already_pulled)` sends `PullRange`; and
+`sync_conversation_worktree(conversation)` sends `Sync`, which merges the session worktree's current
+files into the conversation's worktree before a turn and answers `{"sync": {…} | null}` or
+`{"conflicts": […], "moreConflicts": n}`. They are functions beside `conversation_worktree` rather than
+`ConversationWorktreeOp` variants, because that enum is `Copy` and they carry data; each builds its
+request through `conversation_op_request` from an `Op`. All of them live in `src/conversation.rs`,
+and the transports' request-taking cores (`dispatch_request_via_*`) are shared with the
+`dispatch_via_*` entry points.
+
+Over HTTP the request travels as Connect JSON built by `connect_json_body`: the request's fields, and
+the chosen operation as a key of its own — `{"pull": {}}`, `{"remove": {}}`, `{"reset": {"commit"}}`,
+`{"diff": {"from", "to"}}`, `{"pull_range": {"from", "to", "already_pulled"}}`, `{"sync": {}}`. That
+encoding is hand-written and not yet verified against a live daemon over HTTP; see the backlog entry
+*The `ConversationWorktree` call over HTTP is unverified*.
 
 ## Why it is its own crate
 

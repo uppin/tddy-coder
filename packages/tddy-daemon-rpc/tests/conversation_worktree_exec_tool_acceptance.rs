@@ -1,7 +1,7 @@
 //! Acceptance: `ExecuteTool` carrying a `conversation_id` runs in that conversation's own
 //! worktree, and `ConversationWorktree` hands the work back or removes it.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

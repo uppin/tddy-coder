@@ -44,6 +44,8 @@ The module docs carry it, and they are the authority rather than a summary of on
 | `roster::link` | which daemon those RPCs reach, and the identity they carry |
 | `subagent::turn_request` | what a caller may ask of a turn — a new question, a continuation, a rewind, a correction — and the budget it runs under, including why the **floor** is as load-bearing as the ceiling |
 | `subagent::transcript` | one conversation's addressable history: id minting that never reuses a discarded id, preview truncation, and rewind boundary-snapping that never separates a tool call from its results |
+| `subagent::turn_start` | what a turn does before its first model call, in the order that is its contract: clear the repeat ledger when the caller brings something new, rewind (worktree reset first), take in the caller's files, then append the turn's messages with the sync notice last |
+| `subagent::worktree_sync` | the `WorktreeSyncPort` a turn asks to merge the caller's current files into the conversation's worktree, its `SyncAnswer`, and the texts the model and the caller read — `sync_notice` and `sync_refusal` |
 | `subagent::worktree_reset` | the `WorktreeResetPort` a rewind asks to take the conversation's worktree back, and the `ResetTarget` / `WorktreeReset` it speaks in (re-exported from `tddy-subagent-worktree`) — the discovery crate owns no git |
 | `subagent::result_summary` | the bounded, structured facts of one tool result — per-tool extraction from the result JSON at the transcript's append site, serialized as one externally tagged object (`{"read": {…}}`) |
 | `subagent::grep_context` | the `before`/`after` window a `GREP` asks for — argument reading that rejects past the ceiling rather than clamps, the shared context-entry shape, and the Local path's window computation over the file's own lines |
@@ -101,10 +103,10 @@ paths — because it rides every mutating result of a turn.
 
 ## A rewind takes the worktree back
 
-`subagent_resume { fromMessageId }` used to cut the transcript and touch no files. With a
+`subagent_resume { fromMessageId }` takes the conversation's files back with its transcript. With a
 `WorktreeResetPort` configured (`SubagentConfig::{worktree_reset, with_worktree_reset}`, handed to the
-session by `SpecializedSubagentSession::resetting_worktree_through`), `take_turn` does this between
-validation and the cut:
+session by `SpecializedSubagentSession::resetting_worktree_through`), the turn start (`subagent::turn_start`,
+called by `take_turn` after validation) does this before the cut:
 
 1. if the request rewinds and `TurnRequest::resets_worktree()` (the default; `keeping_worktree()` opts
    out), `Transcript::commit_kept_by(point)` picks the target — the commit recorded on the last kept
@@ -112,9 +114,10 @@ validation and the cut:
    `last_kept_by` with `rewind_to`, so the reset and the cut cannot disagree about which entries a
    rewind keeps;
 2. `port.reset(target)` runs. `Ok(None)` means the conversation has no worktree; an `Err` fails
-   `take_turn` **before `rewind_to`**, so a failed reset leaves the transcript, and the refusal, as
+   the turn **before `rewind_to`**, so a failed reset leaves the transcript, and the refusal, as
    they were. The reset precedes the cut for exactly that reason;
-3. the transcript is cut and the turn runs; the first model request therefore follows the reset;
+3. the transcript is cut; the caller sync (below) and the first model request therefore follow the
+   reset;
 4. `PromptOutcome::worktree_reset` carries the `WorktreeReset` (absent for no port, an opt-out, no
    rewind, or no worktree), and `prompt_outcome_json` serializes it as `worktreeReset { to,
    droppedCommits }`.
@@ -123,6 +126,55 @@ validation and the cut:
 port is a trait rather than a dispatch-closure tool name because a reset is not something the model
 can call. The host-side implementation lives in `tddy-tools`; the tests inject a recording port and
 assert both the target asked for and that no model request had been made when it was asked.
+
+## Every turn takes in the caller's current files
+
+A caller that took part of a subagent's work, edited files itself, and prompts or resumes the
+conversation would otherwise send the subagent back into a tree the caller no longer has. With a
+`WorktreeSyncPort` configured (`SubagentConfig::{worktree_sync, with_worktree_sync}`, handed to the
+session by `SpecializedSubagentSession::syncing_worktree_through`), every turn asks the host that owns
+the worktree to merge the caller's files in
+([`tddy-subagent-worktree`](../../tddy-subagent-worktree/docs/conversation-worktree.md) § Caller
+sync). The discovery crate owns no git: the port answers a `SyncAnswer` —
+`Merged(WorktreeSync)`, `Nothing` (no worktree yet, or nothing new from the caller), or
+`Conflicted { paths, more_paths }`.
+
+`SpecializedSubagentSession::prepare_turn` (`subagent/turn_start.rs`) runs the turn's start in this
+order, and the order is the contract:
+
+1. **Repeat ledger.** A new prompt, a correction, a rewind point or a replacement clears the
+   repeated-call ledger (`RepeatedCalls::forget_earlier_calls`).
+2. **Reset**, when the request rewinds and resets the worktree (above) — before the cut, so a failed
+   reset leaves the history whole.
+3. **Rewind** — `Transcript::rewind_to`.
+4. **Sync**, when `TurnRequest::syncs_worktree()` (the default; `without_sync()` opts out — the
+   `syncWorktree: false` of both MCP tools) and a port is present
+   (`worktree_sync::take_in_callers_files`). After the reset, so the caller's files merge into the
+   worktree the turn will run on; before anything is appended, so a conflict refuses the turn before
+   a single model call. `Merged` **clears the repeat ledger again**: a read it remembers can now return
+   different content, so the subagent may read a file again without being refused as a repeat.
+   `Conflicted` fails the turn with `sync_refusal`; a port error fails it the same way.
+5. **Appends** (`append_turn_messages`): prompt, correction, replacement — then the **sync notice
+   last**, so it follows a replacement's completed tool-call group and is what the model reads right
+   before it acts.
+
+`sync_notice(&WorktreeSync)` is one user message:
+
+> The caller changed 3 files since your last turn (+41 −7): README.md, src/lib.rs, src/new.rs. Your
+> worktree now has their versions — re-read before relying on what you read earlier.
+
+`sync_refusal(paths, more_paths, rewind)` names the conflicted paths and the three ways forward —
+pull those commits first (`subagent_pull`), change the files, or carry on without the caller's changes
+(`syncWorktree: false`). Both name at most `SYNC_NOTICE_PATHS` (20) paths, then `and N more` (counting
+what the host already left out); a path holding a control character is Debug-quoted, so a newline in a
+file name cannot forge a line of the message. A refusal after a rewind does not undo it: `RewindApplied`
+makes the refusal say the conversation stays rewound, and its worktree reset when one ran.
+
+`PromptOutcome::worktree_sync` carries what was merged (absent for no port, an opt-out, or nothing
+merged), and `prompt_outcome_json` serializes it as `worktreeSync { commit, files, lines, paths,
+morePaths }`. The host-side port (`ConversationWorktreeSyncPort`) lives in `tddy-tools`. The tests
+(`tests/caller_sync_acceptance.rs`) give the reset and sync ports one shared event log, each event
+noting the model requests seen, so the order reset → sync → first model call is asserted directly.
 
 ## Features
 

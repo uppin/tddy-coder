@@ -1,7 +1,7 @@
 //! A conversation's own worktree: how it is cut, what one commit per change records, how the work
 //! is handed back to the caller, and how it is removed.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 mod support;
 

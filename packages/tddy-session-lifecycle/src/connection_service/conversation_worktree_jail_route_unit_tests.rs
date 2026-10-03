@@ -9,7 +9,7 @@
 //! `tddy-sandbox-runner`; a real jail is not started here, so this proves what reaches it rather
 //! than what the OS sandbox then does.)
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 use super::workspace_sandbox_roster_dispatch_unit_tests::{
     a_sandboxed_workspace_session, SeededWorkspace,

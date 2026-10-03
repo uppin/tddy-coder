@@ -486,7 +486,7 @@ mod tests {
 
     /// `subagent_end` is how a conversation's work reaches the caller at all: a sandboxed Claude
     /// allowed to cancel a conversation but not to end it could only ever throw the work away.
-    /// Feature: docs/ft/coder/1-WIP/PRD-2026-09-30-agent-worktree-isolated-edits.md
+    /// Feature: docs/ft/coder/managed-codebase-subagents.md
     #[test]
     fn subagent_end_is_allowlisted_wherever_subagent_cancel_is() {
         // Given

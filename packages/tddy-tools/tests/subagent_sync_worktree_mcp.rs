@@ -1,7 +1,7 @@
 //! `subagent_prompt` and `subagent_resume` advertise `syncWorktree` — the caller's opt-out from a
 //! turn first taking in its current files — over the real `tddy-tools --mcp` stdio wire.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-03-agent-worktree-caller-sync.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 //!
 //! The sync itself is pinned where it can be observed: the order and the notice in
 //! `packages/tddy-discovery/tests/caller_sync_acceptance.rs`, the git in

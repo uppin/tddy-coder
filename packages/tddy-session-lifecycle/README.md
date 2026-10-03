@@ -17,9 +17,30 @@ ports and moved by `#carve` 16–21
 
 `LocalExecTools::run_exec_tool_locally` — the one route every exec tool takes — runs a call that
 carries a `conversation_id` through `tddy_subagent_worktree::run_in_conversation` (no branch inside
-`stream_execute_tool`), and merges the `worktreeChange` into its result. `run_conversation_worktree_op`
-serves `ConversationWorktree`'s `Pull` and `Remove` for both the exec-tool RPC and the jail's host
-bridge (`DaemonRpcHandler`), where the runner has already bound the request to its own session.
+`stream_execute_tool`), and merges the `worktreeChange` into its result.
+
+`run_conversation_worktree_op` (`connection_service/conversation_worktree_op.rs`) serves every
+`ConversationWorktree` operation — `Pull`, `PullRange`, `Remove`, `Reset`, `Diff`, `Sync` — with one
+helper per op, for both the exec-tool RPC and the jail's host bridge. `Sync` merges the session
+worktree's current files into the conversation's branch before a turn and answers
+`{"sync": {commit, files, lines, paths, morePaths}}`, `{"sync": null}` (no worktree, nothing new, or a
+recorded merge that changed no file), or `{"conflicts": [≤ SYNC_NOTICE_PATHS paths], "moreConflicts": n}`
+with nothing moved; a merge and a conflict are logged at `info`.
+
+**The host bridge is bound to its jail's session.** Each jail gets its own `DaemonRpcHandler`,
+built by `sandbox_rpc_handler(session_id, session_dir)` at every jail launch
+(`svc_start_sandboxed_cursor_cli_session.rs`, `jail_launch_steps.rs`, `relaunch_jail_steps.rs`) and
+carrying a `BoundJailSession { session_id, session_dir }` — the session the daemon built the jail
+for, with the session directory the daemon itself resolved under the session owner's sessions base.
+The host keeps only a `Weak<DaemonSessionHost>` (`install_sandbox_rpc_bridge`).
+`conversation_worktree_from_jail` refuses a request naming any other session with `PermissionDenied`
+(and a warning in the log) — the runner rewrites every request to its own session, so one that names
+another did not come through the runner — and reads the worktree from the bound `session_dir` through
+`workspace_session::resolve_worktree_root_in_session_dir`, the same `.session.yaml` lookup the token
+route's `resolve_worktree_root_for_session` makes. The runner's own rebinding
+(`tddy-sandbox-runner`'s `conversation_root::bind_to_this_session`) is the second line of defence.
+`Sync` reads the session's uncommitted files into a worktree the bridge's `Diff` can read, so this
+binding is what keeps the bridge from being a read path into another session.
 `agent_tool_reads_the_clone` delegates to `ToolEffect::of`: one read-only classifier.
 
 ## Quick Start

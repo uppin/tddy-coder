@@ -1,7 +1,7 @@
 # 2026-10-03 — A merge the subagent makes itself is read as a caller sync
 
 **Category:** Known gap
-**Source:** changeset [`2026-10-03-agent-worktree-caller-sync`](../1-WIP/2026-10-03-agent-worktree-caller-sync.md)
+**Source:** changeset [`2026-10-03-agent-worktree-caller-sync`](../changesets/2026-10-03-agent-worktree-caller-sync.md)
 (`/validate-changes` first pass, ℹ info)
 
 The conversation branch's lineage (`packages/tddy-subagent-worktree/src/lineage.rs`) treats **every**

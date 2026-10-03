@@ -1,6 +1,6 @@
 //! Bringing a conversation's worktree up to the caller's current files before a turn.
 //!
-//! PRD: docs/ft/coder/1-WIP/PRD-2026-10-03-agent-worktree-caller-sync.md
+//! Feature: docs/ft/coder/managed-codebase-subagents.md
 
 mod support;
 

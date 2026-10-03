@@ -31,7 +31,7 @@ pub enum SyncAnswer {
 }
 
 /// What a turn had already done to the conversation before its sync was refused — a refused sync
-/// does not undo it (PRD: "A sync refusal after a rewind leaves the rewind done").
+/// does not undo it: a resume that rewound stays rewound, and the refusal says so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RewindApplied {
     /// The transcript was rewound; the worktree was not touched (no worktree, or
