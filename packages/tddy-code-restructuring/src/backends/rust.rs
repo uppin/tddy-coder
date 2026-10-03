@@ -57,7 +57,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 10] = [
+const SUPPORTED: [RefactorKind; 12] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -68,6 +68,8 @@ const SUPPORTED: [RefactorKind; 10] = [
     RefactorKind::MoveModuleToCrate,
     RefactorKind::MoveClusterToCrate,
     RefactorKind::MoveTestBinaryToCrate,
+    RefactorKind::RemoveUnusedParam,
+    RefactorKind::ConvertTupleReturnToStruct,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -321,6 +323,32 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             kinds: &["refactor.inline"],
             at_caret: true,
             placeholder: None,
+            multi_file: true,
+            needs_inference: false,
+            relocates_items: false,
+        }),
+        // TODO(signature-assists): verify the title and kind against the bundled rust-analyzer
+        // (2026-03-30) — the assist id is `remove_unused_param`, offered at the parameter.
+        RefactorKind::RemoveUnusedParam => Some(Assist {
+            title: "remove unused parameter",
+            kinds: &["refactor"],
+            at_caret: true,
+            placeholder: None,
+            multi_file: true,
+            needs_inference: false,
+            relocates_items: false,
+        }),
+        // TODO(signature-assists): verify the title and kind against the bundled rust-analyzer —
+        // the assist id is `convert_tuple_return_type_to_struct`; the struct it writes is named
+        // after the function, so the placeholder is found by what the assist added.
+        RefactorKind::ConvertTupleReturnToStruct => Some(Assist {
+            title: "convert tuple return type to tuple struct",
+            kinds: &["refactor.rewrite"],
+            at_caret: true,
+            placeholder: Some(Placeholder {
+                keyword: "struct",
+                name: None,
+            }),
             multi_file: true,
             needs_inference: false,
             relocates_items: false,
@@ -1132,6 +1160,20 @@ impl RustBackend {
             return Ok(Resolution::of(crate_move::resolve_test_binary_move(
                 workspace, &moving,
             )?));
+        }
+
+        // TODO(signature-assists): implement — `remove_unused_param` places the caret on the
+        // parameter `op.name` names and refuses, naming it, when the server offers no removal
+        // because the body uses it; `convert_tuple_return_to_struct` renames the struct the assist
+        // introduces to `op.name`. Both resolve through `multi_file_assist`, callers included.
+        if matches!(
+            op.op,
+            RefactorKind::RemoveUnusedParam | RefactorKind::ConvertTupleReturnToStruct
+        ) {
+            return Err(failure(format!(
+                "TODO(signature-assists): {:?} is not implemented yet",
+                op.op
+            )));
         }
 
         self.start(workspace.root)?;

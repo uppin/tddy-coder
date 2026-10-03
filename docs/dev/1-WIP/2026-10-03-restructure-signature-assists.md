@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 9/15 — branch `feature/live-plan/signature-assists`, base `feature/live-plan/code-navigation`.
-PR: _recorded when the PR opens_
+PR: [#569](https://github.com/uppin/tddy-coder/pull/569)
 
 **Position.** Appended after #539, in green-wave order: wave 1 #539, code-navigation, signature-assists · wave 2 transactional-groups, session-lsp-tools, indexing-indicators · wave 3 plan-dialog, session-restructure-tools, signature-rewrites; inside each wave the node with the most transitive dependents leads.
 
@@ -86,20 +86,32 @@ As in `## Responsibility` and the PRD's Proposed Changes.
 
 ## Acceptance Tests
 
-### tddy-code-restructuring — `tests/signature_assists_acceptance.rs` (live rust-analyzer)
+### tddy-code-restructuring — [`tests/signature_assists_acceptance.rs`](../../../packages/tddy-code-restructuring/tests/signature_assists_acceptance.rs) (live rust-analyzer, item-anchored plans applied through the runner)
 
-- `removing_an_unused_parameter_rewrites_every_call_site_and_compiles`
-- `removing_a_used_parameter_is_refused_naming_it`
-- `converting_a_tuple_return_to_a_struct_rewrites_destructuring_callers_and_compiles`
-- `a_missing_name_is_refused_as_malformed`
+- `removing_an_unused_parameter_rewrites_every_call_site_and_compiles` — `ledger::pricing::total(price, quantity, note)` called from `checkout.rs` and `lib.rs`; asserts all three files exactly and `cargo check`.
+- `removing_a_used_parameter_is_refused_naming_it` — `discount` read by the body; the refusal names `` `discount` `` and says it "is used"; both files unchanged.
+- `converting_a_tuple_return_to_a_struct_rewrites_destructuring_callers_and_compiles` — `split -> (u32, u32)` into `Halves`; asserts `struct Halves(u32, u32);`, `-> Halves {`, `let Halves(first, second) = split(7);`, and `cargo check`.
+- `a_missing_name_is_refused_as_malformed` — parse-level (no server), `remove_unused_param` with no `name`; exact message `` plan is malformed: `remove_unused_param` needs `name`: the parameter to remove ``.
+
+### tddy-code-restructuring — `src/plan.rs` unit tests
+
+- `refuses_a_tuple_return_conversion_that_names_no_struct` — exact message `` plan is malformed: `convert_tuple_return_to_struct` needs `name`: the new struct's name `` (fails until the `parse_op` refusal lands).
+- `reads_a_parameter_removal_naming_its_parameter`, `reads_a_tuple_return_conversion_naming_its_struct` — the serde surface; pass already.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+Red-phase stubs, each marked `TODO(signature-assists)`:
+
+- `backends/rust.rs` `resolve_opening` — both ops return `Err("TODO(signature-assists): … is not implemented yet")` before a server starts. Green: caret on the parameter `name` names, refusal naming a used parameter, the struct placeholder renamed to `name`, all through `multi_file_assist`.
+- `backends/rust.rs` `assist_for` — arms for both ops with titles `remove unused parameter` / `convert tuple return type to tuple struct` and kinds `refactor` / `refactor.rewrite`, **unverified** against the bundled rust-analyzer (2026-03-30).
+- `plan.rs` `parse_op` — the `name`-required refusal for both ops is a TODO, so `a_missing_name_is_refused_as_malformed` and `refuses_a_tuple_return_conversion_that_names_no_struct` stay red.
+
+Not written in the red phase: the plan-schema skill reference rows for the two ops (documentation, at green/wrap).
 
 ## Decisions & Trade-offs
 
-_(populated during development)_
+- **Red phase:** the `parse_op` `name` validation was left as a `TODO(signature-assists)` rather than written with the surface, so the missing-name tests fail on this node's behaviour; the Draft PR contract lists only the variants, `assist_for` arms and `SUPPORTED` entries.
+- The acceptance tests apply **item-anchored** plans through the runner (`applying_a_plan_of`), since `resolving` hands the backend an unlowered anchor.
 
 ## Refactoring Needed
 
@@ -118,10 +130,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -371,5 +371,9 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         )));
     }
 
+    // TODO(signature-assists): implement — refuse a `remove_unused_param` with no `name` (the
+    // parameter to drop) and a `convert_tuple_return_to_struct` with no `name` (the new struct's),
+    // as malformed, before any server is spawned.
+
     Ok(op)
 }
