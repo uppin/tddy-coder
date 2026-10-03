@@ -11,10 +11,11 @@ use crate::{
     plan_store::PlanStore,
     registry::Workspace,
     runner::{
-        entry_points::anchor_entry_points, group_gate::GroupRun, restore_ledger, resume,
-        AppliedRun, StatePaths,
+        entry_points::anchor_entry_points,
+        group_gate::{GroupGate, GroupRun, Settled},
+        restore_ledger, resume, AppliedRun, StatePaths,
     },
-    BackendRegistry, Journal,
+    BackendRegistry, Journal, Resolution,
 };
 
 use crate::Overlay;
@@ -156,6 +157,50 @@ pub fn open_plan_run(
     })
 }
 
+/// Tell the progress sink what the run is about to do.
+fn announce_run(options: &Options, total: usize, start: usize) {
+    (options.progress)(&format!(
+        "apply: {total} operation(s){}{}",
+        if options.dry_run { ", dry-run" } else { "" },
+        if start > 0 {
+            format!(", from op {start}")
+        } else {
+            String::new()
+        }
+    ));
+}
+
+/// Whether `--stop-after` has been spent by the time the run reaches operation `index`, saying so
+/// on the progress sink when it has.
+fn stop_limit_reached(options: &Options, start: usize, index: usize) -> bool {
+    let Some(limit) = options.stop_after else {
+        return false;
+    };
+    if index < start + limit {
+        return false;
+    }
+    (options.progress)(&format!(
+        "stopped after {} operation(s) as requested",
+        index - start
+    ));
+    true
+}
+
+/// Bring the plan `key` up to the tree after each of `settled`'s operations, in plan order.
+fn refresh_plan(
+    store: &mut PlanStore,
+    key: &PlanKey,
+    settled: &[(usize, Resolution)],
+    registry: &mut BackendRegistry,
+    journal: &mut Journal,
+    paths: &StatePaths,
+) -> Result<()> {
+    for (member, applied) in settled {
+        record_applied_op(store, key, *member, applied, registry, journal, paths)?;
+    }
+    Ok(())
+}
+
 fn apply_held_plan(
     root: &Path,
     store: &mut PlanStore,
@@ -193,15 +238,7 @@ fn apply_held_plan(
         cancel,
     )?;
     let total = plan.ops.len();
-    (options.progress)(&format!(
-        "apply: {total} operation(s){}{}",
-        if options.dry_run { ", dry-run" } else { "" },
-        if start > 0 {
-            format!(", from op {start}")
-        } else {
-            String::new()
-        }
-    ));
+    announce_run(options, total, start);
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
@@ -213,15 +250,7 @@ fn apply_held_plan(
         // successful partial run as a defective one. Never inside a group, though: a group stands
         // or falls whole, so the limit is judged where a group would begin and its members all
         // count toward it.
-        if group.is_none()
-            && options
-                .stop_after
-                .is_some_and(|limit| index >= start + limit)
-        {
-            (options.progress)(&format!(
-                "stopped after {} operation(s) as requested",
-                index - start
-            ));
+        if group.is_none() && stop_limit_reached(options, start, index) {
             stopped_early = true;
             break;
         }
@@ -265,12 +294,12 @@ fn apply_held_plan(
             "op {index} of {total}: applying {files} file(s) to disk"
         ));
         let id = op.id.as_ref().filter(|_| !legacy);
-        if group.is_none() {
-            group = GroupRun::begin(&plan, index, &paths, &mut journal)?;
-        }
-        if let Some(open) = group.as_mut() {
-            open.pre_image(index, id, &resolved, root, &paths, &mut journal)?;
-        }
+        let gate = GroupGate {
+            root,
+            paths: &paths,
+            cancel,
+        };
+        GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
         commit_operation(
             index,
             id,
@@ -280,42 +309,15 @@ fn apply_held_plan(
             &mut journal,
             &mut ledger,
         )?;
-        match group.take() {
-            // A group's members reach the plan store together, once the group has compiled.
-            Some(mut open) => {
-                open.applied(index, resolved.clone());
-                if open.closes_at(index) {
-                    (options.progress)(&format!(
-                        "op {index} of {total}: checking group `{}` compiles",
-                        open.name()
-                    ));
-                    for (member, applied) in open.finish(root, &paths, &mut journal, cancel)? {
-                        if !legacy {
-                            record_applied_op(
-                                store,
-                                key,
-                                member,
-                                &applied,
-                                &mut registry,
-                                &mut journal,
-                                &paths,
-                            )?;
-                        }
-                    }
-                } else {
-                    group = Some(open);
-                }
-            }
-            None if !legacy => record_applied_op(
-                store,
-                key,
-                index,
-                &resolved,
-                &mut registry,
-                &mut journal,
-                &paths,
-            )?,
-            None => {}
+        // A group's members reach the plan store together, once the group has compiled.
+        let on_check = |name: &str| {
+            (options.progress)(&format!(
+                "op {index} of {total}: checking group `{name}` compiles"
+            ));
+        };
+        let settled = GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, on_check)?;
+        if let (Settled::Ready(ready), false) = (settled, legacy) {
+            refresh_plan(store, key, &ready, &mut registry, &mut journal, &paths)?;
         }
         // Reported *after* the commit, so a line in the account means the edit is on disk and in
         // the journal. An apply used to report nothing at all — the dry run, where nothing is at

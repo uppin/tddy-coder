@@ -147,6 +147,73 @@ impl GroupRun {
     }
 }
 
+/// What a run needs beside the journal to enter, gate and roll back a group.
+pub struct GroupGate<'a> {
+    pub root: &'a Path,
+    pub paths: &'a StatePaths,
+    pub cancel: &'a CancellationToken,
+}
+
+/// What committing one operation left for the plan store to refresh.
+pub enum Settled {
+    /// The operation belongs to a group that is still open: nothing is refreshed yet.
+    Pending,
+    /// Operations whose edits are final, in plan order: the operation itself when it is ungrouped,
+    /// every member once its group has compiled.
+    Ready(Vec<(usize, Resolution)>),
+}
+
+impl GroupRun {
+    /// Before committing operation `index`: begin its group when it opens one and `slot` holds none,
+    /// then journal the pre-images the group's open member needs. Does nothing for an ungrouped
+    /// operation.
+    pub fn enter(
+        slot: &mut Option<GroupRun>,
+        plan: &Plan,
+        index: usize,
+        id: Option<&OpId>,
+        resolved: &Resolution,
+        gate: &GroupGate<'_>,
+        journal: &mut Journal,
+    ) -> Result<()> {
+        if slot.is_none() {
+            *slot = GroupRun::begin(plan, index, gate.paths, journal)?;
+        }
+        match slot.as_mut() {
+            Some(open) => open.pre_image(index, id, resolved, gate.root, gate.paths, journal),
+            None => Ok(()),
+        }
+    }
+
+    /// After committing operation `index`: keep it for its group, and judge the group when it was
+    /// the last member (`on_check` is told the group's name first). An ungrouped operation is
+    /// settled at once.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`GroupRun::finish`].
+    pub fn settle(
+        slot: &mut Option<GroupRun>,
+        index: usize,
+        resolved: Resolution,
+        gate: &GroupGate<'_>,
+        journal: &mut Journal,
+        on_check: impl FnOnce(&str),
+    ) -> Result<Settled> {
+        let Some(mut open) = slot.take() else {
+            return Ok(Settled::Ready(vec![(index, resolved)]));
+        };
+        open.applied(index, resolved);
+        if !open.closes_at(index) {
+            *slot = Some(open);
+            return Ok(Settled::Pending);
+        }
+        on_check(open.name());
+        open.finish(gate.root, gate.paths, journal, gate.cancel)
+            .map(Settled::Ready)
+    }
+}
+
 /// Refuse the group `group` when the tree its members left does not compile.
 ///
 /// Checked over the packages owning every file the group's members journalled an edit to.

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tddy_code_restructuring::backends::rust::ProgressSink;
 use tddy_code_restructuring::plan_store::PlanKey;
 use tddy_code_restructuring::registry::Workspace;
-use tddy_code_restructuring::runner::group_gate::{self, GroupRun};
+use tddy_code_restructuring::runner::group_gate::{self, GroupGate, GroupRun, Settled};
 use tddy_code_restructuring::runner::{self, Options, PlanRun};
 use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
@@ -70,18 +70,15 @@ pub(crate) fn apply_plan(
     apply_held_plan(root, held, options, client, &cancel, progress, events)
 }
 
-fn apply_held_plan(
-    root: &Path,
+/// The plan `held` names, copied out of the store with the path it is held at.
+///
+/// Before the plan is read out or anything is waited for, a stale operation is refused while
+/// nothing has been written.
+fn read_held_plan(
     held: &HeldPlan,
     options: &Options,
-    client: Arc<LspClient>,
-    cancel: &CancellationToken,
-    progress: ProgressSink,
-    events: &EventSender<RestructureEvent>,
-) -> Result<()> {
-    let (plan, plan_path) = held.with_store(|store| {
-        // Before the plan is read out or anything is waited for: a stale operation is refused while
-        // nothing has been written.
+) -> Result<(tddy_code_restructuring::Plan, std::path::PathBuf)> {
+    held.with_store(|store| {
         runner::refuse_a_stale_pending_op(store, &held.key, options)?;
         store
             .get(&held.key)
@@ -92,7 +89,34 @@ fn apply_held_plan(
                     held.key
                 ))
             })
-    })?;
+    })
+}
+
+/// Bring the held plan up to the tree after each of `settled`'s operations, in plan order.
+fn refresh_held_plan(
+    held: &HeldPlan,
+    settled: &[(usize, Resolution)],
+    registry: &mut tddy_code_restructuring::BackendRegistry,
+    journal: &mut tddy_code_restructuring::Journal,
+    paths: &runner::StatePaths,
+) -> Result<()> {
+    held.with_store(|store| {
+        settled.iter().try_for_each(|(member, applied)| {
+            runner::record_applied_op(store, &held.key, *member, applied, registry, journal, paths)
+        })
+    })
+}
+
+fn apply_held_plan(
+    root: &Path,
+    held: &HeldPlan,
+    options: &Options,
+    client: Arc<LspClient>,
+    cancel: &CancellationToken,
+    progress: ProgressSink,
+    events: &EventSender<RestructureEvent>,
+) -> Result<()> {
+    let (plan, plan_path) = read_held_plan(held, options)?;
 
     // The gates run on a copy of the plan, outside the store's lock: the baseline compile check
     // takes minutes.
@@ -153,14 +177,15 @@ fn apply_held_plan(
         if options.dry_run {
             ledger.record(&resolved.edit);
             overlay.record(root, &resolved.edit)?;
+            unreported.push((index, resolved));
         } else {
             let id = op.id.as_ref().filter(|_| !legacy);
-            if group.is_none() {
-                group = GroupRun::begin(&plan, index, &paths, &mut journal)?;
-            }
-            if let Some(open) = group.as_mut() {
-                open.pre_image(index, id, &resolved, root, &paths, &mut journal)?;
-            }
+            let gate = GroupGate {
+                root,
+                paths: &paths,
+                cancel,
+            };
+            GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
             runner::commit_operation(
                 index,
                 id,
@@ -170,78 +195,31 @@ fn apply_held_plan(
                 &mut journal,
                 &mut ledger,
             )?;
-            match group.take() {
-                // A group's members reach the plan store, and the caller's eyes, together, once the
-                // group has compiled.
-                Some(mut open) => {
-                    open.applied(index, resolved.clone());
-                    if open.closes_at(index) {
-                        for (member, applied) in open.finish(root, &paths, &mut journal, cancel)? {
-                            if !legacy {
-                                held.with_store(|store| {
-                                    runner::record_applied_op(
-                                        store,
-                                        &held.key,
-                                        member,
-                                        &applied,
-                                        &mut registry,
-                                        &mut journal,
-                                        &paths,
-                                    )
-                                })?;
-                            }
-                            unreported.push((member, applied));
-                        }
-                    } else {
-                        group = Some(open);
-                        done += 1;
-                        continue;
-                    }
-                }
-                None if !legacy => held.with_store(|store| {
-                    runner::record_applied_op(
-                        store,
-                        &held.key,
-                        index,
-                        &resolved,
-                        &mut registry,
-                        &mut journal,
-                        &paths,
-                    )
-                })?,
-                None => {}
+            // A group's members reach the plan store, and the caller's eyes, together, once the
+            // group has compiled.
+            let settled =
+                GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, |_| {})?;
+            let Settled::Ready(ready) = settled else {
+                done += 1;
+                continue;
+            };
+            if !legacy {
+                refresh_held_plan(held, &ready, &mut registry, &mut journal, &paths)?;
             }
+            unreported.extend(ready);
         }
         done += 1;
 
         // Reported *after* the commit, so an event means the edit is on disk and in the journal —
         // and, for a group member, that its group compiled.
-        if unreported.is_empty() {
-            unreported.push((index, resolved));
-        }
-        let reported = done - unreported.len();
-        for (offset, (member, resolution)) in unreported.drain(..).enumerate() {
-            let member_op = &plan.ops[member];
-            emit(
-                events,
-                cancel,
-                operation_event(
-                    member,
-                    reported + offset + 1,
-                    plan.ops.len(),
-                    member_op,
-                    &resolution,
-                    options.dry_run,
-                ),
-            );
-            for note in &resolution.notes {
-                emit(
-                    events,
-                    cancel,
-                    note_event(&tddy_code_restructuring::console::note(note)),
-                );
-            }
-        }
+        report_applied(
+            events,
+            cancel,
+            &plan,
+            &mut unreported,
+            done,
+            options.dry_run,
+        );
     }
 
     // Judged before the outcome is sent, so a tree that does not compile ends the stream with the
@@ -267,6 +245,35 @@ fn apply_held_plan(
         outcome_event(done, plan.ops.len(), stopped_early),
     );
     Ok(())
+}
+
+/// Send the events for the operations that have just been settled, oldest first, and empty `settled`.
+///
+/// `done` counts everything applied so far, `settled` included.
+fn report_applied(
+    events: &EventSender<RestructureEvent>,
+    cancel: &CancellationToken,
+    plan: &tddy_code_restructuring::Plan,
+    settled: &mut Vec<(usize, Resolution)>,
+    done: usize,
+    dry_run: bool,
+) {
+    let reported = done - settled.len();
+    for (offset, (member, resolution)) in settled.drain(..).enumerate() {
+        let event = operation_event(
+            member,
+            reported + offset + 1,
+            plan.ops.len(),
+            &plan.ops[member],
+            &resolution,
+            dry_run,
+        );
+        emit(events, cancel, event);
+        for note in &resolution.notes {
+            let note = tddy_code_restructuring::console::note(note);
+            emit(events, cancel, note_event(&note));
+        }
+    }
 }
 
 /// Where a seam's diagnostic trace goes when `RESTRUCTURE_TRACE` asks for one. The log, because a

@@ -197,7 +197,20 @@ compared before and after.
 - **Generated code**: `code_index.proto` is not under `scripts/generated-code.manifest`, so no drift to regenerate.
 - ⚠ `apply_held_plan` grew in both loops (daemon 139 → 198 lines, CLI 151 → 188) — already over the 40-line guideline, now further.
 - ⚠ `journal.rs` production lines 294 → 517 (crosses the 500 budget; step 3.5 of `/pr-wrap`).
-- ℹ `render.rs` and `tddy-tools/src/index_console.rs` do not print `OperationApplied.group`.
+- ℹ `render.rs` and `tddy-tools/src/index_console.rs` do not print `OperationApplied.group` — now fixed: a `   group: <name>` line (`console::group`) follows the operation's line when the group is non-empty.
+
+## Restructuring
+
+`journal.rs` crossed the 500-line production budget (294 → 517, counted to the first `#[cfg(test)]`). Split by `tddy-tools restructure apply` (one `extract_module` with `to_file`, `reexport: glob`, checked with `check --deep` first); no moved code was written by hand.
+
+| File | Production lines before | after |
+|------|------------------------:|------:|
+| `packages/tddy-code-restructuring/src/journal.rs` | 517 | 460 |
+| `packages/tddy-code-restructuring/src/journal/group.rs` (new: `PreImage`, its `impl`, `OpenGroup`) | — | 65 |
+
+`journal.rs` re-exports `group::*` (`pub use`), so `lib.rs` and every consumer keep their paths. The engine emitted `pub(crate) use group::*`, which `lib.rs`'s public re-export of `PreImage`/`OpenGroup` rejects (E0365); the one-word visibility fix to `pub use` was made by hand after the move.
+
+The group handling in both apply loops moved into `GroupRun::enter` / `GroupRun::settle` (`runner/group_gate.rs`, with `GroupGate` and `Settled`), plus small helpers in each loop file. `apply_held_plan`: daemon 198 → 139 lines, command line 188 → 145 (before this PR: 139 and 151).
 
 ## TODO
 

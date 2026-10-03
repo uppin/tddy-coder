@@ -58,23 +58,32 @@ pub(crate) fn restructure(event: &RestructureEvent, rehearsal: bool) {
 /// The widenings come first, as they do in both other front ends: they are what the operation had
 /// to do to reach the line that follows.
 fn applied(operation: &OperationApplied) {
-    for widened in &operation.visibility {
-        log::info!(target: crate::MAIN, "{}", console::visibility(widened));
+    for line in applied_lines(operation) {
+        log::info!(target: crate::MAIN, "{line}");
     }
-    log::info!(
-        target: crate::MAIN,
-        "{}",
-        console::operation(
-            operation.index as usize,
-            // The event counts this operation as done already; the renderer counts from the one
-            // before it, as the apply loop that produces the line does.
-            (operation.done as usize).saturating_sub(1),
-            operation.total as usize,
-            &operation.kind,
-            operation.files.len(),
-            !operation.rehearsed_only,
-        )
-    );
+}
+
+/// The lines of [`applied`]: widenings, the operation, and its group when it has one.
+fn applied_lines(operation: &OperationApplied) -> Vec<String> {
+    let mut lines: Vec<String> = operation
+        .visibility
+        .iter()
+        .map(|w| console::visibility(w))
+        .collect();
+    lines.push(console::operation(
+        operation.index as usize,
+        // The event counts this operation as done already; the renderer counts from the one
+        // before it, as the apply loop that produces the line does.
+        (operation.done as usize).saturating_sub(1),
+        operation.total as usize,
+        &operation.kind,
+        operation.files.len(),
+        !operation.rehearsed_only,
+    ));
+    if !operation.group.is_empty() {
+        lines.push(console::group(&operation.group));
+    }
+    lines
 }
 
 /// What the whole run amounted to.
@@ -315,6 +324,41 @@ pub(crate) fn refusal(status: &tddy_rpc::Status) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_operation_in_a_group_names_the_group_after_its_line() {
+        // Given an applied operation that belongs to the group `signature`
+        let operation = OperationApplied {
+            index: 2,
+            done: 3,
+            total: 5,
+            kind: "RenameSymbol".to_string(),
+            group: "signature".to_string(),
+            ..OperationApplied::default()
+        };
+
+        // When it is rendered
+        let lines = applied_lines(&operation);
+
+        // Then the operation's line is followed by the group's
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("   group: signature")
+        );
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn an_ungrouped_operation_renders_no_group_line() {
+        // Given an applied operation outside any group
+        let operation = OperationApplied::default();
+
+        // When it is rendered
+        let lines = applied_lines(&operation);
+
+        // Then only the operation's own line appears
+        assert_eq!(lines.len(), 1);
+    }
 
     #[test]
     fn an_anchor_answer_without_its_json_is_not_a_rendered_anchor() {
