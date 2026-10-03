@@ -491,12 +491,9 @@ export function CreateSessionPane({
       // re-runs the creation without re-sending bytes that already arrived.
       const requestAttachments: SessionAttachmentInit[] = await stageAttachments();
       const request = startSessionRequest(branchOverrides, requestAttachments);
-      // Streaming only buys per-attachment progress, so a creation with nothing attached keeps using
-      // the unary RPC every other client uses.
-      const res =
-        requestAttachments.length === 0
-          ? await client.startSession(request)
-          : await startSessionStreamed(request);
+      // Always streamed: the host reports the step it is in (worktree, agent) as well as the
+      // per-attachment progress, and ends the stream with the one result that creates the session.
+      const res = await startSessionStreamed(request);
       if (res === null) {
         // The form unmounted while the host was still working; it owns no navigation any more.
         return;

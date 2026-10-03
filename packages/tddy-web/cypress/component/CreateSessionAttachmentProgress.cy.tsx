@@ -21,7 +21,13 @@ import { createClient, ConnectError, Code } from "@connectrpc/connect";
 import { create } from "@bufbuild/protobuf";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
-import { SessionService, StartSessionEventSchema, type StartSessionRequest } from "../../src/gen/session_pb";
+import {
+  SessionService,
+  StartPhase_Boundary,
+  StartPhase_Step,
+  StartSessionEventSchema,
+  type StartSessionRequest,
+} from "../../src/gen/session_pb";
 import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
@@ -229,16 +235,31 @@ it("surfaces a failed materialization as a creation error and creates no session
   createSessionPage.submitButton().should("not.be.disabled");
 });
 
-it("starts a session with no attachments over the unary RPC, leaving that path unchanged", () => {
-  // Given a form with nothing attached, and a host whose streaming RPC would fail if used
-  const backend = aBaselineBackend()
-    .onUnary(SessionService.method.startSession, () => ({ sessionId: "unary-1" }))
-    .implement(SessionService, {
-      async *streamStartSession() {
-        throw new ConnectError("the streaming RPC must not be used without attachments", Code.Internal);
-        yield create(StartSessionEventSchema, {});
-      },
-    });
+function aGate(): { held: Promise<void>; release: () => void } {
+  let release: () => void = () => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { held, release: () => release() };
+}
+
+it("starts a session with nothing attached over the streaming RPC and names the step the host is in", () => {
+  // Given a host whose start reports the worktree step, holds, then yields the result
+  const gate = aGate();
+  const backend = aBaselineBackend().implement(SessionService, {
+    async *streamStartSession() {
+      yield create(StartSessionEventSchema, {
+        event: {
+          case: "phase",
+          value: { step: StartPhase_Step.WORKTREE, boundary: StartPhase_Boundary.BEGIN },
+        },
+      });
+      await gate.held;
+      yield create(StartSessionEventSchema, {
+        event: { case: "result", value: { sessionId: "streamed-1" } },
+      });
+    },
+  });
   mountCreatePane(backend);
 
   // When the session is created without attaching anything
@@ -246,9 +267,8 @@ it("starts a session with no attachments over the unary RPC, leaving that path u
   createSessionPage.selectAgent(CLAUDE_OPTION);
   createSessionPage.submit();
 
-  // Then the unary RPC created it
-  cy.get("@onCreated").should("have.been.calledWith", "unary-1");
-  cy.wrap(null).should(() => {
-    expect(backend.callsTo(SessionService.method.startSession)).to.have.length(1);
-  });
+  // Then the step the host is in is named, and releasing the host creates the session
+  createSessionPage.startPhase().should("contain.text", "Creating worktree…");
+  cy.then(() => gate.release());
+  cy.get("@onCreated").should("have.been.calledWith", "streamed-1");
 });

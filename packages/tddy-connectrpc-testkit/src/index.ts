@@ -27,3 +27,5 @@
 
 export { anInMemoryRpcBackend, InMemoryRpcBackend } from "./backend.js";
 export type { RecordedUnaryCall } from "./backend.js";
+export { registerServerStreamFallback } from "./backend.js";
+export type { ServerStreamFallback } from "./backend.js";

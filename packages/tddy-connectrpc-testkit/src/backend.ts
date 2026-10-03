@@ -39,6 +39,7 @@ import type {
   DescService,
   DescMethod,
   DescMethodUnary,
+  DescMethodServerStreaming,
   MessageShape,
 } from "@bufbuild/protobuf";
 
@@ -51,6 +52,33 @@ export interface RecordedUnaryCall<M extends DescMethodUnary> {
   readonly request: MessageShape<M["input"]>;
   readonly methodName: string;
   readonly serviceName: string;
+}
+
+/**
+ * A rule for a service that offers one operation both as a unary call and as a server stream whose
+ * last event is the unary answer: a backend that serves the unary method but not the stream answers
+ * the stream by running the unary handler and emitting `toEvent(answer)` as the only event.
+ */
+export interface ServerStreamFallback<
+  U extends DescMethodUnary = DescMethodUnary,
+  S extends DescMethodServerStreaming = DescMethodServerStreaming,
+> {
+  readonly unary: U;
+  readonly stream: S;
+  readonly toEvent: (answer: MessageShape<U["output"]>) => MessageShape<S["output"]>;
+}
+
+const serverStreamFallbacks: ServerStreamFallback[] = [];
+
+/**
+ * Register a {@link ServerStreamFallback} for every backend built afterwards (process-wide). An
+ * explicit implementation of the stream method on a backend always wins over the fallback.
+ */
+export function registerServerStreamFallback<
+  U extends DescMethodUnary,
+  S extends DescMethodServerStreaming,
+>(fallback: ServerStreamFallback<U, S>): void {
+  serverStreamFallbacks.push(fallback as unknown as ServerStreamFallback);
 }
 
 // Internal accumulator for service/method registrations
@@ -159,6 +187,14 @@ export class InMemoryRpcBackend {
     const services = [...this.services];
     const methods = [...this.methods];
 
+    const streamFallbacks = serverStreamFallbacks.flatMap((fallback) => {
+      const unaryImpl = findImpl(services, methods, fallback.unary);
+      if (unaryImpl === undefined || findImpl(services, methods, fallback.stream) !== undefined) {
+        return [];
+      }
+      return [{ fallback, unaryImpl }];
+    });
+
     this.cachedTransport = createRouterTransport(
       (router) => {
         for (const { service, impl } of services) {
@@ -166,6 +202,18 @@ export class InMemoryRpcBackend {
         }
         for (const { method, impl } of methods) {
           router.rpc(method, impl);
+        }
+        for (const { fallback, unaryImpl } of streamFallbacks) {
+          router.rpc(fallback.stream, async function* (req: unknown, ctx: unknown) {
+            // The unary handler is called directly, so the call is recorded here as the unary
+            // interceptor would have; a thrown ConnectError becomes the stream's error.
+            const key = requestKey(fallback.unary.parent.typeName, fallback.unary.name);
+            const bucket = recording.get(key) ?? [];
+            bucket.push(req);
+            recording.set(key, bucket);
+            const answer = await (unaryImpl as (r: unknown, c: unknown) => unknown)(req, ctx);
+            yield fallback.toEvent(answer as never);
+          } as unknown as MethodImpl<DescMethod>);
         }
       },
       {
@@ -232,6 +280,18 @@ export function anInMemoryRpcBackend(): InMemoryRpcBackend {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** The handler registered for `method`, by `.onUnary` / `.failWith` or inside an `.implement`. */
+function findImpl(
+  services: ServiceEntry[],
+  methods: MethodEntry[],
+  method: DescMethod,
+): unknown {
+  const registered = methods.find((entry) => entry.method === method);
+  if (registered !== undefined) return registered.impl;
+  const service = services.find((entry) => entry.service === method.parent);
+  return (service?.impl as Record<string, unknown> | undefined)?.[method.localName];
+}
 
 function requestKey(serviceTypeName: string, methodName: string): string {
   return `${serviceTypeName}/${methodName}`;
