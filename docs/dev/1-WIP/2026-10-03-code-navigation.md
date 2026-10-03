@@ -165,6 +165,13 @@ _(populated during development)_
 
 ## Validation Results
 
+### /validate-tests (2026-10-03)
+
+Tests analyzed: 7 daemon acceptance + 4 unit, 8 index-daemon unit + 3 navigation acceptance, 3 Cypress navigation specs. Critical 0 · Warning 0 · Info 1.
+
+- ✅ Given/When/Then comments, behaviour-named tests, named helpers (`a_project_with_a_worktree`, `an_index_daemon_host_serving`), page-object access in Cypress, `mountWithRpc` + in-memory backend (no `cy.intercept`), no `#[ignore]` / `.skip` / `.only`, no sleeps added by this PR (the `sleep 86400` is the stand-in index daemon's process body, and `tokio::time::sleep` at `code_index_service_acceptance.rs:1290` pre-dates the PR).
+- ℹ️ `a_definition_request_is_forwarded_to_the_index_daemon_for_the_session_worktree` pins both the forwarded request and the mapped answer — two assertions on one forward, acceptable for an acceptance test.
+
 ### /validate-changes (2026-10-03)
 
 Stack gate: base `feature/live-plan/live-plans`, already current, `origin/<base>..HEAD` is this PR's five commits only. Critical 0 · Warning 2 · Info 3.
