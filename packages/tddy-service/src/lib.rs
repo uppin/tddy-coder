@@ -50,6 +50,7 @@ pub use proto::activity::ActivityServiceServer;
 pub use proto::auth::{AuthServiceServer, LiveKitTokenServiceServer};
 pub use proto::bsp::BspServiceServer;
 pub use proto::catalog::CatalogServiceServer;
+pub use proto::code_navigation::CodeNavigationServiceServer;
 pub use proto::demo_vm::DemoVmServiceServer;
 pub use proto::exec_tools::ExecToolServiceServer;
 pub use proto::host::HostServiceServer;
@@ -119,6 +120,11 @@ pub mod proto {
     /// browsing and reading the files inside one.
     pub mod worktree {
         include!(concat!(env!("OUT_DIR"), "/worktree.rs"));
+    }
+    /// `CodeNavigationService`: definition, references and hover over a session's worktree,
+    /// answered by the warm code-intelligence index.
+    pub mod code_navigation {
+        include!(concat!(env!("OUT_DIR"), "/code_navigation.rs"));
     }
     /// `LiveKitService`: which rooms this daemon can see, and who is in them. Split out of
     /// [`connection`] by `#unbundle` node 4; its 12 messages overlap nothing that stayed.

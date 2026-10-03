@@ -10,6 +10,7 @@ import type { ActivityService } from "../../gen/activity_pb";
 import type { SessionAgentService } from "../../gen/session_agents_pb";
 import type { SessionFilesService } from "../../gen/session_files_pb";
 import type { TerminalSessionService } from "../../gen/terminal_session_pb";
+import type { CodeNavigationService } from "../../gen/code_navigation_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { projectForUnscopedSession } from "../../utils/sessionProjectTable";
 import type { SessionAttachmentState } from "./useSessionAttachment";
@@ -50,6 +51,7 @@ type SessionAgentClient = Client<typeof SessionAgentService>;
 type ActivityClient = Client<typeof ActivityService>;
 type TerminalClient = Client<typeof TerminalSessionService>;
 type WorktreeClient = Client<typeof WorktreeService>;
+type CodeNavigationClient = Client<typeof CodeNavigationService>;
 
 interface SessionMainPaneProps {
   selectedSession: SessionEntry | null;
@@ -77,6 +79,11 @@ interface SessionMainPaneProps {
    * reason `client` can be: no daemon is reachable yet.
    */
   worktreeClient?: WorktreeClient;
+  /**
+   * The code-navigation service on the same host as `worktreeClient` — definition, references and
+   * hover for the Code pane's preview. Absent, the preview stays read-only text.
+   */
+  codeNavigationClient?: CodeNavigationClient;
   /**
    * The terminal service on the same host as `client` — each runtime claims its control lease and
    * carries its host-served terminal I/O over it. Absent for the same reason `client` can be: no
@@ -185,6 +192,7 @@ export function SessionMainPane({
   client,
   projectClient,
   worktreeClient,
+  codeNavigationClient,
   terminalClient,
   sessionFilesClient,
   sessionAgentClient,
@@ -600,6 +608,7 @@ export function SessionMainPane({
                         sessionToken={sessionToken}
                         projectId={resolvedProjectId}
                         worktreePath={selectedSession.repoPath}
+                        navigationClient={codeNavigationClient}
                       />
                     </Panel>
                   </>

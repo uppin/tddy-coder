@@ -19,6 +19,7 @@ pub mod analyze;
 mod apply;
 mod graph;
 pub mod index;
+mod navigation;
 pub mod operations;
 mod plan_upkeep;
 pub mod queries;

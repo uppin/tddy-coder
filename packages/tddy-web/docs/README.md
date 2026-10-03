@@ -2,6 +2,7 @@
 
 - **Capability gating (media and presence surfaces)**: [capability-gating.md](capability-gating.md)
 - **Changeset history**: [changesets/](changesets/)
+- **Code navigation (definition, hover, references in the code pane)**: [code-navigation.md](code-navigation.md)
 - **Codex OAuth dialog**: [codex-oauth-dialog.md](codex-oauth-dialog.md)
 - **Cross-daemon fan-out**: [host-fan-out.md](host-fan-out.md)
 - **Daemon sign-in (the declared GitHub flow, device code, whole-session guard)**: [daemon-sign-in.md](daemon-sign-in.md)

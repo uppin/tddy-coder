@@ -31,6 +31,7 @@ code path rather than a second one.
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded |
 | `queries.rs` | `Anchors`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `PlanStatus` reads the loaded plan. `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
 | `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation, bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
+| `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, and the translation either side of it |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
 | `activity.rs` | Composes what the daemon says about its own requests |
@@ -90,6 +91,37 @@ itself. It is a notification rather than an open and close, so a document some r
 unaffected. A tree that cannot be read is a `FailedPrecondition`. The walk costs about 0.2 s per
 request on this repository (1,843 files). No filesystem-watching dependency is taken.
 
+## Navigation
+
+`Definition`, `References` and `Hover` take `{workspace_root, file, position}` and answer from the
+warm server `WorkspaceIndex::client_for(root)` hands out, through `LspClient::{definition, references,
+hover}`.
+
+**Coordinates.** A `SourcePosition` is a one-based line and a one-based **byte** column, the
+coordinates every other RPC in the service uses. The language server speaks zero-based positions, and
+the conversion belongs to this module, so no caller sees an LSP position. The LSP client negotiates
+`positionEncoding: utf-8` and refuses a server that does not answer in it, so a column converts by its
+offset alone (`character + 1` on the way out) and the daemon performs no UTF-16 arithmetic.
+
+**Locations.** A `CodeLocation` carries `file`, a `range` and `outside_root`. A location inside
+`workspace_root` is returned relative to it; one outside it (a dependency, the standard library) is
+returned as an absolute path with `outside_root` true, which a caller that can only open files of the
+root must not offer to open. File URIs are percent-escaped on the way to the server and decoded on the
+way back.
+
+**What is refused**, all before the server is asked:
+
+| Request | Status |
+|---|---|
+| Empty `file`, an absolute `file`, or one containing `..` | `InvalidArgument` |
+| A file whose extension is not `.rs` — the one language server this host runs would otherwise be told a non-Rust file is Rust | `InvalidArgument` |
+| No position, or a line or column of 0 | `InvalidArgument` |
+| A file that cannot be read | `NotFound` |
+| A language-server failure | the class `status.rs` assigns it |
+
+**Freshness.** The file's current contents are sent to the server (`sync_document`) before each query,
+so the answer is about the text the caller read, not an older copy the server held.
+
 ## Cancellation
 
 `tddy_rpc::RpcService` passes a handler no token, no deadline and no context, and `ServerEngine`'s
@@ -134,7 +166,7 @@ Every suite runs against `fake_lsp`, `tddy-lsp`'s deterministic fake, reached th
 
 | Suite | Covers |
 |---|---|
-| `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc`, plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema — and an `Apply` the compile gate fails |
+| `code_index_service_acceptance.rs` | Every RPC dispatched at the registered coordinate through `handle_rpc` (navigation answers, root-relative and one-based, come from `fake_lsp` started with `--answers-in-its-workspace`, which reports its canned locations under the client's `rootUri`), plus the coordinate-integrity trio — including one test that reads the `.proto` off disk and asserts the published constant matches the schema — and an `Apply` the compile gate fails |
 | `dual_transport_acceptance.rs` | The binary as a process: single-shot exit codes, both transports concurrently, stdout silence under `--stdio`, fail-fast with no transport |
 | `tree_changes_acceptance.rs` | A warm server told of a module written since its last request (created and changed), of one removed (deleted), of each change once, and of nothing when the tree has not changed — against `fake_lsp`, which replays the notifications it received as `tddy/watchedFileChanges` |
 | `activity_log_acceptance.rs` | The whole journal of one request, through a capturing logger — which caught a double-logged outcome that no test of the pure composer could see |

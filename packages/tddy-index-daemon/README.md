@@ -3,10 +3,10 @@
 A warm rust-analyzer index, served as `code_index.CodeIndexService` over gRPC and stdio — or one
 operation run in process and then exit.
 
-Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Fourteen RPCs covering the
-plan-driven restructuring operations (`tddy-code-restructuring`) and the analysis operations
-(`tddy-code-analysis`), each request naming the `workspace_root` it acts on so one process serves
-several worktrees.
+Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Seventeen RPCs covering the
+plan-driven restructuring operations (`tddy-code-restructuring`), the analysis operations
+(`tddy-code-analysis`) and code navigation (`Definition`, `References`, `Hover`), each request naming
+the `workspace_root` it acts on so one process serves several worktrees.
 
 ```bash
 tddy-index-daemon restructure check --workspace-root . plan.jsonl   # run once, exit(0|1)
@@ -20,6 +20,9 @@ subcommand nor a transport is an error rather than a default.
 - **Plan store**: the daemon keeps one per root. `LoadPlans`, `UnloadPlans` and `ListPlans` manage it;
   `Check`, `Apply` and `PlanStatus` run the loaded plan, refresh its pending operations after each
   operation and write it back, and every dirty plan is flushed on `SIGTERM`/`^C` and at single-shot exit.
+- **Navigation**: `Definition`, `References` and `Hover` answer from the root's warm rust-analyzer in
+  the service's one-based byte coordinates. Locations come back relative to the root, or absolute and
+  marked `outside_root`. Rust sources only; any other file is refused.
 - **Contract, warm-state model and refusal classes**:
   [`docs/code-index-service.md`](docs/code-index-service.md)
 - **Product documentation**:

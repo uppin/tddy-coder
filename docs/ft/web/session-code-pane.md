@@ -1,7 +1,7 @@
 # Worktree Code Pane
 
 **Route:** `#/sessions` (within `SessionsDrawerScreen`)
-**Components:** `WorktreeCodePane`, `WorktreeFileTree` (`packages/tddy-web/src/components/session/`)
+**Components:** `WorktreeCodePane`, `WorktreeFileTree`, `CodeBlock`, `CodeNavigationOverlays` (`packages/tddy-web/src/components/session/`)
 **Mount point:** `SessionMainPane` (`packages/tddy-web/src/components/sessions/`)
 
 ## Overview
@@ -67,6 +67,31 @@ terminals), the Code pane is available to **all** session types.
   Prism theme follows the app's light/dark mode.
 - Reads are size-capped; content beyond the cap is truncated (flagged in the response).
 
+## Code navigation
+
+A Rust (`.rs`) file in the preview is navigable. The answers come from the warm rust-analyzer index
+([Warm code-intelligence daemon](../coder/warm-code-intelligence-daemon.md)), reached through the
+session host's daemon, which authorises each request exactly as it authorises a file read.
+
+- **Go to definition.** Ctrl-click (cmd-click on macOS) an identifier. The definition's file opens in the
+  same pane, scrolled to the definition's line and marked as the target. When there are several
+  definitions the pane lists them to pick from; when there are none it says so. A definition outside the
+  worktree (a dependency, the standard library) is listed but cannot be opened.
+- **Hover.** Resting the pointer on an identifier shows a card with the language server's hover text,
+  typically the item's signature and docs. The card sits over the bottom of the preview and has a
+  **Close** action.
+- **References.** The hover card's **References** action lists every reference to the symbol, its
+  declaration included, as `path:line` entries. Selecting one opens that file at that line.
+- **Rust only.** Other files — markdown, TypeScript, JSON — render exactly as before, with no
+  identifier handlers. The index serves Rust, and nothing falls back to another language server.
+- **Failures are visible.** A failed lookup shows an inline notice naming the action. A daemon with no
+  index configured, or whose index cannot start, therefore tells the operator rather than silently
+  doing nothing. Without a navigation service on the session's host the pane is the plain read-only
+  preview.
+
+Positions are one-based lines and one-based **byte** columns throughout, so identifiers after
+multi-byte characters resolve correctly. Locations are relative to the worktree root.
+
 ## Backend contract
 
 Two new **`ConnectionService`** RPCs, rooted at the worktree and secured like `RemoveWorktree`
@@ -78,6 +103,14 @@ reads under the worktree root):
   (empty = root), `.gitignore`-filtered and `.git`-excluded, directories first.
 - `ReadWorktreeFile(session_token, project_id, worktree_path, rel_path)` →
   `content_utf8`, `truncated`, `byte_size`.
+
+Navigation uses a third service, **`code_navigation.CodeNavigationService`**
+(`Definition`, `References`, `Hover`), keyed by the same `session_token`, `project_id` and
+`worktree_path` plus the file's `rel_path` and a position. It authorises the worktree through the same
+listed-worktree check as the file RPCs, rejects a `rel_path` that leaves the worktree, and answers
+`FAILED_PRECONDITION` naming the `index_daemon:` configuration section when the daemon has none.
+Contract: [`code_navigation.proto`](../../../packages/tddy-service/docs/code-navigation-proto.md); how it is
+served: [code navigation service](../../../packages/tddy-daemon/docs/code-navigation-service.md).
 
 The client identifies the worktree by `SessionEntry.repo_path` (the worktree is bound to the
 session). `rel_path` is validated to reject traversal (`..`), absolute paths, and any resolution
@@ -102,3 +135,11 @@ outside the worktree root.
    (e.g. `.rs`, `.ts`, `.py`, `.json`, `.yaml`) renders it as tokenized, colored code in
    `worktree-code-highlight`; a file with no recognized extension (e.g. `LICENSE`) renders as plain
    monospace text with no highlight container. Highlighting never alters the file's text content.
+8. **Go to definition.** Ctrl-click on an identifier in a `.rs` preview opens the definition's file
+   scrolled to its line, with that line marked as the navigation target.
+9. **Hover.** Resting on an identifier shows its type text in a hover card.
+10. **References.** The hover card's **References** action lists the references; selecting one opens its
+    file at that line.
+11. **Rust only, authorised.** Non-`.rs` files offer no navigation. A `worktree_path` not listed for the
+    project is rejected, and a daemon with no `index_daemon:` section answers `FAILED_PRECONDITION`
+    naming it.

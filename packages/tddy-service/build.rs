@@ -176,6 +176,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .compile_protos(&[proto], &["proto"])?;
     }
 
+    // Code navigation — definition, references and hover over a session's worktree, for the web's
+    // code pane. Served by tddy-daemon, which forwards to the index daemon's `code_index` service;
+    // no tonic pass, because nothing reaches it over the local gRPC socket.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
+        }))
+        .compile_protos(&["proto/code_navigation.proto"], &["proto"])?;
+
     // Host and worktree — `#unbundle` node 1. Post-stack follow-up replaces hand-written adapters
     // in `tddy-session-lifecycle` with generated ones (same two-pass shape as node 7).
     for (proto, package) in [
@@ -590,6 +603,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/auth.proto",
                 "proto/host.proto",
                 "proto/worktree.proto",
+                "proto/code_navigation.proto",
                 "proto/livekit.proto",
                 "proto/session_files.proto",
                 "proto/session_agents.proto",

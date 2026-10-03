@@ -12147,6 +12147,7 @@ dependencies = [
  "tddy-discovery",
  "tddy-github",
  "tddy-host-service",
+ "tddy-index-daemon",
  "tddy-livekit",
  "tddy-livekit-testkit",
  "tddy-lsp",
