@@ -138,6 +138,17 @@ pub struct RestructureAnchorsArgs {
     pub at: Option<crate::edit::Range>,
 }
 
+impl RestructureAnchorsArgs {
+    /// The item names `--items` carries, one per name. What every front end sends, so none of
+    /// them states the splitting rule itself: see [`crate::item_anchor::parse_item_list`].
+    pub fn item_names(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .flat_map(|list| crate::item_anchor::parse_item_list(list))
+            .collect()
+    }
+}
+
 /// Read `LINE:COL` (a caret) or `LINE:COL-LINE:COL` (a range), one-based.
 pub fn parse_position_range(text: &str) -> std::result::Result<crate::edit::Range, String> {
     let refused = || format!("`{text}` is not LINE:COL or LINE:COL-LINE:COL");
@@ -211,13 +222,16 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             budget: check.budget,
             ..Options::default()
         },
-        RestructureCommand::Anchors(anchors) => Options {
-            command: Command::Anchors,
-            target: Some(anchors.file),
-            items: normalised_items(anchors.items),
-            at: anchors.at,
-            ..Options::default()
-        },
+        RestructureCommand::Anchors(anchors) => {
+            let items = anchors.item_names();
+            Options {
+                command: Command::Anchors,
+                target: Some(anchors.file),
+                items,
+                at: anchors.at,
+                ..Options::default()
+            }
+        }
         RestructureCommand::Verify(verify) => Options {
             command: Command::Verify,
             against: Some(verify.against),
@@ -244,44 +258,6 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             ..Options::default()
         },
     }
-}
-
-/// `--items` as the runner has always received it: split at the commas outside angle brackets,
-/// trimmed, with empty elements dropped.
-///
-/// clap's `value_delimiter = ','` would split inside a generic self type (`<Pair<A, B>>`), so the
-/// split is ours. Without this normalisation `--items "One, Two"` would resolve an item literally
-/// named `" Two"` and `--items "A,,B"` would carry an empty one — a wrong answer with no error.
-/// `runner::comma_separated` did this normalisation while the dispatch lived in `tddy-tools`; the
-/// call site keeps doing it now that the parsed arguments cross no package boundary.
-fn normalised_items(items: Vec<String>) -> Vec<String> {
-    items
-        .iter()
-        .flat_map(|list| split_outside_angle_brackets(list))
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-        .collect()
-}
-
-/// `list` split at every comma that is not inside `<..>`.
-fn split_outside_angle_brackets(list: &str) -> Vec<&str> {
-    let mut pieces = Vec::new();
-    let mut depth = 0usize;
-    let mut from = 0usize;
-    for (at, character) in list.char_indices() {
-        match character {
-            '<' => depth += 1,
-            '>' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                pieces.push(&list[from..at]);
-                from = at + 1;
-            }
-            _ => {}
-        }
-    }
-    pieces.push(&list[from..]);
-    pieces
 }
 
 #[cfg(test)]

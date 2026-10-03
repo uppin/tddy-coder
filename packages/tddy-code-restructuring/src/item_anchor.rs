@@ -307,6 +307,38 @@ fn covering_run(
     })
 }
 
+/// The names an `--items` value carries: split at the commas outside `<..>`, trimmed, with empty
+/// elements dropped.
+///
+/// The one place this is decided, for every front end that takes `--items` — the in-process CLI,
+/// the daemon's own command line, `tddy-tools`, and the legacy flag parser. A comma inside `<..>`
+/// belongs to the type (`<Pair<A, B>>` is one item), so clap's `value_delimiter = ','` cannot do
+/// it; and without the trimming `--items "One, Two"` would name an item literally called `" Two"`,
+/// and `--items "A,,B"` an unnamed one — a wrong answer with no error.
+pub fn parse_item_list(list: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut depth = 0usize;
+    let mut from = 0usize;
+    for (at, character) in list.char_indices() {
+        match character {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                names.push(&list[from..at]);
+                from = at + 1;
+            }
+            _ => {}
+        }
+    }
+    names.push(&list[from..]);
+    names
+        .into_iter()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 /// The `items` anchor over `names`, items of the module `file` is — what `anchors --items` emits.
 ///
 /// A name is bare (`Alpha`) or already begins with the file's own module path (`krate::m::Alpha`),
@@ -432,6 +464,47 @@ pub trait ItemAtResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_item_list_is_one_name_per_top_level_comma_trimmed() {
+        // Given a list written the way a person types one
+        // When it is split
+        // Then each name is trimmed and an empty element is dropped
+        assert_eq!(
+            parse_item_list("One, Two ,,Three,"),
+            ["One", "Two", "Three"]
+        );
+    }
+
+    #[test]
+    fn a_comma_inside_angle_brackets_belongs_to_the_type() {
+        // Given an impl block of a generic type between two plain items
+        // When the list is split
+        // Then the generic name stays whole
+        assert_eq!(
+            parse_item_list("One,<Pair<A, B>>,Two"),
+            ["One", "<Pair<A, B>>", "Two"]
+        );
+    }
+
+    #[test]
+    fn a_nested_generic_self_type_with_several_commas_stays_whole() {
+        // Given brackets nested two deep with commas at both levels
+        // When the list is split
+        // Then it is still one name
+        assert_eq!(
+            parse_item_list("<Map<K, Vec<(A, B)>>>#2,after"),
+            ["<Map<K, Vec<(A, B)>>>#2", "after"]
+        );
+    }
+
+    #[test]
+    fn an_empty_item_list_names_nothing() {
+        // Given a blank value
+        // When it is split
+        // Then there are no names
+        assert!(parse_item_list("  , ,").is_empty());
+    }
 
     fn a_resolved_item(first_line: u32, last_line: u32) -> ResolvedItem {
         ResolvedItem {
