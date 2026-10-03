@@ -33,6 +33,30 @@ pub enum RestructureCommand {
     Verify(RestructureVerifyArgs),
     /// Rewrite a plan's snapshot header to the working tree as it stands.
     Snapshot(RestructureSnapshotArgs),
+    /// Load plans into the index daemon, which then keeps them current and flushes them back.
+    Load(RestructureLoadArgs),
+    /// Flush and drop plans the index daemon holds.
+    Unload(RestructureUnloadArgs),
+    /// List the plans the index daemon holds.
+    Plans,
+}
+
+#[derive(Parser)]
+pub struct RestructureLoadArgs {
+    /// The plan JSONL files to load.
+    #[arg(required = true)]
+    pub plans: Vec<PathBuf>,
+}
+
+#[derive(Parser)]
+pub struct RestructureUnloadArgs {
+    /// The plans to flush and drop.
+    #[arg(required_unless_present = "all", conflicts_with = "all")]
+    pub plans: Vec<PathBuf>,
+
+    /// Flush and drop every plan the daemon holds for this tree.
+    #[arg(long)]
+    pub all: bool,
 }
 
 #[derive(Parser)]
@@ -46,11 +70,39 @@ pub struct RestructurePlanArgs {
     #[arg(long)]
     pub resume: bool,
 
-    #[arg(long)]
-    pub from: Option<usize>,
+    /// Start at this operation — its index in the plan, or the id the plan store gave it.
+    #[arg(long, value_name = "INDEX|ID")]
+    pub from: Option<OpRef>,
 
     #[arg(long)]
     pub stop_after: Option<usize>,
+}
+
+/// An operation named the way `--from` takes it: by where it sits in the plan, or by the stable id
+/// that survives a reorder of the plan.
+///
+/// Digits are an index; anything else is an id. An id made only of digits therefore cannot be
+/// named, which is why the ids the store assigns are not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpRef {
+    Index(usize),
+    Id(String),
+}
+
+impl std::str::FromStr for OpRef {
+    type Err = String;
+
+    fn from_str(text: &str) -> std::result::Result<OpRef, String> {
+        if text.is_empty() {
+            return Err(
+                "an operation is named by its index or its id, and this names neither".into(),
+            );
+        }
+        Ok(match text.parse::<usize>() {
+            Ok(index) => OpRef::Index(index),
+            Err(_) => OpRef::Id(text.to_string()),
+        })
+    }
 }
 
 #[derive(Parser)]
@@ -130,7 +182,14 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             target: Some(plan.plan),
             dry_run: plan.dry_run,
             resume: plan.resume,
-            from: plan.from,
+            from: match &plan.from {
+                Some(OpRef::Index(index)) => Some(*index),
+                _ => None,
+            },
+            from_id: match plan.from {
+                Some(OpRef::Id(id)) => Some(crate::plan::OpId(id)),
+                _ => None,
+            },
             stop_after: plan.stop_after,
             ..Options::default()
         },
@@ -161,6 +220,21 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
         RestructureCommand::Snapshot(snapshot) => Options {
             command: Command::Snapshot,
             target: Some(snapshot.plan),
+            ..Options::default()
+        },
+        RestructureCommand::Load(load) => Options {
+            command: Command::Load,
+            plans: load.plans,
+            ..Options::default()
+        },
+        RestructureCommand::Unload(unload) => Options {
+            command: Command::Unload,
+            plans: unload.plans,
+            all: unload.all,
+            ..Options::default()
+        },
+        RestructureCommand::Plans => Options {
+            command: Command::Plans,
             ..Options::default()
         },
     }
@@ -327,5 +401,23 @@ mod tests {
 
         // Then clap refuses the run rather than parsing a number nothing honours
         assert!(parsed.is_err(), "the withdrawn flag was still accepted");
+    }
+
+    #[test]
+    fn from_names_an_operation_by_its_index_or_by_its_id() {
+        // Given one apply resumed at an index and another at an id
+        let by_index = parse(&["apply", "plan.jsonl", "--from", "3"]);
+        let by_id = parse(&["apply", "plan.jsonl", "--from", "op-7"]);
+
+        // Then each reaches the runner as the kind of name it was
+        assert_eq!(
+            (by_index.from, by_index.from_id, by_id.from, by_id.from_id),
+            (
+                Some(3),
+                None,
+                None,
+                Some(crate::plan::OpId("op-7".to_string()))
+            )
+        );
     }
 }

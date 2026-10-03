@@ -5,12 +5,14 @@
 //! gone and no per-request stream for an index wait to report into. Each of these is therefore
 //! bounded by how long its one answer takes, and its progress goes to the log.
 //!
-//! They still take the root's queue, because each reads the tree or the `.restructure/` state a
-//! concurrent apply is writing.
+//! Most still take the root's queue, because each reads the tree or the `.restructure/` state a
+//! concurrent apply is writing. Loading and listing plans do not: they read plan files and the
+//! store, never the tree.
 
 use std::path::PathBuf;
 
 use tddy_code_restructuring::item_anchor;
+use tddy_code_restructuring::plan_store::PlanStore;
 use tddy_code_restructuring::runner::{self, Command, Options};
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
@@ -19,8 +21,9 @@ use crate::activity::Activity;
 use crate::index::WorkspaceIndex;
 use crate::operations::{joined, plan_path};
 use crate::proto::code_index::{
-    AnchorsRequest, AnchorsResponse, PlanStatusRequest, PlanStatusResponse, SourcePosition,
-    SourceRange, VerifyRequest, VerifyResponse,
+    AnchorsRequest, AnchorsResponse, ListPlansRequest, LoadPlansRequest, LoadedPlan,
+    PlanStatusRequest, PlanStatusResponse, PlansResponse, SourcePosition, SourceRange,
+    UnloadPlansRequest, VerifyRequest, VerifyResponse,
 };
 use crate::status::status_of;
 
@@ -151,15 +154,30 @@ async fn plan_progress(
 
     let options = Options {
         command: Command::Status,
-        target: Some(plan),
+        target: Some(plan.clone()),
         ..Options::default()
     };
 
     let _queued = index.hold(&root).await;
-    let progress = tokio::task::spawn_blocking(move || runner::status(&root, options))
-        .await
-        .map_err(|failure| joined("plan status", &failure))?
-        .map_err(|refusal| status_of(&refusal))?;
+    // A loaded plan is counted as the store holds it, which is the plan a run would execute; one
+    // that is not loaded is read from its file, since a status does not load what it looks at.
+    let store = index.plans_of(&root).await;
+    let progress = tokio::task::spawn_blocking(move || {
+        let held = {
+            let store = store.lock().expect("a root's plan store");
+            store
+                .key_for(&plan)
+                .ok()
+                .and_then(|key| store.get(&key).map(|loaded| loaded.plan.clone()))
+        };
+        match held {
+            Some(held) => runner::status_of_plan(&root, &plan, &held),
+            None => runner::status(&root, options),
+        }
+    })
+    .await
+    .map_err(|failure| joined("plan status", &failure))?
+    .map_err(|refusal| status_of(&refusal))?;
 
     Ok(PlanStatusResponse {
         completed: progress.completed as u32,
@@ -227,4 +245,122 @@ fn logged_progress() -> tddy_code_restructuring::backends::rust::ProgressSink {
 /// same reason: a line this process writes to stdout is a line in somebody's RPC frame.
 fn logged_trace(line: &str) {
     log::debug!(target: "tddy_index_daemon::operations", "trace: {line}");
+}
+
+/// Load plans into the root's store, answering every plan the store then holds.
+///
+/// Does not take the root's queue: it reads plan files and touches no tree, so it is answered while
+/// a run is going — the one thing that must wait is the store's lock, for as long as the run's step
+/// that holds it.
+pub(crate) async fn serve_load_plans(
+    index: &WorkspaceIndex,
+    request: LoadPlansRequest,
+) -> Result<PlansResponse, Status> {
+    let (activity, root) = Activity::arrived("load plans", index, &request.workspace_root).await?;
+    activity.recorded(load_plans(index, root, request).await)
+}
+
+async fn load_plans(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: LoadPlansRequest,
+) -> Result<PlansResponse, Status> {
+    if request.plans.is_empty() {
+        return Err(Status::invalid_argument(
+            "the request names no plans to load",
+        ));
+    }
+    let plans = request
+        .plans
+        .iter()
+        .map(|plan| plan_path(&root, plan))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let store = index.plans_of(&root).await;
+    tokio::task::spawn_blocking(move || {
+        let mut store = store.lock().expect("a root's plan store");
+        store.load(&plans)?;
+        Ok(held_by(&store))
+    })
+    .await
+    .map_err(|failure| joined("load plans", &failure))?
+    .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))
+}
+
+/// Flush and drop plans from the root's store, answering what it still holds.
+///
+/// Takes the root's queue, because dropping the plan a run is executing would pull it out from
+/// under the run: it waits for the run to end.
+pub(crate) async fn serve_unload_plans(
+    index: &WorkspaceIndex,
+    request: UnloadPlansRequest,
+) -> Result<PlansResponse, Status> {
+    let (activity, root) =
+        Activity::arrived("unload plans", index, &request.workspace_root).await?;
+    activity.recorded(unload_plans(index, root, request).await)
+}
+
+async fn unload_plans(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: UnloadPlansRequest,
+) -> Result<PlansResponse, Status> {
+    match (request.all, request.plans.is_empty()) {
+        (true, false) => {
+            return Err(Status::invalid_argument(
+                "the request names plans and asks for all of them — name one or the other",
+            ))
+        }
+        (false, true) => {
+            return Err(Status::invalid_argument(
+                "the request names no plans to unload",
+            ))
+        }
+        _ => {}
+    }
+
+    let _queued = index.hold(&root).await;
+    let store = index.plans_of(&root).await;
+    tokio::task::spawn_blocking(move || {
+        let mut store = store.lock().expect("a root's plan store");
+        if request.all {
+            store.unload_all()?;
+        } else {
+            let plans: Vec<PathBuf> = request.plans.iter().map(PathBuf::from).collect();
+            store.unload(&plans)?;
+        }
+        Ok(held_by(&store))
+    })
+    .await
+    .map_err(|failure| joined("unload plans", &failure))?
+    .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))
+}
+
+/// The plans the root's store holds.
+pub(crate) async fn serve_list_plans(
+    index: &WorkspaceIndex,
+    request: ListPlansRequest,
+) -> Result<PlansResponse, Status> {
+    let (activity, root) = Activity::arrived("list plans", index, &request.workspace_root).await?;
+    let store = index.plans_of(&root).await;
+    let listed =
+        tokio::task::spawn_blocking(move || held_by(&store.lock().expect("a root's plan store")))
+            .await
+            .map_err(|failure| joined("list plans", &failure));
+    activity.recorded(listed)
+}
+
+/// What a store holds, as the wire carries it.
+fn held_by(store: &PlanStore) -> PlansResponse {
+    PlansResponse {
+        plans: store
+            .list()
+            .into_iter()
+            .map(|held| LoadedPlan {
+                plan: held.key.to_string(),
+                ops: held.ops as u32,
+                dirty: held.dirty,
+            })
+            .collect(),
+    }
 }

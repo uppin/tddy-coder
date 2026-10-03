@@ -4,7 +4,7 @@
 //! a sink. A host that called it would learn what the whole run amounted to and nothing about the
 //! operations that made it up — one event per operation, with the files it touched and the
 //! visibility it widened, is not something a line carries — which is why
-//! [`tddy_code_restructuring::runner::open_run_resolving_anchors`],
+//! [`tddy_code_restructuring::runner::open_plan_run`],
 //! [`tddy_code_restructuring::runner::restore_ledger`] and
 //! [`tddy_code_restructuring::runner::commit_operation`] were promoted to public: the write-ahead
 //! sequence stays in the library, where a crash in the middle of it is still resumable, and the
@@ -20,39 +20,87 @@ use std::path::Path;
 use std::sync::Arc;
 
 use tddy_code_restructuring::backends::rust::ProgressSink;
+use tddy_code_restructuring::plan_store::PlanKey;
 use tddy_code_restructuring::registry::Workspace;
-use tddy_code_restructuring::runner::{self, Options, StatePaths};
-use tddy_code_restructuring::{Overlay, Plan, Resolution, Result};
+use tddy_code_restructuring::runner::{self, Options, PlanRun};
+use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
+use crate::index::SharedPlanStore;
 use crate::operations::{note_event, EventSender};
 use crate::proto::code_index::{restructure_event, OperationApplied, RestructureEvent, RunOutcome};
 
-/// Execute `options`' plan against the tree under `root`, reporting each operation as an event.
+/// The plan a run executes: the store that holds it, and what it is held under.
+pub(crate) struct HeldPlan {
+    pub(crate) store: SharedPlanStore,
+    pub(crate) key: PlanKey,
+}
+
+impl HeldPlan {
+    fn with_store<T>(
+        &self,
+        use_store: impl FnOnce(&mut tddy_code_restructuring::plan_store::PlanStore) -> T,
+    ) -> T {
+        use_store(&mut self.store.lock().expect("a root's plan store"))
+    }
+}
+
+/// Execute the plan `held` names against the tree under `root`, reporting each operation as an
+/// event.
 ///
-/// The caller owns the queue for `root`: the journal this writes carries no plan identity, so two
-/// runs under one root must not be in here at once.
+/// The plan is the store's copy, not the file, and its run state is its own — keyed by the plan's
+/// path — so what the caller owns is the queue for `root`: two runs under one root must not edit
+/// its tree at once, whatever plans they are of. After each operation the store refreshes the plan's
+/// pending anchors and writes the plan back; see [`runner::apply_from_store`], which this mirrors
+/// event for line.
+///
+/// The store is locked for the steps that need it and not across the run, so a request to list the
+/// root's plans is answered while the run is going.
 pub(crate) fn apply_plan(
     root: &Path,
+    held: &HeldPlan,
     options: &Options,
     client: Arc<LspClient>,
     cancel: CancellationToken,
     progress: ProgressSink,
     events: &EventSender<RestructureEvent>,
 ) -> Result<()> {
-    let plan = Plan::parse(&std::fs::read_to_string(options.plan()?)?)?;
-    let paths = StatePaths::under(root);
+    apply_held_plan(root, held, options, client, &cancel, progress, events)
+}
 
-    // Item anchors resolve and then the baseline compile check runs, both before `.restructure/`
-    // is written — the one shared order, `runner::open_run_resolving_anchors`.
+fn apply_held_plan(
+    root: &Path,
+    held: &HeldPlan,
+    options: &Options,
+    client: Arc<LspClient>,
+    cancel: &CancellationToken,
+    progress: ProgressSink,
+    events: &EventSender<RestructureEvent>,
+) -> Result<()> {
+    let (plan, plan_path) = held.with_store(|store| {
+        store
+            .get(&held.key)
+            .map(|loaded| (loaded.plan.clone(), store.path_of(&held.key)))
+            .ok_or_else(|| {
+                tddy_code_restructuring::RestructureError::MalformedPlan(format!(
+                    "{} is not loaded — load it first",
+                    held.key
+                ))
+            })
+    })?;
+
+    // The gates run on a copy of the plan, outside the store's lock: the baseline compile check
+    // takes minutes.
     let mut registry = runner::registry_for(client, cancel.clone(), progress, logged_trace);
-    let (mut journal, plan) =
-        runner::open_run_resolving_anchors(&plan, root, &paths, options, &mut registry, || {
-            runner::refuse_a_broken_baseline(root, &plan, options, &cancel)
-        })?;
-    let mut ledger = runner::restore_ledger(&journal, &paths)?;
-    let start = options.from.unwrap_or_else(|| journal.next_op());
+    let PlanRun {
+        mut journal,
+        plan,
+        paths,
+        mut ledger,
+        legacy,
+        start,
+    } = runner::open_plan_run(&plan, &plan_path, root, options, &mut registry, cancel)?;
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
@@ -93,20 +141,41 @@ pub(crate) fn apply_plan(
             ledger.record(&resolved.edit);
             overlay.record(root, &resolved.edit)?;
         } else {
-            runner::commit_operation(index, &resolved, root, &paths, &mut journal, &mut ledger)?;
+            runner::commit_operation(
+                index,
+                op.id.as_ref().filter(|_| !legacy),
+                &resolved,
+                root,
+                &paths,
+                &mut journal,
+                &mut ledger,
+            )?;
+            if !legacy {
+                held.with_store(|store| {
+                    runner::record_applied_op(
+                        store,
+                        &held.key,
+                        index,
+                        &resolved,
+                        &mut registry,
+                        &mut journal,
+                        &paths,
+                    )
+                })?;
+            }
         }
         done += 1;
 
         // Reported *after* the commit, so an event means the edit is on disk and in the journal.
         emit(
             events,
-            &cancel,
+            cancel,
             operation_event(index, done, plan.ops.len(), op, &resolved, options.dry_run),
         );
         for note in &resolved.notes {
             emit(
                 events,
-                &cancel,
+                cancel,
                 note_event(&tddy_code_restructuring::console::note(note)),
             );
         }
@@ -121,10 +190,17 @@ pub(crate) fn apply_plan(
         applied: done,
         total: plan.ops.len(),
     };
-    runner::refuse_a_broken_result(root, options, run, &cancel)?;
+    runner::refuse_a_broken_result(root, options, run, cancel)?;
+    // Before the outcome, so a plan that could not be written back ends the stream with that and
+    // never with "applied N of N". A run that failed earlier writes nothing here: the operations it
+    // committed wrote the plan as they landed, and one refused before its first leaves the file as
+    // it was.
+    if !options.dry_run {
+        held.with_store(|store| store.flush(&held.key))?;
+    }
     emit(
         events,
-        &cancel,
+        cancel,
         outcome_event(done, plan.ops.len(), stopped_early),
     );
     Ok(())
@@ -150,6 +226,7 @@ fn operation_event(
             index: index as u32,
             done: done as u32,
             total: total as u32,
+            op_id: op.id.as_ref().map(ToString::to_string).unwrap_or_default(),
             kind: format!("{:?}", op.op),
             files: tddy_code_restructuring::apply::touched_paths(&resolved.edit),
             // Stated by the renderer rather than here, so a widening carried as a value on this

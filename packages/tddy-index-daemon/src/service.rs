@@ -16,9 +16,10 @@ use crate::operations;
 use crate::proto::code_index::{
     AnalyzeEvent, AnchorsRequest, AnchorsResponse, ApplyRequest, CheckRequest, CodeIndexService,
     CodeIndexServiceServer, ComplexityRequest, ComplexityResponse, CoverageRequest,
-    DuplicateTestsRequest, IndexProgress, PlanStatusRequest, PlanStatusResponse, ReportRequest,
-    ReportResponse, RestructureEvent, VerifyRequest, VerifyResponse, WarmRequest,
-    WorkspacesRequest, WorkspacesResponse,
+    DuplicateTestsRequest, IndexProgress, ListPlansRequest, LoadPlansRequest, PlanStatusRequest,
+    PlanStatusResponse, PlansResponse, ReportRequest, ReportResponse, RestructureEvent,
+    UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest,
+    WorkspacesResponse,
 };
 use crate::queries;
 use crate::CODE_INDEX_SERVICE;
@@ -51,6 +52,15 @@ impl CodeIndexServiceImpl {
         Self {
             index: WorkspaceIndex::new(ports.servers),
         }
+    }
+
+    /// Write every plan any root holds back to disk now, for a process about to stop.
+    ///
+    /// Plans are written back shortly after they change, but "shortly" is a delay, and a process
+    /// that exits inside it takes the change with it. Every plan is tried even when one cannot be
+    /// written; the first refusal is returned.
+    pub async fn flush_plans(&self) -> tddy_code_restructuring::Result<()> {
+        self.index.flush_plans().await
     }
 }
 
@@ -109,6 +119,36 @@ impl CodeIndexService for CodeIndexServiceImpl {
         request: tddy_rpc::Request<PlanStatusRequest>,
     ) -> Result<tddy_rpc::Response<PlanStatusResponse>, tddy_rpc::Status> {
         queries::serve_plan_status(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// Load plans into the root's store.
+    async fn load_plans(
+        &self,
+        request: tddy_rpc::Request<LoadPlansRequest>,
+    ) -> Result<tddy_rpc::Response<PlansResponse>, tddy_rpc::Status> {
+        queries::serve_load_plans(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// Flush and drop plans from the root's store.
+    async fn unload_plans(
+        &self,
+        request: tddy_rpc::Request<UnloadPlansRequest>,
+    ) -> Result<tddy_rpc::Response<PlansResponse>, tddy_rpc::Status> {
+        queries::serve_unload_plans(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// The plans the root's store holds.
+    async fn list_plans(
+        &self,
+        request: tddy_rpc::Request<ListPlansRequest>,
+    ) -> Result<tddy_rpc::Response<PlansResponse>, tddy_rpc::Status> {
+        queries::serve_list_plans(&self.index, request.into_inner())
             .await
             .map(tddy_rpc::Response::new)
     }

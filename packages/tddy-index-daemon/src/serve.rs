@@ -7,7 +7,8 @@
 //! `CodeIndexServiceServer::from_arc` and `CodeIndexServiceTonicAdapter::new` both take an
 //! already-shared handle for exactly this.
 //!
-//! Shutdown is the other half. The language servers are *children of this process* — a
+//! Shutdown is the other half. Loaded plans are written back before the process goes. The language
+//! servers are *children of this process* — a
 //! multi-gigabyte rust-analyzer per root — so leaving them behind is the defect
 //! `docs/dev/todo/2026-09-15-the-daemon-orphans-its-sandbox-children-on-shutdown.md` records
 //! against `tddy-daemon`, and this path deliberately does not inherit it.
@@ -76,6 +77,12 @@ pub(crate) async fn serve(
     // (`operations::progress_into`) — so the runs still in flight cancel rather than carrying on
     // for nobody.
     serving.shutdown().await;
+    // The plans next: a plan changed in memory and not yet written back would be lost with this
+    // process, and the transports that could still change one are gone. A refusal — a plan whose
+    // file somebody edited — is logged and does not stop the rest of the shutdown.
+    if let Err(failure) = service.flush_plans().await {
+        log::error!(target: crate::MAIN, "could not write every loaded plan back: {failure}");
+    }
     // The servers next, because cancelling their tasks is what kills the child processes.
     servers.shutdown_all().await;
     cancel_every_remaining_task(&tasks).await;

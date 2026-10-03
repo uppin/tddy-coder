@@ -36,7 +36,10 @@ See [warm code-intelligence daemon](warm-code-intelligence-daemon.md).
 ## CLI
 
 ```text
-tddy-tools restructure apply <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
+tddy-tools restructure apply <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]
+tddy-tools restructure load <plan.jsonl>...
+tddy-tools restructure unload <plan.jsonl>... | --all
+tddy-tools restructure plans
 tddy-tools restructure status <plan.jsonl>
 tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES]
 tddy-tools restructure snapshot <plan.jsonl>
@@ -52,6 +55,7 @@ there is no budget to state. See [Waiting](#waiting).
 |---|---|
 | `apply` | Execute the plan; `--dry-run` rehearses in an overlay; `--resume` continues from the journal |
 | | Run state is **keyed by the plan** — `<root>/.restructure/<plan stem>-<digest>/` — so a completed plan does not block the next one under the same root, and `--resume` resumes the plan it was given rather than whichever ran last. Every multi-layer restructuring is several plans in one repository, which is why this is not an implementation detail. A journal left at `<root>/.restructure/` by an older run is adopted when resuming, and otherwise refused by name; it is never silently taken over by a different plan |
+| `load` / `unload` / `plans` | Hold plans in the index daemon's [plan store](#plan-store): `load` reads each plan once and gives every operation an id, `unload` writes changed plans back and drops them (`--all` for every plan of the tree), `plans` lists what is held. All three need the index daemon (`TDDY_INDEX_SOCKET`) and are refused without one |
 | `status` | completed / in_flight / pending / failed |
 | `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many lines — a report, never a gate |
 | `snapshot` | Rewrite the plan's line-1 `sha256:` header from the working tree, leaving every operation line byte-identical. No index, no language server |
@@ -73,9 +77,48 @@ A v2 header never refuses a run; a file whose hash drifted, or which is gone, is
 progress line and the plan runs, because an item anchor does not depend on the rest of the file.
 `restructure snapshot` rewrites the header of whichever version the plan has.
 
-Subsequent lines are one `RefactorOp` each. Plans must not contain `text` / `code` / `content`, `create_file`, or `insert_text` — the parser refuses them. Unsupported operations are hard errors, not skips. Files appear because an operation caused them (`to_file` / `extract_module_to_file`), never because a plan declared them.
+Subsequent lines are one `RefactorOp` each; every operation carries an opaque `id` (see [Plan store](#plan-store)). Plans must not contain `text` / `code` / `content`, `create_file`, or `insert_text` — the parser refuses them. Unsupported operations are hard errors, not skips. Files appear because an operation caused them (`to_file` / `extract_module_to_file`), never because a plan declared them.
 
 See [`.agents/skills/code-restructuring/references/plan-schema.md`](../../../.agents/skills/code-restructuring/references/plan-schema.md).
+
+## Plan store
+
+A plan is a command log that the executor reads through a **plan store** and writes back as it runs.
+The store is a library type with two lifetimes: the index daemon keeps one per workspace root across
+requests, and a one-shot `restructure apply` or `check` keeps one for the length of the run.
+
+- **Operation ids.** Every operation has a stable `id` (`"id":"op-3"`). Loading a plan gives one to any
+  operation without it, and the next write-back puts it in the file; two operations sharing an id are
+  refused as malformed. The journal and the apply events carry the id beside the index, and `--from`
+  accepts either. Reordering or inserting operations by hand is safe.
+- **Execution by reference.** `Check`, `Apply` and `PlanStatus` run the loaded operations, not whatever
+  the file says now. `Apply` of a plan that is not loaded loads it and leaves it loaded; `load` exists to
+  load a batch, `unload` to release one. Loading is all or nothing.
+- **The applied plan stays current.** After each applied operation the store rewrites the *pending*
+  operations of that plan: item-anchor hints and relative ranges are translated through the operation's
+  edits, fingerprints of items the operation edited are recomputed, range anchors move with the lines
+  inserted above them, and `file` hints follow a file the operation moved. A pending item anchor the edit
+  left unresolvable is kept as written, for the next run to refuse. Only the plan being applied is
+  refreshed.
+- **Write-back.** A changed plan is written (temporary file and rename) within a second of changing, and
+  always at the end of a run, on `unload`, and on shutdown of a served daemon (`^C` or `SIGTERM`). After
+  an operation the plan is written synchronously, so the file never lags the journal by more than that
+  one step. A dry run, and a run refused before its first operation, write nothing.
+- **The file stays the human's.** A write-back onto a plan whose file changed since it was loaded is
+  refused, naming the plan and saying to unload and reload; the file is untouched. `unload` of such a
+  plan drops it without writing, which is how the refusal's remedy works.
+- **Resume is verified.** Per operation the run journals `completed`, refreshes the plan in memory,
+  journals `plan_synced` (a digest of the pending operations' ids, anchors and `also`), then writes the
+  plan. A `--resume` or `--from` recomputes the digest from the plan it holds and compares it with the
+  last completed operation's record, so every crash point refuses and none redoes or skips an
+  operation. See [Known limitations](#known-limitations).
+- **Without a daemon**, `apply` and `check` still work over a store that lives for that one invocation
+  and flushes at exit; `load`, `unload` and `plans` are refused as needing the daemon. `--from <id>`
+  works only on runs with no daemon.
+- **Run state is keyed by the plan** in the daemon as on the command line, so a second plan under a root
+  where a first completed through the daemon applies without `--resume`.
+
+How the crate delivers this: [plan-store.md](../../../packages/tddy-code-restructuring/docs/plan-store.md).
 
 ## Item anchors
 
@@ -297,11 +340,18 @@ something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what
   rewrites what it left behind to reach the new module through qualified `module::Item` paths. The
   run reports which lines stayed. Author the anchor with `anchors --items` or `anchors --at` rather than by
   hand — a range that clips a helper is the usual way into this — and read the widening report the run prints.
-- **A continued run refuses item anchors.** Item anchors resolve against the tree the run starts on, and
-  a run whose journal already completed operations no longer has it. `--resume` and `--from` over a
-  partly applied plan of item anchors are refused (`FailedPrecondition`) with the remedy: run the
-  remainder from a plan of range anchors, or start the plan afresh. Keeping item anchors current across
-  runs belongs to the `#live-plan` stack's plan store ([#538](https://github.com/uppin/tddy-coder/pull/538) onward).
+- **A continued run refuses a plan the journal cannot vouch for.** `--resume` and `--from` over a partly
+  applied plan read anchors the plan store wrote back after each operation, and check them against a
+  digest the run journalled first. A plan whose pending anchors differ (the run stopped before the
+  write-back, or an anchor was edited by hand) is refused as out of sync, and an item-anchored plan
+  over a journal from before write-back cannot be verified; both say to run the remainder from a new
+  plan file. A plan of ranges and symbols over such an older journal resumes as before.
+- **A crash between a committed operation and its plan write-back is detected, not repaired.** The next
+  resume refuses as out of sync; the lost refresh is not reconstructed, so the remainder runs from a new
+  plan file. A hand edit of a pending *anchor* between runs is refused the same way; an edit to anything
+  else (`name`, `variant`) is not.
+- **`--from <id>` does not reach the daemon.** `ApplyRequest` carries no field for it, so the daemon path
+  refuses it, naming the workaround. Journal records and `OperationApplied` events carry `op_id`.
 - **`check` without `--deep` cannot examine item anchors.** A static check has no server to resolve
   them with, so it reports each item-anchored operation as a finding that says to run `check --deep`;
   a plan of item anchors never passes a static check green.

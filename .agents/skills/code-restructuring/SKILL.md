@@ -12,14 +12,23 @@ description: Restructure Rust code without writing moved code by hand — split 
 ## CLI
 
 ```bash
-tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N] [--stop-after N]
+tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]
 tddy-tools restructure status <plan.jsonl>
 tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
 tddy-tools restructure verify --against <git-ref>
+tddy-tools restructure load   <plan.jsonl>...        # needs the index daemon (TDDY_INDEX_SOCKET)
+tddy-tools restructure unload <plan.jsonl>... | --all
+tddy-tools restructure plans
 ```
+
+`load` reads a plan into the daemon once, gives every operation an `id`, and keeps it current: `apply`
+runs the loaded plan rather than the file, rewrites the pending operations' anchors after each
+operation, and writes the plan back. `apply` loads a plan that is not loaded; `load` is for batches.
+`--from ID` is accepted by a run with no daemon; with one, name the index. See
+[plan-schema.md](references/plan-schema.md).
 
 ## Workflow (abbreviated)
 

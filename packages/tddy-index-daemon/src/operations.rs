@@ -14,7 +14,8 @@
 //! cancels the token on a failed send, and that is the disconnect signal.
 //!
 //! Operations that touch a root's tree or its `.restructure/` state take that root's queue first
-//! (see [`WorkspaceIndex::hold`]), because the journal is keyed by root with no lock file.
+//! (see [`WorkspaceIndex::hold`]), because two runs on one tree would interleave their edits. A
+//! run's state is keyed by its plan, so what the queue protects is the tree, not the journal.
 
 use std::path::{Path, PathBuf};
 
@@ -25,7 +26,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
 use crate::activity::Activity;
-use crate::apply::apply_plan;
+use crate::apply::{apply_plan, HeldPlan};
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     restructure_event, ApplyRequest, CheckRequest, Finding, IndexProgress, RestructureEvent,
@@ -65,6 +66,7 @@ pub(crate) async fn serve_check(
 ) -> Result<EventStream<RestructureEvent>, Status> {
     let (activity, root) = Activity::arrived("check", index, &request.workspace_root).await?;
     let plan = activity.refusing(plan_path(&root, &request.plan))?;
+    let plan_file = plan.clone();
     let deep = request.deep;
     let budget = file_budget(request.file_budget);
     let (events, stream) = event_stream();
@@ -103,10 +105,24 @@ pub(crate) async fn serve_check(
             ..Options::default()
         };
 
+        // A loaded plan is checked as the store holds it, which is the plan an apply would run; one
+        // that is not loaded is read from its file, since a check does not load what it looks at.
+        let held = match held_copy(&index, &root, &plan_file).await {
+            Ok(held) => held,
+            Err(refusal) => {
+                activity.refused(&refusal);
+                let _ = events.send(Err(refusal)).await;
+                return;
+            }
+        };
         let checked = {
             let root = root.clone();
             let cancel = cancel.clone();
-            tokio::task::spawn_blocking(move || runner::check(&root, options, client, cancel)).await
+            tokio::task::spawn_blocking(move || match held {
+                Some(plan) => runner::check_plan(&root, plan, options, client, cancel),
+                None => runner::check(&root, options, client, cancel),
+            })
+            .await
         };
 
         // A run whose caller went away ended because of that, whatever the engine returned: this
@@ -149,7 +165,7 @@ pub(crate) async fn serve_apply(
     let plan = activity.refusing(plan_path(&root, &request.plan))?;
     let options = Options {
         command: Command::Apply,
-        target: Some(plan),
+        target: Some(plan.clone()),
         dry_run: request.dry_run,
         resume: request.resume,
         from: request.from.map(|from| from as usize),
@@ -161,6 +177,16 @@ pub(crate) async fn serve_apply(
 
     tokio::spawn(async move {
         let _queued = index.hold(&root).await;
+        // Loaded first, so a plan the store refuses — two operations sharing an id — is refused
+        // before a language server is waited for.
+        let held = match loaded_for_a_run(&index, &root, &plan).await {
+            Ok(held) => held,
+            Err(refusal) => {
+                activity.refused(&refusal);
+                let _ = events.send(Err(refusal)).await;
+                return;
+            }
+        };
         let client = match index.client_for(&root).await {
             Ok(client) => client,
             Err(refusal) => {
@@ -176,7 +202,7 @@ pub(crate) async fn serve_apply(
             let events = events.clone();
             let cancel = cancel.clone();
             tokio::task::spawn_blocking(move || {
-                apply_plan(&root, &options, client, cancel, progress, &events)
+                apply_plan(&root, &held, &options, client, cancel, progress, &events)
             })
             .await
         };
@@ -193,6 +219,48 @@ pub(crate) async fn serve_apply(
     });
 
     Ok(stream)
+}
+
+/// The plan an apply runs, loaded into its root's store if the store does not already hold it.
+///
+/// What makes `load` optional: an apply of a plan nobody loaded loads it and leaves it loaded, so
+/// the plans a root holds are the plans it has run as well as the ones it was told to hold.
+async fn loaded_for_a_run(
+    index: &WorkspaceIndex,
+    root: &Path,
+    plan: &Path,
+) -> Result<HeldPlan, Status> {
+    let store = index.plans_of(root).await;
+    let plan = plan.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut held = store.lock().expect("a root's plan store");
+        held.load(std::slice::from_ref(&plan))?;
+        let key = held.key_for(&plan)?;
+        drop(held);
+        Ok(HeldPlan { store, key })
+    })
+    .await
+    .map_err(|failure| joined("load", &failure))?
+    .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))
+}
+
+/// The store's copy of `plan`, if its root has loaded it.
+async fn held_copy(
+    index: &WorkspaceIndex,
+    root: &Path,
+    plan: &Path,
+) -> Result<Option<tddy_code_restructuring::Plan>, Status> {
+    let store = index.plans_of(root).await;
+    let plan = plan.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let held = store.lock().expect("a root's plan store");
+        // A path that names no plan has no key, hence nothing held under it — and is refused where
+        // the check reads the file.
+        let key = held.key_for(&plan).ok()?;
+        Some(held.get(&key)?.plan.clone())
+    })
+    .await
+    .map_err(|failure| joined("check", &failure))
 }
 
 /// One request's event channel and the stream its caller reads.

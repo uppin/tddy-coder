@@ -106,6 +106,7 @@ fn refuses_an_anchor_that_is_not_a_test_binary() {
         overlay: &overlay,
     };
     let op = tddy_code_restructuring::RefactorOp {
+        id: None,
         op: RefactorKind::MoveTestBinaryToCrate,
         anchor: Anchor::Symbol {
             file: "packages/tddy-daemon/src/runtime.rs".to_string(),
@@ -222,6 +223,7 @@ fn a_workspace_whose_moved_test_declares_a_module() -> tempfile::TempDir {
 
 fn a_move_of(source: &str, to: &str) -> tddy_code_restructuring::RefactorOp {
     tddy_code_restructuring::RefactorOp {
+        id: None,
         op: RefactorKind::MoveTestBinaryToCrate,
         anchor: Anchor::Symbol {
             file: source.to_string(),

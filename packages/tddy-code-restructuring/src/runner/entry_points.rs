@@ -11,10 +11,12 @@ use crate::item_anchor;
 use crate::item_anchor::{has_item_anchors, item_anchor_at, items_anchor};
 use crate::journal::{Journal, OpStatus};
 use crate::plan::{Anchor, RefactorKind};
+use crate::plan_store::{FlushPolicy, PlanKey, PlanStore};
 use crate::registry::{BackendRegistry, Workspace};
-use crate::{Overlay, Plan, RestructureError, Result};
+use crate::{Overlay, Plan, PositionLedger, RestructureError, Result};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
@@ -22,6 +24,7 @@ use super::budget::{budget_report, files_named_by, measured};
 use super::comparison::verify;
 use super::options::usage;
 use super::rehearsal::{survey_lines, Rehearsal};
+use super::resume;
 use super::{
     commit_operation, open_run_gated, parse_options, refuse_a_broken_baseline,
     refuse_a_broken_result, refuse_repo_scoped_state, report_drifted_hints, restore_ledger,
@@ -72,50 +75,46 @@ pub fn dispatch(
         Command::Anchors => item_anchors(root, options, client, cancel).map(Outcome::ItemAnchored),
         Command::Verify => verify(root, options).map(Outcome::Verified),
         Command::Snapshot => snapshot(root, options).map(Outcome::Snapshotted),
+        // Held across requests, so only a process that outlives one has anything to load into: a
+        // run with no daemon has a store for its own length and nothing to name afterwards.
+        Command::Load => Err(RestructureError::NeedsIndexDaemon {
+            command: "load".to_string(),
+        }),
+        Command::Unload => Err(RestructureError::NeedsIndexDaemon {
+            command: "unload".to_string(),
+        }),
+        Command::Plans => Err(RestructureError::NeedsIndexDaemon {
+            command: "plans".to_string(),
+        }),
     }
 }
 
-/// Build a registry for static checks only (no LSP connection).
-fn registry_for_static() -> BackendRegistry {
-    let mut registry = BackendRegistry::new();
-    registry.register(Box::new(RustBackend::new(
-        "/usr/bin/rust-analyzer",
-        "/tmp",
-        "/tmp",
-    )));
-    registry
-}
-
-/// Build a registry backed by rust-analyzer through the shared LSP client.
+/// Apply the plan `key` names from `store`, starting at `from` (or where its journal left off),
+/// refreshing the plan's pending operations after each one and flushing it at the end.
 ///
-/// The token is what ends a wait for an index that is still loading: this library states no budget
-/// of its own, so the only bound on such a wait is the caller it belongs to.
+/// What every front end runs: the daemon over its long-lived store, a one-shot `apply` over a store
+/// that lives for the run. The plan is the store's copy, not the file: `options.target` names
+/// nothing here, and a file edited since it was loaded changes nothing about what runs.
 ///
-/// Both destinations are the caller's: `progress` takes the server's own indexing lines, and
-/// `trace` takes the diagnostic account of a seam — but only when `RESTRUCTURE_TRACE` asks for one,
-/// which is read here so that a run gets a trace without every caller having to look.
-pub fn registry_for(
-    client: Arc<LspClient>,
-    cancel: CancellationToken,
-    progress: ProgressSink,
-    trace: fn(&str),
-) -> BackendRegistry {
-    let mut registry = BackendRegistry::new();
-    let mut rust = RustBackend::from_lsp_client(client, Some(cancel), progress);
-    if wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()) {
-        rust = rust.with_trace(trace);
-    }
-    registry.register(Box::new(rust));
-    registry
-}
-
-/// Execute a plan against the working tree under `root`.
+/// **The store's anchors are current.** After each committed operation the plan's pending operations
+/// are rewritten for the tree it left and the plan is written back, so what the file says is what
+/// the tree holds as of the last completed operation. A run therefore translates anchors through the
+/// edits *of this run* only — a ledger folded from the journal would carry the edits of earlier runs
+/// a second time — and a resume reads anchors that match the tree it resumes on. The write follows
+/// the journal's record of the operation, so a crash between the two leaves the file one operation
+/// behind the journal.
 ///
-/// Returns what the whole run amounted to; the account of each operation as it lands goes to
-/// [`Options::account`] while the run is still going, because that is the only time it is worth
-/// anything.
-pub fn apply(
+/// A dry run writes nothing: no journal record, no refresh, no flush. Neither does a run that is
+/// refused before its first operation: the plan file is as it was.
+///
+/// # Errors
+///
+/// [`RestructureError::PlanChangedOnDisk`] when the plan's file changed since it was loaded, at the
+/// first write. The operations committed before it stay on disk and in the journal.
+pub fn apply_from_store(
     root: &Path,
+    store: &mut PlanStore,
+    key: &PlanKey,
     options: Options,
     client: Option<Arc<LspClient>>,
     cancel: CancellationToken,
@@ -123,24 +122,115 @@ pub fn apply(
     let client = client.ok_or_else(|| {
         RestructureError::MalformedPlan("apply requires a rust-analyzer LSP session".into())
     })?;
-    let plan_path = options.plan()?;
-    let plan = read_plan(&plan_path)?;
-    let paths = StatePaths::for_plan(root, &plan_path)?;
+    let summary = apply_held_plan(root, store, key, &options, client, &cancel)?;
+    // A run that refused or failed writes nothing here: the operations it did commit wrote the plan
+    // as they landed ([`record_applied_op`]), and one that never started must leave the plan file
+    // as it found it — "nothing was written" is what its refusal says.
+    if !options.dry_run {
+        store.flush(key)?;
+    }
+    Ok(summary)
+}
 
+/// A run that has been opened: its journal, the plan it executes, and where in it to start.
+///
+/// What [`open_plan_run`] hands back, so the loop that drives it — the command line's, which
+/// reports lines, and the daemon's, which reports events — starts from the same state.
+pub struct PlanRun {
+    pub journal: Journal,
+    /// The plan to execute, every item anchor lowered into the range it names on the tree the run
+    /// starts on.
+    pub plan: Plan,
+    pub paths: StatePaths,
+    /// Translates `plan`'s anchors: through the edits **this run** commits and nothing earlier, since
+    /// the plan was written back to match the tree — unless the journal `legacy`, in which case it
+    /// starts from the journal's own fold. See [`apply_from_store`].
+    pub ledger: PositionLedger,
+    /// The journal was written before plans were kept current, so this run continues it as such: its
+    /// operations are journalled without ids and the plan is neither refreshed nor written back —
+    /// mixing the two epochs in one plan would leave anchors that match neither.
+    pub legacy: bool,
+    /// The index of the first operation to execute.
+    pub start: usize,
+}
+
+/// Open the run of `plan`, a plan a store holds at `plan_path`: the journal, with its refusals, and
+/// item anchors lowered, in the one order every apply loop uses ([`open_run_resolving_anchors`]).
+///
+/// Takes the plan rather than the store, so a host whose store is shared can copy the plan out and
+/// not hold the store through a baseline compile check that takes minutes.
+pub fn open_plan_run(
+    plan: &Plan,
+    plan_path: &Path,
+    root: &Path,
+    options: &Options,
+    registry: &mut BackendRegistry,
+    cancel: &CancellationToken,
+) -> Result<PlanRun> {
+    let paths = StatePaths::for_plan(root, plan_path)?;
     // Item anchors resolve, and then the baseline compile check runs, both before `.restructure/`
     // exists — see `open_run_resolving_anchors` for why in that order.
+    let (journal, lowered) =
+        open_run_resolving_anchors(plan, root, &paths, options, registry, || {
+            refuse_a_broken_baseline(root, plan, options, cancel)
+        })?;
+    // The checkpoint must agree with the journal either way. What translates anchors differs:
+    // a journal that predates write-back left the plan in the coordinates the run began in, so the
+    // journal's own fold does it; any other leaves the plan current, and what translates is this
+    // run's edits alone.
+    let folded = restore_ledger(&journal, &paths)?;
+    let legacy = resume::predates_plan_write_back(&journal);
+    let start = resume::start_of(&lowered, options, &journal)?;
+    Ok(PlanRun {
+        journal,
+        plan: lowered,
+        paths,
+        ledger: if legacy {
+            folded
+        } else {
+            PositionLedger::new()
+        },
+        legacy,
+        start,
+    })
+}
+
+fn apply_held_plan(
+    root: &Path,
+    store: &mut PlanStore,
+    key: &PlanKey,
+    options: &Options,
+    client: Arc<LspClient>,
+    cancel: &CancellationToken,
+) -> Result<RunSummary> {
+    let plan = store
+        .get(key)
+        .ok_or_else(|| {
+            RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
+        })?
+        .plan
+        .clone();
     let mut registry = registry_for(
         client,
         cancel.clone(),
         Arc::clone(&options.progress),
         options.trace,
     );
-    let (mut journal, plan) =
-        open_run_resolving_anchors(&plan, root, &paths, &options, &mut registry, || {
-            refuse_a_broken_baseline(root, &plan, &options, &cancel)
-        })?;
-    let mut ledger = restore_ledger(&journal, &paths)?;
-    let start = options.from.unwrap_or_else(|| journal.next_op());
+    let PlanRun {
+        mut journal,
+        plan,
+        paths,
+        mut ledger,
+        legacy,
+        start,
+    } = open_plan_run(
+        &plan,
+        &store.path_of(key),
+        root,
+        options,
+        &mut registry,
+        cancel,
+    )?;
     let total = plan.ops.len();
     (options.progress)(&format!(
         "apply: {total} operation(s){}{}",
@@ -209,7 +299,26 @@ pub fn apply(
         (options.progress)(&format!(
             "op {index} of {total}: applying {files} file(s) to disk"
         ));
-        commit_operation(index, &resolved, root, &paths, &mut journal, &mut ledger)?;
+        commit_operation(
+            index,
+            op.id.as_ref().filter(|_| !legacy),
+            &resolved,
+            root,
+            &paths,
+            &mut journal,
+            &mut ledger,
+        )?;
+        if !legacy {
+            record_applied_op(
+                store,
+                key,
+                index,
+                &resolved,
+                &mut registry,
+                &mut journal,
+                &paths,
+            )?;
+        }
         // Reported *after* the commit, so a line in the account means the edit is on disk and in
         // the journal. An apply used to report nothing at all — the dry run, where nothing is at
         // stake, was the only mode that spoke.
@@ -230,12 +339,121 @@ pub fn apply(
         applied: done,
         total,
     };
-    refuse_a_broken_result(root, &options, run, &cancel)?;
+    refuse_a_broken_result(root, options, run, cancel)?;
     Ok(RunSummary {
         applied: done,
         total: plan.ops.len(),
         stopped_early,
     })
+}
+
+/// Bring the plan `key` up to the tree after its operation `index` was committed, record that in
+/// the journal, and write the plan back: pending anchors rewritten through the edit
+/// ([`PlanStore::refresh_after_op`]), a digest of them journalled, then the flush.
+///
+/// The order is the point. The journal's `completed` record is already down, so a crash before the
+/// digest leaves an operation with no digest, and a crash after the digest and before the flush
+/// leaves a digest the plan on disk does not match — both of which a resume refuses
+/// ([`RestructureError::PlanOutOfSync`]) instead of reading anchors from a plan that is behind the
+/// tree. The flush is synchronous for the same reason: it is what makes the next resume's check pass.
+///
+/// What every apply loop calls after [`commit_operation`], the command line's and the daemon's.
+pub fn record_applied_op(
+    store: &mut PlanStore,
+    key: &PlanKey,
+    index: usize,
+    resolved: &crate::Resolution,
+    resolver: &mut dyn crate::item_anchor::ItemResolver,
+    journal: &mut Journal,
+    paths: &StatePaths,
+) -> Result<()> {
+    let id = store
+        .get(key)
+        .and_then(|held| held.plan.ops.get(index))
+        .and_then(|op| op.id.clone())
+        .ok_or_else(|| {
+            RestructureError::MalformedPlan(format!(
+                "{key} has no operation {index} to refresh from"
+            ))
+        })?;
+    store.refresh_after_op(key, &id, &resolved.edit, resolver)?;
+    let held = store.get(key).ok_or_else(|| {
+        RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
+    })?;
+    let digest = crate::plan_store::pending_digest(&held.plan, index);
+    journal.append(
+        &paths.journal,
+        crate::journal::JournalRecord::plan_synced(index, Some(id), digest),
+    )?;
+    store.flush(key)
+}
+
+/// Build a registry for static checks only (no LSP connection).
+fn registry_for_static() -> BackendRegistry {
+    let mut registry = BackendRegistry::new();
+    registry.register(Box::new(RustBackend::new(
+        "/usr/bin/rust-analyzer",
+        "/tmp",
+        "/tmp",
+    )));
+    registry
+}
+
+/// Build a registry backed by rust-analyzer through the shared LSP client.
+///
+/// The token is what ends a wait for an index that is still loading: this library states no budget
+/// of its own, so the only bound on such a wait is the caller it belongs to.
+///
+/// Both destinations are the caller's: `progress` takes the server's own indexing lines, and
+/// `trace` takes the diagnostic account of a seam — but only when `RESTRUCTURE_TRACE` asks for one,
+/// which is read here so that a run gets a trace without every caller having to look.
+pub fn registry_for(
+    client: Arc<LspClient>,
+    cancel: CancellationToken,
+    progress: ProgressSink,
+    trace: fn(&str),
+) -> BackendRegistry {
+    let mut registry = BackendRegistry::new();
+    let mut rust = RustBackend::from_lsp_client(client, Some(cancel), progress);
+    if wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()) {
+        rust = rust.with_trace(trace);
+    }
+    registry.register(Box::new(rust));
+    registry
+}
+
+/// Execute a plan against the working tree under `root`.
+///
+/// Returns what the whole run amounted to; the account of each operation as it lands goes to
+/// [`Options::account`] while the run is still going, because that is the only time it is worth
+/// anything.
+///
+/// The plan is loaded into a store that lives for this call and runs through
+/// [`apply_from_store`], so a run with no daemon still gives its operations ids, refreshes their
+/// anchors and writes the plan back — the same thing the daemon does over a store it keeps.
+pub fn apply(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<RunSummary> {
+    if client.is_none() {
+        return Err(RestructureError::MalformedPlan(
+            "apply requires a rust-analyzer LSP session".into(),
+        ));
+    }
+    let plan_path = options.plan()?;
+    // Nothing but this call reads the store, so there is no later moment for a debounce to wait for:
+    // the flushes are the ones the run asks for.
+    let mut store = PlanStore::new(
+        root,
+        FlushPolicy {
+            debounce: Duration::ZERO,
+        },
+    );
+    store.load(std::slice::from_ref(&plan_path))?;
+    let key = store.key_for(&plan_path)?;
+    apply_from_store(root, &mut store, &key, options, client, cancel)
 }
 
 /// One line of per-operation progress, in the wording every front end uses for it.
@@ -313,7 +531,13 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
 pub fn status(root: &Path, options: Options) -> Result<PlanProgress> {
     let plan_path = options.plan()?;
     let plan = read_plan(&plan_path)?;
-    let paths = StatePaths::for_plan(root, &plan_path)?;
+    status_of_plan(root, &plan_path, &plan)
+}
+
+/// [`status`] of a plan the caller already holds — the daemon's, out of its store — rather than one
+/// read from `plan_path`, which still says where the plan's run state is keyed.
+pub fn status_of_plan(root: &Path, plan_path: &Path, plan: &Plan) -> Result<PlanProgress> {
+    let paths = StatePaths::for_plan(root, plan_path)?;
     refuse_repo_scoped_state(root, &paths)?;
     let journal = Journal::load(&paths.journal)?;
     let counted = |wanted: OpStatus| {
@@ -350,6 +574,18 @@ pub fn check(
     cancel: CancellationToken,
 ) -> Result<Vec<Finding>> {
     let plan = read_plan(&options.plan()?)?;
+    check_plan(root, plan, options, client, cancel)
+}
+
+/// [`check`] of a plan the caller already holds — the daemon's, out of its store — rather than one
+/// read from `options.target`.
+pub fn check_plan(
+    root: &Path,
+    plan: Plan,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<Vec<Finding>> {
     plan.verify_snapshot(root)?;
     report_drifted_hints(&plan, root, &options.progress);
 
@@ -513,9 +749,9 @@ pub fn item_anchors(
     }
 }
 
-/// Open a run the way both apply loops must: item anchors resolved, then the baseline compile
-/// check, then `.restructure/` written — and the plan to run, with every anchor lowered to the
-/// snapshot coordinates the ledger translates, handed back beside the journal.
+/// Open a run the way both apply loops must: the plan checked against the journal, item anchors
+/// resolved, then the baseline compile check, then `.restructure/` written — and the plan to run,
+/// with every anchor lowered to the coordinates the run translates, handed back beside the journal.
 ///
 /// One function so the CLI's apply and the daemon's cannot diverge on the order. It is this order
 /// because resolving is cheap and refuses for the commonest reasons — an item edited since the plan
@@ -523,15 +759,13 @@ pub fn item_anchors(
 /// and both come before the first write, so their refusals' "nothing was written" stays true and
 /// leaves no `.restructure/` behind.
 ///
-/// Item anchors are resolved against the tree the run *starts* on, because that is the tree the
-/// ledger's coordinates are in. A run that continues a journal does not have it: the tree already
-/// holds the edits of the operations the journal completed, and coordinates read from it would be
-/// translated through those edits a second time. Such a run is refused here — once before the gate
-/// from the journal as found, and again against the journal the open returns, since opening a
-/// continued run may adopt a repository-scoped one the first look could not see.
-///
-/// TODO(plan-store): keep item anchors current across runs, which is what lets a resumed run
-/// resolve them; until then a resumed run of a plan that has item anchors is refused.
+/// Item anchors are resolved against the tree the run *starts* on, and only the operations the run
+/// will execute: a run that continues a journal starts on a tree that holds the journal's edits,
+/// and the plan's pending anchors were written back to describe exactly that tree
+/// ([`record_applied_op`]). What a continued run first has to know is that they were — see
+/// `resume::refuse_a_plan_the_journal_cannot_vouch_for` — and it asks twice: of the journal as
+/// found before the gate, and of the one the open returns, since opening a continued run may adopt
+/// a repository-scoped journal the first look could not see.
 pub fn open_run_resolving_anchors(
     plan: &Plan,
     root: &Path,
@@ -542,36 +776,14 @@ pub fn open_run_resolving_anchors(
 ) -> Result<(Journal, Plan)> {
     let (journal, resolved) = open_run_gated(plan, root, paths, options, || {
         let found = Journal::load(&paths.journal)?;
-        let resolved = resolve_item_anchors(plan, root, &found, registry)?;
+        resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &found)?;
+        let start = resume::start_of(plan, options, &found)?;
+        let resolved = resume::lower_pending(plan, start, root, registry)?;
         baseline_gate()?;
         Ok(resolved)
     })?;
-    refuse_a_continued_item_plan(plan, &journal)?;
+    resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &journal)?;
     Ok((journal, resolved))
-}
-
-/// `plan` with every item anchor resolved against the tree it is about to run on, refusing a run
-/// that continues a journal (see [`open_run_resolving_anchors`]).
-pub fn resolve_item_anchors(
-    plan: &Plan,
-    root: &Path,
-    journal: &Journal,
-    registry: &mut BackendRegistry,
-) -> Result<Plan> {
-    if !has_item_anchors(plan) {
-        return Ok(plan.clone());
-    }
-    refuse_a_continued_item_plan(plan, journal)?;
-    item_anchor::resolve_item_anchors(plan, root, registry)
-}
-
-fn refuse_a_continued_item_plan(plan: &Plan, journal: &Journal) -> Result<()> {
-    if has_item_anchors(plan) && journal.next_op() > 0 {
-        return Err(RestructureError::ItemAnchorsOnContinuedRun {
-            applied: journal.next_op(),
-        });
-    }
-    Ok(())
 }
 
 fn read_plan(path: &Path) -> Result<Plan> {

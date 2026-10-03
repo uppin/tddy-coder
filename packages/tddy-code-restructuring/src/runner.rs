@@ -1,8 +1,9 @@
 //! The entry points for restructuring subcommands, one per [`Command`].
 //!
-//! The plan is a command log and is never rewritten. Each operation's resolved edit is appended to
-//! an event journal, and the position ledger is a projection over that journal — which is what
-//! makes an interrupted run resumable.
+//! The plan is a command log the [`crate::plan_store`] keeps current: after each operation its
+//! pending anchors are rewritten for the tree and the plan is written back. Each operation's
+//! resolved edit is appended to an event journal, and the position ledger is a projection over that
+//! journal — which is what makes an interrupted run resumable.
 //!
 //! **Nothing here prints.** Every entry point returns its result — findings, progress, a summary,
 //! an anchor, a comparison — and its live account goes to the sinks its caller installed in
@@ -18,19 +19,21 @@ mod entry_points;
 mod options;
 mod outcome;
 mod rehearsal;
+mod resume;
 
 pub use comparison::verify;
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{
-    apply, check, dispatch, item_anchors, open_run_resolving_anchors, registry_for,
-    resolve_item_anchors, run, snapshot, status,
+    apply, apply_from_store, check, check_plan, dispatch, item_anchors, open_plan_run,
+    open_run_resolving_anchors, record_applied_op, registry_for, run, snapshot, status,
+    status_of_plan, PlanRun,
 };
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, hash_touched_files};
 use crate::journal::{Journal, JournalRecord, ResumeDecision};
-use crate::{LedgerCheckpoint, Plan, PositionLedger, RestructureError, Result};
+use crate::{LedgerCheckpoint, OpId, Plan, PositionLedger, RestructureError, Result};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -49,11 +52,13 @@ use std::path::{Path, PathBuf};
 /// makes an interrupted run resumable — so a caller driving the loop itself must commit through here
 /// rather than calling [`crate::apply::apply_workspace_edit`] directly.
 ///
-/// The caller owns the ordering: `index` is the operation's position in the plan, and operations
+/// The caller owns the ordering: `index` is the operation's position in the plan and `id` its stable
+/// id when it has one — both are journalled — and operations
 /// must be committed in the order the plan states them, because `ledger` is a projection over the
 /// journal and translating a later anchor depends on every earlier edit having been recorded.
 pub fn commit_operation(
     index: usize,
+    id: Option<&OpId>,
     resolved: &crate::Resolution,
     root: &Path,
     paths: &StatePaths,
@@ -61,7 +66,10 @@ pub fn commit_operation(
     ledger: &mut PositionLedger,
 ) -> Result<()> {
     let pre = hash_touched_files(root, &resolved.edit)?;
-    journal.append(&paths.journal, JournalRecord::in_flight(index, pre.clone()))?;
+    journal.append(
+        &paths.journal,
+        JournalRecord::in_flight(index, id.cloned(), pre.clone()),
+    )?;
 
     apply_workspace_edit(root, &resolved.edit)?;
 
@@ -70,6 +78,7 @@ pub fn commit_operation(
         &paths.journal,
         JournalRecord::completed(
             index,
+            id.cloned(),
             resolved.edit.clone(),
             pre,
             post,

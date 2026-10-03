@@ -20,13 +20,25 @@ plan runs, because an item anchor does not depend on the rest of the file. A v1 
 before, including the `snapshot mismatch` refusal. `restructure snapshot` rewrites the header of
 whichever version the plan has.
 
-The plan is a **command log** and is never rewritten. Execution appends to `.restructure/journal.jsonl`
-(the event log) and checkpoints the coordinate ledger to `.restructure/ledger.json`.
+The plan is a **command log** that the executor reads through a plan store and writes back as it runs.
+Every operation carries an `id` (`"id":"op-3"`, opaque): the store gives one to any operation loaded
+without it and writes it into the file, two operations sharing an id are refused as malformed, and the
+journal, the apply events and `--from` name operations by it. After each applied operation the store
+rewrites the *pending* operations' anchors for the tree the operation left, and writes the plan back
+(a temporary file and a rename). It never overwrites a plan whose file changed since it was loaded:
+that is refused, naming the plan. Before writing it back the run journals a digest of the pending
+anchors, and a `--resume`/`--from` checks the plan against it: a mismatch (a crash between the two, or
+an anchor edited by hand) is refused as out of sync — run the remainder from a new plan file. A plan
+written back is normalised: keys in the executor's order,
+defaults omitted. Execution also appends to `.restructure/journal.jsonl` (the event log) and
+checkpoints the coordinate ledger to `.restructure/ledger.json`.
 
 ## Anchors
 
-`symbol` and `range` anchors are expressed in the coordinates of the snapshot, never adjusted for
-earlier operations.
+`symbol` and `range` anchors are expressed in the coordinates of the tree the plan runs on. Within a
+run they are translated through the edits of the operations before them, and the executor writes the
+translated anchors back to the plan after every operation — so a plan that has been partly applied
+describes the tree as it now is, and a resume reads anchors that match it.
 
 ```jsonc
 {"kind":"symbol","file":"src/shapes.ts","path":"scaleBox"}   // a bare name: the FIRST match in the file

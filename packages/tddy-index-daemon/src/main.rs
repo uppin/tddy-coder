@@ -99,10 +99,19 @@ async fn main() -> ExitCode {
             // long enough to shut them down again.
             let (_tasks, servers, service) = wired();
             let verdict = single_shot::run_once(service.as_ref(), requested).await;
+            // A plan this run loaded or changed is written back before the process goes, as a
+            // serving one does on shutdown: the run is over and nothing else will.
+            let flushed = service.flush_plans().await;
             // The same cleanup a serving process does, for the same reason: this run may have
             // started a language server, and it is a child of this process either way.
             servers.shutdown_all().await;
-            verdict.exit_code()
+            match flushed {
+                Ok(()) => verdict.exit_code(),
+                Err(failure) => {
+                    log::error!(target: MAIN, "could not write every loaded plan back: {failure}");
+                    ExitCode::FAILURE
+                }
+            }
         }
         Lifetime::Serve(transports) => {
             let (tasks, servers, service) = wired();

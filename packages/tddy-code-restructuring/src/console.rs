@@ -92,6 +92,29 @@ pub fn plan_progress(progress: &PlanProgress) -> Vec<String> {
     ]
 }
 
+/// The plans a store holds, one line each, or the statement that it holds none.
+///
+/// Takes `(plan, operations, changed)` triples rather than a store type because the two front ends
+/// that render it hold the wire's `LoadedPlan`, not this crate's. `changed` is a plan the store has
+/// changed and not yet written back.
+pub fn loaded_plans(held: &[(&str, usize, bool)]) -> Vec<String> {
+    if held.is_empty() {
+        return vec!["no plans loaded".to_string()];
+    }
+    held.iter()
+        .map(|(plan, operations, changed)| {
+            format!(
+                "{plan}: {operations} operation(s){}",
+                if *changed {
+                    ", not yet written back"
+                } else {
+                    ""
+                }
+            )
+        })
+        .collect()
+}
+
 /// Every finding a check made, or the statement that it made none.
 ///
 /// For a front end handed the findings as values. One that is told about them a stream item at a

@@ -3,7 +3,7 @@
 A warm rust-analyzer index, served as `code_index.CodeIndexService` over gRPC and stdio — or one
 operation run in process and then exit.
 
-Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Eleven RPCs covering the
+Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Fourteen RPCs covering the
 plan-driven restructuring operations (`tddy-code-restructuring`) and the analysis operations
 (`tddy-code-analysis`), each request naming the `workspace_root` it acts on so one process serves
 several worktrees.
@@ -17,6 +17,9 @@ tddy-index-daemon --grpc 127.0.0.1:7777 --stdio                     # both, one 
 A transport argument selects the serving lifetime; its absence selects single-shot. Neither a
 subcommand nor a transport is an error rather than a default.
 
+- **Plan store**: the daemon keeps one per root. `LoadPlans`, `UnloadPlans` and `ListPlans` manage it;
+  `Check`, `Apply` and `PlanStatus` run the loaded plan, refresh its pending operations after each
+  operation and write it back, and every dirty plan is flushed on `SIGTERM`/`^C` and at single-shot exit.
 - **Contract, warm-state model and refusal classes**:
   [`docs/code-index-service.md`](docs/code-index-service.md)
 - **Product documentation**:

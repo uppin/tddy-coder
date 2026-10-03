@@ -485,6 +485,18 @@ async fn answers_a_grpc_client_at_the_coordinate_it_serves() {
     );
 }
 
+/// Whether `process` has exited within `budget`.
+fn the_process_exits_within(process: &mut std::process::Child, budget: Duration) -> bool {
+    let deadline = std::time::Instant::now() + budget;
+    while std::time::Instant::now() < deadline {
+        if matches!(process.try_wait(), Ok(Some(_))) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
 /// A gRPC client dialled at `port`, retried because a listener that has accepted a probe is not
 /// yet necessarily serving HTTP/2 on it.
 async fn a_grpc_client_on(
@@ -505,4 +517,60 @@ async fn a_grpc_client_on(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("no gRPC client could be dialled on {port}: {last:?}");
+}
+
+/// A loaded plan's store is flushed when the served process is asked to stop: `SIGTERM` is how
+/// `tddy-daemon` and `run-index-daemon --stop` end it, and a plan changed in memory must not be lost
+/// with the process.
+#[tokio::test]
+async fn sigterm_flushes_every_dirty_plan_before_exit() {
+    // Given the binary serving gRPC, holding a plan made dirty by id assignment on load
+    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let plan = workspace.path().join("carve.jsonl");
+    std::fs::write(
+        &plan,
+        "{\"v\":1,\"snapshot\":{}}\n{\"op\":\"rename_symbol\",\"anchor\":{\"kind\":\"symbol\",\
+         \"file\":\"src/lib.rs\",\"path\":\"foo\"},\"name\":\"bar\"}\n",
+    )
+    .expect("write the plan");
+    let port = a_free_port();
+    let mut serving = Command::new(the_index_daemon())
+        .args(["--grpc", &format!("127.0.0.1:{port}")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary starts");
+    assert!(
+        a_tcp_connection_is_accepted_on(port, A_RUN_SHOULD_FINISH_WITHIN),
+        "the gRPC listener never accepted a client"
+    );
+    let loaded = a_grpc_client_on(port)
+        .await
+        .load_plans(tddy_index_daemon::proto::code_index::LoadPlansRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plans: vec!["carve.jsonl".to_string()],
+        })
+        .await;
+
+    // When the process is sent SIGTERM and exits
+    let signalled = Command::new("kill")
+        .args(["-TERM", &serving.id().to_string()])
+        .status()
+        .expect("kill runs");
+    let exited = the_process_exits_within(&mut serving, A_RUN_SHOULD_FINISH_WITHIN);
+    if !exited {
+        let _ = serving.kill();
+        let _ = serving.wait();
+    }
+    loaded.expect("the plan loads");
+    assert!(signalled.success(), "SIGTERM was not delivered");
+    assert!(exited, "the process outlived SIGTERM");
+
+    // Then the plan on disk carries the id the store gave its operation
+    let written = tddy_code_restructuring::Plan::parse(&std::fs::read_to_string(&plan).unwrap())
+        .expect("the flushed plan parses");
+    assert!(
+        written.ops[0].id.is_some(),
+        "the dirty plan was lost with the process"
+    );
 }

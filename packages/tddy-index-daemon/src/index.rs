@@ -1,19 +1,27 @@
-//! The warm per-root state: which roots this process holds an index for, and the queue that keeps
-//! two callers on one root out of each other's way.
+//! The warm per-root state: which roots this process holds an index for, the queue that keeps two
+//! callers on one root out of each other's way, and the plans each root has loaded.
 //!
 //! The servers themselves live in [`tddy_lsp::LspRegistry`], which is already keyed by
-//! `(root, language)` and already reaps, respawns and shuts them down. What this adds is the two
-//! things a *host* of that registry needs and the registry cannot know: which roots this host has
-//! asked for (the registry answers by key, not by enumeration), and a queue per root, because
-//! `.restructure/journal.jsonl` is keyed by root with no lock file and
-//! [`tddy_code_restructuring::runner::open_run`] refuses a second plan with `JournalExists`.
+//! `(root, language)` and already reaps, respawns and shuts them down. What this adds is what a
+//! *host* of that registry needs and the registry cannot know: which roots this host has asked for
+//! (the registry answers by key, not by enumeration), a queue per root so two runs do not
+//! interleave their edits to one tree, and a [`PlanStore`] per root.
+//!
+//! The queue is per root and the journal is per plan: a run's state is keyed by its plan
+//! ([`tddy_code_restructuring::runner::StatePaths::for_plan`]), so the queue is no longer what keeps
+//! one plan's journal from another's — it keeps two runs from editing the same tree at once.
+//!
+//! The stores outlive the servers. A root whose server was reaped is no longer warm, but the plans
+//! it loaded are still in memory, perhaps changed and not yet written back, and dropping them with
+//! the root's record would lose that.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use tddy_code_analysis::complexity_cache::InMemoryComplexityCache;
+use tddy_code_restructuring::plan_store::{FlushPolicy, PlanStore};
 use tddy_lsp::client::LspClient;
 use tddy_lsp::registry::{workspace_root_for, LspKey};
 use tddy_lsp::{Language, LspRegistry};
@@ -38,6 +46,26 @@ use crate::tree_changes::{watched_files_params, FileChange, TreeSnapshot};
 /// it clear of any single request against a cold graph. The same number, for the same reason, as
 /// the one a one-shot command line installs.
 const REQUEST_BOUND_ABOVE_ANY_COLD_INDEX: Duration = Duration::from_secs(600);
+
+/// How long a changed plan may wait in memory before it is written back.
+///
+/// Short enough that a plan a person opens in an editor a moment after a run sees the run's work,
+/// long enough that a burst of changes is one write. A run's own per-operation writes do not wait
+/// for it, and neither do unload and shutdown.
+const PLAN_FLUSH_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// How often the flusher looks for plans that have been dirty for longer than the debounce.
+const PLAN_FLUSH_TICK: Duration = Duration::from_millis(250);
+
+/// One root's loaded plans, shared between the requests that load, run and unload them and the
+/// flusher.
+///
+/// A `std` mutex, not a tokio one: every holder is a blocking thread or a handler that has moved to
+/// one, and a run holds it across the language-server calls that refresh its plan. The flusher only
+/// ever `try_lock`s it, so a run in progress is never what it waits on.
+pub type SharedPlanStore = Arc<std::sync::Mutex<PlanStore>>;
+
+type PlanStores = std::sync::Mutex<BTreeMap<PathBuf, SharedPlanStore>>;
 
 /// What this process knows about one workspace root.
 struct RootState {
@@ -74,6 +102,10 @@ pub struct WorkspaceIndex {
     /// mostly the same bytes: partitioning would rescore every shared file once per root and hold
     /// two copies of the answer.
     scores: Arc<InMemoryComplexityCache>,
+    /// The plans each root has loaded.
+    plans: Arc<PlanStores>,
+    /// Starts the flusher the first time a store exists for it to flush.
+    flusher: Arc<std::sync::Once>,
 }
 
 impl WorkspaceIndex {
@@ -83,7 +115,57 @@ impl WorkspaceIndex {
             servers,
             roots: Arc::new(Mutex::new(BTreeMap::new())),
             scores: Arc::new(InMemoryComplexityCache::default()),
+            plans: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
+            flusher: Arc::new(std::sync::Once::new()),
         }
+    }
+
+    /// The plans `root` has loaded, creating its store on first use.
+    ///
+    /// Async because the first call starts the task that writes changed plans back, which needs the
+    /// runtime the caller is running in.
+    pub async fn plans_of(&self, root: &Path) -> SharedPlanStore {
+        let store = {
+            let mut stores = self.plans.lock().expect("the table of plan stores");
+            Arc::clone(stores.entry(root.to_path_buf()).or_insert_with(|| {
+                Arc::new(std::sync::Mutex::new(PlanStore::new(
+                    root,
+                    FlushPolicy {
+                        debounce: PLAN_FLUSH_DEBOUNCE,
+                    },
+                )))
+            }))
+        };
+        self.flusher.call_once(|| {
+            tokio::spawn(flush_eventually(Arc::downgrade(&self.plans)));
+        });
+        store
+    }
+
+    /// Write every changed plan of every root back now — what shutdown does before the process
+    /// goes, so a plan changed in memory is not lost with it.
+    ///
+    /// Every store is flushed even when one cannot be written; the first failure is returned.
+    pub async fn flush_plans(&self) -> tddy_code_restructuring::Result<()> {
+        let stores: Vec<SharedPlanStore> = self
+            .plans
+            .lock()
+            .expect("the table of plan stores")
+            .values()
+            .cloned()
+            .collect();
+        tokio::task::spawn_blocking(move || {
+            let mut first_failure = None;
+            for store in stores {
+                let flushed = store.lock().expect("a root's plan store").flush_all();
+                if let Err(failure) = flushed {
+                    first_failure.get_or_insert(failure);
+                }
+            }
+            first_failure.map_or(Ok(()), Err)
+        })
+        .await
+        .expect("flushing the plans does not panic")
     }
 
     /// The warm complexity scores, for an operation that will score a source file.
@@ -129,7 +211,10 @@ impl WorkspaceIndex {
     /// Wait for this root's turn, and hold it until the returned guard is dropped.
     ///
     /// Every operation that reads the tree or writes `.restructure/` takes this, so two clients on
-    /// one root queue rather than collide on a journal that carries no plan identity and no lock.
+    /// one root queue rather than edit one tree at once. The journal is keyed by plan, so this is
+    /// about the tree: two runs of different plans would still interleave their edits to it.
+    /// Loading and listing plans do not take it, for the reason warming does not — neither touches
+    /// the tree, and "which plans are held?" should be answerable while a run is going.
     /// [`Self::client_for`] and [`Self::warm_workspaces`] deliberately do not: warming is
     /// documented idempotent and reaching a server touches neither the tree nor the journal, so
     /// queueing them behind a seven-minute apply would make "is this root warm?" unanswerable for
@@ -304,6 +389,64 @@ impl WorkspaceIndex {
         };
         state.tree = Some(tree);
         changes
+    }
+}
+
+/// Write each store's plans that have been dirty for longer than the debounce, until the index
+/// that owns the stores is gone.
+///
+/// A store a run is using is skipped for this tick rather than waited for: the run writes its own
+/// plan after every operation, and a flusher that queued behind the run's language-server calls
+/// would hold a thread for as long as they take.
+async fn flush_eventually(plans: Weak<PlanStores>) {
+    let mut tick = tokio::time::interval(PLAN_FLUSH_TICK);
+    // What was last refused per root, so a plan that stays refused is reported once and not on
+    // every tick for as long as it stays so.
+    let mut reported: BTreeMap<PathBuf, String> = BTreeMap::new();
+    loop {
+        tick.tick().await;
+        let Some(plans) = plans.upgrade() else {
+            return;
+        };
+        let stores: Vec<(PathBuf, SharedPlanStore)> = plans
+            .lock()
+            .expect("the table of plan stores")
+            .iter()
+            .map(|(root, store)| (root.clone(), Arc::clone(store)))
+            .collect();
+        drop(plans);
+
+        let outcomes = tokio::task::spawn_blocking(move || {
+            stores
+                .into_iter()
+                .filter_map(|(root, store)| {
+                    let mut held = store.try_lock().ok()?;
+                    Some((
+                        root,
+                        held.flush_dirty().map(|_| ()).map_err(|f| f.to_string()),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .expect("flushing the plans does not panic");
+
+        for (root, outcome) in outcomes {
+            match outcome {
+                Ok(()) => {
+                    reported.remove(&root);
+                }
+                Err(refusal) => {
+                    if reported.get(&root) != Some(&refusal) {
+                        log::warn!(
+                            target: "tddy_index_daemon::index",
+                            "could not write back a plan of {}: {refusal}", root.display()
+                        );
+                        reported.insert(root, refusal);
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -56,6 +56,7 @@ fn a_workspace_with_both_module_shapes() -> tempfile::TempDir {
 
 fn a_move_of(file: &str, path: &str) -> RefactorOp {
     RefactorOp {
+        id: None,
         op: RefactorKind::MoveModuleToCrate,
         anchor: Anchor::Symbol {
             file: file.to_string(),

@@ -120,6 +120,7 @@ mod tests {
             ops: files
                 .iter()
                 .map(|file| RefactorOp {
+                    id: None,
                     op: RefactorKind::ExtractModuleToFile,
                     anchor: Anchor::Symbol {
                         file: file.to_string(),
