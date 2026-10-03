@@ -224,6 +224,13 @@ conflict. It is already recorded and deferred by #540 with the developer's conse
 (a parent-owned entry, left untouched here). Do the split as a follow-up branch after the stack lands.
 This PR's share is one line and is reported in the wrap summary.
 
+### /analyze-clean-code (2026-10-03, via /pr-wrap)
+
+Score **A** (0 must-refactor, 2 needs-attention). Applied: `stays_behind_through_a_body` 52 → 36 lines
+(new `module_left_behind`), the two "would be a merge" messages share `would_be_a_merge`, and the
+module-home lookup used twice is `home_of_anchor` — behaviour-preserving, finding texts byte-identical.
+Remaining: `cluster.rs` file length (pre-existing, deferred — see the file-length gate above).
+
 ### /validate-tests (2026-10-03, via /pr-wrap)
 
 `tests/check_precondition_parity.rs`: 12 tests analyzed (4 pre-existing, 8 this PR). No always-passing,

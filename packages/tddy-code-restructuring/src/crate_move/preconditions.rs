@@ -90,37 +90,22 @@ pub(crate) fn stays_behind_through_a_body(
     let moving = moving::Move::read(workspace, op)?;
     let mut travelling = earlier.clone();
     for anchor in op.anchors() {
-        let module = module_home::module_name(anchor.file())?;
-        let home = module_home::module_home(workspace, anchor.file(), &module)?;
-        travelling.insert(home.path.join("::"));
+        travelling.insert(home_of_anchor(workspace, anchor)?.path.join("::"));
     }
 
     let text = workspace.read(&moving.source)?;
     let survey = survey::survey_moved_file(workspace, &text, &moving.origin, &moving.home.path)?;
     let origin = &moving.origin.extern_name;
 
-    for path in survey
+    let left_behind = survey
         .paths
         .iter()
-        .filter(|path| path.in_body && !path.in_test)
-    {
-        if path.defining_crate != *origin {
-            continue;
-        }
-        // `origin::host::project_root` is inside the module `host`; `origin::helper`, an item of the
-        // crate root, is inside none and is not this finding's to name.
-        let Some(inside) = path.defined_at.strip_prefix(&format!("{origin}::")) else {
-            continue;
-        };
-        let mut segments = inside.split("::");
-        let (Some(module), Some(_)) = (segments.next(), segments.next()) else {
-            continue;
-        };
-        if header::travels_with(inside, &travelling).is_some() {
-            continue;
-        }
-
-        return Ok(Some(format!(
+        .filter(|path| path.in_body && !path.in_test && path.defining_crate == *origin)
+        .find_map(|path| {
+            module_left_behind(&path.defined_at, origin, &travelling).map(|module| (path, module))
+        });
+    Ok(left_behind.map(|(path, module)| {
+        format!(
             "`{source}` reaches `{written}` in a body at line {line}, and `{module}` stays behind \
              in `{origin}` — after the move that path names nothing in `{destination}`, and naming \
              `{origin}` from there is a cycle. Cut the body's dependency on `{module}` before moving \
@@ -130,9 +115,35 @@ pub(crate) fn stays_behind_through_a_body(
             line = path.site.line,
             origin = moving.origin.package,
             destination = moving.destination.package,
-        )));
-    }
-    Ok(None)
+        )
+    }))
+}
+
+/// The module of `origin` that `defined_at` is inside, when that module stays behind — `None` for a
+/// path outside `origin`, for an item of the crate root (inside no module, and not this finding's to
+/// name: `origin::host::project_root` is inside `host`, `origin::helper` is inside none), and for a
+/// module that `travelling` carries along.
+fn module_left_behind<'a>(
+    defined_at: &'a str,
+    origin: &str,
+    travelling: &BTreeSet<String>,
+) -> Option<&'a str> {
+    let inside = defined_at.strip_prefix(&format!("{origin}::"))?;
+    let mut segments = inside.split("::");
+    let (module, _item) = (segments.next()?, segments.next()?);
+    header::travels_with(inside, travelling)
+        .is_none()
+        .then_some(module)
+}
+
+/// The module `anchor` names, with where it is declared.
+///
+/// # Errors
+///
+/// Refuses when the anchor's file names no module or lies in no crate.
+fn home_of_anchor(workspace: &Workspace<'_>, anchor: &Anchor) -> Result<module_home::ModuleHome> {
+    let module = module_home::module_name(anchor.file())?;
+    module_home::module_home(workspace, anchor.file(), &module)
 }
 
 /// The destination's root already binds the moved module's name — a `mod` declaration, or a file
@@ -150,24 +161,27 @@ pub(crate) fn destination_already_has_the_module(
     let root = moving.destination_root();
     let declared = workspace.read(&root)?;
     if manifest_edits::module_declaration(&declared, &moving.module).is_some() {
-        return Ok(Some(format!(
-            "`{destination}` already declares `{module}` in {root} — moving `{module}` into it \
-             would be a merge, which no operation performs",
-            destination = moving.destination.package,
-            module = moving.module,
+        return Ok(Some(would_be_a_merge(
+            &moving,
+            &format!("declares `{}` in {root}", moving.module),
         )));
     }
 
     let target = moving.moved_to();
     if workspace.root.join(&target).exists() {
-        return Ok(Some(format!(
-            "`{destination}` already has {target} — moving `{module}` into it would be a merge, \
-             which no operation performs",
-            destination = moving.destination.package,
-            module = moving.module,
-        )));
+        return Ok(Some(would_be_a_merge(&moving, &format!("has {target}"))));
     }
     Ok(None)
+}
+
+/// The finding for a destination that `already` binds the moved module's name.
+fn would_be_a_merge(moving: &moving::Move, already: &str) -> String {
+    format!(
+        "`{destination}` already {already} — moving `{module}` into it would be a merge, which no \
+         operation performs",
+        destination = moving.destination.package,
+        module = moving.module,
+    )
 }
 
 /// Every check [`resolve`] runs before it consults rust-analyzer.
@@ -237,10 +251,7 @@ pub(crate) fn moved_by_earlier_operations(
     index: usize,
     anchor: &Anchor,
 ) -> BTreeSet<String> {
-    let home_of = |anchor: &Anchor| {
-        let module = module_home::module_name(anchor.file()).ok()?;
-        module_home::module_home(workspace, anchor.file(), &module).ok()
-    };
+    let home_of = |anchor: &Anchor| home_of_anchor(workspace, anchor).ok();
     let Some(here) = home_of(anchor) else {
         return BTreeSet::new();
     };
