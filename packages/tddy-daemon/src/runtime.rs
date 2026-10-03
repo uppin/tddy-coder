@@ -1052,6 +1052,31 @@ pub async fn build(
             Arc::new(worktree_service)
         };
 
+        // The warm code-intelligence index, when this daemon was configured to manage one. Its
+        // lifecycle is owned here and its *index* is owned by the process itself — the two are
+        // split because rust-analyzer's handshake is fixed at spawn and this daemon's registry
+        // advertises no client capabilities, so the two cannot share one registry entry (see the
+        // PRD, § "A separate process, whose lifecycle the daemon manages"). Nothing is started
+        // here: the first request that needs it starts it.
+        if let Some(configured) = config_arc.index_daemon.as_ref() {
+            let index_daemon = crate::index_daemon::IndexDaemonRegistry::new(
+                crate::index_daemon::IndexDaemonSpawn::from_config(configured),
+                shared_claude_cli_manager.task_registry(),
+            );
+            log::info!(
+                target: "tddy_daemon::index_daemon",
+                "managing an index daemon on {}",
+                index_daemon.socket_path().display()
+            );
+            tasks.index_daemon = Some(index_daemon.clone());
+            index_daemon_registry = Some(index_daemon);
+        }
+
+        // Each session's code-index warm-up progress: written by the warm-ups a started session's
+        // worktree triggers, read by `WatchCodeIndex`. One holder, shared by both.
+        let session_index_progress =
+            tddy_daemon_rpc::code_index_warmup::SessionIndexProgress::new();
+
         let mut connection_impl =
             tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
                 config.clone(),
@@ -1069,6 +1094,18 @@ pub async fn build(
             .with_model_registry(Arc::clone(&model_registry))
             .with_session_notification_bus(session_notification_bus)
             .with_session_tokens(session_tokens.clone());
+        // A started session's worktree starts its warm-up in the background; the host cannot name
+        // this crate, so it is told through its observer port. Without an index daemon there is
+        // nothing to warm, so nothing is installed.
+        if let Some(registry) = index_daemon_registry.clone() {
+            connection_impl = connection_impl.with_worktree_observer(Arc::new(
+                tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver::new(
+                    Arc::new(registry)
+                        as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>,
+                    session_index_progress.clone(),
+                ),
+            ));
+        }
         if let Some(ref tracker) = idle_tracker {
             connection_impl = connection_impl.with_idle_tracker(tracker.clone());
         }
@@ -1098,26 +1135,6 @@ pub async fn build(
         // repository's `BUILD.yaml` targets (discovery lives in `tddy-bsp` on top of
         // `tddy-build`; `tddy-core` owns only the port).
         tddy_bsp::register_catalog_provider();
-
-        // The warm code-intelligence index, when this daemon was configured to manage one. Its
-        // lifecycle is owned here and its *index* is owned by the process itself — the two are
-        // split because rust-analyzer's handshake is fixed at spawn and this daemon's registry
-        // advertises no client capabilities, so the two cannot share one registry entry (see the
-        // PRD, § "A separate process, whose lifecycle the daemon manages"). Nothing is started
-        // here: the first request that needs it starts it.
-        if let Some(configured) = config_arc.index_daemon.as_ref() {
-            let index_daemon = crate::index_daemon::IndexDaemonRegistry::new(
-                crate::index_daemon::IndexDaemonSpawn::from_config(configured),
-                task_registry.clone(),
-            );
-            log::info!(
-                target: "tddy_daemon::index_daemon",
-                "managing an index daemon on {}",
-                index_daemon.socket_path().display()
-            );
-            tasks.index_daemon = Some(index_daemon.clone());
-            index_daemon_registry = Some(index_daemon);
-        }
 
         // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
         // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
@@ -1300,11 +1317,6 @@ pub async fn build(
         // the worktree service above, so it reaches no path that service would refuse to read, and
         // answered by the index daemon this runtime manages; without an `index_daemon:` section it
         // has none, and says so.
-        //
-        // TODO(indexing-indicators): build one `code_index_warmup::SessionIndexProgress` here, hand
-        // it to this service (`with_index_progress`) and call `code_index_warmup::warm_for_session`
-        // with it once a started session's worktree exists, so `WatchCodeIndex` has something to
-        // follow.
         rpc_entries.push(
             tddy_daemon_rpc::code_navigation::build_code_navigation_entry(
                 tddy_daemon_rpc::code_navigation::CodeNavigationServiceImpl::new(
@@ -1313,7 +1325,8 @@ pub async fn build(
                         Arc::new(registry)
                             as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>
                     }),
-                ),
+                )
+                .with_index_progress(session_index_progress.clone()),
             ),
         );
 

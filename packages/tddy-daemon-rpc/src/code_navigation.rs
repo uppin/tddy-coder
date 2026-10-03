@@ -30,6 +30,9 @@ use tonic::transport::Channel;
 
 use crate::code_index_warmup::SessionIndexProgress;
 
+/// How many progress messages `WatchCodeIndex` buffers for a reader that has not drained them yet.
+const WATCH_BUFFER: usize = 8;
+
 /// The coordinate the web addresses this service at: `package code_navigation` +
 /// `service CodeNavigationService` in `tddy-service/proto/code_navigation.proto`.
 pub const CODE_NAVIGATION_SERVICE: &str = "code_navigation.CodeNavigationService";
@@ -54,7 +57,6 @@ pub struct CodeNavigationServiceImpl {
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
     /// Each session's latest code-index warm-up progress, which `WatchCodeIndex` follows.
-    #[allow(dead_code)] // TODO(indexing-indicators): read by `watch_code_index`.
     index_progress: SessionIndexProgress,
 }
 
@@ -221,13 +223,33 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
     /// or `error` — or at once, for a session nothing warmed.
     async fn watch_code_index(
         &self,
-        _request: Request<WatchCodeIndexRequest>,
+        request: Request<WatchCodeIndexRequest>,
     ) -> Result<Response<Self::WatchCodeIndexStream>, Status> {
-        // TODO(indexing-indicators): authorise the token against the session's owner, follow
-        // `index_progress.watch(session_id)` onto the stream, and end it after `ready` or `error`.
-        Err(Status::unimplemented(
-            "WatchCodeIndex is not served yet — TODO(indexing-indicators)",
-        ))
+        let r = request.into_inner();
+        self.worktrees.authorize(&r.session_token)?;
+        let mut watching = self.index_progress.watch(&r.session_id);
+        let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+        tokio::spawn(async move {
+            // The latest value is delivered on joining, then each change; a change is a
+            // replacement, so a slow reader sees the newest rather than every step.
+            loop {
+                let latest = watching.borrow_and_update().clone();
+                if let Some(progress) = latest {
+                    let finished = progress.ready || !progress.error.is_empty();
+                    if tx.send(Ok(progress)).await.is_err() || finished {
+                        return;
+                    }
+                } else {
+                    // Nothing warmed this session: a warm records its first progress before
+                    // `warm_for_session` returns, so there is nothing to wait for.
+                    return;
+                }
+                if watching.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 

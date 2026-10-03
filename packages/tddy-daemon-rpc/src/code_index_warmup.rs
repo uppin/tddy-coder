@@ -16,8 +16,12 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use tddy_index_daemon::proto::code_index as index;
+use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_service::proto::code_navigation::CodeIndexProgress;
 use tokio::sync::watch;
+
+use tddy_session_lifecycle::connection_service::SessionWorktreeObserver;
 
 use crate::code_navigation::IndexChannelSource;
 
@@ -81,9 +85,107 @@ pub fn warm_for_session(
     session_id: &str,
     worktree: &Path,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    // TODO(indexing-indicators): with an index channel source and a `Cargo.toml` at `worktree`'s root, spawn a
-    // task that `connect`s (mapping the port's error to `error`), calls `code_index.Warm { workspace_root: worktree }`, records each
-    // `IndexProgress` as `CodeIndexProgress`, and records a failed connect or warm as `error`.
-    let _ = (index_daemon, progress, session_id, worktree);
-    None
+    let source = Arc::clone(index_daemon?);
+    if !worktree.join("Cargo.toml").is_file() {
+        return None;
+    }
+    let progress = progress.clone();
+    // Recorded before the task starts, so a watcher arriving first finds a warm under way rather
+    // than a session nothing warmed.
+    progress.record(
+        session_id,
+        CodeIndexProgress {
+            line: "Starting the code index".to_string(),
+            phase: "Starting".to_string(),
+            ..Default::default()
+        },
+    );
+    let session_id = session_id.to_string();
+    let workspace_root = worktree.display().to_string();
+    Some(tokio::spawn(async move {
+        if let Err(reason) = warm(source.as_ref(), &progress, &session_id, workspace_root).await {
+            log::warn!("code index warm-up of session {session_id} failed: {reason}");
+            progress.record(
+                &session_id,
+                CodeIndexProgress {
+                    error: reason,
+                    ..Default::default()
+                },
+            );
+        }
+    }))
+}
+
+/// Streams `workspace_root`'s `Warm` into `progress`, ending when the stream does. An `Err` is the
+/// reason the warm could not run, broke off, or ended short of `ready`.
+async fn warm(
+    source: &dyn IndexChannelSource,
+    progress: &SessionIndexProgress,
+    session_id: &str,
+    workspace_root: String,
+) -> Result<(), String> {
+    let channel = source
+        .connect()
+        .await
+        .map_err(|err| format!("index daemon: {err}"))?;
+    let mut stream = CodeIndexServiceClient::new(channel)
+        .warm(index::WarmRequest { workspace_root })
+        .await
+        .map_err(|status| format!("warm: {}", status.message()))?
+        .into_inner();
+    let mut ready = false;
+    while let Some(update) = stream
+        .message()
+        .await
+        .map_err(|status| format!("warm: {}", status.message()))?
+    {
+        ready = update.ready;
+        progress.record(session_id, web_progress(update));
+    }
+    if ready {
+        Ok(())
+    } else {
+        Err("warm: the index daemon ended the stream before the index was ready".to_string())
+    }
+}
+
+fn web_progress(update: index::IndexProgress) -> CodeIndexProgress {
+    CodeIndexProgress {
+        line: update.line,
+        phase: update.phase,
+        percentage: update.percentage,
+        furthest: update.furthest,
+        ready: update.ready,
+        error: String::new(),
+    }
+}
+
+/// Starts a session's warm-up when its worktree appears: the daemon's end of the session host's
+/// [`SessionWorktreeObserver`] port.
+pub struct IndexWarmupObserver {
+    index_daemon: Arc<dyn IndexChannelSource>,
+    progress: SessionIndexProgress,
+}
+
+impl IndexWarmupObserver {
+    /// An observer warming through `index_daemon` and recording into `progress`.
+    #[must_use]
+    pub fn new(index_daemon: Arc<dyn IndexChannelSource>, progress: SessionIndexProgress) -> Self {
+        Self {
+            index_daemon,
+            progress,
+        }
+    }
+}
+
+impl SessionWorktreeObserver for IndexWarmupObserver {
+    fn worktree_ready(&self, session_id: &str, worktree: &Path) {
+        // Detached on purpose: a session's start never waits on its index.
+        drop(warm_for_session(
+            Some(&self.index_daemon),
+            &self.progress,
+            session_id,
+            worktree,
+        ));
+    }
 }

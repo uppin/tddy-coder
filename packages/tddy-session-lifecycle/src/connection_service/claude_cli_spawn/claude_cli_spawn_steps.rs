@@ -19,6 +19,8 @@ use std::path::Path;
 
 use crate::config::DaemonConfig;
 
+use tddy_service::proto::session::start_phase::Step as StartStep;
+
 /// What cutting a claude-cli session's worktree reads: the checkout, the base, and where it goes.
 pub(super) struct ClaudeCliWorktreeCut<'a> {
     pub(super) config: &'a DaemonConfig,
@@ -157,6 +159,7 @@ pub(super) struct ManagedClaudeCliLaunch<'a> {
     pub(super) conversation_spawn_handler:
         Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler + 'static>>,
     pub(super) semantic_index: bool,
+    pub(super) progress: &'a super::AttachmentProgressSink,
     pub(super) task_registry: &'a TaskRegistry,
     pub(super) session_dir: &'a Path,
     pub(super) worktree_path: &'a Path,
@@ -180,6 +183,7 @@ pub(super) async fn managed_claude_cli_launch(
         child_spawn_handler,
         conversation_spawn_handler,
         semantic_index,
+        progress,
         task_registry,
         session_dir,
         worktree_path,
@@ -209,6 +213,7 @@ pub(super) async fn managed_claude_cli_launch(
     // agent (blocking until terminal). A missing embedder or a failed index aborts the start — no
     // unindexed fallback. On success, point the `SemanticSearch` tool at the session's index DB.
     if semantic_index {
+        progress.begin_phase(StartStep::SemanticIndex);
         service_util::index_session_worktree(
             tddy_data_dir,
             task_registry,
@@ -217,6 +222,7 @@ pub(super) async fn managed_claude_cli_launch(
             session_dir,
         )
         .await?;
+        progress.end_phase(StartStep::SemanticIndex);
         let (key, value) = tddy_semantic_index::semantic_index::semantic_index_env(session_dir);
         env_extra.push((key, value));
     }

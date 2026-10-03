@@ -29,6 +29,8 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use super::DaemonSessionHost;
 
+use tddy_service::proto::session::start_phase::Step as StartStep;
+
 use tddy_daemon_kernel::trim_to_option;
 
 mod tool_spawn_plan;
@@ -49,9 +51,12 @@ impl DaemonSessionHost {
     /// streaming entry point, [`AttachmentProgressSink::discarding`] for the unary one. Nothing
     /// else differs between the two, so the unary path stays byte-for-byte what it was.
     ///
-    /// TODO(indexing-indicators): the start's phases (`StartPhase`: worktree, semantic index,
-    /// agent) are reported through the same sink — `begin_phase` / `end_phase` — by each session
-    /// type's start; none reports them yet, so today's stream is unchanged.
+    /// The start's phases (`StartPhase`: worktree, semantic index, agent) are reported through the
+    /// same sink — `begin_phase` / `end_phase` — by each session type's start; a step that fails
+    /// reports no end.
+    ///
+    /// TODO(indexing-indicators): the sandboxed claude-cli / cursor-cli, tool and split starts do
+    /// not report phases yet; claude-cli, cursor-cli and workspace starts do.
     pub(crate) async fn start_session_core(
         &self,
         req: StartSessionRequest,
@@ -257,6 +262,7 @@ impl DaemonSessionHost {
                 // for the codebase half of a split session the roster lives here, so "co-located"
                 // means "owned by this daemon" and an agent of any other host is the one that needs
                 // a clone (docs/ft/daemon/session-agent-roster.md § Remote agents).
+                progress.begin_phase(StartStep::Worktree);
                 let (started, codebase, seeded) = self
                     .seed_and_start_workspace_session(
                         &req,
@@ -267,6 +273,7 @@ impl DaemonSessionHost {
                         timeout,
                     )
                     .await?;
+                progress.end_phase(StartStep::Worktree);
                 if req.semantic_index {
                     // Unwound here rather than inside the seed, because the seed cannot see this
                     // step: a start that answers with an error but leaves its roster behind leaves
@@ -274,6 +281,7 @@ impl DaemonSessionHost {
                     // withdrawal against a main agent that was never spawned — and, for a
                     // peer-owned seed, a claimed clone on that peer with nothing left to release
                     // it.
+                    progress.begin_phase(StartStep::SemanticIndex);
                     if let Err(status) = self
                         .index_workspace_worktree(&sessions_base, &session_id)
                         .await
@@ -287,6 +295,7 @@ impl DaemonSessionHost {
                         .await;
                         return Err(status);
                     }
+                    progress.end_phase(StartStep::SemanticIndex);
                 }
                 // The jail is built last, and deliberately after the index: indexing reads the host
                 // worktree directly, so it belongs before a jail exists rather than through one.
@@ -310,6 +319,7 @@ impl DaemonSessionHost {
                         return Err(status);
                     }
                 }
+                self.announce_worktree_ready(&sessions_base, &session_id);
                 return Ok(started);
             };
             let started = self
@@ -348,15 +358,20 @@ impl DaemonSessionHost {
                     )
                     .await;
             }
-            return self
+            let sessions_base = start.sessions_base.clone();
+            let session_id = start.session_id.clone();
+            let started = self
                 .start_claude_cli_from_request(
                     &req,
                     os_user,
                     start,
                     stack_parent_for_claude_cli,
                     managed_recipe,
+                    progress,
                 )
-                .await;
+                .await?;
+            self.announce_worktree_ready(&sessions_base, &session_id);
+            return Ok(started);
         }
 
         // --- cursor-cli branch: no LiveKit; spawns Cursor Agent CLI in a PTY worktree ---
@@ -375,7 +390,9 @@ impl DaemonSessionHost {
             // than persisting a roster entry that resolves to nothing on the next resume.
             let started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
             let clones = self.seed_clone_claimant();
-            return self
+            let sessions_base = start.sessions_base.clone();
+            let session_id = start.session_id.clone();
+            let started = self
                 .spawn_cursor_cli_from_request(
                     &req,
                     os_user,
@@ -383,8 +400,11 @@ impl DaemonSessionHost {
                     managed_recipe,
                     started_agents,
                     clones,
+                    progress,
                 )
-                .await;
+                .await?;
+            self.announce_worktree_ready(&sessions_base, &session_id);
+            return Ok(started);
         }
 
         let livekit = spawner::livekit_creds_from_config(&self.config)

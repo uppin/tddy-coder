@@ -135,7 +135,7 @@ impl WorktreeServiceImpl {
     }
 
     /// Authenticate, then answer with the OS user this daemon runs the caller's work as.
-    fn authorize(&self, session_token: &str) -> Result<String, Status> {
+    pub fn authorize(&self, session_token: &str) -> Result<String, Status> {
         let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         self.config

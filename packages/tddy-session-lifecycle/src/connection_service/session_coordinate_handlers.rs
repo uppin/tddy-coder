@@ -380,7 +380,7 @@ impl DaemonSessionHost {
         let (conn_progress_tx, conn_progress_rx) =
             tokio::sync::mpsc::unbounded_channel::<Result<ConnStartSessionEvent, Status>>();
         let session_tx = tx.clone();
-        tokio::spawn(async move {
+        let forwarding = tokio::spawn(async move {
             let mut conn_progress_rx = conn_progress_rx;
             while let Some(item) = conn_progress_rx.recv().await {
                 let mapped = match item {
@@ -394,7 +394,14 @@ impl DaemonSessionHost {
         });
         tokio::spawn(async move {
             let sink = AttachmentProgressSink::streaming(conn_progress_tx);
-            let event = match service.start_session_core(req, &sink).await {
+            let started = service.start_session_core(req, &sink).await;
+            // The terminal event goes out only after every progress event ahead of it has been
+            // forwarded: they travel through the forwarding task, so sending the terminal one
+            // directly would let it overtake a phase's end. Dropping the sink closes the channel
+            // that task drains.
+            drop(sink);
+            let _ = forwarding.await;
+            let event = match started {
                 Ok(response) => match super::family_proto_bridge::wire_same(&response.into_inner())
                 {
                     Ok(session_result) => Ok(StartSessionEvent {
