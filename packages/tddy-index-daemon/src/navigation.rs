@@ -130,24 +130,42 @@ async fn asked_document(
     file: &str,
     position: Option<SourcePosition>,
 ) -> Result<AskedDocument, Status> {
+    let path = served_source(root, file)?;
+    let position =
+        position.ok_or_else(|| Status::invalid_argument("the request names no position"))?;
+    let at = server_position(position)?;
+    let (client, uri) = synced_document(index, root, &path, file).await?;
+    Ok(AskedDocument { client, uri, at })
+}
+
+/// `file` resolved inside `root`, refused unless this host's language server can answer for it.
+pub(crate) fn served_source(root: &Path, file: &str) -> Result<PathBuf, Status> {
     let path = file_within(root, file)?;
     if !is_served_source(&path) {
         return Err(Status::invalid_argument(format!(
             "`{file}` is not a `.{SOURCE_EXTENSION}` file; this index serves {LANGUAGE_ID} only"
         )));
     }
-    let position =
-        position.ok_or_else(|| Status::invalid_argument("the request names no position"))?;
-    let at = server_position(position)?;
-    let text = std::fs::read_to_string(&path)
+    Ok(path)
+}
+
+/// The root's warm server, told the current contents of `path` (the request's `file`), and the
+/// path's URI.
+pub(crate) async fn synced_document(
+    index: &WorkspaceIndex,
+    root: &Path,
+    path: &Path,
+    file: &str,
+) -> Result<(Arc<LspClient>, String), Status> {
+    let text = std::fs::read_to_string(path)
         .map_err(|err| Status::not_found(format!("`{file}` cannot be read: {err}")))?;
-    let uri = uri_of_path(&path)?;
+    let uri = uri_of_path(path)?;
     let client = index.client_for(root).await?;
     client
         .sync_document(&uri, LANGUAGE_ID, &text)
         .await
         .map_err(|failure| status_of_lsp(&failure))?;
-    Ok(AskedDocument { client, uri, at })
+    Ok((client, uri))
 }
 
 fn is_served_source(path: &Path) -> bool {
@@ -184,7 +202,7 @@ fn server_position(position: SourcePosition) -> Result<Position, Status> {
     Ok(Position::at(position.line - 1, position.column - 1))
 }
 
-fn wire_position(position: Position) -> SourcePosition {
+pub(crate) fn wire_position(position: Position) -> SourcePosition {
     SourcePosition {
         line: position.line + 1,
         column: position.character + 1,
@@ -193,7 +211,7 @@ fn wire_position(position: Position) -> SourcePosition {
 
 /// A server location as the wire carries it: relative to `root` when inside it, the absolute path
 /// marked `outside_root` otherwise.
-fn code_location(root: &Path, location: &Location) -> Result<CodeLocation, Status> {
+pub(crate) fn code_location(root: &Path, location: &Location) -> Result<CodeLocation, Status> {
     let path = path_of_uri(&location.uri)?;
     let range = Some(SourceRange {
         start: Some(wire_position(location.range.start)),

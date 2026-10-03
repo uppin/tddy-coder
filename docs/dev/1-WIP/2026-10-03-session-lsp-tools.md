@@ -159,28 +159,24 @@ what pins the advertised set.)
 
 ## Technical Debt & Production Readiness
 
-**Stubs (`TODO(session-lsp-tools)`):**
-
-- `tddy-index-daemon/src/symbols.rs` — `serve_symbols`, `serve_diagnostics` answer `Unimplemented`.
-- `tddy-lsp-executor/src/index_backed.rs` — every `IndexLspExecutor` method; `is_available` returns
-  `false`; the `index` field carries `#[allow(dead_code)]` until a query dials it;
-  `bind_to_session_worktree` refuses with a not-implemented message.
-- `tddy-daemon/src/runtime.rs` — the selection hook (register `select_lsp_executor(Some(registry), …)`
-  when `index_daemon:` is set). Registration is first-wins, so the selection must precede today's
-  `tddy_lsp_executor::register` call, which also returns the `LspRegistry` the idle reaper drives.
+**Stubs:** none left. `Symbols` / `Diagnostics` are served by `tddy-index-daemon/src/symbols.rs`, the
+`IndexLspExecutor` methods and `bind_to_session_worktree` by `tddy-lsp-executor/src/index_backed.rs`,
+and `tddy-daemon/src/runtime.rs` registers `select_lsp_executor` (with the registry as the channel when
+`index_daemon:` is set) in place of today's `tddy_lsp_executor::register` call; the existing executor is
+still built there, and its registry still drives the idle reaper.
 
 **Open, not written as tests:**
 
-- `ReadLints` (`workspace_diagnostics`) has no index RPC — `Diagnostics` is per file. With an index
-  configured, green must choose: a workspace-wide `Diagnostics` (empty `file`), or a refusal. Not
-  pinned; the PRD lists only the five `Lsp*` tools.
+- `ReadLints` (`workspace_diagnostics`) has no index RPC — `Diagnostics` is per file. **Decided: a
+  refusal** naming `LspDiagnostics` as the alternative, not a fall back to the local executor (a second
+  server would disagree with the index). TODO: a workspace-wide `Diagnostics` (empty `file`) would lift it.
 - `LspReferences` / `LspHover` through the index are not tested here: they are the same shape as
   `LspDefinition` over code-navigation's RPCs, and adding them would only grow the fake.
-- `is_available` for the index-backed executor (it gates the tools' exposure) is not pinned.
+- `is_available` for the index-backed executor (it gates the tools' exposure) is not pinned: true when the worktree root holds a `Cargo.toml`.
 - No daemon-level test proves the hook selects the index executor: the process-global
   `register_lsp_executor` is first-wins per process, and the runtime registers before any test can
   observe it. `select_lsp_executor` is the tested seam.
-- UTF-16 ↔ byte column conversion is pinned only on ASCII lines.
+- UTF-16 ↔ byte column conversion is implemented by reading the line from disk (inputs and answers) but pinned only on ASCII lines.
 
 **Dependency weight:** `tddy-lsp-executor` now depends on `tddy-index-daemon` (+ `tonic`,
 `async-trait`), so `tddy-session-lifecycle`, `tddy-sandbox-app` and `tddy-tools` (already a
