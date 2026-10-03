@@ -28,7 +28,7 @@ use anyhow::Result;
 use tddy_code_restructuring::console;
 use tddy_code_restructuring::restructure_cli::step_delta;
 use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
-use tddy_code_restructuring::verify::Comparison;
+use tddy_code_restructuring::verify::{Comparison, Excused};
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
     PlanStatusResponse, PlansResponse, RestructureEvent, RunOutcome, VerifyResponse,
@@ -269,12 +269,53 @@ fn a_comparison(response: &VerifyResponse) -> Comparison {
         after: response.after as usize,
         missing: response.missing.clone(),
         added: response.added.clone(),
+        excused: Excused {
+            repointed: response.repointed as usize,
+            visibility: response.visibility_normalised as usize,
+            cfg_test_gates: response.cfg_test_gates as usize,
+        },
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The daemon counts what a restructure's expected churn set aside, and the console states it
+    /// the way the in-process `verify` does — a front end that dropped it would say less than the
+    /// others about the same comparison.
+    #[test]
+    fn a_comparison_carries_what_the_daemon_set_aside_as_expected_churn() {
+        // Given a daemon answer that excused a re-pointed call, a widening and a gate line
+        let response = VerifyResponse {
+            holds: true,
+            before: 10,
+            after: 11,
+            repointed: 1,
+            visibility_normalised: 2,
+            cfg_test_gates: 1,
+            ..VerifyResponse::default()
+        };
+
+        // When it becomes the comparison the renderer speaks
+        let comparison = a_comparison(&response);
+
+        // Then the counts survive, and the rendered lines carry the summary
+        assert_eq!(
+            comparison.excused,
+            Excused {
+                repointed: 1,
+                visibility: 2,
+                cfg_test_gates: 1
+            }
+        );
+        assert!(
+            console::comparison(&comparison)
+                .iter()
+                .any(|line| line.starts_with("verify: 1 statement(s) re-pointed")),
+            "the summary line is missing"
+        );
+    }
 
     /// A check with findings is an answered call whose answer is a failed run, which is what
     /// becomes the exit status — the same judgement the cold path makes.

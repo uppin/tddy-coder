@@ -249,6 +249,11 @@ message VerifyResponse {
   uint32          after   = 3;
   repeated string missing = 4;
   repeated string added   = 5;
+  // What the comparison set aside as the expected churn of a restructure rather than reporting it:
+  // the same three counts the in-process `verify` prints, so no front end states less than another.
+  uint32          repointed             = 6;  // pairs equal once module qualifiers are deleted
+  uint32          visibility_normalised = 7;  // pairs equal once a leading `pub…` is deleted
+  uint32          cfg_test_gates        = 8;  // `#[cfg(test)]` lines directly above a `use`
 }
 
 // ---------------------------------------------------------------------------------------------

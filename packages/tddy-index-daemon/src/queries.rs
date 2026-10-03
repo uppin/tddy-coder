@@ -231,6 +231,9 @@ async fn comparison_against(
         after: comparison.after as u32,
         missing: comparison.missing,
         added: comparison.added,
+        repointed: comparison.excused.repointed as u32,
+        visibility_normalised: comparison.excused.visibility as u32,
+        cfg_test_gates: comparison.excused.cfg_test_gates as u32,
     })
 }
 

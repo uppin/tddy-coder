@@ -24,7 +24,7 @@
 
 use crate::edit::VisibilityChange;
 use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
-use crate::verify::Comparison;
+use crate::verify::{Comparison, Excused};
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
 ///
@@ -176,6 +176,7 @@ pub fn comparison(comparison: &Comparison) -> Vec<String> {
         "{} statements before, {} after",
         comparison.before, comparison.after
     )];
+    lines.extend(excused_summary(&comparison.excused));
     lines.extend(
         comparison
             .missing
@@ -192,6 +193,23 @@ pub fn comparison(comparison: &Comparison) -> Vec<String> {
         lines.push("every statement accounted for".to_string());
     }
     lines
+}
+
+/// The one line naming churn a comparison set aside, or nothing when none was.
+fn excused_summary(excused: &Excused) -> Option<String> {
+    let parts: Vec<String> = [
+        (
+            excused.repointed,
+            "statement(s) re-pointed through a module qualifier",
+        ),
+        (excused.visibility, "visibility-normalised"),
+        (excused.cfg_test_gates, "cfg(test) gate line(s) excused"),
+    ]
+    .iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, what)| format!("{count} {what}"))
+    .collect();
+    (!parts.is_empty()).then(|| format!("verify: {}", parts.join(", ")))
 }
 
 /// Why a comparison that does not hold is a failed run.

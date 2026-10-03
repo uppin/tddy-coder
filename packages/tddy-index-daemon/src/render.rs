@@ -14,7 +14,7 @@
 
 use tddy_code_restructuring::console;
 use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
-use tddy_code_restructuring::verify::Comparison;
+use tddy_code_restructuring::verify::{Comparison, Excused};
 use tddy_index_daemon::proto::code_index::{
     analyze_event, restructure_event, AnalyzeEvent, AnchorsResponse, ComplexityResponse,
     DuplicateTestsFound, OperationApplied, PlanStatusResponse, PlansResponse, ReportResponse,
@@ -155,6 +155,11 @@ pub(crate) fn verify(response: &VerifyResponse) {
         after: response.after as usize,
         missing: response.missing.clone(),
         added: response.added.clone(),
+        excused: Excused {
+            repointed: response.repointed as usize,
+            visibility: response.visibility_normalised as usize,
+            cfg_test_gates: response.cfg_test_gates as usize,
+        },
     };
     for line in console::comparison(&comparison) {
         log::info!(target: crate::MAIN, "{line}");

@@ -14,7 +14,7 @@
 use tddy_code_restructuring::console;
 use tddy_code_restructuring::plan::{Anchor, Fingerprint, ItemPath};
 use tddy_code_restructuring::runner::{Finding, Outcome, PlanProgress, RunSummary};
-use tddy_code_restructuring::verify::Comparison;
+use tddy_code_restructuring::verify::{Comparison, Excused};
 
 #[test]
 fn renders_an_applied_run_for_a_front_end_that_never_started_a_language_server() {
@@ -166,6 +166,7 @@ fn renders_a_comparison_that_holds_as_every_statement_accounted_for() {
         after: 2,
         missing: Vec::new(),
         added: Vec::new(),
+        ..Comparison::default()
     });
 
     // When it is rendered
@@ -189,6 +190,7 @@ fn renders_the_statements_a_tree_lost_and_gained_without_stating_the_verdict() {
         after: 2,
         missing: vec!["1".to_string()],
         added: vec!["2".to_string()],
+        ..Comparison::default()
     };
 
     // When it is rendered
@@ -204,6 +206,52 @@ fn renders_the_statements_a_tree_lost_and_gained_without_stating_the_verdict() {
         console::comparison_refusal(&comparison),
         "1 statement(s) the tree lost and 1 it gained — see above"
     );
+}
+
+#[test]
+fn renders_one_summary_line_for_the_churn_a_comparison_excused() {
+    // Given a tree that held once a re-point, two widenings and a cfg(test) gate were set aside
+    let comparison = Comparison {
+        before: 5,
+        after: 6,
+        excused: Excused {
+            repointed: 1,
+            visibility: 2,
+            cfg_test_gates: 1,
+        },
+        ..Comparison::default()
+    };
+
+    // When it is rendered
+    let lines = console::outcome(&Outcome::Verified(comparison), false);
+
+    // Then the counts are stated once, between the totals and the verdict
+    assert_eq!(
+        lines,
+        vec![
+            "5 statements before, 6 after",
+            "verify: 1 statement(s) re-pointed through a module qualifier, 2 visibility-normalised, 1 cfg(test) gate line(s) excused",
+            "every statement accounted for"
+        ]
+    );
+}
+
+#[test]
+fn omits_the_zero_parts_of_the_excused_summary() {
+    // Given a tree where only widenings were excused
+    let comparison = Comparison {
+        excused: Excused {
+            visibility: 3,
+            ..Excused::default()
+        },
+        ..Comparison::default()
+    };
+
+    // When it is rendered
+    let lines = console::outcome(&Outcome::Verified(comparison), false);
+
+    // Then only that part is named
+    assert_eq!(lines[1], "verify: 3 visibility-normalised");
 }
 
 #[test]
