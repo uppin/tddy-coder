@@ -189,7 +189,15 @@ compared before and after.
 
 ## Validation Results
 
-_(populated by validation commands)_
+### @validate-changes (2026-10-03)
+
+- **Stack gate**: already current on `feature/live-plan/signature-assists`; `origin/<base>..HEAD` is this PR's four commits only; no deletions.
+- **Boundary**: every `## Responsibility` item delivered, no `TODO(transactional-groups)` / `todo!` left in `src/`; nothing from `## Dependencies` implemented (only existing store APIs called); no signature operations; ungrouped runs unchanged (both ungrouped guard tests green).
+- **Build / tests (scoped)**: `cargo check --all-targets` clean for tddy-code-restructuring, tddy-index-daemon, tddy-tools; `transactional_groups_acceptance` 7/7.
+- **Generated code**: `code_index.proto` is not under `scripts/generated-code.manifest`, so no drift to regenerate.
+- ⚠ `apply_held_plan` grew in both loops (daemon 139 → 198 lines, CLI 151 → 188) — already over the 40-line guideline, now further.
+- ⚠ `journal.rs` production lines 294 → 517 (crosses the 500 budget; step 3.5 of `/pr-wrap`).
+- ℹ `render.rs` and `tddy-tools/src/index_console.rs` do not print `OperationApplied.group`.
 
 ## TODO
 
