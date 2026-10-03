@@ -210,6 +210,10 @@ export const TEST_IDS = {
   worktreeFileTree: "worktree-file-tree",
   worktreeFilePreview: "worktree-file-preview",
   worktreeCodeHighlight: "worktree-code-highlight",
+  // Code navigation in the preview (docs/ft/web/1-WIP/PRD-2026-10-03-code-navigation.md)
+  worktreeCodeHover: "worktree-code-hover",
+  worktreeCodeReferencesAction: "worktree-code-references-action",
+  worktreeCodeReferences: "worktree-code-references",
 
   // Sessions drawer screen
   sessionsDrawerScreen: "sessions-drawer-screen",
@@ -1011,6 +1015,20 @@ export const sessionsRuntimeTerminal = (sessionId: string) =>
 
 /** `[data-testid="worktree-tree-node-<relPath>"]` — a single file/dir node in the worktree tree. */
 export const worktreeTreeNode = (relPath: string) => `worktree-tree-node-${relPath}`;
+
+/** `[data-testid="worktree-code-line-<line>"]` — one one-based line of the code preview. */
+export const worktreeCodeLine = (line: number) => `worktree-code-line-${line}`;
+
+/**
+ * `[data-testid="worktree-code-identifier-<line>-<column>"]` — the identifier token starting at a
+ * one-based line and one-based byte column of the code preview.
+ */
+export const worktreeCodeIdentifier = (line: number, column: number) =>
+  `worktree-code-identifier-${line}-${column}`;
+
+/** `[data-testid="worktree-code-reference-<relPath>-<line>"]` — one entry of the references list. */
+export const worktreeCodeReference = (relPath: string, line: number) =>
+  `worktree-code-reference-${relPath}-${line}`;
 
 /** `[data-testid="sessions-terminal-tab-<terminalId>"]` — a single bash terminal tab. */
 export const sessionsTerminalTab = (terminalId: string) =>

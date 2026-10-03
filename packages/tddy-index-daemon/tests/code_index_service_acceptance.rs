@@ -15,9 +15,10 @@ use std::time::Duration;
 use prost::Message;
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnalyzeEvent, AnchorsRequest, AnchorsResponse, ApplyRequest, CheckRequest,
-    CodeIndexServiceServer, ComplexityRequest, ComplexityResponse, CoverageRequest,
-    DuplicateTestsRequest, Finding, FunctionComplexity, IndexProgress, ListPlansRequest,
-    LoadPlansRequest, LoadedPlan, PlanStatusRequest, PlanStatusResponse, PlansResponse,
+    CodeIndexServiceServer, CodeLocation, ComplexityRequest, ComplexityResponse, CoverageRequest,
+    DefinitionRequest, DefinitionResponse, DuplicateTestsRequest, Finding, FunctionComplexity,
+    HoverRequest, HoverResponse, IndexProgress, ListPlansRequest, LoadPlansRequest, LoadedPlan,
+    PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest, ReferencesResponse,
     ReportRequest, ReportResponse, RestructureEvent, RunOutcome, SourcePosition, SourceRange,
     UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest,
     WorkspacesResponse,
@@ -1289,4 +1290,151 @@ async fn a_dirty_plan_reaches_disk_within_the_flush_interval() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(flushed, "the loaded plan was never written back");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Navigation
+//
+// The fake answers every definition with `src/lib.rs` zero-based 10:0–10:3 and every references
+// request with that location plus `src/main.rs` 20:4–20:7, and every hover with
+// `fn foo() -> u32`. Started with `--answers-in-its-workspace`, it reports those files under the
+// root the index started it on — so the assertions below are the service's translation of those
+// canned answers: paths relative to the root, one-based byte coordinates.
+
+/// A host whose fake language servers report their locations inside the workspace they serve.
+fn a_host_over_fake_language_servers_answering_in_their_workspace() -> tddy_rpc::ServiceEntry {
+    let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
+        .with_capabilities(tddy_code_restructuring::client_capabilities())
+        .with_initialization_options(tddy_code_restructuring::server_settings());
+    spec.args = vec!["--answers-in-its-workspace".to_string()];
+    let mut allow = LspAllowList::new();
+    allow.allow(Language::Rust, spec);
+    build_code_index_entry(CodeIndexPorts {
+        servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+    })
+}
+
+/// A package whose `src/lib.rs` calls `foo`, the symbol every navigation request points at.
+fn a_workspace_calling_foo() -> tempfile::TempDir {
+    a_workspace_holding_a_package(
+        "pub fn caller() -> u32 {\n    foo()\n}\n\nfn foo() -> u32 {\n    42\n}\n",
+    )
+}
+
+/// The call to `foo` on line 2 — one-based line, one-based byte column.
+fn the_call_to_foo() -> Option<SourcePosition> {
+    Some(SourcePosition { line: 2, column: 5 })
+}
+
+/// A one-based byte range on a single line, as the wire carries it.
+fn a_range_on_line(line: u32, start_column: u32, end_column: u32) -> Option<SourceRange> {
+    Some(SourceRange {
+        start: Some(SourcePosition {
+            line,
+            column: start_column,
+        }),
+        end: Some(SourcePosition {
+            line,
+            column: end_column,
+        }),
+    })
+}
+
+/// A location inside the workspace, at `file` relative to its root.
+fn a_location_in_the_workspace(file: &str, range: Option<SourceRange>) -> CodeLocation {
+    CodeLocation {
+        file: file.to_string(),
+        range,
+        outside_root: false,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn definition_returns_the_callee_location_in_the_worktree() {
+    // Given a workspace whose language server knows where `foo` is defined
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers_answering_in_their_workspace();
+
+    // When the definition of the call to `foo` is asked for
+    let answer: DefinitionResponse = unary_at(
+        &entry,
+        "Definition",
+        DefinitionRequest {
+            workspace_root: root_of(&workspace),
+            file: "src/lib.rs".to_string(),
+            position: the_call_to_foo(),
+        },
+    )
+    .await
+    .expect("a call inside the workspace has a definition");
+
+    // Then it is the callee's location, relative to the root, in one-based byte coordinates
+    assert_eq!(
+        answer,
+        DefinitionResponse {
+            locations: vec![a_location_in_the_workspace(
+                "src/lib.rs",
+                a_range_on_line(11, 1, 4)
+            )],
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn references_returns_every_reference() {
+    // Given a workspace whose language server knows every reference to `foo`
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers_answering_in_their_workspace();
+
+    // When the references of `foo` are asked for
+    let answer: ReferencesResponse = unary_at(
+        &entry,
+        "References",
+        ReferencesRequest {
+            workspace_root: root_of(&workspace),
+            file: "src/lib.rs".to_string(),
+            position: the_call_to_foo(),
+        },
+    )
+    .await
+    .expect("a symbol inside the workspace has references");
+
+    // Then every reference the server reported is there, each relative to the root
+    assert_eq!(
+        answer,
+        ReferencesResponse {
+            locations: vec![
+                a_location_in_the_workspace("src/lib.rs", a_range_on_line(11, 1, 4)),
+                a_location_in_the_workspace("src/main.rs", a_range_on_line(21, 5, 8)),
+            ],
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hover_returns_the_type_text() {
+    // Given a workspace whose language server can describe `foo`
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers_answering_in_their_workspace();
+
+    // When the hover of the call to `foo` is asked for
+    let answer: HoverResponse = unary_at(
+        &entry,
+        "Hover",
+        HoverRequest {
+            workspace_root: root_of(&workspace),
+            file: "src/lib.rs".to_string(),
+            position: the_call_to_foo(),
+        },
+    )
+    .await
+    .expect("a symbol inside the workspace has a hover");
+
+    // Then it is the server's type text
+    assert_eq!(
+        answer,
+        HoverResponse {
+            markdown: Some("fn foo() -> u32".to_string()),
+        }
+    );
 }

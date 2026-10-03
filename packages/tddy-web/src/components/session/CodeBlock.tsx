@@ -17,6 +17,7 @@ import tsx from "react-syntax-highlighter/dist/esm/languages/prism/tsx";
 import yaml from "react-syntax-highlighter/dist/esm/languages/prism/yaml";
 
 import { codeLanguageForPath } from "../../lib/codeLanguage";
+import type { CodePosition } from "./codeNavigationApi";
 
 SyntaxHighlighter.registerLanguage("bash", bash);
 SyntaxHighlighter.registerLanguage("c", c);
@@ -37,6 +38,15 @@ SyntaxHighlighter.registerLanguage("yaml", yaml);
 export type CodeBlockProps = {
   content: string;
   relPath: string;
+  /**
+   * Ctrl/cmd-click on an identifier: go to its definition. Absent, the block stays a plain
+   * read-only preview.
+   */
+  onNavigate?: (at: CodePosition) => void;
+  /** The pointer rests on an identifier: show its hover. */
+  onHover?: (at: CodePosition) => void;
+  /** One-based line to scroll into view and mark as the navigation target. */
+  focusLine?: number;
 };
 
 /**
@@ -44,6 +54,9 @@ export type CodeBlockProps = {
  * monospace text for anything else. The theme follows the app's dark-mode class on the document.
  */
 export function CodeBlock({ content, relPath }: CodeBlockProps) {
+  // TODO(code-navigation): render each line and identifier token with its one-based byte
+  // position, route ctrl/cmd-click to `onNavigate` and hover to `onHover`, and scroll `focusLine`
+  // into view marked as the navigation target.
   const language = codeLanguageForPath(relPath);
 
   if (language === null) {

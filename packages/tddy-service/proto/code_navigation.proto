@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+// A bare, lower-snake package name, like every other proto in this tree (`worktree`, `host`).
+package code_navigation;
+
+// CodeNavigationService: go-to-definition, references and hover over a session's worktree, for the
+// web's code pane.
+//
+// Every request names its worktree the way `worktree.WorktreeService` does — session token,
+// project id, worktree path — and is authorised the same way: the token resolves to an OS user, the
+// project to its main repo on this host, and the worktree path must appear in that repo's
+// `git worktree list`. Only then is the request forwarded to the warm code-intelligence index
+// (`code_index.CodeIndexService`), with the worktree as its workspace root.
+//
+// A daemon configured without an `index_daemon:` section answers every method with
+// `FAILED_PRECONDITION` naming that section. There is no fallback to another language server.
+service CodeNavigationService {
+  // Where the symbol at a position is defined.
+  rpc Definition(DefinitionRequest) returns (DefinitionResponse);
+
+  // Every reference to the symbol at a position, its declaration included.
+  rpc References(ReferencesRequest) returns (ReferencesResponse);
+
+  // The hover text — signature and docs — of the symbol at a position.
+  rpc Hover(HoverRequest) returns (HoverResponse);
+}
+
+// One-based line, one-based column counted in bytes — the coordinates `code_index` speaks.
+message SourcePosition {
+  uint32 line   = 1;
+  uint32 column = 2;
+}
+
+message SourceRange {
+  SourcePosition start = 1;
+  SourcePosition end   = 2;
+}
+
+message DefinitionRequest {
+  string         session_token = 1;
+  string         project_id    = 2;
+  // The session's worktree root, as `worktree.WorktreeService` names it.
+  string         worktree_path = 3;
+  // The file the position is in, relative to `worktree_path`.
+  string         rel_path      = 4;
+  SourcePosition position      = 5;
+}
+
+message DefinitionResponse {
+  repeated CodeLocation locations = 1;
+}
+
+message ReferencesRequest {
+  string         session_token = 1;
+  string         project_id    = 2;
+  string         worktree_path = 3;
+  string         rel_path      = 4;
+  SourcePosition position      = 5;
+}
+
+message ReferencesResponse {
+  repeated CodeLocation locations = 1;
+}
+
+message HoverRequest {
+  string         session_token = 1;
+  string         project_id    = 2;
+  string         worktree_path = 3;
+  string         rel_path      = 4;
+  SourcePosition position      = 5;
+}
+
+message HoverResponse {
+  // The hover markdown; unset when there is nothing to say about the position.
+  optional string markdown = 1;
+}
+
+// A place in the worktree a navigation answer points at.
+message CodeLocation {
+  // Relative to the worktree root when the location is inside it; the absolute path otherwise.
+  string      rel_path         = 1;
+  SourceRange range            = 2;
+  // True when the location lies outside the worktree — a dependency or the standard library — so
+  // the pane, which can only open the worktree's files, does not offer to open it.
+  bool        outside_worktree = 3;
+}

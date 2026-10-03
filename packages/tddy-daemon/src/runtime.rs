@@ -1282,6 +1282,17 @@ pub async fn build(
             service: Arc::new(worktree_server) as Arc<dyn tddy_rpc::RpcService>,
         });
 
+        // CodeNavigationService — definition, references and hover for the code pane. Authorised by
+        // the worktree service above, so it reaches no path that service would refuse to read, and
+        // answered by the index daemon this runtime manages; without an `index_daemon:` section it
+        // has none, and says so.
+        rpc_entries.push(crate::code_navigation::build_code_navigation_entry(
+            crate::code_navigation::CodeNavigationServiceImpl::new(
+                Arc::clone(&worktree_service_impl),
+                index_daemon_registry.clone(),
+            ),
+        ));
+
         // ModelRegistryService — this daemon's providers, models and assistants. Rides the same
         // entries as every other service, so it is reachable over HTTP `/rpc` and LiveKit alike.
         // The entry comes from `tddy-model-registry` rather than being assembled here: the

@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 8/15 — branch `feature/live-plan/code-navigation`, base `feature/live-plan/live-plans`.
-PR: _recorded when the PR opens_
+PR: [#574](https://github.com/uppin/tddy-coder/pull/574)
 
 **Position.** Appended after #539, in green-wave order: wave 1 #539, code-navigation, signature-assists · wave 2 transactional-groups, session-lsp-tools, indexing-indicators · wave 3 plan-dialog, session-restructure-tools, signature-rewrites; inside each wave the node with the most transitive dependents leads.
 
@@ -92,28 +92,68 @@ As in `## Responsibility` and the PRD's Proposed Changes.
 
 ## Acceptance Tests
 
-### tddy-index-daemon — `tests/code_index_service_acceptance.rs`
+Written and run in the draft-PR contract commit; every one fails on a `TODO(code-navigation)` stub.
 
-- `definition_returns_the_callee_location_in_the_worktree`
-- `references_returns_every_reference`
-- `hover_returns_the_type_text`
+### tddy-index-daemon — `packages/tddy-index-daemon/tests/code_index_service_acceptance.rs` (§ Navigation)
 
-### tddy-daemon — `tests/code_navigation_acceptance.rs`
+Dispatched at the registered coordinate over `fake_lsp` started with the new
+`--answers-in-its-workspace` flag (`packages/tddy-lsp/tests/bin/fake_lsp.rs`), which reports its
+canned definition/reference locations under the client's `rootUri` instead of `file:///workspace`.
 
-- `a_definition_request_is_forwarded_to_the_index_daemon_for_the_session_worktree`
-- `a_worktree_not_listed_for_the_project_is_refused`
-- `without_an_index_daemon_section_the_service_answers_failed_precondition`
-- `the_first_request_starts_the_index_daemon`
+- `definition_returns_the_callee_location_in_the_worktree` — `src/lib.rs` 11:1–11:4, root-relative, one-based bytes
+- `references_returns_every_reference` — `src/lib.rs` 11:1–11:4 and `src/main.rs` 21:5–21:8
+- `hover_returns_the_type_text` — `markdown: Some("fn foo() -> u32")`
 
-### tddy-web — `cypress/component/WorktreeCodePaneNavigation.cy.tsx` (`mountWithRpc` + `anInMemoryRpcBackend`)
+Each fails today with `Unimplemented: "<Method> is not served yet — TODO(code-navigation)"`
+(`src/navigation.rs`).
 
-- `ctrl_click_on_an_identifier_opens_the_definition_scrolled_to_its_line`
-- `hovering_an_identifier_shows_its_type`
-- `the_references_list_navigates_to_a_reference`
+### tddy-daemon — `packages/tddy-daemon/tests/code_navigation_acceptance.rs`
+
+The registry is the production `IndexDaemonRegistry` over a stand-in program (the
+`index_daemon_lifecycle_acceptance.rs` pattern) that symlinks the socket it is told to bind to a
+fake `code_index` server the test hosts over tonic; the fake records every `DefinitionRequest`.
+
+- `a_definition_request_is_forwarded_to_the_index_daemon_for_the_session_worktree` — fake asked once with `workspace_root` = listed worktree, `file` = `rel_path`; answer mapped to `CodeLocation{rel_path, range, outside_worktree}`
+- `a_worktree_not_listed_for_the_project_is_refused` — `FailedPrecondition` "worktree_path is not a worktree of this project", fake never asked, registry never started
+- `without_an_index_daemon_section_the_service_answers_failed_precondition` — `FailedPrecondition` naming `index_daemon`
+- `the_first_request_starts_the_index_daemon` — stand-in argv `--grpc-uds <socket>`, `registry.running()` holds that socket
+
+Each fails today on `Unimplemented: "Definition is not served yet — TODO(code-navigation)"`
+(`src/code_navigation.rs`). `tests/test_placement.rs` `BELONGS_HERE` gained the suite.
+
+### tddy-web — `packages/tddy-web/cypress/component/WorktreeCodePaneNavigation.cy.tsx` (`mountWithRpc` + in-memory backend)
+
+Mounted through `SessionsDrawerScreen` → Code pane → `src/main.rs`; navigation answered by
+`CodeNavigationService` handlers on the in-memory backend.
+
+- "ctrl-click on an identifier opens the definition scrolled to its line" — `src/geometry.rs` line 120 visible and `data-navigation-target="true"`; recorded `Definition` request carries token, project, worktree, `src/main.rs`, position 4:26
+- "hovering an identifier shows its type" — hover card shows `fn area(width: u32, height: u32) -> u32`
+- "the references list navigates to a reference" — hover card → References action → list → `src/geometry.rs:120` opens at that line
+
+All three fail today at `worktree-code-identifier-4-26` never rendering (`CodeBlock` TODO).
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+`TODO(code-navigation)` stubs left by the contract commit (green replaces each):
+
+- `packages/tddy-index-daemon/src/navigation.rs` — `serve_definition`, `serve_references`, `serve_hover` answer `Unimplemented`.
+- `packages/tddy-daemon/src/code_navigation.rs` — `CodeNavigationServiceImpl::{definition, references, hover}` answer `Unimplemented`; both fields carry `#[allow(dead_code)] // TODO(code-navigation)`.
+- `packages/tddy-daemon/Cargo.toml` — `tddy-index-daemon` (and `tokio-stream` `net`) is a **dev**-dependency for now; it moves to `[dependencies]` when the forward lands (`test_placement.rs` refuses a runtime dependency no `src/` file names).
+- `packages/tddy-web/src/components/session/codeNavigationApi.ts` — `createCodeNavigationApi` rejects every call.
+- `packages/tddy-web/src/components/session/CodeBlock.tsx` — `onNavigate`, `onHover`, `focusLine` props declared, not rendered (no per-line / per-identifier positions yet).
+- `packages/tddy-web/src/components/session/WorktreeCodePane.tsx` — `navigationClient` prop declared, unused; `SessionMainPane` / `SessionsDrawerScreen` do not yet create a `CodeNavigationService` client (`useDaemonClientFor`) — the Cypress spec needs that wiring.
+
+Planned but not written as tests here:
+
+- References / Hover through the daemon (only `Definition` is pinned end-to-end at the daemon; the three share one authorise-and-forward path).
+- `rel_path` traversal refusal (`../`) and `outside_root` → `outside_worktree` mapping — green should add a unit test with the forward.
+- Cmd-click (macOS) — the spec pins ctrl-click; the handler should accept `metaKey` too.
+
+Contract deviations from the plan:
+
+- `WorktreeServiceImpl::resolve_listed_worktree` was private; it is now `pub` so the daemon reuses the exact authorisation instead of copying it.
+- The web-facing `CodeLocation` names its fields `rel_path` / `outside_worktree` (worktree vocabulary); the index's `CodeLocation` keeps `file` / `outside_root`.
+- `code_navigation.proto` is built with an RPC-server pass only (no tonic adapter), like `session_files.proto`: nothing reaches it over the local gRPC socket.
 
 ## Decisions & Trade-offs
 
@@ -136,10 +176,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

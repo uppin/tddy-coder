@@ -180,7 +180,7 @@ impl WorktreeServiceImpl {
     ///
     /// The membership gate is what keeps filesystem access from escaping a real worktree: the path
     /// arrives as free text from a browser, and this daemon can reach files its caller cannot.
-    fn resolve_listed_worktree(
+    pub fn resolve_listed_worktree(
         &self,
         session_token: &str,
         project_id: &str,
