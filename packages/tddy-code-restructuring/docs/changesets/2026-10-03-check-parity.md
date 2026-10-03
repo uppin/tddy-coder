@@ -28,7 +28,7 @@ move whose module name the destination already has* (both 2026-09-25).
 |---|---|
 | `tddy-code-restructuring` tests | 702 passed, 0 failed, 1 ignored (scoped run) |
 | `crate_move/cluster.rs` production lines | 624 → 625 (already over the 500 budget; split deferred, two other nodes of the stack edit it) |
-| `crate_move/preconditions.rs` production lines | 84 → about 250 |
+| `crate_move/preconditions.rs` production lines | 84 → 268 |
 | Longest new function | `stays_behind_through_a_body`, 36 lines |
 
 ## Left open
