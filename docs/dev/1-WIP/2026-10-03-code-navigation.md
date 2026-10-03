@@ -165,6 +165,14 @@ _(populated during development)_
 
 ## Validation Results
 
+### /analyze-clean-code (2026-10-03)
+
+`WorktreeCodePane` was one 186-line function; navigation state and handlers moved to `useCodeNavigation.ts` and the overlays to `CodeNavigationOverlays.tsx` (component now ~54 lines; longest hook function `useNavigationActions` ~85 lines — splitting it further would prop-drill the setters). Behaviour unchanged: both specs pass (3 + 11).
+
+### File-length gate (2026-10-03)
+
+New files are all under 500 production lines (largest `WorktreeCodePane`-adjacent file 273). Four files already over budget grew by this PR's wiring — `runtime.rs` 1,620 → 1,631, `build.rs` 695 → 709, `SessionMainPane.tsx` 657 → 666, `SessionsDrawerScreen.tsx` 966 → 969 — and their decomposition is **deferred with the developer's consent**: rows added to the two Rust code-issue records, and `docs/dev/todo/2026-10-03-code-navigation-grew-four-oversized-files.md` for all four.
+
 ### /validate-prod-ready (2026-10-03)
 
 13 production files. ✅ Ready — blockers 0, warnings 0. No `println!`/`eprintln!`/`dbg!`/`console.*`, no mock/fake/stub code, no fallbacks (index unavailable → `FAILED_PRECONDITION` / `Unavailable`; nothing falls back to `tddy_lsp_executor`), no `TODO`/`FIXME` added, no `unwrap`/`expect` in production paths, no `allow(dead_code)`. Build and `clippy -D warnings` clean on the touched Rust packages.
@@ -198,19 +206,19 @@ Stack gate: base `feature/live-plan/live-plans`, already current, `origin/<base>
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-code-navigation-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps
