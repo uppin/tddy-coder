@@ -4,15 +4,15 @@
 
 // A bare, lower-snake package name, like every other proto in this tree (`worktree`, `host`).
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file code_navigation.proto.
  */
 export const file_code_navigation: GenFile = /*@__PURE__*/
-  fileDesc("ChVjb2RlX25hdmlnYXRpb24ucHJvdG8SD2NvZGVfbmF2aWdhdGlvbiJCChVXYXRjaENvZGVJbmRleFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJInQKEUNvZGVJbmRleFByb2dyZXNzEgwKBGxpbmUYASABKAkSDQoFcGhhc2UYAiABKAkSEgoKcGVyY2VudGFnZRgDIAEoDRIQCghmdXJ0aGVzdBgEIAEoCRINCgVyZWFkeRgFIAEoCBINCgVlcnJvchgGIAEoCSIuCg5Tb3VyY2VQb3NpdGlvbhIMCgRsaW5lGAEgASgNEg4KBmNvbHVtbhgCIAEoDSJrCgtTb3VyY2VSYW5nZRIuCgVzdGFydBgBIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbhIsCgNlbmQYAiABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24imgEKEURlZmluaXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIkYKEkRlZmluaXRpb25SZXNwb25zZRIwCglsb2NhdGlvbnMYASADKAsyHS5jb2RlX25hdmlnYXRpb24uQ29kZUxvY2F0aW9uIpoBChFSZWZlcmVuY2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCRIxCghwb3NpdGlvbhgFIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbiJGChJSZWZlcmVuY2VzUmVzcG9uc2USMAoJbG9jYXRpb25zGAEgAygLMh0uY29kZV9uYXZpZ2F0aW9uLkNvZGVMb2NhdGlvbiKVAQoMSG92ZXJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIjMKDUhvdmVyUmVzcG9uc2USFQoIbWFya2Rvd24YASABKAlIAIgBAUILCglfbWFya2Rvd24iZwoMQ29kZUxvY2F0aW9uEhAKCHJlbF9wYXRoGAEgASgJEisKBXJhbmdlGAIgASgLMhwuY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVJhbmdlEhgKEG91dHNpZGVfd29ya3RyZWUYAyABKAgy7QIKFUNvZGVOYXZpZ2F0aW9uU2VydmljZRJVCgpEZWZpbml0aW9uEiIuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXNwb25zZRJVCgpSZWZlcmVuY2VzEiIuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXNwb25zZRJGCgVIb3ZlchIdLmNvZGVfbmF2aWdhdGlvbi5Ib3ZlclJlcXVlc3QaHi5jb2RlX25hdmlnYXRpb24uSG92ZXJSZXNwb25zZRJeCg5XYXRjaENvZGVJbmRleBImLmNvZGVfbmF2aWdhdGlvbi5XYXRjaENvZGVJbmRleFJlcXVlc3QaIi5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4UHJvZ3Jlc3MwAWIGcHJvdG8z");
+  fileDesc("ChVjb2RlX25hdmlnYXRpb24ucHJvdG8SD2NvZGVfbmF2aWdhdGlvbiJCChVXYXRjaENvZGVJbmRleFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJInQKEUNvZGVJbmRleFByb2dyZXNzEgwKBGxpbmUYASABKAkSDQoFcGhhc2UYAiABKAkSEgoKcGVyY2VudGFnZRgDIAEoDRIQCghmdXJ0aGVzdBgEIAEoCRINCgVyZWFkeRgFIAEoCBINCgVlcnJvchgGIAEoCSIuCg5Tb3VyY2VQb3NpdGlvbhIMCgRsaW5lGAEgASgNEg4KBmNvbHVtbhgCIAEoDSJrCgtTb3VyY2VSYW5nZRIuCgVzdGFydBgBIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbhIsCgNlbmQYAiABKAsyHy5jb2RlX25hdmlnYXRpb24uU291cmNlUG9zaXRpb24imgEKEURlZmluaXRpb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIkYKEkRlZmluaXRpb25SZXNwb25zZRIwCglsb2NhdGlvbnMYASADKAsyHS5jb2RlX25hdmlnYXRpb24uQ29kZUxvY2F0aW9uIpoBChFSZWZlcmVuY2VzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnByb2plY3RfaWQYAiABKAkSFQoNd29ya3RyZWVfcGF0aBgDIAEoCRIQCghyZWxfcGF0aBgEIAEoCRIxCghwb3NpdGlvbhgFIAEoCzIfLmNvZGVfbmF2aWdhdGlvbi5Tb3VyY2VQb3NpdGlvbiJGChJSZWZlcmVuY2VzUmVzcG9uc2USMAoJbG9jYXRpb25zGAEgAygLMh0uY29kZV9uYXZpZ2F0aW9uLkNvZGVMb2NhdGlvbiKVAQoMSG92ZXJSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJEjEKCHBvc2l0aW9uGAUgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVBvc2l0aW9uIjMKDUhvdmVyUmVzcG9uc2USFQoIbWFya2Rvd24YASABKAlIAIgBAUILCglfbWFya2Rvd24iZwoMQ29kZUxvY2F0aW9uEhAKCHJlbF9wYXRoGAEgASgJEisKBXJhbmdlGAIgASgLMhwuY29kZV9uYXZpZ2F0aW9uLlNvdXJjZVJhbmdlEhgKEG91dHNpZGVfd29ya3RyZWUYAyABKAgiZQoPT3BlblBsYW5SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKcHJvamVjdF9pZBgCIAEoCRIVCg13b3JrdHJlZV9wYXRoGAMgASgJEhAKCHJlbF9wYXRoGAQgASgJImYKEFdhdGNoUGxhblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiZAoOUnVuUGxhblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpwcm9qZWN0X2lkGAIgASgJEhUKDXdvcmt0cmVlX3BhdGgYAyABKAkSEAoIcmVsX3BhdGgYBCABKAkiVAoMUGxhblNuYXBzaG90EhAKCHJlbF9wYXRoGAEgASgJEjIKCm9wZXJhdGlvbnMYAiADKAsyHi5jb2RlX25hdmlnYXRpb24uUGxhbk9wZXJhdGlvbiKtAQoNUGxhbk9wZXJhdGlvbhIKCgJpZBgBIAEoCRINCgVpbmRleBgCIAEoDRIKCgJvcBgDIAEoCRIMCgRpdGVtGAQgASgJEgwKBGZpbGUYBSABKAkSDQoFZ3JvdXAYBiABKAkSNAoGc3RhdHVzGAcgASgOMiQuY29kZV9uYXZpZ2F0aW9uLlBsYW5PcGVyYXRpb25TdGF0dXMSFAoMc3RhbGVfcmVhc29uGAggASgJIssBCgxQbGFuUnVuRXZlbnQSOgoJb3BlcmF0aW9uGAEgASgLMiUuY29kZV9uYXZpZ2F0aW9uLlBsYW5PcGVyYXRpb25BcHBsaWVkSAASDgoEbm90ZRgCIAEoCUgAEjIKB291dGNvbWUYAyABKAsyHy5jb2RlX25hdmlnYXRpb24uUGxhblJ1bk91dGNvbWVIABIyCgdmYWlsdXJlGAQgASgLMh8uY29kZV9uYXZpZ2F0aW9uLlBsYW5SdW5GYWlsdXJlSABCBwoFZXZlbnQiYAoUUGxhbk9wZXJhdGlvbkFwcGxpZWQSDQoFb3BfaWQYASABKAkSDQoFaW5kZXgYAiABKA0SDAoEZG9uZRgDIAEoDRINCgV0b3RhbBgEIAEoDRINCgVmaWxlcxgFIAMoCSIwCg5QbGFuUnVuT3V0Y29tZRIPCgdhcHBsaWVkGAEgASgNEg0KBXRvdGFsGAIgASgNIkUKDlBsYW5SdW5GYWlsdXJlEg8KB21lc3NhZ2UYASABKAkSDQoFZ3JvdXAYAiABKAkSEwoLcm9sbGVkX2JhY2sYAyADKAkq8AEKE1BsYW5PcGVyYXRpb25TdGF0dXMSJQohUExBTl9PUEVSQVRJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASIQodUExBTl9PUEVSQVRJT05fU1RBVFVTX1BFTkRJTkcQARIjCh9QTEFOX09QRVJBVElPTl9TVEFUVVNfSU5fRkxJR0hUEAISIQodUExBTl9PUEVSQVRJT05fU1RBVFVTX0FQUExJRUQQAxIgChxQTEFOX09QRVJBVElPTl9TVEFUVVNfRkFJTEVEEAQSJQohUExBTl9PUEVSQVRJT05fU1RBVFVTX1JPTExFRF9CQUNLEAUy2AQKFUNvZGVOYXZpZ2F0aW9uU2VydmljZRJVCgpEZWZpbml0aW9uEiIuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLkRlZmluaXRpb25SZXNwb25zZRJVCgpSZWZlcmVuY2VzEiIuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXF1ZXN0GiMuY29kZV9uYXZpZ2F0aW9uLlJlZmVyZW5jZXNSZXNwb25zZRJGCgVIb3ZlchIdLmNvZGVfbmF2aWdhdGlvbi5Ib3ZlclJlcXVlc3QaHi5jb2RlX25hdmlnYXRpb24uSG92ZXJSZXNwb25zZRJeCg5XYXRjaENvZGVJbmRleBImLmNvZGVfbmF2aWdhdGlvbi5XYXRjaENvZGVJbmRleFJlcXVlc3QaIi5jb2RlX25hdmlnYXRpb24uQ29kZUluZGV4UHJvZ3Jlc3MwARJLCghPcGVuUGxhbhIgLmNvZGVfbmF2aWdhdGlvbi5PcGVuUGxhblJlcXVlc3QaHS5jb2RlX25hdmlnYXRpb24uUGxhblNuYXBzaG90Ek8KCVdhdGNoUGxhbhIhLmNvZGVfbmF2aWdhdGlvbi5XYXRjaFBsYW5SZXF1ZXN0Gh0uY29kZV9uYXZpZ2F0aW9uLlBsYW5TbmFwc2hvdDABEksKB1J1blBsYW4SHy5jb2RlX25hdmlnYXRpb24uUnVuUGxhblJlcXVlc3QaHS5jb2RlX25hdmlnYXRpb24uUGxhblJ1bkV2ZW50MAFiBnByb3RvMw");
 
 /**
  * @generated from message code_navigation.WatchCodeIndexRequest
@@ -341,6 +341,389 @@ export const CodeLocationSchema: GenMessage<CodeLocation> = /*@__PURE__*/
   messageDesc(file_code_navigation, 10);
 
 /**
+ * @generated from message code_navigation.OpenPlanRequest
+ */
+export type OpenPlanRequest = Message<"code_navigation.OpenPlanRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+
+  /**
+   * The plan file, relative to `worktree_path`.
+   *
+   * @generated from field: string rel_path = 4;
+   */
+  relPath: string;
+};
+
+/**
+ * Describes the message code_navigation.OpenPlanRequest.
+ * Use `create(OpenPlanRequestSchema)` to create a new message.
+ */
+export const OpenPlanRequestSchema: GenMessage<OpenPlanRequest> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 11);
+
+/**
+ * @generated from message code_navigation.WatchPlanRequest
+ */
+export type WatchPlanRequest = Message<"code_navigation.WatchPlanRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+
+  /**
+   * @generated from field: string rel_path = 4;
+   */
+  relPath: string;
+};
+
+/**
+ * Describes the message code_navigation.WatchPlanRequest.
+ * Use `create(WatchPlanRequestSchema)` to create a new message.
+ */
+export const WatchPlanRequestSchema: GenMessage<WatchPlanRequest> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 12);
+
+/**
+ * @generated from message code_navigation.RunPlanRequest
+ */
+export type RunPlanRequest = Message<"code_navigation.RunPlanRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string project_id = 2;
+   */
+  projectId: string;
+
+  /**
+   * @generated from field: string worktree_path = 3;
+   */
+  worktreePath: string;
+
+  /**
+   * @generated from field: string rel_path = 4;
+   */
+  relPath: string;
+};
+
+/**
+ * Describes the message code_navigation.RunPlanRequest.
+ * Use `create(RunPlanRequestSchema)` to create a new message.
+ */
+export const RunPlanRequestSchema: GenMessage<RunPlanRequest> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 13);
+
+/**
+ * A plan as the dialog shows it: every operation, in plan order.
+ *
+ * @generated from message code_navigation.PlanSnapshot
+ */
+export type PlanSnapshot = Message<"code_navigation.PlanSnapshot"> & {
+  /**
+   * The plan file, relative to the worktree.
+   *
+   * @generated from field: string rel_path = 1;
+   */
+  relPath: string;
+
+  /**
+   * @generated from field: repeated code_navigation.PlanOperation operations = 2;
+   */
+  operations: PlanOperation[];
+};
+
+/**
+ * Describes the message code_navigation.PlanSnapshot.
+ * Use `create(PlanSnapshotSchema)` to create a new message.
+ */
+export const PlanSnapshotSchema: GenMessage<PlanSnapshot> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 14);
+
+/**
+ * One operation of a plan.
+ *
+ * @generated from message code_navigation.PlanOperation
+ */
+export type PlanOperation = Message<"code_navigation.PlanOperation"> & {
+  /**
+   * The operation's stable id in its plan — what rows, events and staleness are keyed by.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Its position in the plan, zero-based.
+   *
+   * @generated from field: uint32 index = 2;
+   */
+  index: number;
+
+  /**
+   * The operation kind as the plan spells it, e.g. `rename_symbol`.
+   *
+   * @generated from field: string op = 3;
+   */
+  op: string;
+
+  /**
+   * The item or symbol path the operation's anchor names; empty for a range anchor.
+   *
+   * @generated from field: string item = 4;
+   */
+  item: string;
+
+  /**
+   * The file the operation's anchor is in, relative to the worktree.
+   *
+   * @generated from field: string file = 5;
+   */
+  file: string;
+
+  /**
+   * The transactional group the operation belongs to; empty when it stands alone.
+   *
+   * @generated from field: string group = 6;
+   */
+  group: string;
+
+  /**
+   * @generated from field: code_navigation.PlanOperationStatus status = 7;
+   */
+  status: PlanOperationStatus;
+
+  /**
+   * Why the operation can no longer run as written — `item changed`, `item not found in <file>`,
+   * `edited by <plan>#<op>` — as the plan store words it; empty while it still points at its code.
+   *
+   * @generated from field: string stale_reason = 8;
+   */
+  staleReason: string;
+};
+
+/**
+ * Describes the message code_navigation.PlanOperation.
+ * Use `create(PlanOperationSchema)` to create a new message.
+ */
+export const PlanOperationSchema: GenMessage<PlanOperation> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 15);
+
+/**
+ * What happened while a plan ran. Exactly one field is set.
+ *
+ * @generated from message code_navigation.PlanRunEvent
+ */
+export type PlanRunEvent = Message<"code_navigation.PlanRunEvent"> & {
+  /**
+   * @generated from oneof code_navigation.PlanRunEvent.event
+   */
+  event: {
+    /**
+     * @generated from field: code_navigation.PlanOperationApplied operation = 1;
+     */
+    value: PlanOperationApplied;
+    case: "operation";
+  } | {
+    /**
+     * A consequence an operation could not avoid, reported rather than left in the diff.
+     *
+     * @generated from field: string note = 2;
+     */
+    value: string;
+    case: "note";
+  } | {
+    /**
+     * The terminal event of a run that finished.
+     *
+     * @generated from field: code_navigation.PlanRunOutcome outcome = 3;
+     */
+    value: PlanRunOutcome;
+    case: "outcome";
+  } | {
+    /**
+     * The terminal event of a run that stopped on an error.
+     *
+     * @generated from field: code_navigation.PlanRunFailure failure = 4;
+     */
+    value: PlanRunFailure;
+    case: "failure";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message code_navigation.PlanRunEvent.
+ * Use `create(PlanRunEventSchema)` to create a new message.
+ */
+export const PlanRunEventSchema: GenMessage<PlanRunEvent> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 16);
+
+/**
+ * @generated from message code_navigation.PlanOperationApplied
+ */
+export type PlanOperationApplied = Message<"code_navigation.PlanOperationApplied"> & {
+  /**
+   * The operation's stable id — the row it turns applied.
+   *
+   * @generated from field: string op_id = 1;
+   */
+  opId: string;
+
+  /**
+   * @generated from field: uint32 index = 2;
+   */
+  index: number;
+
+  /**
+   * How many operations the run has finished, of `total`.
+   *
+   * @generated from field: uint32 done = 3;
+   */
+  done: number;
+
+  /**
+   * @generated from field: uint32 total = 4;
+   */
+  total: number;
+
+  /**
+   * @generated from field: repeated string files = 5;
+   */
+  files: string[];
+};
+
+/**
+ * Describes the message code_navigation.PlanOperationApplied.
+ * Use `create(PlanOperationAppliedSchema)` to create a new message.
+ */
+export const PlanOperationAppliedSchema: GenMessage<PlanOperationApplied> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 17);
+
+/**
+ * @generated from message code_navigation.PlanRunOutcome
+ */
+export type PlanRunOutcome = Message<"code_navigation.PlanRunOutcome"> & {
+  /**
+   * @generated from field: uint32 applied = 1;
+   */
+  applied: number;
+
+  /**
+   * @generated from field: uint32 total = 2;
+   */
+  total: number;
+};
+
+/**
+ * Describes the message code_navigation.PlanRunOutcome.
+ * Use `create(PlanRunOutcomeSchema)` to create a new message.
+ */
+export const PlanRunOutcomeSchema: GenMessage<PlanRunOutcome> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 18);
+
+/**
+ * @generated from message code_navigation.PlanRunFailure
+ */
+export type PlanRunFailure = Message<"code_navigation.PlanRunFailure"> & {
+  /**
+   * The index's account of why the run stopped.
+   *
+   * @generated from field: string message = 1;
+   */
+  message: string;
+
+  /**
+   * The group that did not compile, when that is why; empty otherwise.
+   *
+   * @generated from field: string group = 2;
+   */
+  group: string;
+
+  /**
+   * The operations restored with that group, by id.
+   *
+   * @generated from field: repeated string rolled_back = 3;
+   */
+  rolledBack: string[];
+};
+
+/**
+ * Describes the message code_navigation.PlanRunFailure.
+ * Use `create(PlanRunFailureSchema)` to create a new message.
+ */
+export const PlanRunFailureSchema: GenMessage<PlanRunFailure> = /*@__PURE__*/
+  messageDesc(file_code_navigation, 19);
+
+/**
+ * Where an operation's journal says it is.
+ *
+ * @generated from enum code_navigation.PlanOperationStatus
+ */
+export enum PlanOperationStatus {
+  /**
+   * @generated from enum value: PLAN_OPERATION_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: PLAN_OPERATION_STATUS_PENDING = 1;
+   */
+  PENDING = 1,
+
+  /**
+   * @generated from enum value: PLAN_OPERATION_STATUS_IN_FLIGHT = 2;
+   */
+  IN_FLIGHT = 2,
+
+  /**
+   * @generated from enum value: PLAN_OPERATION_STATUS_APPLIED = 3;
+   */
+  APPLIED = 3,
+
+  /**
+   * @generated from enum value: PLAN_OPERATION_STATUS_FAILED = 4;
+   */
+  FAILED = 4,
+
+  /**
+   * Applied as part of a group that did not compile, and restored with the rest of that group.
+   *
+   * @generated from enum value: PLAN_OPERATION_STATUS_ROLLED_BACK = 5;
+   */
+  ROLLED_BACK = 5,
+}
+
+/**
+ * Describes the enum code_navigation.PlanOperationStatus.
+ */
+export const PlanOperationStatusSchema: GenEnum<PlanOperationStatus> = /*@__PURE__*/
+  enumDesc(file_code_navigation, 0);
+
+/**
  * CodeNavigationService: go-to-definition, references and hover over a session's worktree, for the
  * web's code pane.
  *
@@ -402,6 +785,44 @@ export const CodeNavigationService: GenService<{
     methodKind: "server_streaming";
     input: typeof WatchCodeIndexRequestSchema;
     output: typeof CodeIndexProgressSchema;
+  },
+  /**
+   * Open a restructure plan file of the session's worktree as a plan: load it into the index's plan
+   * store for that worktree (`code_index.LoadPlans`) and answer its operations, each with its
+   * status and, when it can no longer run as written, why. Authorised like every other method; the
+   * plan's path is `rel_path`, relative to the worktree.
+   *
+   * @generated from rpc code_navigation.CodeNavigationService.OpenPlan
+   */
+  openPlan: {
+    methodKind: "unary";
+    input: typeof OpenPlanRequestSchema;
+    output: typeof PlanSnapshotSchema;
+  },
+  /**
+   * A plan's operations as they change: opens with the current snapshot, then sends a new one
+   * whenever an operation's status or staleness changes (`code_index.PlanStatus` /
+   * `code_index.ListPlans` for the worktree). Runs until the client goes away.
+   *
+   * @generated from rpc code_navigation.CodeNavigationService.WatchPlan
+   */
+  watchPlan: {
+    methodKind: "server_streaming";
+    input: typeof WatchPlanRequestSchema;
+    output: typeof PlanSnapshotSchema;
+  },
+  /**
+   * Apply a plan through the warm index (`code_index.Apply`), sending each operation's outcome as it
+   * lands and ending with the run's outcome. A run is refused while another run holds the worktree
+   * — the index daemon's per-root queue — and a group that does not compile ends the stream with a
+   * `failure` naming it, its operations rolled back.
+   *
+   * @generated from rpc code_navigation.CodeNavigationService.RunPlan
+   */
+  runPlan: {
+    methodKind: "server_streaming";
+    input: typeof RunPlanRequestSchema;
+    output: typeof PlanRunEventSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_code_navigation, 0);

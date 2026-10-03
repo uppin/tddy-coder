@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 
 import type { CodeNavigationService } from "../../gen/code_navigation_pb";
@@ -11,6 +11,8 @@ import { CodeBlock } from "./CodeBlock";
 import { createCodeNavigationApi, type CodePosition } from "./codeNavigationApi";
 import { HoverCard, LocationListCard, NavigationNotice } from "./CodeNavigationOverlays";
 import { useCodeNavigation, type SelectedFile } from "./useCodeNavigation";
+import { createRestructurePlanApi, isRestructurePlanFile } from "./restructurePlanApi";
+import { RestructurePlanDialog } from "./RestructurePlanDialog";
 
 export type WorktreeCodePaneProps = {
   client: Client<typeof WorktreeService>;
@@ -20,7 +22,8 @@ export type WorktreeCodePaneProps = {
   worktreePath: string;
   /**
    * `code_navigation.CodeNavigationService` on the same host as `client` — definition, references
-   * and hover for the preview. Absent, the preview is read-only text.
+   * and hover for the preview, and the plan calls behind "Open as plan". Absent, the preview is
+   * read-only text.
    */
   navigationClient?: Client<typeof CodeNavigationService>;
 };
@@ -48,6 +51,13 @@ export function WorktreeCodePane({
         : null,
     [navigationClient, sessionToken, projectId, worktreePath],
   );
+  const plans = useMemo(
+    () =>
+      navigationClient
+        ? createRestructurePlanApi(navigationClient, { sessionToken, projectId, worktreePath })
+        : null,
+    [navigationClient, sessionToken, projectId, worktreePath],
+  );
   const nav = useCodeNavigation(api, navigation);
   const { selected, openFile } = nav;
   const handleSelectFile = useCallback((relPath: string) => openFile(relPath), [openFile]);
@@ -55,6 +65,16 @@ export function WorktreeCodePane({
   // The index serves Rust only; offering ctrl-click and hover on other languages would ask it
   // questions it refuses.
   const navigable = navigation !== null && selected !== null && selected.relPath.endsWith(".rs");
+
+  // A restructure plan opens as a plan only where the plan calls are served.
+  const [openPlan, setOpenPlan] = useState<string | null>(null);
+  const planFile =
+    plans !== null &&
+    selected !== null &&
+    !selected.error &&
+    isRestructurePlanFile(selected.relPath, selected.content)
+      ? selected.relPath
+      : null;
 
   return (
     <div
@@ -74,6 +94,18 @@ export function WorktreeCodePane({
           aria-label="Worktree file preview"
           className="min-w-0 flex-1 overflow-auto p-3"
         >
+          {planFile !== null && (
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                data-testid="worktree-code-open-as-plan"
+                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                onClick={() => setOpenPlan(planFile)}
+              >
+                Open as plan
+              </button>
+            </div>
+          )}
           <FilePreview
             selected={selected}
             onNavigate={navigable ? nav.navigate : undefined}
@@ -92,6 +124,9 @@ export function WorktreeCodePane({
           )}
         </div>
       </div>
+      {plans !== null && openPlan !== null && (
+        <RestructurePlanDialog api={plans} relPath={openPlan} onClose={() => setOpenPlan(null)} />
+      )}
     </div>
   );
 }

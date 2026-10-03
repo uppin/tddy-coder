@@ -12,7 +12,7 @@ Full codebase exploration that grounded this plan:
 ## Stack
 
 `#live-plan` 13/15 — branch `feature/live-plan/plan-dialog`, base `feature/live-plan/indexing-indicators`.
-PR: _recorded when the PR opens_
+PR: [#572](https://github.com/uppin/tddy-coder/pull/572)
 
 **Position.** Appended after #539, in green-wave order: wave 1 #539, code-navigation, signature-assists · wave 2 transactional-groups, session-lsp-tools, indexing-indicators · wave 3 plan-dialog, session-restructure-tools, signature-rewrites; inside each wave the node with the most transitive dependents leads.
 
@@ -39,6 +39,23 @@ implementing one here collides with the PR that owns it.
 | `transactional-groups` (8) | `group`, rolled-back outcome | group column, rolled-back status | change group events |
 
 Every node below it in the line that is not in the table is **not consumed** — do not touch its surfaces.
+
+Sequencing facts found while writing the contract (wave 2, 2026-10-03):
+
+- The three calls reuse code-navigation's `authorise_and_connect` unchanged — no second authorisation
+  path. `indexing-indicators`' `WatchCodeIndex` is untouched; the new methods sit beside it.
+- The index daemon's plan RPCs answer **less than the dialog shows**: `LoadedPlan` carries an op
+  *count* and the stale list, and `PlanStatusResponse` carries journal *counts*
+  (completed/in_flight/pending/failed), not per-operation rows or statuses. So the daemon reads the
+  plan file itself for the rows (id, kind, anchor item and file, group — via
+  `tddy-code-restructuring`'s `Plan::parse`, a new internal dependency of `tddy-daemon`) and folds in
+  the store's stale reasons. Per-operation status needs either the journal read directly or a
+  per-op status on `PlanStatus`; the latter would change #539's RPC, which this node must not do. The
+  acceptance tests pin only the fresh-plan case (every operation pending), so green can choose.
+- `transactional-groups` puts no group outcome on the wire: a group that does not compile surfaces
+  as `Apply` failing with `RestructureError::GroupDoesNotCompile` mapped to `FAILED_PRECONDITION`.
+  `PlanRunFailure.group` / `rolled_back` are therefore filled from that error, not from an event —
+  untested here until transactional-groups is green.
 
 ## Draft PR contract
 
@@ -91,22 +108,54 @@ As in `## Responsibility` and the PRD's Proposed Changes.
 
 ### tddy-daemon — `tests/plan_dialog_acceptance.rs`
 
-- `open_plan_loads_the_plan_for_the_session_worktree`
-- `watch_plan_reports_a_stale_operation_with_its_reason`
-- `run_plan_streams_each_operations_outcome`
-- `a_worktree_not_listed_for_the_project_is_refused`
+Harness: `code_navigation_acceptance.rs`'s — a shell-script stand-in index daemon whose socket points
+at a fake tonic `code_index` server. The fake holds one plan's store state (stale ops) and answers
+`LoadPlans`, `ListPlans` and `PlanStatus` from it, so the tests pin what the dialog sees rather than
+which of those calls green chooses; `Apply` replays a script. Registered in `test_placement.rs`
+`BELONGS_HERE`.
+
+| Test | Status | Fails on |
+|---|---|---|
+| `open_plan_loads_the_plan_for_the_session_worktree` | ❌ failing | own stub: `OpenPlan` → `Unimplemented … TODO(plan-dialog)` |
+| `watch_plan_reports_a_stale_operation_with_its_reason` | ❌ failing | own stub: `WatchPlan` → `Unimplemented` |
+| `run_plan_streams_each_operations_outcome` | ❌ failing | own stub: `RunPlan` → `Unimplemented` |
+| `a_worktree_not_listed_for_the_project_is_refused` | ✅ passes by design | the stubs authorise through code-navigation's `authorise_and_connect` before answering, so the refusal (and "index daemon never started") already holds |
 
 ### tddy-web — `cypress/component/RestructurePlanDialog.cy.tsx`
 
-- `opening_a_plan_file_shows_open_as_plan`
-- `another_jsonl_file_shows_no_plan_entry`
-- `the_dialog_lists_operations_with_status_and_group`
-- `a_stale_operation_disables_run_and_names_it`
-- `running_turns_each_row_applied_as_its_event_arrives`
+`mountWithRpc` + `anInMemoryRpcBackend`; the run test holds its stub generator at a gate to assert
+the mid-run state exactly. Page object `cypress/support/pages/restructurePlanDialogPage.ts`.
+
+| Test | Status | Fails on |
+|---|---|---|
+| opening a plan file shows open as plan | ❌ failing | own stub: `isRestructurePlanFile` returns `false` |
+| another jsonl file shows no plan entry | ✅ passes by design | the guard: an event log must never be offered as a plan |
+| the dialog lists operations with status and group | ❌ failing | own stub: `RestructurePlanDialog` loads no rows |
+| a stale operation disables run and names it | ❌ failing | own stub: no rows, no stale notice |
+| running turns each row applied as its event arrives | ❌ failing | own stub: no rows, Run never runs |
+
+None of the failures reaches a parent's stub.
 
 ## Technical Debt & Production Readiness
 
-_(populated during development)_
+Stubs this node's contract leaves for green (all marked `TODO(plan-dialog)`):
+
+- `packages/tddy-daemon/src/code_navigation.rs` — `open_plan`, `watch_plan`, `run_plan` authorise and
+  dial through `authorise_and_connect`, then answer `Unimplemented`.
+- `packages/tddy-web/src/components/session/restructurePlanApi.ts` — `isRestructurePlanFile` returns
+  `false`. (`createRestructurePlanApi`, the thin adapter over the three calls, is written.)
+- `packages/tddy-web/src/components/session/RestructurePlanDialog.tsx` — renders the shell (title,
+  empty table, disabled Run, Close) and does not call `api.open` / `watch` / `run`.
+
+Not written in the red phase, and why:
+
+- No test for a failing group showing rolled back (PRD criterion 4, second half): group outcomes are
+  not on the index daemon's wire yet (see Dependencies) — add it once transactional-groups is green.
+- No test for per-operation status other than pending: the index daemon's `PlanStatus` reports counts
+  only, so how a row learns `applied`/`failed` outside a run is green's decision (see Dependencies).
+- No test for "Run refused while another run holds the root": it is the index daemon's per-root
+  queue, already this service's error passthrough.
+- No unit tests: the daemon handlers and the dialog are thin; the acceptance suites cover them.
 
 ## Decisions & Trade-offs
 
@@ -129,10 +178,10 @@ _(populated by validation commands)_
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

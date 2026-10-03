@@ -33,6 +33,23 @@ service CodeNavigationService {
   // no indicator shows. Warming never blocks the session: navigation answers whenever the index
   // can, and a failed warm is only reported here.
   rpc WatchCodeIndex(WatchCodeIndexRequest) returns (stream CodeIndexProgress);
+
+  // Open a restructure plan file of the session's worktree as a plan: load it into the index's plan
+  // store for that worktree (`code_index.LoadPlans`) and answer its operations, each with its
+  // status and, when it can no longer run as written, why. Authorised like every other method; the
+  // plan's path is `rel_path`, relative to the worktree.
+  rpc OpenPlan(OpenPlanRequest) returns (PlanSnapshot);
+
+  // A plan's operations as they change: opens with the current snapshot, then sends a new one
+  // whenever an operation's status or staleness changes (`code_index.PlanStatus` /
+  // `code_index.ListPlans` for the worktree). Runs until the client goes away.
+  rpc WatchPlan(WatchPlanRequest) returns (stream PlanSnapshot);
+
+  // Apply a plan through the warm index (`code_index.Apply`), sending each operation's outcome as it
+  // lands and ending with the run's outcome. A run is refused while another run holds the worktree
+  // — the index daemon's per-root queue — and a group that does not compile ends the stream with a
+  // `failure` naming it, its operations rolled back.
+  rpc RunPlan(RunPlanRequest) returns (stream PlanRunEvent);
 }
 
 message WatchCodeIndexRequest {
@@ -114,4 +131,104 @@ message CodeLocation {
   // True when the location lies outside the worktree — a dependency or the standard library — so
   // the pane, which can only open the worktree's files, does not offer to open it.
   bool        outside_worktree = 3;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Restructure plans
+
+message OpenPlanRequest {
+  string session_token = 1;
+  string project_id    = 2;
+  string worktree_path = 3;
+  // The plan file, relative to `worktree_path`.
+  string rel_path      = 4;
+}
+
+message WatchPlanRequest {
+  string session_token = 1;
+  string project_id    = 2;
+  string worktree_path = 3;
+  string rel_path      = 4;
+}
+
+message RunPlanRequest {
+  string session_token = 1;
+  string project_id    = 2;
+  string worktree_path = 3;
+  string rel_path      = 4;
+}
+
+// A plan as the dialog shows it: every operation, in plan order.
+message PlanSnapshot {
+  // The plan file, relative to the worktree.
+  string                 rel_path   = 1;
+  repeated PlanOperation operations = 2;
+}
+
+// Where an operation's journal says it is.
+enum PlanOperationStatus {
+  PLAN_OPERATION_STATUS_UNSPECIFIED = 0;
+  PLAN_OPERATION_STATUS_PENDING     = 1;
+  PLAN_OPERATION_STATUS_IN_FLIGHT   = 2;
+  PLAN_OPERATION_STATUS_APPLIED     = 3;
+  PLAN_OPERATION_STATUS_FAILED      = 4;
+  // Applied as part of a group that did not compile, and restored with the rest of that group.
+  PLAN_OPERATION_STATUS_ROLLED_BACK = 5;
+}
+
+// One operation of a plan.
+message PlanOperation {
+  // The operation's stable id in its plan — what rows, events and staleness are keyed by.
+  string              id           = 1;
+  // Its position in the plan, zero-based.
+  uint32              index        = 2;
+  // The operation kind as the plan spells it, e.g. `rename_symbol`.
+  string              op           = 3;
+  // The item or symbol path the operation's anchor names; empty for a range anchor.
+  string              item         = 4;
+  // The file the operation's anchor is in, relative to the worktree.
+  string              file         = 5;
+  // The transactional group the operation belongs to; empty when it stands alone.
+  string              group        = 6;
+  PlanOperationStatus status       = 7;
+  // Why the operation can no longer run as written — `item changed`, `item not found in <file>`,
+  // `edited by <plan>#<op>` — as the plan store words it; empty while it still points at its code.
+  string              stale_reason = 8;
+}
+
+// What happened while a plan ran. Exactly one field is set.
+message PlanRunEvent {
+  oneof event {
+    PlanOperationApplied operation = 1;
+    // A consequence an operation could not avoid, reported rather than left in the diff.
+    string               note      = 2;
+    // The terminal event of a run that finished.
+    PlanRunOutcome       outcome   = 3;
+    // The terminal event of a run that stopped on an error.
+    PlanRunFailure       failure   = 4;
+  }
+}
+
+message PlanOperationApplied {
+  // The operation's stable id — the row it turns applied.
+  string          op_id = 1;
+  uint32          index = 2;
+  // How many operations the run has finished, of `total`.
+  uint32          done  = 3;
+  uint32          total = 4;
+  repeated string files = 5;
+}
+
+message PlanRunOutcome {
+  uint32 applied = 1;
+  uint32 total   = 2;
+}
+
+message PlanRunFailure {
+  // The index's account of why the run stopped.
+  string          message     = 1;
+  // The group that did not compile, when that is why; empty otherwise.
+  string          group       = 2;
+  // The operations restored with that group, by id.
+  repeated string rolled_back = 3;
 }
