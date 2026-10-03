@@ -23,6 +23,7 @@ import type {
   StartSessionRequestSchema,
   StartSessionResponse,
 } from "../gen/session_pb";
+import { StartPhase_Boundary } from "../gen/session_pb";
 import type { SessionFilesService } from "../gen/session_files_pb";
 import {
   duplicateBasenames,
@@ -226,8 +227,8 @@ export function useSessionAttachments({
   );
   const [pickRefusal, setPickRefusal] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, AttachmentProgress>>({});
-  // TODO(indexing-indicators): set from the stream's `phase` events in `startSessionStreamed`.
-  const [startPhase] = useState<StartPhase_Step | null>(null);
+  // The step of the start the host reported beginning and has not yet ended.
+  const [startPhase, setStartPhase] = useState<StartPhase_Step | null>(null);
   const [hostDocPickerOpen, setHostDocPickerOpen] = useState(false);
 
   // What has already reached a staging host, by row id. A submit that fails — a branch conflict, most
@@ -382,22 +383,33 @@ export function useSessionAttachments({
     request: StartSessionRequestInit,
   ): Promise<StartSessionResponse | null> => {
     let result: StartSessionResponse | null = null;
-    for await (const event of client.streamStartSession(request)) {
-      if (cancelledRef.current) return null;
-      if (event.event.case === "attachmentProgress") {
-        const reported = event.event.value;
-        setProgress((prev) => ({
-          ...prev,
-          [reported.basename]: {
-            percent: percentDone(Number(reported.bytesDone), Number(reported.bytesTotal)),
-            phase: "materializing",
-          },
-        }));
-      } else if (event.event.case === "result") {
-        result = event.event.value;
+    try {
+      for await (const event of client.streamStartSession(request)) {
+        if (cancelledRef.current) return null;
+        if (event.event.case === "attachmentProgress") {
+          const reported = event.event.value;
+          setProgress((prev) => ({
+            ...prev,
+            [reported.basename]: {
+              percent: percentDone(Number(reported.bytesDone), Number(reported.bytesTotal)),
+              phase: "materializing",
+            },
+          }));
+        } else if (event.event.case === "result") {
+          result = event.event.value;
+        } else if (event.event.case === "phase") {
+          const { step, boundary } = event.event.value;
+          if (boundary === StartPhase_Boundary.BEGIN) {
+            setStartPhase(step);
+          } else if (boundary === StartPhase_Boundary.END) {
+            setStartPhase((current) => (current === step ? null : current));
+          }
+        }
       }
-      // TODO(indexing-indicators): a `phase` event sets `startPhase` to its step on BEGIN and clears
-      // it on that step's END, so the pane names the step the host is in.
+    } finally {
+      // A step that fails sends no END (the stream errors instead), so the phase is cleared when the
+      // stream is over, however it ended.
+      if (!cancelledRef.current) setStartPhase(null);
     }
     if (result === null) {
       throw new Error("the host ended the start-session stream without a result");
