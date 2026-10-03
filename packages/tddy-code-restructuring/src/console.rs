@@ -25,7 +25,6 @@
 use crate::edit::VisibilityChange;
 use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 use crate::verify::Comparison;
-use std::time::{Duration, Instant};
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
 ///
@@ -268,49 +267,6 @@ pub fn narration(kind: &str, stamp: Option<&str>, line: &str) -> String {
     }
 }
 
-/// Decides which of a server's narration lines a console shows.
-///
-/// A cold index load reports one progress token per proc-macro, dylib and crate — hundreds of
-/// lines that bury the few that matter. Both front ends (the in-process one and
-/// `tddy_tools::index_console`) pass every line through one throttle so they cannot drift.
-///
-/// Rules:
-/// - a line that does not start with `working` — a phase change, `crate index ready`, an error,
-///   `warming crate index...` — is always admitted;
-/// - `working...` lines are per-item progress: the first one after any non-working line is
-///   admitted, then at most one per [`WORKING_INTERVAL`];
-/// - a line ending `(100%)` is always admitted.
-///
-/// Pure and clock-injected: the caller supplies `now`, and nothing is printed here. What the
-/// caller stamps a printed line with is the time since the last line *admitted*, so the stamps
-/// stay true when lines are dropped.
-#[derive(Debug, Default)]
-pub struct NarrationThrottle {
-    /// When a `working` line was last admitted; `None` after any non-working line.
-    last_working: Option<Instant>,
-}
-
-/// The least time between two admitted per-item progress lines.
-pub const WORKING_INTERVAL: Duration = Duration::from_secs(2);
-
-impl NarrationThrottle {
-    /// Whether `line`, arriving at `now`, is to be shown.
-    pub fn admit(&mut self, line: &str, now: Instant) -> bool {
-        if !line.starts_with("working") {
-            self.last_working = None;
-            return true;
-        }
-        let due = self
-            .last_working
-            .is_none_or(|last| now.duration_since(last) >= WORKING_INTERVAL);
-        if due || line.ends_with("(100%)") {
-            self.last_working = Some(now);
-            return true;
-        }
-        false
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,65 +333,5 @@ mod tests {
             narration("indexing", None, "loading crate graph (42%)"),
             "   indexing: loading crate graph (42%)"
         );
-    }
-
-    fn a_throttle_and_a_start() -> (NarrationThrottle, Instant) {
-        (NarrationThrottle::default(), Instant::now())
-    }
-
-    #[test]
-    fn a_throttle_always_admits_a_line_that_is_not_per_item_progress() {
-        // Given a throttle that has just admitted a working line
-        let (mut throttle, t0) = a_throttle_and_a_start();
-        throttle.admit("working: proc-macro serde built", t0);
-
-        // When phase changes and errors arrive in the same instant
-        // Then every one of them is admitted
-        assert!(throttle.admit("warming crate index...", t0));
-        assert!(throttle.admit("crate index ready", t0));
-        assert!(throttle.admit("error: the server exited", t0));
-    }
-
-    #[test]
-    fn a_throttle_admits_the_first_working_line_then_one_per_two_seconds() {
-        // Given a throttle and a burst of working lines, one every 100ms
-        let (mut throttle, t0) = a_throttle_and_a_start();
-        let at = |ms: u64| t0 + Duration::from_millis(ms);
-
-        // When they arrive
-        let admitted: Vec<bool> = [0, 100, 200, 300, 1999, 2000, 2100]
-            .iter()
-            .map(|&ms| throttle.admit("working: proc-macro serde built", at(ms)))
-            .collect();
-
-        // Then the first is admitted, the next four are dropped, one at 2s is admitted
-        assert_eq!(admitted, [true, false, false, false, false, true, false]);
-    }
-
-    #[test]
-    fn a_throttle_admits_a_working_line_after_a_line_that_is_not_one() {
-        // Given a throttle that admitted a working line a moment ago
-        let (mut throttle, t0) = a_throttle_and_a_start();
-        throttle.admit("working: loading proc-macros", t0);
-
-        // When a phase line arrives and a working line follows it
-        throttle.admit("loading crate graph", t0 + Duration::from_millis(10));
-        let admitted = throttle.admit("working: 12/40 (30%)", t0 + Duration::from_millis(20));
-
-        // Then the new phase's first working line is shown
-        assert!(admitted);
-    }
-
-    #[test]
-    fn a_throttle_always_admits_a_line_reporting_completion() {
-        // Given a throttle that admitted a working line a moment ago
-        let (mut throttle, t0) = a_throttle_and_a_start();
-        throttle.admit("working: 1273/1851 (68%)", t0);
-
-        // When the same progress reaches 100% inside the interval
-        let admitted = throttle.admit("working: 1851/1851 (100%)", t0 + Duration::from_millis(5));
-
-        // Then it is admitted
-        assert!(admitted);
     }
 }

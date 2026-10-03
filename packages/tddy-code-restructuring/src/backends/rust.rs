@@ -6424,23 +6424,30 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     #[test]
     fn reads_a_progress_line_from_a_work_done_notification() {
         let mut chatter = ServerChatter::default();
+        let started = std::time::Instant::now();
 
-        chatter.absorb(&json!({
-            "method": "$/progress",
-            "params": {
-                "token": "rustAnalyzer/cachePriming",
-                "value": { "kind": "begin", "title": "Priming caches", "cancellable": false }
-            }
-        }));
-        let line = chatter
-            .absorb(&json!({
+        chatter.absorb_at(
+            &json!({
                 "method": "$/progress",
                 "params": {
                     "token": "rustAnalyzer/cachePriming",
-                    "value": { "kind": "report", "message": "20/28 (serde_core)", "percentage": 71 }
+                    "value": { "kind": "begin", "title": "Priming caches", "cancellable": false }
                 }
-            }))
-            .expect("a progress report says something worth printing");
+            }),
+            started,
+        );
+        let line = chatter
+            .absorb_at(
+                &json!({
+                    "method": "$/progress",
+                    "params": {
+                        "token": "rustAnalyzer/cachePriming",
+                        "value": { "kind": "report", "message": "20/28 (serde_core)", "percentage": 71 }
+                    }
+                }),
+                started + std::time::Duration::from_secs(3),
+            )
+            .expect("a progress report, once the interval has passed, says something worth printing");
 
         assert!(line.contains("Priming caches"), "{line}");
         assert!(line.contains("20/28 (serde_core)"), "{line}");

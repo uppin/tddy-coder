@@ -151,42 +151,22 @@ fn install_console(options: &mut Options) {
 /// through one shared instant and both accounts would be nonsense. A closure owning its own
 /// `Instant` reads identically for the CLI and stays correct when a second caller appears.
 fn a_stamped_sink(kind: &'static str, aside: bool) -> ProgressSink {
-    let narrator: Mutex<Narrator> = Mutex::new(Narrator::default());
+    let previous: Mutex<Option<Instant>> = Mutex::new(None);
     Arc::new(move |line: &str| {
-        let stamped =
-            narrator
-                .lock()
-                .expect("the sink's own clock")
-                .narrate(kind, line, Instant::now());
-        match stamped {
-            Some(stamped) if aside => eprintln!("{stamped}"),
-            Some(stamped) => println!("{stamped}"),
-            None => {}
+        let now = Instant::now();
+        let stamp = {
+            let mut last = previous.lock().expect("the sink's own clock");
+            let stamp = step_delta(*last, now);
+            *last = Some(now);
+            stamp
+        };
+        let stamped = console::narration(kind, Some(&stamp), line);
+        if aside {
+            eprintln!("{stamped}");
+        } else {
+            println!("{stamped}");
         }
     })
-}
-
-/// One run's narration state: the throttle that drops per-item noise, and when a line was last
-/// *printed* — the stamp is the time since that line, so it stays true when lines are dropped.
-#[derive(Debug, Default)]
-pub struct Narrator {
-    throttle: console::NarrationThrottle,
-    printed: Option<Instant>,
-}
-
-impl Narrator {
-    /// The console line for one narrated `line` at `now`, or `None` when the throttle drops it.
-    ///
-    /// Shared with `tddy_tools::index_console`, so the two front ends cannot drift on which lines
-    /// they show.
-    pub fn narrate(&mut self, kind: &str, line: &str, now: Instant) -> Option<String> {
-        if !self.throttle.admit(line, now) {
-            return None;
-        }
-        let stamp = step_delta(self.printed, now);
-        self.printed = Some(now);
-        Some(console::narration(kind, Some(&stamp), line))
-    }
 }
 
 /// Elapsed time since the previous line, in the units a reader can act on.
@@ -444,34 +424,5 @@ mod tests {
         // Then it is the ten minutes a cold index can take to answer one request, not the seconds
         // an interactive query gets
         assert_eq!(REQUEST_BOUND_ABOVE_ANY_COLD_INDEX, Duration::from_secs(600));
-    }
-
-    #[test]
-    fn a_burst_of_per_item_progress_prints_at_most_two_lines_and_the_ready_line_still_prints() {
-        // Given a narrator and 200 proc-macro lines inside one second, then the ready line
-        let mut narrator = Narrator::default();
-        let t0 = Instant::now();
-
-        // When they are narrated
-        let mut printed: Vec<String> = (0..200)
-            .filter_map(|n| {
-                let at = t0 + Duration::from_millis(n * 5);
-                narrator.narrate("indexing", &format!("working: proc-macro m{n} built"), at)
-            })
-            .collect();
-        printed.extend(narrator.narrate(
-            "indexing",
-            "crate index ready",
-            t0 + Duration::from_millis(1000),
-        ));
-
-        // Then one working line and the ready line printed, the latter stamped since the former
-        assert_eq!(
-            printed,
-            [
-                "   indexing (+0ms): working: proc-macro m0 built",
-                "   indexing (+1.0s): crate index ready",
-            ]
-        );
     }
 }
