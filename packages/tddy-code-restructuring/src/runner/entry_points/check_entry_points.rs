@@ -96,7 +96,35 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
         plan: path.to_string_lossy().to_string(),
         paths: plan.snapshot.len() + plan.files.len(),
         rewritten,
+        stale: Vec::new(),
     })
+}
+
+/// [`snapshot`], and for a plan with item anchors the anchors are re-resolved too: each hint
+/// follows its item through the edits made since the plan was written, and an operation whose item
+/// changed or went is reported and left as written ([`rebase_plan_file`]).
+///
+/// An item anchor is resolved by a language server, so a plan that has any needs `client`; a plan
+/// without one is what [`snapshot`] has always handled and asks nothing of it.
+pub fn snapshot_resolving(
+    root: &Path,
+    options: Options,
+    client: Option<Arc<LspClient>>,
+    cancel: CancellationToken,
+) -> Result<SnapshotRewrite> {
+    let path = options.plan()?;
+    if !has_item_anchors(&read_plan(&path)?) {
+        return snapshot(root, options);
+    }
+    let client = client.ok_or_else(|| {
+        RestructureError::MalformedPlan(
+            "snapshot of a plan with item anchors requires a rust-analyzer LSP session".into(),
+        )
+    })?;
+    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
+    let stale = crate::plan_store::rebase_plan_file(root, &path, &mut registry)?;
+    let rewrite = snapshot(root, options)?;
+    Ok(SnapshotRewrite { stale, ..rewrite })
 }
 
 /// How far a plan's journal under `root` got.

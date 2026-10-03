@@ -1,10 +1,12 @@
-use super::OpStaleness;
+use super::{FlushPolicy, OpStaleness, PlanStore};
 
 use crate::{RefactorOp, RestructureError};
 
 use crate::item_anchor::absolute_range;
 
 use std::path::Path;
+
+use std::time::Duration;
 
 use crate::plan::Anchor;
 
@@ -136,7 +138,7 @@ fn refreshed(
 /// What an answer says, or `None` when it is the refusal of an item the edit left no longer
 /// resolvable. Every other failure — a server that did not answer, a caller that stopped waiting —
 /// is not about the item, and is returned.
-fn resolved_or_left_as_written<T>(answer: Result<T>) -> Result<Option<T>> {
+pub(super) fn resolved_or_left_as_written<T>(answer: Result<T>) -> Result<Option<T>> {
     match answer {
         Ok(found) => Ok(Some(found)),
         Err(RestructureError::MalformedPlan(_)) => Ok(None),
@@ -153,7 +155,20 @@ pub fn rebase_plan_file(
     plan: &Path,
     resolver: &mut dyn ItemResolver,
 ) -> Result<Vec<OpStaleness>> {
-    // TODO(live-plans): implement
-    let _ = (root, plan, resolver);
-    todo!("live-plans: re-resolve and rewrite one plan file")
+    let mut store = PlanStore::new(
+        root,
+        FlushPolicy {
+            debounce: Duration::ZERO,
+        },
+    );
+    store.load(&[plan.to_path_buf()])?;
+    let key = store.key_for(plan)?;
+    let held = store.get(&key).ok_or_else(|| {
+        RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
+    })?;
+    let files = super::live::files_named_by(&held.plan);
+    store.reresolve_files(&files, resolver)?;
+    let stale = store.stale_ops(&key);
+    store.flush(&key)?;
+    Ok(stale)
 }

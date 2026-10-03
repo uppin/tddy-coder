@@ -47,7 +47,7 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
 /// A plan that was already current says so rather than saying nothing: a silent no-op is
 /// indistinguishable from a subcommand that did not run, the reason [`NO_FINDINGS`] exists.
 pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
-    vec![if rewrite.rewritten {
+    let mut lines = vec![if rewrite.rewritten {
         format!(
             "rewrote the snapshot header of {} over {} file(s)",
             rewrite.plan, rewrite.paths
@@ -57,7 +57,18 @@ pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
             "{} already snapshots the working tree over {} file(s)",
             rewrite.plan, rewrite.paths
         )
-    }]
+    }];
+    let stale: Vec<(String, String)> = rewrite
+        .stale
+        .iter()
+        .map(|found| (found.op.to_string(), found.reason.to_string()))
+        .collect();
+    let stale: Vec<(&str, &str)> = stale
+        .iter()
+        .map(|(op, reason)| (op.as_str(), reason.as_str()))
+        .collect();
+    lines.extend(stale_operations(&stale));
+    lines
 }
 
 /// What the whole run amounted to.
@@ -92,26 +103,42 @@ pub fn plan_progress(progress: &PlanProgress) -> Vec<String> {
     ]
 }
 
-/// The plans a store holds, one line each, or the statement that it holds none.
+/// One plan of a store as a front end holds it: its name, how many operations it has, whether it
+/// has changes not yet written back, and its stale operations as `(operation, reason)`.
+pub type HeldPlanRow<'a> = (&'a str, usize, bool, Vec<(&'a str, &'a str)>);
+
+/// The plans a store holds, one line each — and under it one line per stale operation — or the
+/// statement that it holds none.
 ///
-/// Takes `(plan, operations, changed)` triples rather than a store type because the two front ends
-/// that render it hold the wire's `LoadedPlan`, not this crate's. `changed` is a plan the store has
-/// changed and not yet written back.
-pub fn loaded_plans(held: &[(&str, usize, bool)]) -> Vec<String> {
+/// Takes rows rather than a store type because the two front ends that render it hold the wire's
+/// `LoadedPlan`, not this crate's. `changed` is a plan the store has changed and not yet written
+/// back.
+pub fn loaded_plans(held: &[HeldPlanRow<'_>]) -> Vec<String> {
     if held.is_empty() {
         return vec!["no plans loaded".to_string()];
     }
     held.iter()
-        .map(|(plan, operations, changed)| {
-            format!(
+        .flat_map(|(plan, operations, changed, stale)| {
+            let line = format!(
                 "{plan}: {operations} operation(s){}",
                 if *changed {
                     ", not yet written back"
                 } else {
                     ""
                 }
-            )
+            );
+            std::iter::once(line).chain(stale_operations(stale))
         })
+        .collect()
+}
+
+/// The operations of a plan that can no longer run as written, one line each, as
+/// `(operation, reason)` pairs. Nothing for a plan with none, so a listing of sound plans reads as
+/// it always did.
+pub fn stale_operations(stale: &[(&str, &str)]) -> Vec<String> {
+    stale
+        .iter()
+        .map(|(op, reason)| format!("  stale {op}: {reason}"))
         .collect()
 }
 

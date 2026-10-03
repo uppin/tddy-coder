@@ -208,7 +208,7 @@ impl Plan {
 }
 
 /// What a v2 header says about the file at `path` as it stands: its hash and when it last changed.
-fn hint_of(path: &std::path::Path) -> Result<FileHint> {
+pub(crate) fn hint_of(path: &std::path::Path) -> Result<FileHint> {
     let modified = std::fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .map_err(|error| malformed(format!("{} could not be read: {error}", path.display())))?;

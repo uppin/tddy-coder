@@ -191,10 +191,17 @@ impl Rendered {
 
 /// The plans a daemon's store holds.
 pub(crate) fn plans(response: &PlansResponse) {
-    let held: Vec<(&str, usize, bool)> = response
+    let held: Vec<console::HeldPlanRow> = response
         .plans
         .iter()
-        .map(|plan| (plan.plan.as_str(), plan.ops as usize, plan.dirty))
+        .map(|plan| {
+            let stale = plan
+                .stale
+                .iter()
+                .map(|found| (found.op.as_str(), found.reason.as_str()))
+                .collect();
+            (plan.plan.as_str(), plan.ops as usize, plan.dirty, stale)
+        })
         .collect();
     for line in console::loaded_plans(&held) {
         say(&line);
@@ -209,6 +216,14 @@ pub(crate) fn plan_status(response: &PlanStatusResponse) {
         pending: response.pending as usize,
         failed: response.failed as usize,
     }) {
+        say(&line);
+    }
+    let stale: Vec<(&str, &str)> = response
+        .stale
+        .iter()
+        .map(|found| (found.op.as_str(), found.reason.as_str()))
+        .collect();
+    for line in console::stale_operations(&stale) {
         say(&line);
     }
 }

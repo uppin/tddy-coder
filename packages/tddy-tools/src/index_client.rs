@@ -47,6 +47,12 @@ pub(crate) async fn run_restructure(args: RestructureArgs) -> Result<()> {
 /// it runs here rather than dialling a socket to be told what `sha256` already knows. Routed before
 /// the dial rather than as an arm of [`restructure_at`], because a run that failed to reach a
 /// daemon it never needed would be a refusal invented by this function.
+///
+/// A plan with item anchors is the exception to "no index behind it": its anchors are re-resolved
+/// through a language server, which this process starts for itself, cold, as an `apply` with no
+/// daemon does.
+// TODO(live-plans): a daemon holds that index warm; routing an item-anchored snapshot to it needs a
+// `Snapshot` RPC, which this change does not add.
 fn answered_without_an_index(command: &RestructureCommand) -> bool {
     match command {
         RestructureCommand::Snapshot(_) => true,

@@ -20,6 +20,7 @@ mod apply;
 mod graph;
 pub mod index;
 pub mod operations;
+mod plan_upkeep;
 pub mod queries;
 pub mod service;
 pub mod status;

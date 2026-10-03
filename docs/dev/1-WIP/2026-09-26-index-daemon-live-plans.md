@@ -199,13 +199,31 @@ calling it after each op and on tree changes.
 
 ## Technical Debt & Production Readiness
 
-- Draft-PR-contract stubs: `TODO(live-plans)` in `plan_store.rs` (`fold_foreign_op`,
-  `reresolve_files`, `stale_ops`, `rebase_plan_file`) and `tddy-index-daemon/src/queries.rs`
-  (`PlanStatusResponse.stale`).
-- Still to wire in green: the daemon's apply loop calling `fold_foreign_op`, the tree-change path
-  calling `reresolve_files`, `LoadedPlan.stale` in `ListPlans`, `restructure snapshot` routing a v2
-  plan through `rebase_plan_file`.
-- New: `RestructureError::StaleOperation` (`FailedPrecondition`); `StaleOp` on the wire.
+- Draft-PR-contract stubs: **all implemented.** `PlanStore::{fold_foreign_op, reresolve_files,
+  stale_ops}` delegate to `plan_store/live.rs` (re-resolution, staleness) and `plan_store/live/fold.rs`
+  (the foreign-op fold); `rebase_plan_file` is in `plan_store/refresh.rs`; `LoadedPlan.stale` and
+  `PlanStatusResponse.stale` are filled in `tddy-index-daemon/src/queries.rs`.
+- Wired: `runner::record_applied_op` folds each committed op into every other held plan and writes
+  those plans back (journal digest first, so a resume still vouches for them), which is what both
+  the daemon's apply loop and a one-shot `apply` call; `reresolve_files` runs from
+  `tddy-index-daemon/src/plan_upkeep.rs` for the files the tree comparison reports that the daemon
+  did not write; `runner::refuse_a_stale_pending_op` refuses a run before any read or write in both
+  apply loops (`RestructureError::StaleOperation`, `FailedPrecondition`); `Check` reports stale
+  operations as findings (`runner::stale_findings`); `restructure snapshot` of an item-anchored plan
+  goes through `rebase_plan_file` (`runner::snapshot_resolving`); `console::stale_operations` is the
+  one renderer, called by the in-process CLI, `tddy-index-daemon` and `tddy-tools`.
+- Known gaps (marked `TODO(live-plans)` where they are in code):
+  - A file the daemon sees **deleted** is not re-resolved, so an item anchor in it does not go stale
+    (`plan_upkeep.rs`).
+  - `tddy-tools restructure snapshot` of an item-anchored plan starts a cold language server of its
+    own; there is no `Snapshot` RPC to reach a warm one (`index_client.rs`).
+  - The store does not know which operations of a plan already ran, so a foreign op that overlaps an
+    already-applied operation's old anchor marks that operation stale; `Apply` ignores it (it only
+    refuses stale operations at or after the run's start), but `ListPlans` still reports it.
+  - The applied plan's own v2 `files` hints are not rewritten by `refresh_after_op` (parent-owned);
+    other plans' hints are, by the fold.
+- New: `RestructureError::StaleOperation` (`FailedPrecondition`) existed already; `StaleOp` on the
+  wire existed already.
 
 ## Decisions & Trade-offs
 
@@ -235,7 +253,7 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`); CI for the rest

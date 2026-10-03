@@ -102,6 +102,9 @@ pub struct PlanStore {
     /// When each dirty plan first became dirty — what the debounce is measured from. Kept beside
     /// the plans rather than in them so [`LoadedPlan`] stays what a reader of the store sees.
     dirty_since: BTreeMap<PlanKey, Instant>,
+    /// Which operations are stale and which files the store's own runs wrote — derived state, kept
+    /// out of the plans so a plan written back is still just a plan.
+    live: live::Liveness,
 }
 
 impl PlanStore {
@@ -111,7 +114,13 @@ impl PlanStore {
             policy,
             plans: BTreeMap::new(),
             dirty_since: BTreeMap::new(),
+            live: live::Liveness::default(),
         }
+    }
+
+    /// The workspace root the plans are keyed against.
+    pub fn root(&self) -> &Path {
+        &self.root
     }
 
     /// Read each plan, assign an id to every operation without one, and hold it.
@@ -261,6 +270,9 @@ impl PlanStore {
     /// their anchors translated through it, their `file` hints following a moved file, their
     /// fingerprints recomputed where the edit touched an item outside the anchored range. An edit
     /// overlapping another plan's anchored range marks that operation stale.
+    ///
+    /// Nothing is changed unless every plan could be folded. The plan `from` is left to
+    /// [`Self::refresh_after_op`], and a plan nobody loaded is not here to be touched.
     pub fn fold_foreign_op(
         &mut self,
         from: &PlanKey,
@@ -268,28 +280,26 @@ impl PlanStore {
         edit: &WorkspaceEdit,
         resolver: &mut dyn ItemResolver,
     ) -> Result<()> {
-        // TODO(live-plans): implement
-        let _ = (from, op, edit, resolver);
-        todo!("live-plans: fold an applied operation into every other held plan")
+        live::fold(self, from, op, edit, resolver)
     }
 
     /// Re-resolve every held item anchor in `files` after they changed underneath the store: hints
     /// and per-file hints rewritten where the item is intact, the operation stale where it is not.
+    ///
+    /// Files the store's own runs wrote since the last call are not "underneath" it — the run
+    /// already carried every plan through those edits — and are skipped.
     pub fn reresolve_files(
         &mut self,
         files: &[String],
         resolver: &mut dyn ItemResolver,
     ) -> Result<()> {
-        // TODO(live-plans): implement
-        let _ = (files, resolver);
-        todo!("live-plans: re-resolve anchors in files changed underneath the store")
+        live::reresolve(self, files, resolver)
     }
 
-    /// The stale operations of a held plan, in plan order.
+    /// The stale operations of a held plan, in plan order. Derived, never written to the plan; a
+    /// plan that is not held has none.
     pub fn stale_ops(&self, key: &PlanKey) -> Vec<OpStaleness> {
-        // TODO(live-plans): implement
-        let _ = key;
-        todo!("live-plans: a held plan's stale operations")
+        live::stale_ops(self, key)
     }
 
     /// Write every plan dirty for longer than the debounce; the keys written.
@@ -373,6 +383,7 @@ impl PlanStore {
         }
         self.plans.remove(key);
         self.dirty_since.remove(key);
+        self.live.forget(key);
         Ok(())
     }
 
@@ -460,6 +471,7 @@ fn normalised(path: &Path) -> PathBuf {
     folded
 }
 
+mod live;
 mod refresh;
 pub use refresh::rebase_plan_file;
 

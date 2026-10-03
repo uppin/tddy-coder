@@ -28,6 +28,8 @@ use crate::RestructureError;
 
 use super::super::RunSummary;
 
+use super::super::Finding;
+
 use tokio_util::sync::CancellationToken;
 
 use tddy_lsp::client::LspClient;
@@ -73,6 +75,7 @@ pub fn apply_from_store(
     let client = client.ok_or_else(|| {
         RestructureError::MalformedPlan("apply requires a rust-analyzer LSP session".into())
     })?;
+    refuse_a_stale_pending_op(store, key, &options)?;
     let summary = apply_held_plan(root, store, key, &options, client, &cancel)?;
     // A run that refused or failed writes nothing here: the operations it did commit wrote the plan
     // as they landed ([`record_applied_op`]), and one that never started must leave the plan file
@@ -332,6 +335,7 @@ pub fn record_applied_op(
             ))
         })?;
     store.refresh_after_op(key, &id, &resolved.edit, resolver)?;
+    store.fold_foreign_op(key, &id, &resolved.edit, resolver)?;
     let held = store.get(key).ok_or_else(|| {
         RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
     })?;
@@ -340,5 +344,113 @@ pub fn record_applied_op(
         &paths.journal,
         crate::journal::JournalRecord::plan_synced(index, Some(id), digest),
     )?;
-    store.flush(key)
+    store.flush(key)?;
+    settle_folded_plans(store, key)
+}
+
+/// Write back every *other* plan the operation changed by folding it in.
+///
+/// Each one's journal first records a digest of its new pending anchors, then the plan is written,
+/// in the order [`record_applied_op`] gives for the plan that ran: a plan changed under a journal
+/// that still vouched for its old anchors would be refused at its next resume as out of sync.
+fn settle_folded_plans(store: &mut PlanStore, applied: &PlanKey) -> Result<()> {
+    let changed: Vec<PlanKey> = store
+        .list()
+        .into_iter()
+        .filter(|held| held.dirty && held.key != *applied)
+        .map(|held| held.key)
+        .collect();
+    for key in changed {
+        record_resynced_digest(store, &key)?;
+        store.flush(&key)?;
+    }
+    Ok(())
+}
+
+/// Journal the digest of `key`'s pending anchors as they now are, if its journal vouched for others.
+fn record_resynced_digest(store: &PlanStore, key: &PlanKey) -> Result<()> {
+    let Some(held) = store.get(key) else {
+        return Ok(());
+    };
+    let paths = StatePaths::for_plan(store.root(), &store.path_of(key))?;
+    let mut journal = Journal::load(&paths.journal)?;
+    let Some(last) = journal.last_completed() else {
+        return Ok(());
+    };
+    if resume::predates_plan_write_back(&journal) {
+        return Ok(());
+    }
+    let (op, op_id) = (last.op, last.op_id.clone());
+    let digest = crate::plan_store::pending_digest(&held.plan, op);
+    if journal.plan_digest_after(op) == Some(digest.as_str()) {
+        return Ok(());
+    }
+    journal.append(
+        &paths.journal,
+        crate::journal::JournalRecord::plan_synced(op, op_id, digest),
+    )
+}
+
+/// Refuse a run whose plan has a stale operation still to run, before anything is read from the
+/// tree or written.
+///
+/// Not only the *next* operation: a stale one further on is refused at the same place, since the
+/// run would reach it after writing everything before it, and what it would do there is what its
+/// anchor says about a tree that has moved on. The author re-anchors the operation; nothing here
+/// re-targets it.
+///
+/// What every apply loop calls first, the command line's and the daemon's.
+///
+/// # Errors
+///
+/// [`RestructureError::StaleOperation`] naming the first such operation and why it is stale.
+pub fn refuse_a_stale_pending_op(
+    store: &PlanStore,
+    key: &PlanKey,
+    options: &Options,
+) -> Result<()> {
+    let stale = store.stale_ops(key);
+    if stale.is_empty() {
+        return Ok(());
+    }
+    let held = store.get(key).ok_or_else(|| {
+        RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
+    })?;
+    let paths = StatePaths::for_plan(store.root(), &store.path_of(key))?;
+    let journal = Journal::load(&paths.journal)?;
+    let start = resume::start_of(&held.plan, options, &journal)?;
+    let pending = held
+        .plan
+        .ops
+        .iter()
+        .skip(start)
+        .filter_map(|op| op.id.as_ref());
+    for id in pending {
+        if let Some(found) = stale.iter().find(|found| &found.op == id) {
+            return Err(RestructureError::StaleOperation {
+                plan: key.to_string(),
+                op: id.to_string(),
+                reason: found.reason.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// What a check reports of `plan`'s stale operations: one finding each, at the operation's index.
+#[must_use]
+pub fn stale_findings(plan: &Plan, stale: &[crate::plan_store::OpStaleness]) -> Vec<Finding> {
+    stale
+        .iter()
+        .filter_map(|found| {
+            let operation = plan
+                .ops
+                .iter()
+                .position(|op| op.id.as_ref() == Some(&found.op))?;
+            Some(Finding {
+                operation,
+                detail: format!("stale: {} — re-anchor it before applying", found.reason),
+            })
+        })
+        .collect()
 }

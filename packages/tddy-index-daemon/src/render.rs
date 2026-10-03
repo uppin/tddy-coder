@@ -130,14 +130,29 @@ pub(crate) fn plan_status(response: &PlanStatusResponse) {
     }) {
         log::info!(target: crate::MAIN, "{line}");
     }
+    let stale: Vec<(&str, &str)> = response
+        .stale
+        .iter()
+        .map(|found| (found.op.as_str(), found.reason.as_str()))
+        .collect();
+    for line in console::stale_operations(&stale) {
+        log::info!(target: crate::MAIN, "{line}");
+    }
 }
 
 /// The plans a root's store holds.
 pub(crate) fn plans(response: &PlansResponse) {
-    let held: Vec<(&str, usize, bool)> = response
+    let held: Vec<console::HeldPlanRow> = response
         .plans
         .iter()
-        .map(|plan| (plan.plan.as_str(), plan.ops as usize, plan.dirty))
+        .map(|plan| {
+            let stale = plan
+                .stale
+                .iter()
+                .map(|found| (found.op.as_str(), found.reason.as_str()))
+                .collect();
+            (plan.plan.as_str(), plan.ops as usize, plan.dirty, stale)
+        })
         .collect();
     for line in console::loaded_plans(&held) {
         log::info!(target: crate::MAIN, "{line}");

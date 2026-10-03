@@ -42,6 +42,10 @@ pub struct SnapshotRewrite {
     pub paths: usize,
     /// Whether the header on disk differed from the working tree and was replaced.
     pub rewritten: bool,
+    /// The operations of an item-anchored plan whose item has changed or gone since the plan was
+    /// written — reported and left as they were. Empty for a plan with no item anchors, which a
+    /// snapshot does not look into.
+    pub stale: Vec<crate::plan_store::OpStaleness>,
 }
 
 /// What a whole run amounted to.

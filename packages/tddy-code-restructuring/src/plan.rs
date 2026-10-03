@@ -356,6 +356,7 @@ pub struct Plan {
 }
 
 mod codec;
+pub(crate) use codec::hint_of;
 
 fn malformed(reason: impl Into<String>) -> crate::RestructureError {
     crate::RestructureError::MalformedPlan(reason.into())

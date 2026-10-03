@@ -65,7 +65,8 @@ pub fn dispatch(
         Command::Anchors => anchor_entry_points::item_anchors(root, options, client, cancel)
             .map(Outcome::ItemAnchored),
         Command::Verify => verify(root, options).map(Outcome::Verified),
-        Command::Snapshot => check_entry_points::snapshot(root, options).map(Outcome::Snapshotted),
+        Command::Snapshot => check_entry_points::snapshot_resolving(root, options, client, cancel)
+            .map(Outcome::Snapshotted),
         // Held across requests, so only a process that outlives one has anything to load into: a
         // run with no daemon has a store for its own length and nothing to name afterwards.
         Command::Load => Err(RestructureError::NeedsIndexDaemon {
@@ -81,7 +82,10 @@ pub fn dispatch(
 }
 
 mod store_run;
-pub use store_run::{apply_from_store, open_plan_run, record_applied_op, PlanRun};
+pub use store_run::{
+    apply_from_store, open_plan_run, record_applied_op, refuse_a_stale_pending_op, stale_findings,
+    PlanRun,
+};
 
 /// Build a registry for static checks only (no LSP connection).
 fn registry_for_static() -> BackendRegistry {
@@ -171,7 +175,9 @@ fn progress_line(
 }
 
 mod check_entry_points;
-pub use check_entry_points::{check, check_plan, snapshot, status, status_of_plan};
+pub use check_entry_points::{
+    check, check_plan, snapshot, snapshot_resolving, status, status_of_plan,
+};
 
 mod anchor_entry_points;
 pub use anchor_entry_points::{item_anchors, open_run_resolving_anchors};
