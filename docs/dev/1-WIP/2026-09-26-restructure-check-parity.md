@@ -167,6 +167,13 @@ bodies; the two merge tests need nothing from any other node.
 
 ### From @validate-changes (Change Validation)
 ### From @validate-tests (Test Quality)
+- [ ] ⚠️ `the_body_path_remedy_does_not_suggest_a_cluster_for_the_host_module` has no Given/When/Then.
+- [ ] ⚠️ `…_moved_elsewhere_is_still_a_finding` asserts only `len() == 1`; assert the finding names `host`.
+- [ ] ⚠️ No test for three guard branches of `stays_behind_through_a_body`: crate-root item, path re-exported from another crate, `#[cfg(test)]` body path.
+- [ ] ⚠️ `a_workspace_whose_moving_module_reaches_its_host_in_a_body` duplicates `an_origin_holding`; the `Cargo.toml` strings appear three times.
+- [ ] ℹ️ Merge tests: inline `std::fs::write(..).unwrap()` in Given → named helper, `.expect`.
+- [ ] ℹ️ `const HOST` is reused as `workspace_session.rs`'s body in the cluster test → rename/split.
+- [ ] ℹ️ Doc comments on the 8 new tests, as the pre-existing ones have.
 ### From @prod-ready (Production Readiness)
 ### From @analyze-clean-code (Code Quality)
 
@@ -186,6 +193,13 @@ diff holds only this PR's files. Build: `tddy-code-restructuring` ✅ (scoped). 
 
 Scoped re-run after the fixes (`-p tddy-code-restructuring`): 699 passed, 0 failed, 33 suites; clippy `--all-targets -D warnings` clean; fmt clean.
 The 5 VM tests were not run here (`./vm-tests`); not touched by this change.
+
+### /validate-tests (2026-10-03, via /pr-wrap)
+
+`tests/check_precondition_parity.rs`: 12 tests analyzed (4 pre-existing, 8 this PR). No always-passing,
+ignored, timing or port-dependent tests. 0 critical, 4 warnings, 3 info — listed under
+*Refactoring Needed → From @validate-tests*.
+
 
 ## TODO
 
