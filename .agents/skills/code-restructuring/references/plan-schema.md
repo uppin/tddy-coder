@@ -335,6 +335,8 @@ not define is refused rather than ignored.
   new is kept; callers reach it by inference, and narrowing it would leave a `pub(crate)` signature over
   a private type.
 
+  A **relative** visibility is rebased for the module one level deeper so it keeps meaning "visible in the same place": `pub(super)` becomes `pub(in super::super)`, `pub(in super::x)` gains a `super::`, `pub(self)` becomes `pub(super)` and `pub(in self::x)` becomes `pub(in super::x)`; `pub`, `pub(crate)` and `pub(in crate::…)` are unchanged.
+
   A relocated **`impl` member** is different, and deliberately so. It is reached through its type, so
   no module path names it and the survey that decides restoration rightly does not descend into an
   `impl` — which means the member stays `pub(crate)`. That widening is now *named* on stdout and

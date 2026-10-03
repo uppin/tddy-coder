@@ -37,6 +37,7 @@ mod item_path;
 mod nested_modules;
 mod prelude_shadow;
 mod readiness;
+mod relative_visibility;
 mod selection;
 
 pub use chatter::ServerChatter;
@@ -4151,6 +4152,12 @@ fn restore_visibility(
             continue;
         }
 
+        // The assist widens only what was private; a relative visibility it leaves as written, and
+        // as written it means something else one module deeper.
+        if relative_visibility::rebase_left_as_written(&mut source, &block, item) {
+            continue;
+        }
+
         // Only inside the module the assist just wrote. A same-named item elsewhere in the file is a
         // different item, and rewriting its visibility would be a change nobody asked for.
         let Some(index) = source[block.opened..block.closed]
@@ -4182,14 +4189,7 @@ fn restore_visibility(
             continue;
         }
 
-        let line = source[index].clone();
-        let indent = &line[..line.len() - line.trim_start().len()];
-        let rest = line.trim_start().strip_prefix(WIDENED).unwrap_or_default();
-        source[index] = if item.visibility.is_empty() {
-            format!("{indent}{rest}")
-        } else {
-            format!("{indent}{} {rest}", item.visibility)
-        };
+        source[index] = relative_visibility::put_back(&source[index], item);
     }
 
     Ok((source.join("\n"), report))
@@ -5244,7 +5244,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(restored.contains("    pub(super) fn helper"), "{restored}");
+        assert!(
+            restored.contains("    pub(in super::super) fn helper"),
+            "{restored}"
+        );
     }
 
     /// The assist never narrows, so an item written `pub` is already as it was and has nothing to

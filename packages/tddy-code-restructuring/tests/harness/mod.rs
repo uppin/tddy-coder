@@ -1995,6 +1995,50 @@ pub fn a_crate_whose_private_helper_has_only_its_moved_caller() -> AFixtureWorks
         )
 }
 
+/// A module file whose `pub(super)` helper the crate root calls, beside a `pub(crate)` function and
+/// a private user of the helper. Nothing else mentions them.
+///
+/// The shape of `imports.rs`, whose `pub(super)` helpers its parent `rust.rs` calls. `helper`,
+/// `shared` and `private_user` are lines 3-13 of [`OUTER_MODULE`].
+pub fn a_crate_whose_module_declares_a_function_visible_in_its_parent() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The parent of `outer`, which calls what `outer` shows it.",
+                "",
+                "mod outer;",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::helper() + outer::shared() + outer::combined()",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! Visible in its parent, and in the crate.",
+                "",
+                "pub(super) fn helper() -> u32 {",
+                "    1",
+                "}",
+                "",
+                "pub(crate) fn shared() -> u32 {",
+                "    2",
+                "}",
+                "",
+                "pub(super) fn combined() -> u32 {",
+                "    helper() + shared()",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// The module file [`a_crate_whose_module_declares_a_function_visible_in_its_parent`] splits.
+pub const OUTER_MODULE: &str = "crates/origin/src/outer.rs";
+
 fn a_crate_whose_gauge_reads_then(members: &[&str], after: &[&str]) -> AFixtureWorkspace {
     let mut lines: Vec<&str> = vec![
         "//! A type whose `impl` a seam cuts in half.",
