@@ -209,6 +209,21 @@ the two draft-contract `todo!()` stubs are implemented and gone.
   it states the invariant from the survey's own field instead of leaning on a string prefix of
   `defined_at`, which `move-paths` owns.
 
+### File-length gate (2026-10-03, via /pr-wrap) — measured against `origin/feature/live-plan/extraction-defects`
+
+| File (production lines) | Was → now | Verdict |
+|---|---|---|
+| `crate_move/cluster.rs` | 624 → 625 | 🔴 already ≥ 500, +1 line from this PR (`member_op` call + the `earlier` set). **Deferred**, below. |
+| `crate_move/preconditions.rs` | 84 → 257 | ✅ under budget |
+| `crate_move/header.rs` | 2 → 2 | ✅ (comment-only change) |
+
+**Why `cluster.rs` is not decomposed here:** the stack stop applies — `move-paths` (#540) and
+`move-facades` (#541) also edit it, so a split under this PR turns each of their diffs into a
+conflict. It is already recorded and deferred by #540 with the developer's consent, in
+[`2026-10-02-cluster-rs-is-617-production-lines.md`](../todo/2026-10-02-cluster-rs-is-617-production-lines.md)
+(a parent-owned entry, left untouched here). Do the split as a follow-up branch after the stack lands.
+This PR's share is one line and is reported in the wrap summary.
+
 ### /validate-tests (2026-10-03, via /pr-wrap)
 
 `tests/check_precondition_parity.rs`: 12 tests analyzed (4 pre-existing, 8 this PR). No always-passing,
