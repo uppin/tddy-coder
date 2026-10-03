@@ -23,6 +23,7 @@ mod subagent_end;
 mod subagent_pull;
 mod sync_worktree_choice;
 pub mod tool_list_announcer;
+mod worktree_answer;
 mod worktree_reset_port;
 mod worktree_sync_port;
 

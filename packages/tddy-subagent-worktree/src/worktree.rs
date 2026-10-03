@@ -1,5 +1,6 @@
 //! Creating, committing in, handing over and removing one conversation's worktree.
 
+use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use crate::change_facts::{FileCounts, LineCounts, WorktreeChange};
 use crate::conversation_id::ConversationId;
 use crate::git::{git, git_raw};
 use crate::inherit;
+use crate::range_pull::PullRange;
 use crate::serialise;
 
 /// Where conversation worktrees live, relative to the session worktree. Added to the repository's
@@ -303,6 +305,14 @@ impl ConversationWorktree {
     /// Changing nothing commits nothing and returns counts of zero with no `commit`.
     pub async fn commit_changes(&self, subject: &str) -> Result<WorktreeChange, WorktreeError> {
         let _exclusive = serialise::exclusive(&self.root).await;
+        self.commit_changes_held(subject).await
+    }
+
+    /// [`Self::commit_changes`] for a caller already holding the worktree's exclusive lock.
+    pub(crate) async fn commit_changes_held(
+        &self,
+        subject: &str,
+    ) -> Result<WorktreeChange, WorktreeError> {
         git(&self.root, ["add", "-A"], &[], None).await?;
         let name_status = git(&self.root, ["diff", "--cached", "--name-status"], &[], None).await?;
         if name_status.trim().is_empty() {
@@ -328,32 +338,18 @@ impl ConversationWorktree {
         })
     }
 
-    /// Apply everything committed since the base to the caller's worktree as uncommitted changes,
-    /// 3-way: a hunk that no longer applies is written with conflict markers and its path reported.
-    /// The caller's `HEAD` never moves.
+    /// Apply every subagent commit since the base to the caller's worktree as uncommitted changes,
+    /// one commit at a time and 3-way: a hunk that no longer applies is written with conflict
+    /// markers and its path reported. The caller's `HEAD` never moves. A sync merge is not the
+    /// subagent's work and is never applied, so the caller never gets its own changes back.
     pub async fn pull_into_caller(&self) -> Result<PullOutcome, WorktreeError> {
-        let range = format!("{}..{}", self.base, self.branch);
-        let name_status = git(&self.caller, ["diff", "--name-status", &range], &[], None).await?;
-        if name_status.trim().is_empty() {
-            return Ok(PullOutcome::default());
-        }
-        let numstat = git(&self.caller, ["diff", "--numstat", &range], &[], None).await?;
-        let (files, lines) = count_change(&name_status, &numstat);
-        let patch = git(&self.caller, ["diff", "--binary", &range], &[], None).await?;
-        let touched = git(
-            &self.caller,
-            ["diff", "--name-only", "--no-renames", "-z", &range],
-            &[],
-            None,
-        )
-        .await?;
-        let conflicts = self
-            .apply_3way(patch.as_bytes(), touched.as_bytes())
+        let pulled = self
+            .pull_range(&PullRange::default(), &BTreeSet::new())
             .await?;
         Ok(PullOutcome {
-            files,
-            lines,
-            conflicts,
+            files: pulled.files,
+            lines: pulled.lines,
+            conflicts: pulled.conflicts,
         })
     }
 

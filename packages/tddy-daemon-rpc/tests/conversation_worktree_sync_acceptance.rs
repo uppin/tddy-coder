@@ -12,7 +12,7 @@ use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_rpc::test_util::test_service;
 use tddy_rpc::Request;
 use tddy_service::proto::exec_tools::{
-    conversation_worktree_request::Op, ConversationWorktreeRequest, ExecToolService,
+    conversation_worktree_request::Op, ConversationWorktreeRequest, DiffOp, ExecToolService,
     ExecuteToolRequest, SyncOp,
 };
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
@@ -92,6 +92,29 @@ impl ADaemonWithASession {
         serde_json::from_str(&response.get_ref().result_json).expect("result JSON")
     }
 
+    /// The conversation's first tool call writes `path`, which creates its worktree and commits
+    /// there; answers the commit the call reported.
+    async fn a_conversation_that_wrote(
+        &self,
+        conversation_id: &str,
+        path: &str,
+        contents: &str,
+    ) -> String {
+        let answer = self
+            .tool_call(
+                conversation_id,
+                "Write",
+                json!({ "path": path, "contents": contents }),
+            )
+            .await;
+        let commit = answer["worktreeChange"]["commit"]
+            .as_str()
+            .unwrap_or_else(|| panic!("the Write committed in the conversation: {answer}"))
+            .to_string();
+        assert_eq!(commit, short_head(&self.conversation_root(conversation_id)));
+        commit
+    }
+
     fn conversation_root(&self, conversation_id: &str) -> PathBuf {
         self.worktree
             .join("tmp/subagent-worktrees")
@@ -133,11 +156,7 @@ async fn sync_merges_the_session_worktrees_edit_into_the_conversation() {
     // Given
     let daemon = a_daemon_with_a_git_session();
     daemon
-        .tool_call(
-            "explore",
-            "Write",
-            json!({ "path": "a.txt", "contents": "a\n" }),
-        )
+        .a_conversation_that_wrote("explore", "a.txt", "a\n")
         .await;
     std::fs::write(daemon.worktree.join("caller.txt"), "theirs\n").unwrap();
 
@@ -164,14 +183,10 @@ async fn sync_merges_the_session_worktrees_edit_into_the_conversation() {
 
 #[tokio::test]
 async fn sync_with_an_unchanged_session_worktree_merges_nothing() {
-    // Given
+    // Given — the conversation has a worktree, and the session worktree has not changed since
     let daemon = a_daemon_with_a_git_session();
-    daemon
-        .tool_call(
-            "explore",
-            "Write",
-            json!({ "path": "a.txt", "contents": "a\n" }),
-        )
+    let tip = daemon
+        .a_conversation_that_wrote("explore", "a.txt", "a\n")
         .await;
 
     // When
@@ -180,7 +195,14 @@ async fn sync_with_an_unchanged_session_worktree_merges_nothing() {
         .await;
 
     // Then
-    assert_eq!(answer, json!({ "sync": null }));
+    assert_eq!(
+        (
+            answer,
+            daemon.conversation_root("explore").exists(),
+            short_head(&daemon.conversation_root("explore"))
+        ),
+        (json!({ "sync": null }), true, tip)
+    );
 }
 
 #[tokio::test]
@@ -205,14 +227,9 @@ async fn sync_on_a_conversation_without_a_worktree_merges_nothing() {
 async fn sync_names_the_conflicting_paths_and_merges_nothing() {
     // Given — the subagent and the caller both rewrote README.md
     let daemon = a_daemon_with_a_git_session();
-    daemon
-        .tool_call(
-            "explore",
-            "Write",
-            json!({ "path": "README.md", "contents": "subagent\n" }),
-        )
+    let tip = daemon
+        .a_conversation_that_wrote("explore", "README.md", "subagent\n")
         .await;
-    let tip = short_head(&daemon.conversation_root("explore"));
     std::fs::write(daemon.worktree.join("README.md"), "caller\n").unwrap();
 
     // When
@@ -223,23 +240,50 @@ async fn sync_names_the_conflicting_paths_and_merges_nothing() {
     // Then
     assert_eq!(
         (answer, short_head(&daemon.conversation_root("explore"))),
-        (json!({ "conflicts": ["README.md"] }), tip)
+        (
+            json!({ "conflicts": ["README.md"], "moreConflicts": 0 }),
+            tip
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_diff_to_the_tip_right_after_a_sync_includes_the_callers_changes() {
+    // Given — the tip is the sync's merge: no subagent commit follows it
+    let daemon = a_daemon_with_a_git_session();
+    daemon
+        .a_conversation_that_wrote("explore", "a.txt", "a\n")
+        .await;
+    std::fs::write(daemon.worktree.join("caller.txt"), "theirs\n").unwrap();
+    daemon
+        .conversation_worktree("explore", Op::Sync(SyncOp {}))
+        .await;
+
+    // When
+    let answer = daemon
+        .conversation_worktree("explore", Op::Diff(DiffOp::default()))
+        .await;
+
+    // Then
+    assert_eq!(
+        (
+            answer["diff"]["to"].clone(),
+            answer["diff"]["includesCallerChanges"].clone()
+        ),
+        (
+            json!(short_head(&daemon.conversation_root("explore"))),
+            json!(true)
+        )
     );
 }
 
 fn short_head(root: &Path) -> String {
-    let out = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root)
-        .output()
-        .expect("spawn git");
-    String::from_utf8(out.stdout)
-        .expect("utf-8")
+    git(root, &["rev-parse", "--short", "HEAD"])
         .trim()
         .to_string()
 }
 
-fn git(dir: &Path, args: &[&str]) {
+fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(args)
         .current_dir(dir)
@@ -250,4 +294,5 @@ fn git(dir: &Path, args: &[&str]) {
         "git {args:?} failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    String::from_utf8(out.stdout).expect("utf-8 git output")
 }

@@ -1844,6 +1844,10 @@ async fn subagent_prompt_tool(args: serde_json::Value) -> String {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
+    let request = match crate::sync_worktree_choice::with_sync_worktree_choice(request, &args) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
     take_a_turn(session_id, request, grace).await
 }
 
@@ -1890,6 +1894,10 @@ async fn subagent_resume_tool(args: serde_json::Value) -> String {
         None => {}
     }
     let request = match crate::reset_worktree_choice::with_reset_worktree_choice(request, &args) {
+        Ok(request) => request,
+        Err(e) => return subagent_error_json(e),
+    };
+    let request = match crate::sync_worktree_choice::with_sync_worktree_choice(request, &args) {
         Ok(request) => request,
         Err(e) => return subagent_error_json(e),
     };
@@ -2485,6 +2493,7 @@ fn subagent_prompt_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
             },
             "maxTurns": max_turns_property(),
             "yieldConditions": yield_conditions_property(),
+            (crate::sync_worktree_choice::SYNC_WORKTREE_ARG): crate::sync_worktree_choice::sync_worktree_property(),
         }
     }))
 }
@@ -2529,6 +2538,7 @@ fn subagent_resume_schema() -> std::sync::Arc<serde_json::Map<String, serde_json
                                 `worktreeReset` says where the worktree now stands and which \
                                 commits were dropped."
             },
+            (crate::sync_worktree_choice::SYNC_WORKTREE_ARG): crate::sync_worktree_choice::sync_worktree_property(),
         }
     }))
 }

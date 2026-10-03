@@ -187,9 +187,11 @@ export const ConversationWorktreeRequestSchema: GenMessage<ConversationWorktreeR
 /**
  * Merge the session worktree's current files (HEAD + staged, unstaged and untracked changes) into
  * the conversation's branch as a merge commit, before a turn. Answers `{"sync": {commit, files,
- * lines, paths, morePaths}}`, `{"sync": null}` when the conversation has no worktree or the session
- * worktree has not changed since the last sync, or `{"conflicts": [paths]}` when the caller's changes
- * and the subagent's unpulled work touch the same lines (nothing is merged then).
+ * lines, paths, morePaths}}`; `{"sync": null}` when the conversation has no worktree, the session
+ * worktree has not changed since the last sync, or a merge was recorded that changed no file in the
+ * conversation worktree; or `{"conflicts": [paths], "moreConflicts": n}` when the caller's changes
+ * and the subagent's unpulled work touch the same lines (nothing is merged then) — at most 20 paths
+ * (SYNC_NOTICE_PATHS), `moreConflicts` counting the rest.
  *
  * @generated from message exec_tools.SyncOp
  */

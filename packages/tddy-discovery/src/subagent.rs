@@ -28,6 +28,7 @@ mod result_summary;
 mod tool_arguments;
 mod transcript;
 mod turn_request;
+mod turn_start;
 mod worktree_change;
 mod worktree_reset;
 mod worktree_sync;
@@ -47,7 +48,8 @@ pub use transcript::{
 pub use turn_request::{TurnRequest, SUBAGENT_MAX_TURNS_CEILING, SUBAGENT_MIN_TURNS};
 pub use worktree_reset::{ResetTarget, WorktreeReset, WorktreeResetPort};
 pub use worktree_sync::{
-    sync_notice, sync_refusal, SyncAnswer, WorktreeSync, WorktreeSyncPort, SYNC_NOTICE_PATHS,
+    sync_notice, sync_refusal, RewindApplied, SyncAnswer, WorktreeSync, WorktreeSyncPort,
+    SYNC_NOTICE_PATHS,
 };
 pub use yield_condition::{
     evaluate as evaluate_yield_condition, validate as validate_yield_conditions, OutcomeFact, When,
@@ -1934,8 +1936,8 @@ impl SubagentSession for SpecializedSubagentSession {
     /// spending a turn on a request that was never valid is the silent-continue this refuses to be
     /// (AC17).
     async fn take_turn(&mut self, request: TurnRequest) -> Result<PromptOutcome, SubagentError> {
-        // First of all — before the rewind below, before anything is appended, before a single
-        // model call: a malformed condition list is refused with the history untouched, so a
+        // First of all — before the rewind (`prepare_turn`), before anything is appended, before a
+        // single model call: a malformed condition list is refused with the history untouched, so a
         // malformed request costs no model turn (AC5). The replacement is refused on the same
         // discipline, for the same reason.
         validate_yield_conditions(request.yield_conditions()).map_err(SubagentError)?;
@@ -1943,61 +1945,19 @@ impl SubagentSession for SpecializedSubagentSession {
             validate_replacement(replacement).map_err(SubagentError)?;
         }
         let budget = request.budget_within(self.max_turns);
-        // Anything that changes the conversation from outside the loop — a new question, a
-        // correction, a rewind that discards answers it was holding, a replacement appended
-        // after the yield — invalidates the premise the repeat ledger rests on (see
-        // [`RepeatedCalls::forget_earlier_calls`]).
-        if request.prompt_text().is_some()
-            || request.correction().is_some()
-            || request.rewind_point().is_some()
-            || request.replacement().is_some()
-        {
-            self.repeated_calls.forget_earlier_calls();
-        }
-        // The worktree goes back first: a reset that fails refuses the resume with the history
-        // whole, which a reset after the cut could not promise.
-        let mut worktree_reset = None;
-        if let Some(rewind_point) = request.rewind_point() {
-            if let (Some(port), true) = (&self.worktree_reset, request.resets_worktree()) {
-                let target = self
-                    .transcript
-                    .commit_kept_by(rewind_point)
-                    .map_err(|e| SubagentError(e.to_string()))?;
-                worktree_reset = port.reset(target).await?;
-            }
-            self.transcript
-                .rewind_to(rewind_point)
-                .map_err(|e| SubagentError(e.to_string()))?;
-        }
+        let worktree = self.prepare_turn(&request).await?;
         // Taken after the rewind: what this turn appended is what is new relative to the history
         // it actually ran against.
         let appended_from = self.transcript.len();
-        if let Some(text) = request.prompt_text() {
-            self.transcript.push(ChatMessage::user(text.to_string()));
-        }
-        if let Some(correction) = request.correction() {
-            self.transcript
-                .push(ChatMessage::user(correction.to_string()));
-        }
-        // The caller's replacement call and its result, appended after any rewind and correction —
-        // in that order, so all three can be given. Resume-only: a fresh prompt never carries one
-        // (a prompt has nothing to replace), enforced where the RPC shapes are built. Validated
-        // before the rewind above, so a malformed one never reshapes the history it was refused
-        // from. The append never dispatches — the result is the caller's text, verbatim.
-        if let Some(replacement) = request.replacement() {
-            self.transcript.append_replacement(replacement);
-        }
+        self.append_turn_messages(&request, worktree.sync.as_ref());
 
         let mut outcome = self
             .run_turn_loop(budget.turns, request.yield_conditions())
             .await?;
         outcome.messages = self.transcript.descriptors_from(appended_from);
         outcome.clamped_max_turns = budget.clamped_to;
-        outcome.worktree_reset = worktree_reset;
-        // TODO(caller-sync): after `rewind_to`, when `request.syncs_worktree()` and
-        // `self.worktree_sync` is set — `Merged` forgets earlier calls, remembers the sync for the
-        // notice (pushed last, after prompt / correction / replacement) and for
-        // `outcome.worktree_sync`; `Conflicted` refuses with `sync_refusal` before any model call
+        outcome.worktree_reset = worktree.reset;
+        outcome.worktree_sync = worktree.sync;
         Ok(outcome)
     }
 

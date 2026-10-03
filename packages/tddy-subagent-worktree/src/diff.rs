@@ -29,19 +29,25 @@ pub struct ConversationDiff {
 }
 
 impl ConversationWorktree {
-    /// The diff `from..to`. `from` defaults to the base, `to` to the branch tip. Each must be the base
-    /// or a commit on the branch after it, and `from` an ancestor of `to`; anything else is refused.
+    /// The diff `from..to`. `from` defaults to the base, `to` to the branch tip — which may be a sync
+    /// merge, flagged by [`ConversationDiff::includes_caller_changes`]. A bound that is named must be
+    /// the base or one of the subagent's commits after it (a sync merge is not), and `from` an
+    /// ancestor of `to`; anything else is refused.
     /// Nothing is written.
     pub async fn diff(
         &self,
         from: Option<&str>,
         to: Option<&str>,
     ) -> Result<ConversationDiff, WorktreeError> {
-        let range = format!("{}..{}", self.base(), self.branch());
-        let on_branch = git(self.root(), ["rev-list", &range], &[], None).await?;
-        let on_branch: Vec<&str> = on_branch.lines().collect();
-        let from = self.resolve_bound(from, self.base(), &on_branch).await?;
-        let to = self.resolve_bound(to, self.branch(), &on_branch).await?;
+        let subagent_commits = self.subagent_commits().await?;
+        let subagent_commits: Vec<&str> = subagent_commits.iter().map(String::as_str).collect();
+        let from = self
+            .resolve_bound(from.unwrap_or(self.base()), &subagent_commits)
+            .await?;
+        let to = match to {
+            Some(named) => self.resolve_bound(named, &subagent_commits).await?,
+            None => self.resolve_commit(self.branch()).await?,
+        };
         let (shown, ancestry) = git_raw(
             self.root(),
             ["merge-base", "--is-ancestor", &from, &to],
@@ -55,6 +61,7 @@ impl ConversationWorktree {
                 stderr: format!("{from} is not an ancestor of {to}"),
             });
         }
+        let includes_caller_changes = self.merges_between(&from, &to).await?;
         let (text, files, lines) = self.range_changes(&from, &to).await?;
         let (diff, truncated) = cut_at_a_line(text, DIFF_TEXT_CAP_BYTES);
         let (from, to) = self.short_pair(&from, &to).await?;
@@ -65,8 +72,7 @@ impl ConversationWorktree {
             lines,
             diff,
             truncated,
-            // TODO(caller-sync): true when a sync merge lies on the first-parent line in `from..to`
-            includes_caller_changes: false,
+            includes_caller_changes,
         })
     }
 
@@ -93,7 +99,7 @@ impl ConversationWorktree {
     }
 
     /// `git diff <format> from to`, with no external diff driver or text conversion run.
-    async fn diff_output(
+    pub(crate) async fn diff_output(
         &self,
         format: &[&str],
         from: &str,
@@ -106,23 +112,21 @@ impl ConversationWorktree {
         git(self.root(), args, &[], None).await
     }
 
-    /// The full hash of `bound`, or of `default` when omitted. It must be the base or one of
-    /// `on_branch` (the commits after the base); anything else is refused.
+    /// The full hash of the bound `named`, which must be the base or one of `subagent_commits`;
+    /// anything else is refused.
     async fn resolve_bound(
         &self,
-        bound: Option<&str>,
-        default: &str,
-        on_branch: &[&str],
+        named: &str,
+        subagent_commits: &[&str],
     ) -> Result<String, WorktreeError> {
-        let named = bound.unwrap_or(default);
         let full = self.resolve_commit(named).await?;
-        if full == self.base() || on_branch.contains(&full.as_str()) {
+        if full == self.base() || subagent_commits.contains(&full.as_str()) {
             return Ok(full);
         }
         Err(WorktreeError::Git {
             args: vec!["diff".to_string(), named.to_string()],
             stderr: format!(
-                "{named} is not the base or a commit of branch {} after it",
+                "{named} is not the base or one of the subagent's commits on branch {}",
                 self.branch()
             ),
         })

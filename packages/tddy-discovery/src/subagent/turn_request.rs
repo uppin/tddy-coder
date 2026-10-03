@@ -98,9 +98,7 @@ impl TurnRequest {
 
     /// Whether this turn first takes in the caller's current files — the default.
     pub fn syncs_worktree(&self) -> bool {
-        // TODO(caller-sync): implement
-        let _ = self.skip_sync;
-        todo!("syncs_worktree")
+        !self.skip_sync
     }
 
     /// Whether a rewind by this request takes the conversation's worktree back too — the default.
@@ -281,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn without_sync_runs_the_turn_on_the_worktree_as_it_stands() {
+    fn without_sync_turns_the_sync_off() {
         assert!(!TurnRequest::resuming().without_sync().syncs_worktree());
     }
 }

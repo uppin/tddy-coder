@@ -314,8 +314,7 @@ pub(crate) fn connect_json_body(request: &ConversationWorktreeRequest) -> serde_
                 "already_pulled": range.already_pulled
             }),
         ),
-        // TODO(caller-sync): `{"sync": {}}`
-        Some(Op::Sync(_)) => None,
+        Some(Op::Sync(_)) => fields.insert("sync".to_string(), serde_json::json!({})),
         None => None,
     };
     serde_json::Value::Object(fields)
@@ -327,22 +326,18 @@ fn error_body(message: String) -> String {
 
 /// Ask the facilitating daemon to merge the session worktree's current files into
 /// `conversation_id`'s worktree before a turn; the answer's `result_json` (`{"sync": {…} | null}` or
-/// `{"conflicts": […]}`) or a `{"error", "is_error": true}` body.
+/// `{"conflicts": […], "moreConflicts": n}`) or a `{"error", "is_error": true}` body.
 pub async fn sync_conversation_worktree(conversation_id: &str) -> String {
-    // TODO(caller-sync): implement through `ask_conversation_worktree`
-    let _ = conversation_id;
-    todo!("sync_conversation_worktree")
+    ask_conversation_worktree(|envelope| conversation_sync_request(&envelope, conversation_id))
+        .await
 }
 
 /// The `ConversationWorktree` request a sync sends.
-#[allow(dead_code)] // TODO(caller-sync): called by `sync_conversation_worktree`
 pub(crate) fn conversation_sync_request(
     envelope: &SessionToolEnvelope,
     conversation_id: &str,
 ) -> ConversationWorktreeRequest {
-    // TODO(caller-sync): implement
-    let _ = (envelope, conversation_id, SyncOp {});
-    todo!("conversation_sync_request")
+    conversation_op_request(envelope, conversation_id, Op::Sync(SyncOp {}))
 }
 
 /// Ask the facilitating daemon to reset `conversation_id`'s worktree to `commit`, or to its base
@@ -361,12 +356,13 @@ pub(crate) fn conversation_reset_request(
     conversation_id: &str,
     commit: Option<&str>,
 ) -> ConversationWorktreeRequest {
-    ConversationWorktreeRequest {
-        op: Some(Op::Reset(ResetOp {
+    conversation_op_request(
+        envelope,
+        conversation_id,
+        Op::Reset(ResetOp {
             commit: commit.unwrap_or_default().to_string(),
-        })),
-        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
-    }
+        }),
+    )
 }
 
 /// Ask the facilitating daemon for the diff `from..to` of `conversation_id` (either bound `None`:
@@ -389,13 +385,14 @@ pub(crate) fn conversation_diff_request(
     from: Option<&str>,
     to: Option<&str>,
 ) -> ConversationWorktreeRequest {
-    ConversationWorktreeRequest {
-        op: Some(Op::Diff(DiffOp {
+    conversation_op_request(
+        envelope,
+        conversation_id,
+        Op::Diff(DiffOp {
             from: from.unwrap_or_default().to_string(),
             to: to.unwrap_or_default().to_string(),
-        })),
-        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
-    }
+        }),
+    )
 }
 
 /// Ask the facilitating daemon to apply `conversation_id`'s commits `from..=to` that are not in
@@ -421,14 +418,15 @@ pub(crate) fn conversation_pull_range_request(
     to: Option<&str>,
     already_pulled: &[String],
 ) -> ConversationWorktreeRequest {
-    ConversationWorktreeRequest {
-        op: Some(Op::PullRange(PullRangeOp {
+    conversation_op_request(
+        envelope,
+        conversation_id,
+        Op::PullRange(PullRangeOp {
             from: from.unwrap_or_default().to_string(),
             to: to.unwrap_or_default().to_string(),
             already_pulled: already_pulled.to_vec(),
-        })),
-        ..conversation_worktree_request(envelope, conversation_id, ConversationWorktreeOp::Pull)
-    }
+        }),
+    )
 }
 
 /// The `ExecuteTool` a conversation's call sends.
@@ -450,15 +448,25 @@ pub(crate) fn conversation_worktree_request(
     conversation_id: &str,
     op: ConversationWorktreeOp,
 ) -> ConversationWorktreeRequest {
+    let op = match op {
+        ConversationWorktreeOp::Pull => Op::Pull(PullOp {}),
+        ConversationWorktreeOp::Remove => Op::Remove(RemoveOp {}),
+    };
+    conversation_op_request(envelope, conversation_id, op)
+}
+
+/// The `ConversationWorktree` request carrying `op` for `conversation_id`, identified by `envelope`.
+fn conversation_op_request(
+    envelope: &SessionToolEnvelope,
+    conversation_id: &str,
+    op: Op,
+) -> ConversationWorktreeRequest {
     ConversationWorktreeRequest {
         session_token: envelope.session_token.clone(),
         session_id: envelope.session_id.clone(),
         daemon_instance_id: envelope.daemon_instance_id.clone(),
         conversation_id: conversation_id.to_string(),
-        op: Some(match op {
-            ConversationWorktreeOp::Pull => Op::Pull(PullOp {}),
-            ConversationWorktreeOp::Remove => Op::Remove(RemoveOp {}),
-        }),
+        op: Some(op),
     }
 }
 
@@ -590,30 +598,43 @@ mod tests {
     #[test]
     fn a_sync_travels_over_http_as_its_own_key() {
         // Given
-        let request = ConversationWorktreeRequest {
-            session_token: "token-1".into(),
-            session_id: "sess-1".into(),
-            daemon_instance_id: "daemon-a".into(),
-            conversation_id: "explore".into(),
-            op: Some(Op::Sync(SyncOp {})),
-        };
+        let request = conversation_sync_request(&an_envelope(), "explore");
 
         // When
         let body = connect_json_body(&request);
 
         // Then
-        assert_eq!(body["sync"], serde_json::json!({}));
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "session_token": "token-1",
+                "session_id": "sess-1",
+                "daemon_instance_id": "daemon-a",
+                "conversation_id": "explore",
+                "sync": {}
+            })
+        );
     }
 
     /// Guards the extraction: an existing op keeps its encoding.
     #[test]
     fn a_reset_still_travels_over_http_with_its_commit() {
-        let body = connect_json_body(&conversation_reset_request(
-            &an_envelope(),
-            "explore",
-            Some("3f9c2ab"),
-        ));
+        // Given
+        let request = conversation_reset_request(&an_envelope(), "explore", Some("3f9c2ab"));
 
-        assert_eq!(body["reset"], serde_json::json!({ "commit": "3f9c2ab" }));
+        // When
+        let body = connect_json_body(&request);
+
+        // Then
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "session_token": "token-1",
+                "session_id": "sess-1",
+                "daemon_instance_id": "daemon-a",
+                "conversation_id": "explore",
+                "reset": { "commit": "3f9c2ab" }
+            })
+        );
     }
 }

@@ -10,6 +10,13 @@ use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
 use super::DaemonRpcHandler;
 
+/// The session a jail's bridge serves, as the daemon resolved it when it built the jail.
+pub(crate) struct BoundJailSession {
+    pub(crate) session_id: String,
+    /// `<the session owner's sessions base>/sessions/<session_id>`.
+    pub(crate) session_dir: std::path::PathBuf,
+}
+
 /// The coordinate an in-jail agent relays family B at, read from the crate that serves it so this
 /// bridge and `tddy-sandbox-runner`'s allowlist cannot disagree about the name.
 const SESSION_AGENT_SERVICE: &str = tddy_session_agents::SERVICE_NAME;
@@ -191,7 +198,10 @@ impl tddy_sandbox_runner::HostRpcHandler for DaemonRpcHandler {
                 }
             }
             (tddy_tool_engine::EXEC_TOOL_SERVICE, "ConversationWorktree") => {
-                tddy_rpc::RpcResult::Unary(conn.conversation_worktree_from_jail(payload).await)
+                tddy_rpc::RpcResult::Unary(
+                    conn.conversation_worktree_from_jail(&self.bound, payload)
+                        .await,
+                )
             }
             _ => tddy_rpc::RpcResult::Unary(Err(tddy_rpc::Status::not_found(format!(
                 "DaemonRpcHandler does not serve {service}/{method}"

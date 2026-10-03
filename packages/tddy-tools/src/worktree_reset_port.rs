@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use tddy_discovery::subagent::{ResetTarget, SubagentError, WorktreeReset, WorktreeResetPort};
 use tddy_session_tool_client::reset_conversation_worktree;
 
+use crate::worktree_answer::WorktreeOperation;
+
 /// Resets one conversation's worktree through `ConversationWorktree { reset }`.
 pub(crate) struct ConversationWorktreeResetPort {
     conversation_id: String,
@@ -30,25 +32,20 @@ impl WorktreeResetPort for ConversationWorktreeResetPort {
     }
 }
 
+/// How the reset's answer and its refusals are named.
+const RESET: WorktreeOperation = WorktreeOperation {
+    name: "reset",
+    failure: "could not reset the conversation's worktree",
+};
+
 /// What the daemon's answer to a reset says: the reset it made (`None` when there was nothing to
 /// take back), or why it could not.
 fn reset_from_answer(answer: &str) -> Result<Option<WorktreeReset>, SubagentError> {
-    let mut answer: serde_json::Value = serde_json::from_str(answer).map_err(|e| {
-        SubagentError::from(format!(
-            "the daemon's answer to the worktree reset was not JSON ({e}): {answer}"
-        ))
-    })?;
-    if answer.get("is_error") == Some(&serde_json::Value::Bool(true)) {
-        return Err(SubagentError::from(format!(
-            "could not reset the conversation's worktree: {}",
-            answer["error"].as_str().unwrap_or("unknown error")
-        )));
-    }
-    match answer["reset"].take() {
+    match RESET.parse(answer)?["reset"].take() {
         serde_json::Value::Null => Ok(None),
-        reset => serde_json::from_value(reset).map(Some).map_err(|e| {
-            SubagentError::from(format!("the daemon's worktree reset was malformed: {e}"))
-        }),
+        reset => serde_json::from_value(reset)
+            .map(Some)
+            .map_err(|e| RESET.malformed(e)),
     }
 }
 

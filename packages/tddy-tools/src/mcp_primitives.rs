@@ -106,15 +106,20 @@ pub(crate) fn subagent_config_from_env() -> SubagentConfig {
 
 /// [`subagent_config_from_env`] for the conversation `conversation_id`: its `Managed` calls name
 /// it, so the daemon runs them in its own worktree.
-/// A managed conversation also resets its worktree through the daemon when it is rewound; one that
-/// runs locally has no conversation worktree to reset.
+/// A managed conversation also resets its worktree through the daemon when it is rewound, and takes
+/// the caller's current files in through the daemon before every turn; one that runs locally has no
+/// conversation worktree to reset or sync.
 pub(crate) fn subagent_config_for_conversation(conversation_id: &str) -> SubagentConfig {
     let config = SubagentConfig::new(subagent_codebase_access_from_env(Some(conversation_id)))
         .with_provider_queue(provider_queue());
     match subagent_access_is_managed() {
-        true => config.with_worktree_reset(std::sync::Arc::new(
-            crate::worktree_reset_port::ConversationWorktreeResetPort::new(conversation_id),
-        )),
+        true => config
+            .with_worktree_reset(std::sync::Arc::new(
+                crate::worktree_reset_port::ConversationWorktreeResetPort::new(conversation_id),
+            ))
+            .with_worktree_sync(std::sync::Arc::new(
+                crate::worktree_sync_port::ConversationWorktreeSyncPort::new(conversation_id),
+            )),
         false => config,
     }
 }

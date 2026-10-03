@@ -15,8 +15,8 @@ use serde_json::json;
 use tddy_discovery::agent_def::{SpecializedAgentDef, SubagentTool};
 use tddy_discovery::subagent::{
     sync_notice, sync_refusal, CodebaseAccess, FileCounts, LineCounts, MessageId, ResetTarget,
-    SubagentConfig, SubagentError, SubagentRegistry, SubagentSession, SyncAnswer, TurnRequest,
-    WorktreeReset, WorktreeResetPort, WorktreeSync, WorktreeSyncPort,
+    RewindApplied, SubagentConfig, SubagentError, SubagentRegistry, SubagentSession, SyncAnswer,
+    TurnRequest, WorktreeReset, WorktreeResetPort, WorktreeSync, WorktreeSyncPort,
 };
 use wiremock::matchers::{method, path as path_matcher};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -26,7 +26,8 @@ type EventLog = Arc<Mutex<Vec<(&'static str, usize)>>>;
 
 struct RecordingSyncs {
     events: EventLog,
-    answer: SyncAnswer,
+    /// What the host answers, or why it could not be reached.
+    answer: Result<SyncAnswer, String>,
     provider: Arc<MockServer>,
 }
 
@@ -35,7 +36,7 @@ impl WorktreeSyncPort for RecordingSyncs {
     async fn sync(&self) -> Result<SyncAnswer, SubagentError> {
         let seen = self.provider.received_requests().await.unwrap().len();
         self.events.lock().unwrap().push(("sync", seen));
-        Ok(self.answer.clone())
+        self.answer.clone().map_err(SubagentError::from)
     }
 }
 
@@ -157,6 +158,13 @@ async fn a_conversation(
     responses: Vec<serde_json::Value>,
     sync_answer: SyncAnswer,
 ) -> AConversation {
+    a_conversation_whose_sync_answers(responses, Ok(sync_answer)).await
+}
+
+async fn a_conversation_whose_sync_answers(
+    responses: Vec<serde_json::Value>,
+    sync_answer: Result<SyncAnswer, String>,
+) -> AConversation {
     let provider = Arc::new(MockServer::start().await);
     for response in responses {
         Mock::given(method("POST"))
@@ -198,7 +206,14 @@ async fn a_conversation(
 
 /// A conversation whose first turn wrote `a.txt` and finished, its ports answering `sync_answer`.
 async fn a_conversation_after_one_turn(sync_answer: SyncAnswer) -> AConversation {
-    let mut conversation = a_conversation(
+    a_conversation_after_one_turn_whose_sync_answers(Ok(sync_answer)).await
+}
+
+/// [`a_conversation_after_one_turn`] whose sync port answers `sync_answer`, an error included.
+async fn a_conversation_after_one_turn_whose_sync_answers(
+    sync_answer: Result<SyncAnswer, String>,
+) -> AConversation {
+    let mut conversation = a_conversation_whose_sync_answers(
         vec![a_call(
             "WRITE",
             json!({ "path": "a.txt", "contents": "a\n" }),
@@ -207,9 +222,11 @@ async fn a_conversation_after_one_turn(sync_answer: SyncAnswer) -> AConversation
         sync_answer,
     )
     .await;
+    // Without a sync: the ports answer `sync_answer` every time, and a conversation's first turn has
+    // no worktree to merge into yet (the daemon answers it with nothing merged).
     conversation
         .session
-        .take_turn(TurnRequest::prompting("write a.txt"))
+        .take_turn(TurnRequest::prompting("write a.txt").without_sync())
         .await
         .expect("the first turn runs");
     conversation.events.lock().unwrap().clear();
@@ -225,11 +242,18 @@ impl AConversation {
         self.events.lock().unwrap().clone()
     }
 
-    /// The messages of the model request at `index`.
-    async fn messages_sent_in_request(&self, index: usize) -> Vec<serde_json::Value> {
+    /// `(role, content)` of the last two messages of the model request at `index`.
+    async fn last_two_messages_sent_in(
+        &self,
+        index: usize,
+    ) -> Vec<(serde_json::Value, serde_json::Value)> {
         let requests = self.provider.received_requests().await.unwrap();
         let body: serde_json::Value = serde_json::from_slice(&requests[index].body).unwrap();
-        body["messages"].as_array().unwrap().clone()
+        let sent = body["messages"].as_array().unwrap();
+        sent[sent.len() - 2..]
+            .iter()
+            .map(|message| (message["role"].clone(), message["content"].clone()))
+            .collect()
     }
 }
 
@@ -325,13 +349,8 @@ async fn a_merge_is_announced_last_before_the_turn_runs() {
         .expect("the turn runs");
 
     // Then
-    let sent = conversation.messages_sent_in_request(next_request).await;
-    let last_two: Vec<(serde_json::Value, serde_json::Value)> = sent[sent.len() - 2..]
-        .iter()
-        .map(|message| (message["role"].clone(), message["content"].clone()))
-        .collect();
     assert_eq!(
-        last_two,
+        conversation.last_two_messages_sent_in(next_request).await,
         vec![
             (json!("user"), json!("now the tests")),
             (json!("user"), json!(sync_notice(&merge))),
@@ -354,8 +373,13 @@ async fn nothing_merged_announces_nothing() {
         .expect("the turn runs");
 
     // Then
-    let sent = conversation.messages_sent_in_request(next_request).await;
-    assert_eq!(sent.last().unwrap()["content"], json!("now the tests"));
+    assert_eq!(
+        conversation.last_two_messages_sent_in(next_request).await,
+        vec![
+            (json!("assistant"), json!("done")),
+            (json!("user"), json!("now the tests")),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -379,8 +403,11 @@ async fn the_outcome_reports_the_merge() {
 async fn a_conflict_refuses_the_turn_before_any_model_call_naming_the_paths() {
     // Given
     let conflicted = vec!["src/lib.rs".to_string(), "README.md".to_string()];
-    let mut conversation =
-        a_conversation_after_one_turn(SyncAnswer::Conflicted(conflicted.clone())).await;
+    let mut conversation = a_conversation_after_one_turn(SyncAnswer::Conflicted {
+        paths: conflicted.clone(),
+        more_paths: 0,
+    })
+    .await;
     let before = conversation.requests_so_far().await;
 
     // When
@@ -395,14 +422,14 @@ async fn a_conflict_refuses_the_turn_before_any_model_call_naming_the_paths() {
             refused.map(|_| ()).map_err(|e| e.to_string()),
             conversation.requests_so_far().await
         ),
-        (Err(sync_refusal(&conflicted).to_string()), before)
+        (Err(sync_refusal(&conflicted, 0, None).to_string()), before)
     );
 }
 
-#[tokio::test]
-async fn a_merge_lets_the_subagent_read_a_file_again() {
-    // Given — two identical reads in the first turn; a third would be refused as a repeat unless
-    // the merge cleared what the conversation remembers having read
+/// A conversation whose first turn read `src/lib.rs` twice — a third identical read is refused as a
+/// repeat unless something cleared what the conversation remembers having read — and whose provider
+/// answers the next turn with that third read. Its sync answers `sync_answer`.
+async fn a_conversation_that_read_a_file_twice(sync_answer: SyncAnswer) -> AConversation {
     let read = || json!({ "path": "src/lib.rs" });
     let mut conversation = a_conversation(
         vec![
@@ -411,7 +438,7 @@ async fn a_merge_lets_the_subagent_read_a_file_again() {
             a_final_answer(),
             a_call("READ", read(), "call_3"),
         ],
-        SyncAnswer::Merged(a_merge_of(&["src/lib.rs"])),
+        sync_answer,
     )
     .await;
     conversation
@@ -419,6 +446,15 @@ async fn a_merge_lets_the_subagent_read_a_file_again() {
         .take_turn(TurnRequest::prompting("read it").without_sync())
         .await
         .expect("the first turn runs");
+    conversation
+}
+
+#[tokio::test]
+async fn a_merge_lets_the_subagent_read_a_file_again() {
+    // Given
+    let mut conversation =
+        a_conversation_that_read_a_file_twice(SyncAnswer::Merged(a_merge_of(&["src/lib.rs"])))
+            .await;
 
     // When
     conversation
@@ -429,4 +465,74 @@ async fn a_merge_lets_the_subagent_read_a_file_again() {
 
     // Then
     assert_eq!(conversation.reads.load(Ordering::SeqCst), 3);
+}
+
+/// The positive control for the test above: with nothing merged, the third identical read is
+/// refused as a repeat, so it is the merge that let it through.
+#[tokio::test]
+async fn without_a_merge_a_resumed_third_identical_read_is_refused() {
+    // Given
+    let mut conversation = a_conversation_that_read_a_file_twice(SyncAnswer::Nothing).await;
+
+    // When
+    conversation
+        .session
+        .take_turn(TurnRequest::resuming())
+        .await
+        .expect("the resumed turn runs");
+
+    // Then
+    assert_eq!(conversation.reads.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn a_sync_that_cannot_reach_the_daemon_refuses_the_turn_before_any_model_call() {
+    // Given
+    let mut conversation = a_conversation_after_one_turn_whose_sync_answers(Err(
+        "conversation worktree sync: connection refused".to_string(),
+    ))
+    .await;
+    let before = conversation.requests_so_far().await;
+
+    // When
+    let refused = conversation
+        .session
+        .take_turn(TurnRequest::prompting("now the tests"))
+        .await;
+
+    // Then
+    assert_eq!(
+        (
+            refused.map(|_| ()).map_err(|e| e.to_string()),
+            conversation.requests_so_far().await
+        ),
+        (
+            Err("conversation worktree sync: connection refused".to_string()),
+            before
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_conflict_after_a_rewind_says_the_rewind_stands() {
+    // Given — the reset port answers that it reset the worktree
+    let conflicted = vec!["src/lib.rs".to_string()];
+    let mut conversation = a_conversation_after_one_turn(SyncAnswer::Conflicted {
+        paths: conflicted.clone(),
+        more_paths: 0,
+    })
+    .await;
+    let the_first_prompt = MessageId::from("m1".to_string());
+
+    // When
+    let refused = conversation
+        .session
+        .take_turn(TurnRequest::resuming().from_message(the_first_prompt))
+        .await;
+
+    // Then
+    assert_eq!(
+        refused.map(|_| ()).map_err(|e| e.to_string()),
+        Err(sync_refusal(&conflicted, 0, Some(RewindApplied::HistoryAndWorktree)).to_string())
+    );
 }

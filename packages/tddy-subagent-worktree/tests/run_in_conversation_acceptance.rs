@@ -222,16 +222,26 @@ async fn a_delete_reports_a_removed_file() {
 
 #[tokio::test]
 async fn await_is_treated_as_mutating_and_commits_what_the_background_job_wrote() {
-    // Given
+    // Given — the job writes only once the Shell call that started it has returned (and committed
+    // what it saw), so the write is the Await's to commit, never the Shell call's
     let caller = a_caller_worktree().build();
     let conversation = a_conversation_over(&caller);
+    let gate_dir = tempfile::tempdir().expect("gate dir");
+    let gate = gate_dir.path().join("released");
     let started = conversation
         .calls(
             "Shell",
-            json!({ "command": "sleep 0.2 && printf 'late\\n' > late.txt", "block_until_ms": 0 }),
+            json!({
+                "command": format!(
+                    "while [ ! -e '{}' ]; do sleep 0.01; done; printf 'late\\n' > late.txt",
+                    gate.display()
+                ),
+                "block_until_ms": 0
+            }),
         )
         .await;
     let job_id = started.output.job_id.clone();
+    std::fs::write(&gate, b"").expect("release the job");
 
     // When
     let awaited = conversation

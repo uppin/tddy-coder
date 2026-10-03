@@ -108,6 +108,14 @@ branch's first-parent line without merge commits:
 - `tddy-discovery`: a sync port beside the reset port; `take_turn` runs it and appends the notice;
   `PromptOutcome::worktree_sync`.
 - `tddy-tools`: the sync port, `syncWorktree` on both tools, `worktreeSync` in the outcome.
+- **Requires git ≥ 2.40** on the host that owns the session worktree: the sync merges with
+  `git merge-tree --write-tree --merge-base <base> <ours> <theirs>`, and `--merge-base` with
+  `--write-tree` arrived in git 2.40. An older git makes every sync fail with a git error, which
+  refuses the turn (`syncWorktree: false` still runs it).
+- The jail host bridge serves `ConversationWorktree` only for the session its jail was built for,
+  and finds that session's worktree the way the token route does (under the session OS user's
+  sessions base) — `Sync` reads the caller's uncommitted files, so a forged session id there would
+  be a read path into another session.
 
 ### User Impact
 

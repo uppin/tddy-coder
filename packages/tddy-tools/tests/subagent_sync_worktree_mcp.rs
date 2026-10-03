@@ -33,8 +33,14 @@ async fn receive(stdout: &mut BufReader<ChildStdout>) -> Value {
     serde_json::from_str(&line).unwrap_or_else(|e| panic!("invalid JSON-RPC line {line:?}: {e}"))
 }
 
-/// The `inputSchema` a server with one agent on its roster advertises for `tool`.
-async fn the_advertised_schema_of(tool: &str) -> Value {
+/// A `tddy-tools --mcp` server with one agent on its roster, initialized and held open.
+struct AServer {
+    child: tokio::process::Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+async fn a_server_with_one_agent() -> AServer {
     let defs = json!([{
         "name": "explorer",
         "model": "qwen2.5-coder:7b",
@@ -50,6 +56,7 @@ async fn the_advertised_schema_of(tool: &str) -> Value {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .expect("spawn tddy-tools --mcp");
     let mut stdin = child.stdin.take().expect("stdin");
@@ -72,20 +79,55 @@ async fn the_advertised_schema_of(tool: &str) -> Value {
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
     )
     .await;
-    send(
-        &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
-    )
-    .await;
-    let listed = receive(&mut stdout).await;
-    let _ = child.kill().await;
-    listed["result"]["tools"]
-        .as_array()
-        .expect("a tools array")
-        .iter()
-        .find(|t| t["name"] == tool)
-        .unwrap_or_else(|| panic!("{tool} is advertised"))["inputSchema"]
-        .clone()
+    AServer {
+        child,
+        stdin,
+        stdout,
+    }
+}
+
+impl AServer {
+    /// The `inputSchema` this server advertises for `tool`.
+    async fn advertised_schema_of(&mut self, tool: &str) -> Value {
+        send(
+            &mut self.stdin,
+            json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}),
+        )
+        .await;
+        let listed = receive(&mut self.stdout).await;
+        listed["result"]["tools"]
+            .as_array()
+            .expect("a tools array")
+            .iter()
+            .find(|t| t["name"] == tool)
+            .unwrap_or_else(|| panic!("{tool} is advertised"))["inputSchema"]
+            .clone()
+    }
+
+    /// Call `tool` with `arguments` and parse the JSON text its result carries.
+    async fn call(&mut self, tool: &str, arguments: Value) -> Value {
+        send(
+            &mut self.stdin,
+            json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": {"name": tool, "arguments": arguments}
+            }),
+        )
+        .await;
+        let response = receive(&mut self.stdout).await;
+        let text = response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a text content block, got: {response}"));
+        serde_json::from_str(text).unwrap_or_else(|e| panic!("{text:?} is not JSON: {e}"))
+    }
+}
+
+/// The `inputSchema` a server with one agent on its roster advertises for `tool`.
+async fn the_advertised_schema_of(tool: &str) -> Value {
+    let mut server = a_server_with_one_agent().await;
+    let schema = server.advertised_schema_of(tool).await;
+    let _ = server.child.kill().await;
+    schema
 }
 
 #[tokio::test]
@@ -109,5 +151,29 @@ async fn subagent_resume_advertises_sync_worktree_as_a_boolean() {
     assert_eq!(
         schema["properties"]["syncWorktree"]["type"],
         json!("boolean")
+    );
+}
+
+#[tokio::test]
+async fn subagent_prompt_refuses_a_non_boolean_sync_worktree_by_name() {
+    // Given
+    let mut server = a_server_with_one_agent().await;
+
+    // When
+    let answer = server
+        .call(
+            "subagent_prompt",
+            json!({
+                "sessionId": "never-opened",
+                "prompt": [{"type": "text", "text": "go on"}],
+                "syncWorktree": "no"
+            }),
+        )
+        .await;
+
+    // Then
+    assert_eq!(
+        answer,
+        json!({ "error": "syncWorktree must be a boolean", "is_error": true })
     );
 }

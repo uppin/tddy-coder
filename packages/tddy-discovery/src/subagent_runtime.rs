@@ -453,7 +453,9 @@ pub fn prompt_outcome_json(outcome: PromptOutcome) -> String {
     if let (Some(object), Some(reset)) = (body.as_object_mut(), &outcome.worktree_reset) {
         object.insert("worktreeReset".to_string(), serde_json::json!(reset));
     }
-    // TODO(caller-sync): `worktreeSync` from `outcome.worktree_sync`
+    if let (Some(object), Some(sync)) = (body.as_object_mut(), &outcome.worktree_sync) {
+        object.insert("worktreeSync".to_string(), serde_json::json!(sync));
+    }
     body.to_string()
 }
 
@@ -1037,8 +1039,17 @@ mod tests {
         let mut outcome = an_end_turn_outcome("done");
         outcome.worktree_sync = Some(crate::subagent::WorktreeSync {
             commit: "7d1e0aa".to_string(),
+            files: crate::subagent::FileCounts {
+                created: 1,
+                updated: 2,
+                removed: 3,
+            },
+            lines: crate::subagent::LineCounts {
+                added: 41,
+                removed: 7,
+            },
             paths: vec!["src/lib.rs".to_string()],
-            ..Default::default()
+            more_paths: 5,
         });
 
         // When
@@ -1049,10 +1060,10 @@ mod tests {
             body["worktreeSync"],
             serde_json::json!({
                 "commit": "7d1e0aa",
-                "files": { "created": 0, "updated": 0, "removed": 0 },
-                "lines": { "added": 0, "removed": 0 },
+                "files": { "created": 1, "updated": 2, "removed": 3 },
+                "lines": { "added": 41, "removed": 7 },
                 "paths": ["src/lib.rs"],
-                "morePaths": 0
+                "morePaths": 5
             })
         );
     }

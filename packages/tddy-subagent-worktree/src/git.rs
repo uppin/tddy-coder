@@ -30,6 +30,8 @@ pub(crate) const COMMITTER_EMAIL: &str = "tddy-subagent@tddy.invalid";
 /// What a finished git process left: its exit status and both streams, undecoded.
 pub(crate) struct RawOutput {
     pub success: bool,
+    /// The exit code; `None` when a signal ended the process.
+    pub code: Option<i32>,
     pub stdout: Vec<u8>,
     pub stderr: String,
 }
@@ -95,6 +97,7 @@ where
         shown,
         RawOutput {
             success: output.status.success(),
+            code: output.status.code(),
             stdout: output.stdout,
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         },

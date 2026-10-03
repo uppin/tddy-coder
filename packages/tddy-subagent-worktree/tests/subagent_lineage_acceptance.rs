@@ -8,8 +8,11 @@ mod support;
 use std::collections::BTreeSet;
 
 use pretty_assertions::assert_eq;
-use support::{a_caller_worktree, conversation, rev_parse, short_head, write, CallerWorktree};
-use tddy_subagent_worktree::{ConversationWorktree, PullRange, ResetTarget, SyncOutcome};
+use support::{
+    a_caller_worktree, a_conversation_that_committed, merged, read_in, refusal_of, rev_parse,
+    short_head, write, CallerWorktree,
+};
+use tddy_subagent_worktree::{ConversationWorktree, FileCounts, PullRange, ResetTarget};
 
 /// A conversation that committed `a.txt` (c1), took in a caller edit of `caller.txt` (a sync merge),
 /// then committed `b.txt` (c2).
@@ -22,22 +25,7 @@ struct ASyncedConversation {
 }
 
 async fn a_conversation_with_a_sync_between_two_commits() -> ASyncedConversation {
-    let caller = a_caller_worktree()
-        .with_committed_file("caller.txt", "before\n")
-        .build();
-    let worktree = caller
-        .conversations()
-        .ensure(&conversation("explore"))
-        .await
-        .expect("ensure");
-    write(worktree.root(), "a.txt", b"a\n");
-    worktree.commit_changes("Write").await.expect("c1");
-    let c1 = short_head(worktree.root());
-    caller.write("caller.txt", "after\n");
-    let merge = match worktree.sync_with_caller().await.expect("sync") {
-        SyncOutcome::Merged(sync) => sync.commit,
-        other => panic!("the fixture needs a merge, got {other:?}"),
-    };
+    let (caller, worktree, c1, merge) = a_conversation_whose_tip_is_a_sync().await;
     write(worktree.root(), "b.txt", b"b\n");
     worktree.commit_changes("Write").await.expect("c2");
     let c2 = short_head(worktree.root());
@@ -48,6 +36,20 @@ async fn a_conversation_with_a_sync_between_two_commits() -> ASyncedConversation
         merge,
         c2,
     }
+}
+
+/// A conversation that committed `a.txt` (c1) and then took in a caller edit of `caller.txt` — the
+/// sync merge is its tip. Returns c1 and the merge, by short hash.
+async fn a_conversation_whose_tip_is_a_sync(
+) -> (CallerWorktree, ConversationWorktree, String, String) {
+    let caller = a_caller_worktree()
+        .with_committed_file("caller.txt", "before\n")
+        .build();
+    let (worktree, commits) = a_conversation_that_committed(&caller, &[("a.txt", "a\n")]).await;
+    caller.write("caller.txt", "after\n");
+    let merge = merged(worktree.sync_with_caller().await.expect("sync")).commit;
+    let c1 = commits.into_iter().next().expect("c1");
+    (caller, worktree, c1, merge)
 }
 
 fn full(worktree: &ConversationWorktree, short: &str) -> String {
@@ -111,10 +113,18 @@ async fn pull_into_caller_never_hands_the_caller_its_own_changes_back() {
     assert_eq!(
         (
             pulled.conflicts,
-            pulled.files.created,
+            pulled.files,
             synced.caller.read("caller.txt")
         ),
-        (Vec::<String>::new(), 2, "after\n".to_string())
+        (
+            Vec::<String>::new(),
+            FileCounts {
+                created: 2,
+                updated: 0,
+                removed: 0
+            },
+            "after\n".to_string()
+        )
     );
 }
 
@@ -150,10 +160,10 @@ async fn a_reset_past_a_sync_drops_it_and_the_next_sync_takes_the_caller_in_agai
     // Then
     assert_eq!(
         (
-            matches!(outcome, SyncOutcome::Merged(_)),
-            std::fs::read_to_string(synced.worktree.root().join("caller.txt")).unwrap()
+            merged(outcome).paths,
+            read_in(&synced.worktree, "caller.txt")
         ),
-        (true, "after\n".to_string())
+        (vec!["caller.txt".to_string()], "after\n".to_string())
     );
 }
 
@@ -171,8 +181,18 @@ async fn a_merge_commit_is_refused_as_a_reset_target() {
 
     // Then
     assert_eq!(
-        (refused.is_err(), rev_parse(synced.worktree.root(), "HEAD")),
-        (true, tip)
+        (
+            refusal_of(refused),
+            rev_parse(synced.worktree.root(), "HEAD")
+        ),
+        (
+            format!(
+                "{} is not one of the subagent's commits on branch {}",
+                synced.merge,
+                synced.worktree.branch()
+            ),
+            tip
+        )
     );
 }
 
@@ -185,7 +205,14 @@ async fn a_merge_commit_is_refused_as_a_diff_bound() {
     let refused = synced.worktree.diff(Some(&synced.merge), None).await;
 
     // Then
-    assert!(refused.is_err());
+    assert_eq!(
+        refusal_of(refused),
+        format!(
+            "{} is not the base or one of the subagent's commits on branch {}",
+            synced.merge,
+            synced.worktree.branch()
+        )
+    );
 }
 
 #[tokio::test]
@@ -219,4 +246,16 @@ async fn a_diff_with_no_sync_in_its_range_does_not() {
 
     // Then
     assert!(!diff.includes_caller_changes);
+}
+
+#[tokio::test]
+async fn a_diff_with_no_upper_bound_runs_to_a_tip_that_is_a_sync() {
+    // Given
+    let (_caller, worktree, _c1, merge) = a_conversation_whose_tip_is_a_sync().await;
+
+    // When
+    let diff = worktree.diff(None, None).await.expect("diff");
+
+    // Then
+    assert_eq!((diff.to, diff.includes_caller_changes), (merge, true));
 }

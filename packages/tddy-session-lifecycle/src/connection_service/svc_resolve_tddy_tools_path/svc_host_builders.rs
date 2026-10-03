@@ -119,24 +119,34 @@ impl DaemonSessionHost {
         }
     }
 
-    /// Install the in-jail family-B relay once this service lives behind an `Arc` (see `runtime::build`).
+    /// Install the handle each jail's family-B relay is built from, once this service lives behind
+    /// an `Arc` (see `runtime::build`).
     ///
-    /// The handler holds a [`std::sync::Weak`] back to this host, never an `Arc`: the bridge it is
-    /// stored in is a field of the host, so a strong reference would be a cycle that keeps the
-    /// daemon — and therefore every jail in its `WorkspaceSandboxRegistry` — alive forever.
+    /// Only a [`std::sync::Weak`] is kept, never an `Arc`: it is stored in a field of the host, so a
+    /// strong reference would be a cycle that keeps the daemon — and therefore every jail in its
+    /// `WorkspaceSandboxRegistry` — alive forever.
     pub fn install_sandbox_rpc_bridge(self: &Arc<Self>) {
-        let handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler> =
-            Arc::new(super::super::DaemonRpcHandler {
-                conn: Arc::downgrade(self),
-            });
-        let _ = self.sandbox_rpc_bridge.set(handler);
+        let _ = self.sandbox_rpc_bridge.set(Arc::downgrade(self));
     }
 
-    /// The host-side dispatch a sandboxed session's `SessionChannel` relays family B to.
-    pub fn sandbox_rpc_handler(&self) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
-        self.sandbox_rpc_bridge.get().cloned().expect(
+    /// The host-side dispatch the jail built for `session_id` relays family B to, bound to that
+    /// session: `session_dir` is the session's directory under its owner's sessions base, as the
+    /// daemon resolved it to build the jail.
+    pub fn sandbox_rpc_handler(
+        &self,
+        session_id: &str,
+        session_dir: &std::path::Path,
+    ) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
+        let conn = self.sandbox_rpc_bridge.get().cloned().expect(
             "sandbox RPC bridge not installed — runtime must call install_sandbox_rpc_bridge",
-        )
+        );
+        Arc::new(super::super::DaemonRpcHandler {
+            conn,
+            bound: super::super::daemon_rpc_handler::BoundJailSession {
+                session_id: session_id.to_string(),
+                session_dir: session_dir.to_path_buf(),
+            },
+        })
     }
 
     /// Share this daemon's model registry (builder), so an assistant defined in it is listed by

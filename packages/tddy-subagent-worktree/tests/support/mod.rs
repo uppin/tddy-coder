@@ -7,7 +7,10 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tddy_subagent_worktree::{ConversationId, ConversationWorktrees};
+use tddy_subagent_worktree::{
+    ConversationId, ConversationWorktree, ConversationWorktrees, SyncOutcome, WorktreeError,
+    WorktreeSync,
+};
 
 pub const SESSION_ID: &str = "sess-1";
 
@@ -225,6 +228,54 @@ impl CallerWorktree {
             ],
         );
     }
+}
+
+/// A conversation `explore` of `caller` holding one subagent commit per `(path, content)`, in
+/// order, and those commits' short hashes.
+pub async fn a_conversation_that_committed(
+    caller: &CallerWorktree,
+    writes: &[(&str, &str)],
+) -> (ConversationWorktree, Vec<String>) {
+    let worktree = caller
+        .conversations()
+        .ensure(&conversation("explore"))
+        .await
+        .expect("ensure");
+    let mut commits = Vec::new();
+    for (path, content) in writes {
+        write(worktree.root(), path, content.as_bytes());
+        worktree.commit_changes("Write").await.expect("commit");
+        commits.push(short_head(worktree.root()));
+    }
+    (worktree, commits)
+}
+
+/// A file as the conversation worktree holds it.
+pub fn read_in(worktree: &ConversationWorktree, path: &str) -> String {
+    std::fs::read_to_string(worktree.root().join(path)).expect("read conversation file")
+}
+
+/// What a sync merged; any other outcome fails the test.
+pub fn merged(outcome: SyncOutcome) -> WorktreeSync {
+    match outcome {
+        SyncOutcome::Merged(sync) => sync,
+        other => panic!("expected the caller's changes to be merged, got {other:?}"),
+    }
+}
+
+/// The reason a git-backed operation was refused; success or any other error fails the test.
+pub fn refusal_of<T: std::fmt::Debug>(result: Result<T, WorktreeError>) -> String {
+    match result {
+        Err(WorktreeError::Git { stderr, .. }) => stderr,
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+}
+
+/// The subject of `rev`.
+pub fn subject_of(root: &Path, rev: &str) -> String {
+    git(root, &["log", "-1", "--format=%s", rev])
+        .trim()
+        .to_string()
 }
 
 /// Point a conversation worktree's `.git` file at nothing, so that every later git step in it

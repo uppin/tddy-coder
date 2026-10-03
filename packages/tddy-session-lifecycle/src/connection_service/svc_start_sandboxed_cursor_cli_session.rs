@@ -380,7 +380,7 @@ impl DaemonSessionHost {
             Arc::new(session_env),
             session_dir.clone(),
             self.agent_activity_hub(),
-            self.sandbox_rpc_handler(),
+            self.sandbox_rpc_handler(session_id, &session_dir),
         )
         .await
         .map_err(Status::internal)?;
