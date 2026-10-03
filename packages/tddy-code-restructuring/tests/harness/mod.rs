@@ -953,6 +953,66 @@ pub fn a_crate_whose_alias_only_the_compiler_resolves() -> AFixtureWorkspace {
     ])
 }
 
+/// A crate whose parent module binds `Result` over the prelude: `use crate::{Overlay, Result};`,
+/// where `crate::Result` is the crate's one-generic alias, as in the real case.
+///
+/// Lines 11–17 of the parent are a seam naming that `Result` (`run`) and the prelude's `Option`,
+/// which the parent never imports (`pick`).
+pub fn a_crate_whose_parent_rebinds_a_prelude_name() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The crate root, which owns the one-generic `Result`.",
+                "",
+                "mod entry;",
+                "",
+                "pub struct Overlay;",
+                "",
+                "pub struct RestructureError;",
+                "",
+                "pub type Result<T> = std::result::Result<T, RestructureError>;",
+                "",
+                "pub fn first() -> Result<u32> {",
+                "    entry::first()",
+                "}",
+            ]),
+        )
+        .writing(
+            ENTRY_MODULE,
+            &source(&[
+                "//! The module the seam leaves.",
+                "",
+                "use crate::{Overlay, RestructureError, Result};",
+                "",
+                "pub fn first() -> Result<u32> {",
+                "    Ok(1)",
+                "}",
+                "",
+                "pub fn overlay() -> Overlay {",
+                "    Overlay",
+                "}",
+                "",
+                "pub fn run(overlay: &Overlay) -> Result<()> {",
+                "    let _ = overlay;",
+                "    if false {",
+                "        return Err(RestructureError);",
+                "    }",
+                "    Ok(())",
+                "}",
+                "",
+                "pub fn pick() -> Option<u32> {",
+                "    Some(3)",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// The module [`a_crate_whose_parent_rebinds_a_prelude_name`] splits.
+pub const ENTRY_MODULE: &str = "crates/origin/src/entry.rs";
+
 fn a_crate_binding_an_alias_to(generated: &[&str]) -> AFixtureWorkspace {
     let mut lines: Vec<&str> = vec![
         "//! The file the seams leave.",

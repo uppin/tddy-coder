@@ -265,6 +265,12 @@ not define is refused rather than ignored.
   from, then by the **crate** the file binds that same name from. Where none of the three settles it,
   the operation refuses and names the candidates rather than guessing.
 
+  A second, lexical step then carries across every name the parent binds by `use` that the moved code
+  uses and the module does not bind: the server cannot report a name unresolved when the prelude
+  resolves it (`Result` rebound to the crate's one-generic alias would silently become the
+  two-generic `std::result::Result`), so the parent's own import, rebased one level deeper, is copied.
+  Surplus ones are removed by the tidy step.
+
   The crate tier exists because a re-export gives one item two paths. `tddy-core` publishes
   `pub use error::{BackendError, ParseError, WorkflowError};`, so a file writing the canonical
   `tddy_core::error::ParseError` is offered the shorter `tddy_core::ParseError` — the same type under

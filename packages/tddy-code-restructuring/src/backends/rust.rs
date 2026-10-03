@@ -34,6 +34,7 @@ mod imports;
 mod introduced;
 mod item_path;
 mod nested_modules;
+mod prelude_shadow;
 mod readiness;
 mod selection;
 
@@ -1440,6 +1441,7 @@ impl RustBackend {
         // more, so the counter runs across them rather than restarting.
         let pruned = self.prune_assist_imports(uri, &named, &name)?;
         let imported = self.restore_imports(uri, original, &pruned, &name, &moved, reexport)?;
+        let imported = prelude_shadow::carry_shadowed_imports(original, &imported, &name)?;
         let (preserved, mut report) = restore_visibility(&imported, &name, &moved)?;
 
         // The widenings the pass above cannot see, because the survey feeding it stops above an

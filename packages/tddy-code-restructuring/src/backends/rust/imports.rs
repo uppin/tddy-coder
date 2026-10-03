@@ -332,7 +332,7 @@ fn bound_declaration(text: &str, module: &str, name: &str) -> Option<String> {
 }
 
 /// The bounds of `module`'s inline block in `text`.
-fn module_block(text: &str, module: &str) -> Result<ModuleBlock> {
+pub(super) fn module_block(text: &str, module: &str) -> Result<ModuleBlock> {
     let source: Vec<String> = text.split('\n').map(str::to_string).collect();
     module_bounds(&source, module)
 }
