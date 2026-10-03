@@ -29,6 +29,7 @@ use tokio_util::sync::CancellationToken;
 mod chatter;
 mod documents;
 mod early_return;
+mod escaping_types;
 mod impl_seam;
 mod imports;
 mod introduced;
@@ -4141,6 +4142,8 @@ fn restore_visibility(
     // block alone, because a `module::Item` mention inside the module's own body says nothing about
     // what the parent reaches.
     let outside = outside_the_module(&source, &block);
+    // A type no path names, but a widened signature does, has to stay as widened as that signature.
+    let escaping = escaping_types::kept_widened(&source, &block, &outside, module, items);
 
     for item in items {
         // The assist never narrows, so an item written `pub` has nothing to answer for.
@@ -4163,7 +4166,10 @@ fn restore_visibility(
         // private while the assist had rewritten the parent to `planning::StructuredPlan` and
         // `planning::prd_value_looks_like_md_file_path`. `E0603` at the next build, after the run
         // reported `applied 1 of 1 operations`.
-        if item.reached_from_outside || reaches_through_module(&outside, module, &item.name) {
+        if item.reached_from_outside
+            || reaches_through_module(&outside, module, &item.name)
+            || escaping.contains(&item.name)
+        {
             report.push(VisibilityChange {
                 item: item.name.clone(),
                 from: if item.visibility.is_empty() {

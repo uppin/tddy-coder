@@ -1938,6 +1938,63 @@ pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_an_alias
     )
 }
 
+/// A private struct and the private function returning it, side by side, with a file-local
+/// `#[cfg(test)]` module that calls the function and reads a field of what it returns. The tests
+/// never write the type's name, so no path reference to it exists — it escapes through the signature.
+///
+/// `struct W` and `fn make` are lines 3-9.
+pub fn a_crate_whose_tests_read_a_field_of_a_moved_functions_private_return_type(
+) -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function whose return type no path names.",
+                "",
+                "struct W {",
+                "    line: String,",
+                "}",
+                "",
+                "fn make() -> W {",
+                "    W { line: \"x\".to_string() }",
+                "}",
+                "",
+                "#[cfg(test)]",
+                "mod tests {",
+                "    use super::*;",
+                "",
+                "    #[test]",
+                "    fn reads_a_field() {",
+                "        assert_eq!(make().line, \"x\");",
+                "    }",
+                "}",
+            ]),
+        )
+}
+
+/// A private helper and its only caller, side by side; nothing else in the file mentions either.
+///
+/// `helper` and `caller` are lines 3-9.
+pub fn a_crate_whose_private_helper_has_only_its_moved_caller() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A helper that travels with its only caller.",
+                "",
+                "fn helper() -> u32 {",
+                "    2",
+                "}",
+                "",
+                "pub fn caller() -> u32 {",
+                "    helper() + 1",
+                "}",
+            ]),
+        )
+}
+
 fn a_crate_whose_gauge_reads_then(members: &[&str], after: &[&str]) -> AFixtureWorkspace {
     let mut lines: Vec<&str> = vec![
         "//! A type whose `impl` a seam cuts in half.",

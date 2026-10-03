@@ -330,6 +330,10 @@ not define is refused rather than ignored.
   `pub(crate)`. For a **path-reached** item, what nothing outside the new module reaches is put back as
   it was written, so a seam that carries a private helper along with its only caller keeps the helper
   private. Prefer such seams: cutting between a helper and its only caller is what forces a widening.
+  A type that no path reaches stays widened too when the signature of a widened item names it (a
+  return or parameter type, a `where` clause, a field, an alias or `const` type), repeated until nothing
+  new is kept; callers reach it by inference, and narrowing it would leave a `pub(crate)` signature over
+  a private type.
 
   A relocated **`impl` member** is different, and deliberately so. It is reached through its type, so
   no module path names it and the survey that decides restoration rightly does not descend into an
