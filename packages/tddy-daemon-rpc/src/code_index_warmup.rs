@@ -62,6 +62,18 @@ impl SessionIndexProgress {
         self.sender_for(session_id).subscribe()
     }
 
+    /// Follows `session_id`'s progress from its latest value on, or `None` when nothing has warmed
+    /// it. Unlike [`Self::watch`] it never creates an entry, so following an id nothing warmed
+    /// (or one the caller does not own) leaves no trace.
+    #[must_use]
+    pub fn follow(&self, session_id: &str) -> Option<watch::Receiver<Option<CodeIndexProgress>>> {
+        self.sessions
+            .lock()
+            .expect("the session progress map")
+            .get(session_id)
+            .map(watch::Sender::subscribe)
+    }
+
     fn sender_for(&self, session_id: &str) -> watch::Sender<Option<CodeIndexProgress>> {
         self.sessions
             .lock()

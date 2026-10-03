@@ -226,8 +226,15 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<WatchCodeIndexRequest>,
     ) -> Result<Response<Self::WatchCodeIndexStream>, Status> {
         let r = request.into_inner();
-        self.worktrees.authorize(&r.session_token)?;
-        let mut watching = self.index_progress.watch(&r.session_id);
+        // The session must be the caller's, as the worktree service decides it, before any of its
+        // progress — an `error` can carry paths — is looked up.
+        self.worktrees
+            .resolve_owned_session_dir(&r.session_token, &r.session_id)?;
+        let Some(mut watching) = self.index_progress.follow(r.session_id.trim()) else {
+            // Nothing warmed this session: an empty stream, as for any session never warmed.
+            let (_, rx) = tokio::sync::mpsc::channel(1);
+            return Ok(Response::new(ReceiverStream::new(rx)));
+        };
         let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
         tokio::spawn(async move {
             // The latest value is delivered on joining, then each change; a change is a

@@ -56,7 +56,8 @@ impl DaemonSessionHost {
     /// reports no end.
     ///
     /// TODO(indexing-indicators): the sandboxed claude-cli / cursor-cli, tool and split starts do
-    /// not report phases yet; claude-cli, cursor-cli and workspace starts do.
+    /// not report phases or announce their worktree yet; claude-cli, cursor-cli and workspace starts
+    /// do — see `docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md`.
     pub(crate) async fn start_session_core(
         &self,
         req: StartSessionRequest,

@@ -174,9 +174,12 @@ streamed start instead of the unary one.
   `DaemonSessionHost::with_worktree_observer`, implemented by the daemon's `IndexWarmupObserver`;
   installed only when `index_daemon:` is configured. The index-daemon block in `runtime.rs` moved
   above the session host so the observer can hold the registry (same task registry as before).
-- ⚠ `WatchCodeIndex` authorisation checks the **token** (`WorktreeServiceImpl::authorize`, made
-  `pub`) but **not session ownership**: `warm_for_session` takes no user and the acceptance test
-  watches a session with no directory. **Open decision for the developer.**
+- ✅ `WatchCodeIndex` authorisation: token → OS user → `<sessions base>/sessions/<id>` must exist
+  (`WorktreeServiceImpl::resolve_owned_session_dir`, which `restore_session_worktree` shares through
+  `session_dir_for`, so there is one ownership model). A foreign session and a missing one are the
+  same `NotFound`. `SessionIndexProgress::follow` is a non-creating lookup, so watching an unknown id
+  records nothing. Pinned by `another_users_watch_of_the_session_is_refused_and_shows_no_progress`;
+  the suite's fixture now creates the session directory. `authorize` stays private.
 - ✅ Web: `startPhase` follows the stream's `phase` events; `SessionIndexingIndicator` follows
   `watchCodeIndex`, shows `error`, cleans up on unmount; rendered in `SessionMainPane`'s header
   through `codeNavigationClient` (`SessionsDrawerScreen` passes the owning host's client).
@@ -228,10 +231,10 @@ streamed start instead of the unary one.
 
 | Severity | Where | Finding |
 |---|---|---|
-| WARNING | `code_navigation.rs` `watch_code_index` | token authorised, session ownership not — any signed-in user can follow any session's progress (and `error` text, which may carry paths) |
-| WARNING | `svc_start_session_core.rs:58` | own `TODO(indexing-indicators)`: sandboxed, tool and split starts report no phases and trigger no warm |
-| INFO | `code_index_warmup.rs` `SessionIndexProgress` | one map entry per session id ever watched, never freed |
-| INFO | `tddy-worktree-service` `authorize` | widened to `pub` for one caller |
+| ✅ fixed | `code_navigation.rs` `watch_code_index` | was token-only; now refuses a session that is not the caller's (see Technical Debt) |
+| WARNING → deferred | `svc_start_session_core.rs:58` | own `TODO(indexing-indicators)`: sandboxed, tool and split starts report no phases and trigger no warm — recorded in `docs/dev/todo/2026-10-03-start-phases-and-code-index-warm-skip-sandboxed-tool-and-split-starts.md` (developer chose to defer) |
+| ✅ fixed | `code_index_warmup.rs` `SessionIndexProgress` | watching an unknown id no longer creates an entry (`follow`); entries are still never freed for warmed sessions |
+| INFO | `./test -p tddy-worktree-service` | `worktree_size_calculator_acceptance::a_cached_size_is_served_after_reload_without_recomputing` and `remote_git_livekit_acceptance` fail; neither touches `authorize` / `restore_session_worktree`; not compared with the base |
 | INFO | `tddy-connectrpc-testkit` | outside the planned surface; test infrastructure, process-wide registration |
 | INFO | `CreateSessionAcceptance.cy.tsx` | failed 15/15 once in a batch run during a full-disk episode, passed alone; cause not found |
 

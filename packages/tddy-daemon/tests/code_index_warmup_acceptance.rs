@@ -74,6 +74,14 @@ fn a_rust_session_worktree() -> ASessionWorktree {
     .expect("a manifest");
     std::fs::write(path.join("src/main.rs"), "fn main() {}\n").expect("main.rs");
     git(&path, &["init", "-q"]);
+    // The session itself exists under the user it belongs to: its directory in their sessions base.
+    std::fs::create_dir_all(
+        data_dir
+            .path()
+            .join(tddy_core::output::SESSIONS_SUBDIR)
+            .join(THE_SESSION),
+    )
+    .expect("the session's directory");
     ASessionWorktree {
         path: path.canonicalize().expect("an existing worktree"),
         worktree_service,
@@ -406,9 +414,17 @@ fn the_navigation_entry(
     index_daemon: Option<IndexDaemonRegistry>,
     progress: &SessionIndexProgress,
 ) -> tddy_rpc::ServiceEntry {
+    the_navigation_entry_over(worktree.worktree_service.clone(), index_daemon, progress)
+}
+
+fn the_navigation_entry_over(
+    worktree_service: tddy_worktree_service::WorktreeServiceImpl,
+    index_daemon: Option<IndexDaemonRegistry>,
+    progress: &SessionIndexProgress,
+) -> tddy_rpc::ServiceEntry {
     build_code_navigation_entry(
         CodeNavigationServiceImpl::new(
-            Arc::new(worktree.worktree_service.clone()),
+            Arc::new(worktree_service),
             index_daemon.map(|registry| Arc::new(registry) as Arc<dyn IndexChannelSource>),
         )
         .with_index_progress(progress.clone()),
@@ -419,6 +435,16 @@ fn the_navigation_entry(
 async fn watch_code_index_at(
     entry: &tddy_rpc::ServiceEntry,
 ) -> mpsc::Receiver<Result<Vec<u8>, tddy_rpc::Status>> {
+    try_watch_code_index_at(entry)
+        .await
+        .expect("WatchCodeIndex opens a stream for the session")
+}
+
+/// Ask for `WatchCodeIndex` of [`THE_SESSION`] at the registered coordinate, and get the stream or
+/// the refusal.
+async fn try_watch_code_index_at(
+    entry: &tddy_rpc::ServiceEntry,
+) -> Result<mpsc::Receiver<Result<Vec<u8>, tddy_rpc::Status>>, tddy_rpc::Status> {
     let request = WatchCodeIndexRequest {
         session_token: TEST_TOKEN.to_string(),
         session_id: THE_SESSION.to_string(),
@@ -432,9 +458,7 @@ async fn watch_code_index_at(
         .handle_rpc(entry.name, "WatchCodeIndex", &message)
         .await
     {
-        tddy_rpc::RpcResult::ServerStream(opened) => {
-            opened.expect("WatchCodeIndex opens a stream for the session")
-        }
+        tddy_rpc::RpcResult::ServerStream(opened) => opened,
         tddy_rpc::RpcResult::Unary(_) => panic!("WatchCodeIndex is a server stream"),
     }
 }
@@ -585,5 +609,33 @@ async fn a_warm_failure_is_reported_and_the_session_stays_usable() {
             .contains("rust-analyzer exited during startup"),
         "the indicator names the failure's reason, was {:?}",
         delivered[0].error
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn another_users_watch_of_the_session_is_refused_and_shows_no_progress() {
+    // Given a session whose warm has reached 40% of indexing
+    let worktree = a_rust_session_worktree();
+    let (fake, warm) = a_fake_index_whose_warm_the_test_drives();
+    let host = an_index_daemon_host_serving(fake).await;
+    let registry = host.registry();
+    let progress = SessionIndexProgress::new();
+    let _warming = a_warm_of(&worktree, &registry, &progress);
+    warm.reports(indexing_at(40)).await;
+    until_the_latest_progress_is(&progress, the_header_sees_indexing_at(40)).await;
+
+    // When another user, whose sessions do not include it, watches the session's code index
+    let others_sessions = TempDir::new().expect("the other user's data directory");
+    let entry = the_navigation_entry_over(
+        test_service(others_sessions.path().to_path_buf(), "another-user"),
+        Some(registry),
+        &progress,
+    );
+    let refusal = try_watch_code_index_at(&entry).await;
+
+    // Then it is refused as a session that is not theirs, and no progress is delivered
+    assert_eq!(
+        refusal.map(|_| ()).map_err(|status| status.code),
+        Err(tddy_rpc::Code::NotFound)
     );
 }
