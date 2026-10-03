@@ -200,7 +200,12 @@ fn renders_the_statements_a_tree_lost_and_gained_without_stating_the_verdict() {
     // *means* is the front end's to decide, and each one turns it into a different thing
     assert_eq!(
         lines,
-        vec!["2 statements before, 2 after", "missing: 1", "added:   2",]
+        vec![
+            "2 statements before, 2 after",
+            "verify: tokens lost: 1 x1; tokens gained: 2 x1",
+            "missing: 1",
+            "added:   2",
+        ]
     );
     assert_eq!(
         console::comparison_refusal(&comparison),

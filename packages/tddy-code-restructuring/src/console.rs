@@ -24,7 +24,7 @@
 
 use crate::edit::VisibilityChange;
 use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
-use crate::verify::{Comparison, Excused};
+use crate::verify::{token_difference, Comparison, Excused};
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
 ///
@@ -177,6 +177,7 @@ pub fn comparison(comparison: &Comparison) -> Vec<String> {
         comparison.before, comparison.after
     )];
     lines.extend(excused_summary(&comparison.excused));
+    lines.extend(token_difference(&comparison.missing, &comparison.added));
     lines.extend(
         comparison
             .missing
@@ -300,6 +301,25 @@ mod tests {
         assert_eq!(
             line,
             "[4/29] op 3: ExtractModuleToFile -> 3 file(s) applied"
+        );
+    }
+
+    #[test]
+    fn a_failed_comparison_says_which_tokens_it_lost_and_gained() {
+        // Given a comparison whose unexplained statements differ in a token
+        let failed = Comparison {
+            missing: vec!["let x = check(1);".to_string()],
+            added: vec!["let x = inspect(1);".to_string()],
+            ..Comparison::default()
+        };
+
+        // When it is rendered
+        let lines = comparison(&failed);
+
+        // Then one line names what changed
+        assert!(
+            lines.contains(&"verify: tokens lost: check x1; tokens gained: inspect x1".to_string()),
+            "{lines:?}"
         );
     }
 

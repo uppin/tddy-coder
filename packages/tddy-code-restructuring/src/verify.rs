@@ -11,16 +11,32 @@
 //! missing and only a mechanical before-and-after count surfaced them.
 //!
 //! What is excused, because an `extract_module` always causes it and it is not a behaviour change —
-//! each counted and summarised rather than silently dropped, so the exit status is a signal:
+//! each counted and summarised rather than silently dropped, so the exit status is a signal. The
+//! passes run in this order, each on what the previous one left:
 //!
-//! - a leading `pub` / `pub(crate)` / `pub(super)` / `pub(in …)` on any statement (the assist widens
-//!   what it moves);
-//! - a call re-pointed through a module qualifier (`f(` becoming `m::f(`), when the two statements
-//!   are otherwise identical — paired one to one, and only lowercase module segments are deleted, so
-//!   `Foo::new(` never pairs with `Bar::new(`;
-//! - a `#[cfg(test)]` directly above a `use` (the tidy gates an import only tests use);
-//! - `rustfmt` wrapping a statement the above made longer: statements are compared as logical
-//!   statements, a wrapped one joined back into one line (bounded, never across a blank or comment).
+//! 1. **`use` items** are scaffolding, wholly: a multi-line `use crate::{` … `};` is reduced to its
+//!    first line before anything is compared, so its members are never read as statements. Imports
+//!    are the compiler's to check. (A comment written *inside* a `use` group is excused with it.)
+//! 2. **Exact multiset**: every statement is compared as a multiset across the whole crate, so a
+//!    statement moving between files is not a difference. A leading `pub` / `pub(crate)` /
+//!    `pub(super)` / `pub(in …)` is stripped first (the assist widens what it moves), a `#[cfg(test)]`
+//!    directly above a `use` is dropped (the tidy gates an import only tests use), and a statement
+//!    `rustfmt` wrapped is joined back into one when a `(` or `[` is left open (bounded, never across
+//!    a blank line or a comment).
+//! 3. **Visibility pairing**: a lost and a gained statement equal once a leading `pub…` is deleted.
+//! 4. **Re-point pairing**: a lost and a gained statement, 1:1, equal once lowercase module
+//!    qualifiers are deleted (`f(` becoming `m::f(`). Only lowercase segments go, so `Foo::new(` never
+//!    pairs with `Bar::new(`.
+//! 5. **Token multiset, last resort**: every leftover statement is tokenised — identifiers, numbers,
+//!    string and char literals and each `//` comment as single opaque tokens, other punctuation one
+//!    by one — dropping whitespace, `{` `}` `,` `;` and lowercase module qualifiers. When the lost
+//!    and the gained tokens are the *same multiset* the leftovers differ only by reflow, regrouping
+//!    or re-pointing (a match arm becoming a block, a closure call collapsing onto one line) and all
+//!    are excused, counted in [`Excused::repointed`] (there is deliberately no separate wire count).
+//!    When they differ nothing is excused here, and [`token_difference`] names the tokens that
+//!    changed. It cannot excuse a renamed callee, a changed or dropped argument, a lost statement or
+//!    a lost comment: each unbalances the multisets. The price is that one real loss anywhere keeps
+//!    all the leftover reflow reported too, beside the tokens line that points at the loss.
 //!
 //! Everything else stays an error, comments included: a lost banner comment is the finding this exists for.
 //!
@@ -77,7 +93,8 @@ pub fn statements(text: &str) -> Vec<String> {
 
 /// [`statements`], and how many `#[cfg(test)]` lines above a `use` were set aside.
 fn analyse(text: &str) -> (Vec<String>, usize) {
-    let lines: Vec<&str> = text.split('\n').map(str::trim).collect();
+    let trimmed: Vec<&str> = text.split('\n').map(str::trim).collect();
+    let lines = collapse_use_items(&trimmed);
     let logical: Vec<String> = join_wrapped(&lines)
         .into_iter()
         .filter(|statement| !statement.is_empty())
@@ -88,6 +105,49 @@ fn analyse(text: &str) -> (Vec<String>, usize) {
         .filter(|statement| !is_structural(statement))
         .collect();
     (kept, excused)
+}
+
+/// The most lines one multi-line `use` item may span before it is left as physical lines.
+const USE_LIMIT: usize = 400;
+
+/// Reduce every multi-line `use` item to its first line.
+///
+/// Only the first line of `use crate::{` … `};` starts with `use`, so without this the members are
+/// compared as statements. Imports are the compiler's to check; this comparison is about statements,
+/// and a restructure rewrites imports wholesale.
+fn collapse_use_items<'a>(lines: &[&'a str]) -> Vec<&'a str> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut at = 0;
+    while at < lines.len() {
+        out.push(lines[at]);
+        at += use_item_len(lines, at);
+    }
+    out
+}
+
+/// How many lines the `use` item starting at `at` spans (1 when it is not an open multi-line one).
+fn use_item_len(lines: &[&str], at: usize) -> usize {
+    let first = lines[at];
+    if !strip_visibility(first).starts_with("use ") || first.contains(';') {
+        return 1;
+    }
+    let mut depth = brace_depth(first);
+    for (offset, next) in lines.iter().enumerate().skip(at + 1).take(USE_LIMIT) {
+        depth += brace_depth(next);
+        if depth <= 0 && next.ends_with(';') {
+            return offset - at + 1;
+        }
+    }
+    1
+}
+
+/// Net `{` opened by a line.
+fn brace_depth(line: &str) -> i32 {
+    line.chars().fold(0, |depth, ch| match ch {
+        '{' => depth + 1,
+        '}' => depth - 1,
+        _ => depth,
+    })
 }
 
 /// The most physical lines one logical statement is joined from; past it the lines stay physical.
@@ -289,6 +349,174 @@ fn qualifier_len(chars: &[char], at: usize, chained: bool) -> usize {
     }
 }
 
+/// How many distinct tokens the `tokens lost` / `tokens gained` line names.
+const TOKENS_SHOWN: usize = 10;
+
+/// Counts of the code tokens of every statement in `statements`.
+fn token_counts(statements: &[String]) -> BTreeMap<String, i64> {
+    let mut counts = BTreeMap::new();
+    for token in statements
+        .iter()
+        .flat_map(|statement| code_tokens(statement))
+    {
+        *counts.entry(token).or_default() += 1;
+    }
+    counts
+}
+
+/// `a` minus `b`, keeping only what `a` has more of.
+fn surplus(a: &BTreeMap<String, i64>, b: &BTreeMap<String, i64>) -> Vec<(String, i64)> {
+    let mut over: Vec<(String, i64)> = a
+        .iter()
+        .map(|(token, count)| (token.clone(), count - b.get(token).copied().unwrap_or(0)))
+        .filter(|(_, count)| *count > 0)
+        .collect();
+    over.sort_by(|x, y| y.1.cmp(&x.1).then_with(|| x.0.cmp(&y.0)));
+    over
+}
+
+fn token_list(tokens: &[(String, i64)]) -> String {
+    if tokens.is_empty() {
+        return "none".to_string();
+    }
+    let shown: Vec<String> = tokens
+        .iter()
+        .take(TOKENS_SHOWN)
+        .map(|(token, count)| format!("{token} x{count}"))
+        .collect();
+    shown.join(", ")
+}
+
+/// The one line saying which code tokens the unexplained statements lost and gained, or `None`
+/// when their token multisets are equal (nothing changed but layout).
+///
+/// An author reading 263 unexplained lines cannot see that one callee was renamed; this can.
+pub fn token_difference(missing: &[String], added: &[String]) -> Option<String> {
+    let lost = token_counts(missing);
+    let gained = token_counts(added);
+    let (lost_only, gained_only) = (surplus(&lost, &gained), surplus(&gained, &lost));
+    if lost_only.is_empty() && gained_only.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "verify: tokens lost: {}; tokens gained: {}",
+        token_list(&lost_only),
+        token_list(&gained_only)
+    ))
+}
+
+/// The code tokens of a statement, with everything layout-only removed.
+///
+/// Identifiers, numbers, string and char literals (one opaque token each), a `//` comment (one
+/// token, its whole text) and single punctuation characters are kept. Whitespace, `{`, `}`, `,` and
+/// `;` are dropped, so block-versus-expression and trailing-comma differences vanish, and so is
+/// every lowercase module qualifier `segment::` before an identifier (the re-point rule).
+fn code_tokens(statement: &str) -> Vec<String> {
+    let chars: Vec<char> = statement.chars().collect();
+    let mut tokens = Vec::new();
+    let mut at = 0;
+    let mut chain_end = usize::MAX;
+    while at < chars.len() {
+        let c = chars[at];
+        let len = if c.is_whitespace() || "{},;".contains(c) {
+            1
+        } else if chars[at..].starts_with(&['/', '/']) {
+            tokens.push(chars[at..].iter().collect());
+            chars.len() - at
+        } else if c == '"' {
+            push_slice(&mut tokens, &chars, at, string_len(&chars, at))
+        } else if c == '\'' && char_literal_len(&chars, at) > 0 {
+            push_slice(&mut tokens, &chars, at, char_literal_len(&chars, at))
+        } else if c.is_alphabetic() || c == '_' {
+            let qualifier = token_qualifier_len(
+                &chars,
+                at,
+                at == chain_end || at == 0 || chars[at - 1] != ':',
+            );
+            if qualifier > 0 {
+                chain_end = at + qualifier;
+                qualifier
+            } else {
+                push_slice(&mut tokens, &chars, at, word_len(&chars, at))
+            }
+        } else if c.is_ascii_digit() {
+            push_slice(&mut tokens, &chars, at, word_len(&chars, at))
+        } else {
+            push_slice(&mut tokens, &chars, at, 1)
+        };
+        at += len;
+    }
+    tokens
+}
+
+fn push_slice(tokens: &mut Vec<String>, chars: &[char], at: usize, len: usize) -> usize {
+    tokens.push(chars[at..at + len].iter().collect());
+    len
+}
+
+fn word_len(chars: &[char], at: usize) -> usize {
+    chars[at..]
+        .iter()
+        .take_while(|c| c.is_alphanumeric() || **c == '_')
+        .count()
+}
+
+/// Length of the string literal opening at `at`, to its closing quote or the end of the text.
+fn string_len(chars: &[char], at: usize) -> usize {
+    let mut len = 1;
+    while let Some(&c) = chars.get(at + len) {
+        len += if c == '\\' { 2 } else { 1 };
+        if c == '"' {
+            break;
+        }
+    }
+    len.min(chars.len() - at)
+}
+
+/// Length of the char literal opening at `at`, or 0 when the `'` opens a lifetime.
+fn char_literal_len(chars: &[char], at: usize) -> usize {
+    match (chars.get(at + 1), chars.get(at + 2), chars.get(at + 3)) {
+        (Some('\\'), Some(_), Some('\'')) => 4,
+        (Some(c), Some('\''), _) if *c != '\\' => 3,
+        _ => 0,
+    }
+}
+
+/// Length of a lowercase `segment::` qualifier at `at` when it names something and `may_start`.
+fn token_qualifier_len(chars: &[char], at: usize, may_start: bool) -> usize {
+    if !may_start || !(chars[at].is_ascii_lowercase() || chars[at] == '_') {
+        return 0;
+    }
+    let after = at + word_len(chars, at);
+    let separated = chars.get(after) == Some(&':') && chars.get(after + 1) == Some(&':');
+    let names_something = chars
+        .get(after + 2)
+        .is_some_and(|c| c.is_alphabetic() || *c == '_');
+    if separated && names_something {
+        after + 2 - at
+    } else {
+        0
+    }
+}
+
+/// Last resort for what the exact and 1:1 passes left: when the leftover lost statements and the
+/// leftover gained ones carry the same token multiset, they differ only in layout and qualifiers.
+fn reflow_pass(missing: Vec<String>, added: Vec<String>) -> Paired {
+    let same = token_difference(&missing, &added).is_none();
+    if same {
+        return Paired {
+            pairs: missing.len(),
+            missing: Vec::new(),
+            added: Vec::new(),
+        };
+    }
+    Paired {
+        missing,
+        added,
+        pairs: 0,
+    }
+}
+
 /// What is left of two lists after pairing entries that agree on a key, one to one.
 struct Paired {
     missing: Vec<String>,
@@ -372,15 +600,16 @@ pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, Strin
     }
 
     let widened = pair_by(missing, added, visibility_key);
-    let re_pointed = pair_by(widened.missing, widened.added, re_point_key);
+    let paired = pair_by(widened.missing, widened.added, re_point_key);
+    let reflowed = reflow_pass(paired.missing, paired.added);
 
     Comparison {
         before: before_total,
         after: after_total,
-        missing: re_pointed.missing,
-        added: re_pointed.added,
+        missing: reflowed.missing,
+        added: reflowed.added,
         excused: Excused {
-            repointed: re_pointed.pairs,
+            repointed: paired.pairs + reflowed.pairs,
             visibility: widened.pairs,
             cfg_test_gates: gates,
         },
@@ -623,6 +852,123 @@ mod tests {
         );
 
         assert!(comparison.holds(), "{comparison:?}");
+    }
+
+    const CHECK_ARM: &str =
+        "Command::Check => check(root, options, client, cancel).map(Outcome::Checked),\n";
+    const CHECK_BLOCK: &str = "Command::Check => {\ncheck_entry_points::check(root, options, client, cancel).map(Outcome::Checked)\n}\n";
+
+    #[test]
+    fn a_multi_line_use_group_is_excused_whole_and_the_next_statement_still_compared() {
+        let comparison = verdict(
+            "use crate::{\n    A,\n    B,\n};\nlet x = 1;\n",
+            "use crate::{\n    C,\n    runner::{a, b},\n};\nlet x = 2;\n",
+        );
+
+        assert_eq!(comparison.missing, ["let x = 1;"]);
+        assert_eq!(comparison.added, ["let x = 2;"]);
+    }
+
+    #[test]
+    fn a_multi_line_public_use_group_is_excused_whole() {
+        let comparison = verdict(
+            "pub use crate::{\n    A,\n};\n",
+            "pub(crate) use crate::{\n    B,\n    c::{D, E},\n};\n",
+        );
+
+        assert!(comparison.holds(), "{comparison:?}");
+    }
+
+    #[test]
+    fn a_match_arm_reflowed_into_a_block_with_a_gained_qualifier_is_excused() {
+        let comparison = verdict(CHECK_ARM, CHECK_BLOCK);
+
+        assert!(comparison.holds(), "{comparison:?}");
+        assert_eq!(comparison.excused.repointed, 1);
+    }
+
+    #[test]
+    fn a_closure_let_reflowed_to_one_line_with_a_gained_qualifier_is_excused() {
+        let comparison = verdict(
+            "let (journal, lowered) = open_run(plan, root, || {\n    refuse(root, plan)\n})?;\n",
+            "let (journal, lowered) = anchors::open_run(plan, root, || refuse(root, plan))?;\n",
+        );
+
+        assert!(comparison.holds(), "{comparison:?}");
+    }
+
+    #[test]
+    fn the_real_entry_points_split_exits_clean() {
+        let before = "use crate::{\n    AppliedRun, Command, Finding,\n    StatePaths,\n};\n\
+            fn run() {\n\
+            match command {\n\
+            Command::Anchors => item_anchors(root, options, client, cancel).map(Outcome::ItemAnchored),\n\
+            Command::Check => check(root, options, client, cancel).map(Outcome::Checked),\n\
+            }\n\
+            let (journal, lowered) = open_run_resolving_anchors(plan, root, &paths, options, registry, || {\n\
+            refuse_a_broken_baseline(root, plan, options, cancel)\n\
+            })?;\n}\n";
+        let after = "use crate::{\n    plan_store::PlanStore,\n    runner::{entry_points::anchor_entry_points, restore_ledger, AppliedRun},\n};\n\
+            fn run() {\n\
+            match command {\n\
+            Command::Anchors => anchor_entry_points::item_anchors(root, options, client, cancel)\n\
+            .map(Outcome::ItemAnchored),\n\
+            Command::Check => {\n\
+            check_entry_points::check(root, options, client, cancel).map(Outcome::Checked)\n\
+            }\n\
+            }\n\
+            let (journal, lowered) = anchor_entry_points::open_run_resolving_anchors(plan, root, &paths, options, registry, || refuse_a_broken_baseline(root, plan, options, cancel))?;\n}\n";
+
+        let comparison = verdict(before, after);
+
+        assert!(comparison.holds(), "{comparison:?}");
+    }
+
+    #[test]
+    fn a_renamed_callee_is_not_excused_and_the_tokens_say_which() {
+        let comparison = verdict(CHECK_ARM, &CHECK_BLOCK.replace("::check(", "::inspect("));
+
+        let tokens = token_difference(&comparison.missing, &comparison.added);
+
+        assert!(!comparison.holds());
+        assert_eq!(
+            tokens.as_deref(),
+            Some("verify: tokens lost: check x1; tokens gained: inspect x1")
+        );
+    }
+
+    #[test]
+    fn a_dropped_argument_is_not_excused() {
+        let comparison = verdict(CHECK_ARM, &CHECK_BLOCK.replace("client, cancel", "client"));
+
+        assert!(!comparison.holds());
+        assert_eq!(
+            token_difference(&comparison.missing, &comparison.added).as_deref(),
+            Some("verify: tokens lost: cancel x1; tokens gained: none")
+        );
+    }
+
+    #[test]
+    fn a_lost_comment_is_still_reported_beside_reflow_noise() {
+        let comparison = verdict(&format!("// the check arm\n{CHECK_ARM}"), CHECK_BLOCK);
+
+        assert!(comparison.missing.contains(&"// the check arm".to_string()));
+    }
+
+    #[test]
+    fn a_lost_statement_beside_unrelated_reflow_is_reported_with_its_tokens() {
+        let comparison = verdict(&format!("let spread = 1;\n{CHECK_ARM}"), CHECK_BLOCK);
+
+        assert!(!comparison.holds());
+        assert_eq!(
+            token_difference(&comparison.missing, &comparison.added).as_deref(),
+            Some("verify: tokens lost: 1 x1, = x1, let x1, spread x1; tokens gained: none")
+        );
+    }
+
+    #[test]
+    fn equal_leftovers_have_no_token_difference() {
+        assert_eq!(token_difference(&[], &[]), None);
     }
 
     #[test]
