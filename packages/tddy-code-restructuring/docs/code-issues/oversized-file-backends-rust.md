@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **2,666 production lines** (2026-10-03, #539; 4,475 before; 4,475 after #542, 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
+**Metrics:** **2,705 production lines** (2026-10-03, #569; 2,666 after #539; 4,475 before; 4,475 after #542, 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
 **Status:** Open — partially fixed (the impl-member seams remain). #539 (`#live-plan` 7/15) moved the free-item runs out (4,475 to 2,666); #527 had already taken 472 net
 
@@ -20,6 +20,7 @@
 | 2026-10-02 | 4,433 | #537 (`#live-plan` 1/7): +74 by the same rule (merge base 4,359 → 4,433). Item-anchor resolution through the LSP outline (including the outline-readiness check `outline_is_the_servers_answer`); the split is deferred because later `#live-plan` nodes touch this file. None of its own seams were cut |
 | 2026-10-02 | 4,475 | #542 (`#live-plan` 5/7): +42 by the same rule (merge base 4,433 → 4,475). `assist` takes a probe position, `assisted_edit` widens/refuses a borrowed selection, probes within the bound and carries function-local `use` items, and `check` reports the carry; the logic itself went to `selection.rs` (new), `imports.rs`, `early_return.rs` and `readiness.rs`. Split deferred: #543 (`check-parity`, the dependent) touches this file. None of its own seams were cut |
 | 2026-10-03 | 2,666 | #539 (`#live-plan` 7/15): 4,475 to 2,666 (−1,809) by engine moves only. Nine modules took the free-item runs: `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`. What is left is the methods of the three `impl RustBackend` blocks and the trait impls, which only the engine's impl-member seam can move |
+| 2026-10-03 | 2,705 | #569 (`#live-plan` 9/15): +39. The two signature assists' own logic (carets, the used-parameter refusal, the struct rename) went to a new sibling, `backends/rust/signature.rs` (403 lines); what is left here is wiring: two `SUPPORTED` entries, two `assist_for` rows and the dispatch in `multi_file_assist`. The split of this file stays deferred — every open `#live-plan` node edits it — with the developer's consent. |
 
 ## What the gate found
 

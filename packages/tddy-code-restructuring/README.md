@@ -82,6 +82,9 @@ requests reads the tree on disk again after each one. See
 `convert_tuple_return_to_struct` (`name`: the new struct), `move_module_to_crate` (`to`,
 `reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`).
 
+`remove_unused_param` and `convert_tuple_return_to_struct` rewrite every caller as well as the declaration,
+through rust-analyzer's own assists; see [docs/signature-assists.md](docs/signature-assists.md).
+
 `move_cluster_to_crate` moves a **set** of modules as one unit — `anchor` is the first member and
 `also` names the rest — in a single edit, so the tree is never half-moved. That is what makes a
 mutually-referencing group movable at all: moved one at a time, each module's reference to a sibling
