@@ -2,9 +2,9 @@
 //!
 //! Every method is a routing table entry: it hands the decoded request to [`crate::operations`]
 //! (the streaming restructure half), [`crate::queries`] (the unary restructure half),
-//! [`crate::analyze`] (everything about coverage and complexity) or `crate::navigation`
-//! (definition, references and hover) and does nothing else, so this
-//! file stays readable as the list of what the coordinate answers to.
+//! [`crate::analyze`] (everything about coverage and complexity), `crate::navigation`
+//! (definition, references and hover) or `crate::symbols` (symbols and diagnostics) and does
+//! nothing else, so this file stays readable as the list of what the coordinate answers to.
 
 use std::sync::Arc;
 
@@ -18,13 +18,15 @@ use crate::operations;
 use crate::proto::code_index::{
     AnalyzeEvent, AnchorsRequest, AnchorsResponse, ApplyRequest, CheckRequest, CodeIndexService,
     CodeIndexServiceServer, ComplexityRequest, ComplexityResponse, CoverageRequest,
-    DefinitionRequest, DefinitionResponse, DuplicateTestsRequest, HoverRequest, HoverResponse,
-    IndexProgress, ListPlansRequest, LoadPlansRequest, PlanStatusRequest, PlanStatusResponse,
-    PlansResponse, ReferencesRequest, ReferencesResponse, ReportRequest, ReportResponse,
-    RestructureEvent, UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest,
+    DefinitionRequest, DefinitionResponse, DiagnosticsRequest, DiagnosticsResponse,
+    DuplicateTestsRequest, HoverRequest, HoverResponse, IndexProgress, ListPlansRequest,
+    LoadPlansRequest, PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest,
+    ReferencesResponse, ReportRequest, ReportResponse, RestructureEvent, SymbolsRequest,
+    SymbolsResponse, UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest,
     WorkspacesRequest, WorkspacesResponse,
 };
 use crate::queries;
+use crate::symbols;
 use crate::CODE_INDEX_SERVICE;
 
 /// A stream of events a running operation reports as it goes.
@@ -242,6 +244,26 @@ impl CodeIndexService for CodeIndexServiceImpl {
         request: tddy_rpc::Request<HoverRequest>,
     ) -> Result<tddy_rpc::Response<HoverResponse>, tddy_rpc::Status> {
         navigation::serve_hover(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// The symbols of a file, or the root's symbols matching a query.
+    async fn symbols(
+        &self,
+        request: tddy_rpc::Request<SymbolsRequest>,
+    ) -> Result<tddy_rpc::Response<SymbolsResponse>, tddy_rpc::Status> {
+        symbols::serve_symbols(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// What the language server reports wrong with a file.
+    async fn diagnostics(
+        &self,
+        request: tddy_rpc::Request<DiagnosticsRequest>,
+    ) -> Result<tddy_rpc::Response<DiagnosticsResponse>, tddy_rpc::Status> {
+        symbols::serve_diagnostics(&self.index, request.into_inner())
             .await
             .map(tddy_rpc::Response::new)
     }

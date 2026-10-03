@@ -12724,14 +12724,23 @@ dependencies = [
 name = "tddy-lsp-executor"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "hyper-util",
  "log",
+ "pretty_assertions",
  "serde_json",
  "serial_test",
  "tddy-build",
  "tddy-core",
+ "tddy-index-daemon",
  "tddy-lsp",
+ "tddy-rpc",
  "tddy-task",
+ "tempfile",
  "tokio",
+ "tokio-stream",
+ "tonic 0.12.3",
+ "tower 0.5.3",
 ]
 
 [[package]]
