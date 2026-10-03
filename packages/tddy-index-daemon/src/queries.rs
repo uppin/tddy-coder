@@ -362,6 +362,8 @@ fn held_by(store: &PlanStore) -> PlansResponse {
                 plan: held.key.to_string(),
                 ops: held.ops as u32,
                 dirty: held.dirty,
+                // TODO(live-plans): implement — the held plan's stale operations.
+                stale: Vec::new(),
             })
             .collect(),
     }
