@@ -8,7 +8,7 @@
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — ten operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twelve operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -220,6 +220,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `extract_module_to_file` | Move items to new file |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
+| `remove_unused_param` | Remove a parameter the body never reads, from the declaration and from **every call site in every file**. The anchor names the function and `name` is the parameter. rust-analyzer offers the removal only for an unused parameter, so naming a used one is refused — the refusal names the parameter and says it is used, and nothing is written. A `name` that is not a parameter of the function is refused as well |
+| `convert_tuple_return_to_struct` | `-> (A, B)` becomes `-> Name`, a new tuple struct that keeps the function's visibility, and every destructuring caller is rewritten (`let (a, b) = f()` becomes `let Name(a, b) = f()`). The anchor names the function and `name` is the struct. rust-analyzer names the struct after the function; the engine has the server rename it to `name`, declaration and callers together. A function with no return type is refused |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
@@ -482,6 +484,14 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
 
 ## Known limitations
 
+- **`remove_unused_param` reports every refusal from the server as a used parameter.** The refusal
+  names the parameter and says it is used, with the server's own reason in parentheses; a parameter
+  rust-analyzer declines to remove for another reason (a trait method whose impls would diverge, for
+  instance) is reported the same way, and the parenthesis is where the cause shows. Only a parameter
+  bound by a plain identifier (`name`, `mut name`) can be named; a destructuring pattern in the
+  parameter list is refused as not a parameter of the function.
+- **Both signature operations use the crate's byte columns**, as every other anchor does, so a
+  non-ASCII character earlier on the parameter's line moves the caret off the name the server expects.
 - **An assist may relocate less than the anchor asked for, and rewrite the remainder in place.**
   rust-analyzer decides the extraction's real extent; when it moves part of the anchored range, it
   rewrites what it left behind to reach the new module through qualified `module::Item` paths. The

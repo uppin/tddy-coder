@@ -78,8 +78,12 @@ requests reads the tree on disk again after each one. See
 ## Operations (v1)
 
 `extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`),
-`extract_module_to_file`, `extract_trait`, `inline_method`, `move_module_to_crate` (`to`,
+`extract_module_to_file`, `extract_trait`, `inline_method`, `remove_unused_param` (`name`: the parameter),
+`convert_tuple_return_to_struct` (`name`: the new struct), `move_module_to_crate` (`to`,
 `reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`).
+
+`remove_unused_param` and `convert_tuple_return_to_struct` rewrite every caller as well as the declaration,
+through rust-analyzer's own assists; see [docs/signature-assists.md](docs/signature-assists.md).
 
 `move_cluster_to_crate` moves a **set** of modules as one unit — `anchor` is the first member and
 `also` names the rest — in a single edit, so the tree is never half-moved. That is what makes a

@@ -211,6 +211,16 @@ pub enum RefactorKind {
     /// Takes `to`, the destination crate's directory. The destination's `[dev-dependencies]` gain
     /// what the moved test names, not its `[dependencies]`.
     MoveTestBinaryToCrate,
+    /// rust-analyzer `Remove unused parameter`: drops a parameter the body never reads, from the
+    /// declaration and from every call site. Anchored on the function; `name` is the parameter.
+    ///
+    /// The server offers it only for an unused parameter, so a used one is refused naming it rather
+    /// than approximated.
+    RemoveUnusedParam,
+    /// rust-analyzer `convert_tuple_return_type_to_struct`: `-> (A, B)` becomes `-> Named`, a new
+    /// tuple struct, and every destructuring caller is rewritten to match. Anchored on the function;
+    /// `name` is the new struct's, given to the assist's placeholder through the server's rename.
+    ConvertTupleReturnToStruct,
 }
 
 impl RefactorKind {
@@ -615,6 +625,45 @@ mod tests {
 
         assert_eq!(plan.ops[0].op, RefactorKind::InlineMethod);
         assert_eq!(plan.ops[0].name, None);
+    }
+
+    /// A parameter removal names the parameter it drops, and the function it is anchored on.
+    #[test]
+    fn reads_a_parameter_removal_naming_its_parameter() {
+        let plan = Plan::parse(&plan_with(
+            r#"{"op":"remove_unused_param","anchor":{"kind":"symbol","file":"src/spawn.rs","path":"build_claude_argv"},"name":"initial_prompt"}"#,
+        ))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::RemoveUnusedParam);
+        assert_eq!(plan.ops[0].name.as_deref(), Some("initial_prompt"));
+    }
+
+    /// A tuple-return conversion names the struct it introduces.
+    #[test]
+    fn reads_a_tuple_return_conversion_naming_its_struct() {
+        let plan = Plan::parse(&plan_with(
+            r#"{"op":"convert_tuple_return_to_struct","anchor":{"kind":"symbol","file":"src/placement.rs","path":"resolve_placement"},"name":"Placement"}"#,
+        ))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::ConvertTupleReturnToStruct);
+        assert_eq!(plan.ops[0].name.as_deref(), Some("Placement"));
+    }
+
+    /// With no `name` a tuple-return conversion has nothing to call the struct, and the assist's own
+    /// placeholder would land in the tree.
+    #[test]
+    fn refuses_a_tuple_return_conversion_that_names_no_struct() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"convert_tuple_return_to_struct","anchor":{"kind":"symbol","file":"src/placement.rs","path":"resolve_placement"}}"#,
+        ))
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "plan is malformed: `convert_tuple_return_to_struct` needs `name`: the new struct's name"
+        );
     }
 
     /// `extract_class` is the one operation with no engine behind it, which makes it the one most

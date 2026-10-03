@@ -38,6 +38,7 @@ mod prelude_shadow;
 mod readiness;
 mod relative_visibility;
 mod selection;
+mod signature;
 
 pub use chatter::ServerChatter;
 
@@ -57,7 +58,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 10] = [
+const SUPPORTED: [RefactorKind; 12] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -68,6 +69,8 @@ const SUPPORTED: [RefactorKind; 10] = [
     RefactorKind::MoveModuleToCrate,
     RefactorKind::MoveClusterToCrate,
     RefactorKind::MoveTestBinaryToCrate,
+    RefactorKind::RemoveUnusedParam,
+    RefactorKind::ConvertTupleReturnToStruct,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -319,6 +322,27 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
         RefactorKind::InlineMethod => Some(Assist {
             title: "inline into all callers",
             kinds: &["refactor.inline"],
+            at_caret: true,
+            placeholder: None,
+            multi_file: true,
+            needs_inference: false,
+            relocates_items: false,
+        }),
+        // Offered with the caret on the parameter's name, which is why the caret is placed there.
+        RefactorKind::RemoveUnusedParam => Some(Assist {
+            title: "remove unused parameter",
+            kinds: &["refactor"],
+            at_caret: true,
+            placeholder: None,
+            multi_file: true,
+            needs_inference: false,
+            relocates_items: false,
+        }),
+        // The struct it writes is named after the function; `multi_file_assist` finds that name by
+        // what the assist added and has the server rename it, so there is no fixed placeholder.
+        RefactorKind::ConvertTupleReturnToStruct => Some(Assist {
+            title: "convert tuple return type to tuple struct",
+            kinds: &["refactor.rewrite"],
             at_caret: true,
             placeholder: None,
             multi_file: true,
@@ -1780,11 +1804,26 @@ impl RustBackend {
         op: &RefactorOp,
     ) -> Result<WorkspaceEdit> {
         (self.progress)(&format!("assist: {:?} (multi-file)", op.op));
-        let range = self.anchor_range(uri, op)?;
+        let mut range = self.anchor_range(uri, op)?;
+        match op.op {
+            RefactorKind::RemoveUnusedParam => {
+                range = signature::parameter_caret(workspace, op, range)?
+            }
+            RefactorKind::ConvertTupleReturnToStruct => {
+                range = signature::return_type_caret(workspace, op, range)?
+            }
+            _ => {}
+        }
 
-        let action = self.assist(uri, range, op.op, range.start)?;
+        let action = self
+            .assist(uri, range, op.op, range.start)
+            .map_err(|refusal| signature::refuse_used_parameter(op, refusal))?;
         let resolved = self.request_settled("codeAction/resolve", action)?;
         let workspace_edit = resolved.get("edit").unwrap_or(&resolved);
+
+        if op.op == RefactorKind::ConvertTupleReturnToStruct {
+            return self.name_converted_struct(uri, workspace, op, workspace_edit);
+        }
 
         let mut changes = Vec::new();
         let mut created: Vec<String> = Vec::new();
