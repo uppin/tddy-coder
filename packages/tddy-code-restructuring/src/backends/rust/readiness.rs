@@ -2,7 +2,7 @@
 //!
 //! Split out of `backends/rust.rs`, which is past its size budget.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -17,6 +17,18 @@ const INACTIVE_CODE: &str = "inactive-code";
 
 /// The code rust-analyzer gives the diagnostic it attaches to a file no crate's module tree reaches.
 const UNLINKED_FILE: &str = "unlinked-file";
+
+/// How long a ready index may leave a hover `null` at a position that has nothing excusing it.
+///
+/// A ready index answers a hover in well under a second. Past this the position is one the server
+/// will never type, and waiting longer is how a range opening with `&` held a warm daemon for
+/// minutes with the server idle.
+pub(super) const READY_HOVER_BOUND: Duration = Duration::from_secs(30);
+
+/// Whether a hover silent for `silent_for` has outlasted `bound`; no bound never does.
+fn silent_past(silent_for: Duration, bound: Option<Duration>) -> bool {
+    bound.is_some_and(|bound| silent_for >= bound)
+}
 
 /// Where a wait for one position ended.
 pub(super) enum Answerable {
@@ -111,8 +123,31 @@ impl RustBackend {
         uri: &str,
         position: &Value,
     ) -> Result<Answerable> {
+        self.await_answer(uri, position, None)
+    }
+
+    /// [`Self::wait_until_resolved`], ended as unusable once a ready index has left the hover `null`
+    /// for [`READY_HOVER_BOUND`] — a position nothing excuses and nothing will ever type.
+    pub(super) fn wait_until_resolved_within_bound(
+        &mut self,
+        uri: &str,
+        position: &Value,
+    ) -> Result<()> {
+        match self.await_answer(uri, position, Some(READY_HOVER_BOUND))? {
+            Answerable::Ready => Ok(()),
+            Answerable::Inactive(said) => Err(inactive_code_refusal(uri, position, &said)?),
+        }
+    }
+
+    fn await_answer(
+        &mut self,
+        uri: &str,
+        position: &Value,
+        bound: Option<Duration>,
+    ) -> Result<Answerable> {
         (self.progress)("waiting for type inference at the anchor");
         let started = Instant::now();
+        let mut ready_and_silent_since: Option<Instant> = None;
         loop {
             let hover = self.request_settled(
                 "textDocument/hover",
@@ -136,6 +171,21 @@ impl RustBackend {
                     self.refuse_degraded_index()?;
                     return Ok(Answerable::Inactive(said));
                 }
+            }
+            if hover.is_null() && self.indexed && !self.chatter.loading() {
+                let silent_for = ready_and_silent_since
+                    .get_or_insert_with(Instant::now)
+                    .elapsed();
+                if silent_past(silent_for, bound) {
+                    return Err(server_defect(format!(
+                        "the index is ready and rust-analyzer still gives no hover at {} after \
+                         {silent_for:?}, so it cannot type this position. Start the range on an \
+                         expression it can type.",
+                        located(uri, position)?
+                    )));
+                }
+            } else {
+                ready_and_silent_since = None;
             }
             if !self.keep_waiting(INDEXING_POLL) {
                 return Err(self.incomplete_index(started.elapsed()));
@@ -375,5 +425,41 @@ mod tests {
 
         // Then
         assert_eq!(said, None);
+    }
+
+    #[test]
+    fn a_hover_silent_for_exactly_the_bound_has_outlasted_it() {
+        // Given a ready index that has left the hover null for the whole bound
+        let silent_for = READY_HOVER_BOUND;
+
+        // When
+        let outlasted = silent_past(silent_for, Some(READY_HOVER_BOUND));
+
+        // Then
+        assert!(outlasted);
+    }
+
+    #[test]
+    fn a_hover_silent_for_less_than_the_bound_has_not_outlasted_it() {
+        // Given
+        let silent_for = READY_HOVER_BOUND - Duration::from_millis(1);
+
+        // When
+        let outlasted = silent_past(silent_for, Some(READY_HOVER_BOUND));
+
+        // Then
+        assert!(!outlasted);
+    }
+
+    #[test]
+    fn a_wait_without_a_bound_never_outlasts_it() {
+        // Given a hover silent for far longer than the bound
+        let silent_for = READY_HOVER_BOUND * 1000;
+
+        // When
+        let outlasted = silent_past(silent_for, None);
+
+        // Then
+        assert!(!outlasted);
     }
 }

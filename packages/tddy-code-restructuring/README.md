@@ -114,8 +114,11 @@ list what that leaves for the build to catch.
 The delegated operations take an assist's output as a draft, not a result. The import pass restores
 what the cut stranded, weighing only the names the seam lost and applying an import only when it
 reduces its name's unresolved occurrences; two lexical repairs undo the `modname::` rewrites the
-assist writes into calls it leaves behind; and an `extract_method` whose range returns from the
-enclosing function is refused before the assist runs. See
+assist writes into calls it leaves behind; an `extract_method` whose range returns from the
+enclosing function is refused before the assist runs; an `extract_method` carries the
+function-local `use` items its range needs into the new function; and an `extract_variable` asks
+the server about a position that can answer, binds a borrowed place as the borrow, and never waits
+on the server without a bound. See
 [docs/assist-output-repairs.md](docs/assist-output-repairs.md) and
 [docs/readiness-and-gates.md](docs/readiness-and-gates.md).
 

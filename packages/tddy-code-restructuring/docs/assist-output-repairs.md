@@ -3,8 +3,11 @@
 rust-analyzer's "extract into module" assist moves the text; it does not leave a crate that builds.
 Between the assist and the rename of its placeholder module, `RustBackend` runs three passes over
 the produced text: the **import pass** restores the names the cut stranded, and two lexical repairs
-undo rewrites the assist writes that are not Rust. Each pass either makes the result correct or
-refuses the operation by name; none writes a result it cannot vouch for.
+undo rewrites the assist writes that are not Rust. Two further steps shape `extract_method` and
+`extract_variable`: a function-local `use` the new function needs is carried into it, and the range
+`extract_variable` hands the assist is chosen so the assist binds a borrow as a borrow. Each pass
+either makes the result correct or refuses the operation by name; none writes a result it cannot
+vouch for.
 
 | Module (`src/backends/rust/`) | Holds |
 |---|---|
@@ -12,6 +15,9 @@ refuses the operation by name; none writes a result it cannot vouch for.
 | `impl_seam.rs` | `refuse_impl_sibling_references`, `is_inherent_impl`, `with_method_calls_restored`, `reached_through_the_type` |
 | `nested_modules.rs` | `with_nested_references_restored`, and the brace-depth module reader behind it |
 | `introduced.rs` | finding the `let` binding `extract_variable`'s assist introduced, so it can be renamed to the plan's `name` |
+| `selection.rs` | the position `extract_variable` probes, the widening of a borrowed place to its borrow, and the by-value refusal |
+
+`imports.rs` also holds the carry of function-local `use` items (`carry_function_local_uses`).
 
 `backends/rust.rs` wires these in. It keeps `choose_import`, `already_bound`, `expand_use` and
 `collect_aliases`.
@@ -68,6 +74,20 @@ which a pass that makes progress on every round never reaches.
 
 A bare path through an item the parent declares (`sibling::X`, 2018 uniform paths) cannot be told
 from an extern crate by reading, so it is left as written, and verification refuses it by name.
+
+## A function-local `use` the extracted function needs
+
+rust-analyzer writes an extracted function beside the one it came from, where that function's own
+`use` items are not in scope. `carry_function_local_uses` runs for an `extract_method` whose new
+function is not nested in its origin: each `use` inside the origin function that binds a name the
+range mentions is written, as written, at the top of the new function's body, so it stays local and
+means what it meant. A `use` the range itself holds travelled with it and is not copied again. The
+words of the range are read over text with comments and strings masked, and a `use` is recognised
+only at the start of a statement, so one in a comment or a string is not one.
+
+The origin's own `use` is left as written. When nothing in the origin names the binding any more, it
+is an unused import, which the compiler reports as a warning, not an error. `check` reports the
+items it would carry on its progress line; that is information, not a finding.
 
 ## Cutting through an `impl`
 
@@ -154,6 +174,33 @@ rust-analyzer's: one operation replaces **one** occurrence of the expression, an
 between `&self.x` and `self.x` from the autoref it sees (see
 [plan-schema.md](../../../.agents/skills/code-restructuring/references/plan-schema.md)).
 
+## Where `extract_variable` asks, and what it binds
+
+Two defects came from taking the range exactly as written.
+
+**The probe position.** The type probe hovers at the first position of the range that can carry a
+hover (`hover_bearing_position`): past leading `&`, `&mut`, `*`, `!`, `-` and `(`, and whitespace
+after them. On a `&` the hover is `null` however long the index has been ready. The position is read
+on the range's first line and never past the range's end; a range of nothing but such punctuation
+keeps its start. The wait is bounded; see
+[readiness-and-gates.md](readiness-and-gates.md#the-probe-is-bounded).
+
+**A borrowed place is bound as the borrow.** The assist binds what is selected by value, so `self.v`
+selected inside `&self.v` becomes `let x = self.v;`, a move out of the borrow (`E0507`) whenever the
+type is not `Copy`. When the selection is a place (a field access or a path) that is the whole
+operand of a unary `&` or `&mut` written on the same line, the selection is widened to include the
+borrow, and the binding is `let x = &self.v;`. Where the borrow is on another line, or the range
+spans lines, it is not widened, and `refuse_by_value_hoist` refuses the selection as
+`rust-analyzer's answer was unusable:`, naming both positions and advising to select the borrow
+including its `&`.
+
+That refusal is **structural**. It asks whether a place sits directly under a `&` or `&mut` the
+selection omits, from the text alone, and does not ask whether the type is `Copy`: there is no type
+information at that point, and a by-value hoist of a borrowed place is never what the borrow meant.
+So a `Copy` place under a borrow is refused too; selecting the borrow, `&` included, is always
+accepted. A place that is the receiver of a call, an index, a method or a `?` is not the borrow's
+operand and is not refused.
+
 ## Known limitations
 
 - **A generic qualifier is not undone.** `Foo::<T>::modname::f` is left as written and refused.
@@ -166,6 +213,10 @@ between `&self.x` and `self.x` from the autoref it sees (see
   rust-analyzer offers `super::super::X` itself, so the pass never reaches that fallback. Only the
   alias form is reproduced against a live server; the plain form's test is a guard.
 - **A trait `impl` cut with no sibling reference is not refused**, though it is E0119 all the same.
+- **A borrow on another line is refused, not widened.** The widening is single-line; a selection
+  whose `&` is on an earlier line is refused by the by-value check, so the plan selects the borrow.
+- **The carried `use` is not removed from the origin**, so a `use` whose only reader moved leaves an
+  unused-import warning there.
 - **The module reader is lexical.** It counts braces over masked text rather than asking the server
   for the module tree, so a shape the lexer does not know (a brace a macro produces, for example)
   could mislead it. The compile gate on `apply` (see [readiness-and-gates.md](readiness-and-gates.md))

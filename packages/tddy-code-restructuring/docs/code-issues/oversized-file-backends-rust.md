@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **4,433 production lines** (2026-10-02, #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
+**Metrics:** **4,475 production lines** (2026-10-02, #542; 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
-**Status:** Open — regressed 2026-10-02 (+74 in #537, `#live-plan` 1/7; +18 in #526, `#carve` 15/21); pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
+**Status:** Open — regressed 2026-10-02 (+42 in #542, `#live-plan` 5/7; +74 in #537, `#live-plan` 1/7; +18 in #526, `#carve` 15/21); pre-existing; #498 added 16 lines and deferred, blocked by stack overlap; **partially fixed** by #527 (−472 net); the decomposition below still stands
 
 ## Measurement history
 
@@ -18,6 +18,7 @@
 | 2026-09-25 | 4,342 | #524 (`#carve` 14/15), `3714a654`: every entry point now closes the documents it opened. `did_open` and the closing went to a new sibling, `documents.rs` (59 lines); the +29 here (4,313 → 4,342 at `3714a654^` and after, both by the inline-test-block rule) is the three `closing_what_it_opens` wrappers around the bodies moved verbatim into `resolve_opening`, `anchor_opening` and `outside_references_opening`, and the `opened` field. Unchanged in kind: none of its own seams were cut |
 | 2026-09-26 | 4,360 | #526 (`#carve` 15/21): +18 by this wrap's re-implementation of the inline-test-block rule, which reads `2688227f` as 4,340 and `22787218` as 4,358. +5 in `5446cec6` (the inactive-code answer threaded through the caller survey) and +13 in `cb367ac6` (`carries_placeholder_type` reading `'_` as a lifetime); `cc19d3a4` net 0 (the `extract_variable` naming went to a new sibling, `introduced.rs`). Regressed slightly; none of its own seams were cut |
 | 2026-10-02 | 4,433 | #537 (`#live-plan` 1/7): +74 by the same rule (merge base 4,359 → 4,433). Item-anchor resolution through the LSP outline (including the outline-readiness check `outline_is_the_servers_answer`); the split is deferred because later `#live-plan` nodes touch this file. None of its own seams were cut |
+| 2026-10-02 | 4,475 | #542 (`#live-plan` 5/7): +42 by the same rule (merge base 4,433 → 4,475). `assist` takes a probe position, `assisted_edit` widens/refuses a borrowed selection, probes within the bound and carries function-local `use` items, and `check` reports the carry; the logic itself went to `selection.rs` (new), `imports.rs`, `early_return.rs` and `readiness.rs`. Split deferred: #543 (`check-parity`, the dependent) touches this file. None of its own seams were cut |
 
 ## What the gate found
 

@@ -25,12 +25,17 @@ use crate::Result;
 /// [`runs_to_the_end_of_a_function`] reads is stated there; a signature rust-analyzer infers
 /// differently from the caller's (an `impl Trait` it spells out) is left to `apply`'s compile gate.
 ///
+/// **Not when that function returns `()`** ([`ends_in_a_unit_tail`]): there is no tail value to
+/// return, and the assist rewrites the `return` into a `ControlFlow` the tree does not import.
+///
 /// Read from the text, so it costs no index, and the same refusal reaches a plain `check`, a
 /// `check --deep` (whose static tier runs first) and an `apply`. What [`early_returns`] relies on is
 /// stated there.
 pub(super) fn refuse_early_returns(text: &str, range: Range) -> Result<()> {
     let found = early_returns(text, range);
-    if found.is_empty() || runs_to_the_end_of_a_function(text, range) {
+    if found.is_empty()
+        || (runs_to_the_end_of_a_function(text, range) && !ends_in_a_unit_tail(text, range))
+    {
         return Ok(());
     }
 
@@ -54,6 +59,61 @@ pub(super) fn refuse_early_returns(text: &str, range: Range) -> Result<()> {
          the tail and a `return` means what it did.",
         named.join(" and ")
     )))
+}
+
+/// Whether the range ends in its function's tail expression **and** that function returns `()`.
+///
+/// The tail-range exception lets a range holding a `return` through when it runs to the end of
+/// the function, because the extracted function can then return what the tail did. A `()` tail
+/// has nothing to return, and rust-analyzer rewrites the early `return` into `ControlFlow` — which
+/// the tree does not import. Such a range is refused instead.
+pub(super) fn ends_in_a_unit_tail(text: &str, range: Range) -> bool {
+    let Some(to) = byte_offset(text, range.end) else {
+        return false;
+    };
+    if !runs_to_the_end_of_a_function(text, range) {
+        return false;
+    }
+    let masked = masked_to_code(text);
+    let code = masked.as_bytes();
+    let Some(close) = (to..code.len()).find(|at| !code[*at].is_ascii_whitespace()) else {
+        return false;
+    };
+    matching_open_brace(code, close)
+        .and_then(|open| function_header(code, open))
+        .is_some_and(|header| !declares_a_return_type(header))
+}
+
+/// Whether a function header, from its `fn` to its body, declares a return type: a `->` outside the
+/// parameter list and the generics, before any `where` clause.
+fn declares_a_return_type(header: &[u8]) -> bool {
+    let (mut parentheses, mut angles) = (0isize, 0isize);
+    let mut at = 0usize;
+    while at < header.len() {
+        match header[at] {
+            b'(' | b'[' => parentheses += 1,
+            b')' | b']' => parentheses -= 1,
+            b'-' if header.get(at + 1) == Some(&b'>') => {
+                if parentheses == 0 && angles == 0 {
+                    return true;
+                }
+                at += 1;
+            }
+            b'<' => angles += 1,
+            b'>' => angles -= 1,
+            byte if byte.is_ascii_alphabetic() || byte == b'_' => {
+                let end = word_end(header, at);
+                if &header[at..end] == b"where" && parentheses == 0 && angles == 0 {
+                    return false;
+                }
+                at = end;
+                continue;
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    false
 }
 
 /// The one-based lines inside `range` holding a `return` whose target is the enclosing function.
@@ -136,7 +196,7 @@ fn runs_to_the_end_of_a_function(text: &str, range: Range) -> bool {
 }
 
 /// The `{` that the `}` at `close` closes.
-fn matching_open_brace(code: &[u8], close: usize) -> Option<usize> {
+pub(super) fn matching_open_brace(code: &[u8], close: usize) -> Option<usize> {
     let mut depth = 0usize;
     for at in (0..close).rev() {
         match code[at] {
@@ -150,13 +210,19 @@ fn matching_open_brace(code: &[u8], close: usize) -> Option<usize> {
 }
 
 /// Whether the `{` at `open` starts a function's body: `fn name` among the tokens of its header.
-fn opens_a_function_body(code: &[u8], open: usize) -> bool {
+pub(super) fn opens_a_function_body(code: &[u8], open: usize) -> bool {
+    function_header(code, open).is_some()
+}
+
+/// The header of the function whose body the `{` at `open` starts, from the tokens after the
+/// previous `;`, `{` or `}` — or `None` when that `{` starts something else.
+fn function_header(code: &[u8], open: usize) -> Option<&[u8]> {
     let mut depth = 0isize;
     let mut start = 0usize;
     for at in (0..open).rev() {
         match code[at] {
             b')' | b']' => depth += 1,
-            b'(' | b'[' if depth == 0 => return false,
+            b'(' | b'[' if depth == 0 => return None,
             b'(' | b'[' => depth -= 1,
             b';' | b'{' | b'}' if depth == 0 => {
                 start = at + 1;
@@ -172,18 +238,18 @@ fn opens_a_function_body(code: &[u8], open: usize) -> bool {
         if header[at].is_ascii_alphabetic() || header[at] == b'_' {
             let end = word_end(header, at);
             if &header[at..end] == b"fn" && next_is_identifier(header, end) {
-                return true;
+                return Some(&header[at..]);
             }
             at = end;
         } else {
             at += 1;
         }
     }
-    false
+    None
 }
 
 /// The byte offset of a one-based line and character column, clamped to the end of its line.
-fn byte_offset(text: &str, at: Position) -> Option<usize> {
+pub(super) fn byte_offset(text: &str, at: Position) -> Option<usize> {
     let line_start: usize = text
         .split_inclusive('\n')
         .take(at.line.checked_sub(1)? as usize)
@@ -814,5 +880,30 @@ mod tests {
                  `return` means what it did."
                 .to_string())
         );
+    }
+
+    #[test]
+    fn a_range_ending_in_the_tail_of_a_unit_function_ends_in_a_unit_tail() {
+        // Given `f`, which returns `()`, and a range from its `let` to its end
+        let text = "fn f(x: Option<u32>) {\n    let Some(v) = x else { return; };\n    \
+                    if v > 1 {\n        drop(v);\n    }\n}\n";
+        let range = Range {
+            start: crate::edit::Position { line: 2, col: 5 },
+            end: crate::edit::Position { line: 5, col: 6 },
+        };
+
+        assert!(ends_in_a_unit_tail(text, range));
+    }
+
+    #[test]
+    fn a_range_ending_in_the_tail_of_a_function_returning_a_value_does_not() {
+        let text = "fn f(x: Option<u32>) -> u32 {\n    let Some(v) = x else { return 0; };\n    \
+                    v + 1\n}\n";
+        let range = Range {
+            start: crate::edit::Position { line: 2, col: 5 },
+            end: crate::edit::Position { line: 3, col: 10 },
+        };
+
+        assert!(!ends_in_a_unit_tail(text, range));
     }
 }
