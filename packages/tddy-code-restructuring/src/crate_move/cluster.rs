@@ -889,6 +889,9 @@ mod tests {
             to_file: false,
             also: Vec::new(),
             group: None,
+            type_: None,
+            expr: None,
+            order: Vec::new(),
         }
     }
 

@@ -60,6 +60,9 @@ fn a_move_to_a_file_of(anchor: Anchor) -> RefactorOp {
         to_file: true,
         also: Vec::new(),
         group: None,
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 
