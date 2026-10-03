@@ -76,6 +76,12 @@ service CodeIndexService {
 
   // The hover text — signature and docs — of the symbol at a position.
   rpc Hover(HoverRequest) returns (HoverResponse);
+
+  // The symbols declared in one file or, when `query` is set, the root's symbols matching it.
+  rpc Symbols(SymbolsRequest) returns (SymbolsResponse);
+
+  // What the root's warm language server reports wrong with one file.
+  rpc Diagnostics(DiagnosticsRequest) returns (DiagnosticsResponse);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -464,4 +470,51 @@ message CodeLocation {
   // True when the location lies outside `workspace_root` — a dependency or the standard library —
   // which a caller that can only open files of the root must not offer to open.
   bool        outside_root = 3;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Symbols and diagnostics
+//
+// The same coordinates as navigation: one-based line, one-based byte column, files relative to
+// `workspace_root` unless `outside_root` says otherwise.
+
+message SymbolsRequest {
+  string          workspace_root = 1;
+  // The file whose symbols are listed, relative to `workspace_root`. Ignored when `query` is set.
+  string          file           = 2;
+  // A workspace-symbol search over the whole root instead of one file's symbols.
+  optional string query          = 3;
+}
+
+message SymbolsResponse {
+  repeated CodeSymbol symbols = 1;
+}
+
+// One symbol the language server reported.
+message CodeSymbol {
+  string          name      = 1;
+  // The LSP `SymbolKind` numeric code, passed through unchanged.
+  uint32          kind      = 2;
+  CodeLocation    location  = 3;
+  // The enclosing item's name, when the server reported one.
+  optional string container = 4;
+}
+
+message DiagnosticsRequest {
+  string workspace_root = 1;
+  // The file to report on, relative to `workspace_root`.
+  string file           = 2;
+}
+
+message DiagnosticsResponse {
+  repeated CodeDiagnostic diagnostics = 1;
+}
+
+// One problem the language server reported in the requested file.
+message CodeDiagnostic {
+  SourceRange     range    = 1;
+  // LSP severity: 1 error, 2 warning, 3 information, 4 hint.
+  uint32          severity = 2;
+  string          message  = 3;
+  optional string source   = 4;
 }
