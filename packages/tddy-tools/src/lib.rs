@@ -16,6 +16,7 @@ pub mod list_models;
 pub mod mcp_primitives;
 mod pull_ledger;
 mod reset_worktree_choice;
+pub mod restructure_tools;
 pub mod server;
 pub mod session_actions_cli;
 mod subagent_diff;
