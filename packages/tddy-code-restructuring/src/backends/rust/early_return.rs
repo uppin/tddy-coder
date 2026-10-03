@@ -673,4 +673,68 @@ mod tests {
 
         assert!(!ends_in_a_unit_tail(text, range));
     }
+
+    /// What `masked_to_code` must hold for any text: one output byte per input byte and newlines where
+    /// they were, so an offset into the result is an offset into the original.
+    fn assert_masks_in_place(text: &str) {
+        let masked = masked_to_code(text);
+
+        assert_eq!(masked.len(), text.len(), "the length changed for {text:?}");
+        for (at, byte) in text.bytes().enumerate() {
+            assert_eq!(masked.as_bytes()[at] == b'\n', byte == b'\n', "{text:?}");
+            // Masked text is ASCII wherever it is not code, so it may have more boundaries than
+            // the original, never fewer: every offset that slices `text` slices `masked`.
+            assert!(
+                !text.is_char_boundary(at) || masked.is_char_boundary(at),
+                "{at} is a boundary of {text:?} and not of its mask"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_a_non_ascii_identifier_as_the_code_it_is() {
+        for text in [
+            "fn é() {}",
+            "let naïve = 1;",
+            "let 変数 = 1;",
+            "struct Ünïcode;",
+        ] {
+            assert_eq!(masked_to_code(text), text);
+        }
+    }
+
+    #[test]
+    fn masks_non_ascii_text_in_a_string_or_a_comment_byte_for_byte() {
+        let masked = masked_to_code("let s = \"é🙂\"; // 🙂é\nlet t = 1;");
+
+        // The string is 8 bytes and the comment 9, one space for each.
+        assert_eq!(masked, "let s = 0       ;          \nlet t = 1;");
+    }
+
+    #[test]
+    fn reads_code_around_a_non_ascii_character_next_to_a_delimiter() {
+        assert_eq!(masked_to_code("é\"a\"é"), "é0  é");
+        assert_eq!(masked_to_code("é/* x */é"), "é       é");
+        assert_eq!(masked_to_code("é// x\né"), "é    \né");
+        assert_eq!(masked_to_code("é'a'é"), "é0  é");
+        assert_eq!(masked_to_code("let é = '🙂';"), "let é = 0     ;");
+    }
+
+    #[test]
+    fn preserves_length_and_boundaries_for_mixed_text() {
+        for text in [
+            "",
+            "é",
+            "fn é() { let s = \"🙂\"; /* ü */ }",
+            "\"unterminated é",
+            "/* unterminated 🙂",
+            "r#\"raw é\"# + 'é' + b'a'",
+            "'\\u{e9}' 'static é",
+            "\"\\é\" 変数",
+            "// é",
+            "let a = 1; // 🙂\nlet 変 = 2;",
+        ] {
+            assert_masks_in_place(text);
+        }
+    }
 }

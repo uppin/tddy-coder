@@ -630,7 +630,8 @@ pub(crate) fn readable_spans(text: &str) -> Vec<(std::ops::Range<usize>, Prose)>
             code_before(&mut spans, code_from, at);
             at = end;
         } else {
-            at += 1;
+            // A whole character, so `at` is always on a boundary the literal scan can slice at.
+            at += text[at..].chars().next().map_or(1, char::len_utf8);
             continue;
         }
         code_from = at;
