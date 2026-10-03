@@ -16,11 +16,18 @@
 //! zero-based LSP positions in and out, `file://` URIs, the same top-level keys. The coordinate
 //! translation to the index's one-based byte positions is this module's.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 use tddy_core::toolcall::lsp::{LspExecutor, LspQuery};
+use tddy_index_daemon::proto::code_index as index;
+use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
+use tddy_lsp::{Diagnostic, Location, Position, Range, SymbolInfo};
+use tonic::transport::Channel;
+
+use crate::{block_on, diagnostic_json, location_json, symbol_json};
 
 /// Where a channel to the warm index comes from — in production the daemon's
 /// `IndexDaemonRegistry::connect`, which starts the index daemon on first use.
@@ -35,7 +42,6 @@ pub trait IndexChannel: Send + Sync {
 
 /// Answers the `Lsp*` tools from the warm index reached through an [`IndexChannel`].
 pub struct IndexLspExecutor {
-    #[allow(dead_code)] // TODO(session-lsp-tools): dialled by every query.
     index: Arc<dyn IndexChannel>,
 }
 
@@ -45,53 +51,302 @@ impl IndexLspExecutor {
     pub fn new(index: Arc<dyn IndexChannel>) -> Self {
         Self { index }
     }
-}
 
-/// Not served yet: every method answers this until the index is asked.
-fn not_served_yet(tool: &str) -> String {
-    format!("{tool} through the warm index is not served yet — TODO(session-lsp-tools)")
+    /// A client on a fresh channel to the index.
+    async fn client(&self) -> Result<CodeIndexServiceClient<Channel>, String> {
+        let channel = self
+            .index
+            .connect()
+            .await
+            .map_err(|err| format!("index daemon: {err}"))?;
+        Ok(CodeIndexServiceClient::new(channel))
+    }
 }
 
 impl LspExecutor for IndexLspExecutor {
-    fn is_available(&self, _repo_dir: &Path) -> bool {
-        // TODO(session-lsp-tools): available when the worktree holds a Rust workspace root.
-        false
+    /// Whether the worktree holds a Rust workspace, the one language the index serves.
+    fn is_available(&self, repo_dir: &Path) -> bool {
+        repo_dir.join("Cargo.toml").is_file()
     }
 
-    fn diagnostics(&self, _repo_dir: &Path, _query: &LspQuery) -> Result<Value, String> {
-        // TODO(session-lsp-tools): bind the file, `code_index.Diagnostics`, render
-        // `{"diagnostics":[…]}` in zero-based LSP coordinates.
-        Err(not_served_yet("LspDiagnostics"))
+    fn diagnostics(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
+        let file = bind_to_session_worktree(repo_dir, &query.file)?;
+        let path = repo_dir.join(&file);
+        block_on(async {
+            let answered = self
+                .client()
+                .await?
+                .diagnostics(index::DiagnosticsRequest {
+                    workspace_root: repo_dir.display().to_string(),
+                    file,
+                })
+                .await
+                .map_err(|status| status.message().to_string())?
+                .into_inner();
+            let mut columns = Columns::within(repo_dir);
+            let diagnostics = answered
+                .diagnostics
+                .iter()
+                .map(|diagnostic| {
+                    Ok(diagnostic_json(&Diagnostic {
+                        range: columns.lsp_range(&path, diagnostic.range)?,
+                        severity: severity_of(diagnostic.severity)?,
+                        message: diagnostic.message.clone(),
+                        source: diagnostic.source.clone(),
+                    }))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok(json!({ "diagnostics": diagnostics }))
+        })
     }
 
-    fn definition(&self, _repo_dir: &Path, _query: &LspQuery) -> Result<Value, String> {
-        // TODO(session-lsp-tools): bind the file, `code_index.Definition` at the one-based byte
-        // position, render `{"locations":[{uri, range}]}` in zero-based LSP coordinates.
-        Err(not_served_yet("LspDefinition"))
+    fn definition(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
+        let locations = self.navigate(repo_dir, query, Navigation::Definition)?;
+        Ok(json!({ "locations": locations }))
     }
 
-    fn references(&self, _repo_dir: &Path, _query: &LspQuery) -> Result<Value, String> {
-        // TODO(session-lsp-tools): as `definition`, through `code_index.References`, rendered as
-        // `{"references":[…]}`.
-        Err(not_served_yet("LspReferences"))
+    fn references(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
+        let locations = self.navigate(repo_dir, query, Navigation::References)?;
+        Ok(json!({ "references": locations }))
     }
 
-    fn hover(&self, _repo_dir: &Path, _query: &LspQuery) -> Result<Value, String> {
-        // TODO(session-lsp-tools): as `definition`, through `code_index.Hover`, rendered as
-        // `{"hover": markdown-or-null}`.
-        Err(not_served_yet("LspHover"))
+    fn hover(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
+        let request = self.position_request(repo_dir, query)?;
+        let answered = block_on(async {
+            self.client()
+                .await?
+                .hover(index::HoverRequest {
+                    workspace_root: request.workspace_root,
+                    file: request.file,
+                    position: request.position,
+                })
+                .await
+                .map_err(|status| status.message().to_string())
+        })?
+        .into_inner();
+        Ok(json!({ "hover": answered.markdown }))
     }
 
-    fn symbols(&self, _repo_dir: &Path, _query: &LspQuery) -> Result<Value, String> {
-        // TODO(session-lsp-tools): bind the file, `code_index.Symbols` (with `query` for a
-        // workspace search), render `{"symbols":[{name, kind, location, container}]}`.
-        Err(not_served_yet("LspSymbols"))
+    fn symbols(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
+        // A workspace search names no file; the index ignores the file when it is given a query.
+        let file = match &query.symbol_query {
+            Some(_) => String::new(),
+            None => bind_to_session_worktree(repo_dir, &query.file)?,
+        };
+        let answered = block_on(async {
+            self.client()
+                .await?
+                .symbols(index::SymbolsRequest {
+                    workspace_root: repo_dir.display().to_string(),
+                    file,
+                    query: query.symbol_query.clone(),
+                })
+                .await
+                .map_err(|status| status.message().to_string())
+        })?
+        .into_inner();
+        let mut columns = Columns::within(repo_dir);
+        let symbols = answered
+            .symbols
+            .iter()
+            .map(|symbol| {
+                let location = symbol
+                    .location
+                    .as_ref()
+                    .ok_or("the index answered a symbol without a location")?;
+                Ok(symbol_json(&SymbolInfo {
+                    name: symbol.name.clone(),
+                    kind: u8::try_from(symbol.kind).map_err(|_| {
+                        format!("symbol kind {} is not an LSP SymbolKind", symbol.kind)
+                    })?,
+                    location: columns.lsp_location(location)?,
+                    container: symbol.container.clone(),
+                }))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(json!({ "symbols": symbols }))
     }
 
+    /// The index answers diagnostics for one file at a time and has no workspace-wide query, so
+    /// `ReadLints` is refused rather than answered by a second language server of this executor's
+    /// own: that one would disagree with the index every other pane asks.
     fn workspace_diagnostics(&self, _repo_dir: &Path) -> Result<Value, String> {
-        // TODO(session-lsp-tools): `ReadLints` — the index has no workspace-wide diagnostics RPC;
-        // decide between one and a refusal (see the changeset's Technical Debt).
-        Err(not_served_yet("ReadLints"))
+        // TODO: a workspace-wide `Diagnostics` (empty `file`) would let `ReadLints` use the index.
+        Err("ReadLints is not available through the warm index: it reports diagnostics one file              at a time — use LspDiagnostics with a file"
+            .to_string())
+    }
+}
+
+/// Which location-answering navigation query to put to the index.
+#[derive(Clone, Copy)]
+enum Navigation {
+    Definition,
+    References,
+}
+
+/// A navigation request's fields, bound to the session's worktree and in the index's coordinates.
+struct PositionRequest {
+    workspace_root: String,
+    file: String,
+    position: Option<index::SourcePosition>,
+}
+
+impl IndexLspExecutor {
+    /// The tool's file and zero-based position as the index's request fields: the file bound to the
+    /// worktree, the position one-based with its column in bytes.
+    fn position_request(
+        &self,
+        repo_dir: &Path,
+        query: &LspQuery,
+    ) -> Result<PositionRequest, String> {
+        let file = bind_to_session_worktree(repo_dir, &query.file)?;
+        let column = byte_column(&repo_dir.join(&file), query.line, query.character)?;
+        Ok(PositionRequest {
+            workspace_root: repo_dir.display().to_string(),
+            file,
+            position: Some(index::SourcePosition {
+                line: query.line + 1,
+                column: column + 1,
+            }),
+        })
+    }
+
+    /// The index's answer to a definition or references query, as the tool's location JSON.
+    fn navigate(
+        &self,
+        repo_dir: &Path,
+        query: &LspQuery,
+        navigation: Navigation,
+    ) -> Result<Vec<Value>, String> {
+        let request = self.position_request(repo_dir, query)?;
+        let answered = block_on(async {
+            let mut client = self.client().await?;
+            match navigation {
+                Navigation::Definition => client
+                    .definition(index::DefinitionRequest {
+                        workspace_root: request.workspace_root,
+                        file: request.file,
+                        position: request.position,
+                    })
+                    .await
+                    .map(|answer| answer.into_inner().locations),
+                Navigation::References => client
+                    .references(index::ReferencesRequest {
+                        workspace_root: request.workspace_root,
+                        file: request.file,
+                        position: request.position,
+                    })
+                    .await
+                    .map(|answer| answer.into_inner().locations),
+            }
+            .map_err(|status| status.message().to_string())
+        })?;
+        let mut columns = Columns::within(repo_dir);
+        answered
+            .iter()
+            .map(|location| Ok(location_json(&columns.lsp_location(location)?)))
+            .collect()
+    }
+}
+
+/// The index's severity code as the LSP's one-byte one.
+fn severity_of(severity: u32) -> Result<u8, String> {
+    u8::try_from(severity).map_err(|_| format!("severity {severity} is not an LSP severity"))
+}
+
+/// The text of one line of `path`, without its terminator.
+fn line_of(path: &Path, line: u32) -> Result<String, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|err| format!("{} cannot be read: {err}", path.display()))?;
+    text.split('\n')
+        .nth(line as usize)
+        .map(|line| line.trim_end_matches('\r').to_string())
+        .ok_or_else(|| format!("{} has no line {}", path.display(), line + 1))
+}
+
+/// The zero-based byte offset in line `line` of `path` that the zero-based UTF-16 column `column`
+/// names — the tools speak LSP's UTF-16 columns, the index bytes.
+fn byte_column(path: &Path, line: u32, column: u32) -> Result<u32, String> {
+    let text = line_of(path, line)?;
+    let mut units = 0;
+    for (offset, character) in text.char_indices() {
+        if units >= column {
+            return u32::try_from(offset).map_err(|err| err.to_string());
+        }
+        units += u32::try_from(character.len_utf16()).map_err(|err| err.to_string())?;
+    }
+    // At or past the line's end the column is the line's length, as an editor clamps it.
+    u32::try_from(text.len()).map_err(|err| err.to_string())
+}
+
+/// Translates the index's one-based byte coordinates into the tools' zero-based UTF-16 ones,
+/// reading each file's lines from disk once.
+struct Columns<'a> {
+    worktree: &'a Path,
+    lines: HashMap<(PathBuf, u32), String>,
+}
+
+impl<'a> Columns<'a> {
+    fn within(worktree: &'a Path) -> Self {
+        Self {
+            worktree,
+            lines: HashMap::new(),
+        }
+    }
+
+    /// A location the index answered — relative to the worktree unless `outside_root` — as the
+    /// tools' location: a `file://` URI and a zero-based range.
+    fn lsp_location(&mut self, location: &index::CodeLocation) -> Result<Location, String> {
+        let path = if location.outside_root {
+            PathBuf::from(&location.file)
+        } else {
+            self.worktree.join(&location.file)
+        };
+        Ok(Location {
+            uri: format!("file://{}", path.display()),
+            range: self.lsp_range(&path, location.range)?,
+        })
+    }
+
+    fn lsp_range(
+        &mut self,
+        path: &Path,
+        range: Option<index::SourceRange>,
+    ) -> Result<Range, String> {
+        let range = range.ok_or("the index answered a range without bounds")?;
+        Ok(Range {
+            start: self.lsp_position(path, range.start)?,
+            end: self.lsp_position(path, range.end)?,
+        })
+    }
+
+    fn lsp_position(
+        &mut self,
+        path: &Path,
+        position: Option<index::SourcePosition>,
+    ) -> Result<Position, String> {
+        let position = position
+            .filter(|at| at.line >= 1 && at.column >= 1)
+            .ok_or("the index answered a position below one")?;
+        let line = position.line - 1;
+        let key = (path.to_path_buf(), line);
+        if !self.lines.contains_key(&key) {
+            self.lines.insert(key.clone(), line_of(path, line)?);
+        }
+        let text = &self.lines[&key];
+        let prefix = text.get(..(position.column - 1) as usize).ok_or_else(|| {
+            format!(
+                "{} line {} has no column {}",
+                path.display(),
+                position.line,
+                position.column
+            )
+        })?;
+        let units: usize = prefix.chars().map(char::len_utf16).sum();
+        Ok(Position::at(
+            line,
+            u32::try_from(units).map_err(|err| err.to_string())?,
+        ))
     }
 }
 
@@ -100,13 +355,20 @@ impl LspExecutor for IndexLspExecutor {
 ///
 /// This is the host-side binding: `worktree` is what the host resolved from the session, and
 /// nothing reaches the index for a file this refuses.
-pub fn bind_to_session_worktree(_worktree: &Path, file: &str) -> Result<String, String> {
-    // TODO(session-lsp-tools): resolve `file` against `worktree` lexically (the file may not exist
-    // yet), refuse `{file} is outside the session's worktree` when the result leaves it, return
-    // the relative path otherwise.
-    Err(format!(
-        "binding {file} to the session's worktree is not implemented — TODO(session-lsp-tools)"
-    ))
+pub fn bind_to_session_worktree(worktree: &Path, file: &str) -> Result<String, String> {
+    let refused = || format!("{file} is outside the session's worktree");
+    let relative = match Path::new(file).strip_prefix(worktree) {
+        Ok(inside) => inside,
+        Err(_) if Path::new(file).is_absolute() => return Err(refused()),
+        Err(_) => Path::new(file),
+    };
+    let stays_inside = relative
+        .components()
+        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir));
+    if !stays_inside || relative.as_os_str().is_empty() {
+        return Err(refused());
+    }
+    Ok(relative.to_string_lossy().into_owned())
 }
 
 /// The executor a host registers: the index-backed one when it manages an index, `existing`

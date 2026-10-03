@@ -1099,21 +1099,6 @@ pub async fn build(
         // `tddy-build`; `tddy-core` owns only the port).
         tddy_bsp::register_catalog_provider();
 
-        // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
-        // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
-        // language server; the loop that reaps servers left idle is the host's to start.
-        //
-        // TODO(session-lsp-tools): when `config_arc.index_daemon` is set, register
-        // `tddy_lsp_executor::index_backed::select_lsp_executor(Some(registry), …)` instead, so a
-        // session's `Lsp*` tools ask the managed index (the registry below) and no second
-        // rust-analyzer is started. Registration is first-wins, so the selection has to happen
-        // before this call; without `index_daemon:` nothing changes.
-        tasks.lsp_idle_reaper = Some(tddy_lsp_executor::register(
-            task_registry.clone(),
-            tddy_lsp::LspAllowList::rust_only(),
-            Duration::from_secs(300),
-        ));
-
         // The warm code-intelligence index, when this daemon was configured to manage one. Its
         // lifecycle is owned here and its *index* is owned by the process itself — the two are
         // split because rust-analyzer's handshake is fixed at spawn and this daemon's registry
@@ -1133,6 +1118,29 @@ pub async fn build(
             tasks.index_daemon = Some(index_daemon.clone());
             index_daemon_registry = Some(index_daemon);
         }
+
+        // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
+        // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
+        // language server; the loop that reaps servers left idle is the host's to start.
+        //
+        // With an `index_daemon:` section the session's `Lsp*` tools ask the managed index instead
+        // (the registry above), so no second rust-analyzer is started; this executor then answers
+        // nothing and its registry, which the reaper drives, stays empty.
+        let lsp_executor = tddy_lsp_executor::TddyLspExecutor::new(
+            tddy_lsp::LspAllowList::rust_only(),
+            task_registry.clone(),
+            Duration::from_secs(300),
+        );
+        tasks.lsp_idle_reaper = Some(lsp_executor.registry());
+        let index_channel = index_daemon_registry.clone().map(|registry| {
+            Arc::new(registry) as Arc<dyn tddy_lsp_executor::index_backed::IndexChannel>
+        });
+        tddy_core::toolcall::lsp::register_lsp_executor(
+            tddy_lsp_executor::index_backed::select_lsp_executor(
+                index_channel,
+                Arc::new(lsp_executor),
+            ),
+        );
 
         let livekit_service = tddy_daemon_livekit::build_livekit_service(
             tddy_daemon_livekit::livekit_rooms_stream::room_roster_from_config(
