@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-24 | 692 → 695 | `origin/master` `35cf2913` → #510 HEAD: `+3`, the passphrase `Debug` redaction (N1). The auth block gains `.skip_debug([".auth.UnlockVaultRequest", ".auth.ResetVaultRequest"])` and a two-line comment pointing at `src/auth_redacted_debug.rs`, so prost derives no `Debug` that would print the vault passphrase. Grown; deferred with consent |
+| 2026-10-03 | 709 | 695 → 709 after #574 (`#live-plan` 8/15): one more `prost_build` / RPC-server pass for `code_navigation.proto`, in `main`. Grown; the split is deferred with the developer's consent (`docs/dev/todo/2026-10-03-code-navigation-grew-four-oversized-files.md`) |
 
 ## What the gate found
 
