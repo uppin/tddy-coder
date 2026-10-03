@@ -17,12 +17,25 @@
 //! round are restored from the bytes held in memory and the round is redone with every import the
 //! errors *name* (a backtick-quoted identifier equal to the name the `use` bound) gated with
 //! `#[cfg(test)]` instead of removed — see [`gating`]. A nested group is left in place and
-//! reported. A round that still does not compile is undone the same way and fails the run, saying
-//! so: the tidy never leaves a broken tree behind, and never touches the plan's own edits.
+//! reported. A redo that still does not compile is repeated while each redo leaves fewer quoted
+//! names failing (at most [`MAX_REPAIRS`] times); one that stops improving is undone the same way
+//! and fails the run, saying so: the tidy never leaves a broken tree behind, and never touches the
+//! plan's own edits.
+//!
+//! **Statements are rewritten from sets, not from spans.** A library is checked as itself and with
+//! its tests, and each unit words its removal of one group its own way (`a, ` here, `, b` there):
+//! the member edits of the two overlap. So the units are counted — one `compiler-artifact` per
+//! unit — and a statement they disagree on is rebuilt from the *names*: reported by every unit,
+//! removed; reported by fewer units than build the file, read by the rest, so gated in a repair;
+//! reported by none, kept. Nothing is applied as two overlapping edits, and [`apply_fixes`] fails
+//! loudly on an edit it cannot apply instead of dropping it — a dropped edit once left one name of
+//! a wide facade group un-gated, and the redo then removed it.
 
 mod diagnostics;
 mod format;
 mod gating;
+#[cfg(test)]
+mod wide_facade_tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -34,7 +47,7 @@ use crate::backends::rust::ProgressSink;
 use crate::{RestructureError, Result};
 use diagnostics::{parse, Diagnostic, Fix, Span};
 use format::format_touched;
-use gating::{named_by_errors, place, quoted_in_errors, Placement};
+use gating::{named_by_errors, place, quoted_in_errors, reconcile, Placement};
 
 /// How many times unused imports are removed and the tree re-checked.
 const MAX_ROUNDS: usize = 3;
@@ -158,6 +171,7 @@ impl Report {
         for span in removed {
             *self.removed.entry(span.file.clone()).or_default() += 1;
         }
+        self.warnings.extend(round.declined);
         if let Some(placement) = round.placement {
             self.gated.extend(placement.gated);
             self.warnings.extend(placement.declined);
@@ -198,7 +212,22 @@ struct Round {
     unused: UnusedImports,
     /// The edits that were applied, in the coordinates of `before`.
     applied: Vec<Fix>,
+    /// `warning remains: …` lines for statements the round left alone because it could not rebuild
+    /// them from the compiler's sets.
+    declined: Vec<String>,
+    /// How this round was redone, once a first attempt broke the tree.
     placement: Option<Placement>,
+    /// What redoing it has been tried: the imports gated so far, and the quoted names the check
+    /// that last failed still had — a repair only goes on while that count falls.
+    repairs: Repairs,
+}
+
+/// The progress of the repairs of one round.
+#[derive(Default)]
+struct Repairs {
+    attempts: usize,
+    failing: usize,
+    matched: BTreeSet<Span>,
 }
 
 /// Remove unused imports until the compiler reports none or [`MAX_ROUNDS`] removals have been
@@ -246,12 +275,15 @@ fn begin(root: &Path, unused: UnusedImports) -> Result<Round> {
     for file in unused.fixes.keys() {
         before.insert(file.clone(), std::fs::read(root.join(file))?);
     }
-    let applied = apply_fixes(root, &unused.fixes)?;
+    let reconciled = reconcile(&unused, &before);
+    let applied = apply_fixes(root, &reconciled.fixes)?;
     Ok(Round {
         before,
         unused,
         applied,
+        declined: reconciled.declined,
         placement: None,
+        repairs: Repairs::default(),
     })
 }
 
@@ -265,8 +297,12 @@ enum Repair {
     Failed(Failure),
 }
 
+/// How many times one round is redone with more imports gated.
+const MAX_REPAIRS: usize = 5;
+
 /// Undo a round that broke the tree and redo it with the imports the errors name gated for tests.
-/// A round that was already redone is undone for good, loudly.
+/// A round that was already redone is redone again while each redo leaves fewer quoted names
+/// failing, up to [`MAX_REPAIRS`] times; one that stops improving is undone for good, loudly.
 fn repair(
     tidying: &Tidying<'_>,
     round: Round,
@@ -274,16 +310,20 @@ fn repair(
     report: &mut Report,
 ) -> Result<Repair> {
     restore(tidying.root, &round.before)?;
-    let matched = named_by_errors(&round.unused.primaries, &round.before, &failure.quoted);
-    if round.placement.is_some() || matched.is_empty() {
-        return Ok(Repair::Failed(undone(&round, &matched, failure)));
+    let named = named_by_errors(&round.unused.primaries, &round.before, &failure.quoted);
+    let mut repairs = Repairs {
+        attempts: round.repairs.attempts + 1,
+        failing: failure.quoted.len(),
+        matched: round.repairs.matched.clone(),
+    };
+    repairs
+        .matched
+        .extend(named.iter().map(|span| (*span).clone()));
+    if repairs.matched.is_empty() || !round.keeps_improving(&repairs) {
+        return Ok(Repair::Failed(undone(&round, &repairs, failure)));
     }
-    let placement = place(
-        &round.unused.fixes,
-        &round.unused.primaries,
-        &round.before,
-        &matched,
-    );
+    let matched: Vec<&Span> = repairs.matched.iter().collect();
+    let placement = place(&round.unused, &round.before, &matched);
     if placement.fixes.values().all(BTreeSet::is_empty) {
         report.warnings.extend(placement.declined);
         return Ok(Repair::Nothing);
@@ -293,17 +333,31 @@ fn repair(
         before: round.before,
         unused: round.unused,
         applied,
+        declined: round.declined,
         placement: Some(placement),
+        repairs,
     }))
+}
+
+impl Round {
+    /// Whether redoing the round once more is worth a check: the first redo always is, a later one
+    /// only when the check after the last redo quoted fewer names than the one before it and the
+    /// redo gates something new, and none after [`MAX_REPAIRS`].
+    fn keeps_improving(&self, now: &Repairs) -> bool {
+        let first = self.placement.is_none();
+        let fewer_failing = now.failing < self.repairs.failing;
+        let gates_more = now.matched.len() > self.repairs.matched.len();
+        now.attempts <= MAX_REPAIRS && (first || (fewer_failing && gates_more))
+    }
 }
 
 /// The failure of a round that could not be placed, saying what was undone and which imports it
 /// could not place.
-fn undone(round: &Round, matched: &[&Span], failure: Failure) -> Failure {
-    let culprits: Vec<&Span> = if matched.is_empty() {
+fn undone(round: &Round, repairs: &Repairs, failure: Failure) -> Failure {
+    let culprits: Vec<&Span> = if repairs.matched.is_empty() {
         round.unused.primaries.iter().collect()
     } else {
-        matched.to_vec()
+        repairs.matched.iter().collect()
     };
     let names: Vec<&str> = culprits
         .iter()
@@ -332,6 +386,10 @@ fn restore(root: &Path, before: &BTreeMap<String, Vec<u8>>) -> Result<()> {
 struct UnusedImports {
     fixes: BTreeMap<String, BTreeSet<Fix>>,
     primaries: BTreeSet<Span>,
+    /// The imports some unit reads although another reports them unused: a library is checked once
+    /// as itself and once with its tests, so a name the first reports and the second does not is
+    /// one only the tests use. Always a subset of `primaries`.
+    read_by_a_unit: BTreeSet<Span>,
 }
 
 /// The `unused_imports` removals in the touched files. Each target (library, tests) repeats a
@@ -339,10 +397,11 @@ struct UnusedImports {
 fn unused_imports(diagnostics: &[Diagnostic], touched: &BTreeSet<String>) -> UnusedImports {
     let mut fixes: BTreeMap<String, BTreeSet<Fix>> = BTreeMap::new();
     let mut primaries: BTreeSet<Span> = BTreeSet::new();
-    let unused = diagnostics
+    let unused: Vec<&Diagnostic> = diagnostics
         .iter()
-        .filter(|diagnostic| diagnostic.code.as_deref() == Some("unused_imports"));
-    for diagnostic in unused {
+        .filter(|diagnostic| diagnostic.code.as_deref() == Some("unused_imports"))
+        .collect();
+    for diagnostic in &unused {
         for fix in diagnostic
             .fixes
             .iter()
@@ -356,29 +415,85 @@ fn unused_imports(diagnostics: &[Diagnostic], touched: &BTreeSet<String>) -> Unu
         primaries.extend(diagnostic.primaries.iter().cloned());
     }
     primaries.retain(|span| fixes.contains_key(&span.file));
-    UnusedImports { fixes, primaries }
+    let read_by_a_unit = read_by_a_unit(&unused, &primaries);
+    UnusedImports {
+        fixes,
+        primaries,
+        read_by_a_unit,
+    }
 }
 
-/// Apply every file's edits from the highest offset down, so none moves another's coordinates. An
-/// edit overlapping one already applied is left for the next round to find again. Returns the
-/// spans of the edits that were applied.
+/// The imports reported unused by fewer units than build them: every unit that does not report one
+/// reads it.
+fn read_by_a_unit(unused: &[&Diagnostic], primaries: &BTreeSet<Span>) -> BTreeSet<Span> {
+    let mut reports: BTreeMap<&Span, (usize, usize)> = BTreeMap::new();
+    for diagnostic in unused {
+        for span in diagnostic
+            .primaries
+            .iter()
+            .filter(|span| primaries.contains(*span))
+        {
+            let (reported, units) = reports.entry(span).or_default();
+            *reported += 1;
+            *units = (*units).max(diagnostic.units);
+        }
+    }
+    reports
+        .into_iter()
+        .filter(|(_, (reported, units))| reported < units)
+        .map(|(span, _)| span.clone())
+        .collect()
+}
+
+/// Apply every file's edits from the highest offset down, so none moves another's coordinates.
+/// Returns the edits that were applied — all of them.
+///
+/// An edit that cannot be applied is an error, never a skip: two different edits over the same text
+/// (the compilation units word one removal differently, so a statement is edited twice) or an edit
+/// outside the file. Nothing is written for a file until all of its edits are known to apply, so a
+/// dropped fix can never look like a success.
 fn apply_fixes(root: &Path, fixes: &BTreeMap<String, BTreeSet<Fix>>) -> Result<Vec<Fix>> {
     let mut applied = Vec::new();
     for (file, edits) in fixes {
         let path = root.join(file);
         let mut bytes = std::fs::read(&path)?;
-        let mut floor = bytes.len();
-        for edit in edits.iter().rev() {
-            if edit.end > floor || edit.start > edit.end {
-                continue;
-            }
+        let ordered: Vec<&Fix> = edits.iter().collect();
+        refuse_unappliable(file, &ordered, bytes.len())?;
+        for edit in ordered.into_iter().rev() {
             bytes.splice(edit.start..edit.end, edit.replacement.bytes());
-            floor = edit.start;
             applied.push(edit.clone());
         }
         std::fs::write(&path, bytes)?;
     }
     Ok(applied)
+}
+
+/// Fail when an edit is malformed, lies outside the `length` bytes of `file`, or overlaps another.
+fn refuse_unappliable(file: &str, edits: &[&Fix], length: usize) -> Result<()> {
+    let refusal = |why: String| {
+        Err(RestructureError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("the tidy's import edits for {file} cannot all be applied: {why}"),
+        )))
+    };
+    for (at, edit) in edits.iter().enumerate() {
+        if edit.start > edit.end || edit.end > length {
+            return refusal(format!(
+                "edit {}..{} lies outside the file's {length} bytes",
+                edit.start, edit.end
+            ));
+        }
+        if let Some(other) = edits[at + 1..]
+            .iter()
+            .find(|other| gating::overlap(edit, other))
+        {
+            return refusal(format!(
+                "edits {}..{} and {}..{} overlap",
+                edit.start, edit.end, other.start, other.end
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Format the touched files; whether any changed, so the caller knows to check again.
@@ -767,6 +882,110 @@ mod tests {
         assert!(errors.contains("the tidy was undone"), "{errors}");
         assert!(errors.contains("Write"), "{errors}");
         assert_eq!(demo.read("src/lib.rs"), source);
+    }
+
+    /// A library whose module `parts` holds `names`, imported in one group by the library file; its
+    /// production code calls `used_by_production` and its tests call `used_by_tests`.
+    fn a_library_with_a_group(
+        names: &[&str],
+        used_by_production: &[&str],
+        used_by_tests: &[&str],
+    ) -> ACrate {
+        let functions: String = names
+            .iter()
+            .map(|name| format!("    pub fn {name}() -> u8 {{\n        1\n    }}\n"))
+            .collect();
+        let calls = |called: &[&str]| -> String {
+            called.iter().map(|name| format!("{name}() + ")).collect()
+        };
+        let source = format!(
+            "mod parts {{\n{functions}}}\nuse parts::{{{}}};\n\npub fn total() -> u8 {{\n    {}0\n}}\n\n\
+             #[cfg(test)]\nmod tests {{\n    use super::*;\n\n    #[test]\n    fn counts() {{\n        \
+             assert!({}0 >= 1);\n    }}\n}}\n",
+            names.join(", "),
+            calls(used_by_production),
+            calls(used_by_tests),
+        );
+        a_crate_with(&[("src/lib.rs", &source)])
+    }
+
+    #[test]
+    fn gates_four_members_of_a_group_and_removes_the_fifth() {
+        // Given a group of six: production reads `kept`, the tests read four, nothing reads the last
+        let demo = a_library_with_a_group(
+            &["one", "two", "three", "four", "five", "kept"],
+            &["kept"],
+            &["one", "two", "three", "four"],
+        );
+
+        // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then each of the four is gated in an item of its own, the fifth is gone, the tree compiles
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let source = demo.read("src/lib.rs");
+        let gated = |name: &str| source.contains(&format!("#[cfg(test)]\nuse parts::{name};\n"));
+        assert!(
+            gated("one") && gated("two") && gated("three") && gated("four"),
+            "{source}"
+        );
+        assert!(source.contains("use parts::kept;\n"), "{source}");
+        assert!(!source.contains("parts::five"), "{source}");
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(!demo.warns_of_an_unused_import());
+        assert_eq!(
+            said.iter()
+                .filter(|line| line.starts_with("gated for tests"))
+                .count(),
+            4,
+            "{said:?}"
+        );
+    }
+
+    #[test]
+    fn tidies_eleven_wide_groups_in_one_file_in_one_round() {
+        // Given eleven modules, each imported in a group of three: production reads the first, the
+        // tests the second, nothing the third
+        let demo = a_library_with_eleven_groups();
+
+        // When its file is tidied
+        let (verdict, _) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then every group keeps its first, gates its second and loses its third
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let source = demo.read("src/lib.rs");
+        for group in 0..11 {
+            assert!(
+                source.contains(&format!("use m{group}::a{group};\n")),
+                "{source}"
+            );
+            assert!(
+                source.contains(&format!("#[cfg(test)]\nuse m{group}::b{group};\n")),
+                "{source}"
+            );
+            assert!(!source.contains(&format!("m{group}::c{group}")), "{source}");
+        }
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(!demo.warns_of_an_unused_import());
+    }
+
+    fn a_library_with_eleven_groups() -> ACrate {
+        let mut source = String::new();
+        let mut production = String::new();
+        let mut tests = String::new();
+        for group in 0..11 {
+            source += &format!(
+                "mod m{group} {{\n    pub fn a{group}() -> u8 {{ 1 }}\n    pub fn b{group}() -> u8 {{ 1 }}\n    \
+                 pub fn c{group}() -> u8 {{ 1 }}\n}}\nuse m{group}::{{a{group}, b{group}, c{group}}};\n\n"
+            );
+            production += &format!("a{group}() + ");
+            tests += &format!("b{group}() + ");
+        }
+        source += &format!(
+            "pub fn total() -> u8 {{\n    {production}0\n}}\n\n#[cfg(test)]\nmod tests {{\n    use super::*;\n\n    \
+             #[test]\n    fn counts() {{\n        assert!({tests}0 >= 1);\n    }}\n}}\n"
+        );
+        a_crate_with(&[("src/lib.rs", &source)])
     }
 
     #[test]

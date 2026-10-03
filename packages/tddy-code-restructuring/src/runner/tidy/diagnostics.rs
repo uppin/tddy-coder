@@ -1,5 +1,7 @@
 //! The compiler's `--message-format json` output, read as far as a tidy needs it.
 
+use std::collections::BTreeMap;
+
 use serde_json::Value;
 
 /// One `compiler-message`: where it points, what it says, and the edits it offers.
@@ -14,6 +16,10 @@ pub(super) struct Diagnostic {
     pub primaries: Vec<Span>,
     /// The machine-applicable replacements its children suggest.
     pub fixes: Vec<Fix>,
+    /// How many compilation units built the target this message came from: a library checked with
+    /// `--all-targets` is built twice, once as itself and once with its tests, and each unit says
+    /// every warning of the code they share. One when the message names no target.
+    pub units: usize,
 }
 
 /// Bytes `start..end` of `file`.
@@ -43,15 +49,35 @@ impl Fix {
 /// Every diagnostic in a check's stdout. Lines that are not compiler messages — artifacts, the
 /// build summary — are not diagnostics and are skipped.
 pub(super) fn parse(stdout: &str) -> Vec<Diagnostic> {
-    stdout
+    let lines: Vec<Value> = stdout
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .collect();
+    let units = units_per_target(&lines);
+    lines
+        .iter()
         .filter(|line| line["reason"] == "compiler-message")
-        .map(|line| diagnostic_of(&line["message"]))
+        .map(|line| {
+            let root = line["target"]["src_path"].as_str().unwrap_or_default();
+            diagnostic_of(&line["message"], units.get(root).copied().unwrap_or(1))
+        })
         .collect()
 }
 
-fn diagnostic_of(message: &Value) -> Diagnostic {
+/// How many units finished per target source path: every unit ends with one `compiler-artifact`.
+fn units_per_target(lines: &[Value]) -> BTreeMap<String, usize> {
+    let mut units = BTreeMap::new();
+    let artifacts = lines
+        .iter()
+        .filter(|line| line["reason"] == "compiler-artifact");
+    for artifact in artifacts {
+        let root = artifact["target"]["src_path"].as_str().unwrap_or_default();
+        *units.entry(root.to_string()).or_default() += 1;
+    }
+    units
+}
+
+fn diagnostic_of(message: &Value, units: usize) -> Diagnostic {
     let spans = array_of(&message["spans"]);
     let primary: Vec<&Value> = spans
         .iter()
@@ -68,6 +94,7 @@ fn diagnostic_of(message: &Value) -> Diagnostic {
             .flat_map(|child| array_of(&child["spans"]))
             .filter_map(fix_of)
             .collect(),
+        units,
     }
 }
 

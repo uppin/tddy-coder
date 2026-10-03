@@ -56,14 +56,39 @@ used by the parent's `#[cfg(test)]` module through `use super::*`, and one is us
    Nothing covers several gated members in a group, a group where the library's unused set strictly
    contains the test unit's, or eleven groups in one file in one round.
 
-**Not yet established (hypothesis, to be reproduced):** *why* the gated `placeholder_sites` did not
-resolve. The likely mechanism is that the group statement is rewritten by `gating::place` (kept
-members + one `#[cfg(test)] use …` item per gated member) while the lib unit's and the test unit's
-member-level removal spans for the **same statement** overlap it; `apply_fixes` keeps edits only while
-`edit.end <= floor` and silently drops the rest, so the rewrite and a removal can cancel or corrupt
-each other. A naive replay of every `MachineApplicable` span of this plan on the pre-tidy tree produces
-`error: unexpected closing delimiter` — overlapping spans from the two units do not compose, which is
-consistent with this. It has not been shown that `apply_fixes` is what dropped the gated item.
+## Root cause (confirmed)
+
+Reproduced on the saved pre-tidy tree and the real diagnostics (trimmed copies are the fixtures of
+`src/runner/tidy/wide_facade_tests.rs`). The two units *are* distinguishable: a library checked with
+`--all-targets` is built twice, every unit ends with one `compiler-artifact` for the same
+`target.src_path`, and a name reported by one unit and not the other is read by the other.
+
+For the `placeholder_checks` group (`Block, declares` kept; rustc: the library unit reports five
+names, the test unit only `is_identifier_byte`):
+
+1. **Round 1 applied the compiler's member spans of both units.** They overlap (the library drops
+   `a, `, the tests `, b`), and `apply_fixes` kept an edit only while `edit.end <= floor` and skipped
+   the rest without a word. The group came out `use placeholder_checks::{Block, declares,
+   placeholder_sites};` — `placeholder_sites` survived because its removal span was the one skipped.
+2. **So the failed check never named it.** The tests that read `placeholder_sites` still compiled; the
+   errors quoted only `refuse_inferred_placeholder`, `carries_placeholder_type` and
+   `refuse_residual_placeholder`.
+3. **The redo then removed it.** `gating::place` gated the three quoted names and removed *every other
+   name in the statement that any unit reported* — including `placeholder_sites`, which round 1 had in
+   fact left in place. Redone group: `{Block, declares}` plus three `#[cfg(test)]` items.
+4. **The second check quoted `placeholder_sites` (E0425 ×2) and `repair` gave up**, because a redone
+   round is never repaired a second time. The errors in the failure message are the redo's, which is
+   why their line numbers disagree with the tree's.
+
+The hypothesis held in part: the overlap and the silent skip were real, but the skip did not corrupt
+the gated rewrite — it hid a name from the first check, and the redo's "remove everything else"
+turned that into a removal of something the tests read.
+
+Fixed in `src/runner/tidy.rs and src/runner/tidy/`: units are counted (`Diagnostic::units`), a statement the units
+disagree on is rebuilt from the sets (`gating::reconcile`, and in a repair `gating::place` gates
+every name some unit reads, not only the quoted ones), `apply_fixes` fails loudly on overlapping or
+out-of-range edits, and a redone round is redone again while each redo leaves fewer quoted names
+failing, at most five times.
 
 ## Why it matters
 

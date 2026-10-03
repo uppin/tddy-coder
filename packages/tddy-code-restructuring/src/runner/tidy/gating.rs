@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::diagnostics::{Diagnostic, Fix, Span};
+use super::UnusedImports;
 
 /// What a round that gates imports does instead of removing every unused one.
 pub(super) struct Placement {
@@ -166,6 +167,12 @@ fn rewrite(
     gated: &BTreeSet<&str>,
 ) -> std::result::Result<Rewrite, Reason> {
     let (indent, head) = gateable_head(source, statement)?;
+    if !statement.body.contains('{') && gated.is_empty() {
+        return Ok(Rewrite {
+            replacement: String::new(),
+            gated: Vec::new(),
+        });
+    }
     if !statement.body.contains('{') {
         let path = statement.body;
         let replacement = format!("{indent}#[cfg(test)]\n{head}use {path};");
@@ -265,18 +272,16 @@ fn split_group(body: &str) -> std::result::Result<(&str, Vec<&str>), Reason> {
     Ok((prefix, members))
 }
 
-/// Redo a round's edits with the `matched` imports gated instead of removed.
+/// Redo a round's edits with the `matched` imports gated instead of removed. A statement holding a
+/// matched import is rewritten from the compiler's sets, not from its member edits: what only the
+/// tests read — reported by fewer units than build the file — is gated beside it, what every unit
+/// reports is removed, and the rest is kept.
 pub(super) fn place(
-    fixes: &BTreeMap<String, BTreeSet<Fix>>,
-    primaries: &BTreeSet<Span>,
+    unused: &UnusedImports,
     before: &BTreeMap<String, Vec<u8>>,
     matched: &[&Span],
 ) -> Placement {
-    let mut placement = Placement {
-        fixes: fixes.clone(),
-        gated: Vec::new(),
-        declined: Vec::new(),
-    };
+    let mut placement = reconcile(unused, before);
     let mut statements: BTreeMap<(&str, usize), Vec<&Span>> = BTreeMap::new();
     for span in matched {
         let source = source_of(before, &span.file);
@@ -287,10 +292,88 @@ pub(super) fn place(
             .push(span);
     }
     for ((file, _), group) in &statements {
+        let source = source_of(before, file);
+        let (start, end) = statement_range(source, group[0]);
+        let mut gated: BTreeSet<&Span> = group.iter().copied().collect();
+        gated.extend(
+            unused
+                .read_by_a_unit
+                .iter()
+                .filter(|span| span.file == *file && span.start >= start && span.end <= end),
+        );
+        let statement = Wanted {
+            anchor: group[0],
+            gated,
+            declined_as: "gated for tests",
+        };
         // A refusal is already reported in `declined`, and the statement stays as it was.
-        let _ = place_statement(&mut placement, before, primaries, file, group);
+        let _ = place_statement(&mut placement, before, unused, &statement);
     }
     placement
+}
+
+/// The round's edits with every statement they clash on rewritten from the compiler's sets.
+///
+/// Each unit words its removals of one group its own way — the library drops `a, `, the tests
+/// `, b` — and the two overlap. Nothing is gated here: every import any unit reports is removed,
+/// as it would be were the edits one unit's, and a repair gates what the failed check names. A
+/// statement that cannot be rebuilt is left as it is and reported.
+pub(super) fn reconcile(unused: &UnusedImports, before: &BTreeMap<String, Vec<u8>>) -> Placement {
+    let mut placement = Placement::of(&unused.fixes);
+    for anchor in clashing_statements(unused, before) {
+        let statement = Wanted {
+            anchor,
+            gated: BTreeSet::new(),
+            declined_as: "removed (the compilation units word its removal differently)",
+        };
+        let _ = place_statement(&mut placement, before, unused, &statement);
+    }
+    placement
+}
+
+/// One import of every statement whose edits overlap another, different, edit.
+fn clashing_statements<'a>(
+    unused: &'a UnusedImports,
+    before: &BTreeMap<String, Vec<u8>>,
+) -> Vec<&'a Span> {
+    let mut anchors: BTreeMap<(&str, usize), &Span> = BTreeMap::new();
+    for edits in unused.fixes.values() {
+        let edits: Vec<&Fix> = edits.iter().collect();
+        for (at, edit) in edits.iter().enumerate() {
+            if !edits[at + 1..].iter().any(|other| overlap(edit, other)) {
+                continue;
+            }
+            for span in unused.primaries.iter().filter(|span| edit.covers(span)) {
+                let source = source_of(before, &span.file);
+                let (start, _) = statement_range(source, span);
+                anchors.entry((span.file.as_str(), start)).or_insert(span);
+            }
+        }
+    }
+    anchors.into_values().collect()
+}
+
+/// Whether two different edits claim some of the same text. Edits are distinct set members.
+pub(super) fn overlap(a: &Fix, b: &Fix) -> bool {
+    a.file == b.file && a.start < b.end && b.start < a.end
+}
+
+impl Placement {
+    fn of(fixes: &BTreeMap<String, BTreeSet<Fix>>) -> Self {
+        Placement {
+            fixes: fixes.clone(),
+            gated: Vec::new(),
+            declined: Vec::new(),
+        }
+    }
+}
+
+/// A statement to rewrite from the sets: one import in it, those to gate, and how a refusal says
+/// what it could not do.
+struct Wanted<'a> {
+    anchor: &'a Span,
+    gated: BTreeSet<&'a Span>,
+    declined_as: &'static str,
 }
 
 fn source_of<'a>(before: &'a BTreeMap<String, Vec<u8>>, file: &str) -> &'a str {
@@ -300,71 +383,97 @@ fn source_of<'a>(before: &'a BTreeMap<String, Vec<u8>>, file: &str) -> &'a str {
         .unwrap_or_default()
 }
 
-/// Place one statement's matched imports; on refusal the statement is left exactly as it was and
-/// the report says why.
+/// Place one statement; on refusal the statement is left exactly as it was and the report says why.
 fn place_statement(
     placement: &mut Placement,
     before: &BTreeMap<String, Vec<u8>>,
-    primaries: &BTreeSet<Span>,
-    file: &str,
-    group: &[&Span],
+    unused: &UnusedImports,
+    wanted: &Wanted<'_>,
 ) -> std::result::Result<(), Reason> {
+    let file = wanted.anchor.file.as_str();
     let source = source_of(before, file);
-    let outcome = rewrite_group(source, before, primaries, group);
-    let (start, end) = statement_range(source, group[0]);
+    let outcome = rewrite_statement(source, before, unused, wanted);
+    let (start, end) = statement_range(source, wanted.anchor);
     if let Some(edits) = placement.fixes.get_mut(file) {
         edits.retain(|fix| fix.end <= start || fix.start >= end);
     }
-    match outcome {
-        Ok(rewrite) => {
-            placement
-                .fixes
-                .entry(file.to_string())
-                .or_default()
-                .insert(Fix {
-                    file: file.to_string(),
-                    start,
-                    end,
-                    replacement: rewrite.replacement,
-                });
-            placement.gated.extend(
-                rewrite
-                    .gated
-                    .into_iter()
-                    .map(|path| (file.to_string(), path)),
-            );
-            Ok(())
-        }
-        Err(reason) => {
-            for span in group {
-                placement.declined.push(format!(
-                    "warning remains: unused import {} could not be gated for tests ({reason})",
-                    text_of(before, span)
-                ));
+    let rewrite =
+        match outcome {
+            Ok(rewrite) => rewrite,
+            Err(reason) => {
+                placement.declined.extend(
+                    statement_imports(unused, wanted.anchor, start, end).map(|span| {
+                        format!(
+                            "warning remains: unused import {} could not be {} ({reason})",
+                            text_of(before, span),
+                            wanted.declined_as
+                        )
+                    }),
+                );
+                return Err(reason);
             }
-            Err(reason)
-        }
-    }
+        };
+    // A statement that goes whole takes its line with it.
+    let end = match source.as_bytes().get(end) {
+        Some(b'\n') if rewrite.replacement.is_empty() => end + 1,
+        _ => end,
+    };
+    placement
+        .fixes
+        .entry(file.to_string())
+        .or_default()
+        .insert(Fix {
+            file: file.to_string(),
+            start,
+            end,
+            replacement: rewrite.replacement,
+        });
+    placement.gated.extend(
+        rewrite
+            .gated
+            .into_iter()
+            .map(|path| (file.to_string(), path)),
+    );
+    Ok(())
+}
+
+/// The unused imports inside the statement at `start..end` of the anchor's file.
+fn statement_imports<'a>(
+    unused: &'a UnusedImports,
+    anchor: &Span,
+    start: usize,
+    end: usize,
+) -> impl Iterator<Item = &'a Span> {
+    let file = anchor.file.clone();
+    unused
+        .primaries
+        .iter()
+        .filter(move |span| span.file == file && span.start >= start && span.end <= end)
 }
 
 fn statement_range(source: &str, span: &Span) -> (usize, usize) {
     statement_around(source, span.start).map_or((span.start, span.start), |s| (s.line_start, s.end))
 }
 
-fn rewrite_group(
+/// Rewrite the statement around the anchor: what is in `wanted.gated` is gated, every other
+/// unused import in it is removed.
+fn rewrite_statement(
     source: &str,
     before: &BTreeMap<String, Vec<u8>>,
-    primaries: &BTreeSet<Span>,
-    group: &[&Span],
+    unused: &UnusedImports,
+    wanted: &Wanted<'_>,
 ) -> std::result::Result<Rewrite, Reason> {
-    let statement = statement_around(source, group[0].start).ok_or("unrecognised use statement")?;
-    let gated: BTreeSet<&str> = group.iter().map(|span| text_of(before, span)).collect();
-    let removed: BTreeSet<&str> = primaries
+    let statement =
+        statement_around(source, wanted.anchor.start).ok_or("unrecognised use statement")?;
+    let gated: BTreeSet<&str> = wanted
+        .gated
         .iter()
-        .filter(|span| span.file == group[0].file)
-        .filter(|span| span.start >= statement.line_start && span.end <= statement.end)
         .map(|span| text_of(before, span))
-        .filter(|text| !gated.contains(text))
         .collect();
+    let removed: BTreeSet<&str> =
+        statement_imports(unused, wanted.anchor, statement.line_start, statement.end)
+            .map(|span| text_of(before, span))
+            .filter(|text| !gated.contains(text))
+            .collect();
     rewrite(source, &statement, &removed, &gated)
 }
