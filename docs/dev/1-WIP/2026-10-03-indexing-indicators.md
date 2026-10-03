@@ -238,6 +238,18 @@ streamed start instead of the unary one.
 | INFO | `tddy-connectrpc-testkit` | outside the planned surface; test infrastructure, process-wide registration |
 | INFO | `CreateSessionAcceptance.cy.tsx` | failed 15/15 once in a batch run during a full-disk episode, passed alone; cause not found |
 
+### /validate-tests (2026-10-03, head `399c18dc`)
+
+Analysed 13 tests in 4 files: `start_phase_acceptance.rs` (2), `code_index_warmup_acceptance.rs` (5), `SessionStartAndIndexingProgress.cy.tsx` (2), `CreateSessionAttachmentProgress.cy.tsx` (4, one rewritten in green). No `#[ignore]`, `.skip`/`.only`, sleeps, `cy.intercept` or raw `data-testid` selectors; no always-passing tests. The new `another_users_watch_of_the_session_is_refused_and_shows_no_progress` and the rewritten no-attachment Cypress test are compliant Given/When/Then with named helpers.
+
+| Severity | Where | Finding |
+|---|---|---|
+| WARNING | `code_index_warmup_acceptance.rs` `without_an_index_daemon_no_warm_starts` | two behaviours in one test (no warm starts; watching ends empty) — split |
+| WARNING | `code_index_warmup_acceptance.rs` `a_warm_failure_is_reported_and_the_session_stays_usable` | name promises "the session stays usable"; the body asserts only the reported failure — name states what it pins |
+| WARNING | `tddy-connectrpc-testkit` `registerServerStreamFallback` | process-wide, load-bearing for ~25 specs, and the package has no tests; "explicit stream wins" and "unary error becomes the stream's error" are pinned only incidentally — **not fixed here**: the package has no test runner, so pinning it is its own piece of work |
+| INFO | `CreateSessionAttachmentProgress.cy.tsx` rewritten test | asserts the phase text and the created session in one scenario, and builds the `phase` wire event inline; the other tests in the file do the same |
+| INFO | web | no test pins END clearing the phase or a stream error ending it |
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-03-indexing-indicators-initial-discovery.md`)
@@ -248,7 +260,7 @@ streamed start instead of the unary one.
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [x] TDD Green — implement with quality code (⚠ sandboxed / tool / split starts and session-ownership authorisation remain — see Technical Debt)
+- [x] TDD Green — implement with quality code (⚠ sandboxed / tool / split starts deferred to `docs/dev/todo/` — see Technical Debt)
 - [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest — local scoped run done; CI not yet read

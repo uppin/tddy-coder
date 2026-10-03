@@ -568,16 +568,24 @@ async fn without_an_index_daemon_no_warm_starts() {
     // Then nothing is started and the session has no progress
     assert!(warming.is_none(), "no warm starts without an index daemon");
     assert_eq!(progress.latest(THE_SESSION), None);
-    // And watching its code index ends at once with nothing to show, so no indicator shows
-    let entry = the_navigation_entry(&worktree, None, &progress);
-    assert_eq!(
-        everything_delivered_by(watch_code_index_at(&entry).await).await,
-        vec![]
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_warm_failure_is_reported_and_the_session_stays_usable() {
+async fn watching_a_session_nothing_warmed_ends_at_once_with_nothing() {
+    // Given a daemon configured without an `index_daemon:` section, so nothing warmed the session
+    let worktree = a_rust_session_worktree();
+    let progress = SessionIndexProgress::new();
+
+    // When the session header watches the session's code index
+    let entry = the_navigation_entry(&worktree, None, &progress);
+    let watching = watch_code_index_at(&entry).await;
+
+    // Then the stream ends at once with nothing to show, so no indicator shows
+    assert_eq!(everything_delivered_by(watching).await, vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_warm_failure_is_reported_with_its_reason_and_the_warm_does_not_panic() {
     // Given a managed index daemon whose warm of the session's worktree fails
     let worktree = a_rust_session_worktree();
     let (fake, warm) = a_fake_index_whose_warm_the_test_drives();
