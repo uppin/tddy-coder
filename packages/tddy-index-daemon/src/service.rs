@@ -1,8 +1,9 @@
 //! The service implementation, and the entry a host registers it as.
 //!
 //! Every method is a routing table entry: it hands the decoded request to [`crate::operations`]
-//! (the streaming restructure half), [`crate::queries`] (the unary restructure half) or
-//! [`crate::analyze`] (everything about coverage and complexity) and does nothing else, so this
+//! (the streaming restructure half), [`crate::queries`] (the unary restructure half),
+//! [`crate::analyze`] (everything about coverage and complexity) or `crate::navigation`
+//! (definition, references and hover) and does nothing else, so this
 //! file stays readable as the list of what the coordinate answers to.
 
 use std::sync::Arc;
@@ -12,14 +13,16 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::analyze;
 use crate::index::WorkspaceIndex;
+use crate::navigation;
 use crate::operations;
 use crate::proto::code_index::{
     AnalyzeEvent, AnchorsRequest, AnchorsResponse, ApplyRequest, CheckRequest, CodeIndexService,
     CodeIndexServiceServer, ComplexityRequest, ComplexityResponse, CoverageRequest,
-    DuplicateTestsRequest, IndexProgress, ListPlansRequest, LoadPlansRequest, PlanStatusRequest,
-    PlanStatusResponse, PlansResponse, ReportRequest, ReportResponse, RestructureEvent,
-    UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest,
-    WorkspacesResponse,
+    DefinitionRequest, DefinitionResponse, DuplicateTestsRequest, HoverRequest, HoverResponse,
+    IndexProgress, ListPlansRequest, LoadPlansRequest, PlanStatusRequest, PlanStatusResponse,
+    PlansResponse, ReferencesRequest, ReferencesResponse, ReportRequest, ReportResponse,
+    RestructureEvent, UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest,
+    WorkspacesRequest, WorkspacesResponse,
 };
 use crate::queries;
 use crate::CODE_INDEX_SERVICE;
@@ -211,6 +214,36 @@ impl CodeIndexService for CodeIndexServiceImpl {
         Ok(tddy_rpc::Response::new(
             operations::serve_workspaces(&self.index).await,
         ))
+    }
+
+    /// Where the symbol at a position is defined.
+    async fn definition(
+        &self,
+        request: tddy_rpc::Request<DefinitionRequest>,
+    ) -> Result<tddy_rpc::Response<DefinitionResponse>, tddy_rpc::Status> {
+        navigation::serve_definition(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// Every reference to the symbol at a position.
+    async fn references(
+        &self,
+        request: tddy_rpc::Request<ReferencesRequest>,
+    ) -> Result<tddy_rpc::Response<ReferencesResponse>, tddy_rpc::Status> {
+        navigation::serve_references(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// The hover text of the symbol at a position.
+    async fn hover(
+        &self,
+        request: tddy_rpc::Request<HoverRequest>,
+    ) -> Result<tddy_rpc::Response<HoverResponse>, tddy_rpc::Status> {
+        navigation::serve_hover(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
     }
 }
 

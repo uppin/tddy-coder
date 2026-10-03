@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 
+import type { CodeNavigationService } from "../../gen/code_navigation_pb";
 import type { WorktreeService } from "../../gen/worktree_pb";
 import { WorktreeFileTree } from "./WorktreeFileTree";
 import { createWorktreeFilesApi } from "./worktreeFilesApi";
@@ -14,6 +15,12 @@ export type WorktreeCodePaneProps = {
   projectId: string;
   /** The session's worktree root (`SessionEntry.repo_path`). */
   worktreePath: string;
+  /**
+   * `code_navigation.CodeNavigationService` on the same host as `client` — definition, references
+   * and hover for the preview. Absent, the preview is read-only text.
+   * TODO(code-navigation): consumed through `createCodeNavigationApi`; wired by `SessionMainPane`.
+   */
+  navigationClient?: Client<typeof CodeNavigationService>;
 };
 
 type SelectedFile = { relPath: string; content: string; error: boolean };

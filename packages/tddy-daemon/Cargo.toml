@@ -138,3 +138,9 @@ tddy-session-files = { path = "../tddy-session-files" }
 # tddy-daemon's own remaining tests and by no file in `src/`.
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-sandbox = { path = "../tddy-sandbox" }
+# The `code_index` service the code-navigation suite stands a fake index daemon up with, and the
+# client the forward dials it through.
+# TODO(code-navigation): moves to `[dependencies]` when `CodeNavigationServiceImpl` forwards —
+# `tests/test_placement.rs` refuses a runtime dependency no file in `src/` names.
+tddy-index-daemon = { path = "../tddy-index-daemon" }
+tokio-stream = { version = "0.1", features = ["net"] }

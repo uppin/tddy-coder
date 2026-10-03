@@ -19,6 +19,10 @@
 //!   this the fake never claims to load anything, so a consumer whose readiness *is* the server's
 //!   quiescence has nothing to wait for. Independent of `--cold-hovers`, and off unless asked for,
 //!   so every other mode is byte-identical to what it was.
+//! - `--answers-in-its-workspace` — report the definition and reference locations under the
+//!   `rootUri` the client initialized with rather than under `file:///workspace`, so a consumer
+//!   that maps locations back to paths relative to its root has a root to map them into. Same
+//!   files, same ranges; off unless asked for, so every other mode is byte-identical.
 //!
 //! Two methods model failure modes a real rust-analyzer has and the fixed replies above do
 //! not: `textDocument/codeAction` answers with a JSON-RPC `ContentModified` error, and
@@ -65,6 +69,10 @@ fn main() {
     }
     let hang = args.iter().any(|a| a == "--hang");
     let loads_crate_graph = args.iter().any(|a| a == "--loads-crate-graph");
+    ANSWERS_IN_ITS_WORKSPACE.store(
+        args.iter().any(|a| a == "--answers-in-its-workspace"),
+        std::sync::atomic::Ordering::SeqCst,
+    );
     let cold_hovers = args
         .iter()
         .position(|a| a == "--cold-hovers")
@@ -89,6 +97,10 @@ fn main() {
         }
     }
 }
+
+/// Set by `--answers-in-its-workspace`: locations are reported under the client's `rootUri`.
+static ANSWERS_IN_ITS_WORKSPACE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// The `initialize` params as received, so `tddy/initializeParams` can replay them.
 static INITIALIZE_PARAMS: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
@@ -445,6 +457,9 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
 
 /// The single source file location the fake reports for definition and the first
 /// reference. Tests assert against these exact values.
+/// The root [`FAKE_LIB_URI`] and [`FAKE_MAIN_URI`] sit under unless `--answers-in-its-workspace`
+/// re-roots them.
+const FAKE_ROOT_URI: &str = "file:///workspace";
 const FAKE_LIB_URI: &str = "file:///workspace/src/lib.rs";
 const FAKE_MAIN_URI: &str = "file:///workspace/src/main.rs";
 const FAKE_HOVER_MARKDOWN: &str = "fn foo() -> u32";
@@ -483,14 +498,29 @@ fn initialize_result() -> Value {
 }
 
 fn definition_result() -> Value {
-    json!([{ "uri": FAKE_LIB_URI, "range": range(10, 0, 10, 3) }])
+    json!([{ "uri": reported(FAKE_LIB_URI), "range": range(10, 0, 10, 3) }])
 }
 
 fn references_result() -> Value {
     json!([
-        { "uri": FAKE_LIB_URI, "range": range(10, 0, 10, 3) },
-        { "uri": FAKE_MAIN_URI, "range": range(20, 4, 20, 7) },
+        { "uri": reported(FAKE_LIB_URI), "range": range(10, 0, 10, 3) },
+        { "uri": reported(FAKE_MAIN_URI), "range": range(20, 4, 20, 7) },
     ])
+}
+
+/// A fixed location's URI as this run reports it: unchanged, or re-rooted under the `rootUri` the
+/// client initialized with when `--answers-in-its-workspace` was given.
+fn reported(uri: &str) -> String {
+    if !ANSWERS_IN_ITS_WORKSPACE.load(std::sync::atomic::Ordering::SeqCst) {
+        return uri.to_string();
+    }
+    let root = remembered_initialize_params()
+        .get("rootUri")
+        .and_then(Value::as_str)
+        .unwrap_or(FAKE_ROOT_URI)
+        .trim_end_matches('/')
+        .to_string();
+    uri.replacen(FAKE_ROOT_URI, &root, 1)
 }
 
 fn hover_result() -> Value {
