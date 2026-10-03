@@ -34,6 +34,7 @@ use crate::crate_move::declared_package_name;
 use crate::journal::{Journal, OpStatus};
 use crate::{Plan, RestructureError, Result};
 
+use super::tidy::{tidy, Tidied, Tidying};
 use super::{Options, StatePaths};
 
 /// Refuse a fresh, writing run whose tree does not compile before the plan touches it.
@@ -103,7 +104,11 @@ pub fn refuse_a_broken_result(
              journal, and were not checked to compile"
         ));
     }
-    match checked? {
+    let broken = match checked? {
+        None => tidy_a_complete_run(root, options, (applied, total), &touched, &packages, cancel)?,
+        Some(broken) => Some(broken),
+    };
+    match broken {
         None => Ok(()),
         Some((checked, errors)) => Err(RestructureError::AppliedTreeDoesNotCompile {
             applied,
@@ -121,8 +126,38 @@ pub fn refuse_a_broken_result(
     }
 }
 
+/// Tidy the tree of a run that applied **every** operation, returning the check and errors when
+/// the tidied tree no longer compiles.
+///
+/// Only a complete run: tidying rewrites files, and a later operation's anchors are read against
+/// the tree the earlier ones left, so a run stopped early (`--stop-after`) must leave its files
+/// exactly as the operations wrote them.
+fn tidy_a_complete_run(
+    root: &Path,
+    options: &Options,
+    (applied, total): (usize, usize),
+    touched: &BTreeSet<String>,
+    packages: &BTreeSet<String>,
+    cancel: &CancellationToken,
+) -> Result<Option<(String, String)>> {
+    if applied != total {
+        return Ok(None);
+    }
+    let tidying = Tidying {
+        root,
+        packages,
+        touched,
+        progress: &options.progress,
+        cancel,
+    };
+    match tidy(&tidying)? {
+        Tidied::Compiles => Ok(None),
+        Tidied::Broken { checked, errors } => Ok(Some((checked, errors))),
+    }
+}
+
 /// Every file a completed edit in the journal touched.
-fn completed_edit_paths(journal: &Journal) -> BTreeSet<String> {
+pub(super) fn completed_edit_paths(journal: &Journal) -> BTreeSet<String> {
     journal
         .records
         .iter()
@@ -148,7 +183,10 @@ pub struct AppliedRun<'a> {
 /// Walked from the file's directory rather than read from `cargo metadata`, because a file a move
 /// just renamed away no longer exists — its directory usually still does, and a manifest above it
 /// certainly does. A file no package owns is compiled by nothing, so it adds nothing to check.
-fn owning_packages(root: &Path, files: impl Iterator<Item = String>) -> Result<BTreeSet<String>> {
+pub(super) fn owning_packages(
+    root: &Path,
+    files: impl Iterator<Item = String>,
+) -> Result<BTreeSet<String>> {
     let mut packages = BTreeSet::new();
     for file in files {
         let mut directory = root.join(&file);
@@ -182,7 +220,35 @@ fn failing_check(
     if packages.is_empty() {
         return Ok(None);
     }
-    let mut arguments = vec!["check", "--all-targets", "--message-format", "short"];
+    let output = run_check(root, packages, "short", cancel)?;
+    if output.succeeded {
+        return Ok(None);
+    }
+    Ok(Some((
+        described_check(packages),
+        compiler_errors(&output.stderr),
+    )))
+}
+
+/// What a finished `cargo check` said, on both streams.
+pub(super) struct CheckOutput {
+    pub succeeded: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Run `cargo check --all-targets --message-format <format>` over `packages` and wait for it,
+/// killing it when `cancel` fires ([`RestructureError::CallerStopped`]).
+///
+/// What the baseline, the result check and the tidy share: one way to spawn the compiler, drain
+/// its pipes and honour the run's cancellation.
+pub(super) fn run_check(
+    root: &Path,
+    packages: &BTreeSet<String>,
+    message_format: &str,
+    cancel: &CancellationToken,
+) -> Result<CheckOutput> {
+    let mut arguments = vec!["check", "--all-targets", "--message-format", message_format];
     for package in packages {
         arguments.extend(["-p", package.as_str()]);
     }
@@ -190,18 +256,20 @@ fn failing_check(
         .args(&arguments)
         .current_dir(root)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    // Drained on a thread of its own while the check runs: a check that fails writes more than a
-    // pipe holds, and a cargo blocked writing stderr would never exit for `try_wait` to see.
-    let stderr = drain(&mut child);
+    // Both pipes are drained on threads of their own while the check runs: a check that fails
+    // writes more than a pipe holds, and a cargo blocked writing would never exit for `try_wait`
+    // to see.
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
     let status = exit_or_kill(&mut child, cancel)?;
-    let said = stderr.join().unwrap_or_default();
-    if status.success() {
-        return Ok(None);
-    }
-    Ok(Some((described_check(packages), compiler_errors(&said))))
+    Ok(CheckOutput {
+        succeeded: status.success(),
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
 }
 
 /// The status `child` exits with, or [`RestructureError::CallerStopped`] once `cancel` fires first
@@ -223,7 +291,7 @@ fn exit_or_kill(child: &mut Child, cancel: &CancellationToken) -> Result<ExitSta
 }
 
 /// The check as a refusal names it, for a reader to run again.
-fn described_check(packages: &BTreeSet<String>) -> String {
+pub(super) fn described_check(packages: &BTreeSet<String>) -> String {
     let selected: Vec<String> = packages
         .iter()
         .map(|package| format!("-p {package}"))
@@ -231,15 +299,14 @@ fn described_check(packages: &BTreeSet<String>) -> String {
     format!("cargo check --all-targets {}", selected.join(" "))
 }
 
-/// Everything `child` writes to stderr, read to the end on a thread of its own.
-fn drain(child: &mut Child) -> JoinHandle<String> {
-    let mut stderr = child.stderr.take();
+/// Everything a child's pipe carries, read to the end on a thread of its own.
+fn drain<R: Read + Send + 'static>(mut pipe: Option<R>) -> JoinHandle<String> {
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
-        if let Some(stderr) = stderr.as_mut() {
+        if let Some(pipe) = pipe.as_mut() {
             // A read that fails part-way still leaves what was read, which is the evidence
             // there is.
-            let _ = stderr.read_to_end(&mut bytes);
+            let _ = pipe.read_to_end(&mut bytes);
         }
         String::from_utf8_lossy(&bytes).into_owned()
     })
@@ -250,7 +317,7 @@ fn drain(child: &mut Child) -> JoinHandle<String> {
 ///
 /// Not every line mentioning the word: a warning about `error_handling.rs`, or a note quoting an
 /// `Error` type, is not an error, and the whole point of the list is which lines are.
-fn compiler_errors(said: &str) -> String {
+pub(super) fn compiler_errors(said: &str) -> String {
     let errors: Vec<&str> = said
         .lines()
         .filter(|line| line.starts_with("error") || line.contains(": error"))

@@ -12,7 +12,7 @@
 use std::path::PathBuf;
 
 use tddy_code_restructuring::item_anchor;
-use tddy_code_restructuring::plan_store::PlanStore;
+use tddy_code_restructuring::plan_store::{OpStaleness, PlanStore};
 use tddy_code_restructuring::runner::{self, Command, Options};
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
@@ -22,7 +22,7 @@ use crate::index::WorkspaceIndex;
 use crate::operations::{joined, plan_path};
 use crate::proto::code_index::{
     AnchorsRequest, AnchorsResponse, ListPlansRequest, LoadPlansRequest, LoadedPlan,
-    PlanStatusRequest, PlanStatusResponse, PlansResponse, SourcePosition, SourceRange,
+    PlanStatusRequest, PlanStatusResponse, PlansResponse, SourcePosition, SourceRange, StaleOp,
     UnloadPlansRequest, VerifyRequest, VerifyResponse,
 };
 use crate::status::status_of;
@@ -162,17 +162,20 @@ async fn plan_progress(
     // A loaded plan is counted as the store holds it, which is the plan a run would execute; one
     // that is not loaded is read from its file, since a status does not load what it looks at.
     let store = index.plans_of(&root).await;
-    let progress = tokio::task::spawn_blocking(move || {
+    let (progress, stale) = tokio::task::spawn_blocking(move || {
         let held = {
             let store = store.lock().expect("a root's plan store");
-            store
-                .key_for(&plan)
-                .ok()
-                .and_then(|key| store.get(&key).map(|loaded| loaded.plan.clone()))
+            store.key_for(&plan).ok().and_then(|key| {
+                store
+                    .get(&key)
+                    .map(|loaded| (loaded.plan.clone(), store.stale_ops(&key)))
+            })
         };
         match held {
-            Some(held) => runner::status_of_plan(&root, &plan, &held),
-            None => runner::status(&root, options),
+            Some((held, stale)) => {
+                runner::status_of_plan(&root, &plan, &held).map(|progress| (progress, stale))
+            }
+            None => runner::status(&root, options).map(|progress| (progress, Vec::new())),
         }
     })
     .await
@@ -184,7 +187,19 @@ async fn plan_progress(
         in_flight: progress.in_flight as u32,
         pending: progress.pending as u32,
         failed: progress.failed as u32,
+        stale: stale_on_the_wire(&stale),
     })
+}
+
+/// Stale operations as the wire carries them.
+fn stale_on_the_wire(stale: &[OpStaleness]) -> Vec<StaleOp> {
+    stale
+        .iter()
+        .map(|found| StaleOp {
+            op: found.op.to_string(),
+            reason: found.reason.to_string(),
+        })
+        .collect()
 }
 
 /// Hold the working tree's statements against a git ref's, as multisets.
@@ -229,6 +244,9 @@ async fn comparison_against(
         after: comparison.after as u32,
         missing: comparison.missing,
         added: comparison.added,
+        repointed: comparison.excused.repointed as u32,
+        visibility_normalised: comparison.excused.visibility as u32,
+        cfg_test_gates: comparison.excused.cfg_test_gates as u32,
     })
 }
 
@@ -360,6 +378,7 @@ fn held_by(store: &PlanStore) -> PlansResponse {
                 plan: held.key.to_string(),
                 ops: held.ops as u32,
                 dirty: held.dirty,
+                stale: stale_on_the_wire(&store.stale_ops(&held.key)),
             })
             .collect(),
     }

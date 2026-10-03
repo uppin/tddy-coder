@@ -4,6 +4,8 @@
 # Usage: ./test                    — run all tests
 #        ./test -p tddy-core       — run tests for one package
 #        ./test -- test_name       — run a specific test
+# Every test target runs even after one fails (cargo's --no-fail-fast), so a scoped run reports the
+# whole package instead of stopping at the first red target and hiding the rest.
 set -e
 cd "$(dirname "$0")"
 
@@ -19,5 +21,5 @@ nix develop --profile ./.nix-profile -c bash -c '
   # change to the runner is tested against whatever build happened to be on disk, and the suite
   # goes green against the old jail. The fixtures check the binary exists; nothing checks its age.
   cargo build -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-runner -p tddy-build -p tddy-livekit -p tddy-livekit-screen-capture -p tddy-acp-stub -p tddy-demo-tui --examples --bins
-  cargo test "$@" -- --test-threads=1 2>&1 | tee .verify-result.txt
+  cargo test --no-fail-fast "$@" -- --test-threads=1 2>&1 | tee .verify-result.txt
 ' -- "$@"

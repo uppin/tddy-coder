@@ -274,16 +274,26 @@ fn needs_lsp_client(options: &Options) -> bool {
         Command::Check => options.deep,
         // A snapshot re-hashes the files the plan's header names against the working tree. There
         // is no seam to resolve and nothing to ask a server about, so starting one would cost
-        // minutes of indexing to produce an answer `sha256` already has.
+        // minutes of indexing to produce an answer `sha256` already has — unless the plan has item
+        // anchors, which only a server can re-resolve.
+        Command::Snapshot => names_item_anchors(options),
         // The store's commands are answered by the index daemon; without one they are refused
         // before any server would be needed.
-        Command::Status
-        | Command::Verify
-        | Command::Snapshot
-        | Command::Load
-        | Command::Unload
-        | Command::Plans => false,
+        Command::Status | Command::Verify | Command::Load | Command::Unload | Command::Plans => {
+            false
+        }
     }
+}
+
+/// Whether the plan `options` names holds item anchors. A plan that cannot be read or parsed has
+/// none to resolve, and says why when the command reads it.
+fn names_item_anchors(options: &Options) -> bool {
+    options
+        .plan()
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| crate::Plan::parse(&text).ok())
+        .is_some_and(|plan| crate::item_anchor::has_item_anchors(&plan))
 }
 
 #[cfg(test)]

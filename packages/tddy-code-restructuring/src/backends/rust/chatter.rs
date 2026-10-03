@@ -3,11 +3,21 @@
 //! Split out of `backends/rust.rs`, which is past its size budget.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 /// What a progress line calls a phase the server never gave a title.
 const UNTITLED_PHASE: &str = "working";
+
+/// The least time between two lines shown for one progress token.
+///
+/// A cold load reports hundreds of notifications per phase — a percent at a time, or one message
+/// per crate with no percentage at all — and a console printing each buries the handful of lines
+/// that matter. Limiting by token, here, covers every title the server uses and every front end,
+/// where matching a title in a front end covered only the title its author had seen. A `begin` and
+/// a phase reaching 100% are shown regardless.
+pub const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
 
 /// What the server has said about its own progress while a request was in flight.
 ///
@@ -35,6 +45,13 @@ pub struct ServerChatter {
     /// What was last printed for each token, deduplicated per token for the same reason the titles
     /// are: two phases running at once would otherwise each defeat the other's deduplication.
     shown: HashMap<String, String>,
+    /// When a line was last shown for each token, which [`PROGRESS_INTERVAL`] is measured from.
+    /// Per token, for the reason the titles are.
+    shown_at: HashMap<String, Instant>,
+    /// Whether every distinct report is returned, with no [`PROGRESS_INTERVAL`] between them. For a
+    /// consumer that forwards the phases as data — the daemon's warm stream, whose clients read the
+    /// percentages — as opposed to one that prints them, which the interval exists for.
+    unthrottled: bool,
     /// Whether the server has reported itself quiescent — an extension, so never the only signal.
     pub(super) quiescent: bool,
     /// Whether the server has sent any `experimental/serverStatus` at all.
@@ -65,13 +82,29 @@ pub struct ServerChatter {
 }
 
 impl ServerChatter {
+    /// A chatter that returns every distinct report instead of one per [`PROGRESS_INTERVAL`] per
+    /// token. The default throttles, because its lines are printed; a stream of structured events
+    /// is not read a line at a time, and a client that wanted the 50% it was never sent cannot ask.
+    pub fn unthrottled() -> ServerChatter {
+        ServerChatter {
+            unthrottled: true,
+            ..ServerChatter::default()
+        }
+    }
+
     /// Fold one server-sent message in, and return the line worth printing for it.
     ///
     /// A message that answers a request carries no `method`, which is what keeps every result out
     /// of the progress stream without having to know the ids in flight.
     pub fn absorb(&mut self, message: &Value) -> Option<String> {
+        self.absorb_at(message, Instant::now())
+    }
+
+    /// [`Self::absorb`] with the clock supplied: how long ago a progress line was shown decides
+    /// whether the next one is, so a test has to be able to say what time it is.
+    pub fn absorb_at(&mut self, message: &Value, now: Instant) -> Option<String> {
         match message.get("method").and_then(Value::as_str)? {
-            "$/progress" => self.progress(message.get("params")?),
+            "$/progress" => self.progress_at(message.get("params")?, now),
             "experimental/serverStatus" => {
                 let params = message.get("params")?;
                 if let Some(health) = params.get("health").and_then(Value::as_str) {
@@ -93,15 +126,20 @@ impl ServerChatter {
     ///
     /// The title arrives only with `begin`, so it is held and reused for the `report` lines that
     /// follow it — without that, a report reads as a bare percentage with nothing to attach it to.
-    /// Lines are deduplicated on the phase and its percentage rather than on the whole line, because
-    /// the server reports one notification per *file* scanned and each carries a different absolute
-    /// path. Printing all of them buries the phases; one line per percent of each phase is the
-    /// progress a reader can actually follow. A notification with no percentage — every `begin`, and
-    /// the sub-steps of a phase that does not count — falls back to the line itself.
-    fn progress(&mut self, params: &Value) -> Option<String> {
+    /// Every notification updates what the timeout message and the readiness checks read
+    /// (`last`, `furthest`); only what is *returned for display* is limited. A `begin` is always
+    /// shown, a `report` only when [`PROGRESS_INTERVAL`] has passed since the last line shown for
+    /// its token, or when it reaches 100% — once, because lines are also deduplicated on the phase
+    /// and its percentage (or, with none, on the line itself), the server reporting one
+    /// notification per *file* scanned with a different absolute path each.
+    ///
+    /// The clock is supplied by [`Self::absorb_at`], so how long ago a line was shown is something a
+    /// test can state.
+    fn progress_at(&mut self, params: &Value, now: Instant) -> Option<String> {
         let token = token_key(params.get("token")?);
         let value = params.get("value")?;
-        match value.get("kind").and_then(Value::as_str)? {
+        let kind = value.get("kind").and_then(Value::as_str)?;
+        match kind {
             "begin" => {
                 if let Some(title) = value.get("title").and_then(Value::as_str) {
                     self.titles.insert(token.clone(), title.to_string());
@@ -109,6 +147,8 @@ impl ServerChatter {
             }
             "end" => {
                 self.titles.remove(&token);
+                self.shown.remove(&token);
+                self.shown_at.remove(&token);
                 return None;
             }
             _ => {}
@@ -130,7 +170,16 @@ impl ServerChatter {
         if self.shown.get(&token) == Some(&key) {
             return None;
         }
-        self.shown.insert(token, key);
+        let due = self.unthrottled
+            || self
+                .shown_at
+                .get(&token)
+                .is_none_or(|at| now.duration_since(*at) >= PROGRESS_INTERVAL);
+        if kind != "begin" && percentage.is_none_or(|pct| pct < 100) && !due {
+            return None;
+        }
+        self.shown.insert(token.clone(), key);
+        self.shown_at.insert(token, now);
         Some(line)
     }
 
@@ -262,6 +311,176 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    fn begin(token: &str, title: &str) -> Value {
+        json!({ "token": token, "value": { "kind": "begin", "title": title } })
+    }
+
+    fn report(token: &str, message: Option<&str>, percentage: Option<u64>) -> Value {
+        let mut value = json!({ "kind": "report" });
+        if let Some(message) = message {
+            value["message"] = json!(message);
+        }
+        if let Some(percentage) = percentage {
+            value["percentage"] = json!(percentage);
+        }
+        json!({ "token": token, "value": value })
+    }
+
+    fn end(token: &str) -> Value {
+        json!({ "token": token, "value": { "kind": "end" } })
+    }
+
+    fn at(start: Instant, millis: u64) -> Instant {
+        start + Duration::from_millis(millis)
+    }
+
+    #[test]
+    fn shows_one_line_of_a_burst_of_percentages_arriving_inside_one_second() {
+        // Given a phase that has begun
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        let begun = chatter.progress_at(&begin("scan", "Roots Scanned"), t0);
+
+        // When 300 reports with distinct messages and rising percentages arrive within a second
+        let shown: Vec<String> = (0..300u64)
+            .filter_map(|n| {
+                let params = report("scan", Some(&format!("/crate/{n}")), Some(n * 99 / 300));
+                chatter.progress_at(&params, at(t0, n * 3))
+            })
+            .collect();
+
+        // Then only the begin line was shown
+        assert_eq!(begun.as_deref(), Some("Roots Scanned"));
+        assert!(shown.is_empty(), "lines leaked through: {shown:?}");
+    }
+
+    #[test]
+    fn shows_a_report_once_the_interval_has_passed_since_the_last_line_shown() {
+        // Given a phase that has begun and a report suppressed inside the interval
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("scan", "Roots Scanned"), t0);
+        let early = chatter.progress_at(&report("scan", Some("/a"), Some(10)), at(t0, 1999));
+
+        // When a report arrives two seconds after the begin
+        let due = chatter.progress_at(&report("scan", Some("/b"), Some(20)), at(t0, 2000));
+
+        // Then the early one was dropped and this one is shown
+        assert_eq!(early, None);
+        assert_eq!(due.as_deref(), Some("Roots Scanned: /b (20%)"));
+    }
+
+    #[test]
+    fn measures_the_interval_from_the_last_line_shown_not_the_last_one_received() {
+        // Given a report shown at 2s and another dropped at 3s
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("scan", "Roots Scanned"), t0);
+        chatter.progress_at(&report("scan", None, Some(20)), at(t0, 2000));
+        chatter.progress_at(&report("scan", None, Some(30)), at(t0, 3000));
+
+        // When a report arrives at 3.9s, under two seconds after the last one shown
+        let early = chatter.progress_at(&report("scan", None, Some(40)), at(t0, 3900));
+        let due = chatter.progress_at(&report("scan", None, Some(50)), at(t0, 4000));
+
+        // Then it is dropped, and the one at 4s is shown
+        assert_eq!(early, None);
+        assert_eq!(due.as_deref(), Some("Roots Scanned (50%)"));
+    }
+
+    #[test]
+    fn always_shows_a_phase_reaching_one_hundred_percent_but_only_once() {
+        // Given a phase that has begun
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("scan", "Roots Scanned"), t0);
+
+        // When it reaches 100% inside the window, and says so again
+        let done = chatter.progress_at(&report("scan", None, Some(100)), at(t0, 10));
+        let again = chatter.progress_at(&report("scan", None, Some(100)), at(t0, 20));
+
+        // Then the first is shown and the repeat is not
+        assert_eq!(done.as_deref(), Some("Roots Scanned (100%)"));
+        assert_eq!(again, None);
+    }
+
+    #[test]
+    fn throttles_two_phases_running_at_once_independently() {
+        // Given two phases begun together
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("deps", "Building compile-time-deps"), t0);
+        chatter.progress_at(&begin("fetch", "Fetching"), at(t0, 1500));
+
+        // When each is reported to at 2.0s
+        let deps = chatter.progress_at(
+            &report("deps", Some("build script a run"), None),
+            at(t0, 2000),
+        );
+        let fetch = chatter.progress_at(
+            &report("fetch", Some("cargo metadata: started"), None),
+            at(t0, 2000),
+        );
+
+        // Then the older phase is due and the newer one is not
+        assert_eq!(
+            deps.as_deref(),
+            Some("Building compile-time-deps: build script a run")
+        );
+        assert_eq!(fetch, None);
+    }
+
+    #[test]
+    fn keeps_the_last_line_and_the_furthest_percentage_current_when_a_line_is_suppressed() {
+        // Given a phase that has begun
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("scan", "Roots Scanned"), t0);
+
+        // When reports inside the window are suppressed
+        let first = chatter.progress_at(&report("scan", Some("/a"), Some(43)), at(t0, 10));
+        let second = chatter.progress_at(&report("scan", Some("/b"), None), at(t0, 20));
+
+        // Then nothing was shown, yet what the timeout message reads kept advancing
+        assert_eq!((first, second), (None, None));
+        assert_eq!(chatter.last.as_deref(), Some("Roots Scanned: /b"));
+        assert_eq!(chatter.furthest(), Some((43, "Roots Scanned")));
+    }
+
+    #[test]
+    fn forgets_a_phase_clock_when_the_phase_ends() {
+        // Given a phase that began, was reported to, and ended
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("t", "Fetching"), t0);
+        chatter.progress_at(
+            &report("t", Some("cargo metadata: started"), None),
+            at(t0, 2000),
+        );
+        let ended = chatter.progress_at(&end("t"), at(t0, 2001));
+
+        // When a new phase reuses the token a moment later
+        let begun = chatter.progress_at(&begin("t", "Fetching"), at(t0, 2002));
+
+        // Then its begin is shown, as the first of a fresh phase
+        assert_eq!(ended, None);
+        assert_eq!(begun.as_deref(), Some("Fetching"));
+    }
+
+    /// Recorded shape of a cold `cargo check`-driven load: one phase, hundreds of unpercentaged
+    /// messages, which the old one-line-per-distinct-line rule printed in full.
+    #[test]
+    fn shows_at_most_two_lines_of_a_build_script_phase_reporting_every_crate() {
+        // Given Building compile-time-deps begun
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        let mut shown: Vec<String> = chatter
+            .progress_at(&begin("deps", "Building compile-time-deps"), t0)
+            .into_iter()
+            .collect();
+
+        // When 200 distinct, percentage-free messages arrive inside one second
+        shown.extend((0..200u64).filter_map(|n| {
+            let message = format!("build script crate-{n} run");
+            chatter.progress_at(&report("deps", Some(&message), None), at(t0, n * 5))
+        }));
+
+        // Then at most two lines were shown
+        assert!(shown.len() <= 2, "{} lines: {shown:?}", shown.len());
+    }
 
     fn a_status(quiescent: bool) -> Value {
         json!({
@@ -407,5 +626,25 @@ mod tests {
 
         // Then
         assert!(!chatter.loading());
+    }
+    /// The daemon's warm stream forwards phases as data: every percentage the server reported has to
+    /// reach its client, however fast they arrive.
+    #[test]
+    fn an_unthrottled_chatter_returns_every_distinct_percentage_of_a_burst() {
+        // Given a phase that reports 25, 50 and 75 percent within one second
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        let at = |ms| t0 + Duration::from_millis(ms);
+        chatter.progress_at(&begin("t", "loading crate graph"), at(0));
+
+        // When each report is absorbed
+        let shown: Vec<Option<String>> = [(25, 100), (50, 200), (75, 300)]
+            .iter()
+            .map(|&(percentage, ms)| {
+                chatter.progress_at(&report("t", None, Some(percentage)), at(ms))
+            })
+            .collect();
+
+        // Then every one of them came back
+        assert!(shown.iter().all(Option::is_some), "{shown:?}");
     }
 }

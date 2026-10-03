@@ -791,6 +791,7 @@ async fn reports_every_operation_as_pending_for_a_plan_that_has_not_run() {
             in_flight: 0,
             pending: 2,
             failed: 0,
+            stale: Vec::new(),
         }
     );
 }
@@ -824,6 +825,9 @@ async fn holds_a_tree_against_the_ref_it_was_committed_as() {
             after: 2,
             missing: Vec::new(),
             added: Vec::new(),
+            repointed: 0,
+            visibility_normalised: 0,
+            cfg_test_gates: 0,
         }
     );
 }
@@ -1150,6 +1154,7 @@ async fn apply_of_an_unloaded_plan_loads_it_and_list_plans_shows_it() {
                 plan: "carve.jsonl".to_string(),
                 ops: 0,
                 dirty: false,
+                stale: Vec::new(),
             }],
         }
     );

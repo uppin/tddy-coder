@@ -1,12 +1,12 @@
 //! The file-budget report `check --budget LINES` produces.
 //!
-//! How long each file a plan names is in the tree as it stands, and which of them are over the
+//! How many production lines each file a plan names has in the tree as it stands, and which of them are over the
 //! budget — a record of where the tree stands rather than a verdict on the plan.
 
 use crate::{Anchor, Plan, RefactorOp, RestructureError, Result};
 use std::path::Path;
 
-/// One file a plan names, and how long it is in the tree as it stands.
+/// One file a plan names, and how many production lines it has in the tree as it stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct FileSize {
     path: String,
@@ -33,7 +33,36 @@ pub(super) fn files_named_by(plan: &Plan) -> Vec<String> {
     named
 }
 
-/// How long each named file is, read from the tree the check is running against.
+/// The lines of Rust source before its test module — the length the repository's file budget and
+/// every code-issue record count.
+///
+/// The test module opens at the first `#[cfg(test)]` whose next non-blank line starts a `mod`, so a
+/// `#[cfg(test)] use ...;` above it does not end the count early. A text with no such module is
+/// production throughout.
+pub(crate) fn production_lines(text: &str) -> usize {
+    let lines: Vec<&str> = text.lines().collect();
+    let opens_a_test_module = |index: usize| {
+        lines[index].trim_start().starts_with("#[cfg(test)]")
+            && lines[index + 1..]
+                .iter()
+                .map(|line| line.trim_start())
+                .find(|line| !line.is_empty())
+                .is_some_and(|line| line.starts_with("mod ") || line.starts_with("pub mod "))
+    };
+    (0..lines.len())
+        .find(|&index| opens_a_test_module(index))
+        .unwrap_or(lines.len())
+}
+
+/// Production lines of a file: Rust is cut at its test module, any other language has none.
+fn lines_of_file(path: &str, text: &str) -> usize {
+    match Path::new(path).extension().and_then(|ext| ext.to_str()) {
+        Some("rs") => production_lines(text),
+        _ => text.lines().count(),
+    }
+}
+
+/// How many production lines each named file has, read from the tree the check is running against.
 pub(super) fn measured(root: &Path, paths: &[String]) -> Result<Vec<FileSize>> {
     paths
         .iter()
@@ -45,7 +74,7 @@ pub(super) fn measured(root: &Path, paths: &[String]) -> Result<Vec<FileSize>> {
             })?;
             Ok(FileSize {
                 path: path.clone(),
-                lines: text.lines().count(),
+                lines: lines_of_file(path, &text),
             })
         })
         .collect()
@@ -75,18 +104,18 @@ pub(super) fn budget_report(sizes: &[FileSize], budget: usize) -> Vec<String> {
     let over = over_budget(sizes, budget);
     if over.is_empty() {
         return vec![format!(
-            "budget: every file the plan names is within {budget} lines"
+            "budget: every file the plan names is within {budget} production lines"
         )];
     }
 
     let mut lines = vec![format!(
-        "budget: {} of {} file(s) over {budget} lines",
+        "budget: {} of {} file(s) over {budget} production lines",
         over.len(),
         sizes.len()
     )];
     lines.extend(over.iter().map(|file| {
         format!(
-            "budget: {} is {} lines, {} over",
+            "budget: {} is {} production lines, {} over",
             file.path,
             file.lines,
             file.lines - budget
@@ -190,8 +219,8 @@ mod tests {
         assert_eq!(
             report,
             [
-                "budget: 1 of 2 file(s) over 500 lines",
-                "budget: src/over.rs is 612 lines, 112 over",
+                "budget: 1 of 2 file(s) over 500 production lines",
+                "budget: src/over.rs is 612 production lines, 112 over",
             ]
         );
     }
@@ -208,7 +237,7 @@ mod tests {
         // Then
         assert_eq!(
             report,
-            ["budget: every file the plan names is within 500 lines"]
+            ["budget: every file the plan names is within 500 production lines"]
         );
     }
 
@@ -224,5 +253,108 @@ mod tests {
 
         // Then
         assert_eq!(named, ["src/big.rs", "src/other.rs"]);
+    }
+
+    /// A file with no test module is measured whole: nothing in it is test code.
+    #[test]
+    fn counts_every_line_of_a_file_with_no_test_module() {
+        // Given a source file with no `#[cfg(test)]` anywhere
+        let text = "fn a() {}\nfn b() {}\nfn c() {}\n";
+
+        // When its production lines are counted
+        let lines = production_lines(text);
+
+        // Then all three are production
+        assert_eq!(lines, 3);
+    }
+
+    /// The count ends where the test module opens, so a long test module cannot push a short file
+    /// over the budget.
+    #[test]
+    fn stops_counting_where_the_test_module_opens() {
+        // Given two production lines followed by a test module of three lines
+        let text = "fn a() {}\nfn b() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n";
+
+        // When
+        let lines = production_lines(text);
+
+        // Then only the two lines before the attribute are production
+        assert_eq!(lines, 2);
+    }
+
+    /// `#[cfg(test)] use ...;` is a test-only import, not the start of the test module.
+    #[test]
+    fn does_not_end_early_at_a_test_only_import_above_the_module() {
+        // Given a test-only import on line 2 and the test module on line 5
+        let text =
+            "fn a() {}\n#[cfg(test)]\nuse std::fmt;\nfn b() {}\n#[cfg(test)]\nmod tests {}\n";
+
+        // When
+        let lines = production_lines(text);
+
+        // Then the import and the item after it still count
+        assert_eq!(lines, 4);
+    }
+
+    /// Blank lines between the attribute and `mod` do not make it something else.
+    #[test]
+    fn finds_a_test_module_after_blank_lines_following_its_attribute() {
+        // Given a blank line between the attribute and a `pub mod`
+        let text = "fn a() {}\n#[cfg(test)]\n\npub mod tests {}\n";
+
+        // When
+        let lines = production_lines(text);
+
+        // Then
+        assert_eq!(lines, 1);
+    }
+
+    /// A file that is nothing but its test module has no production lines.
+    #[test]
+    fn counts_no_production_lines_when_the_test_module_is_the_whole_file() {
+        // Given a file that opens its test module on the first line
+        let text = "#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n";
+
+        // When
+        let lines = production_lines(text);
+
+        // Then
+        assert_eq!(lines, 0);
+    }
+
+    /// Only Rust has `#[cfg(test)]`; in any other file the same text is just text.
+    #[test]
+    fn measures_every_line_of_a_file_that_is_not_rust() {
+        // Given a TypeScript file whose text happens to contain the Rust attribute
+        let dir = tempfile::tempdir().expect("a temp dir");
+        std::fs::write(
+            dir.path().join("widget.ts"),
+            "a\n#[cfg(test)]\nmod tests {}\n",
+        )
+        .expect("the fixture is written");
+
+        // When it is measured
+        let sizes = measured(dir.path(), &["widget.ts".to_string()]).expect("measured");
+
+        // Then every line counts
+        assert_eq!(sizes, [a_file_of("widget.ts", 3)]);
+    }
+
+    /// The measurement a plan author acts on: a file over the budget only by its tests is within it.
+    #[test]
+    fn measures_production_lines_only_so_a_long_test_module_does_not_count() {
+        // Given a Rust file of 3 production lines and a 4-line test module on disk
+        let dir = tempfile::tempdir().expect("a temp dir");
+        std::fs::write(
+            dir.path().join("big.rs"),
+            "fn a() {}\nfn b() {}\nfn c() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n",
+        )
+        .expect("the fixture is written");
+
+        // When it is measured
+        let sizes = measured(dir.path(), &["big.rs".to_string()]).expect("measured");
+
+        // Then
+        assert_eq!(sizes, [a_file_of("big.rs", 3)]);
     }
 }

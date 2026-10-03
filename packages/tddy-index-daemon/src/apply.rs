@@ -79,6 +79,9 @@ fn apply_held_plan(
     events: &EventSender<RestructureEvent>,
 ) -> Result<()> {
     let (plan, plan_path) = held.with_store(|store| {
+        // Before the plan is read out or anything is waited for: a stale operation is refused while
+        // nothing has been written.
+        runner::refuse_a_stale_pending_op(store, &held.key, options)?;
         store
             .get(&held.key)
             .map(|loaded| (loaded.plan.clone(), store.path_of(&held.key)))

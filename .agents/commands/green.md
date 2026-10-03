@@ -31,7 +31,7 @@ its **own commit**, and implement nothing in it.
 Implementing on top of a structure you are about to change means writing the code twice and
 reviewing a diff that is both at once.
 
-Three contract points:
+Four contract points:
 
 1. **The baseline is carved out.** `/code-restructuring` demands a green baseline and calls a red one
    a stop — but a changeset from `/plan-red` **has red tests by design**. The restructure changeset's
@@ -40,7 +40,11 @@ Three contract points:
 2. **This changeset's own red tests get rewritten** by the restructure, mechanically, and that is
    correct. They must still fail **for the same reason** afterwards — a red test that stops failing
    during a restructure has been broken, not fixed. Verify it.
-3. **It stays behaviour-preserving.** If a seam turns out to need the feature's behaviour to exist
+3. **Its tests run once, at the end.** Build and test after the *whole* restructure is applied, not
+   between its plans or operations: the engine's own compile gate and `restructure verify` are the
+   evidence in between (`/code-restructuring` § Testing cadence). Point 2's "fails for the same
+   reason" check is part of that one run, by test name.
+4. **It stays behaviour-preserving.** If a seam turns out to need the feature's behaviour to exist
    first, that is a planning error: stop and re-sequence rather than sliding implementation into the
    restructure commit.
 

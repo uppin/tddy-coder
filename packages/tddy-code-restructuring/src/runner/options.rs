@@ -207,13 +207,9 @@ impl Options {
 }
 
 fn comma_separated(value: Option<&String>) -> Result<Vec<String>> {
-    Ok(value
-        .ok_or_else(|| usage("--items needs a comma-separated list"))?
-        .split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-        .collect())
+    Ok(crate::item_anchor::parse_item_list(value.ok_or_else(
+        || usage("--items needs a comma-separated list"),
+    )?))
 }
 
 fn numeric_value<T: std::str::FromStr>(value: Option<&String>, flag: &str) -> Result<T> {
@@ -272,6 +268,23 @@ mod tests {
         // When it is read
         // Then it names no indexing budget
         assert!(!USAGE.contains("--indexing-budget"), "{USAGE}");
+    }
+
+    /// The legacy flag parser reads `--items` too, and a generic self type's comma is part of the
+    /// item it names, not a separator.
+    #[test]
+    fn keeps_the_commas_of_a_generic_self_type_inside_an_item() {
+        // Given an anchors run naming a generic impl block between two plain items
+        let options = parse_options(&[
+            "anchors".to_string(),
+            "src/lib.rs".to_string(),
+            "--items".to_string(),
+            "One, <Pair<A, B>> ,Two".to_string(),
+        ])
+        .unwrap();
+
+        // Then three items are read, the generic one whole and trimmed
+        assert_eq!(options.items, vec!["One", "<Pair<A, B>>", "Two"]);
     }
 
     #[test]

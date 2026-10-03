@@ -6,31 +6,19 @@
 
 use crate::backends::rust::ProgressSink;
 use crate::backends::RustBackend;
-use crate::crate_move;
-use crate::item_anchor;
-use crate::item_anchor::{has_item_anchors, item_anchor_at, items_anchor};
-use crate::journal::{Journal, OpStatus};
-use crate::plan::{Anchor, RefactorKind};
-use crate::plan_store::{FlushPolicy, PlanKey, PlanStore};
-use crate::registry::{BackendRegistry, Workspace};
-use crate::{Overlay, Plan, PositionLedger, RestructureError, Result};
+use crate::plan::RefactorKind;
+use crate::plan_store::{FlushPolicy, PlanStore};
+use crate::registry::BackendRegistry;
+use crate::{Plan, RestructureError, Result};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
-use super::budget::{budget_report, files_named_by, measured};
 use super::comparison::verify;
 use super::options::usage;
-use super::rehearsal::{survey_lines, Rehearsal};
-use super::resume;
-use super::{
-    commit_operation, open_run_gated, parse_options, refuse_a_broken_baseline,
-    refuse_a_broken_result, refuse_repo_scoped_state, report_drifted_hints, restore_ledger,
-    AppliedRun, Command, Finding, Options, Outcome, PlanProgress, RunSummary, SnapshotRewrite,
-    StatePaths,
-};
+use super::{parse_options, Command, Options, Outcome, RunSummary};
 
 /// Dispatch a restructuring subcommand given a raw command line.
 ///
@@ -70,11 +58,15 @@ pub fn dispatch(
 ) -> Result<Outcome> {
     match options.command {
         Command::Apply => apply(root, options, client, cancel).map(Outcome::Applied),
-        Command::Status => status(root, options).map(Outcome::Status),
-        Command::Check => check(root, options, client, cancel).map(Outcome::Checked),
-        Command::Anchors => item_anchors(root, options, client, cancel).map(Outcome::ItemAnchored),
+        Command::Status => check_entry_points::status(root, options).map(Outcome::Status),
+        Command::Check => {
+            check_entry_points::check(root, options, client, cancel).map(Outcome::Checked)
+        }
+        Command::Anchors => anchor_entry_points::item_anchors(root, options, client, cancel)
+            .map(Outcome::ItemAnchored),
         Command::Verify => verify(root, options).map(Outcome::Verified),
-        Command::Snapshot => snapshot(root, options).map(Outcome::Snapshotted),
+        Command::Snapshot => check_entry_points::snapshot_resolving(root, options, client, cancel)
+            .map(Outcome::Snapshotted),
         // Held across requests, so only a process that outlives one has anything to load into: a
         // run with no daemon has a store for its own length and nothing to name afterwards.
         Command::Load => Err(RestructureError::NeedsIndexDaemon {
@@ -89,304 +81,11 @@ pub fn dispatch(
     }
 }
 
-/// Apply the plan `key` names from `store`, starting at `from` (or where its journal left off),
-/// refreshing the plan's pending operations after each one and flushing it at the end.
-///
-/// What every front end runs: the daemon over its long-lived store, a one-shot `apply` over a store
-/// that lives for the run. The plan is the store's copy, not the file: `options.target` names
-/// nothing here, and a file edited since it was loaded changes nothing about what runs.
-///
-/// **The store's anchors are current.** After each committed operation the plan's pending operations
-/// are rewritten for the tree it left and the plan is written back, so what the file says is what
-/// the tree holds as of the last completed operation. A run therefore translates anchors through the
-/// edits *of this run* only — a ledger folded from the journal would carry the edits of earlier runs
-/// a second time — and a resume reads anchors that match the tree it resumes on. The write follows
-/// the journal's record of the operation, so a crash between the two leaves the file one operation
-/// behind the journal.
-///
-/// A dry run writes nothing: no journal record, no refresh, no flush. Neither does a run that is
-/// refused before its first operation: the plan file is as it was.
-///
-/// # Errors
-///
-/// [`RestructureError::PlanChangedOnDisk`] when the plan's file changed since it was loaded, at the
-/// first write. The operations committed before it stay on disk and in the journal.
-pub fn apply_from_store(
-    root: &Path,
-    store: &mut PlanStore,
-    key: &PlanKey,
-    options: Options,
-    client: Option<Arc<LspClient>>,
-    cancel: CancellationToken,
-) -> Result<RunSummary> {
-    let client = client.ok_or_else(|| {
-        RestructureError::MalformedPlan("apply requires a rust-analyzer LSP session".into())
-    })?;
-    let summary = apply_held_plan(root, store, key, &options, client, &cancel)?;
-    // A run that refused or failed writes nothing here: the operations it did commit wrote the plan
-    // as they landed ([`record_applied_op`]), and one that never started must leave the plan file
-    // as it found it — "nothing was written" is what its refusal says.
-    if !options.dry_run {
-        store.flush(key)?;
-    }
-    Ok(summary)
-}
-
-/// A run that has been opened: its journal, the plan it executes, and where in it to start.
-///
-/// What [`open_plan_run`] hands back, so the loop that drives it — the command line's, which
-/// reports lines, and the daemon's, which reports events — starts from the same state.
-pub struct PlanRun {
-    pub journal: Journal,
-    /// The plan to execute, every item anchor lowered into the range it names on the tree the run
-    /// starts on.
-    pub plan: Plan,
-    pub paths: StatePaths,
-    /// Translates `plan`'s anchors: through the edits **this run** commits and nothing earlier, since
-    /// the plan was written back to match the tree — unless the journal `legacy`, in which case it
-    /// starts from the journal's own fold. See [`apply_from_store`].
-    pub ledger: PositionLedger,
-    /// The journal was written before plans were kept current, so this run continues it as such: its
-    /// operations are journalled without ids and the plan is neither refreshed nor written back —
-    /// mixing the two epochs in one plan would leave anchors that match neither.
-    pub legacy: bool,
-    /// The index of the first operation to execute.
-    pub start: usize,
-}
-
-/// Open the run of `plan`, a plan a store holds at `plan_path`: the journal, with its refusals, and
-/// item anchors lowered, in the one order every apply loop uses ([`open_run_resolving_anchors`]).
-///
-/// Takes the plan rather than the store, so a host whose store is shared can copy the plan out and
-/// not hold the store through a baseline compile check that takes minutes.
-pub fn open_plan_run(
-    plan: &Plan,
-    plan_path: &Path,
-    root: &Path,
-    options: &Options,
-    registry: &mut BackendRegistry,
-    cancel: &CancellationToken,
-) -> Result<PlanRun> {
-    let paths = StatePaths::for_plan(root, plan_path)?;
-    // Item anchors resolve, and then the baseline compile check runs, both before `.restructure/`
-    // exists — see `open_run_resolving_anchors` for why in that order.
-    let (journal, lowered) =
-        open_run_resolving_anchors(plan, root, &paths, options, registry, || {
-            refuse_a_broken_baseline(root, plan, options, cancel)
-        })?;
-    // The checkpoint must agree with the journal either way. What translates anchors differs:
-    // a journal that predates write-back left the plan in the coordinates the run began in, so the
-    // journal's own fold does it; any other leaves the plan current, and what translates is this
-    // run's edits alone.
-    let folded = restore_ledger(&journal, &paths)?;
-    let legacy = resume::predates_plan_write_back(&journal);
-    let start = resume::start_of(&lowered, options, &journal)?;
-    Ok(PlanRun {
-        journal,
-        plan: lowered,
-        paths,
-        ledger: if legacy {
-            folded
-        } else {
-            PositionLedger::new()
-        },
-        legacy,
-        start,
-    })
-}
-
-fn apply_held_plan(
-    root: &Path,
-    store: &mut PlanStore,
-    key: &PlanKey,
-    options: &Options,
-    client: Arc<LspClient>,
-    cancel: &CancellationToken,
-) -> Result<RunSummary> {
-    let plan = store
-        .get(key)
-        .ok_or_else(|| {
-            RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
-        })?
-        .plan
-        .clone();
-    let mut registry = registry_for(
-        client,
-        cancel.clone(),
-        Arc::clone(&options.progress),
-        options.trace,
-    );
-    let PlanRun {
-        mut journal,
-        plan,
-        paths,
-        mut ledger,
-        legacy,
-        start,
-    } = open_plan_run(
-        &plan,
-        &store.path_of(key),
-        root,
-        options,
-        &mut registry,
-        cancel,
-    )?;
-    let total = plan.ops.len();
-    (options.progress)(&format!(
-        "apply: {total} operation(s){}{}",
-        if options.dry_run { ", dry-run" } else { "" },
-        if start > 0 {
-            format!(", from op {start}")
-        } else {
-            String::new()
-        }
-    ));
-    let mut overlay = Overlay::new();
-    let mut done = 0usize;
-    let mut stopped_early = false;
-
-    for (index, op) in plan.ops.iter().enumerate().skip(start) {
-        // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
-        // than raising. Reporting it as a malformed plan — with a usage dump — described a
-        // successful partial run as a defective one.
-        if options
-            .stop_after
-            .is_some_and(|limit| index >= start + limit)
-        {
-            (options.progress)(&format!(
-                "stopped after {} operation(s) as requested",
-                index - start
-            ));
-            stopped_early = true;
-            break;
-        }
-
-        let at = ledger.translate_op(op)?;
-        (options.progress)(&format!(
-            "op {index} of {total}: resolving {:?} in `{}`",
-            op.op,
-            at.anchor.file()
-        ));
-        let resolved = registry
-            .backend_for(Path::new(at.anchor.file()), op.op)?
-            .resolve(
-                &at,
-                &Workspace {
-                    root,
-                    overlay: &overlay,
-                },
-            )?;
-
-        report_visibility(&options.account, &resolved);
-
-        let files = resolved.edit.changes.len();
-        (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
-        if options.dry_run {
-            (options.account)(&progress_line(
-                index,
-                done,
-                plan.ops.len(),
-                op.op,
-                files,
-                false,
-            ));
-            ledger.record(&resolved.edit);
-            overlay.record(root, &resolved.edit)?;
-            done += 1;
-            continue;
-        }
-
-        (options.progress)(&format!(
-            "op {index} of {total}: applying {files} file(s) to disk"
-        ));
-        commit_operation(
-            index,
-            op.id.as_ref().filter(|_| !legacy),
-            &resolved,
-            root,
-            &paths,
-            &mut journal,
-            &mut ledger,
-        )?;
-        if !legacy {
-            record_applied_op(
-                store,
-                key,
-                index,
-                &resolved,
-                &mut registry,
-                &mut journal,
-                &paths,
-            )?;
-        }
-        // Reported *after* the commit, so a line in the account means the edit is on disk and in
-        // the journal. An apply used to report nothing at all — the dry run, where nothing is at
-        // stake, was the only mode that spoke.
-        (options.account)(&progress_line(
-            index,
-            done,
-            plan.ops.len(),
-            op.op,
-            files,
-            true,
-        ));
-        done += 1;
-    }
-
-    let run = AppliedRun {
-        journal: &journal,
-        paths: &paths,
-        applied: done,
-        total,
-    };
-    refuse_a_broken_result(root, options, run, cancel)?;
-    Ok(RunSummary {
-        applied: done,
-        total: plan.ops.len(),
-        stopped_early,
-    })
-}
-
-/// Bring the plan `key` up to the tree after its operation `index` was committed, record that in
-/// the journal, and write the plan back: pending anchors rewritten through the edit
-/// ([`PlanStore::refresh_after_op`]), a digest of them journalled, then the flush.
-///
-/// The order is the point. The journal's `completed` record is already down, so a crash before the
-/// digest leaves an operation with no digest, and a crash after the digest and before the flush
-/// leaves a digest the plan on disk does not match — both of which a resume refuses
-/// ([`RestructureError::PlanOutOfSync`]) instead of reading anchors from a plan that is behind the
-/// tree. The flush is synchronous for the same reason: it is what makes the next resume's check pass.
-///
-/// What every apply loop calls after [`commit_operation`], the command line's and the daemon's.
-pub fn record_applied_op(
-    store: &mut PlanStore,
-    key: &PlanKey,
-    index: usize,
-    resolved: &crate::Resolution,
-    resolver: &mut dyn crate::item_anchor::ItemResolver,
-    journal: &mut Journal,
-    paths: &StatePaths,
-) -> Result<()> {
-    let id = store
-        .get(key)
-        .and_then(|held| held.plan.ops.get(index))
-        .and_then(|op| op.id.clone())
-        .ok_or_else(|| {
-            RestructureError::MalformedPlan(format!(
-                "{key} has no operation {index} to refresh from"
-            ))
-        })?;
-    store.refresh_after_op(key, &id, &resolved.edit, resolver)?;
-    let held = store.get(key).ok_or_else(|| {
-        RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
-    })?;
-    let digest = crate::plan_store::pending_digest(&held.plan, index);
-    journal.append(
-        &paths.journal,
-        crate::journal::JournalRecord::plan_synced(index, Some(id), digest),
-    )?;
-    store.flush(key)
-}
+mod store_run;
+pub use store_run::{
+    apply_from_store, open_plan_run, record_applied_op, refuse_a_stale_pending_op, stale_findings,
+    PlanRun,
+};
 
 /// Build a registry for static checks only (no LSP connection).
 fn registry_for_static() -> BackendRegistry {
@@ -453,7 +152,7 @@ pub fn apply(
     );
     store.load(std::slice::from_ref(&plan_path))?;
     let key = store.key_for(&plan_path)?;
-    apply_from_store(root, &mut store, &key, options, client, cancel)
+    store_run::apply_from_store(root, &mut store, &key, options, client, cancel)
 }
 
 /// One line of per-operation progress, in the wording every front end uses for it.
@@ -475,316 +174,13 @@ fn progress_line(
     crate::console::operation(index, done, total, &format!("{op:?}"), files, applied)
 }
 
-/// Rewrite a plan's snapshot header to the working tree under `root` as it stands.
-///
-/// Every edit to a snapshotted file invalidates the header, and until this existed recomputing it
-/// was a shell pipeline each author had to invent around [`crate::apply::hash_file`] — which is
-/// public, and which nothing exposed.
-///
-/// **Line 1 and nothing else.** The plan is a command log, and a subcommand that rewrote an
-/// operation would be editing the author's intent rather than restating what the tree holds. So
-/// the operations are carried through as the bytes they arrived as, rather than parsed and
-/// re-serialized: a plan is also a file people diff, and a round trip through `serde_json` would
-/// renumber its whitespace and reorder its keys for nothing.
-///
-/// Nothing is written when the header already matches, so a `snapshot` of a current plan leaves
-/// its mtime alone.
-///
-/// Nothing goes to [`Options::progress`] either. That sink carries how far an index has got, and
-/// this reads a file and hashes what it names — a run with nothing to wait for has no progress to
-/// report, and a line there would be narration about an index that was never consulted.
-pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
-    let path = options.plan()?;
-    let text = std::fs::read_to_string(&path)?;
-    let plan = Plan::parse(&text)?;
-    let header = plan.rehashed_header(root)?;
+mod check_entry_points;
+pub use check_entry_points::{
+    check, check_plan, snapshot, snapshot_resolving, status, status_of_plan,
+};
 
-    // The header is the first line that is *not blank*, which is where `Plan::parse` reads it from.
-    // Taking "everything before the first newline" instead would rewrite a leading blank line and
-    // leave the real header behind to be parsed as an operation.
-    let blank: usize = text
-        .split_inclusive('\n')
-        .take_while(|line| line.trim().is_empty())
-        .map(str::len)
-        .sum();
-    let produced = match text[blank..].split_once('\n') {
-        Some((_, operations)) => format!("{}{header}\n{operations}", &text[..blank]),
-        None => format!("{}{header}", &text[..blank]),
-    };
-
-    let rewritten = produced != text;
-    if rewritten {
-        std::fs::write(&path, &produced)?;
-    }
-
-    Ok(SnapshotRewrite {
-        plan: path.to_string_lossy().to_string(),
-        paths: plan.snapshot.len() + plan.files.len(),
-        rewritten,
-    })
-}
-
-/// How far a plan's journal under `root` got.
-///
-/// `in_flight` discounts the operations that went on to complete — the journal holds a record of
-/// each — and `pending` is what the plan still has left.
-pub fn status(root: &Path, options: Options) -> Result<PlanProgress> {
-    let plan_path = options.plan()?;
-    let plan = read_plan(&plan_path)?;
-    status_of_plan(root, &plan_path, &plan)
-}
-
-/// [`status`] of a plan the caller already holds — the daemon's, out of its store — rather than one
-/// read from `plan_path`, which still says where the plan's run state is keyed.
-pub fn status_of_plan(root: &Path, plan_path: &Path, plan: &Plan) -> Result<PlanProgress> {
-    let paths = StatePaths::for_plan(root, plan_path)?;
-    refuse_repo_scoped_state(root, &paths)?;
-    let journal = Journal::load(&paths.journal)?;
-    let counted = |wanted: OpStatus| {
-        journal
-            .records
-            .iter()
-            .filter(|record| record.status == wanted)
-            .count()
-    };
-    let completed = counted(OpStatus::Completed);
-
-    Ok(PlanProgress {
-        completed,
-        in_flight: counted(OpStatus::InFlight).saturating_sub(completed),
-        pending: plan.ops.len().saturating_sub(completed),
-        failed: counted(OpStatus::Failed),
-    })
-}
-
-/// Everything wrong with a plan, without writing anything.
-///
-/// A plan with findings is an `Ok` carrying them, not a refusal: a caller that receives them as
-/// values decides for itself what they mean — a front end fails the run, a plan author reads the
-/// report, and a host serving the check forwards them. Only a plan that could not be *checked* —
-/// one that will not parse, or whose snapshot does not match the tree — is an error.
-///
-/// The two things a check produces that are not findings go to [`Options::account`]: a deep
-/// check's blast-radius survey, which is a cost rather than a defect, and the file-budget report,
-/// which is a record of where the tree stands.
-pub fn check(
-    root: &Path,
-    options: Options,
-    client: Option<Arc<LspClient>>,
-    cancel: CancellationToken,
-) -> Result<Vec<Finding>> {
-    let plan = read_plan(&options.plan()?)?;
-    check_plan(root, plan, options, client, cancel)
-}
-
-/// [`check`] of a plan the caller already holds — the daemon's, out of its store — rather than one
-/// read from `options.target`.
-pub fn check_plan(
-    root: &Path,
-    plan: Plan,
-    options: Options,
-    client: Option<Arc<LspClient>>,
-    cancel: CancellationToken,
-) -> Result<Vec<Finding>> {
-    plan.verify_snapshot(root)?;
-    report_drifted_hints(&plan, root, &options.progress);
-
-    let mut registry = if options.deep {
-        let client = client.ok_or_else(|| {
-            RestructureError::MalformedPlan(
-                "deep check requires a rust-analyzer LSP session".into(),
-            )
-        })?;
-        registry_for(client, cancel, Arc::clone(&options.progress), options.trace)
-    } else {
-        registry_for_static()
-    };
-    let mut findings: Vec<Finding> = Vec::new();
-    // Resolved before anything reads an anchor, so every check below sees the ranges an apply would
-    // act on. A static check has no server to resolve them with, so it cannot vouch for an
-    // operation anchored by item: that is a finding for each, not a quiet skip, because a plan of
-    // item anchors passing `check` green would be a claim nothing examined.
-    let plan = if !has_item_anchors(&plan) {
-        plan
-    } else if options.deep {
-        item_anchor::resolve_item_anchors(&plan, root, &mut registry)?
-    } else {
-        findings.extend(unresolvable_without_a_server(&plan));
-        plan
-    };
-    let mut rehearsal = Rehearsal::default();
-    let total = plan.ops.len();
-    (options.progress)(&format!(
-        "check: {total} operation(s){}",
-        if options.deep { ", deep" } else { "" }
-    ));
-
-    let static_workspace = Workspace {
-        root,
-        overlay: &Overlay::new(),
-    };
-    // Every member of a cluster operation, not only the module its anchor names — otherwise
-    // `check` passes a set one of whose members `apply` then refuses, which is the parity this
-    // whole static pass exists to hold.
-    for (operation, detail) in crate_move::unrunnable(&static_workspace, &plan.ops)? {
-        findings.push(Finding { operation, detail });
-    }
-
-    // Read across the plan rather than per operation: whether a module's siblings come along is a
-    // question about the plan, and an operation that is viable on its own is exactly how a
-    // mutually-referencing set gets left half moved.
-    for (operation, detail) in crate_move::stranded_siblings(&static_workspace, &plan.ops)? {
-        findings.push(Finding { operation, detail });
-    }
-
-    for (index, op) in plan.ops.iter().enumerate() {
-        (options.progress)(&format!(
-            "op {index} of {total}: static check {:?} in `{}`",
-            op.op,
-            op.anchor.file()
-        ));
-        let statics = registry
-            .backend_for(Path::new(op.anchor.file()), op.op)?
-            .check(
-                op,
-                &Workspace {
-                    root,
-                    overlay: &Overlay::new(),
-                },
-            )?;
-        let statically_sound = statics.is_empty();
-        findings.extend(statics.into_iter().map(|detail| Finding {
-            operation: index,
-            detail,
-        }));
-
-        if !options.deep || !statically_sound {
-            continue;
-        }
-
-        (options.progress)(&format!(
-            "op {index} of {total}: deep resolve {:?} in `{}`",
-            op.op,
-            op.anchor.file()
-        ));
-        let rehearsed = rehearsal.rehearse(root, &mut registry, op)?;
-        if let Some(survey) = &rehearsed.survey {
-            for line in survey_lines(index, survey) {
-                (options.account)(&line);
-            }
-        }
-        if let Some(refusal) = rehearsed.refusal {
-            findings.push(Finding {
-                operation: index,
-                detail: refusal,
-            });
-        }
-    }
-
-    if let Some(budget) = options.budget {
-        for line in budget_report(&measured(root, &files_named_by(&plan))?, budget) {
-            (options.account)(&line);
-        }
-    }
-
-    Ok(findings)
-}
-
-/// A finding for each operation a static check cannot examine because an anchor of it names items.
-fn unresolvable_without_a_server(plan: &Plan) -> impl Iterator<Item = Finding> + '_ {
-    plan.ops
-        .iter()
-        .enumerate()
-        .filter(|(_, op)| {
-            op.anchors()
-                .any(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }))
-        })
-        .map(|(index, op)| Finding {
-            operation: index,
-            detail: format!(
-                "{:?} in `{}` anchors by item, which only a deep check can resolve, so this \
-                 static check did not examine it — run `check --deep`",
-                op.op,
-                op.anchor.file()
-            ),
-        })
-}
-
-/// The anchor `restructure anchors` emits: an `items` anchor over `options.items`, or — with
-/// `options.at` — the `item` anchor of the innermost item enclosing that position.
-pub fn item_anchors(
-    root: &Path,
-    options: Options,
-    client: Option<Arc<LspClient>>,
-    cancel: CancellationToken,
-) -> Result<Anchor> {
-    let client = client.ok_or_else(|| {
-        RestructureError::MalformedPlan("anchors requires a rust-analyzer LSP session".into())
-    })?;
-    let source = options.source()?;
-    let file = source.to_string_lossy().to_string();
-
-    let mut registry = registry_for(client, cancel, Arc::clone(&options.progress), options.trace);
-    match options.at {
-        Some(_) if !options.items.is_empty() => {
-            Err(usage("anchors takes --items or --at, not both"))
-        }
-        Some(at) => {
-            (options.progress)(&format!(
-                "anchors: the item enclosing {}:{} in `{file}`",
-                at.start.line, at.start.col
-            ));
-            item_anchor_at(root, &file, at, &mut registry)
-        }
-        None if options.items.is_empty() => {
-            Err(usage("anchors needs --items A,B,C or --at LINE:COL"))
-        }
-        None => {
-            (options.progress)(&format!(
-                "anchors: `{file}` ({} item(s))",
-                options.items.len()
-            ));
-            items_anchor(root, &file, &options.items, &mut registry)
-        }
-    }
-}
-
-/// Open a run the way both apply loops must: the plan checked against the journal, item anchors
-/// resolved, then the baseline compile check, then `.restructure/` written — and the plan to run,
-/// with every anchor lowered to the coordinates the run translates, handed back beside the journal.
-///
-/// One function so the CLI's apply and the daemon's cannot diverge on the order. It is this order
-/// because resolving is cheap and refuses for the commonest reasons — an item edited since the plan
-/// was written, absent, or not in its file — while the baseline gate takes minutes of `cargo check`;
-/// and both come before the first write, so their refusals' "nothing was written" stays true and
-/// leaves no `.restructure/` behind.
-///
-/// Item anchors are resolved against the tree the run *starts* on, and only the operations the run
-/// will execute: a run that continues a journal starts on a tree that holds the journal's edits,
-/// and the plan's pending anchors were written back to describe exactly that tree
-/// ([`record_applied_op`]). What a continued run first has to know is that they were — see
-/// `resume::refuse_a_plan_the_journal_cannot_vouch_for` — and it asks twice: of the journal as
-/// found before the gate, and of the one the open returns, since opening a continued run may adopt
-/// a repository-scoped journal the first look could not see.
-pub fn open_run_resolving_anchors(
-    plan: &Plan,
-    root: &Path,
-    paths: &StatePaths,
-    options: &Options,
-    registry: &mut BackendRegistry,
-    baseline_gate: impl FnOnce() -> Result<()>,
-) -> Result<(Journal, Plan)> {
-    let (journal, resolved) = open_run_gated(plan, root, paths, options, || {
-        let found = Journal::load(&paths.journal)?;
-        resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &found)?;
-        let start = resume::start_of(plan, options, &found)?;
-        let resolved = resume::lower_pending(plan, start, root, registry)?;
-        baseline_gate()?;
-        Ok(resolved)
-    })?;
-    resume::refuse_a_plan_the_journal_cannot_vouch_for(plan, &journal)?;
-    Ok((journal, resolved))
-}
+mod anchor_entry_points;
+pub use anchor_entry_points::{item_anchors, open_run_resolving_anchors};
 
 fn read_plan(path: &Path) -> Result<Plan> {
     Plan::parse(&std::fs::read_to_string(path)?)

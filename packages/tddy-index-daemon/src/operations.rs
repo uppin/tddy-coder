@@ -19,6 +19,7 @@
 
 use std::path::{Path, PathBuf};
 
+use tddy_code_restructuring::plan_store::OpStaleness;
 use tddy_code_restructuring::runner::{self, Command, Options};
 use tddy_rpc::Status;
 use tokio::sync::mpsc;
@@ -119,7 +120,14 @@ pub(crate) async fn serve_check(
             let root = root.clone();
             let cancel = cancel.clone();
             tokio::task::spawn_blocking(move || match held {
-                Some(plan) => runner::check_plan(&root, plan, options, client, cancel),
+                Some((plan, stale)) => {
+                    // A stale operation is a finding too: the check says what an apply would refuse.
+                    let stale = runner::stale_findings(&plan, &stale);
+                    runner::check_plan(&root, plan, options, client, cancel).map(|mut found| {
+                        found.extend(stale);
+                        found
+                    })
+                }
                 None => runner::check(&root, options, client, cancel),
             })
             .await
@@ -244,12 +252,12 @@ async fn loaded_for_a_run(
     .map_err(|refusal: tddy_code_restructuring::RestructureError| status_of(&refusal))
 }
 
-/// The store's copy of `plan`, if its root has loaded it.
+/// The store's copy of `plan` and its stale operations, if its root has loaded it.
 async fn held_copy(
     index: &WorkspaceIndex,
     root: &Path,
     plan: &Path,
-) -> Result<Option<tddy_code_restructuring::Plan>, Status> {
+) -> Result<Option<(tddy_code_restructuring::Plan, Vec<OpStaleness>)>, Status> {
     let store = index.plans_of(root).await;
     let plan = plan.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -257,7 +265,7 @@ async fn held_copy(
         // A path that names no plan has no key, hence nothing held under it — and is refused where
         // the check reads the file.
         let key = held.key_for(&plan).ok()?;
-        Some(held.get(&key)?.plan.clone())
+        Some((held.get(&key)?.plan.clone(), held.stale_ops(&key)))
     })
     .await
     .map_err(|failure| joined("check", &failure))

@@ -194,6 +194,17 @@ impl AFixtureWorkspace {
         Err(String::from_utf8_lossy(&output.stderr).to_string())
     }
 
+    /// Whether rustfmt would leave `relative` as it is, formatting it with edition 2021.
+    pub fn is_rustfmt_clean(&self, relative: &str) -> bool {
+        Command::new("rustfmt")
+            .args(["--check", "--edition", "2021", relative])
+            .current_dir(&self.root)
+            .output()
+            .expect("rustfmt runs")
+            .status
+            .success()
+    }
+
     /// Overwrite a file in a workspace that already exists.
     ///
     /// The builder's own `writing` consumes `self`, which is right while assembling a fixture and
@@ -942,6 +953,66 @@ pub fn a_crate_whose_alias_only_the_compiler_resolves() -> AFixtureWorkspace {
     ])
 }
 
+/// A crate whose parent module binds `Result` over the prelude: `use crate::{Overlay, Result};`,
+/// where `crate::Result` is the crate's one-generic alias, as in the real case.
+///
+/// Lines 11–17 of the parent are a seam naming that `Result` (`run`) and the prelude's `Option`,
+/// which the parent never imports (`pick`).
+pub fn a_crate_whose_parent_rebinds_a_prelude_name() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The crate root, which owns the one-generic `Result`.",
+                "",
+                "mod entry;",
+                "",
+                "pub struct Overlay;",
+                "",
+                "pub struct RestructureError;",
+                "",
+                "pub type Result<T> = std::result::Result<T, RestructureError>;",
+                "",
+                "pub fn first() -> Result<u32> {",
+                "    entry::first()",
+                "}",
+            ]),
+        )
+        .writing(
+            ENTRY_MODULE,
+            &source(&[
+                "//! The module the seam leaves.",
+                "",
+                "use crate::{Overlay, RestructureError, Result};",
+                "",
+                "pub fn first() -> Result<u32> {",
+                "    Ok(1)",
+                "}",
+                "",
+                "pub fn overlay() -> Overlay {",
+                "    Overlay",
+                "}",
+                "",
+                "pub fn run(overlay: &Overlay) -> Result<()> {",
+                "    let _ = overlay;",
+                "    if false {",
+                "        return Err(RestructureError);",
+                "    }",
+                "    Ok(())",
+                "}",
+                "",
+                "pub fn pick() -> Option<u32> {",
+                "    Some(3)",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// The module [`a_crate_whose_parent_rebinds_a_prelude_name`] splits.
+pub const ENTRY_MODULE: &str = "crates/origin/src/entry.rs";
+
 fn a_crate_binding_an_alias_to(generated: &[&str]) -> AFixtureWorkspace {
     let mut lines: Vec<&str> = vec![
         "//! The file the seams leave.",
@@ -1315,6 +1386,33 @@ pub fn a_workspace_whose_test_binary_stands_alone() -> AFixtureWorkspace {
     .tracked_by_git()
 }
 
+/// A test binary with an import nothing uses and a use group rustfmt would write differently —
+/// what a move leaves behind it: the lint gate and `cargo fmt --check` both fail on it.
+pub fn a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use(
+) -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Carries an import nothing reads.",
+        "use std::collections::HashMap;",
+        "use std::fmt::{Debug};",
+        "",
+        "fn shows(value: impl Debug) -> String {",
+        "    format!(\"{value:?}\")",
+        "}",
+        "",
+        "#[test]",
+        "fn doubles() {",
+        "    assert_eq!(shows(2), \"2\");",
+        "}",
+    ])
+    .tracked_by_git()
+}
+
+/// The unused import [`a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use`] holds.
+pub const THE_UNUSED_IMPORT: &str = "use std::collections::HashMap;";
+
+/// Where [`THE_TEST_BINARY`] lands.
+pub const THE_MOVED_TEST_BINARY: &str = "crates/destination/tests/golden.rs";
+
 fn a_workspace_with_a_test_binary(test: &[&str]) -> AFixtureWorkspace {
     a_workspace_of(&["origin", "destination"])
         .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
@@ -1338,6 +1436,18 @@ fn a_workspace_with_a_test_binary(test: &[&str]) -> AFixtureWorkspace {
 pub async fn applying_a_move_of_the_test_binary(
     fixture: &AFixtureWorkspace,
 ) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    moving_the_test_binary(fixture, false).await.0
+}
+
+/// [`applying_a_move_of_the_test_binary`], optionally as a `--dry-run`, with every line the run
+/// reported to its progress sink.
+pub async fn moving_the_test_binary(
+    fixture: &AFixtureWorkspace,
+    dry_run: bool,
+) -> (
+    Result<tddy_code_restructuring::runner::RunSummary, String>,
+    Vec<String>,
+) {
     let root = fixture.path().to_path_buf();
     let digest = tddy_code_restructuring::apply::hash_file(&root.join(THE_TEST_BINARY))
         .expect("the test binary hashes");
@@ -1353,12 +1463,18 @@ pub async fn applying_a_move_of_the_test_binary(
     .expect("the plan is written");
 
     let client = a_server_no_operation_asks(&root).await;
+    let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keeper = Arc::clone(&heard);
     let options = tddy_code_restructuring::runner::Options {
         command: tddy_code_restructuring::runner::Command::Apply,
         target: Some(plan),
+        dry_run,
+        progress: Arc::new(move |line: &str| {
+            keeper.lock().expect("lines").push(line.to_string());
+        }),
         ..tddy_code_restructuring::runner::Options::default()
     };
-    tokio::task::spawn_blocking(move || {
+    let outcome = tokio::task::spawn_blocking(move || {
         tddy_code_restructuring::runner::apply(
             &root,
             options,
@@ -1368,7 +1484,9 @@ pub async fn applying_a_move_of_the_test_binary(
         .map_err(|error| error.to_string())
     })
     .await
-    .expect("the blocking half of the apply joins")
+    .expect("the blocking half of the apply joins");
+    let said = heard.lock().expect("lines").clone();
+    (outcome, said)
 }
 
 /// The deterministic fake language server, for an operation that never asks it anything.
@@ -1820,6 +1938,247 @@ pub fn a_crate_whose_tests_call_an_associated_fn_the_seam_moves_through_an_alias
     )
 }
 
+/// A private struct and the private function returning it, side by side, with a file-local
+/// `#[cfg(test)]` module that calls the function and reads a field of what it returns. The tests
+/// never write the type's name, so no path reference to it exists — it escapes through the signature.
+///
+/// `struct W` and `fn make` are lines 3-9.
+pub fn a_crate_whose_tests_read_a_field_of_a_moved_functions_private_return_type(
+) -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A function whose return type no path names.",
+                "",
+                "struct W {",
+                "    line: String,",
+                "}",
+                "",
+                "fn make() -> W {",
+                "    W { line: \"x\".to_string() }",
+                "}",
+                "",
+                "#[cfg(test)]",
+                "mod tests {",
+                "    use super::*;",
+                "",
+                "    #[test]",
+                "    fn reads_a_field() {",
+                "        assert_eq!(make().line, \"x\");",
+                "    }",
+                "}",
+            ]),
+        )
+}
+
+/// A private helper and its only caller, side by side; nothing else in the file mentions either.
+///
+/// `helper` and `caller` are lines 3-9.
+pub fn a_crate_whose_private_helper_has_only_its_moved_caller() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! A helper that travels with its only caller.",
+                "",
+                "fn helper() -> u32 {",
+                "    2",
+                "}",
+                "",
+                "pub fn caller() -> u32 {",
+                "    helper() + 1",
+                "}",
+            ]),
+        )
+}
+
+/// A module file whose `pub(super)` helper the crate root calls, beside a `pub(crate)` function and
+/// a private user of the helper. Nothing else mentions them.
+///
+/// The shape of `imports.rs`, whose `pub(super)` helpers its parent `rust.rs` calls. `helper`,
+/// `shared` and `private_user` are lines 3-13 of [`OUTER_MODULE`].
+pub fn a_crate_whose_module_declares_a_function_visible_in_its_parent() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The parent of `outer`, which calls what `outer` shows it.",
+                "",
+                "mod outer;",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::helper() + outer::shared() + outer::combined()",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! Visible in its parent, and in the crate.",
+                "",
+                "pub(super) fn helper() -> u32 {",
+                "    1",
+                "}",
+                "",
+                "pub(crate) fn shared() -> u32 {",
+                "    2",
+                "}",
+                "",
+                "pub(super) fn combined() -> u32 {",
+                "    helper() + shared()",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// A module file whose `pub(super)` struct has a `pub(super)` field the crate root reads.
+///
+/// `Gauge` and `gauge` are lines 3-9 of [`OUTER_MODULE`].
+pub fn a_crate_whose_struct_has_a_field_visible_in_its_parent() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The parent of `outer`, which reads a field `outer` shows it.",
+                "",
+                "mod outer;",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::gauge().level",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! A struct with a field visible in its parent.",
+                "",
+                "pub(super) struct Gauge {",
+                "    pub(super) level: u32,",
+                "}",
+                "",
+                "pub(super) fn gauge() -> Gauge {",
+                "    Gauge { level: 3 }",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// A module file whose last function reaches its surroundings through inline `super::`, `self::`
+/// and `crate::` paths, beside a `sibling` that stays behind.
+///
+/// `caller` is lines 7-9 of [`OUTER_MODULE`]; `super::` from `outer` is the crate root.
+pub fn a_crate_whose_moved_function_calls_through_relative_paths() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! The parent of `outer`, which also owns `top_level`.",
+                "",
+                "mod outer;",
+                "",
+                "pub fn top_level() -> u32 {",
+                "    5",
+                "}",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::caller() + outer::sibling()",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! Reaches the root, itself and the crate by path.",
+                "",
+                "pub(crate) fn sibling() -> u32 {",
+                "    1",
+                "}",
+                "",
+                "pub(crate) fn caller() -> u32 {",
+                "    super::top_level() + crate::top_level() + self::sibling()",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// A crate whose module `outer` holds `widest` and, after it, `user`, which calls `widest`.
+///
+/// Two seams of one plan: the first moves `widest` into `outer::visibility`, which leaves `user`
+/// calling `visibility::widest()` and `outer` declaring `mod visibility;`. The second moves `user`
+/// into `outer::facade`, a sibling of `visibility`, where that path no longer names anything.
+pub fn a_crate_whose_second_seam_calls_what_the_first_moved() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "mod outer;",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::total()",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! `user` calls `widest`; each is moved into a module of its own.",
+                "",
+                "pub(crate) struct Member {",
+                "    pub(crate) visibility: u32,",
+                "}",
+                "",
+                "pub(crate) fn user(member: &Member) -> bool {",
+                "    member.visibility != 0 && widest() > 1",
+                "}",
+                "",
+                "pub(crate) fn widest() -> u32 {",
+                "    3",
+                "}",
+                "",
+                "pub(crate) fn total() -> u32 {",
+                "    u32::from(user(&Member { visibility: 1 }))",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// `extract_module` of the functions of `outer` named `items` (each with its text), written to a
+/// file of its own as `name`.
+pub fn an_extract_of_outer_functions_into_a_file(items: &[(&str, &str)], name: &str) -> RefactorOp {
+    let anchor = Anchor::Items {
+        file: OUTER_MODULE.to_string(),
+        items: items
+            .iter()
+            .map(|(item, _)| {
+                tddy_code_restructuring::ItemPath::parse(&format!("origin::outer::{item}"))
+                    .expect("the item path parses")
+            })
+            .collect(),
+        fingerprints: items
+            .iter()
+            .map(|(_, text)| tddy_code_restructuring::Fingerprint::of(text))
+            .collect(),
+    };
+    let mut seam = an_extraction(RefactorKind::ExtractModule, anchor, name);
+    seam.to_file = true;
+    seam
+}
+
+/// The module file [`a_crate_whose_module_declares_a_function_visible_in_its_parent`] splits.
+pub const OUTER_MODULE: &str = "crates/origin/src/outer.rs";
+
 fn a_crate_whose_gauge_reads_then(members: &[&str], after: &[&str]) -> AFixtureWorkspace {
     let mut lines: Vec<&str> = vec![
         "//! A type whose `impl` a seam cuts in half.",
@@ -2188,4 +2547,37 @@ pub fn assert_lints_clean(fixture: &AFixtureWorkspace) {
         "the workspace does not lint clean:\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// Re-resolve the store's anchors in `files` through a live rust-analyzer, as the daemon does when
+/// the tree changes underneath it.
+pub async fn re_resolving_in_the_store(
+    fixture: &AFixtureWorkspace,
+    store: tddy_code_restructuring::plan_store::PlanStore,
+    files: Vec<String>,
+) -> (
+    tddy_code_restructuring::plan_store::PlanStore,
+    Result<(), String>,
+) {
+    with_a_rust_backend(fixture, move |backend| {
+        let mut store = store;
+        let outcome = store
+            .reresolve_files(&files, backend)
+            .map_err(|error| error.to_string());
+        (store, outcome)
+    })
+    .await
+}
+
+/// `restructure snapshot` for an item-anchored plan: re-resolve it once and write it back.
+pub async fn rebasing_the_plan_file(
+    fixture: &AFixtureWorkspace,
+    plan: PathBuf,
+) -> Result<Vec<tddy_code_restructuring::plan_store::OpStaleness>, String> {
+    let root = fixture.path().to_path_buf();
+    with_a_rust_backend(fixture, move |backend| {
+        tddy_code_restructuring::plan_store::rebase_plan_file(&root, &plan, backend)
+            .map_err(|error| error.to_string())
+    })
+    .await
 }

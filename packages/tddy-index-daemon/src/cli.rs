@@ -163,7 +163,7 @@ pub(crate) struct AnchorsArgs {
     pub(crate) file: PathBuf,
 
     /// The items the anchor must cover, in source order.
-    #[arg(long, value_delimiter = ',', value_name = "NAMES")]
+    #[arg(long, value_name = "NAMES")]
     pub(crate) items: Vec<String>,
 
     /// `LINE:COL` or `LINE:COL-LINE:COL`, one-based, columns counted in bytes (not characters):
@@ -350,7 +350,11 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
         RestructureCommand::Anchors(anchors) => Requested::Anchors(AnchorsRequest {
             workspace_root: named(&anchors.root.workspace_root)?,
             file: named(&anchors.file)?,
-            items: normalised(anchors.items),
+            items: anchors
+                .items
+                .iter()
+                .flat_map(|list| tddy_code_restructuring::item_anchor::parse_item_list(list))
+                .collect(),
             at: anchors.at.map(source_range),
         }),
         RestructureCommand::Status(status) => Requested::PlanStatus(PlanStatusRequest {
@@ -396,20 +400,6 @@ fn named(path: &Path) -> Result<String, String> {
             path.display()
         )
     })
-}
-
-/// `--items` as the service has always received it: trimmed, with empty elements dropped.
-///
-/// The same normalisation `restructure_args::normalised_items` performs, and for the same reason:
-/// clap's `value_delimiter` splits on the comma and stops there, so `--items "One, Two"` would
-/// otherwise name an item literally called `" Two"` — a wrong answer with no error.
-fn normalised(items: Vec<String>) -> Vec<String> {
-    items
-        .iter()
-        .map(|item| item.trim())
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 #[cfg(test)]
@@ -613,6 +603,35 @@ mod tests {
                 items: vec!["One".to_string(), "Two".to_string(), "Three".to_string()],
                 at: None,
             }
+        );
+    }
+
+    /// A generic self type carries commas of its own, and the daemon's command line must keep them
+    /// the way the in-process one does: `<Pair<A, B>>` is one item, not two broken ones.
+    #[test]
+    fn anchors_keeps_the_commas_of_a_generic_self_type_inside_its_item() {
+        // Given an anchors run naming an impl block of a generic type beside two plain items
+        let requested = requested_by(&[
+            "restructure",
+            "anchors",
+            "--workspace-root",
+            "/trees/one",
+            "src/lib.rs",
+            "--items",
+            "One, <Pair<A, B>> ,Two",
+        ]);
+
+        // Then the request names three items, the generic one whole
+        let Requested::Anchors(anchors) = requested else {
+            panic!("expected an anchors request");
+        };
+        assert_eq!(
+            anchors.items,
+            vec![
+                "One".to_string(),
+                "<Pair<A, B>>".to_string(),
+                "Two".to_string()
+            ]
         );
     }
 

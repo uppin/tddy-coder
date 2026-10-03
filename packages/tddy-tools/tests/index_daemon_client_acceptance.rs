@@ -221,8 +221,8 @@ fn restructure_runs_against_the_warm_daemon_when_the_socket_variable_is_set() {
     assert_eq!(
         console(&run),
         vec![
-            "budget: 1 of 2 file(s) over 10 lines",
-            "budget: src/big.rs is 12 lines, 2 over",
+            "budget: 1 of 2 file(s) over 10 production lines",
+            "budget: src/big.rs is 12 production lines, 2 over",
             "no findings",
         ],
         "the daemon's events were not rendered as the cold path renders them; stderr was: {}",
