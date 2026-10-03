@@ -1,5 +1,5 @@
 import type { Client } from "@connectrpc/connect";
-import type { CodeNavigationService } from "../../gen/code_navigation_pb";
+import type { CodeLocation, CodeNavigationService } from "../../gen/code_navigation_pb";
 import type { WorktreeFilesApiConfig } from "./worktreeFilesApi";
 
 /** A one-based line and one-based byte column in a worktree file — the coordinates the daemon speaks. */
@@ -30,17 +30,42 @@ export interface CodeNavigationApi {
 
 export type CodeNavigationApiConfig = WorktreeFilesApiConfig;
 
-export function createCodeNavigationApi(
-  _client: Client<typeof CodeNavigationService>,
-  _config: CodeNavigationApiConfig,
-): CodeNavigationApi {
-  // TODO(code-navigation): call `definition` / `references` / `hover` with the bound session
-  // token, project id and worktree path, and map `CodeLocation` / `HoverResponse` into these shapes.
-  const notWiredYet = (method: string) =>
-    Promise.reject(new Error(`TODO(code-navigation): ${method} is not wired yet`));
+function toLocationRef(location: CodeLocation): CodeLocationRef {
+  const { range } = location;
+  if (!range?.start || !range.end) {
+    throw new Error(`Navigation answer for ${location.relPath} carries no range`);
+  }
   return {
-    definition: () => notWiredYet("definition"),
-    references: () => notWiredYet("references"),
-    hover: () => notWiredYet("hover"),
+    relPath: location.relPath,
+    start: { line: range.start.line, column: range.start.column },
+    end: { line: range.end.line, column: range.end.column },
+    outsideWorktree: location.outsideWorktree,
+  };
+}
+
+export function createCodeNavigationApi(
+  client: Client<typeof CodeNavigationService>,
+  { sessionToken, projectId, worktreePath }: CodeNavigationApiConfig,
+): CodeNavigationApi {
+  const request = (relPath: string, position: CodePosition) => ({
+    sessionToken,
+    projectId,
+    worktreePath,
+    relPath,
+    position,
+  });
+  return {
+    async definition(relPath, at) {
+      const res = await client.definition(request(relPath, at));
+      return res.locations.map(toLocationRef);
+    },
+    async references(relPath, at) {
+      const res = await client.references(request(relPath, at));
+      return res.locations.map(toLocationRef);
+    },
+    async hover(relPath, at) {
+      const res = await client.hover(request(relPath, at));
+      return res.markdown ?? null;
+    },
   };
 }
