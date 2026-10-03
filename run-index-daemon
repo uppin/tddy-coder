@@ -25,6 +25,10 @@
 #                             a `nix develop` TMPDIR is not used, see durable_tmpdir).
 #                             Deliberately not inside the checkout: an AF_UNIX path is limited to
 #                             ~104 bytes and a worktree path plus a subdirectory already exceeds it.
+#   TDDY_INDEX_DAEMON_BIN   — run this prebuilt daemon instead of building target/debug's: a release
+#                             build, or a copy outside `target/`, so rebuilding the checkout does not
+#                             replace the binary a long restructure is using. Nothing is built when
+#                             it is set, and a path that is not executable is an error.
 #   TDDY_INDEX_LOG          — RUST_LOG for the daemon (default: info). Readiness is read from the
 #                             daemon's own `listening on …` line, which it logs at info — a level
 #                             below that starts a daemon this script cannot confirm.
@@ -61,7 +65,16 @@ TAG="$(printf '%s' "$ROOT_DIR" | cksum | awk '{print $1}')"
 SOCKET="${RUNTIME_DIR}/tddy-index-${TAG}.sock"
 PID_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.pid"
 LOG_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.log"
-BINARY="${ROOT_DIR}/target/debug/tddy-index-daemon"
+
+# A prebuilt daemon, when the caller names one: a release build, or a copy taken outside `target/` so
+# the rebuilds of an ongoing change cannot replace the binary a long carve is running against. Named
+# and not found is an error — never a quiet fall back to the debug build the caller meant to avoid.
+PREBUILT_BINARY="${TDDY_INDEX_DAEMON_BIN:-}"
+if [[ -n "$PREBUILT_BINARY" ]]; then
+  BINARY="$PREBUILT_BINARY"
+else
+  BINARY="${ROOT_DIR}/target/debug/tddy-index-daemon"
+fi
 
 # Long enough for a debug-profile binary to come up on a loaded machine; short enough that a daemon
 # which never binds is reported rather than waited on forever.
@@ -185,12 +198,21 @@ if [[ -e "$SOCKET" ]]; then
   rm -f "$SOCKET"
 fi
 
-narrate "Building tddy-index-daemon"
-nix develop --profile ./.nix-profile -c cargo build -p tddy-index-daemon >&2
+if [[ -n "$PREBUILT_BINARY" ]]; then
+  # Nothing is built: the point of naming a binary is that this checkout's rebuilds leave it alone.
+  if [[ ! -x "$BINARY" ]]; then
+    narrate "run-index-daemon: TDDY_INDEX_DAEMON_BIN=${BINARY} is not an executable file"
+    exit 1
+  fi
+  narrate "Using the prebuilt index daemon ${BINARY}; not building"
+else
+  narrate "Building tddy-index-daemon"
+  nix develop --profile ./.nix-profile -c cargo build -p tddy-index-daemon >&2
 
-if [[ ! -x "$BINARY" ]]; then
-  narrate "run-index-daemon: ${BINARY} was not built"
-  exit 1
+  if [[ ! -x "$BINARY" ]]; then
+    narrate "run-index-daemon: ${BINARY} was not built"
+    exit 1
+  fi
 fi
 
 # The daemon spawns rust-analyzer, and rust-analyzer runs every build script and proc macro in the
