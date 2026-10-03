@@ -3,6 +3,15 @@
 **Category:** Deferred refactor
 **Source:** `2026-09-15-warm-code-intelligence-daemon` changeset, wave-2 structural pass
 
+**Update 2026-10-03 — partly closed, narrowed.** `#live-plan` 7/15 ([#539](https://github.com/uppin/tddy-coder/pull/539))
+moved the last row of the table below — the free helpers, in nine modules (`line_diff`,
+`placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`,
+`server_process`), by engine moves only — and the file is **2,666 production lines** (was 4,488 when
+the carve began). What remains is the clusters that live inside `impl RustBackend` and its trait impls,
+which only the engine's impl-member seam can move; they are listed, with sizes and the risks found, in
+`2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md` § 1. The seam table
+below describes the file as it was before that carve; its line numbers no longer apply.
+
 Measured on **production** lines (everything before the first `#[cfg(test)]`, at line 4,572):
 
 | File | Prod | Test |

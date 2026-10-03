@@ -27,7 +27,8 @@ may and may not decide.
   `TYPESAFE_API_KEY=apikey_...` (no `export ` prefix, no spaces around `=`). An exported value
   always wins over `.env`. `.env` is the **only** file that may hold it — never a changeset, a
   plan or a record.
-- Green baseline: `./test -p <crate>`. Record pass/fail counts; do not sweep a red tree.
+- Green baseline: `./test -p <crate>`, once. Record pass/fail counts; do not sweep a red tree. Do not
+  re-run it between passes — one run after the last pass is applied is the check.
 
 ## Steps
 

@@ -4,6 +4,22 @@
 **Source:** `#carve` 13/15 `/green`, [#527](https://github.com/uppin/tddy-coder/pull/527), changeset
 [`2026-09-23-restructure-engine-fixes`](../changesets/2026-09-23-restructure-engine-fixes.md)
 
+## Status 2026-10-03 — item-anchored plans closed; range-anchored plans remain
+
+`#live-plan` 7/15 ([#539](https://github.com/uppin/tddy-coder/pull/539)) re-resolves an
+**item-anchored** plan: `restructure snapshot` re-resolves its anchors against the current tree
+(`rebase_plan_file`), rewrites their per-file hints, and reports an operation whose item changed and
+leaves it as written; a plan a daemon holds is rebased continuously. An item anchor names its item, so
+an unrelated edit to the file never made the plan stale in the first place.
+
+**Still open: a v1 plan with `range` anchors.** Its line/column ranges still point at the wrong lines
+after an unrelated change to the same file, and `snapshot` still rewrites only the header. That is the
+shape this entry describes below, and it is not served by item-anchor re-resolution: a range has no
+item to find again. A v1 plan is told to convert with `restructure anchors --at`. What would close it
+is the `snapshot --rebase <ref>` the entry proposes (map each range through the line diff between the
+ref the plan was written against and the working tree; refuse a range an edit overlaps), or retiring v1
+range plans altogether. Everything below this section describes the defect as found.
+
 A plan pins each file it touches by `sha256`, and its anchors are line/column ranges into those
 files. When an unrelated change lands on the same files, the plan is refused with
 `snapshot mismatch`, and that refusal is correct. `restructure snapshot` then rewrites only the

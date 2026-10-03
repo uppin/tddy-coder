@@ -14,7 +14,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 ```bash
 tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]
 tddy-tools restructure status <plan.jsonl>
-tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]
+tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]   # LINES counts production lines (before `#[cfg(test)] mod`)
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
@@ -32,7 +32,10 @@ operation, and writes the plan back. `apply` loads a plan that is not loaded; `l
 
 ## Workflow (abbreviated)
 
-1. **Green baseline** — `./test -p <crate>`; record counts.
+1. **Green baseline** — `./test -p <crate>`, **once, here**; record the counts *and the names of every
+   failing test* (a changeset from `/plan-red` has red tests by design; the names are what a later run
+   is held against, not the totals). It is the only full test run before the plan is finished — see
+   [Testing cadence](#testing-cadence).
 2. **Targeting** — run [`analyze-code-issues`](analyze-code-issues/SKILL.md); put CRAP note in changeset.
 3. **Understand shape** — LSP outline, references, cohesion; write `docs/dev/1-WIP/{slug}-initial-discovery.md`.
 4. **Changeset** — `Type: Refactor` at `docs/dev/1-WIP/YYYY-MM-DD-<name>.md`; see `references/restructure-changeset.md`.
@@ -59,7 +62,38 @@ operation, and writes the plan back. `apply` loads a plan that is not loaded; `l
    `cargo check --all-targets` over every package it touched, and **a tree that does not compile is a
    failed run**, never "applied N of N": the edits are left on disk for inspection and the message says
    how to roll them back. A fresh apply first checks the packages the plan names, and refuses to write
-   anything into a tree that already does not compile.
+   anything into a tree that already does not compile. An apply also **consumes its plan file**: it
+   writes each operation's anchors back for the tree it left, so a plan that has been applied (or that
+   failed part-way and was rolled back) is stale — regenerate it from `anchors` rather than re-running it.
+
+## Testing cadence
+
+**Build and test once, after the whole plan is finished — not between plans, not between operations.**
+A restructure is a sequence of behaviour-preserving moves, and what proves a move correct is already
+inside the loop; a full test run per move adds minutes (every acceptance suite that boots its own
+rust-analyzer, tens of seconds each) and tells you nothing the loop did not.
+
+Between plans, and after each one, the evidence is only what the tool produces:
+
+- `restructure apply` — its own `cargo check --all-targets` before and after (the compile gate), the
+  tidy of imports the compiler reports unused, and `rustfmt` over every file it wrote. That gate is part
+  of the apply: do not skip it, and do not add a build, `cargo clippy`, `cargo fmt` or `./test` of your
+  own beside it.
+- `restructure verify --against HEAD` — every statement accounted for. No cargo.
+- Commit that plan on its own, so a failure found later bisects to one move.
+
+After the **last** plan of the changeset, one gate, in this order:
+
+1. `cargo fmt --check` and `cargo clippy -p <every touched package> --all-targets -- -D warnings`;
+2. `./test -p <crate>` (every target runs, however many fail) — the **failing set must equal the
+   baseline's by name**; a test that was red before must still fail for the same reason;
+3. the comment-line multiset across the touched sources before and after (a lost `//` comment is the one
+   defect no compiler and no test sees), and `restructure verify --against <ref before the first plan>`.
+
+A failure here is fixed forward in a new commit; the per-plan commits are how you find which move did it.
+A refusal or compile failure **inside** an apply is different: it is the tool telling you, so stop, roll
+back what the run touched, and fix the plan (or the tool) before the next plan — never carry a broken
+tree forward to be found by the final gate.
 
 **Prove before you pay.** Against a warm index a `--deep` check costs seconds and an apply costs
 seconds; against a cold one an apply costs six to ten minutes before it can refuse. Every refusal

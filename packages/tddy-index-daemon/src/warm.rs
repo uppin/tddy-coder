@@ -104,7 +104,7 @@ async fn narrate_until_loaded(
     graph: &mut crate::graph::GraphLoad,
     events: &EventSender<IndexProgress>,
 ) -> Ending {
-    let mut chatter = ServerChatter::default();
+    let mut chatter = ServerChatter::unthrottled();
     loop {
         if graph.is_loaded() {
             return Ending::Loaded;
@@ -205,26 +205,37 @@ mod tests {
     fn carries_the_furthest_the_load_reached_rather_than_the_last_number_to_arrive() {
         // Given a server that reported 64% and then a sub-step carrying no percentage
         let mut chatter = ServerChatter::default();
-        chatter.absorb(&json!({
-            "method": "$/progress",
-            "params": {
-                "token": "load",
-                "value": { "kind": "begin", "title": "loading crate graph" },
-            }
-        }));
-        chatter.absorb(&json!({
-            "method": "$/progress",
-            "params": { "token": "load", "value": { "kind": "report", "percentage": 64 } }
-        }));
-        let line = chatter
-            .absorb(&json!({
+        let started = std::time::Instant::now();
+        let after = |seconds| started + std::time::Duration::from_secs(seconds);
+        chatter.absorb_at(
+            &json!({
                 "method": "$/progress",
                 "params": {
                     "token": "load",
-                    "value": { "kind": "report", "message": "tddy_desktop (lib)" },
+                    "value": { "kind": "begin", "title": "loading crate graph" },
                 }
-            }))
-            .expect("a sub-step is worth a line");
+            }),
+            started,
+        );
+        chatter.absorb_at(
+            &json!({
+                "method": "$/progress",
+                "params": { "token": "load", "value": { "kind": "report", "percentage": 64 } }
+            }),
+            after(1),
+        );
+        let line = chatter
+            .absorb_at(
+                &json!({
+                    "method": "$/progress",
+                    "params": {
+                        "token": "load",
+                        "value": { "kind": "report", "message": "tddy_desktop (lib)" },
+                    }
+                }),
+                after(3),
+            )
+            .expect("a sub-step, once the interval has passed, is worth a line");
 
         // When that line becomes a progress message
         let progress = phase_of(&line, &chatter);

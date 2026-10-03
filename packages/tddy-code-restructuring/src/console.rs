@@ -24,7 +24,7 @@
 
 use crate::edit::VisibilityChange;
 use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
-use crate::verify::Comparison;
+use crate::verify::{token_difference, Comparison, Excused};
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
 ///
@@ -47,7 +47,7 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
 /// A plan that was already current says so rather than saying nothing: a silent no-op is
 /// indistinguishable from a subcommand that did not run, the reason [`NO_FINDINGS`] exists.
 pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
-    vec![if rewrite.rewritten {
+    let mut lines = vec![if rewrite.rewritten {
         format!(
             "rewrote the snapshot header of {} over {} file(s)",
             rewrite.plan, rewrite.paths
@@ -57,7 +57,18 @@ pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
             "{} already snapshots the working tree over {} file(s)",
             rewrite.plan, rewrite.paths
         )
-    }]
+    }];
+    let stale: Vec<(String, String)> = rewrite
+        .stale
+        .iter()
+        .map(|found| (found.op.to_string(), found.reason.to_string()))
+        .collect();
+    let stale: Vec<(&str, &str)> = stale
+        .iter()
+        .map(|(op, reason)| (op.as_str(), reason.as_str()))
+        .collect();
+    lines.extend(stale_operations(&stale));
+    lines
 }
 
 /// What the whole run amounted to.
@@ -92,26 +103,42 @@ pub fn plan_progress(progress: &PlanProgress) -> Vec<String> {
     ]
 }
 
-/// The plans a store holds, one line each, or the statement that it holds none.
+/// One plan of a store as a front end holds it: its name, how many operations it has, whether it
+/// has changes not yet written back, and its stale operations as `(operation, reason)`.
+pub type HeldPlanRow<'a> = (&'a str, usize, bool, Vec<(&'a str, &'a str)>);
+
+/// The plans a store holds, one line each — and under it one line per stale operation — or the
+/// statement that it holds none.
 ///
-/// Takes `(plan, operations, changed)` triples rather than a store type because the two front ends
-/// that render it hold the wire's `LoadedPlan`, not this crate's. `changed` is a plan the store has
-/// changed and not yet written back.
-pub fn loaded_plans(held: &[(&str, usize, bool)]) -> Vec<String> {
+/// Takes rows rather than a store type because the two front ends that render it hold the wire's
+/// `LoadedPlan`, not this crate's. `changed` is a plan the store has changed and not yet written
+/// back.
+pub fn loaded_plans(held: &[HeldPlanRow<'_>]) -> Vec<String> {
     if held.is_empty() {
         return vec!["no plans loaded".to_string()];
     }
     held.iter()
-        .map(|(plan, operations, changed)| {
-            format!(
+        .flat_map(|(plan, operations, changed, stale)| {
+            let line = format!(
                 "{plan}: {operations} operation(s){}",
                 if *changed {
                     ", not yet written back"
                 } else {
                     ""
                 }
-            )
+            );
+            std::iter::once(line).chain(stale_operations(stale))
         })
+        .collect()
+}
+
+/// The operations of a plan that can no longer run as written, one line each, as
+/// `(operation, reason)` pairs. Nothing for a plan with none, so a listing of sound plans reads as
+/// it always did.
+pub fn stale_operations(stale: &[(&str, &str)]) -> Vec<String> {
+    stale
+        .iter()
+        .map(|(op, reason)| format!("  stale {op}: {reason}"))
         .collect()
 }
 
@@ -176,6 +203,8 @@ pub fn comparison(comparison: &Comparison) -> Vec<String> {
         "{} statements before, {} after",
         comparison.before, comparison.after
     )];
+    lines.extend(excused_summary(&comparison.excused));
+    lines.extend(token_difference(&comparison.missing, &comparison.added));
     lines.extend(
         comparison
             .missing
@@ -192,6 +221,23 @@ pub fn comparison(comparison: &Comparison) -> Vec<String> {
         lines.push("every statement accounted for".to_string());
     }
     lines
+}
+
+/// The one line naming churn a comparison set aside, or nothing when none was.
+fn excused_summary(excused: &Excused) -> Option<String> {
+    let parts: Vec<String> = [
+        (
+            excused.repointed,
+            "statement(s) re-pointed through a module qualifier",
+        ),
+        (excused.visibility, "visibility-normalised"),
+        (excused.cfg_test_gates, "cfg(test) gate line(s) excused"),
+    ]
+    .iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, what)| format!("{count} {what}"))
+    .collect();
+    (!parts.is_empty()).then(|| format!("verify: {}", parts.join(", ")))
 }
 
 /// Why a comparison that does not hold is a failed run.
@@ -286,6 +332,25 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_comparison_says_which_tokens_it_lost_and_gained() {
+        // Given a comparison whose unexplained statements differ in a token
+        let failed = Comparison {
+            missing: vec!["let x = check(1);".to_string()],
+            added: vec!["let x = inspect(1);".to_string()],
+            ..Comparison::default()
+        };
+
+        // When it is rendered
+        let lines = comparison(&failed);
+
+        // Then one line names what changed
+        assert!(
+            lines.contains(&"verify: tokens lost: check x1; tokens gained: inspect x1".to_string()),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
     fn distinguishes_a_resolved_operation_from_an_applied_one() {
         // Given the same operation resolved rather than applied
         let line = operation(3, 3, 29, "ExtractModuleToFile", 3, false);
@@ -332,6 +397,153 @@ mod tests {
         assert_eq!(
             narration("indexing", None, "loading crate graph (42%)"),
             "   indexing: loading crate graph (42%)"
+        );
+    }
+
+    #[test]
+    fn lists_no_stale_lines_for_a_plan_with_no_stale_operations() {
+        // Given no stale operations
+        // When they are rendered
+        let lines = stale_operations(&[]);
+
+        // Then there is nothing to say
+        assert_eq!(lines, Vec::<String>::new());
+    }
+
+    #[test]
+    fn states_each_stale_operation_with_its_reason_on_a_line_of_its_own() {
+        // Given two stale operations
+        let stale = [("b1", "item changed"), ("b2", "edited by first.jsonl#a1")];
+
+        // When they are rendered
+        let lines = stale_operations(&stale);
+
+        // Then each reads as an indented `stale <operation>: <reason>` line
+        assert_eq!(
+            lines,
+            [
+                "  stale b1: item changed",
+                "  stale b2: edited by first.jsonl#a1"
+            ]
+        );
+    }
+
+    #[test]
+    fn says_so_when_no_plans_are_loaded() {
+        // Given a store holding nothing
+        // When its plans are listed
+        let lines = loaded_plans(&[]);
+
+        // Then the statement that it holds none is the whole answer
+        assert_eq!(lines, ["no plans loaded"]);
+    }
+
+    #[test]
+    fn lists_sound_plans_one_line_each_and_marks_one_not_yet_written_back() {
+        // Given a clean plan and a changed one, neither with stale operations
+        let held: [HeldPlanRow; 2] = [
+            ("first.jsonl", 3, false, Vec::new()),
+            ("second.jsonl", 1, true, Vec::new()),
+        ];
+
+        // When they are listed
+        let lines = loaded_plans(&held);
+
+        // Then each is one line, and only the changed one says it is not yet written back
+        assert_eq!(
+            lines,
+            [
+                "first.jsonl: 3 operation(s)",
+                "second.jsonl: 1 operation(s), not yet written back"
+            ]
+        );
+    }
+
+    #[test]
+    fn lists_a_plans_stale_operations_under_its_line() {
+        // Given a plan with two stale operations, and a sound one after it
+        let held: [HeldPlanRow; 2] = [
+            (
+                "second.jsonl",
+                4,
+                true,
+                vec![("b1", "item changed"), ("b3", "item not found in src/a.rs")],
+            ),
+            ("third.jsonl", 2, false, Vec::new()),
+        ];
+
+        // When they are listed
+        let lines = loaded_plans(&held);
+
+        // Then the stale operations follow their own plan's line and no other
+        assert_eq!(
+            lines,
+            [
+                "second.jsonl: 4 operation(s), not yet written back",
+                "  stale b1: item changed",
+                "  stale b3: item not found in src/a.rs",
+                "third.jsonl: 2 operation(s)"
+            ]
+        );
+    }
+
+    fn a_snapshot_rewrite(
+        rewritten: bool,
+        stale: Vec<crate::plan_store::OpStaleness>,
+    ) -> SnapshotRewrite {
+        SnapshotRewrite {
+            plan: "plan.jsonl".to_string(),
+            paths: 3,
+            rewritten,
+            stale,
+        }
+    }
+
+    #[test]
+    fn a_snapshot_of_a_plan_with_no_stale_operations_says_only_what_it_did_to_the_header() {
+        // Given a rewrite that changed the header and found nothing stale
+        let rewrite = a_snapshot_rewrite(true, Vec::new());
+
+        // When it is rendered
+        let lines = snapshot_rewrite(&rewrite);
+
+        // Then there is one line
+        assert_eq!(
+            lines,
+            ["rewrote the snapshot header of plan.jsonl over 3 file(s)"]
+        );
+    }
+
+    #[test]
+    fn a_snapshot_names_each_stale_operation_after_the_header_line() {
+        // Given a rewrite that left the header alone and found two operations stale
+        let rewrite = a_snapshot_rewrite(
+            false,
+            vec![
+                crate::plan_store::OpStaleness {
+                    op: crate::OpId("b1".to_string()),
+                    reason: crate::plan_store::StaleReason::ItemChanged,
+                },
+                crate::plan_store::OpStaleness {
+                    op: crate::OpId("b2".to_string()),
+                    reason: crate::plan_store::StaleReason::ItemNotFound {
+                        file: "src/a.rs".to_string(),
+                    },
+                },
+            ],
+        );
+
+        // When it is rendered
+        let lines = snapshot_rewrite(&rewrite);
+
+        // Then the header line is followed by one line per stale operation, in order
+        assert_eq!(
+            lines,
+            [
+                "plan.jsonl already snapshots the working tree over 3 file(s)",
+                "  stale b1: item changed",
+                "  stale b2: item not found in src/a.rs"
+            ]
         );
     }
 }

@@ -10,9 +10,7 @@
 
 use crate::backends::lsp_bridge::LspClientBridge;
 use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
-use crate::edit::{
-    FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
-};
+use crate::edit::{FileEdit, Position, Range, Resolution, VisibilityChange, WorkspaceEdit};
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
@@ -20,7 +18,7 @@ use crate::{RestructureError, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
@@ -29,12 +27,16 @@ use tokio_util::sync::CancellationToken;
 mod chatter;
 mod documents;
 mod early_return;
+mod escaping_types;
 mod impl_seam;
 mod imports;
+mod inline_paths;
 mod introduced;
 mod item_path;
 mod nested_modules;
+mod prelude_shadow;
 mod readiness;
+mod relative_visibility;
 mod selection;
 
 pub use chatter::ServerChatter;
@@ -122,7 +124,7 @@ fn convert_change(
             } else {
                 workspace.read(&path)?
             };
-            let updated = apply_lsp_edit(&original, edits_in(change)?);
+            let updated = lsp_edits::apply_lsp_edit(&original, edits_in(change)?);
             Ok(vec![FileEdit::Change {
                 path,
                 edits: minimal_edits(&original, &updated),
@@ -371,7 +373,7 @@ pub struct RustBackend {
     binary: PathBuf,
     cargo_home: PathBuf,
     rustup_home: PathBuf,
-    server: Option<Server>,
+    server: Option<server_process::Server>,
     /// When set, LSP traffic goes through an existing client instead of a spawned server.
     bridge: Option<LspClientBridge>,
     next_id: u64,
@@ -448,83 +450,11 @@ pub fn discard() -> ProgressSink {
 /// destination per front end, not one per caller, so it needs nothing a pointer cannot carry.
 fn discard_line(_line: &str) {}
 
-/// Drop `use` declarations left binding nothing at all.
-///
-/// Moving items out of a file leaves the parent importing what they needed, and where every name in a
-/// grouped import moved the assist hollows the group out rather than removing the line —
-/// `use std::sync::{};`. An empty group binds nothing, ever, so this needs no evidence from the server
-/// and cannot be wrong: it is the one part of the unused-import tail that is decidable by looking.
-///
-/// Deliberately only the empty group. A `use` that resolves is left alone however unused it looks,
-/// because dropping a trait import breaks method resolution invisibly — the same reason
-/// [`RustBackend::prune_assist_imports`] is narrow.
-fn without_hollow_imports(text: &str) -> String {
-    let kept: Vec<&str> = text
-        .split('\n')
-        .filter(|line| !binds_nothing(line))
-        .collect();
-    kept.join("\n")
-}
-
-/// Whether a line is a `use` whose brace group is empty.
-fn binds_nothing(line: &str) -> bool {
-    let body = line.trim();
-    let body = body.strip_prefix("pub ").unwrap_or(body);
-    let Some(rest) = body.strip_prefix("use ") else {
-        return false;
-    };
-    let Some(inner) = rest.strip_suffix(';') else {
-        return false;
-    };
-    let Some(open) = inner.find('{') else {
-        return false;
-    };
-
-    inner.ends_with('}') && inner[open + 1..inner.len() - 1].trim().is_empty()
-}
-
-struct Server {
-    process: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-}
-
-/// One line naming everything that decides how rust-analyzer resolves std and dependencies.
-///
-/// A stall at `discovering sysroot` looks the same whether the toolchain was pinned, whether
-/// cargo/rustc are real binaries or rustup proxies, and whether rust-src is present. This is
-/// what tells them apart in a CI log.
-fn describe_server_environment(binary: &Path, toolchain: &str, toolchain_bin: &Path) -> String {
-    let present = |name: &str| {
-        if toolchain_bin.join(name).exists() {
-            "real"
-        } else {
-            "missing"
-        }
-    };
-    let rust_src = toolchain_bin
-        .parent()
-        .map(|prefix| prefix.join("lib/rustlib/src/rust/library"))
-        .is_some_and(|path| path.exists());
-    format!(
-        "server={}; RUSTUP_TOOLCHAIN={toolchain}; cargo={}; rustc={}; rust-src={}",
-        binary.display(),
-        present("cargo"),
-        present("rustc"),
-        if rust_src { "present" } else { "absent" },
-    )
-}
-
-fn default_toolchain_name(rustup_home: &Path) -> Option<String> {
-    std::fs::read_to_string(rustup_home.join("settings.toml"))
-        .ok()
-        .and_then(|contents| {
-            contents.lines().find_map(|line| {
-                let rest = line.strip_prefix("default_toolchain")?;
-                rest.split('"').nth(1).map(str::to_string)
-            })
-        })
-}
+mod server_process;
+#[cfg(test)]
+use server_process::binds_nothing;
+#[cfg(test)]
+use server_process::without_hollow_imports;
 
 impl RustBackend {
     pub fn new(
@@ -684,7 +614,7 @@ impl RustBackend {
             // wrong rather than refused.
             let handshake = bridge.handshake();
             let encoding = negotiated_encoding(&handshake).to_string();
-            self.unresolved_token = token_type_index(&handshake, UNRESOLVED_TOKEN);
+            self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
             return refuse_foreign_encoding(&encoding);
         }
         if self.server.is_some() {
@@ -696,14 +626,15 @@ impl RustBackend {
         // rust-toolchain.toml — non-empty `components`/`targets`, so the proxy channel-syncs
         // over the network. That is a candidate for the 600s stall at `discovering sysroot`
         // (Falcon e34fef02), and it fails silently, which is worse than failing.
-        let toolchain = default_toolchain_name(&self.rustup_home).ok_or_else(|| {
-            failure(format!(
-                "could not read default_toolchain from {}/settings.toml — refusing to start \
+        let toolchain =
+            server_process::default_toolchain_name(&self.rustup_home).ok_or_else(|| {
+                failure(format!(
+                    "could not read default_toolchain from {}/settings.toml — refusing to start \
                  rust-analyzer unpinned, because the rustup proxy would channel-sync the repo \
                  rust-toolchain.toml overlay instead",
-                self.rustup_home.display()
-            ))
-        })?;
+                    self.rustup_home.display()
+                ))
+            })?;
         let toolchain_bin = self
             .rustup_home
             .join("toolchains")
@@ -728,14 +659,15 @@ impl RustBackend {
                 command.env(key, real);
             }
         }
-        self.environment = describe_server_environment(&self.binary, &toolchain, &toolchain_bin);
+        self.environment =
+            server_process::describe_server_environment(&self.binary, &toolchain, &toolchain_bin);
         let mut process = command
             .spawn()
             .map_err(|error| failure(format!("could not start rust-analyzer: {error}")))?;
 
         let stdin = process.stdin.take().expect("stdin was piped");
         let stdout = BufReader::new(process.stdout.take().expect("stdout was piped"));
-        self.server = Some(Server {
+        self.server = Some(server_process::Server {
             process,
             stdin,
             stdout,
@@ -754,7 +686,7 @@ impl RustBackend {
         )?;
         refuse_foreign_encoding(negotiated_encoding(&handshake))?;
 
-        self.unresolved_token = token_type_index(&handshake, UNRESOLVED_TOKEN);
+        self.unresolved_token = lsp_edits::token_type_index(&handshake, UNRESOLVED_TOKEN);
         self.notify("initialized", json!({}))
     }
 
@@ -1035,7 +967,7 @@ impl LanguageBackend for RustBackend {
         };
         let mut findings = Vec::new();
 
-        if let Err(refusal) = refuse_split_attribute_paths(&text, planned) {
+        if let Err(refusal) = module_text::refuse_split_attribute_paths(&text, planned) {
             findings.push(refusal.to_string());
         }
         if op.op == RefactorKind::ExtractMethod {
@@ -1055,7 +987,7 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::ExtractModule {
             if let Some(name) = op.name.as_deref() {
                 let file = op.anchor.file();
-                if let Err(refusal) = refuse_module_name_taken(&text, name, planned) {
+                if let Err(refusal) = module_text::refuse_module_name_taken(&text, name, planned) {
                     findings.push(refusal.to_string());
                 } else if self
                     .claimed
@@ -1153,13 +1085,13 @@ impl RustBackend {
                 start: *start,
                 end: *end,
             };
-            refuse_split_attribute_paths(&original, planned)?;
+            module_text::refuse_split_attribute_paths(&original, planned)?;
             if op.op == RefactorKind::ExtractMethod {
                 refuse_early_returns(&original, planned)?;
             }
             if op.op == RefactorKind::ExtractModule {
                 if let Some(name) = op.name.as_deref() {
-                    refuse_module_name_taken(&original, name, planned)?;
+                    module_text::refuse_module_name_taken(&original, name, planned)?;
                 }
             }
         }
@@ -1374,7 +1306,7 @@ impl RustBackend {
         // there, because there is no symbol to resolve.
         if assist_for(op.op).is_some_and(|assist| assist.needs_inference) {
             let probe = selection::hover_bearing_position(original, range);
-            self.wait_until_resolved_within_bound(uri, &lsp_position(probe))?;
+            self.wait_until_resolved_within_bound(uri, &lsp_edits::lsp_position(probe))?;
         }
 
         let moved = if relocates {
@@ -1386,7 +1318,7 @@ impl RustBackend {
         // A facade leaves the old path resolving through the parent, so a reference elsewhere is no
         // longer stranded and there is nothing here to refuse.
         if relocates && reexport == Reexport::None {
-            refuse_stranded(&moved)?;
+            seam_survey::refuse_stranded(&moved)?;
         }
 
         // Before the assist, not after it. This same seam is caught today only once rust-analyzer has
@@ -1414,10 +1346,13 @@ impl RustBackend {
         let named = self.rename_placeholder(uri, &extracted, &introduced, &name)?;
         // A symbol already bearing the plan's name was not renamed, so every site of it is meant.
         if introduced.name != name {
-            refuse_residual_placeholder(original, &named, &introduced.name)?;
+            placeholder_checks::refuse_residual_placeholder(original, &named, &introduced.name)?;
         }
         if placeholder.declares_a_signature() {
-            refuse_inferred_placeholder(&named, &format!("{} {name}", placeholder.keyword))?;
+            placeholder_checks::refuse_inferred_placeholder(
+                &named,
+                &format!("{} {name}", placeholder.keyword),
+            )?;
         }
 
         if !relocates {
@@ -1434,31 +1369,36 @@ impl RustBackend {
         // Before the import passes, because a seam the assist only half-took is not one those
         // passes can repair — and refusing here costs the operator two LSP round trips rather than
         // the whole import restoration on a module that is not the one they asked for.
-        refuse_partial_relocation(&named, &name, &moved)?;
+        visibility::refuse_partial_relocation(&named, &name, &moved)?;
 
         // Versions 1 and 2 belong to the open and to the rename above; both import phases send
         // more, so the counter runs across them rather than restarting.
         let pruned = self.prune_assist_imports(uri, &named, &name)?;
         let imported = self.restore_imports(uri, original, &pruned, &name, &moved, reexport)?;
-        let (preserved, mut report) = restore_visibility(&imported, &name, &moved)?;
+        let imported = prelude_shadow::carry_shadowed_imports(original, &imported, &name)?;
+        let (preserved, mut report) = visibility::restore_visibility(&imported, &name, &moved)?;
+        let (preserved, rerooted) = inline_paths::rerooted_module(&preserved, &name)?;
 
         // The widenings the pass above cannot see, because the survey feeding it stops above an
         // `impl`. Read off the text the assist actually produced, so a member it left alone is not
         // reported as though it had moved.
         let relocated: Vec<String> = preserved.split('\n').map(str::to_string).collect();
-        report.extend(impl_widenings(
+        report.extend(facade::impl_widenings(
             &relocated,
-            &module_bounds(&relocated, &name)?,
+            &module_text::module_bounds(&relocated, &name)?,
             &impl_members,
         ));
-        refuse_mangled_rewrite(&preserved, &name, &moved)?;
-        let facade = facade_lines(&name, &moved, reexport)?;
-        let notes = empty_facade_note(&name, &facade, reexport)
+        facade::refuse_mangled_rewrite(&preserved, &name, &moved)?;
+        let facade = facade::facade_lines(&name, &moved, reexport)?;
+        let notes = facade::empty_facade_note(&name, &facade, reexport)
             .into_iter()
+            .chain(inline_paths::note(rerooted))
             .collect();
 
         Ok((
-            without_hollow_imports(&with_facade(&preserved, &name, &facade)?),
+            server_process::without_hollow_imports(&module_text::with_facade(
+                &preserved, &name, &facade,
+            )?),
             report,
             notes,
         ))
@@ -1475,7 +1415,7 @@ impl RustBackend {
         uri: &str,
         text: &str,
         range: Range,
-    ) -> Result<Vec<MovedItem>> {
+    ) -> Result<Vec<seam_survey::MovedItem>> {
         let symbols = self.request_settled(
             "textDocument/documentSymbol",
             json!({ "textDocument": { "uri": uri } }),
@@ -1485,7 +1425,7 @@ impl RustBackend {
 
         for found in path_reached_within(&symbols, range) {
             let reach = self.reach_of(uri, &found.position, range)?;
-            items.push(MovedItem {
+            items.push(seam_survey::MovedItem {
                 visibility: visibility_at(text, &found.position),
                 name: found.name,
                 within: found.within,
@@ -1570,14 +1510,14 @@ impl RustBackend {
         uri: &str,
         text: &str,
         range: Range,
-    ) -> Result<Vec<MovedItem>> {
+    ) -> Result<Vec<seam_survey::MovedItem>> {
         let symbols = self.request_settled(
             "textDocument/documentSymbol",
             json!({ "textDocument": { "uri": uri } }),
         )?;
 
-        let cut = impls_cut_through(&symbols, range);
-        let relocated = items_relocated_within(&symbols, range);
+        let cut = seam_survey::impls_cut_through(&symbols, range);
+        let relocated = seam_survey::items_relocated_within(&symbols, range);
         (self.trace)(&seam_trace(range, &cut, &relocated));
         let mut items = Vec::new();
 
@@ -1585,7 +1525,7 @@ impl RustBackend {
             let Some(holder) = found.within.last() else {
                 continue;
             };
-            if declares(holder) != Some(Block::Impl) {
+            if placeholder_checks::declares(holder) != Some(placeholder_checks::Block::Impl) {
                 continue;
             }
 
@@ -1596,10 +1536,10 @@ impl RustBackend {
             let reach = if cut.contains(holder) {
                 self.reach_of(uri, &found.position, range)?
             } else {
-                Reach::default()
+                seam_survey::Reach::default()
             };
 
-            items.push(MovedItem {
+            items.push(seam_survey::MovedItem {
                 visibility: visibility_at(text, &found.position),
                 name: found.name,
                 within: found.within,
@@ -1646,10 +1586,15 @@ impl RustBackend {
     }
 
     /// Where the references to one item sit, relative to the range about to be relocated.
-    fn reach_of(&mut self, uri: &str, position: &Value, range: Range) -> Result<Reach> {
+    fn reach_of(
+        &mut self,
+        uri: &str,
+        position: &Value,
+        range: Range,
+    ) -> Result<seam_survey::Reach> {
         let references = self.references_at(uri, position)?;
 
-        let mut reach = Reach::default();
+        let mut reach = seam_survey::Reach::default();
 
         for reference in references.as_array().into_iter().flatten() {
             let referrer = reference
@@ -1702,13 +1647,17 @@ impl RustBackend {
         let unresolved = self.unresolved_names(uri, extracted)?;
 
         let source: Vec<String> = extracted.split('\n').map(str::to_string).collect();
-        let block = module_bounds(&source, module)?;
+        let block = module_text::module_bounds(&source, module)?;
 
-        Ok(without_dead_imports(&source, &block, &unresolved).join("\n"))
+        Ok(import_text::without_dead_imports(&source, &block, &unresolved).join("\n"))
     }
 
     /// Every identifier in the open document that the server cannot resolve, in source order.
-    fn unresolved_names(&mut self, uri: &str, text: &str) -> Result<Vec<UnresolvedName>> {
+    fn unresolved_names(
+        &mut self,
+        uri: &str,
+        text: &str,
+    ) -> Result<Vec<import_text::UnresolvedName>> {
         let wanted = self.unresolved_token.ok_or_else(|| {
             server_defect(format!(
                 "rust-analyzer's semantic token legend has no `{UNRESOLVED_TOKEN}`, so the names an \
@@ -1721,7 +1670,7 @@ impl RustBackend {
             json!({ "textDocument": { "uri": uri } }),
         )?;
 
-        Ok(unresolved_in(&tokens, wanted, text))
+        Ok(lsp_edits::unresolved_in(&tokens, wanted, text))
     }
 
     /// Run an assist whose edits may land in more than one file, and carry all of them through.
@@ -1759,7 +1708,7 @@ impl RustBackend {
             line: caret.start.line,
             col: caret.start.col + MOD_KEYWORD.len() as u32,
         };
-        let start = lsp_range(Range {
+        let start = lsp_edits::lsp_range(Range {
             start: named,
             end: named,
         })["start"]
@@ -1784,7 +1733,7 @@ impl RustBackend {
             // produced along the way, which never reaches disk. Every other file the assist touches is
             // based on the tree, which is what `convert_change` already assumes.
             if edits_the_parent(&change, produced.relative, workspace)? {
-                parent = apply_lsp_edit(&parent, edits_in(&change)?);
+                parent = lsp_edits::apply_lsp_edit(&parent, edits_in(&change)?);
                 continue;
             }
             changes.extend(convert_change(&change, workspace, &mut created)?);
@@ -1792,7 +1741,7 @@ impl RustBackend {
 
         changes.push(FileEdit::Change {
             path: produced.relative.to_string(),
-            edits: minimal_edits(produced.original, &parent),
+            edits: seam_survey::minimal_edits(produced.original, &parent),
         });
 
         Ok(changes)
@@ -1919,15 +1868,15 @@ impl RustBackend {
         )?;
 
         let mut changes = Vec::new();
-        for (document, edits) in workspace_edits_for(&renamed)? {
+        for (document, edits) in lsp_edits::workspace_edits_for(&renamed)? {
             let path = relative_to(&document, workspace.root)?;
             // Read through the overlay, as every other multi-document path does, so a caller an
             // earlier operation in the same plan already edited is renamed against that text.
             let original = workspace.read(&path)?;
-            let updated = apply_lsp_edit(&original, edits);
+            let updated = lsp_edits::apply_lsp_edit(&original, edits);
             changes.push(FileEdit::Change {
                 path,
-                edits: minimal_edits(&original, &updated),
+                edits: seam_survey::minimal_edits(&original, &updated),
             });
         }
 
@@ -1977,7 +1926,10 @@ impl RustBackend {
             selection::hover_bearing_position(original, range),
         )?;
         let resolved = self.request_settled("codeAction/resolve", action)?;
-        Ok(apply_lsp_edit(original, edits_for(&resolved, uri)?))
+        Ok(lsp_edits::apply_lsp_edit(
+            original,
+            lsp_edits::edits_for(&resolved, uri)?,
+        ))
     }
 
     /// Give the symbol the assist introduced its real name.
@@ -2000,7 +1952,7 @@ impl RustBackend {
 
         // An assist that introduces a top-level item leaves the server rebuilding the module tree,
         // and a rename that arrives first is refused outright rather than deferred.
-        let position = position_at(extracted, definition);
+        let position = lsp_edits::position_at(extracted, definition);
         self.wait_until_resolved(uri, &position)?;
 
         let renamed = self.request_settled(
@@ -2011,7 +1963,10 @@ impl RustBackend {
                 "newName": name
             }),
         )?;
-        Ok(apply_lsp_edit(extracted, edits_for(&renamed, uri)?))
+        Ok(lsp_edits::apply_lsp_edit(
+            extracted,
+            lsp_edits::edits_for(&renamed, uri)?,
+        ))
     }
 }
 
@@ -2294,8 +2249,8 @@ fn whole_word(line: &str, needle: &str) -> Option<usize> {
     while let Some(found) = line[from..].find(needle) {
         let start = from + found;
         let end = start + needle.len();
-        let opens = start == 0 || !is_identifier_byte(bytes[start - 1]);
-        let closes = end >= bytes.len() || !is_identifier_byte(bytes[end]);
+        let opens = start == 0 || !placeholder_checks::is_identifier_byte(bytes[start - 1]);
+        let closes = end >= bytes.len() || !placeholder_checks::is_identifier_byte(bytes[end]);
         if opens && closes {
             return Some(start);
         }
@@ -2462,7 +2417,7 @@ fn whole_of(text: &str) -> Range {
 
 /// An LSP position as a one-based line and *character* column.
 fn character_column(text: &str, point: LspPoint) -> Position {
-    let line_start = offset_of(
+    let line_start = lsp_edits::offset_of(
         text,
         LspPoint {
             line: point.line,
@@ -2596,1845 +2551,81 @@ fn edits_in(change: &Value) -> Result<Vec<LspEdit>> {
         .and_then(Value::as_array)
         .ok_or_else(|| server_defect("a document change carries no edits"))?
         .iter()
-        .map(read_edit)
+        .map(lsp_edits::read_edit)
         .collect()
 }
 
-/// The one import to apply out of everything the server offered for a name.
-///
-/// A single offer is the answer. Several mean the name is worn by several items, and the one the
-/// moved code meant is the one the file was already importing before the move carried it out of
-/// that declaration's scope. Reading those declarations back narrows the choice without inventing a
-/// path — rust-analyzer still writes every character of the `use` it inserts. A name the file's own
-/// imports do not settle has no answer here either, and is reported rather than picked.
-fn choose_import<'a>(text: &str, offered: &[&'a str]) -> Option<&'a str> {
-    if let [only] = offered {
-        return Some(only);
-    }
-
-    let in_scope = imported_paths(text);
-    let mut narrowed = offered
-        .iter()
-        .filter(|title| import_path(title).is_some_and(|path| in_scope.contains(&path)));
-
-    if let Some(only) = narrowed.next() {
-        if narrowed.next().is_none() {
-            return Some(only);
-        }
-        return None;
-    }
-
-    // The name itself is bound nowhere — routinely true after a seam has moved the code that used
-    // it and the import pass pruned the parent's now-unused binding. The module it came from is
-    // still evidence: a file importing twenty-six names from `tddy_service::proto::connection` and
-    // one contested `Signal` meant that one, not `sysinfo::Signal`.
-    //
-    // Only decisive where exactly one candidate's module is already imported from. Two candidates
-    // from two imported modules is the ambiguity this function exists to refuse.
-    let modules: Vec<String> = in_scope
-        .iter()
-        .filter_map(|path| parent_module(path))
-        .collect();
-    let mut by_module = offered.iter().filter(|title| {
-        import_path(title)
-            .and_then(|path| parent_module(&path))
-            .is_some_and(|module| modules.contains(&module))
-    });
-
-    if let Some(only) = by_module.next() {
-        if by_module.next().is_none() {
-            return Some(only);
-        }
-        return None;
-    }
-
-    // Neither tier can see through a re-export. A crate publishing an item at its root gives one
-    // item two paths, and rust-analyzer offers the shortest: `tddy-core` carries
-    // `pub use error::{BackendError, ParseError, WorkflowError};`, so a file writing the canonical
-    // `tddy_core::error::ParseError` is offered `tddy_core::ParseError` — a different string and a
-    // different parent module for the same type. One live extraction was refused three candidates
-    // deep over exactly that.
-    //
-    // The crate the file already binds *this name* from is the evidence that settles it, and it is
-    // keyed on a binding of the contested name rather than on any binding from the crate. Keyed on
-    // the crate alone it would be worthless: almost every file imports something from `std`, so
-    // `std::string::ParseError` would match as readily as the one the file means.
-    //
-    // Third, and strictly weaker than the two above — a crate root is a coarser claim than a path,
-    // and must never outrank one. Two candidates rooted in the crate the name is bound from is
-    // still the ambiguity this function exists to refuse, because a crate holding both is no
-    // narrower. A wrong guess costs a refusal rather than bad source either way: the caller
-    // verifies each import it writes against the occurrences it was supposed to resolve.
-    let mut by_crate = offered
-        .iter()
-        .filter(|title| import_path(title).is_some_and(|path| binds_that_name(&in_scope, &path)));
-
-    let only = *by_crate.next()?;
-    by_crate.next().is_none().then_some(only)
-}
-
-/// Whether one of `in_scope` binds `path`'s own last segment from `path`'s own crate.
-fn binds_that_name(in_scope: &[String], path: &str) -> bool {
-    let (Some(root), Some(name)) = (crate_root(path), path.rsplit("::").next()) else {
-        return false;
-    };
-
-    in_scope
-        .iter()
-        .any(|bound| bound.rsplit("::").next() == Some(name) && crate_root(bound) == Some(root))
-}
-
-/// The crate a path is rooted in — `a::b::C` is `a`. `None` for an empty path.
-fn crate_root(path: &str) -> Option<&str> {
-    path.split("::").next().filter(|root| !root.is_empty())
-}
-
-/// The module a path's last segment lives in — `a::b::C` is `a::b`. `None` for a bare name.
-fn parent_module(path: &str) -> Option<String> {
-    path.rsplit_once("::").map(|(module, _)| module.to_string())
-}
-
-/// `source` without the single-name `use` lines inside `block` that no import can be.
-///
-/// A line goes when the server reports an unresolved name on it — the import binds nothing — or when
-/// the name it binds is bound again by another `use` in the same block, which the compiler rejects
-/// whichever of the two resolves. A grouped `use` is never dropped: it carries names beyond the one
-/// in question.
-fn without_dead_imports(
-    source: &[String],
-    block: &ModuleBlock,
-    unresolved: &[UnresolvedName],
-) -> Vec<String> {
-    let inside = |index: usize| index > block.opened && index < block.closed;
-
-    // Names bound by a group have to be known before the simple lines are judged: the duplicate is
-    // as often written above its group as below it.
-    let grouped: Vec<String> = source
-        .iter()
-        .enumerate()
-        .filter(|(index, line)| inside(*index) && simple_import(line).is_none())
-        .flat_map(|(_, line)| names_bound(line))
-        .collect();
-
-    let mut kept = Vec::with_capacity(source.len());
-    let mut standing: Vec<String> = Vec::new();
-
-    for (index, line) in source.iter().enumerate() {
-        if let Some(name) = simple_import(line).filter(|_| inside(index)) {
-            if unresolved_on_line(unresolved, index)
-                || grouped.contains(&name)
-                || standing.contains(&name)
-            {
-                continue;
-            }
-            standing.push(name);
-        }
-        kept.push(line.clone());
-    }
-
-    kept
-}
-
-/// The one name a `use` line binds, when it is a single-line declaration binding exactly one.
-fn simple_import(line: &str) -> Option<String> {
-    if line.contains('{') || !line.trim_end().ends_with(';') {
-        return None;
-    }
-
-    let names = names_bound(line);
-    let [only] = names.as_slice() else {
-        return None;
-    };
-    Some(only.clone())
-}
-
-/// Whether the server reports any unresolved name on the given zero-based line.
-fn unresolved_on_line(unresolved: &[UnresolvedName], index: usize) -> bool {
-    unresolved
-        .iter()
-        .any(|found| found.position.get("line").and_then(Value::as_u64) == Some(index as u64))
-}
-
-/// How many of the names the server could not resolve are `name`.
-fn occurrences_of(unresolved: &[UnresolvedName], name: &str) -> usize {
-    unresolved.iter().filter(|found| found.text == name).count()
-}
-
-/// The order to try the offered imports in: the one this file's own imports point at first, then
-/// every other path the server offered, as it offered them.
-///
-/// `choose_import` still decides which path the moved code *meant*, and still refuses when neither
-/// the server nor the file settles it. What is new is that its answer is a first guess rather than
-/// the only one — rust-analyzer offers paths that resolve nothing, and the caller verifies each in
-/// turn instead of trusting the title.
-fn import_order<'a>(text: &str, offered: &'a [String]) -> Option<Vec<&'a str>> {
-    let borrowed: Vec<&str> = offered.iter().map(String::as_str).collect();
-    let first = choose_import(text, &borrowed)?;
-
-    let mut ordered = vec![first];
-    ordered.extend(borrowed.iter().copied().filter(|title| *title != first));
-    Some(ordered)
-}
-
-/// Whether the identifier at `position` is reached through a qualifier — `Type::assoc`, `value.field`.
-///
-/// Such a name is an associated item or a field, resolved through what precedes it rather than
-/// through a path, so no `use` can bind it. A range's `..` is excluded: the name after it is an
-/// ordinary expression, and a constant there is importable like any other.
-fn reached_through_qualifier(text: &str, position: &Value) -> bool {
-    let (Some(line), Some(character)) = (
-        position.get("line").and_then(Value::as_u64),
-        position.get("character").and_then(Value::as_u64),
-    ) else {
-        return false;
-    };
-
-    let Some(before) = text
-        .split('\n')
-        .nth(line as usize)
-        .and_then(|source| source.get(..character as usize))
-        .map(str::trim_end)
-    else {
-        return false;
-    };
-
-    before.ends_with("::") || (before.ends_with('.') && !before.ends_with(".."))
-}
-
-/// Whether `module`'s own `use` declarations already bind `name`.
-///
-/// Scoped to the block being repaired rather than read over the whole file: the same name is
-/// routinely imported by a sibling module, and treating that as already bound here would skip an
-/// import the moved code genuinely lost.
-fn already_bound(text: &str, module: &str, name: &str) -> Result<bool> {
-    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module)?;
-    let body = source[block.opened..block.closed].join("\n");
-
-    Ok(names_bound(&body).iter().any(|bound| bound == name))
-}
-
-/// The path an `Import` quickfix names, read out of its title.
-fn import_path(title: &str) -> Option<String> {
-    let named = title.strip_prefix(IMPORT_TITLE)?;
-    Some(named.trim().trim_matches('`').to_string())
-}
-
-/// Every path the text's own `use` declarations bind, with their `{…}` groups expanded.
-///
-/// This is a lexical read, not a resolution: a glob contributes nothing because there is no telling
-/// what it brings in, and a `use` written inside a function counts the same as one at the top. Both
-/// only ever cost a refusal, never a wrong import.
-fn imported_paths(text: &str) -> Vec<String> {
-    let mut paths = Vec::new();
-
-    for statement in text.split(';') {
-        if let Some(tree) = use_tree(statement) {
-            expand_use(tree, "", &mut paths);
-        }
-    }
-
-    paths
-}
-
-/// The `use` tree a semicolon-terminated statement declares, if it declares one.
-///
-/// The statement is read from its last line-initial `use`, which keeps a `{…}` group spanning
-/// several lines whole while leaving whatever precedes the declaration — an earlier statement, a
-/// comment quoting an import — out of it.
-fn use_tree(statement: &str) -> Option<&str> {
-    let mut start = None;
-    let mut offset = 0;
-
-    for line in statement.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("use ") || trimmed.starts_with("pub use ") {
-            start = Some(offset + line.len() - trimmed.len());
-        }
-        offset += line.len();
-    }
-
-    let tree = &statement[start?..];
-    tree.strip_prefix("use ")
-        .or_else(|| tree.strip_prefix("pub use "))
-}
-
-/// Push every path a `use` tree binds, expanding each group onto the prefix that leads to it.
-fn expand_use(tree: &str, prefix: &str, paths: &mut Vec<String>) {
-    let tree = tree.trim();
-
-    let Some(open) = tree.find('{') else {
-        let bound = tree.split(" as ").next().unwrap_or(tree).trim();
-        if bound == "self" {
-            paths.push(prefix.trim_end_matches("::").to_string());
-        } else if !bound.is_empty() && !bound.ends_with('*') {
-            paths.push(format!("{prefix}{bound}"));
-        }
-        return;
-    };
-
-    let head = format!("{prefix}{}", &tree[..open]);
-    let close = tree.rfind('}').unwrap_or(tree.len());
-
-    for member in group_members(&tree[open + 1..close]) {
-        expand_use(member, &head, paths);
-    }
-}
-
-/// A group's members, split on the commas that are not inside a group of their own.
-fn group_members(inner: &str) -> Vec<&str> {
-    let mut members = Vec::new();
-    let mut depth = 0usize;
-    let mut start = 0;
-
-    for (offset, character) in inner.char_indices() {
-        match character {
-            '{' => depth += 1,
-            '}' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                members.push(&inner[start..offset]);
-                start = offset + 1;
-            }
-            _ => {}
-        }
-    }
-    members.push(&inner[start..]);
-
-    members
-}
-
-/// An identifier the server could not resolve, with the position an assist is asked for at.
-struct UnresolvedName {
-    text: String,
-    position: Value,
-}
-
-/// Where `wanted` sits in the semantic-token legend the server answered the handshake with.
-fn token_type_index(handshake: &Value, wanted: &str) -> Option<u32> {
-    handshake
-        .pointer("/capabilities/semanticTokensProvider/legend/tokenTypes")?
-        .as_array()?
-        .iter()
-        .position(|entry| entry.as_str() == Some(wanted))
-        .map(|index| index as u32)
-}
-
-/// Decode a semantic-token response, keeping the tokens of one type.
-///
-/// The protocol encodes tokens as a flat run of five integers each — line delta, start delta,
-/// length, type, modifiers — where the deltas are relative to the token before, and the start
-/// delta restarts at the beginning of every new line.
-fn unresolved_in(tokens: &Value, wanted: u32, text: &str) -> Vec<UnresolvedName> {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let data: Vec<u32> = tokens
-        .get("data")
-        .and_then(Value::as_array)
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(Value::as_u64)
-                .map(|n| n as u32)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let mut found = Vec::new();
-    let mut line: u32 = 0;
-    let mut character: u32 = 0;
-
-    for entry in data.chunks_exact(5) {
-        let [line_delta, start_delta, length, token_type, _] = *entry else {
-            continue;
-        };
-        line += line_delta;
-        character = if line_delta == 0 {
-            character + start_delta
-        } else {
-            start_delta
-        };
-
-        if token_type != wanted {
-            continue;
-        }
-
-        // A token whose span does not land inside the document is not one to act on: the server is
-        // describing a version of the file this client no longer holds.
-        let Some(name) = lines
-            .get(line as usize)
-            .and_then(|source| source.get(character as usize..(character + length) as usize))
-        else {
-            continue;
-        };
-
-        found.push(UnresolvedName {
-            text: name.to_string(),
-            position: json!({ "line": line, "character": character }),
-        });
-    }
-
-    found
-}
-
-/// The text edits an LSP workspace edit carries for one document.
-///
-/// Servers may answer in either shape the protocol allows — `documentChanges` or `changes` — and a
-/// bare `WorkspaceEdit` (as `textDocument/rename` returns) or one wrapped in a code action.
-fn edits_for(response: &Value, uri: &str) -> Result<Vec<LspEdit>> {
-    let workspace_edit = response.get("edit").unwrap_or(response);
-
-    let raw: Vec<Value> = match workspace_edit
-        .get("documentChanges")
-        .and_then(Value::as_array)
-    {
-        Some(changes) => changes
-            .iter()
-            .filter(|change| {
-                change.pointer("/textDocument/uri").and_then(Value::as_str) == Some(uri)
-            })
-            .filter_map(|change| change.get("edits").and_then(Value::as_array))
-            .flatten()
-            .cloned()
-            .collect(),
-        None => workspace_edit
-            .pointer(&format!("/changes/{}", uri.replace('/', "~1")))
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default(),
-    };
-
-    if raw.is_empty() {
-        return Err(server_defect(
-            "rust-analyzer returned no edits for the document",
-        ));
-    }
-
-    raw.iter().map(read_edit).collect()
-}
-
-/// Every document a workspace edit touches, with its edits — the multi-document counterpart of
-/// [`edits_for`].
-///
-/// [`edits_for`] filters `documentChanges` down to one `uri`, which is correct for an assist this
-/// backend resolves against a single file and **wrong for a rename**: rust-analyzer computes
-/// cross-file rename edits, and discarding every document but the anchor's left those callers naming
-/// a symbol that no longer existed. The anchor's own file looked right, so nothing surfaced until a
-/// later build.
-///
-/// It is also the primitive `move_module_to_crate` needs, because re-pointing a caller *is* editing
-/// another document.
-///
-/// Documents come back in the order the server listed them, so a caller can report them in a stable
-/// order. An edit naming no documents is still an error: this widens what counts as an answer, it
-/// does not make silence acceptable, and neither does a document whose edit list is empty.
-///
-/// Text edits are all it carries. A `documentChanges` entry that is a resource operation — a
-/// `create`, `rename` or `delete` — names no `textDocument`, and so is not one of these pairs;
-/// [`convert_change`] is where those are read.
-fn workspace_edits_for(response: &Value) -> Result<Vec<(String, Vec<LspEdit>)>> {
-    let workspace_edit = response.get("edit").unwrap_or(response);
-
-    let documents: Vec<(String, &Vec<Value>)> = match workspace_edit
-        .get("documentChanges")
-        .and_then(Value::as_array)
-    {
-        Some(changes) => changes
-            .iter()
-            .filter_map(|change| {
-                let uri = change
-                    .pointer("/textDocument/uri")
-                    .and_then(Value::as_str)?;
-                let edits = change.get("edits").and_then(Value::as_array)?;
-                Some((uri.to_string(), edits))
-            })
-            .filter(|(_, edits)| !edits.is_empty())
-            .collect(),
-        None => workspace_edit
-            .get("changes")
-            .and_then(Value::as_object)
-            .map(|documents| {
-                documents
-                    .iter()
-                    .filter_map(|(uri, edits)| Some((uri.clone(), edits.as_array()?)))
-                    .filter(|(_, edits)| !edits.is_empty())
-                    .collect()
-            })
-            .unwrap_or_default(),
-    };
-
-    if documents.is_empty() {
-        return Err(server_defect(
-            "rust-analyzer returned no edits for any document",
-        ));
-    }
-
-    documents
-        .into_iter()
-        .map(|(uri, edits)| Ok((uri, edits.iter().map(read_edit).collect::<Result<_>>()?)))
-        .collect()
-}
-
-/// One text edit, refusing anything malformed rather than guessing at it.
-fn read_edit(entry: &Value) -> Result<LspEdit> {
-    Ok(LspEdit {
-        start: LspPoint::read(entry.pointer("/range/start"))?,
-        end: LspPoint::read(entry.pointer("/range/end"))?,
-        new_text: entry
-            .get("newText")
-            .and_then(Value::as_str)
-            .ok_or_else(|| server_defect("edit is missing `newText`"))?
-            .to_string(),
-    })
-}
-
-/// Apply LSP edits to `text`. Ranges share one coordinate space, so they land last-first.
-fn apply_lsp_edit(text: &str, mut edits: Vec<LspEdit>) -> String {
-    edits.sort_by_key(|edit| edit.start);
-
-    let mut result = text.to_string();
-    for edit in edits.into_iter().rev() {
-        let from = offset_of(&result, edit.start);
-        let to = offset_of(&result, edit.end);
-        result.replace_range(from..to.max(from), &edit.new_text);
-    }
-    result
-}
-
-/// Zero-based line/character to a byte offset.
-fn offset_of(text: &str, point: LspPoint) -> usize {
-    let mut offset = 0usize;
-    for _ in 0..point.line {
-        match text[offset..].find('\n') {
-            None => return text.len(),
-            Some(index) => offset += index + 1,
-        }
-    }
-    let end = text[offset..].find('\n').map_or(text.len(), |i| offset + i);
-
-    // `character` is a byte offset into the line, per the encoding declared at initialize, so it is
-    // added rather than walked. The boundary walk is for a server that broke that agreement: landing
-    // mid-character would panic on the next slice, and advancing to the next boundary is the one
-    // recovery that cannot.
-    let mut at = offset + point.character.min(end - offset);
-    while at < end && !text.is_char_boundary(at) {
-        at += 1;
-    }
-    at
-}
-
-/// Byte offset to the zero-based LSP position naming it.
-fn position_at(text: &str, offset: usize) -> Value {
-    let before = &text[..offset];
-    let line = before.matches('\n').count();
-    let character = before.rsplit('\n').next().map_or(0, str::len);
-    json!({ "line": line, "character": character })
-}
-
-/// One position in LSP's zero-based coordinates.
-fn lsp_position(at: Position) -> Value {
-    json!({ "line": at.line - 1, "character": at.col - 1 })
-}
-
-fn lsp_range(range: Range) -> Value {
-    json!({
-        "start": { "line": range.start.line - 1, "character": range.start.col - 1 },
-        "end": { "line": range.end.line - 1, "character": range.end.col - 1 }
-    })
-}
-
-/// Refuse an extraction whose signature carries an inferred-type placeholder.
-///
-/// rust-analyzer writes the types in an extracted item's signature from its own inference. Asked
-/// before inference is ready it can still produce the assist — the *shape* comes from the syntax tree
-/// — and fills what it does not yet know with `_`:
-///
-/// ```ignore
-/// fn compute_spread(sample: &Sample) -> (_, _) {
-/// ```
-///
-/// `_` is not legal in an item signature (`E0121`), so the result compiles nowhere and the operation
-/// would otherwise report success. Waiting for the anchor to resolve is what avoids this; this is the
-/// post-condition that keeps a recurrence loud instead of writing a tree that cannot build.
-fn refuse_inferred_placeholder(text: &str, declaration: &str) -> Result<()> {
-    let Some(line) = text
-        .split('\n')
-        .find(|line| line.contains(declaration) && carries_placeholder_type(line))
-    else {
-        return Ok(());
-    };
-
-    Err(server_defect(format!(
-        "rust-analyzer wrote `{}` — it produced the extraction before it could infer the types the \
-         signature needs, and `_` is not legal there (E0121). The crate graph was most likely still \
-         loading; retrying the operation against a warm server resolves it.",
-        line.trim()
-    )))
-}
-
-/// Whether a declaration line carries `_` where a type belongs.
-///
-/// Tokenised on identifier boundaries, so `fun_name` and `var_name` — which contain an underscore but
-/// are not one — do not register. A `_` straight after `'` is the elided lifetime `'_`, which is legal
-/// in a signature and is what rust-analyzer writes for a borrowed view (`state: RosterState<'_>`).
-fn carries_placeholder_type(line: &str) -> bool {
-    let mut previous = None;
-    let mut token = String::new();
-    for character in line.chars().chain(std::iter::once(' ')) {
-        if is_identifier_char(character) {
-            token.push(character);
-            continue;
-        }
-        if token == "_" && previous != Some('\'') {
-            return true;
-        }
-        previous = Some(character);
-        token.clear();
-    }
-    false
-}
-
-/// Refuse a result the placeholder survived into.
-///
-/// The assist rewrites references to the items it moved as `modname::Item`, and the rename that
-/// follows is asked of the server — so every reference it can resolve is renamed along with the
-/// declaration. One it *cannot* resolve is left exactly as it was: from inside a different,
-/// already-extracted module `modname::Item` never named anything, and rust-analyzer does not rename
-/// an unresolved path. What lands is source that compiles nowhere, from an operation that reported
-/// success, which is the worst outcome this tool has.
-///
-/// The count is compared against the text as it stood before the assist ran rather than against
-/// zero, so a file that legitimately contains the identifier is not refused for containing it.
-fn refuse_residual_placeholder(original: &str, produced: &str, name: &str) -> Result<()> {
-    let before = placeholder_sites(original, name).len();
-    let sites = placeholder_sites(produced, name);
-    if sites.len() <= before {
-        return Ok(());
-    }
-
-    let mut lines: Vec<String> = Vec::new();
-    for site in &sites {
-        let line = site.to_string();
-        if !lines.contains(&line) {
-            lines.push(line);
-        }
-    }
-
-    // Two causes, and they want opposite advice. A leftover inside an already-extracted *module* is
-    // an ordering mistake: extract the definition first and no reference to it is sitting in a scope
-    // the rewritten path cannot reach. A module the file already had (its `mod tests`) reads the
-    // same lexically and wants no reordering, so that wording names it too; the one such leftover
-    // known, a call beside the module's own import of the item, is repaired before this runs
-    // (`with_nested_references_restored`). A leftover inside an `impl` is not an ordering mistake
-    // either, and reordering the plan provably does not help — one real split was reordered in full
-    // and produced byte-identical refusals at identical offsets. An `impl` body cannot hold a
-    // `mod`, so the sibling can be moved neither first nor second; only a wider seam removes the
-    // reference.
-    //
-    // Where both occur the `impl` wording wins, because it is the one no ordering can satisfy.
-    let inside_an_impl = sites
-        .iter()
-        .any(|site| enclosing_block(produced, *site) == Some(Block::Impl));
-
-    let remedy = if inside_an_impl {
-        "That call sits inside an `impl`, and the module was written outside it, so no ordering of \
-         this plan makes the path resolve — an `impl` body cannot hold a `mod`. Either grow the \
-         seam to carry the whole `impl`, or cut it where nothing crosses."
-    } else {
-        "That reference sits inside another module of this file. If an earlier operation of this \
-         plan extracted that module, extract a definition before the items that reference it, so \
-         no reference to it is sitting inside an already-extracted module when it moves. If the \
-         file already had that module, such as its `mod tests`, no ordering helps: reach the item \
-         there through `use super::*;`, or cut the seam where that module does not name it."
-    };
-
-    Err(server_defect(format!(
-        "rust-analyzer left `{name}` behind in {} place(s) its rename could not reach, so the \
-         extraction would report success over source that resolves nowhere — line(s) {}. {remedy}",
-        sites.len() - before,
-        lines.join(", ")
-    )))
-}
-
-/// The kind of block a line sits inside, where the difference changes what a refusal should advise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Block {
-    Impl,
-    Module,
-}
-
-/// The innermost `impl` or `mod` a one-based line sits inside.
-///
-/// Lexical, and deliberately allowed to be approximate: a brace inside a string literal would mislead
-/// it. That is affordable because this only ever chooses the *wording* of a refusal that has already
-/// been decided — never whether to refuse. Anything finer would mean parsing, for no change in
-/// outcome.
-fn enclosing_block(text: &str, line: u32) -> Option<Block> {
-    let mut stack: Vec<Option<Block>> = Vec::new();
-
-    for (index, raw) in text.split('\n').enumerate() {
-        if index as u32 + 1 == line {
-            return stack.iter().rev().copied().flatten().next();
-        }
-
-        let code = raw.split("//").next().unwrap_or(raw);
-        let mut declaration = 0usize;
-
-        for (at, character) in code.char_indices() {
-            match character {
-                '{' => {
-                    stack.push(declares(&code[declaration..at]));
-                    declaration = at + character.len_utf8();
-                }
-                '}' => {
-                    stack.pop();
-                    declaration = at + character.len_utf8();
-                }
-                ';' => declaration = at + character.len_utf8(),
-                _ => {}
-            }
-        }
-    }
-
-    None
-}
-
-/// Which block, if either, a declaration introduces. Whole tokens, so `implement` is not `impl`.
-fn declares(head: &str) -> Option<Block> {
-    head.split(|character: char| !is_identifier_char(character))
-        .find_map(|token| match token {
-            "impl" => Some(Block::Impl),
-            "mod" => Some(Block::Module),
-            _ => None,
-        })
-}
-
-/// Every one-based line on which `name` occurs as a whole identifier, once per occurrence.
-///
-/// Whole-word, because `modname` inside `modnamed` is a different name and refusing on it would make
-/// perfectly good code unrefactorable.
-fn placeholder_sites(text: &str, name: &str) -> Vec<u32> {
-    let mut sites = Vec::new();
-
-    for (index, line) in text.split('\n').enumerate() {
-        let bytes = line.as_bytes();
-        let mut from = 0;
-        while let Some(found) = line[from..].find(name) {
-            let start = from + found;
-            let end = start + name.len();
-            let opens = start == 0 || !is_identifier_byte(bytes[start - 1]);
-            let closes = end >= bytes.len() || !is_identifier_byte(bytes[end]);
-            if opens && closes {
-                sites.push(index as u32 + 1);
-            }
-            from = end;
-        }
-    }
-
-    sites
-}
-
-fn is_identifier_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
-}
-
-/// The difference between two versions of a file, as one edit per changed region.
-///
-/// One edit spanning everything between the first and last change would be simpler, and is wrong:
-/// the coordinate ledger folds these edits to translate later anchors, and a position *inside* a
-/// replaced span cannot be translated at all. An extraction routinely changes two distant places at
-/// once — it rewrites the items it relocated and every reference to them — so a single span swallows
-/// every untouched line between, and the ledger then correctly reports every anchor there as removed.
-/// A plan could therefore hold only one Rust extraction, which is what forced a fresh server, and a
-/// fresh server re-indexes the crate.
-///
-/// The common prefix and suffix are trimmed first, which bounds the search; the rest is Myers' diff,
-/// the same algorithm the TypeScript sidecar runs, so the two backends cannot disagree on where a
-/// hunk begins.
-fn minimal_edits(previous: &str, current: &str) -> Vec<TextEdit> {
-    let before: Vec<&str> = previous.split('\n').collect();
-    let after: Vec<&str> = current.split('\n').collect();
-
-    let mut prefix = 0;
-    while prefix < before.len() && prefix < after.len() && before[prefix] == after[prefix] {
-        prefix += 1;
-    }
-    let mut suffix = 0;
-    while suffix < before.len() - prefix
-        && suffix < after.len() - prefix
-        && before[before.len() - 1 - suffix] == after[after.len() - 1 - suffix]
-    {
-        suffix += 1;
-    }
-
-    changed_regions(
-        &before[prefix..before.len() - suffix],
-        &after[prefix..after.len() - suffix],
-    )
-    .into_iter()
-    .map(|region| TextEdit {
-        range: Range {
-            start: Position {
-                line: (prefix + region.from) as u32 + 1,
-                col: 1,
-            },
-            end: Position {
-                line: (prefix + region.to) as u32 + 1,
-                col: 1,
-            },
-        },
-        new_text: if region.lines.is_empty() {
-            String::new()
-        } else {
-            format!("{}\n", region.lines.join("\n"))
-        },
-    })
-    .collect()
-}
-
-/// Where the references to one item sit, relative to the range about to be relocated.
-#[derive(Default)]
-struct Reach {
-    /// Files other than the anchor's own that reference it.
-    stranded_in: Vec<String>,
-    /// Whether anything outside the range reaches it, in this file or another.
-    from_outside: bool,
-    /// One-based lines in this same file, outside the range, where something references it.
-    ///
-    /// Kept separately from `from_outside` because that flag answers a visibility question and
-    /// collapses this case together with a reference in another file. Only the seam survey knows
-    /// whether these lines matter, and they matter for exactly one kind of item.
-    in_file_outside_at: Vec<u32>,
-}
-
-/// What the extraction knows about one item it is about to relocate.
-struct MovedItem {
-    name: String,
-    /// The inline modules inside the relocated range that hold it, outermost first. An item with
-    /// any is reached through them, so a facade that named it flat would write a path that never
-    /// resolved.
-    within: Vec<String>,
-    /// The visibility keyword as written — `pub`, `pub(crate)`, `pub(super)`, or empty for private.
-    visibility: String,
-    /// Files other than the anchor's own that reference it.
-    stranded_in: Vec<String>,
-    /// Whether anything outside the range being relocated reaches it, in this file or another.
-    reached_from_outside: bool,
-    /// One-based lines, in this same file, where a sibling *inside the same `impl`* still references
-    /// it after the seam moves.
-    ///
-    /// Distinct from `reached_from_outside`, which is true of any reference beyond the range and is
-    /// only a visibility signal. This one blocks a seam that cuts a trait `impl`, whose halves cannot
-    /// both be `impl`s of the trait; see [`refuse_impl_sibling_references`].
-    referenced_in_impl_at: Vec<u32>,
-}
-
-/// Refuse an extraction that would strand a reference written in another file.
-///
-/// Relocating items changes the path that reaches them, and rust-analyzer rewrites no reference to
-/// them. Inside this file that costs nothing — the `use` the import pass restores binds the old names
-/// again — but a reference in another file has nothing to rewrite it, and only the compiler would say
-/// so. One does sometimes survive regardless, where the restored `use` happens to land in a module
-/// the referrer sits under; that is an accident of where the seam was cut, and not something to let a
-/// restructure quietly depend on.
-///
-/// A facade makes the whole question moot, which is why the caller skips this when one is asked for.
-fn refuse_stranded(items: &[MovedItem]) -> Result<()> {
-    let stranded: Vec<String> = items
-        .iter()
-        .filter(|item| !item.stranded_in.is_empty())
-        .map(|item| format!("`{}` from {}", item.name, item.stranded_in.join(", ")))
-        .collect();
-
-    if stranded.is_empty() {
-        return Ok(());
-    }
-
-    Err(seam_refusal(format!(
-        "the module would be reached by a different path than the items moved into it are now, \
-         and rust-analyzer rewrites no reference it did not move: {}. Ask for `reexport` to leave the \
-         old path resolving through the parent, or cut the seam where these references do not reach.",
-        stranded.join("; ")
-    )))
-}
-
-/// Every item a range would relocate, however it is reached.
-///
-/// The companion to [`path_reached_within`], and deliberately a second traversal rather than a flag on
-/// the first. They answer different questions: that one asks which items a *module path* reaches,
-/// which is what decides facades and visibility, and it is right to stop above an `impl`. This one
-/// asks what physically moves, so it descends through every container — which is the only way an
-/// `impl` member is seen at all.
-///
-/// `within` carries the enclosing containers rather than only the enclosing modules, so an item's
-/// entry names the `impl` that holds it. That is what lets a later pass ask whether the seam cut
-/// through an `impl` instead of around it.
-fn items_relocated_within(symbols: &Value, range: Range) -> Vec<PathReached> {
-    let mut found = Vec::new();
-    collect_relocated(symbols, range, &[], &mut found);
-    found
-}
-
-fn collect_relocated(
-    symbols: &Value,
-    range: Range,
-    within: &[String],
-    found: &mut Vec<PathReached>,
-) {
-    for symbol in symbols.as_array().into_iter().flatten() {
-        let name = symbol.get("name").and_then(Value::as_str);
-        let covered = covers(range, symbol.pointer("/range/start"));
-
-        // A container whose name is not a single identifier — `impl Gauge` — is still a container, so
-        // it is skipped as an item and kept as a step in the path.
-        if covered {
-            if let (Some(item), Some(position)) = (
-                name.filter(|name| is_identifier(name)),
-                symbol
-                    .pointer("/selectionRange/start")
-                    .or_else(|| symbol.pointer("/location/range/start")),
-            ) {
-                found.push(PathReached {
-                    name: item.to_string(),
-                    within: within.to_vec(),
-                    position: position.clone(),
-                });
-            }
-        }
-
-        // Descend whether or not the container itself is covered. A seam that cuts into an `impl`
-        // starts *below* the `impl` keyword by construction, so stopping at an uncovered container
-        // would walk past every member the range actually holds — which is the only geometry this
-        // traversal exists to see.
-        if let Some(children) = symbol.get("children") {
-            let mut inside = within.to_vec();
-            inside.extend(name.map(str::to_owned));
-            collect_relocated(children, range, &inside, found);
-        }
-    }
-}
-
-/// The `impl` blocks the range cuts through rather than around, by name as the server reports them.
-///
-/// An `impl` is cut through when the range reaches some of its members and not others. That is the
-/// geometry the extraction cannot survive: the new module is written outside the `impl`, so the
-/// members left behind reference a path that never resolved from where they sit.
-///
-/// Computed from the members alone, because a partially covered block is exactly one with a member
-/// the range does not reach — no end position required, and none is reliably reported.
-fn impls_cut_through(symbols: &Value, range: Range) -> Vec<String> {
-    let mut cut = Vec::new();
-    collect_impls_cut_through(symbols, range, &mut cut);
-    cut
-}
-
-fn collect_impls_cut_through(symbols: &Value, range: Range, cut: &mut Vec<String>) {
-    for symbol in symbols.as_array().into_iter().flatten() {
-        let children: Vec<&Value> = symbol
-            .get("children")
-            .and_then(Value::as_array)
-            .map(|kids| kids.iter().collect())
-            .unwrap_or_default();
-
-        if symbol.get("kind").and_then(Value::as_u64) == Some(SYMBOL_KIND_IMPL) {
-            let reached = children
-                .iter()
-                .filter(|child| covers(range, child.pointer("/range/start")))
-                .count();
-            if reached > 0 && reached < children.len() {
-                if let Some(name) = symbol.get("name").and_then(Value::as_str) {
-                    cut.push(name.to_string());
-                }
-            }
-        }
-
-        if let Some(kids) = symbol.get("children") {
-            collect_impls_cut_through(kids, range, cut);
-        }
-    }
-}
-
-/// The visibilities the assist widened on members no path-reached survey ever sees.
-///
-/// `restore_visibility` iterates the items [`path_reached_within`] returned, and that traversal stops
-/// above an `impl` — so a relocated `impl` member is neither put back nor named, and lands
-/// `pub(crate)` in silence while the schema promises every widening is reported.
-///
-/// Reported rather than narrowed, deliberately. Narrowing would reintroduce `E0624` for a private
-/// method with a sibling-module caller, which is safe today precisely *because* the item stays
-/// widened; naming it makes that a decision instead of an accident.
-///
-/// A member written `pub` or already `pub(crate)` has nothing to answer for, so the visibility each
-/// one was written with is compared rather than inferred from the relocated text — which cannot tell a
-/// widening from an item that always read that way.
-fn impl_widenings(
-    source: &[String],
-    block: &ModuleBlock,
-    members: &[MovedItem],
-) -> Vec<VisibilityChange> {
-    members
-        .iter()
-        .filter(|member| member.visibility != "pub" && member.visibility != WIDENED.trim())
-        .filter(|member| {
-            source[block.opened..block.closed]
-                .iter()
-                .any(|line| declares_at_widened_visibility(line, &member.name))
-        })
-        .map(|member| VisibilityChange {
-            item: member.name.clone(),
-            from: if member.visibility.is_empty() {
-                "private".to_string()
-            } else {
-                member.visibility.clone()
-            },
-            to: WIDENED.trim().to_string(),
-        })
-        .collect()
-}
-
-/// The `use` lines the parent keeps so paths that reached the relocated items still resolve.
-///
-/// A glob is one line and legal whatever moved: a glob re-export caps at each item's own visibility
-/// rather than failing on a member less visible than itself. A named re-export cannot do that — `pub
-/// use` of a `pub(crate)` item is `E0365` — so its names are grouped by the visibility each item was
-/// written with, widest first. It names only the items something outside the new module reaches,
-/// because re-exporting a helper that travelled with its only caller would make it reachable for
-/// nobody and undo the privacy the seam just preserved.
-/// Refuse a rewrite that produced a qualified path naming something the seam never moved.
-///
-/// One real run wrote `seeded_clone_guard::SeededCloneGuardloneGuardloneGuard` — the identifier's
-/// tail inserted twice at a four-character offset, which is two edits against the same reference
-/// with the second computed on pre-first-edit text. It appeared once among ~20 rewrites of that
-/// symbol and the run still reported success.
-///
-/// The existing residual-placeholder check cannot see this: it counts occurrences of the
-/// *placeholder* (`modname`, `fun_name`), not of the references the assist rewrote. This one is
-/// keyed to what the seam moved, which the backend already knows, and costs a single pass over the
-/// produced text with no server round trip.
-///
-/// Only paths whose qualifier is this module are weighed. A path through any other module was not
-/// written by this operation.
-fn refuse_mangled_rewrite(text: &str, module: &str, moved: &[MovedItem]) -> Result<()> {
-    let known: Vec<&str> = moved.iter().map(|item| item.name.as_str()).collect();
-    let needle = format!("{module}::");
-
-    for (index, line) in text.split('\n').enumerate() {
-        let mut rest = line;
-        while let Some(at) = rest.find(&needle) {
-            // A longer qualifier ending in this module's name is a different module.
-            let boundary_ok = rest[..at]
-                .chars()
-                .last()
-                .is_none_or(|c| !c.is_alphanumeric() && c != '_' && c != ':');
-            rest = &rest[at + needle.len()..];
-            if !boundary_ok {
-                continue;
-            }
-            let ident: String = rest
-                .chars()
-                .take_while(|c| c.is_alphanumeric() || *c == '_')
-                .collect();
-            // Nested modules and associated items are reached through further segments, and a
-            // lower-case head is a module or function rather than a moved type.
-            if ident.is_empty() || known.contains(&ident.as_str()) {
-                continue;
-            }
-            if let Some(base) = known.iter().find(|name| ident.starts_with(*name)) {
-                return Err(server_defect(format!(
-                    "the rewrite of `{base}` produced `{module}::{ident}` on line {} — the \
-                     identifier was written over itself, which is a corrupted edit rather than a \
-                     path. Refusing rather than reporting success over source that will not build.",
-                    index + 1
-                )));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// The widest visibility any relocated item carries, as the keyword a facade should re-export at.
-///
-/// Defaults to `pub(crate)` rather than `pub`: a seam that moved nothing public has nothing to
-/// publish, and `pub(crate)` is both what the assist widened its members to and the visibility the
-/// parent's own dependents reach the facade through.
-fn widest_visibility(items: &[MovedItem]) -> &'static str {
-    if items.iter().any(|item| item.visibility == "pub") {
-        "pub"
-    } else {
-        "pub(crate)"
-    }
-}
-
-/// Whether the facade this seam is getting will itself bind `name` in the parent's scope.
-///
-/// Mirrors [`facade_lines`]: a glob re-exports everything the module holds, while a named facade
-/// covers only the top-level items something outside the seam reaches.
-fn facade_will_bind(name: &str, moved: &[MovedItem], kind: Reexport) -> bool {
-    match kind {
-        Reexport::None => false,
-        Reexport::Glob => moved.iter().any(|item| item.name == name),
-        Reexport::Named => moved
-            .iter()
-            .any(|item| item.name == name && item.reached_from_outside && item.within.is_empty()),
-    }
-}
-
-fn facade_lines(module: &str, items: &[MovedItem], kind: Reexport) -> Result<Vec<String>> {
-    Ok(match kind {
-        Reexport::None => Vec::new(),
-        // `pub use` only where something the module holds is actually `pub`. The assist rewrites
-        // what it relocates to `pub(crate)`, so a seam of private items yields a `pub` glob that
-        // re-exports nothing — `clippy::unused_imports` calls that out by name, and under
-        // `-D warnings` it fails the build the restructure was supposed to leave green.
-        Reexport::Glob => vec![format!("{} use {module}::*;", widest_visibility(items))],
-        Reexport::Named => {
-            refuse_uncovered_nesting(items)?;
-            let reached: Vec<&MovedItem> = items
-                .iter()
-                .filter(|item| item.reached_from_outside && item.within.is_empty())
-                .collect();
-
-            let mut tiers: Vec<&str> = Vec::new();
-            for item in &reached {
-                if !tiers.contains(&item.visibility.as_str()) {
-                    tiers.push(item.visibility.as_str());
-                }
-            }
-            // Widest first, and stable within a tier so the order follows the source.
-            tiers.sort_by_key(|tier| match *tier {
-                "pub" => 0,
-                "" => 2,
-                _ => 1,
-            });
-
-            tiers
-                .into_iter()
-                .map(|tier| {
-                    let names: Vec<&str> = reached
-                        .iter()
-                        .filter(|item| item.visibility == tier)
-                        .map(|item| item.name.as_str())
-                        .collect();
-                    let prefix = if tier.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{tier} ")
-                    };
-                    format!("{prefix}use {module}::{{{}}};", names.join(", "))
-                })
-                .collect()
-        }
-    })
-}
-
-/// Refuse a named facade for an item whose own module the facade will not carry.
-///
-/// A nested item is reached through the module holding it, so re-exporting that module keeps
-/// `parent::nested::buried` resolving untouched and naming the item as well would only publish
-/// `parent::buried` — a path no caller ever used. Naming it flat is worse still: that is the
-/// `pub use grouped::{nested, buried};` that earned `E0432` while the run reported success.
-///
-/// The residual case has no honest line at all: something outside reaches the nested item, nothing
-/// reaches the module holding it, so the facade would have to invent a path or drop the reference.
-/// Refuse, and say which item and which module, because the fix is a different seam.
-fn refuse_uncovered_nesting(items: &[MovedItem]) -> Result<()> {
-    let carried: Vec<&str> = items
-        .iter()
-        .filter(|item| item.reached_from_outside && item.within.is_empty())
-        .map(|item| item.name.as_str())
-        .collect();
-
-    let uncovered: Vec<String> = items
-        .iter()
-        .filter(|item| item.reached_from_outside)
-        .filter_map(|item| {
-            let holder = item.within.first()?;
-            (!carried.contains(&holder.as_str()))
-                .then(|| format!("`{}` inside `{holder}`", item.name))
-        })
-        .collect();
-
-    if uncovered.is_empty() {
-        return Ok(());
-    }
-
-    Err(seam_refusal(format!(
-        "a named re-export cannot keep these paths resolving: {}. Nothing outside reaches the module \
-         holding them, so there is no name the parent could re-export that would cover them. Ask for \
-         `reexport: glob`, which re-exports the module too, or cut the seam so the nested item stays \
-         behind.",
-        uncovered.join("; ")
-    )))
-}
-
-/// What a `named` re-export that re-exported nothing has to say for itself.
-///
-/// A seam whose items are all internal legitimately needs no facade, so this is not a refusal — but
-/// a developer who asked for a facade and got none has to hear it here rather than find it in the
-/// diff.
-fn empty_facade_note(module: &str, lines: &[String], kind: Reexport) -> Option<String> {
-    (kind == Reexport::Named && lines.is_empty()).then(|| {
-        format!(
-            "`reexport: named` on `{module}` re-exported nothing: everything the seam moved is \
-             reached only from inside it. The facade was asked for and is not there."
-        )
-    })
-}
-
-/// Refuse an extraction whose module name the parent already uses for something else.
-///
-/// The name is the one piece of text an extraction invents, and it is the only name a facade can
-/// collide on: every other name in the module was already unique, and an extraction only moves names
-/// out. A `mod report` written beside an existing `pub mod report;` is `E0428`, and nothing in the
-/// assist's own output says so — the run reports success and the crate stops compiling.
-///
-/// Read from the text, so it costs no crate graph and answers before a server is started. A
-/// declaration inside the range is not counted: those move into the new module and vacate the name.
-fn refuse_module_name_taken(text: &str, module: &str, range: Range) -> Result<()> {
-    let retained = outside_the_range(text, range);
-
-    let taken = module_declaration(&retained, module).or_else(|| {
-        imported_paths(&retained)
-            .into_iter()
-            .find(|path| path.rsplit("::").next() == Some(module))
-            .map(|path| format!("use {path}"))
-    });
-
-    match taken {
-        None => Ok(()),
-        Some(binding) => Err(seam_refusal(format!(
-            "`{module}` is already taken in this module by `{binding}`. A second declaration of the \
-             name is `E0428` and the assist writes it without complaint, so the run would report \
-             success against a crate that no longer compiles. Give the module a different name."
-        ))),
-    }
-}
-
-/// The text with the relocated range blanked out, line numbering preserved.
-///
-/// An extraction moves names *out*, so a declaration inside the seam vacates the parent and its name
-/// is free for the new module to take. Blanking rather than deleting keeps every remaining line where
-/// it was, which is what lets the same read serve checks that report a line.
-fn outside_the_range(text: &str, range: Range) -> String {
-    text.split('\n')
-        .enumerate()
-        .map(|(index, line)| {
-            let number = index as u32 + 1;
-            if number >= range.start.line && number <= range.end.line {
-                ""
-            } else {
-                line
-            }
-        })
-        .collect::<Vec<&str>>()
-        .join("\n")
-}
-
-/// The `mod` declaration of `name` the text carries, if it carries one.
-///
-/// Lexical and deliberately narrow. A line that merely mentions the name — a comment, a doc comment,
-/// an attribute, a call — declares nothing, and a name that is a prefix of another (`report` beside
-/// `reporting`) is not it either.
-fn module_declaration(text: &str, name: &str) -> Option<String> {
-    text.split('\n').map(str::trim).find_map(|line| {
-        if line.starts_with("//") || line.starts_with('#') {
-            return None;
-        }
-        let rest = strip_visibility(line).strip_prefix("mod ")?;
-        (rest.trim_end_matches([';', '{', ' ']).trim() == name).then(|| line.to_string())
-    })
-}
-
-/// A declaration with its leading `pub`, `pub(crate)`, `pub(super)` … removed.
-fn strip_visibility(declaration: &str) -> &str {
-    let visibility = visibility_in(declaration);
-    if visibility.is_empty() {
-        return declaration;
-    }
-    declaration[visibility.len()..].trim_start()
-}
-
-/// Every path an attribute names by string, with the line it was written on.
-///
-/// `#[serde(default = "default_extend")]` reaches an item the way a call does, but rust-analyzer
-/// answers `textDocument/references` on that item without it: serde builds the call out of the
-/// string's *contents*, so the identifier it generates has no span in the source. A seam is
-/// therefore free to separate the two, and only the compiler ever says so.
-///
-/// A `doc` attribute is excluded: its string is prose, and prose that happens to read as a path is
-/// not a reference to anything.
-fn attribute_path_names(text: &str) -> Vec<(usize, String)> {
-    let mut found = Vec::new();
-
-    for (index, line) in text.split('\n').enumerate() {
-        let trimmed = line.trim();
-        let Some(body) = trimmed
-            .strip_prefix("#![")
-            .or_else(|| trimmed.strip_prefix("#["))
-        else {
-            continue;
-        };
-        if body.starts_with("doc") {
-            continue;
-        }
-        for literal in body.split('"').skip(1).step_by(2) {
-            if is_path(literal) {
-                found.push((index + 1, literal.to_string()));
-            }
-        }
-    }
-
-    found
-}
-
-/// Whether a string literal reads as a Rust path, and so names something rather than saying something.
-fn is_path(literal: &str) -> bool {
-    !literal.is_empty() && literal.split("::").all(is_identifier)
-}
-
-/// Refuse a seam that would separate an attribute's string path from the item it names.
-///
-/// Only an unqualified name is weighed. A qualified one — `crate::defaults::extend` — resolves the
-/// same from either side of the seam, so moving the attribute or the item changes nothing. A bare
-/// identifier resolves in the scope the attribute sits in, so putting the two in different modules
-/// breaks it, silently, in code no diff shows.
-///
-/// A name this file does not declare is left alone: it lives in another module, and this seam is not
-/// what separates them.
-fn refuse_split_attribute_paths(text: &str, range: Range) -> Result<()> {
-    let split: Vec<String> = attribute_path_names(text)
-        .into_iter()
-        .filter(|(_, path)| !path.contains("::"))
-        .filter_map(|(line, path)| {
-            let declared = declaration_line(text, &path)?;
-            let inside = |line: usize| {
-                line as u32 >= range.start.line && line as u32 <= range.end.line
-            };
-            (inside(line) != inside(declared)).then(|| {
-                format!("`{path}`, named by the attribute on line {line} and declared on line {declared}")
-            })
-        })
-        .collect();
-
-    if split.is_empty() {
-        return Ok(());
-    }
-
-    Err(seam_refusal(format!(
-        "the seam would separate an attribute from the item its string names: {}. The name resolves \
-         in the scope the attribute sits in, and no reference query reports the attribute — a macro \
-         builds the call out of the string's contents, so the identifier it generates has no span to \
-         find. Cut the seam so the two stay together.",
-        split.join("; ")
-    )))
-}
-
-/// The one-based line on which the text declares `name`, if it declares it.
-fn declaration_line(text: &str, name: &str) -> Option<usize> {
-    const KEYWORDS: [&str; 8] = [
-        "fn ", "struct ", "enum ", "trait ", "mod ", "const ", "static ", "type ",
-    ];
-
-    text.split('\n').enumerate().find_map(|(index, line)| {
-        let trimmed = line.trim();
-        if trimmed.starts_with("//") || trimmed.starts_with('#') {
-            return None;
-        }
-        let declaration = strip_visibility(trimmed);
-        let rest = KEYWORDS
-            .iter()
-            .find_map(|keyword| declaration.strip_prefix(keyword))?;
-        let declared = rest
-            .split(|c: char| !is_identifier_char(c))
-            .next()
-            .unwrap_or_default();
-        (declared == name).then_some(index + 1)
-    })
-}
-
-/// Insert the facade immediately after the module the assist wrote.
-///
-/// The module's end is found by indentation rather than by counting braces. A brace inside a string
-/// literal is ordinary Rust — `format!("{:.1}", …)` carries a pair — and counting would be at their
-/// mercy, while the assist always writes the closing brace alone on a line at the `mod` keyword's own
-/// indent. Searching for a marker after the module is no better: an adjacent seam's markers move, and
-/// one item's doc comment is routinely a prefix of another's.
-fn with_facade(text: &str, module: &str, lines: &[String]) -> Result<String> {
-    if lines.is_empty() {
-        return Ok(text.to_string());
-    }
-
-    let mut source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module)?;
-
-    for (offset, line) in lines.iter().enumerate() {
-        source.insert(block.closed + 1 + offset, format!("{}{line}", block.indent));
-    }
-
-    Ok(source.join("\n"))
-}
-
-/// The lines an inline module opens and closes on, and the indent it sits at.
-struct ModuleBlock {
-    opened: usize,
-    closed: usize,
-    indent: String,
-}
-
-/// Locate the module the assist wrote.
-///
-/// By indentation, not by counting braces. A brace inside a string literal is ordinary Rust —
-/// `format!("{:.1}", …)` carries a pair — and counting would be at their mercy, while the assist
-/// always writes the closing brace alone on a line at the `mod` keyword's own indent. Searching for a
-/// marker after the module is no better: an adjacent seam's markers move, and one item's doc comment
-/// is routinely a prefix of another's.
-fn module_bounds(source: &[String], module: &str) -> Result<ModuleBlock> {
-    let header = format!("mod {module}");
-
-    let opened = source
-        .iter()
-        .position(|line| line.trim_start().starts_with(&header) && line.trim_end().ends_with('{'))
-        .ok_or_else(|| {
-            server_defect(format!(
-                "rust-analyzer did not write a `{header}` block where one was expected"
-            ))
-        })?;
-
-    let indent =
-        source[opened][..source[opened].len() - source[opened].trim_start().len()].to_string();
-    let closing = format!("{indent}}}");
-    let closed = source
-        .iter()
-        .skip(opened + 1)
-        .position(|line| line.trim_end() == closing)
-        .map(|offset| opened + 1 + offset)
-        .ok_or_else(|| server_defect(format!("`{header}` is never closed at its own indent")))?;
-
-    Ok(ModuleBlock {
-        opened,
-        closed,
-        indent,
-    })
-}
-
-/// The path an `as` alias binds, for an alias the text declares *outside* the extracted module.
-///
-/// Read from the parent's own `use` tree rather than from the server, because the server reports
-/// what a path resolves to and not what a file chose to call it. Only declarations outside the
-/// module are considered: one inside it would already have bound the name.
-fn alias_target(text: &str, module: &str, alias: &str) -> Option<String> {
-    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module).ok()?;
-    let outside: String = source
-        .iter()
-        .enumerate()
-        .filter(|(line, _)| *line < block.opened || *line > block.closed)
-        .map(|(_, text)| text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    aliased_bindings(&outside)
-        .into_iter()
-        .find(|(bound, _)| bound == alias)
-        .map(|(_, path)| path)
-}
-
-/// The path a *non-aliased* binding the text declares outside the module gives to `name`.
-///
-/// `use crate::tool_engine;` binds `tool_engine`; `use a::b::Thing;` binds `Thing`. Used only where
-/// the server offered nothing, so it never overrides an opinion rust-analyzer actually has.
-fn parent_binding(text: &str, module: &str, name: &str) -> Option<String> {
-    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module).ok()?;
-    let outside: String = source
-        .iter()
-        .enumerate()
-        .filter(|(line, _)| *line < block.opened || *line > block.closed)
-        .map(|(_, text)| text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    imported_paths(&outside)
-        .into_iter()
-        .find(|path| path.rsplit("::").next() == Some(name))
-}
-
-/// Every `(alias, path)` pair the text's `use` declarations bind through `as`.
-fn aliased_bindings(text: &str) -> Vec<(String, String)> {
-    let mut bindings = Vec::new();
-
-    for statement in text.split(';') {
-        if let Some(tree) = use_tree(statement) {
-            collect_aliases(tree, "", &mut bindings);
-        }
-    }
-
-    bindings
-}
-
-/// Walk a `use` tree, recording only the members that carry an `as` clause.
-fn collect_aliases(tree: &str, prefix: &str, bindings: &mut Vec<(String, String)>) {
-    let tree = tree.trim();
-
-    let Some(open) = tree.find('{') else {
-        if let Some((path, alias)) = tree.split_once(" as ") {
-            let alias = alias.trim();
-            let path = path.trim();
-            // `as _` binds no name, so nothing can be unresolved under it.
-            if alias != "_" && !path.is_empty() {
-                bindings.push((alias.to_string(), format!("{prefix}{path}")));
-            }
-        }
-        return;
-    };
-
-    let head = format!("{prefix}{}", &tree[..open]);
-    let close = tree.rfind('}').unwrap_or(tree.len());
-
-    for member in group_members(&tree[open + 1..close]) {
-        collect_aliases(member, &head, bindings);
-    }
-}
-
-/// The text with `line` inserted as the extracted module's first declaration.
-fn with_module_import(text: &str, module: &str, line: &str) -> Result<String> {
-    let mut source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module)?;
-    source.insert(block.opened + 1, format!("{}    {line}", block.indent));
-    Ok(source.join("\n"))
-}
-
-/// The visibility the assist widens everything it relocates to.
-const WIDENED: &str = "pub(crate) ";
-
-/// Item keywords a declaration's name can follow.
-const ITEM_KEYWORDS: [&str; 8] = [
-    "fn", "struct", "enum", "mod", "const", "static", "type", "trait",
-];
-
-/// Put back the visibility an item was written with, wherever nothing outside the new module needs it
-/// widened, and report every widening that has to stand.
-///
-/// The assist rewrites everything it relocates to `pub(crate)`. Across one real restructure that
-/// widened 56 items, six of them fields kept private specifically to force mutation through a single
-/// method — an invariant the compiler had been enforcing, left as a comment that then contradicted the
-/// code. Nothing is narrowed here that a reference still needs, so a seam that co-locates a private
-/// helper with its only caller keeps the privacy, and a seam that does not says so out loud.
-///
-/// Two witnesses say a reference still needs it, and the second is here because the first goes
-/// stale. `MovedItem::reached_from_outside` comes from a survey of the **original** text over the
-/// **requested** range, taken before the assist ran. An assist that relocates only part of that
-/// range rewrites what it leaves behind to reach into the module it has just written, so references
-/// the survey saw *inside* the range are outside it by the time this runs. `text` is the produced
-/// parent, and it is the only witness that is not stale.
-fn restore_visibility(
-    text: &str,
-    module: &str,
-    items: &[MovedItem],
-) -> Result<(String, Vec<VisibilityChange>)> {
-    let mut source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module)?;
-    let mut report = Vec::new();
-
-    // Read once, before the narrowing below rewrites any declaration — and read from outside the
-    // block alone, because a `module::Item` mention inside the module's own body says nothing about
-    // what the parent reaches.
-    let outside = outside_the_module(&source, &block);
-
-    for item in items {
-        // The assist never narrows, so an item written `pub` has nothing to answer for.
-        if item.visibility == "pub" {
-            continue;
-        }
-
-        // Only inside the module the assist just wrote. A same-named item elsewhere in the file is a
-        // different item, and rewriting its visibility would be a change nobody asked for.
-        let Some(index) = source[block.opened..block.closed]
-            .iter()
-            .position(|line| declares_at_widened_visibility(line, &item.name))
-            .map(|offset| block.opened + offset)
-        else {
-            continue;
-        };
-
-        // One live extraction on `parser.rs` ended on the second half of this condition:
-        // `struct StructuredPlan` and `fn prd_value_looks_like_md_file_path` were narrowed back to
-        // private while the assist had rewritten the parent to `planning::StructuredPlan` and
-        // `planning::prd_value_looks_like_md_file_path`. `E0603` at the next build, after the run
-        // reported `applied 1 of 1 operations`.
-        if item.reached_from_outside || reaches_through_module(&outside, module, &item.name) {
-            report.push(VisibilityChange {
-                item: item.name.clone(),
-                from: if item.visibility.is_empty() {
-                    "private".to_string()
-                } else {
-                    item.visibility.clone()
-                },
-                to: "pub(crate)".to_string(),
-            });
-            continue;
-        }
-
-        let line = source[index].clone();
-        let indent = &line[..line.len() - line.trim_start().len()];
-        let rest = line.trim_start().strip_prefix(WIDENED).unwrap_or_default();
-        source[index] = if item.visibility.is_empty() {
-            format!("{indent}{rest}")
-        } else {
-            format!("{indent}{} {rest}", item.visibility)
-        };
-    }
-
-    Ok((source.join("\n"), report))
-}
-
-/// Everything in `source` that is not inside `block`, as one text.
-fn outside_the_module(source: &[String], block: &ModuleBlock) -> String {
-    source
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| *index < block.opened || *index > block.closed)
-        .map(|(_, line)| line.as_str())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Whether `text` reaches `name` through `module` — `planning::StructuredPlan`.
-///
-/// Read as a path rather than as a substring, because the two neighbouring mistakes are both real
-/// source: `myplanning::StructuredPlan` names a different module, and `planning::StructuredPlanner`
-/// a different item. A qualifier in front is not one of them — `crate::planning::StructuredPlan`
-/// reaches this item, and the `::` before it is not an identifier character.
-fn reaches_through_module(text: &str, module: &str, name: &str) -> bool {
-    let path = format!("{module}::{name}");
-    let mut searched = 0;
-
-    while let Some(offset) = text[searched..].find(&path) {
-        let at = searched + offset;
-        let before = text[..at].chars().next_back();
-        let after = text[at + path.len()..].chars().next();
-        if !before.is_some_and(is_identifier_char) && !after.is_some_and(is_identifier_char) {
-            return true;
-        }
-        searched = at + path.len();
-    }
-
-    false
-}
-
-/// Whether `line` declares `name` at the visibility the assist widened it to.
-fn declares_at_widened_visibility(line: &str, name: &str) -> bool {
-    let Some(rest) = line.trim_start().strip_prefix(WIDENED) else {
-        return false;
-    };
-
-    declares_item(rest, name)
-}
-
-/// Whether `line` declares `name` as an item, at whatever visibility it carries.
-///
-/// The visibility-agnostic form of [`declares_at_widened_visibility`]. That one answers "did the
-/// assist widen this", which is the narrowing pass's question; this one answers "is this item here
-/// at all", which is the relocation guard's. An item the seam moved that was already `pub` is never
-/// widened, so keying the guard on the widened form would report it as left behind.
-fn declares_item(line: &str, name: &str) -> bool {
-    let tokens: Vec<&str> = line
-        .split(|character: char| !is_identifier_char(character))
-        .filter(|token| !token.is_empty())
-        .collect();
-
-    tokens
-        .windows(2)
-        .any(|pair| ITEM_KEYWORDS.contains(&pair[0]) && pair[1] == name)
-}
-
-/// Refuse an extraction whose assist relocated less than the anchor asked for.
-///
-/// rust-analyzer decides the extraction's real extent, and it does not have to agree with the range
-/// it was handed. When it moves part of that range it rewrites the remainder **in place**, reaching
-/// into the module it has just written through qualified `module::Item` paths. One live extraction
-/// anchored at lines 10–152 came back having relocated 10–116, and the run reported
-/// `applied 1 of 1 operations` over a parser module that had been split in half.
-///
-/// With visibility now decided on the produced text that result compiles, which is precisely why it
-/// needs saying out loud: a silent partial split is a seam the author did not ask for, and a plan
-/// whose next step assumes the whole range moved is built on it. A `#carve` node promising "one
-/// module per phase" would go green here and fail its own shape assertions later.
-///
-/// Keyed on the surveyed items rather than on a line count. [`path_reached_within`] collects exactly
-/// the path-reachable items the range covered, so an item absent from the produced module is
-/// material by construction — and trailing trivia, a blank line or a comment the assist declined to
-/// carry never trips it.
-fn refuse_partial_relocation(text: &str, module: &str, anchored: &[MovedItem]) -> Result<()> {
-    let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-    let block = module_bounds(&source, module)?;
-    let relocated = &source[block.opened..block.closed];
-
-    let left_behind: Vec<&str> = anchored
-        .iter()
-        .filter(|item| !relocated.iter().any(|line| declares_item(line, &item.name)))
-        .map(|item| item.name.as_str())
-        .collect();
-
-    if left_behind.is_empty() {
-        return Ok(());
-    }
-
-    Err(seam_refusal(format!(
-        "rust-analyzer relocated part of the anchored range and left {} behind: {}. It rewrote what \
-         stayed to reach into `{module}`, so the seam is split rather than extracted — the module \
-         the plan described does not exist. Anchor the range with `restructure anchors --items`, \
-         which covers whole items and their trivia, or cut the seam where the assist will carry all \
-         of it.",
-        if left_behind.len() == 1 { "an item" } else { "items" },
-        left_behind.join(", ")
-    )))
-}
-
-/// One contiguous run of `before` lines and what replaces it. `from` and `to` index `before`.
-struct ChangedRegion<'a> {
-    from: usize,
-    to: usize,
-    lines: Vec<&'a str>,
-}
-
-/// The regions in which `before` and `after` differ.
-///
-/// The lines the two versions share are what make the result useful: they are the coordinates a
-/// later anchor can still be translated into, so the diff recognises as many of them as it can
-/// rather than settling for a common prefix and suffix.
-fn changed_regions<'a>(before: &[&'a str], after: &[&'a str]) -> Vec<ChangedRegion<'a>> {
-    let mut regions = Vec::new();
-    let mut from = 0;
-    let mut cursor = 0;
-
-    for run in common_runs(before, after) {
-        if run.before > from || run.after > cursor {
-            regions.push(ChangedRegion {
-                from,
-                to: run.before,
-                lines: after[cursor..run.after].to_vec(),
-            });
-        }
-        from = run.before + run.length;
-        cursor = run.after + run.length;
-    }
-
-    if from < before.len() || cursor < after.len() {
-        regions.push(ChangedRegion {
-            from,
-            to: before.len(),
-            lines: after[cursor..].to_vec(),
-        });
-    }
-
-    regions
-}
-
-/// A maximal run of lines the two versions agree on, at `before` and `after` respectively.
-struct CommonRun {
-    before: usize,
-    after: usize,
-    length: usize,
-}
-
-/// The common runs of a shortest edit script, by Myers' algorithm.
-///
-/// The search walks diagonals of the edit graph, recording the furthest point reached on each one at
-/// every edit distance; the recorded frontiers are then walked backwards to recover the path, whose
-/// diagonal moves are exactly the lines the two versions share.
-///
-/// A path is always found within `n + m` edits — delete everything, then insert everything — so the
-/// loop cannot fall through, and the empty case is answered before the frontier is sized.
-fn common_runs(before: &[&str], after: &[&str]) -> Vec<CommonRun> {
-    let n = before.len() as isize;
-    let m = after.len() as isize;
-    let max = n + m;
-    if max == 0 {
-        return Vec::new();
-    }
-
-    let offset = max;
-    let at = |k: isize| (k + offset) as usize;
-    let mut frontier = vec![0isize; (2 * max + 1) as usize];
-    let mut trace: Vec<Vec<isize>> = Vec::new();
-
-    for d in 0..=max {
-        trace.push(frontier.clone());
-
-        let mut k = -d;
-        while k <= d {
-            // The furthest-reaching path on this diagonal arrives either from the one below or from
-            // the one above; `&&` short-circuits so the out-of-range neighbour is never read.
-            let go_down = k == -d || (k != d && frontier[at(k - 1)] < frontier[at(k + 1)]);
-            let mut x = if go_down {
-                frontier[at(k + 1)]
-            } else {
-                frontier[at(k - 1)] + 1
-            };
-            let mut y = x - k;
-
-            while x < n && y < m && before[x as usize] == after[y as usize] {
-                x += 1;
-                y += 1;
-            }
-
-            frontier[at(k)] = x;
-
-            if x >= n && y >= m {
-                return backtrack(&trace, n, m, offset);
-            }
-            k += 2;
-        }
-    }
-
-    unreachable!("a shortest edit script always exists within {max} edits")
-}
-
-/// Walks the recorded frontiers backwards, collecting the diagonal moves of the shortest path.
-fn backtrack(trace: &[Vec<isize>], n: isize, m: isize, offset: isize) -> Vec<CommonRun> {
-    let at = |k: isize| (k + offset) as usize;
-    let mut runs = Vec::new();
-    let mut x = n;
-    let mut y = m;
-
-    for step in (1..trace.len()).rev() {
-        let frontier = &trace[step];
-        let d = step as isize;
-        let k = x - y;
-        let go_down = k == -d || (k != d && frontier[at(k - 1)] < frontier[at(k + 1)]);
-        let previous_k = if go_down { k + 1 } else { k - 1 };
-        let previous_x = frontier[at(previous_k)];
-        let previous_y = previous_x - previous_k;
-
-        let mut length = 0;
-        while x > previous_x && y > previous_y {
-            x -= 1;
-            y -= 1;
-            length += 1;
-        }
-        if length > 0 {
-            runs.push(CommonRun {
-                before: x as usize,
-                after: y as usize,
-                length,
-            });
-        }
-
-        x = previous_x;
-        y = previous_y;
-    }
-
-    if x > 0 {
-        runs.push(CommonRun {
-            before: 0,
-            after: 0,
-            length: x as usize,
-        });
-    }
-
-    runs.reverse();
-    runs
-}
+mod import_text;
+#[cfg(test)]
+use import_text::choose_import;
+#[cfg(test)]
+use import_text::imported_paths;
+#[cfg(test)]
+use import_text::parent_module;
+#[cfg(test)]
+use import_text::without_dead_imports;
+use import_text::{
+    already_bound, group_members, import_order, occurrences_of, reached_through_qualifier,
+    use_tree, UnresolvedName,
+};
+
+mod lsp_edits;
+#[cfg(test)]
+use lsp_edits::position_at;
+#[cfg(test)]
+use lsp_edits::token_type_index;
+#[cfg(test)]
+use lsp_edits::unresolved_in;
+use lsp_edits::{apply_lsp_edit, edits_for, lsp_position, lsp_range};
+
+mod placeholder_checks;
+#[cfg(test)]
+use placeholder_checks::carries_placeholder_type;
+#[cfg(test)]
+use placeholder_checks::placeholder_sites;
+#[cfg(test)]
+use placeholder_checks::refuse_inferred_placeholder;
+#[cfg(test)]
+use placeholder_checks::refuse_residual_placeholder;
+use placeholder_checks::{declares, Block};
+
+mod seam_survey;
+#[cfg(test)]
+use seam_survey::refuse_stranded;
+use seam_survey::{minimal_edits, MovedItem};
+
+mod facade;
+#[cfg(test)]
+use facade::empty_facade_note;
+#[cfg(test)]
+use facade::facade_lines;
+use facade::facade_will_bind;
+#[cfg(test)]
+use facade::impl_widenings;
+#[cfg(test)]
+use facade::refuse_mangled_rewrite;
+
+mod module_text;
+#[cfg(test)]
+use module_text::aliased_bindings;
+#[cfg(test)]
+use module_text::attribute_path_names;
+#[cfg(test)]
+use module_text::refuse_module_name_taken;
+#[cfg(test)]
+use module_text::refuse_split_attribute_paths;
+#[cfg(test)]
+use module_text::with_facade;
+use module_text::{alias_target, module_bounds, parent_binding, with_module_import, ModuleBlock};
+
+mod visibility;
+#[cfg(test)]
+use visibility::refuse_partial_relocation;
+#[cfg(test)]
+use visibility::restore_visibility;
+use visibility::{declares_at_widened_visibility, declares_item, reaches_through_module, WIDENED};
+
+mod line_diff;
 
 fn uri_of(path: &Path) -> String {
     format!("file://{}", path.display())
@@ -4515,7 +2706,7 @@ mod tests {
         let text = "let a = BTreeMap::new();\nlet b = HashSet::new();\n";
         let tokens = json!({ "data": [1, 8, 7, 3, 0, 0, 0, 0, 9, 0] });
 
-        let found = unresolved_in(&tokens, 3, text);
+        let found = lsp_edits::unresolved_in(&tokens, 3, text);
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].text, "HashSet");
@@ -4527,7 +2718,7 @@ mod tests {
         let text = "let a = BTreeMap::new();\n";
         let tokens = json!({ "data": [0, 4, 1, 9, 0, 0, 4, 8, 3, 0] });
 
-        let found = unresolved_in(&tokens, 3, text);
+        let found = lsp_edits::unresolved_in(&tokens, 3, text);
 
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].text, "BTreeMap");
@@ -4544,7 +2735,7 @@ mod tests {
 
     #[test]
     fn expands_a_grouped_use_into_one_path_per_name() {
-        let paths = imported_paths("use lopdf::{Document, Object, dictionary};\n");
+        let paths = import_text::imported_paths("use lopdf::{Document, Object, dictionary};\n");
 
         assert_eq!(
             paths,
@@ -4554,7 +2745,9 @@ mod tests {
 
     #[test]
     fn expands_a_group_nested_inside_another() {
-        let paths = imported_paths("use std::{collections::{HashMap, HashSet}, sync::Mutex};\n");
+        let paths = import_text::imported_paths(
+            "use std::{collections::{HashMap, HashSet}, sync::Mutex};\n",
+        );
 
         assert_eq!(
             paths,
@@ -4568,7 +2761,7 @@ mod tests {
 
     #[test]
     fn reads_a_group_that_spans_several_lines() {
-        let paths = imported_paths("use crate::core::{\n    Alpha,\n    Beta,\n};\n");
+        let paths = import_text::imported_paths("use crate::core::{\n    Alpha,\n    Beta,\n};\n");
 
         assert_eq!(paths, ["crate::core::Alpha", "crate::core::Beta"]);
     }
@@ -4600,8 +2793,9 @@ mod tests {
     /// before it: the tree is read from the declaration's own line.
     #[test]
     fn ignores_an_import_written_inside_a_comment() {
-        let paths =
-            imported_paths("/// Callers write `use lopdf::Object;` themselves.\nlet a = 1;\n");
+        let paths = import_text::imported_paths(
+            "/// Callers write `use lopdf::Object;` themselves.\nlet a = 1;\n",
+        );
 
         assert!(paths.is_empty());
     }
@@ -4617,7 +2811,7 @@ mod tests {
     fn settles_a_contested_name_on_the_path_the_file_already_imports() {
         let offered = ["Import `js_sys::Object`", "Import `lopdf::Object`"];
 
-        let chosen = choose_import("use lopdf::{Document, Object};\n", &offered);
+        let chosen = import_text::choose_import("use lopdf::{Document, Object};\n", &offered);
 
         assert_eq!(chosen, Some("Import `lopdf::Object`"));
     }
@@ -4646,7 +2840,7 @@ mod tests {
     /// ledger's line arithmetic and the applier's byte spans agree on what it covers.
     #[test]
     fn starts_and_ends_every_hunk_at_column_one() {
-        let edits = minimal_edits("a\nb\nc\n", "a\nB\nc\n");
+        let edits = seam_survey::minimal_edits("a\nb\nc\n", "a\nB\nc\n");
 
         assert!(edits
             .iter()
@@ -4669,7 +2863,7 @@ mod tests {
         let before = "one\ntwo\nthree\nfour\nfive\nsix\n";
         let after = "ONE\ntwo\nthree\nfour\nfive\nSIX\n";
 
-        let edits = minimal_edits(before, after);
+        let edits = seam_survey::minimal_edits(before, after);
 
         // Lines 2..5 are shared, so no hunk may cover them.
         assert!(edits
@@ -4681,7 +2875,7 @@ mod tests {
     /// replacement missing its terminator shifts every later anchor by one.
     #[test]
     fn terminates_every_replacement_with_a_newline() {
-        let edits = minimal_edits("a\nb\nc\n", "a\nB\nB2\nc\n");
+        let edits = seam_survey::minimal_edits("a\nb\nc\n", "a\nB\nB2\nc\n");
 
         assert!(edits
             .iter()
@@ -4690,7 +2884,7 @@ mod tests {
 
     #[test]
     fn reports_a_pure_deletion_as_an_empty_replacement() {
-        let edits = minimal_edits("a\nb\nc\n", "a\nc\n");
+        let edits = seam_survey::minimal_edits("a\nb\nc\n", "a\nc\n");
 
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].new_text, "");
@@ -4707,7 +2901,7 @@ mod tests {
     /// baseline is the empty string rather than anything on disk.
     #[test]
     fn expresses_a_created_file_as_an_insertion_at_line_one() {
-        let edits = minimal_edits("", "mod counting;\n");
+        let edits = seam_survey::minimal_edits("", "mod counting;\n");
 
         assert_eq!(edits.len(), 1);
         assert_eq!(edits[0].range.start.line, 1);
@@ -4722,7 +2916,7 @@ mod tests {
         let before = "a\nb\nc\nd\ne\nf\ng\nh\n";
         let after = "a\nB\nc\nd\nE\nf\ng\nH\n";
 
-        let edits = minimal_edits(before, after);
+        let edits = seam_survey::minimal_edits(before, after);
 
         for pair in edits.windows(2) {
             assert!(pair[0].range.end.line <= pair[1].range.start.line);
@@ -4735,7 +2929,7 @@ mod tests {
         let after = "alpha\nBETA\ngamma\ndelta\nEPSILON\nomega\n";
 
         let mut lines: Vec<String> = before.split('\n').map(str::to_string).collect();
-        for edit in minimal_edits(before, after).into_iter().rev() {
+        for edit in seam_survey::minimal_edits(before, after).into_iter().rev() {
             let start = edit.range.start.line as usize - 1;
             let end = edit.range.end.line as usize - 1;
             let replacement: Vec<String> = if edit.new_text.is_empty() {
@@ -4767,9 +2961,10 @@ mod tests {
         let original = "fn a() {}\nfn b() {}\n";
         let produced = "fn a() -> modname::T {}\nfn b() -> modname::U {}\n";
 
-        let message = refuse_residual_placeholder(original, produced, "modname")
-            .unwrap_err()
-            .to_string();
+        let message =
+            placeholder_checks::refuse_residual_placeholder(original, produced, "modname")
+                .unwrap_err()
+                .to_string();
 
         assert!(message.contains('1'), "{message}");
         assert!(message.contains('2'), "{message}");
@@ -4917,8 +3112,8 @@ mod tests {
         assert_eq!(visibility_at(text, &position), "pub(crate)");
     }
 
-    fn moved(name: &str, visibility: &str, outside: bool) -> MovedItem {
-        MovedItem {
+    fn moved(name: &str, visibility: &str, outside: bool) -> seam_survey::MovedItem {
+        seam_survey::MovedItem {
             name: name.to_string(),
             visibility: visibility.to_string(),
             within: Vec::new(),
@@ -4930,8 +3125,8 @@ mod tests {
 
     /// A moved item the range holds inside an inline module of its own, which is what a facade
     /// cannot name flat.
-    fn moved_within(name: &str, module: &str, outside: bool) -> MovedItem {
-        MovedItem {
+    fn moved_within(name: &str, module: &str, outside: bool) -> seam_survey::MovedItem {
+        seam_survey::MovedItem {
             name: name.to_string(),
             visibility: "pub".to_string(),
             within: vec![module.to_string()],
@@ -5000,7 +3195,8 @@ mod tests {
         let text = "before\nmod rendering {\n    fn a() {}\n}\nafter\n";
 
         let result =
-            with_facade(text, "rendering", &["pub use rendering::*;".to_string()]).unwrap();
+            module_text::with_facade(text, "rendering", &["pub use rendering::*;".to_string()])
+                .unwrap();
 
         assert_eq!(
             result,
@@ -5015,7 +3211,8 @@ mod tests {
         let text = "mod rendering {\n    fn a() -> String { format!(\"{:.1}\", 1.0) }\n}\ntail\n";
 
         let result =
-            with_facade(text, "rendering", &["pub use rendering::*;".to_string()]).unwrap();
+            module_text::with_facade(text, "rendering", &["pub use rendering::*;".to_string()])
+                .unwrap();
 
         assert!(
             result.contains("}\npub use rendering::*;\ntail"),
@@ -5068,7 +3265,8 @@ mod tests {
         let widened = "mod rendering {\n    pub(crate) fn normalise(v: f64) -> f64 { v }\n}\n";
 
         let (restored, report) =
-            restore_visibility(widened, "rendering", &[moved("normalise", "", false)]).unwrap();
+            visibility::restore_visibility(widened, "rendering", &[moved("normalise", "", false)])
+                .unwrap();
 
         assert!(
             restored.contains("    fn normalise(v: f64) -> f64 { v }"),
@@ -5094,9 +3292,12 @@ mod tests {
         let produced = "mod planning {\n    pub(crate) struct StructuredPlan {\n        goal: Option<String>,\n    }\n}\n\nfn parse_planning_response_impl(s: &str) -> u32 {\n    let parsed: planning::StructuredPlan = serde_json::from_str(s).unwrap();\n    0\n}\n";
 
         // When the survey taken before the assist ran saw no reference from outside the range
-        let (restored, report) =
-            restore_visibility(produced, "planning", &[moved("StructuredPlan", "", false)])
-                .unwrap();
+        let (restored, report) = visibility::restore_visibility(
+            produced,
+            "planning",
+            &[moved("StructuredPlan", "", false)],
+        )
+        .unwrap();
 
         // Then the widening stands, because narrowing it is `E0603` on the line above
         assert!(
@@ -5116,7 +3317,7 @@ mod tests {
         let produced = "mod planning {\n    pub(crate) fn prd_value_looks_like_md_file_path(p: &str) -> bool {\n        p.ends_with(\".md\")\n    }\n}\n\nfn unrelated() -> u32 {\n    0\n}\n";
 
         // When the item was written private and nothing outside reaches it
-        let (restored, report) = restore_visibility(
+        let (restored, report) = visibility::restore_visibility(
             produced,
             "planning",
             &[moved("prd_value_looks_like_md_file_path", "", false)],
@@ -5139,9 +3340,12 @@ mod tests {
         let produced = "mod planning {\n    pub(crate) struct StructuredPlan;\n    fn build() -> planning::StructuredPlan {\n        planning::StructuredPlan\n    }\n}\n\nfn unrelated() -> u32 {\n    0\n}\n";
 
         // When nothing outside the module reaches it
-        let (restored, report) =
-            restore_visibility(produced, "planning", &[moved("StructuredPlan", "", false)])
-                .unwrap();
+        let (restored, report) = visibility::restore_visibility(
+            produced,
+            "planning",
+            &[moved("StructuredPlan", "", false)],
+        )
+        .unwrap();
 
         // Then the mention inside the module does not hold the widening open
         assert!(
@@ -5171,7 +3375,7 @@ mod tests {
         ];
 
         // When what the assist wrote is held against what the anchor asked for
-        let refusal = refuse_partial_relocation(produced, "planning", &anchored)
+        let refusal = visibility::refuse_partial_relocation(produced, "planning", &anchored)
             .expect_err("an item left behind is refused");
 
         // Then it is a seam refusal naming the item that stayed
@@ -5216,7 +3420,8 @@ mod tests {
         let widened = "mod rendering {\n    pub(crate) fn clamp(v: f64) -> f64 { v }\n}\n";
 
         let (restored, report) =
-            restore_visibility(widened, "rendering", &[moved("clamp", "", true)]).unwrap();
+            visibility::restore_visibility(widened, "rendering", &[moved("clamp", "", true)])
+                .unwrap();
 
         assert!(restored.contains("pub(crate) fn clamp"), "{restored}");
         assert_eq!(report.len(), 1);
@@ -5229,14 +3434,17 @@ mod tests {
     fn puts_a_scoped_visibility_back_as_it_was_written() {
         let widened = "mod rendering {\n    pub(crate) fn helper(v: f64) -> f64 { v }\n}\n";
 
-        let (restored, _) = restore_visibility(
+        let (restored, _) = visibility::restore_visibility(
             widened,
             "rendering",
             &[moved("helper", "pub(super)", false)],
         )
         .unwrap();
 
-        assert!(restored.contains("    pub(super) fn helper"), "{restored}");
+        assert!(
+            restored.contains("    pub(in super::super) fn helper"),
+            "{restored}"
+        );
     }
 
     /// The assist never narrows, so an item written `pub` is already as it was and has nothing to
@@ -5246,7 +3454,8 @@ mod tests {
         let text = "mod rendering {\n    pub fn render(v: f64) -> f64 { v }\n}\n";
 
         let (restored, report) =
-            restore_visibility(text, "rendering", &[moved("render", "pub", true)]).unwrap();
+            visibility::restore_visibility(text, "rendering", &[moved("render", "pub", true)])
+                .unwrap();
 
         assert_eq!(restored, text);
         assert!(report.is_empty());
@@ -5257,7 +3466,9 @@ mod tests {
         let mut item = moved("scaled_label", "pub", true);
         item.stranded_in = vec!["src/lib.rs".to_string()];
 
-        let message = refuse_stranded(&[item]).unwrap_err().to_string();
+        let message = seam_survey::refuse_stranded(&[item])
+            .unwrap_err()
+            .to_string();
 
         assert!(message.contains("scaled_label"), "{message}");
         assert!(message.contains("src/lib.rs"), "{message}");
@@ -5275,7 +3486,8 @@ mod tests {
         let text = "pub(crate) fn helper(v: f64) -> f64 { v }\n\nmod rendering {\n    pub(crate) fn helper(v: f64) -> f64 { v }\n}\n";
 
         let (restored, _) =
-            restore_visibility(text, "rendering", &[moved("helper", "", false)]).unwrap();
+            visibility::restore_visibility(text, "rendering", &[moved("helper", "", false)])
+                .unwrap();
 
         let lines: Vec<&str> = restored.split('\n').collect();
         assert_eq!(lines[0], "pub(crate) fn helper(v: f64) -> f64 { v }");
@@ -5297,7 +3509,7 @@ mod tests {
         };
 
         // When the seam is refused for that collision
-        let refusal = refuse_module_name_taken(text, "grouped", range)
+        let refusal = module_text::refuse_module_name_taken(text, "grouped", range)
             .expect_err("a taken module name is refused");
 
         // Then it is a seam refusal, and it does not blame the plan
@@ -5320,7 +3532,7 @@ mod tests {
         let produced = "fn fun_name(v: _) -> _ {\n    v\n}\n";
 
         // When the run refuses it
-        let refusal = refuse_inferred_placeholder(produced, "fn fun_name")
+        let refusal = placeholder_checks::refuse_inferred_placeholder(produced, "fn fun_name")
             .expect_err("an inferred placeholder is refused");
 
         // Then it is a server defect, and it does not blame the plan
@@ -5370,7 +3582,7 @@ mod tests {
     fn names_the_signature_it_refused() {
         let text = "fn compute_spread(sample: &Sample) -> (_, _) {\n";
 
-        let message = refuse_inferred_placeholder(text, "fn compute_spread")
+        let message = placeholder_checks::refuse_inferred_placeholder(text, "fn compute_spread")
             .unwrap_err()
             .to_string();
 
@@ -5434,7 +3646,7 @@ mod tests {
                     state: tddy_session_agents::AgentRosterState<'_>) -> Result<AgentClone, Status> {\n";
 
         // When
-        let checked = refuse_inferred_placeholder(text, "fn agent_clone_for");
+        let checked = placeholder_checks::refuse_inferred_placeholder(text, "fn agent_clone_for");
 
         // Then
         assert!(checked.is_ok(), "{checked:?}");
@@ -5470,7 +3682,7 @@ mod tests {
 
     #[test]
     fn reads_an_alias_out_of_a_grouped_use_tree() {
-        let bindings = aliased_bindings("use a::b::{C as D, E, F as G};\n");
+        let bindings = module_text::aliased_bindings("use a::b::{C as D, E, F as G};\n");
 
         assert_eq!(
             bindings,
@@ -5491,7 +3703,7 @@ mod tests {
     fn writes_the_reconstructed_import_as_the_modules_first_line() {
         let text = "mod m {\n    fn f() {}\n}\n";
 
-        let out = with_module_import(text, "m", "use x::Y as Z;").unwrap();
+        let out = module_text::with_module_import(text, "m", "use x::Y as Z;").unwrap();
 
         assert_eq!(out, "mod m {\n    use x::Y as Z;\n    fn f() {}\n}\n");
     }
@@ -5566,7 +3778,7 @@ mod tests {
         let text =
             "    ) -> Result<seeded_clone_guard::SeededCloneGuardloneGuardloneGuard, Status> {\n";
 
-        let outcome = refuse_mangled_rewrite(text, "seeded_clone_guard", &moved);
+        let outcome = facade::refuse_mangled_rewrite(text, "seeded_clone_guard", &moved);
 
         let message = match outcome {
             Err(RestructureError::ServerDefect(m)) => m,
@@ -5637,7 +3849,7 @@ mod tests {
             "Import `tokio::signal::unix::Signal`",
         ];
 
-        let chosen = choose_import(
+        let chosen = import_text::choose_import(
             "use tddy_service::proto::catalog::{ListToolsRequest};
 use tddy_service::proto::session::{StartSessionResponse};\n",
             &offered,
@@ -5654,7 +3866,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     fn settles_nothing_when_two_candidates_come_from_imported_modules() {
         let offered = ["Import `a::b::Thing`", "Import `c::d::Thing`"];
 
-        let chosen = choose_import("use a::b::Other;\nuse c::d::Another;\n", &offered);
+        let chosen = import_text::choose_import("use a::b::Other;\nuse c::d::Another;\n", &offered);
 
         assert_eq!(chosen, None);
     }
@@ -5664,7 +3876,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     fn prefers_an_exact_binding_over_module_agreement() {
         let offered = ["Import `a::b::Thing`", "Import `c::d::Thing`"];
 
-        let chosen = choose_import("use c::d::Thing;\nuse a::b::Other;\n", &offered);
+        let chosen = import_text::choose_import("use c::d::Thing;\nuse a::b::Other;\n", &offered);
 
         assert_eq!(chosen, Some("Import `c::d::Thing`"));
     }
@@ -5685,7 +3897,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         ];
 
         // When the file that lost the name binds it canonically from one of those crates
-        let chosen = choose_import("use tddy_core::error::ParseError;\n", &offered);
+        let chosen = import_text::choose_import("use tddy_core::error::ParseError;\n", &offered);
 
         // Then the candidate rooted in that same crate is the one the moved code meant
         assert_eq!(chosen, Some("Import `tddy_core::ParseError`"));
@@ -5703,7 +3915,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         ];
 
         // When the file binds the name from the crate that offers two of them
-        let chosen = choose_import("use tddy_core::error::ParseError;\n", &offered);
+        let chosen = import_text::choose_import("use tddy_core::error::ParseError;\n", &offered);
 
         // Then nothing is chosen, because the crate does not say which of its two was meant
         assert_eq!(chosen, None);
@@ -5723,7 +3935,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         // When the file imports something unrelated from `std` and binds the name from `tddy_core`
         let text = "use std::collections::HashMap;\nuse tddy_core::error::ParseError;\n";
-        let chosen = choose_import(text, &offered);
+        let chosen = import_text::choose_import(text, &offered);
 
         // Then the `std` import is not evidence about `ParseError`, and the binding of that name is
         assert_eq!(chosen, Some("Import `tddy_core::ParseError`"));
@@ -5996,14 +4208,14 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         }
     }
 
-    fn block_of(text: &str) -> (Vec<String>, ModuleBlock) {
+    fn block_of(text: &str) -> (Vec<String>, module_text::ModuleBlock) {
         let source: Vec<String> = text.split('\n').map(str::to_string).collect();
-        let block = module_bounds(&source, "moved").expect("a `mod moved` block");
+        let block = module_text::module_bounds(&source, "moved").expect("a `mod moved` block");
         (source, block)
     }
 
-    fn unresolved_at(line: usize, text: &str) -> UnresolvedName {
-        UnresolvedName {
+    fn unresolved_at(line: usize, text: &str) -> import_text::UnresolvedName {
+        import_text::UnresolvedName {
             text: text.to_string(),
             position: json!({ "line": line, "character": 0 }),
         }
@@ -6017,7 +4229,11 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "mod moved {\n    use super::new_with_config;\n    use super::Manager;\n    fn go() {}\n}\n",
         );
 
-        let kept = without_dead_imports(&source, &block, &[unresolved_at(1, "new_with_config")]);
+        let kept = import_text::without_dead_imports(
+            &source,
+            &block,
+            &[unresolved_at(1, "new_with_config")],
+        );
 
         assert!(!kept.iter().any(|line| line.contains("new_with_config")));
         assert!(kept.iter().any(|line| line.contains("use super::Manager;")));
@@ -6031,7 +4247,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "mod moved {\n    use global_context_api;\n    use crate::core::{export_cursor, global_context_api};\n    fn go() {}\n}\n",
         );
 
-        let kept = without_dead_imports(&source, &block, &[]);
+        let kept = import_text::without_dead_imports(&source, &block, &[]);
 
         assert_eq!(
             kept[1],
@@ -6046,7 +4262,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "mod moved {\n    use crate::core::{a, global_context_api};\n    use global_context_api;\n    fn go() {}\n}\n",
         );
 
-        let kept = without_dead_imports(&source, &block, &[]);
+        let kept = import_text::without_dead_imports(&source, &block, &[]);
 
         assert_eq!(
             kept.iter()
@@ -6063,7 +4279,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "mod moved {\n    use super::Manager;\n    use other::Manager;\n    fn go() {}\n}\n",
         );
 
-        let kept = without_dead_imports(&source, &block, &[]);
+        let kept = import_text::without_dead_imports(&source, &block, &[]);
 
         assert_eq!(kept[1], "    use super::Manager;");
         assert!(!kept.iter().any(|line| line.contains("other::Manager")));
@@ -6085,7 +4301,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     fn leaves_imports_outside_the_block_alone() {
         let (source, block) = block_of("use super::stale;\n\nmod moved {\n    fn go() {}\n}\n");
 
-        let kept = without_dead_imports(&source, &block, &[unresolved_at(0, "stale")]);
+        let kept = import_text::without_dead_imports(&source, &block, &[unresolved_at(0, "stale")]);
 
         assert_eq!(kept, source);
     }
@@ -6161,7 +4377,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         let text = a_module_importing("use crate::proto::Event as StartSessionEventKind;");
 
         // When
-        let bound = already_bound(&text, "readings", "StartSessionEventKind").unwrap();
+        let bound = import_text::already_bound(&text, "readings", "StartSessionEventKind").unwrap();
 
         // Then
         assert!(
@@ -6177,7 +4393,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         let text = a_module_importing("use crate::proto::Event as StartSessionEventKind;");
 
         // When
-        let bound = already_bound(&text, "readings", "Event").unwrap();
+        let bound = import_text::already_bound(&text, "readings", "Event").unwrap();
 
         // Then
         assert!(
@@ -6195,7 +4411,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         );
 
         // When
-        let bound = already_bound(&text, "readings", "StartSessionEventKind").unwrap();
+        let bound = import_text::already_bound(&text, "readings", "StartSessionEventKind").unwrap();
 
         // Then
         assert!(
@@ -6213,7 +4429,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         );
 
         // When
-        let bound = already_bound(&text, "readings", "Signal").unwrap();
+        let bound = import_text::already_bound(&text, "readings", "Signal").unwrap();
 
         // Then
         assert!(
@@ -6230,7 +4446,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         let text = a_module_importing("use std::fmt::Write as _;");
 
         // When
-        let bound = already_bound(&text, "readings", "Write").unwrap();
+        let bound = import_text::already_bound(&text, "readings", "Write").unwrap();
 
         // Then
         assert!(!bound, "`use … as _;` was counted as binding `Write`");
@@ -6325,7 +4541,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             moved_within("buried", "nested", true),
         ];
 
-        let message = facade_lines("grouped", &items, Reexport::Named)
+        let message = facade::facade_lines("grouped", &items, Reexport::Named)
             .unwrap_err()
             .to_string();
 
@@ -6351,7 +4567,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// prevent.
     #[test]
     fn reports_a_named_facade_that_had_nothing_to_reexport() {
-        let note = empty_facade_note("grouped", &[], Reexport::Named)
+        let note = facade::empty_facade_note("grouped", &[], Reexport::Named)
             .expect("a named facade that wrote nothing has something to say");
 
         assert!(note.contains("grouped"), "{note}");
@@ -6375,7 +4591,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     fn refuses_a_module_name_the_parent_already_declares() {
         let text = "pub mod report;\n\npub fn min_of() {}\npub fn max_of() {}\n";
 
-        let message = refuse_module_name_taken(text, "report", lines(3, 4))
+        let message = module_text::refuse_module_name_taken(text, "report", lines(3, 4))
             .unwrap_err()
             .to_string();
 
@@ -6424,23 +4640,30 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     #[test]
     fn reads_a_progress_line_from_a_work_done_notification() {
         let mut chatter = ServerChatter::default();
+        let started = std::time::Instant::now();
 
-        chatter.absorb(&json!({
-            "method": "$/progress",
-            "params": {
-                "token": "rustAnalyzer/cachePriming",
-                "value": { "kind": "begin", "title": "Priming caches", "cancellable": false }
-            }
-        }));
-        let line = chatter
-            .absorb(&json!({
+        chatter.absorb_at(
+            &json!({
                 "method": "$/progress",
                 "params": {
                     "token": "rustAnalyzer/cachePriming",
-                    "value": { "kind": "report", "message": "20/28 (serde_core)", "percentage": 71 }
+                    "value": { "kind": "begin", "title": "Priming caches", "cancellable": false }
                 }
-            }))
-            .expect("a progress report says something worth printing");
+            }),
+            started,
+        );
+        let line = chatter
+            .absorb_at(
+                &json!({
+                    "method": "$/progress",
+                    "params": {
+                        "token": "rustAnalyzer/cachePriming",
+                        "value": { "kind": "report", "message": "20/28 (serde_core)", "percentage": 71 }
+                    }
+                }),
+                started + std::time::Duration::from_secs(3),
+            )
+            .expect("a progress report, once the interval has passed, says something worth printing");
 
         assert!(line.contains("Priming caches"), "{line}");
         assert!(line.contains("20/28 (serde_core)"), "{line}");
@@ -6509,7 +4732,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     fn refuses_a_seam_that_separates_an_attribute_from_the_item_it_names() {
         let text = attributed();
 
-        let message = refuse_split_attribute_paths(&text, lines(1, 5))
+        let message = module_text::refuse_split_attribute_paths(&text, lines(1, 5))
             .unwrap_err()
             .to_string();
 
@@ -6550,7 +4773,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     /// reports — an `impl` as `Object` (19) holding a `Method` (6).
     #[test]
     fn reports_an_impl_member_among_the_items_a_range_relocates() {
-        let found = items_relocated_within(&outline(), whole_file());
+        let found = seam_survey::items_relocated_within(&outline(), whole_file());
 
         assert!(
             names_of(&found).contains(&"doubled"),
@@ -6624,7 +4847,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
     /// A member of the `impl` the outline names `holder`, which a sibling left behind calls from
     /// line 9.
-    fn a_member_called_from_behind(name: &str, holder: &str) -> MovedItem {
+    fn a_member_called_from_behind(name: &str, holder: &str) -> seam_survey::MovedItem {
         let mut item = moved(name, "pub", true);
         item.within = vec![holder.to_string()];
         item.referenced_in_impl_at = vec![9];
@@ -6675,7 +4898,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "mod moved {\n    impl Dial {\n        pub(crate) fn dial_offset(&self) -> f64 {\n            0.0\n        }\n    }\n}\n",
         );
 
-        let widened = impl_widenings(&source, &block, &[moved("dial_offset", "", true)]);
+        let widened = facade::impl_widenings(&source, &block, &[moved("dial_offset", "", true)]);
 
         assert_eq!(
             widened
@@ -6710,7 +4933,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             character: 17,
         };
 
-        let offset = offset_of(text, point);
+        let offset = lsp_edits::offset_of(text, point);
 
         assert_eq!(
             position_at(text, offset),
@@ -6723,7 +4946,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
     fn resolves_the_offset_an_astral_character_begins_at() {
         let text = "let label = \"\u{1F600}\";\n";
 
-        let offset = offset_of(
+        let offset = lsp_edits::offset_of(
             text,
             LspPoint {
                 line: 0,
@@ -6742,9 +4965,10 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         let original = "mod grouped {\n    fn a() -> T {}\n}\n";
         let produced = "mod grouped {\n    fn a() -> modname::T {}\n}\n";
 
-        let message = refuse_residual_placeholder(original, produced, "modname")
-            .unwrap_err()
-            .to_string();
+        let message =
+            placeholder_checks::refuse_residual_placeholder(original, produced, "modname")
+                .unwrap_err()
+                .to_string();
 
         assert!(
             message.contains("before the items that reference it"),
@@ -6761,9 +4985,10 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         let produced = "mod tests {\n    fn a() -> u32 { modname::base() }\n}\n";
 
         // When the leftover is refused
-        let message = refuse_residual_placeholder(original, produced, "modname")
-            .unwrap_err()
-            .to_string();
+        let message =
+            placeholder_checks::refuse_residual_placeholder(original, produced, "modname")
+                .unwrap_err()
+                .to_string();
 
         // Then the refusal names a module the file already had, for which no ordering helps
         assert!(
@@ -6784,9 +5009,10 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "impl Dial {\n    fn bearing(&self) -> f64 {\n        self.dial_offset()\n    }\n}\n";
         let produced = "impl Dial {\n    fn bearing(&self) -> f64 {\n        modname::dial_offset(self)\n    }\n}\n";
 
-        let message = refuse_residual_placeholder(original, produced, "modname")
-            .unwrap_err()
-            .to_string();
+        let message =
+            placeholder_checks::refuse_residual_placeholder(original, produced, "modname")
+                .unwrap_err()
+                .to_string();
 
         assert!(message.contains("grow"), "{message}");
         assert!(
@@ -6868,7 +5094,11 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::write(bin.join("cargo"), "").unwrap();
 
-        let described = describe_server_environment(Path::new("/ra/rust-analyzer"), "1.93.1", &bin);
+        let described = server_process::describe_server_environment(
+            Path::new("/ra/rust-analyzer"),
+            "1.93.1",
+            &bin,
+        );
 
         assert!(described.contains("RUSTUP_TOOLCHAIN=1.93.1"));
         assert!(described.contains("cargo=real"));
@@ -6886,7 +5116,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
         std::fs::create_dir_all(prefix.join("lib/rustlib/src/rust/library")).unwrap();
         std::fs::create_dir_all(prefix.join("bin")).unwrap();
 
-        let described = describe_server_environment(
+        let described = server_process::describe_server_environment(
             Path::new("/ra/rust-analyzer"),
             "1.93.1",
             &prefix.join("bin"),
@@ -6936,7 +5166,8 @@ mod cross_file_edit_tests {
         let response = a_rename_touching_two_files();
 
         // When
-        let edits = workspace_edits_for(&response).expect("a rename response is readable");
+        let edits =
+            lsp_edits::workspace_edits_for(&response).expect("a rename response is readable");
 
         // Then
         let touched: Vec<&str> = edits.iter().map(|(uri, _)| uri.as_str()).collect();
@@ -6958,7 +5189,8 @@ mod cross_file_edit_tests {
         let response = a_rename_touching_two_files();
 
         // When
-        let edits = workspace_edits_for(&response).expect("a rename response is readable");
+        let edits =
+            lsp_edits::workspace_edits_for(&response).expect("a rename response is readable");
 
         // Then
         let (_, caller) = edits
@@ -6978,7 +5210,7 @@ mod cross_file_edit_tests {
         let response = json!({ "documentChanges": [] });
 
         // When
-        let outcome = workspace_edits_for(&response);
+        let outcome = lsp_edits::workspace_edits_for(&response);
 
         // Then
         assert!(

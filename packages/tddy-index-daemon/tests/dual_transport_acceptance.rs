@@ -379,11 +379,13 @@ fn exits_non_zero_when_the_tree_no_longer_holds_against_the_ref() {
         .output()
         .expect("the binary runs");
 
-    // Then the statement it lost and the one it gained are both named, and the run fails
+    // Then the statement it lost and the one it gained are both named, so are the tokens that
+    // differ between them (a real change is never excused as reflow), and the run fails
     assert_eq!(
         rendered(&run.stderr),
         vec![
             "2 statements before, 2 after",
+            "verify: tokens lost: 1 x1; tokens gained: 2 x1",
             "missing: 1",
             "added:   2",
             "1 statement(s) the tree lost and 1 it gained — see above"

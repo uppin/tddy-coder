@@ -30,6 +30,8 @@ enum Miss {
     Ambiguous(usize),
     /// A node answered, and its answer carries no range to resolve to.
     Unreadable(String),
+    /// `<Type>#N` names an inherent impl that is not there: only `count` exist.
+    NoSuchImpl { ordinal: usize, count: usize },
 }
 
 impl Miss {
@@ -41,15 +43,32 @@ impl Miss {
             )),
             Miss::Ambiguous(count) => failure(format!(
                 "`{item}` names {count} items in {file}{}",
-                qualification_hint(item)
-                    .map(|qualified| format!(" — qualify it with the trait, as `{qualified}`"))
-                    .unwrap_or_default()
+                ambiguity_hint(item)
+            )),
+            Miss::NoSuchImpl { ordinal, count } => failure(format!(
+                "`{item}` names inherent impl #{ordinal}, but {file} has only {count} inherent \
+                 impl block{} of it",
+                if count == 1 { "" } else { "s" }
             )),
             Miss::Unreadable(segment) => server_defect(format!(
                 "the outline of {file} answers `{segment}` without a range"
             )),
         }
     }
+}
+
+/// How to tell apart the items an ambiguous `item` names: number an inherent impl, or qualify a
+/// member with its trait.
+fn ambiguity_hint(item: &ItemPath) -> String {
+    if matches!(
+        item.segments().last(),
+        Some(ItemSegment::InherentImpl { nth: None, .. })
+    ) {
+        return format!(" — number the impl block, as `{item}#N` (`<Type>#N`, counted from 1)");
+    }
+    qualification_hint(item)
+        .map(|qualified| format!(" — qualify it with the trait, as `{qualified}`"))
+        .unwrap_or_default()
 }
 
 /// `item` with its parent segment written as `<Parent as Trait>`, when it has a parent to write so.
@@ -93,6 +112,7 @@ fn walk(symbols: &Value, segments: &[ItemSegment]) -> std::result::Result<Outlin
             .flat_map(|scope| scope.as_array().into_iter().flatten())
             .filter(|node| answers_to(node, segment, last))
             .collect();
+        let matches = select_ordinal(matches, segment)?;
 
         match matches.as_slice() {
             [] => return Err(Miss::Absent(segment.spelled())),
@@ -107,6 +127,28 @@ fn walk(symbols: &Value, segments: &[ItemSegment]) -> std::result::Result<Outlin
     }
 
     Err(Miss::Absent(String::new()))
+}
+
+/// The `nth` inherent impl among `matches` when `segment` numbers one, in source order; a number
+/// beyond the blocks there are is a refusal, while no blocks at all is left to read as absent.
+fn select_ordinal<'a>(
+    matches: Vec<&'a Value>,
+    segment: &ItemSegment,
+) -> std::result::Result<Vec<&'a Value>, Miss> {
+    let ItemSegment::InherentImpl {
+        nth: Some(ordinal), ..
+    } = segment
+    else {
+        return Ok(matches);
+    };
+    match matches.get(ordinal - 1) {
+        Some(node) => Ok(vec![node]),
+        None if matches.is_empty() => Ok(matches),
+        None => Err(Miss::NoSuchImpl {
+            ordinal: *ordinal,
+            count: matches.len(),
+        }),
+    }
 }
 
 fn hit_of(node: &Value, segment: &ItemSegment) -> std::result::Result<OutlineHit, Miss> {
@@ -138,6 +180,9 @@ fn answers_to(node: &Value, segment: &ItemSegment, last: bool) -> bool {
                 && block
                     .trait_name
                     .is_some_and(|implemented| base_name(implemented) == base_name(trait_name))
+        }),
+        ItemSegment::InherentImpl { self_type, .. } => read_impl(name).is_some_and(|block| {
+            block.trait_name.is_none() && base_name(block.self_type) == base_name(self_type)
         }),
     }
 }
@@ -249,20 +294,9 @@ impl RustBackend {
         let module = module_path_of(&outlined.root, file)?;
         let text = &outlined.text;
 
-        let mut chain: Vec<&Value> = Vec::new();
-        let mut level = Some(&outlined.symbols);
-        while let Some(nodes) = level {
-            let inner = nodes
-                .as_array()
-                .into_iter()
-                .flatten()
-                .find(|node| contains(node, range));
-            let Some(inner) = inner else { break };
-            chain.push(inner);
-            level = inner.get("children");
-        }
+        let chain = enclosing_chain(&outlined.symbols, range);
 
-        let Some(innermost) = chain.last() else {
+        let Some((innermost, siblings)) = chain.last().copied() else {
             return Err(failure(format!(
                 "the position {}:{} is inside no item of {file}",
                 range.start.line, range.start.col
@@ -270,24 +304,31 @@ impl RustBackend {
         };
 
         let mut pieces = module;
-        for node in &chain {
+        for (node, _) in &chain[..chain.len() - 1] {
             pieces.push(segment_of(node)?);
         }
-        if let Some(label) = innermost.get("name").and_then(Value::as_str) {
-            if read_impl(label).is_some_and(|block| block.trait_name.is_none()) {
-                return Err(failure(format!(
-                    "the position {}:{} is inside `{label}` but in none of its items — anchor a \
-                     member of it, or the type itself",
-                    range.start.line, range.start.col
-                )));
-            }
-        }
+        pieces.push(segment_in(innermost, siblings)?);
 
         let item = ItemPath::parse(&pieces.join("::"))?;
         let hit = hit_of(innermost, &ItemSegment::Named(item.to_string()))
             .map_err(|miss| miss.refusal(&item, file))?;
         Ok((item, resolved_from(text, &hit)?))
     }
+}
+
+/// The outline nodes enclosing `range`, outermost first, each with the siblings it was chosen from.
+fn enclosing_chain(symbols: &Value, range: Range) -> Vec<(&Value, &[Value])> {
+    let mut chain = Vec::new();
+    let mut level = Some(symbols);
+    while let Some(nodes) = level {
+        let siblings = nodes.as_array().map(Vec::as_slice).unwrap_or_default();
+        let Some(inner) = siblings.iter().find(|node| contains(node, range)) else {
+            break;
+        };
+        chain.push((inner, siblings));
+        level = inner.get("children");
+    }
+    chain
 }
 
 impl ItemResolver for RustBackend {
@@ -350,6 +391,43 @@ fn segment_of(node: &Value) -> Result<String> {
         }) => base_name(self_type).to_string(),
         None => name.to_string(),
     })
+}
+
+/// How `node`, the innermost item an anchor lands in, is written: like [`segment_of`], except that
+/// an inherent `impl` is itself the item — `<Type>`, numbered `<Type>#N` when `siblings` hold
+/// several inherent impls of the type.
+fn segment_in(node: &Value, siblings: &[Value]) -> Result<String> {
+    let label = node.get("name").and_then(Value::as_str).unwrap_or_default();
+    let Some(ImplLabel {
+        trait_name: None,
+        self_type,
+    }) = read_impl(label)
+    else {
+        return segment_of(node);
+    };
+    let wanted = base_name(self_type);
+    let same_type: Vec<&Value> = siblings
+        .iter()
+        .filter(|sibling| {
+            sibling
+                .get("name")
+                .and_then(Value::as_str)
+                .and_then(read_impl)
+                .is_some_and(|block| {
+                    block.trait_name.is_none() && base_name(block.self_type) == wanted
+                })
+        })
+        .collect();
+    let nth = same_type
+        .iter()
+        .position(|sibling| std::ptr::eq(*sibling, node))
+        .filter(|_| same_type.len() > 1)
+        .map(|index| index + 1);
+    Ok(ItemSegment::InherentImpl {
+        self_type: wanted.to_string(),
+        nth,
+    }
+    .spelled())
 }
 
 /// A server position as the one-based position a plan carries.
@@ -541,5 +619,128 @@ mod tests {
             hit.ok().map(|hit| hit.range["start"]["line"].clone()),
             Some(json!(5))
         );
+    }
+
+    /// `Stack` with `impl Stack` twice (lines 6 and 12), and `impl Display for Stack` between.
+    fn an_outline_with_two_inherent_impls() -> Value {
+        json!([
+            a_node("Stack", 0, 3, json!([])),
+            a_node("impl Stack", 6, 9, json!([a_node("new", 7, 8, json!([]))])),
+            a_node(
+                "impl Display for Stack",
+                9,
+                11,
+                json!([a_node("fmt", 10, 11, json!([]))])
+            ),
+            a_node(
+                "impl Stack",
+                12,
+                15,
+                json!([a_node("peek", 13, 14, json!([]))])
+            ),
+        ])
+    }
+
+    fn first_line_of(hit: Result<OutlineHit>) -> Option<Value> {
+        hit.ok().map(|hit| hit.range["start"]["line"].clone())
+    }
+
+    fn refusal_of(hit: Result<OutlineHit>) -> String {
+        hit.err().map(|error| error.to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn an_inherent_impl_block_is_found_by_its_type() {
+        let path = ItemPath::parse("stacks::workflow::<Stack>").unwrap();
+
+        let hit = walk_outline(&an_outline(), &path, &path.segments());
+
+        assert_eq!(first_line_of(hit), Some(json!(6)));
+    }
+
+    #[test]
+    fn two_inherent_impls_without_an_ordinal_are_ambiguous_and_the_hint_names_the_ordinal() {
+        let path = ItemPath::parse("c::<Stack>").unwrap();
+
+        let refused = walk_outline(
+            &an_outline_with_two_inherent_impls(),
+            &path,
+            &path.segments(),
+        );
+
+        let message = refusal_of(refused);
+        assert!(message.contains("names 2 items"), "{message}");
+        assert!(message.contains("`c::<Stack>#N`"), "{message}");
+    }
+
+    #[test]
+    fn an_ordinal_selects_that_inherent_impl_in_source_order() {
+        let path = ItemPath::parse("c::<Stack>#2").unwrap();
+
+        let hit = walk_outline(
+            &an_outline_with_two_inherent_impls(),
+            &path,
+            &path.segments(),
+        );
+
+        assert_eq!(first_line_of(hit), Some(json!(12)));
+    }
+
+    #[test]
+    fn an_ordinal_past_the_last_inherent_impl_is_refused_saying_how_many_exist() {
+        let path = ItemPath::parse("c::<Stack>#3").unwrap();
+
+        let refused = walk_outline(
+            &an_outline_with_two_inherent_impls(),
+            &path,
+            &path.segments(),
+        );
+
+        let message = refusal_of(refused);
+        assert!(message.contains("only 2 inherent impl"), "{message}");
+    }
+
+    #[test]
+    fn a_trait_impl_of_the_same_type_is_not_an_inherent_impl() {
+        let outline = json!([
+            a_node("Stack", 0, 3, json!([])),
+            a_node("impl Display for Stack", 5, 9, json!([])),
+        ]);
+        let path = ItemPath::parse("c::<Stack>").unwrap();
+
+        let refused = walk_outline(&outline, &path, &path.segments());
+
+        assert!(refusal_of(refused).contains("nothing there is named `<Stack>`"));
+    }
+
+    #[test]
+    fn an_inherent_impl_of_a_generic_type_is_found_by_its_written_type() {
+        let outline = json!([a_node("impl<T> Wrapper<T>", 2, 6, json!([]))]);
+        let path = ItemPath::parse("c::<Wrapper<T>>").unwrap();
+
+        let hit = walk_outline(&outline, &path, &path.segments());
+
+        assert_eq!(first_line_of(hit), Some(json!(2)));
+    }
+
+    #[test]
+    fn a_position_between_an_impls_members_is_spelled_as_the_impl_block() {
+        let outline = an_outline_with_two_inherent_impls();
+        let second_impl = &outline[3];
+        let siblings = outline.as_array().unwrap();
+
+        let spelled = segment_in(second_impl, siblings).unwrap();
+
+        assert_eq!(spelled, "<Stack>#2");
+    }
+
+    #[test]
+    fn the_only_inherent_impl_of_a_type_is_spelled_without_an_ordinal() {
+        let outline = an_outline();
+        let siblings = outline[0]["children"].as_array().unwrap();
+
+        let spelled = segment_in(&siblings[1], siblings).unwrap();
+
+        assert_eq!(spelled, "<Stack>");
     }
 }

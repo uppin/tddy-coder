@@ -12,8 +12,6 @@
 //! code, which errs the safe way: a crate such a path names lands in `[dependencies]`, never missing
 //! from the build.
 
-use std::ops::Range;
-
 use super::test_binary::{readable_spans, Prose};
 
 /// The tokens that open a `cfg` attribute: `#[cfg(`.
@@ -320,216 +318,17 @@ fn tokens_of(masked: &[u8]) -> Vec<Token> {
     tokens
 }
 
-/// One path the file writes: a `use` leaf, or a path in code.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Sighting {
-    /// The segments as written, with a glob's `*` left out.
-    pub(crate) segments: Vec<String>,
-    /// Where the path starts, as a byte offset. Every leaf of one `use` tree shares it.
-    pub(crate) head_at: usize,
-    pub(crate) in_use: bool,
-    /// Whether it is written under a `#[cfg(test)]` item.
-    pub(crate) in_test: bool,
-    /// The inline modules enclosing it, outermost first.
-    pub(crate) modules: Vec<String>,
-}
+mod sighting_walk;
+pub(crate) use sighting_walk::sightings;
 
-/// An open `{ … }` block.
-struct Frame {
-    /// The name, when the block is an inline `mod`.
-    module: Option<String>,
-    test: bool,
-    /// Open brackets of the enclosing block, restored when this one closes.
-    outer_brackets: usize,
-}
-
-/// Every path of two or more segments the file writes, in the order it writes them.
-///
-/// A path in code opens a path only when what precedes it does not continue one: behind `::` it is a
-/// segment of a longer path, behind `.` a field or method, behind `$` a macro variable and behind
-/// `'` a lifetime.
-pub(crate) fn sightings(text: &str) -> Vec<Sighting> {
-    let scan = Scan::of(text);
-    let mut found = Vec::new();
-    let mut frames: Vec<Frame> = Vec::new();
-    let mut pending_test = false;
-    let mut brackets = 0usize;
-    let mut module_block: Option<(usize, String)> = None;
-    let mut at = 0usize;
-
-    while at < scan.tokens.len() {
-        let token = scan.tokens[at];
-        let in_test = frames.last().is_some_and(|frame| frame.test);
-        let modules = || -> Vec<String> {
-            frames
-                .iter()
-                .filter_map(|frame| frame.module.clone())
-                .collect()
-        };
-
-        match token.kind {
-            Kind::Punct(b'#') => {
-                if let Some(length) = scan.cfg_test_attribute(at) {
-                    pending_test = true;
-                    at += length;
-                    continue;
-                }
-            }
-            Kind::Punct(b'(' | b'[') => brackets += 1,
-            Kind::Punct(b')' | b']') => brackets = brackets.saturating_sub(1),
-            Kind::Punct(b'{') => {
-                let consumes_attribute = pending_test && brackets == 0;
-                if consumes_attribute {
-                    pending_test = false;
-                }
-                let module = match module_block.take() {
-                    Some((opens, name)) if opens == at => Some(name),
-                    other => {
-                        module_block = other;
-                        None
-                    }
-                };
-                frames.push(Frame {
-                    module,
-                    test: in_test || consumes_attribute,
-                    outer_brackets: brackets,
-                });
-                brackets = 0;
-            }
-            Kind::Punct(b'}') => {
-                if let Some(frame) = frames.pop() {
-                    brackets = frame.outer_brackets;
-                }
-            }
-            Kind::Punct(b';') if brackets == 0 => pending_test = false,
-            Kind::Ident if scan.text(token) == "mod" => {
-                if let (Some(name), true) = (scan.ident(at + 1), scan.is_punct(at + 2, b'{')) {
-                    module_block = Some((at + 2, name.to_string()));
-                }
-            }
-            Kind::Ident if scan.text(token) == "use" => {
-                let (head_at, leaves, next) = scan.use_item(at);
-                for leaf in leaves {
-                    found.push(Sighting {
-                        segments: leaf.segments,
-                        head_at,
-                        in_use: true,
-                        in_test: in_test || pending_test,
-                        modules: modules(),
-                    });
-                }
-                pending_test = false;
-                at = next;
-                continue;
-            }
-            Kind::Ident if scan.continues_a_path(at) => {}
-            Kind::Ident => {
-                let (segments, last) = scan.path_from(at);
-                if segments.len() >= 2 {
-                    found.push(Sighting {
-                        segments,
-                        head_at: token.start,
-                        in_use: false,
-                        in_test: in_test || pending_test,
-                        modules: modules(),
-                    });
-                }
-                at = last + 1;
-                continue;
-            }
-            _ => {}
-        }
-        at += 1;
-    }
-    found
-}
-
-/// A `mod` a module declares, inline or backed by a file.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ChildModule {
-    pub(crate) name: String,
-    /// The span between an inline module's braces; `None` for `mod name;`.
-    pub(crate) body: Option<Range<usize>>,
-}
-
-/// What a module's own text declares at its top level.
-#[derive(Debug, Default)]
-pub(crate) struct ModuleItems {
-    pub(crate) children: Vec<ChildModule>,
-    pub(crate) uses: Vec<UseLeaf>,
-    /// Names of the items it defines: functions, types, traits, constants, statics, macros.
-    pub(crate) defined: Vec<String>,
-}
-
-/// The top level of a module's text: its `mod`s, its `use`s and the items it defines.
-pub(crate) fn items_of_module(text: &str) -> ModuleItems {
-    let scan = Scan::of(text);
-    let mut items = ModuleItems::default();
-    let mut depth = 0usize;
-    let mut open_child: Option<usize> = None;
-    let mut at = 0usize;
-
-    while at < scan.tokens.len() {
-        let token = scan.tokens[at];
-        match token.kind {
-            Kind::Punct(b'{') => depth += 1,
-            Kind::Punct(b'}') => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    if let Some(child) = open_child.take() {
-                        if let Some(body) = items.children[child].body.as_mut() {
-                            body.end = token.start;
-                        }
-                    }
-                }
-            }
-            Kind::Ident if depth == 0 => match scan.text(token) {
-                "mod" => {
-                    if let Some(name) = scan.ident(at + 1) {
-                        let body = scan
-                            .tokens
-                            .get(at + 2)
-                            .filter(|_| scan.is_punct(at + 2, b'{'))
-                            .map(|opens| opens.end..opens.end);
-                        if body.is_some() {
-                            open_child = Some(items.children.len());
-                        }
-                        items.children.push(ChildModule {
-                            name: name.to_string(),
-                            body,
-                        });
-                    }
-                }
-                "use" => {
-                    let mut cursor = at + 1;
-                    scan.use_tree(&mut cursor, Vec::new(), &mut items.uses);
-                    at = scan.statement_end(cursor) + 1;
-                    continue;
-                }
-                keyword if DEFINING_KEYWORDS.contains(&keyword) => {
-                    // `const fn name` defines `name`, which the `fn` that follows reads.
-                    let name = scan.ident(at + 1).filter(|name| {
-                        keyword != "const" || !["fn", "unsafe", "async", "extern"].contains(name)
-                    });
-                    items.defined.extend(name.map(str::to_string));
-                }
-                "macro_rules" if scan.is_punct(at + 1, b'!') => {
-                    items.defined.extend(scan.ident(at + 2).map(str::to_string));
-                }
-                _ => {}
-            },
-            _ => {}
-        }
-        at += 1;
-    }
-    items
-}
+mod module_items;
+pub(crate) use module_items::{items_of_module, ChildModule, ModuleItems};
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn written(sightings: &[Sighting]) -> Vec<String> {
+    fn written(sightings: &[sighting_walk::Sighting]) -> Vec<String> {
         sightings
             .iter()
             .map(|sighting| sighting.segments.join("::"))
@@ -542,7 +341,7 @@ mod tests {
         let text = "use shared::Clock;\n\npub fn now() -> u64 {\n    shared::tick()\n}\n";
 
         // When
-        let found = sightings(text);
+        let found = sighting_walk::sightings(text);
 
         // Then both are paths, the first in a `use` and the second not
         assert_eq!(written(&found), vec!["shared::Clock", "shared::tick"]);
@@ -558,7 +357,7 @@ mod tests {
         let text = "use crate::{runtime::Clock, config::{self, Settings}};\n";
 
         // When
-        let found = sightings(text);
+        let found = sighting_walk::sightings(text);
 
         // Then each member is its own path and all start where the tree does
         assert_eq!(
@@ -578,7 +377,7 @@ mod tests {
         let text = "// shared::Clock\n/* shared::Tick */\nfn f() -> &'static str {\n    \"shared::Name\"\n}\n";
 
         // When
-        let found = sightings(text);
+        let found = sighting_walk::sightings(text);
 
         // Then nothing is sighted
         assert_eq!(written(&found), Vec::<String>::new());
@@ -590,7 +389,7 @@ mod tests {
         let text = "#[cfg(test)]\nmod tests {\n    fn a() {\n        shared::one();\n    }\n}\n\nfn b() {\n    shared::two();\n}\n";
 
         // When
-        let found = sightings(text);
+        let found = sighting_walk::sightings(text);
 
         // Then only the first is in a test, and it records the module it sits in
         assert_eq!(written(&found), vec!["shared::one", "shared::two"]);
@@ -608,7 +407,7 @@ mod tests {
         let text = "fn f() {\n    value.shared::<u8>();\n    outer::shared::item();\n}\n";
 
         // When
-        let found = sightings(text);
+        let found = sighting_walk::sightings(text);
 
         // Then only the path that opens one is sighted
         assert_eq!(written(&found), vec!["outer::shared::item"]);
@@ -620,7 +419,7 @@ mod tests {
         let text = "pub mod inline {\n    pub fn hidden() {}\n}\nmod filed;\npub use other::Thing as Renamed;\npub fn open() {}\n";
 
         // When
-        let items = items_of_module(text);
+        let items = module_items::items_of_module(text);
 
         // Then the nested function is not the module's own
         assert_eq!(
@@ -641,7 +440,7 @@ mod tests {
         let text = "pub const fn limit() -> u32 {\n    3\n}\npub const MAX: u32 = 4;\n";
 
         // When
-        let items = items_of_module(text);
+        let items = module_items::items_of_module(text);
 
         // Then the names defined are the function's and the constant's
         assert_eq!(items.defined, vec!["limit".to_string(), "MAX".to_string()]);
@@ -653,7 +452,7 @@ mod tests {
         let text = "#[cfg(all(test, feature = \"slow\"))]\nmod slow {\n    fn a() {\n        shared::one();\n    }\n}\n\n#[cfg(any(test, unix))]\nmod either {\n    fn b() {\n        shared::two();\n    }\n}\n";
 
         // When
-        let found = sightings(text);
+        let found = sighting_walk::sightings(text);
 
         // Then only the first is in a test
         assert_eq!(written(&found), vec!["shared::one", "shared::two"]);

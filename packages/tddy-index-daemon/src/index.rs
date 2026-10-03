@@ -30,6 +30,7 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::activity::{reaped_line, Warmth};
 use crate::graph::GraphLoad;
+use crate::plan_upkeep::reresolve_loaded_plans;
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
 use crate::tree_changes::{watched_files_params, FileChange, TreeSnapshot};
@@ -265,6 +266,9 @@ impl WorkspaceIndex {
                 )
                 .await
                 .map_err(|failure| status_of_lsp(&failure))?;
+            // After the server knows, so what the store asks it reads the tree as it now is.
+            let loaded = self.plans_of(root).await;
+            reresolve_loaded_plans(loaded, root, &service.client, &changes).await?;
             log::info!(
                 target: "tddy_index_daemon::index",
                 "told the server for {} of {} file change(s) on disk since its last request",

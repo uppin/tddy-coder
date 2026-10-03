@@ -93,14 +93,21 @@ caller stops waiting. The wait has no deadline of its own.
 A per-file **hint**. A file whose hash drifted, or which is gone, is reported on the progress line and
 the plan runs: an item anchor does not depend on the rest of the file. A v1 header
 (`{"v":1,"snapshot":{…}}`) is read as written, including the `snapshot mismatch` refusal. `restructure
-snapshot` rewrites the header of whichever version the plan has. `modified` is written and not read.
+snapshot` rewrites the header of whichever version the plan has, and for a plan of item anchors
+re-resolves each anchor too (`rebase_plan_file`; see [plan-store.md](plan-store.md#live-plans)).
+`modified` is written and not read; the hashes and hints of a plan are rewritten whenever a refresh
+touches its files.
 
 ## The `anchors` command
 
 | Form | Emits |
 |---|---|
-| `anchors <file> --items A,B` | an `items` anchor for adjacent module items |
+| `anchors <file> --items A,B` | an `items` anchor for adjacent module items. A name is bare (`Alpha`), module-qualified (`krate::module::Alpha`), or `<Type>` / `<Type>#N` for an inherent `impl` block; `<Pair<A, B>>` keeps its comma |
 | `anchors <file> --at L:C[-L:C]` | an `item` anchor for the innermost item enclosing the position, with the relative range, fingerprint and hint filled in |
+
+`item_anchor::parse_item_list` is the one rule that splits an `--items` value (at the commas outside
+`<…>`, trimmed, empty elements dropped), shared by the in-process CLI, the daemon's command line,
+`tddy-tools` and the legacy flag parser.
 
 In process the command returns the anchor value; through the daemon, `AnchorsResponse.anchor_json`
 carries the anchor's JSON and `range` its absolute span. See

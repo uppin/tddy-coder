@@ -73,6 +73,16 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
   nothing searches another file.
 - A member of a trait impl is addressed with the trait when its name is shared:
   `c::m::<Stack as Display>::fmt`. A bare `c::m::Stack::fmt` that two impls define is refused.
+- An inherent `impl` block is itself an item, spelled `<Type>` (no ` as `): `c::m::<Stack>` — the
+  whole block, attributes and doc comments included. A generic type is written as the block writes it
+  (`c::m::<Wrapper<T>>`). With several inherent impls of one type, a bare `<Stack>` is refused as
+  ambiguous and `<Stack>#2` picks the second in source order (1-based; a number past the last is
+  refused saying how many exist). `<Stack>` never matches a trait impl of `Stack`. This is what lets
+  `items` name `struct Stack; impl Stack { … }; fn helper()` as one run:
+  `restructure anchors <file> --items Stack,'<Stack>',helper` (quote the `<`; a name is bare or
+  module-qualified, and commas inside `<…>` belong to the type: `<Pair<A, B>>`). `anchors --at`
+  inside an impl but outside its members emits the block's `<Type>` anchor; inside a member it still
+  emits the member. An `items` run cannot split an impl: the engine's impl-seam refusals stand.
 - A relative range reaching outside its item is `plan is malformed`; an item whose text no longer
   matches `fingerprint` is refused naming the item. `items` must be contiguous: only blank lines may
   separate them.
@@ -254,6 +264,22 @@ not define is refused rather than ignored.
   file's existing imports decide — by an exact path match, then by a module the file already imports
   from, then by the **crate** the file binds that same name from. Where none of the three settles it,
   the operation refuses and names the candidates rather than guessing.
+  The paths written inline in the moved code are re-rooted for the module being one level deeper:
+  `super::x` gains one `super::` (`self::x` becomes `super::x`), except where the path stays inside
+  a module the moved code itself declares; strings, comments and `use` items are untouched, and a
+  `pub(super)` field of a moved struct is rebased like a `pub(super)` item. The count is reported as
+  a `paths: N path(s) re-rooted for the new module` note.
+  A path whose first segment is a module the *parent* declares (`visibility::WIDENED`, beside
+  `mod visibility;`) gains `super::` too, since the new module is that module's sibling — unless the
+  moved code might bind the name itself (any `use` mentioning it, a `mod`, a local or a parameter of
+  that name), in which case none of that module's paths are touched; a `.name` member access or an
+  `a::name` segment is not a binding.
+
+  A second, lexical step then carries across every name the parent binds by `use` that the moved code
+  uses and the module does not bind: the server cannot report a name unresolved when the prelude
+  resolves it (`Result` rebound to the crate's one-generic alias would silently become the
+  two-generic `std::result::Result`), so the parent's own import, rebased one level deeper, is copied.
+  Surplus ones are removed by the tidy step.
 
   The crate tier exists because a re-export gives one item two paths. `tddy-core` publishes
   `pub use error::{BackendError, ParseError, WorkflowError};`, so a file writing the canonical
@@ -314,6 +340,12 @@ not define is refused rather than ignored.
   `pub(crate)`. For a **path-reached** item, what nothing outside the new module reaches is put back as
   it was written, so a seam that carries a private helper along with its only caller keeps the helper
   private. Prefer such seams: cutting between a helper and its only caller is what forces a widening.
+  A type that no path reaches stays widened too when the signature of a widened item names it (a
+  return or parameter type, a `where` clause, a field, an alias or `const` type), repeated until nothing
+  new is kept; callers reach it by inference, and narrowing it would leave a `pub(crate)` signature over
+  a private type.
+
+  A **relative** visibility is rebased for the module one level deeper so it keeps meaning "visible in the same place": `pub(super)` becomes `pub(in super::super)`, `pub(in super::x)` gains a `super::`, `pub(self)` becomes `pub(super)` and `pub(in self::x)` becomes `pub(in super::x)`; `pub`, `pub(crate)` and `pub(in crate::…)` are unchanged.
 
   A relocated **`impl` member** is different, and deliberately so. It is reached through its type, so
   no module path names it and the survey that decides restoration rightly does not descend into an

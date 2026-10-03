@@ -114,7 +114,8 @@ pub struct RestructureCheckArgs {
     #[arg(long)]
     pub deep: bool,
 
-    /// Report every file the plan names that is longer than this many lines.
+    /// Report every file the plan names with more than this many production lines (a Rust file's
+    /// lines before its `#[cfg(test)]` module; any other file's lines in full).
     #[arg(long)]
     pub budget: Option<usize>,
 }
@@ -123,13 +124,29 @@ pub struct RestructureCheckArgs {
 pub struct RestructureAnchorsArgs {
     pub file: PathBuf,
 
-    #[arg(long, value_delimiter = ',')]
+    /// Items of the file's module, comma-separated: bare names (`Alpha`) or full paths beginning
+    /// with the file's own module path (`krate::module::Alpha`). An inherent `impl` block is
+    /// `<Type>` (`<Type>#2` for the second of several, counted from 1) — `Counter,<Counter>,describe`
+    /// names a struct, its `impl Counter { .. }` and the function after it. Commas inside `<..>`
+    /// belong to the type (`<Pair<A, B>>`).
+    #[arg(long)]
     pub items: Vec<String>,
 
     /// `LINE:COL` or `LINE:COL-LINE:COL`, one-based, columns counted in bytes (not characters):
     /// anchor the innermost item enclosing this position, with the range relative to it.
     #[arg(long, value_parser = parse_position_range, conflicts_with = "items")]
     pub at: Option<crate::edit::Range>,
+}
+
+impl RestructureAnchorsArgs {
+    /// The item names `--items` carries, one per name. What every front end sends, so none of
+    /// them states the splitting rule itself: see [`crate::item_anchor::parse_item_list`].
+    pub fn item_names(&self) -> Vec<String> {
+        self.items
+            .iter()
+            .flat_map(|list| crate::item_anchor::parse_item_list(list))
+            .collect()
+    }
 }
 
 /// Read `LINE:COL` (a caret) or `LINE:COL-LINE:COL` (a range), one-based.
@@ -205,13 +222,16 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             budget: check.budget,
             ..Options::default()
         },
-        RestructureCommand::Anchors(anchors) => Options {
-            command: Command::Anchors,
-            target: Some(anchors.file),
-            items: normalised_items(anchors.items),
-            at: anchors.at,
-            ..Options::default()
-        },
+        RestructureCommand::Anchors(anchors) => {
+            let items = anchors.item_names();
+            Options {
+                command: Command::Anchors,
+                target: Some(anchors.file),
+                items,
+                at: anchors.at,
+                ..Options::default()
+            }
+        }
         RestructureCommand::Verify(verify) => Options {
             command: Command::Verify,
             against: Some(verify.against),
@@ -238,22 +258,6 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             ..Options::default()
         },
     }
-}
-
-/// `--items` as the runner has always received it: trimmed, with empty elements dropped.
-///
-/// clap's `value_delimiter = ','` splits on the comma and stops there, so `--items "One, Two"`
-/// would otherwise resolve an item literally named `" Two"` and `--items "A,,B"` would carry an
-/// empty one — a wrong answer with no error. `runner::comma_separated` did this normalisation
-/// while the dispatch lived in `tddy-tools`; the call site keeps doing it now that the parsed
-/// arguments cross no package boundary.
-fn normalised_items(items: Vec<String>) -> Vec<String> {
-    items
-        .iter()
-        .map(|item| item.trim())
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 #[cfg(test)]
@@ -328,6 +332,20 @@ mod tests {
         assert_eq!(options.command, Command::Check);
         assert!(options.deep);
         assert_eq!(options.budget, Some(500));
+    }
+
+    #[test]
+    fn an_items_comma_inside_angle_brackets_does_not_split_the_name() {
+        // Given a generic self type, whose arguments are comma-separated
+        let options = parse(&[
+            "anchors",
+            "src/lib.rs",
+            "--items",
+            "Pair,<Pair<A, B>>,describe",
+        ]);
+
+        // Then the impl's name stays whole
+        assert_eq!(options.items, vec!["Pair", "<Pair<A, B>>", "describe"]);
     }
 
     #[test]

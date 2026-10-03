@@ -47,6 +47,12 @@ pub(crate) async fn run_restructure(args: RestructureArgs) -> Result<()> {
 /// it runs here rather than dialling a socket to be told what `sha256` already knows. Routed before
 /// the dial rather than as an arm of [`restructure_at`], because a run that failed to reach a
 /// daemon it never needed would be a refusal invented by this function.
+///
+/// A plan with item anchors is the exception to "no index behind it": its anchors are re-resolved
+/// through a language server, which this process starts for itself, cold, as an `apply` with no
+/// daemon does.
+// TODO(live-plans): a daemon holds that index warm; routing an item-anchored snapshot to it needs a
+// `Snapshot` RPC, which this change does not add. See docs/dev/todo/2026-10-03-live-plans-three-gaps-in-staleness-reporting-and-snapshot-routing.md.
 fn answered_without_an_index(command: &RestructureCommand) -> bool {
     match command {
         RestructureCommand::Snapshot(_) => true,
@@ -283,16 +289,22 @@ async fn anchors(
     args: RestructureAnchorsArgs,
 ) -> Result<()> {
     let response = client
-        .anchors(AnchorsRequest {
-            workspace_root,
-            file: named(&args.file)?,
-            items: normalised(args.items),
-            at: args.at.map(source_range),
-        })
+        .anchors(anchors_request(workspace_root, args)?)
         .await
         .map_err(refused)?
         .into_inner();
     index_console::anchors(&response)
+}
+
+/// What an `anchors` command asks the daemon. The item list is the in-process CLI's own
+/// ([`RestructureAnchorsArgs::item_names`]), so the request is the one it would have run.
+fn anchors_request(workspace_root: String, args: RestructureAnchorsArgs) -> Result<AnchorsRequest> {
+    Ok(AnchorsRequest {
+        workspace_root,
+        file: named(&args.file)?,
+        items: args.item_names(),
+        at: args.at.map(source_range),
+    })
 }
 
 /// A one-based range as the wire carries it.
@@ -322,23 +334,6 @@ async fn verify(
         .map_err(refused)?
         .into_inner();
     index_console::verify(&response)
-}
-
-/// `--items` as the service has always received it: trimmed, with empty elements dropped.
-///
-/// clap's `value_delimiter = ','` splits on the comma and stops there, so `--items "One, Two"`
-/// would otherwise name an item literally called `" Two"` and `--items "A,,B"` would carry an
-/// unnamed one — a wrong answer with no error. The cold path normalises in
-/// `restructure_args::normalised_items` and the daemon's own command line in `cli::normalised`,
-/// both private to their crates, so the third front end states it too rather than sending a
-/// request the other two could not have sent.
-fn normalised(items: Vec<String>) -> Vec<String> {
-    items
-        .iter()
-        .map(|item| item.trim())
-        .filter(|item| !item.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 /// A path as a request names it.
@@ -371,6 +366,27 @@ fn refused(status: tonic::Status) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
+
+    /// The client is the third front end for `anchors --items`, and the one a human reaches through
+    /// `tddy-tools`: whatever it sends has to be the list the other two would have built from the
+    /// same command line, including a generic self type whose comma is not a separator.
+    #[test]
+    fn an_anchors_request_carries_one_item_per_name_with_a_generic_self_type_whole() {
+        // Given an anchors command naming three items, one of them a generic impl block
+        let args = RestructureAnchorsArgs::parse_from([
+            "anchors",
+            "src/lib.rs",
+            "--items",
+            "One, <Pair<A, B>> ,Two",
+        ]);
+
+        // When the request is built
+        let request = anchors_request("/trees/one".to_string(), args).expect("a request");
+
+        // Then it names three items, the generic one whole
+        assert_eq!(request.items, vec!["One", "<Pair<A, B>>", "Two"]);
+    }
 
     #[test]
     fn a_named_socket_is_the_endpoint_a_run_uses() {
