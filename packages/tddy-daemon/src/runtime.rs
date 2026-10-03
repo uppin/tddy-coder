@@ -1102,6 +1102,12 @@ pub async fn build(
         // Reusable-LSP executor: a Rust-only executor sharing this daemon's task registry,
         // so `Lsp*` tool calls (relayed through tddy-tool-engine) resolve to a real, reused
         // language server; the loop that reaps servers left idle is the host's to start.
+        //
+        // TODO(session-lsp-tools): when `config_arc.index_daemon` is set, register
+        // `tddy_lsp_executor::index_backed::select_lsp_executor(Some(registry), …)` instead, so a
+        // session's `Lsp*` tools ask the managed index (the registry below) and no second
+        // rust-analyzer is started. Registration is first-wins, so the selection has to happen
+        // before this call; without `index_daemon:` nothing changes.
         tasks.lsp_idle_reaper = Some(tddy_lsp_executor::register(
             task_registry.clone(),
             tddy_lsp::LspAllowList::rust_only(),

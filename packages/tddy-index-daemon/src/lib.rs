@@ -25,6 +25,7 @@ mod plan_upkeep;
 pub mod queries;
 pub mod service;
 pub mod status;
+mod symbols;
 mod tree_changes;
 mod warm;
 
