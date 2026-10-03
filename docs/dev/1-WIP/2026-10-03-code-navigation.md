@@ -139,12 +139,6 @@ Every `TODO(code-navigation)` stub the contract commit left is resolved: the ind
 `[dependencies]` entry), `createCodeNavigationApi`, `CodeBlock` positions and the pane / drawer
 wiring. Still open:
 
-- **Navigation is offered on every highlighted language**, but the index daemon announces every
-  document to its one language server as `rust` (`navigation.rs` `LANGUAGE_ID`). Either the web gates
-  `onNavigate`/`onHover` on `.rs` or the index daemon refuses other extensions — a decision for the
-  developer; no fallback has been added.
-- **The outgoing `file://` URI is not percent-encoded** (`navigation.rs` `asked_document`), while
-  answered URIs are decoded — a worktree path with a space or `#` is announced wrongly.
 - The hover card is a fixed card at the bottom of the preview, not anchored to the identifier.
 - Hover markdown renders as a pre-wrapped `<pre>`: `renderSimpleMarkdown` has no code-fence support,
   so rust-analyzer's fences show as raw ```.
@@ -177,8 +171,7 @@ Stack gate: base `feature/live-plan/live-plans`, already current, `origin/<base>
 
 - `cargo build -p tddy-index-daemon -p tddy-daemon -p tddy-service -p tddy-worktree-service`: ✅ clean, no warnings.
 - Responsibility delivered (index RPCs, daemon service, web navigation); `## Dependencies` none; `## Boundaries` respected (no `Lsp*` agent tools, no plan/warm-progress calls, no `tddy_lsp_executor` fallback); no deletions.
-- ⚠️ `navigation.rs` announces every document as `rust`; the web offers navigation for every highlighted language (see Technical Debt).
-- ⚠️ `navigation.rs` builds the outgoing `file://` URI without percent-encoding.
+- ✅ Fixed after validation: the index daemon refuses non-`.rs` files (`is_served_source`) and the web offers ctrl-click / hover on `.rs` files only; the outgoing `file://` URI is now percent-encoded (`uri_of_path`, round-trip unit test).
 - ℹ️ `CodeBlock` wraps every identifier in a span even when no handler is given (DOM weight on large plain previews).
 - ℹ️ `code_navigation.rs` `root.display().to_string()` is lossy for non-UTF-8 worktree paths.
 - ℹ️ Pre-existing failures in `tddy-index-daemon`, reproduced with `navigation.rs` reverted: `warming_a_root_forwards…`, `exits_non_zero_when_the_tree_no_longer_holds_against_the_ref`, `a_test_binary_move_in_plan_a_moves_plan_bs_file_hint`.
