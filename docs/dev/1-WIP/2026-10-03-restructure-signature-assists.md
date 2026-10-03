@@ -138,19 +138,19 @@ Not written in the red phase: the plan-schema skill reference rows for the two o
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
-- [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
+- [x] USER REVIEW — development complete (approved 2026-10-03)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-restructure-signature-assists-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps
