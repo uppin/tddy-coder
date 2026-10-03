@@ -371,9 +371,23 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         )));
     }
 
-    // TODO(signature-assists): implement — refuse a `remove_unused_param` with no `name` (the
-    // parameter to drop) and a `convert_tuple_return_to_struct` with no `name` (the new struct's),
-    // as malformed, before any server is spawned.
+    // Without a name there is nothing to remove, and nothing to call the struct: the assist would
+    // either be asked for an arbitrary parameter or leave its own placeholder in the tree.
+    if op.name.is_none() {
+        match op.op {
+            RefactorKind::RemoveUnusedParam => {
+                return Err(malformed(
+                    "`remove_unused_param` needs `name`: the parameter to remove",
+                ))
+            }
+            RefactorKind::ConvertTupleReturnToStruct => {
+                return Err(malformed(
+                    "`convert_tuple_return_to_struct` needs `name`: the new struct's name",
+                ))
+            }
+            _ => {}
+        }
+    }
 
     Ok(op)
 }

@@ -38,6 +38,7 @@ mod prelude_shadow;
 mod readiness;
 mod relative_visibility;
 mod selection;
+mod signature;
 
 pub use chatter::ServerChatter;
 
@@ -327,8 +328,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             needs_inference: false,
             relocates_items: false,
         }),
-        // TODO(signature-assists): verify the title and kind against the bundled rust-analyzer
-        // (2026-03-30) — the assist id is `remove_unused_param`, offered at the parameter.
+        // Offered with the caret on the parameter's name, which is why the caret is placed there.
         RefactorKind::RemoveUnusedParam => Some(Assist {
             title: "remove unused parameter",
             kinds: &["refactor"],
@@ -338,17 +338,13 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             needs_inference: false,
             relocates_items: false,
         }),
-        // TODO(signature-assists): verify the title and kind against the bundled rust-analyzer —
-        // the assist id is `convert_tuple_return_type_to_struct`; the struct it writes is named
-        // after the function, so the placeholder is found by what the assist added.
+        // The struct it writes is named after the function; `multi_file_assist` finds that name by
+        // what the assist added and has the server rename it, so there is no fixed placeholder.
         RefactorKind::ConvertTupleReturnToStruct => Some(Assist {
             title: "convert tuple return type to tuple struct",
             kinds: &["refactor.rewrite"],
             at_caret: true,
-            placeholder: Some(Placeholder {
-                keyword: "struct",
-                name: None,
-            }),
+            placeholder: None,
             multi_file: true,
             needs_inference: false,
             relocates_items: false,
@@ -1162,20 +1158,6 @@ impl RustBackend {
             )?));
         }
 
-        // TODO(signature-assists): implement — `remove_unused_param` places the caret on the
-        // parameter `op.name` names and refuses, naming it, when the server offers no removal
-        // because the body uses it; `convert_tuple_return_to_struct` renames the struct the assist
-        // introduces to `op.name`. Both resolve through `multi_file_assist`, callers included.
-        if matches!(
-            op.op,
-            RefactorKind::RemoveUnusedParam | RefactorKind::ConvertTupleReturnToStruct
-        ) {
-            return Err(failure(format!(
-                "TODO(signature-assists): {:?} is not implemented yet",
-                op.op
-            )));
-        }
-
         self.start(workspace.root)?;
         self.did_open(&uri, &original)?;
         self.ensure_indexed(&uri)?;
@@ -1822,11 +1804,24 @@ impl RustBackend {
         op: &RefactorOp,
     ) -> Result<WorkspaceEdit> {
         (self.progress)(&format!("assist: {:?} (multi-file)", op.op));
-        let range = self.anchor_range(uri, op)?;
+        let mut range = self.anchor_range(uri, op)?;
+        match op.op {
+            RefactorKind::RemoveUnusedParam => range = parameter_caret(workspace, op, range)?,
+            RefactorKind::ConvertTupleReturnToStruct => {
+                range = return_type_caret(workspace, op, range)?
+            }
+            _ => {}
+        }
 
-        let action = self.assist(uri, range, op.op, range.start)?;
+        let action = self
+            .assist(uri, range, op.op, range.start)
+            .map_err(|refusal| refuse_used_parameter(op, refusal))?;
         let resolved = self.request_settled("codeAction/resolve", action)?;
         let workspace_edit = resolved.get("edit").unwrap_or(&resolved);
+
+        if op.op == RefactorKind::ConvertTupleReturnToStruct {
+            return self.name_converted_struct(uri, workspace, op, workspace_edit);
+        }
 
         let mut changes = Vec::new();
         let mut created: Vec<String> = Vec::new();
@@ -1842,6 +1837,89 @@ impl RustBackend {
             )));
         }
         Ok(WorkspaceEdit { changes })
+    }
+
+    /// The edit `convert_tuple_return_type_to_struct` produced, with its struct given the name the
+    /// plan asked for.
+    ///
+    /// The assist names the struct after the function and writes that name into every file it
+    /// touches. The rename is asked of the server, against the documents as the assist left them, so
+    /// the new name reaches the declaration and every rewritten caller without this backend writing
+    /// an identifier itself.
+    fn name_converted_struct(
+        &mut self,
+        uri: &str,
+        workspace: &Workspace<'_>,
+        op: &RefactorOp,
+        workspace_edit: &Value,
+    ) -> Result<WorkspaceEdit> {
+        let name = op
+            .name
+            .as_deref()
+            .ok_or_else(|| failure("the operation needs a name"))?;
+
+        // Every touched document: its path, what is on disk, and what the assist left.
+        let mut documents: Vec<(String, String, String)> = Vec::new();
+        for change in document_changes(workspace_edit) {
+            if change.get("kind").is_some() {
+                return Err(server_defect(
+                    "rust-analyzer's conversion created a file, which it has no reason to",
+                ));
+            }
+            let path = relative_path(change.pointer("/textDocument/uri"), workspace.root)?;
+            let original = workspace.read(&path)?;
+            let updated = apply_lsp_edit(&original, edits_in(&change)?);
+            documents.push((path, original, updated));
+        }
+
+        let anchored = op.anchor.file();
+        let (_, original, updated) = documents
+            .iter()
+            .find(|(path, _, _)| path == anchored)
+            .ok_or_else(|| {
+                server_defect("rust-analyzer's conversion did not edit the function's own file")
+            })?;
+        let (introduced, offset) =
+            signature::introduced_struct(original, updated).ok_or_else(|| {
+                server_defect("rust-analyzer's conversion declared no struct to name")
+            })?;
+
+        if introduced != name {
+            self.did_change(uri, updated)?;
+            for (path, _, text) in documents.iter().filter(|(path, _, _)| path != anchored) {
+                self.did_open(&uri_of(&workspace.root.join(path)), text)?;
+            }
+
+            let position = position_at(updated, offset);
+            self.wait_until_resolved(uri, &position)?;
+            let renamed = self.request_settled(
+                "textDocument/rename",
+                json!({ "textDocument": { "uri": uri }, "position": position, "newName": name }),
+            )?;
+            for (document, edits) in workspace_edits_for(&renamed)? {
+                let path = relative_to(&document, workspace.root)?;
+                let held = documents
+                    .iter_mut()
+                    .find(|(known, _, _)| *known == path)
+                    .ok_or_else(|| {
+                        server_defect(format!(
+                            "the rename of `{introduced}` reached {path}, which the conversion \
+                             did not touch"
+                        ))
+                    })?;
+                held.2 = apply_lsp_edit(&held.2, edits);
+            }
+        }
+
+        Ok(WorkspaceEdit {
+            changes: documents
+                .into_iter()
+                .map(|(path, original, updated)| FileEdit::Change {
+                    edits: minimal_edits(&original, &updated),
+                    path,
+                })
+                .collect(),
+        })
     }
 
     /// The range an operation's anchor names.
@@ -2682,6 +2760,47 @@ fn uri_of(path: &Path) -> String {
 /// nobody acts on differently would be ceremony.
 fn failure(reason: impl Into<String>) -> RestructureError {
     RestructureError::MalformedPlan(reason.into())
+}
+
+/// The caret for `remove_unused_param`: on the name of the parameter the plan names, inside the
+/// function whose own name `range` starts at.
+fn parameter_caret(workspace: &Workspace<'_>, op: &RefactorOp, range: Range) -> Result<Range> {
+    let name = op
+        .name
+        .as_deref()
+        .ok_or_else(|| failure("the operation needs a name"))?;
+    let text = workspace.read(op.anchor.file())?;
+    let at = signature::parameter_position(&text, range.start, name).ok_or_else(|| {
+        seam_refusal(format!(
+            "`{name}` is not a parameter of the function the anchor names"
+        ))
+    })?;
+    Ok(Range { start: at, end: at })
+}
+
+/// The caret for `convert_tuple_return_to_struct`: on the return type of the function whose own
+/// name `range` starts at.
+fn return_type_caret(workspace: &Workspace<'_>, op: &RefactorOp, range: Range) -> Result<Range> {
+    let text = workspace.read(op.anchor.file())?;
+    let at = signature::return_type_position(&text, range.start).ok_or_else(|| {
+        seam_refusal("the function the anchor names declares no return type to convert")
+    })?;
+    Ok(Range { start: at, end: at })
+}
+
+/// A used parameter, as the refusal it is: the server offers no removal for a parameter its
+/// function still reads, and that absence is the answer rather than an assist to wait for.
+///
+/// Any other failure — a server that would not start, one still indexing — is returned untouched.
+fn refuse_used_parameter(op: &RefactorOp, refusal: RestructureError) -> RestructureError {
+    match (op.op, op.name.as_deref(), &refusal) {
+        (RefactorKind::RemoveUnusedParam, Some(name), RestructureError::SeamRefused(reason)) => {
+            seam_refusal(format!(
+                "parameter `{name}` is used, so it cannot be removed ({reason})"
+            ))
+        }
+        _ => refusal,
+    }
 }
 
 /// A refusal the author fixes by cutting the seam elsewhere, or by changing the code.
