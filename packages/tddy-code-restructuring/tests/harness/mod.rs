@@ -2111,6 +2111,71 @@ pub fn a_crate_whose_moved_function_calls_through_relative_paths() -> AFixtureWo
         .tracked_by_git()
 }
 
+/// A crate whose module `outer` holds `widest` and, after it, `user`, which calls `widest`.
+///
+/// Two seams of one plan: the first moves `widest` into `outer::visibility`, which leaves `user`
+/// calling `visibility::widest()` and `outer` declaring `mod visibility;`. The second moves `user`
+/// into `outer::facade`, a sibling of `visibility`, where that path no longer names anything.
+pub fn a_crate_whose_second_seam_calls_what_the_first_moved() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "mod outer;",
+                "",
+                "pub fn total() -> u32 {",
+                "    outer::total()",
+                "}",
+            ]),
+        )
+        .writing(
+            OUTER_MODULE,
+            &source(&[
+                "//! `user` calls `widest`; each is moved into a module of its own.",
+                "",
+                "pub(crate) struct Member {",
+                "    pub(crate) visibility: u32,",
+                "}",
+                "",
+                "pub(crate) fn user(member: &Member) -> bool {",
+                "    member.visibility != 0 && widest() > 1",
+                "}",
+                "",
+                "pub(crate) fn widest() -> u32 {",
+                "    3",
+                "}",
+                "",
+                "pub(crate) fn total() -> u32 {",
+                "    u32::from(user(&Member { visibility: 1 }))",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// `extract_module` of the functions of `outer` named `items` (each with its text), written to a
+/// file of its own as `name`.
+pub fn an_extract_of_outer_functions_into_a_file(items: &[(&str, &str)], name: &str) -> RefactorOp {
+    let anchor = Anchor::Items {
+        file: OUTER_MODULE.to_string(),
+        items: items
+            .iter()
+            .map(|(item, _)| {
+                tddy_code_restructuring::ItemPath::parse(&format!("origin::outer::{item}"))
+                    .expect("the item path parses")
+            })
+            .collect(),
+        fingerprints: items
+            .iter()
+            .map(|(_, text)| tddy_code_restructuring::Fingerprint::of(text))
+            .collect(),
+    };
+    let mut seam = an_extraction(RefactorKind::ExtractModule, anchor, name);
+    seam.to_file = true;
+    seam
+}
+
 /// The module file [`a_crate_whose_module_declares_a_function_visible_in_its_parent`] splits.
 pub const OUTER_MODULE: &str = "crates/origin/src/outer.rs";
 

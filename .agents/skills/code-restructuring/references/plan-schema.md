@@ -268,7 +268,12 @@ not define is refused rather than ignored.
   `super::x` gains one `super::` (`self::x` becomes `super::x`), except where the path stays inside
   a module the moved code itself declares; strings, comments and `use` items are untouched, and a
   `pub(super)` field of a moved struct is rebased like a `pub(super)` item. The count is reported as
-  a `paths: N super:: path(s) re-rooted for the new module` note.
+  a `paths: N path(s) re-rooted for the new module` note.
+  A path whose first segment is a module the *parent* declares (`visibility::WIDENED`, beside
+  `mod visibility;`) gains `super::` too, since the new module is that module's sibling — unless the
+  moved code might bind the name itself (any `use` mentioning it, a `mod`, a local or a parameter of
+  that name), in which case none of that module's paths are touched; a `.name` member access or an
+  `a::name` segment is not a binding.
 
   A second, lexical step then carries across every name the parent binds by `use` that the moved code
   uses and the module does not bind: the server cannot report a name unresolved when the prelude
