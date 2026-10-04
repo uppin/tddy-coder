@@ -17,3 +17,20 @@ pub(crate) enum DemoVmHandle {
     /// Boot or shutdown failed.
     Error(String),
 }
+
+/// What the demo-VM RPCs read of the host that serves them: the per-session VM table, the data
+/// root and the config their sessions base is resolved from, the session-token resolver, and the
+/// idle tracker an RPC bumps.
+///
+/// Built from the host's fields by `demo_vm_service_state` and held by `DemoVmServiceImpl`, so the
+/// handlers run without the host.
+#[derive(Clone)]
+pub(crate) struct DemoVmState {
+    /// Per-session demo VM state — keyed by session_id.
+    pub(crate) demo_vm_state:
+        std::sync::Arc<tokio::sync::Mutex<std::collections::HashMap<String, DemoVmHandle>>>,
+    pub(crate) tddy_data_dir: std::path::PathBuf,
+    pub(crate) user_resolver: tddy_daemon_kernel::SessionUserResolver,
+    pub(crate) rpc_activity: tddy_daemon_kernel::relay_idle::RpcActivity,
+    pub(crate) config: tddy_daemon_kernel::config::DaemonConfig,
+}

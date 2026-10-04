@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use super::activity_hub;
-use super::DaemonSessionHost;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::demo_vm::{
@@ -11,13 +10,13 @@ use tddy_service::proto::demo_vm::{
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
 };
 
-impl DaemonSessionHost {
+impl activity_hub::DemoVmState {
     pub(crate) async fn start_demo_vm_at_coordinate(
         &self,
         request: Request<StartDemoVmRequest>,
     ) -> Result<Response<StartDemoVmResponse>, Status> {
         let req = request.into_inner();
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let os_user = &self
@@ -148,7 +147,7 @@ impl DaemonSessionHost {
         request: Request<StopDemoVmRequest>,
     ) -> Result<Response<StopDemoVmResponse>, Status> {
         let req = request.into_inner();
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let _os_user = &self
@@ -197,7 +196,7 @@ impl DaemonSessionHost {
         request: Request<GetDemoVmStatusRequest>,
     ) -> Result<Response<GetDemoVmStatusResponse>, Status> {
         let req = request.into_inner();
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let _os_user = &self

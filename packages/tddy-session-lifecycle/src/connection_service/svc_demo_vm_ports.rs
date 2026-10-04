@@ -1,4 +1,4 @@
-//! Family O — `demo_vm.DemoVmService` on [`DaemonSessionHost`].
+//! Family O — `demo_vm.DemoVmService`.
 
 use std::sync::Arc;
 
@@ -10,17 +10,19 @@ use tddy_service::proto::demo_vm::{
 };
 use tddy_service::DemoVmServiceServer;
 
-use super::DaemonSessionHost;
+use super::{activity_hub, DaemonSessionHost};
 
-/// Thin `DemoVmService` adapter over a [`DaemonSessionHost`].
+/// Thin `DemoVmService` adapter over the host's [`DemoVmState`](activity_hub::DemoVmState).
 pub struct DemoVmServiceImpl {
-    host: Arc<DaemonSessionHost>,
+    state: activity_hub::DemoVmState,
 }
 
 impl DemoVmServiceImpl {
     #[must_use]
     pub fn new(host: Arc<DaemonSessionHost>) -> Self {
-        Self { host }
+        Self {
+            state: host.demo_vm_service_state(),
+        }
     }
 }
 
@@ -30,21 +32,21 @@ impl DemoVmService for DemoVmServiceImpl {
         &self,
         request: Request<StartDemoVmRequest>,
     ) -> Result<Response<StartDemoVmResponse>, Status> {
-        self.host.start_demo_vm_at_coordinate(request).await
+        self.state.start_demo_vm_at_coordinate(request).await
     }
 
     async fn stop_demo_vm(
         &self,
         request: Request<StopDemoVmRequest>,
     ) -> Result<Response<StopDemoVmResponse>, Status> {
-        self.host.stop_demo_vm_at_coordinate(request).await
+        self.state.stop_demo_vm_at_coordinate(request).await
     }
 
     async fn get_demo_vm_status(
         &self,
         request: Request<GetDemoVmStatusRequest>,
     ) -> Result<Response<GetDemoVmStatusResponse>, Status> {
-        self.host.get_demo_vm_status_at_coordinate(request).await
+        self.state.get_demo_vm_status_at_coordinate(request).await
     }
 }
 

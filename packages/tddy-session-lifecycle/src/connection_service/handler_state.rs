@@ -130,6 +130,18 @@ impl DaemonSessionHost {
         svc_spawn_split_agent::split_forward_deadline(&self.config)
     }
 
+    /// The fields the demo-VM RPCs read, shared with this host (the VM table and idle tracker are
+    /// the same handles) so a service built from them acts on the host's own VMs.
+    pub(crate) fn demo_vm_service_state(&self) -> super::activity_hub::DemoVmState {
+        super::activity_hub::DemoVmState {
+            demo_vm_state: Arc::clone(&self.demo_vm_state),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            user_resolver: Arc::clone(&self.user_resolver),
+            rpc_activity: self.rpc_activity.clone(),
+            config: self.config.clone(),
+        }
+    }
+
     /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in
     /// `tddy-session-agents` that works them for the length of one call.
     pub(crate) fn agent_roster_state(&self) -> AgentRosterState<'_> {
