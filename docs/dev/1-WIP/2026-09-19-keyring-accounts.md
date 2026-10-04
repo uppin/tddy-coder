@@ -396,3 +396,58 @@ only this PR's files.
   `credential_vaults` exists but auth reports vault state NONE, so the passphrase prompt never shows
   while `/accounts` says "no vault yet". **Developer decision 2026-10-04**: the stub-provider tests
   pre-configure an open vault for the stub user — tracked as the open Scope item above.
+
+Step-1 fix: the lost-update window is recorded as
+[2026-10-04-keyring-accounts-rename-lost-update.md](../todo/2026-10-04-keyring-accounts-rename-lost-update.md)
+(⚠ deferred — needs an atomic update on `SessionVault`, 3/9's surface) and the `TODO(keyring)` names
+it (`5bce9d2a`).
+
+### /validate-tests — 2026-10-04 (`/pr-wrap` step 2)
+
+Tests analyzed: 14 Rust acceptance (`accounts_service_acceptance.rs`), 12 Rust unit
+(`vault_store.rs`), 10 Cypress component (`AccountsScreenAcceptance.cy.tsx`), 4 `appRoutes` unit.
+Critical 0 · Warning 2 · Info 1 — both warnings fixed in `1fb85970`:
+
+- ⚠ `vault_store.rs` `a_locked_vault_stays_locked`, `a_failure_meant_for_the_person_keeps_its_reason`
+  — no Given/When/Then. Restructured, same assertions.
+- ⚠ `AccountsScreenAcceptance.cy.tsx` "keeps two providers' accounts in separate groups" — raw
+  `[data-testid=…]` selector in the test body. Now the page-object `row` helper scoped by `within`.
+- ℹ The `accounts-action-error` path (a failed rename or removal) had no test. Added "reports a
+  failed rename beside the list, which stays" and the `actionError` page-object helper.
+
+No skipped/focused tests, no timing dependence; the in-memory store and `anInMemoryRpcBackend` keep
+both suites deterministic.
+
+### /validate-prod-ready — 2026-10-04 (`/pr-wrap` step 3)
+
+Production files checked: 12 (generated and test files excluded). Mock code 0 · dev fallbacks 0 ·
+debug output 0 · unused code 0 · TODO/FIXME 1 — the `TODO(keyring)` in `set_label`, now deferred
+with a backlog entry (acceptable). Status: ✅ Ready.
+
+### File-length gate — 2026-10-04 (`/pr-wrap` step 3.5)
+
+Range `origin/master..HEAD` (merge-base `b42eb558`), production lines to the first `#[cfg(test)]`.
+
+| File | Before → after | Action |
+|---|---|---|
+| `packages/tddy-daemon/src/runtime.rs` | 1,677 → 1,689 | 🔴 **Not decomposed** — pre-existing; #512 (5/9) and other stacks also touch it; recorded in `oversized-file-runtime` / `complexity-runtime-build` and the post-stack split entry `2026-09-24-keyring-store-deferred-oversized-file-splits.md`. Needs developer consent to defer this PR's +12 |
+| `packages/tddy-service/build.rs` | 709 → 723 | 🔴 **Not decomposed** — pre-existing; #512 (5/9) also adds a prost pass to it; recorded in `oversized-file-build` and the same post-stack entry. Needs developer consent to defer this PR's +14 |
+
+Every new file is under budget: `vault_store.rs` 142, `service.rs` 164, `AccountsScreen.tsx` 205,
+`AccountsAppPage.tsx` 140.
+
+### /analyze-clean-code — 2026-10-04 (`/pr-wrap` step 4)
+
+**Score: D** (3 "must refactor", all JSX component functions over 60 lines). Rust functions are all
+≤ 40 lines, nesting ≤ 3, parameters ≤ 4 (`set_label`'s 5 includes `&self`).
+
+| Function | Lines | Note |
+|---|---|---|
+| `AccountsScreen.tsx` `AccountRowView` | ~65 | extract `RenameForm` and `RemoveControl` |
+| `AccountsScreen.tsx` `renderOutcome` | ~64 | extract the `listed` branch into `ProviderGroups` |
+| `AccountsAppPage.tsx` `AccountsAppPage` | ~70 | extract the rename/remove handlers into a `useAccountsActions` hook |
+
+**Deferred, not applied**: #515 (8/9) edits both `AccountsScreen.tsx` (+40/−5) and
+`AccountsAppPage.tsx` (+17/−4), so restructuring them here would turn #515's diff into conflicts
+(`/pr-wrap` step 4 stack rule). Do them on a follow-up branch after the stack lands, or in #515.
+No magic values (`SUBJECT_METADATA_KEY`, `STORE_UNREADABLE` named); no duplication in production code.
