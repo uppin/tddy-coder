@@ -231,8 +231,8 @@ dependency compile.
   would cost ~8–10 minutes of run time in this leg (their summed time is ~950s) — so do it **after** (1)
   and (2), when the rest of the leg is fast enough that it is the long pole. Two `tddy-index-daemon` files
   and one `tddy-tools` file also say they run a live rust-analyzer and are not in the e2e set.
-- **Report the e2e per-binary timing in the check summary**, so the next regression shows up as a number
-  rather than a 35-minute job.
+- ~~Report the e2e per-binary timing in the check summary.~~ Done: the e2e leg's step summary lists every
+  test binary with its time and test count (`scripts/ci-e2e-timing.ts junit`, `docs/dev/guides/ci.md`).
 
 ## Why it was left
 
@@ -252,8 +252,9 @@ the leg fail in minutes with a named test, not time out at the job limit. Concre
 3. Lift the `docker` group for the LiveKit binaries. **Gate:** measured run time and a flake count over
    several runs.
 4. ~~The deadline setting (and the split of `rpc_scenarios`).~~ Landed in #579 (`#e2e-leg` 2/5). **Gate still open:** the e2e leg's run time with the 2 s deadline test and the split scenarios, read off CI.
-5. The cache question, then the `--timings` measurement from 3a. If test targets are a meaningful share,
-   do 3a (features, `required-features`, the generated target list, the lint); otherwise `nextest archive`.
+5. ~~The cache question, then the `--timings` measurement from 3a.~~ Measured: the e2e leg would skip 53.3% of
+   its compile, over the 25% gate. The split itself is now its own entry:
+   [split the compile by test target](./2026-10-04-split-e2e-leg-compile-by-test-target.md).
 
 **Do not** put a branch in production code that only the tests take, and do not weaken a deadline test
 into a bare `is_err()`: the test asserts `DeadlineExceeded` on purpose, so that a missing deadline cannot
