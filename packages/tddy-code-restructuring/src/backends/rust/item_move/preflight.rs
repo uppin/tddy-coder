@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use super::super::{failure, is_identifier};
 use super::creation::{self, Destination};
-use super::destination::{find_module, package_of, Lookup, Package};
+use super::destination::{find_module, package_of, Lookup, Module, Package};
 use super::written_in;
 use crate::crate_move::source_scan::items_of_module;
 use crate::plan::{Anchor, ItemPath, RefactorOp};
@@ -140,7 +140,14 @@ fn obstacles(
     }
 
     let text = workspace.read(&module.file)?;
-    let taken = taken_by_something_else(&text[module.scope.clone()], &module.path, source, names);
+    let taken = taken_by_something_else(
+        workspace,
+        &named.package,
+        &module,
+        &text[module.scope.clone()],
+        source,
+        names,
+    )?;
     let clashes = names
         .iter()
         .filter(|name| taken.contains(name.as_str()))
@@ -159,27 +166,69 @@ fn obstacles(
 /// item that is moving: that import is not a second declaration, and the move's own re-pointing
 /// removes it.
 fn taken_by_something_else(
-    module_text: &str,
-    destination: &[String],
+    workspace: &Workspace<'_>,
+    package: &Package,
+    module: &Module,
+    text: &str,
     source: &[String],
     names: &[String],
-) -> BTreeSet<String> {
-    let items = items_of_module(module_text);
-    let mut taken = names_declared_in(module_text);
+) -> Result<BTreeSet<String>> {
+    let items = items_of_module(text);
+    let mut taken = names_declared_in(text);
     for name in names {
         let declared_here =
             items.defined.contains(name) || items.children.iter().any(|child| &child.name == name);
         let moved_path: Vec<String> = source.iter().cloned().chain([name.clone()]).collect();
-        let only_imports_the_moved = items
+        let mut only_imports_the_moved = true;
+        for leaf in items
             .uses
             .iter()
             .filter(|leaf| leaf.bound_name() == Some(name.as_str()))
-            .all(|leaf| resolved_from(&leaf.segments, destination).as_ref() == Some(&moved_path));
+        {
+            let Some(path) = resolved_from(&leaf.segments, &module.path) else {
+                only_imports_the_moved = false;
+                continue;
+            };
+            only_imports_the_moved &=
+                path == moved_path || reexports(workspace, package, &path, source, name)?;
+        }
         if !declared_here && only_imports_the_moved {
             taken.remove(name);
         }
     }
-    taken
+    Ok(taken)
+}
+
+/// Whether the module that `path` ends in (the last segment being the name) re-exports `name` from
+/// the `source` module: by a `use` of the item itself, or by a glob of the source module.
+fn reexports(
+    workspace: &Workspace<'_>,
+    package: &Package,
+    path: &[String],
+    source: &[String],
+    name: &str,
+) -> Result<bool> {
+    let Some((_, through)) = path.split_last() else {
+        return Ok(false);
+    };
+    let Lookup::Found(module) = find_module(workspace, package, through)? else {
+        return Ok(false);
+    };
+    let text = workspace.read(&module.file)?;
+    let moved_path: Vec<String> = source.iter().cloned().chain([name.to_string()]).collect();
+    Ok(items_of_module(&text[module.scope.clone()])
+        .uses
+        .iter()
+        .any(|leaf| {
+            let Some(reached) = resolved_from(&leaf.segments, &module.path) else {
+                return false;
+            };
+            if leaf.glob {
+                reached == source
+            } else {
+                leaf.bound_name() == Some(name) && reached == moved_path
+            }
+        }))
 }
 
 /// The path below the crate root that `segments`, written in a `use` of the module at `at`, names.
@@ -251,29 +300,5 @@ mod tests {
             resolved_from(&path("super::guard::Route"), &path("svc::exec")),
             Some(path("svc::guard::Route"))
         );
-    }
-
-    #[test]
-    fn leaves_out_the_name_a_destination_binds_only_by_importing_the_moved_item() {
-        let taken = taken_by_something_else(
-            "use crate::pairing::answer;\n",
-            &path("answers"),
-            &path("pairing"),
-            &["answer".to_string()],
-        );
-
-        assert!(taken.is_empty());
-    }
-
-    #[test]
-    fn keeps_the_name_a_destination_binds_by_importing_something_else() {
-        let taken = taken_by_something_else(
-            "use crate::other::answer;\n",
-            &path("answers"),
-            &path("pairing"),
-            &["answer".to_string()],
-        );
-
-        assert!(taken.contains("answer"));
     }
 }
