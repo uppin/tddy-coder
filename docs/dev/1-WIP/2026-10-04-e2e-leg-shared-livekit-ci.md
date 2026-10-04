@@ -44,11 +44,11 @@ Existing flakes under load are the baseline against which node 5's flake count i
 
 ## Scope
 
-- [ ] `scripts/livekit-ci-server.sh start|stop`: `docker run -d --rm` of the **pinned** image with host port = container port for signalling, ICE/TCP and ICE/UDP (as `start()` does), waits for the Twirp API, writes `LIVEKIT_TESTKIT_WS_URL=…` to `$GITHUB_ENV`, prints the image reference and digest to the log; `stop` is idempotent
-- [ ] Workflow: start step (e2e leg only, `timeout-minutes` short, fails loudly) before nextest and `if: always()` stop step after it
+- [x] `scripts/livekit-ci-server.sh start|stop`: `docker run -d --rm` of the **pinned** image with host port = container port for signalling, ICE/TCP and ICE/UDP (as `start()` does), waits for the Twirp API, writes `LIVEKIT_TESTKIT_WS_URL=…` to `$GITHUB_ENV`, prints the image reference and digest to the log; `stop` is idempotent
+- [x] Workflow: start step (e2e leg only, `timeout-minutes` short, fails loudly) before nextest and `if: always()` stop step after it
 - [ ] Pin the image: one source of truth for the reference used by the testkit and the script (chosen at green by running the suite twice on a release tag/digest; not decided here)
 - [ ] `.config/nextest.toml`: `slow-timeout` (period, `terminate-after`) on the `docker` override, sized above the longest legitimate test, measured from node 3's per-binary table
-- [ ] `./run-livekit-testkit-server --stop`, and the same host=container mapping so the local reuse path works for media too
+- [x] `./run-livekit-testkit-server --stop`, and the same host=container mapping so the local reuse path works for media too
 - [ ] The kill-the-server drill, runnable from `workflow_dispatch` with an input that stops the server mid-run, and its recorded result
 - [ ] Tighten the leg's `timeout-minutes` once real runtime is known (separate from the 150-minute shared job default; may need the job split or a per-leg expression)
 
@@ -79,12 +79,12 @@ Existing flakes under load are the baseline against which node 5's flake count i
 
 ## Implementation Milestones
 
-- [ ] Script and stubbed-docker tests
+- [x] Script and stubbed-docker tests
 - [ ] Image pin chosen and verified on two consecutive runs
 - [ ] Workflow steps; leg green with the group still serial
 - [ ] `slow-timeout` sized from measured timings
 - [ ] Kill-the-server drill run and recorded
-- [ ] Local script `--stop` and port mapping
+- [x] Local script `--stop` and port mapping
 
 ## Testing Plan
 

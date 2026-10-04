@@ -330,6 +330,26 @@ coming back. A false green is worse than a red one.
 | `cloud_init_acceptance` (the two tests CI does not run) | Nothing structural — each bakes from the bare cloud image like the one that does run. They are left out because a second and third bake buys inspection of an artifact the `Cloudinit VM boot` check already boots |
 | `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
 
+## The shared LiveKit server
+
+The `Rust e2e tests` leg starts one LiveKit server before nextest and removes it after, as two
+workflow steps (`Start shared LiveKit server`, and `Stop shared LiveKit server` with `if: always()`),
+both `scripts/livekit-ci-server.sh`. `start` runs the pinned image, waits for the Twirp API (bounded by
+`LIVEKIT_CI_READY_TIMEOUT_SECS`, default 60; on timeout it prints the URL and the container's logs and
+fails), and appends `LIVEKIT_TESTKIT_WS_URL` to `$GITHUB_ENV`, so `LiveKitTestkit::start()` reuses it
+instead of launching a container. Each of the three ports (7880 signalling, 7881 ICE/TCP, 7882
+ICE/UDP) is published on the same number inside and outside the container, because LiveKit embeds
+its container ports in ICE candidates. `stop` is safe to run twice. The unit leg starts nothing.
+
+The image is pinned in one file, `.config/livekit-server.image`, read by the script,
+`./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
+a one-line edit; the pin is not yet proven by two consecutive green e2e runs.
+`./run-livekit-testkit-server --stop` removes the local reusable server.
+
+The `docker` override in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a
+LiveKit test stuck on a dead server is killed and named in minutes rather than at the job's limit.
+Its value is a conservative placeholder until it is sized from the per-binary timing table.
+
 ## Flaky tests
 
 The LiveKit testkit picks a free port by binding `:0` and releasing it, leaving a

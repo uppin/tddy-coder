@@ -163,3 +163,8 @@ filter = """
 )
 """
 test-group = "docker"
+# A test blocked on a LiveKit server that died stops being slow and starts being stuck; without this
+# it waits for the job's 150-minute limit. Terminated tests are reported by name.
+# TODO(shared-livekit-ci): conservative guess, no timing data yet. Re-size `period` from the node-3
+# per-binary table (longest legitimate test plus headroom), then tighten `terminate-after`.
+slow-timeout = { period = "120s", terminate-after = 5 }

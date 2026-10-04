@@ -140,6 +140,13 @@ jobs:
           find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
           find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
 
+      # The e2e leg's LiveKit tests share one pinned server (see docs/dev/guides/ci.md) instead of
+      # starting a container each. The script exports LIVEKIT_TESTKIT_WS_URL through $GITHUB_ENV.
+      - name: Start shared LiveKit server
+        if: ${{ matrix.e2e }}
+        timeout-minutes: 5
+        run: scripts/livekit-ci-server.sh start
+
       - name: cargo nextest
         id: nextest
         # Keep going on failure so the JUnit report still publishes; the report
@@ -155,6 +162,11 @@ jobs:
             filter="not ($e2e)"
           fi
           ./dev cargo nextest run --workspace --profile ci --locked -E "$filter"
+
+      - name: Stop shared LiveKit server
+        if: ${{ always() && matrix.e2e }}
+        timeout-minutes: 2
+        run: scripts/livekit-ci-server.sh stop
 
       # Where the e2e leg's run time goes, per test binary, on the check's summary page — from the
       # JUnit nextest just wrote, so it costs nothing. Skipped only when nextest wrote none (a build
