@@ -82,9 +82,9 @@ impl AccountStore for SessionVaultAccountStore {
         label: &str,
     ) -> Result<CredentialRecord, AccountsError> {
         let (subject, vault) = self.vault_for(session_token)?;
-        // TODO(keyring): the read and the write are two vault operations, each serialised on its
-        // own. A write to the same record landing between them (a link flow refreshing the secret)
-        // is overwritten with the secret read here. `SessionVault` offers no read-modify-write.
+        // TODO(keyring): the read and the write are two separately serialised vault operations, so
+        // a write to this record landing between them is overwritten with the secret read here.
+        // See docs/dev/todo/2026-10-04-keyring-accounts-rename-lost-update.md.
         let mut record = vault
             .get(provider, account)
             .map_err(|error| refusal_of(&subject, error))?
