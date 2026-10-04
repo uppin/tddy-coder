@@ -3,7 +3,7 @@
 **Date**: 2026-09-19
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `feature/keyring/store` (#510)
+**Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `master` (3/9 `feature/keyring/store`, #510, is merged)
 
 ## Affected Packages
 
@@ -35,11 +35,11 @@ Adds the first surface over the credential store `#keyring` 3/9 introduced: `acc
 pieces: a route constant and an `is*Path` predicate in `src/routing/appRoutes.ts:88-130`, an
 `*AppPage` component, a nav `Button` with a `data-testid` in `DaemonNavMenu.tsx:55-140`, and one rung
 in the ladder at `src/index.tsx:483-499`. This node adds a ninth by the same four pieces — the work
-is the service and the three list states, not the plumbing.
+is the service and the four list states, not the plumbing.
 
 After 3/9 the vault's contents are observable by nothing. That blocks 5/9, whose assignment UI must
-show what is assignable, and it leaves the deliberate `Locked` outcome with nowhere to be reported —
-so its only symptom would be git operations failing later, unexplained.
+show what is assignable, and it leaves a locked or not-yet-created vault with nowhere to be
+reported — so its only symptom would be git operations failing later, unexplained.
 
 ## Responsibility
 
@@ -47,8 +47,8 @@ so its only symptom would be git operations failing later, unexplained.
 
 - `accounts.proto` and the `AccountsService` contract;
 - the rule, enforced by message shape, that no response carries a secret;
-- the three distinct list outcomes — empty, `vault_locked`, error;
-- the `/accounts` screen, its route, its nav entry and its rendering of those three states.
+- the four distinct list outcomes — empty, `vault_uninitialized`, `vault_locked`, error;
+- the `/accounts` screen, its route, its nav entry and its rendering of those four states.
 
 ## Boundaries
 
@@ -87,13 +87,19 @@ cheaply; adding proto and RPC to it would push that cost onto every dependent.
 
 ## Dependencies
 
-**Parent in the line**: `#keyring` 3/9 `store` — [#510](https://github.com/uppin/tddy-coder/pull/510).
-This is a **real dependency edge**, not just a line position: `SessionVault`, `ProviderId`,
-`AccountId` and `VaultError::Locked` are all 3/9's, and this node's three list outcomes are a direct
-rendering of them.
+**Parent in the line**: `#keyring` 3/9 `store` — [#510](https://github.com/uppin/tddy-coder/pull/510),
+**merged**; this branch is now based on `master`. This is a **real dependency edge**, not just a line
+position: `SessionVaults`, `VaultState`, `SessionVault`, `ProviderId`, `AccountId` and `VaultError`
+are all 3/9's, and this node's list outcomes are a direct rendering of `VaultState`.
+
+3/9 merged in a redesigned form: the vault is **passphrase-based**. A login does not open it;
+`UnlockVault` with the passphrase does, or a session refresh presenting an unlock key. So `Locked` no
+longer means "the login credential changed and the key no longer unwraps" — it means a vault exists
+and is not unlocked on this daemon, and its passphrase is the recovery, not re-linking. And a subject
+may have **no vault yet** (`VaultState::Uninitialized`), which is a fourth outcome.
 
 **Transitively**: 1/9 [#508](https://github.com/uppin/tddy-coder/pull/508) and 2/9
-[#509](https://github.com/uppin/tddy-coder/pull/509) via 3/9.
+[#509](https://github.com/uppin/tddy-coder/pull/509), both merged.
 
 **Dependents**: 5/9 `assignments`, 6/9 `sync`, 7/9 `screen-share`, 8/9 `link-github`, and 9/9
 transitively — **five**, which is why this node is alone in its wave and why nothing else can start
@@ -104,7 +110,8 @@ all in place.
 
 ## Draft PR contract
 
-Published in this PR's **second commit**:
+Published in this PR's **second commit**, and recorded here as it was then — before 3/9 merged
+passphrase-based, which added the fourth (`vault_uninitialized`) outcome described above:
 
 **Surface**
 
@@ -141,7 +148,7 @@ So this node owns one more symbol than the plan listed — a **port trait** in
 `packages/tddy-accounts/src/store.rs`:
 
 ```rust
-pub enum AccountsError { NoSuchSession, Locked, Unavailable(String) }
+pub enum AccountsError { NoSuchSession, Locked, Uninitialized, Unavailable(String) }
 
 pub trait AccountStore: Send + Sync {
     fn list(&self, session_token: &str) -> Result<Vec<CredentialRecord>, AccountsError>;
@@ -161,11 +168,13 @@ Three things about it are deliberate:
   another owns; a new trait in *this* crate, with 3/9's types as parameters, does not touch 3/9's
   surface. The green phase adds this crate's own implementation over `SessionVault` — again in this
   crate, not in `tddy-credentials`.
-- **Its three error variants are exactly the three outcomes the PRD refuses to collapse**, plus the
-  refused token. `Locked` becomes `vault_locked: true`, `Unavailable` becomes an RPC error carrying
+- **Its error variants are exactly the outcomes the PRD refuses to collapse**, plus the
+  refused token. `Locked` becomes `vault_locked: true`, `Uninitialized` becomes
+  `vault_uninitialized: true` (on a rename or removal, both are `FailedPrecondition` naming the
+  remedy — the passphrase), `Unavailable` becomes an RPC error carrying
   the reason meant for the person (an I/O failure's text names server-side paths, so the client gets
-  a fixed path-free sentence and the daemon log gets the full error with its subject), `NoSuchSession` becomes a refusal — and an `Ok(vec![])` becomes an empty list. Four
-  inputs, four distinguishable responses, which is what the acceptance tests assert.
+  a fixed path-free sentence and the daemon log gets the full error with its subject), `NoSuchSession` becomes a refusal — and an `Ok(vec![])` becomes an empty list. Five
+  inputs, five distinguishable responses, which is what the acceptance tests assert.
 
 ## Green wave
 
@@ -202,7 +211,7 @@ this node does not claim otherwise.
 - [x] **Changeset**: this document
 - [ ] **Draft PR contract**: proto + surface + failing tests (wave 2, commit 2)
 - [ ] **Proto**: `accounts.proto` and its generated code
-- [ ] **Service**: `tddy-accounts` over `SessionVault`, three distinct list outcomes
+- [ ] **Service**: `tddy-accounts` over `SessionVaults`, four distinct list outcomes
 - [ ] **Registration**: one entry in `runtime.rs`
 - [ ] **Web**: route, predicate, `AccountsAppPage`, nav entry, ladder rung
 - [ ] **Testing**: Rust service tests + Cypress component tests + `appRoutes` unit tests
@@ -215,25 +224,28 @@ this node does not claim otherwise.
 
 - The vault exists (3/9) and nothing can observe it.
 - Eight daemon-scoped screens; no accounts route, no accounts service, no `accounts.proto`.
-- `VaultError::Locked` has no representation above the store.
+- A locked or not-yet-created vault has no representation above the store.
 
 ### State B (Target)
 
 - `AccountsService` lists and curates records, returning summaries and never secrets.
 - `/accounts` is the ninth daemon-scoped screen, grouped by provider, with rename and remove.
-- Empty, locked and errored are three distinct, explained states from `VaultError` to the DOM.
+- Empty, uninitialized, locked and errored are four distinct, explained states from `VaultState`
+  to the DOM.
 
 ### Delta (What's Changing)
 
 #### tddy-service
 - **API**: `proto/accounts.proto` — `AccountsService` with `ListAccounts`, `SetAccountLabel`,
-  `RemoveAccount`; `AccountSummary { provider, account_id, label, subject, updated_at, has_secret }`.
+  `RemoveAccount`; `AccountSummary { provider, account_id, label, subject, updated_at, has_secret }`;
+  `ListAccountsResponse { providers, vault_locked, vault_uninitialized }`.
   Every request carries `session_token` first, as every other service does.
 
 #### tddy-accounts (new)
 - **Architecture**: depends on `tddy-credentials` and `tddy-service`; **not** on `tddy-daemon-auth`
   and **not** on LiveKit.
-- **Implementation**: maps `SessionVault` results to the three outcomes; refuses an invalid
+- **Implementation**: maps `SessionVaults::state` — open (read through `use_open`, a use), locked,
+  uninitialized — and `SessionVault` results to the four outcomes; refuses an invalid
   `session_token` rather than serving an empty list.
 
 #### tddy-daemon
@@ -249,7 +261,7 @@ this node does not claim otherwise.
 ## Implementation Milestones
 
 - [ ] **M1** — `accounts.proto` + generated code
-- [ ] **M2** — `tddy-accounts`: `ListAccounts` with the three outcomes distinct
+- [ ] **M2** — `tddy-accounts`: `ListAccounts` with the four outcomes distinct
 - [ ] **M3** — `SetAccountLabel`, `RemoveAccount`, and `session_token` refusal
 - [ ] **M4** — register the entry in `runtime.rs`
 - [ ] **M5** — route constant, predicate and their tests
@@ -265,17 +277,18 @@ this node does not claim otherwise.
 **Rust for the contract, Cypress for the screen, and the split is where the risk is.** That no
 response carries a secret is a property of the wire, so it is asserted in Rust **over the serialised
 response** — a struct-field assertion would pass a refactor that adds a field later. That empty,
-locked and errored look different to a person is a property of the DOM, so it is a component test.
+uninitialized, locked and errored look different to a person is a property of the DOM, so it is a
+component test.
 
 Cypress component tests use `mountWithRpc` + `anInMemoryRpcBackend`, never `cy.intercept` — the house
-rule, and here it also means the three states are produced by a backend returning what the real one
+rule, and here it also means the four states are produced by a backend returning what the real one
 returns rather than by a hand-written fixture.
 
 ### Rust tests (`tddy-accounts`)
 
 - `ListAccounts` groups a multi-provider vault by provider.
 - **No field of the serialised response contains a stored secret.**
-- An empty vault, `VaultError::Locked` and an I/O error produce three distinct responses.
+- An empty vault, no vault yet, a locked vault and an I/O error produce four distinct responses.
 - An invalid or absent `session_token` is refused — **not** served an empty list.
 - `SetAccountLabel` changes only the label; `account_id` and the secret are untouched.
 - `RemoveAccount` removes exactly one record and leaves the rest openable.
@@ -283,7 +296,7 @@ returns rather than by a hand-written fixture.
 ### Web tests
 
 - `appRoutes.test.ts`: `/accounts` matches, `/accounts-archive` does not, `/accounts/x` does not.
-- Cypress component: the three list states render distinctly, each naming its reason.
+- Cypress component: the four list states render distinctly, each naming its reason.
 - Cypress component: rename issues `SetAccountLabel`; remove issues `RemoveAccount` only after
   confirmation.
 
@@ -295,6 +308,8 @@ belongs to CI. `tsc` is not a gate in this repo. Whole-workspace green comes fro
 `scripts/ci-status.sh`.
 
 ### Measured red state (wave 2)
+
+Recorded before 3/9 merged; it measures the three-outcome contract of that commit.
 
 Scoped to the packages this commit touches. `tddy-service` is the only *existing* Rust package it
 changes; `tddy-accounts` is new, so it has no baseline of its own.
@@ -332,7 +347,7 @@ is fixed by amending 2/9 during the stack's closing cascade.
 ## Acceptance Criteria
 
 - [ ] `ListAccounts` returns records grouped by provider with **no secret in any field**
-- [ ] Empty, locked and errored render as three distinct, explained states
+- [ ] Empty, uninitialized, locked and errored render as four distinct, explained states
 - [ ] `SetAccountLabel` leaves `account_id` stable, so 5/9's assignments survive a rename
 - [ ] `RemoveAccount` removes exactly one record, behind a confirmation
 - [ ] An invalid `session_token` is refused rather than served an empty list

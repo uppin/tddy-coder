@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file accounts.proto.
  */
 export const file_accounts: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMifgoOQWNjb3VudFN1bW1hcnkSEAoIcHJvdmlkZXIYASABKAkSEgoKYWNjb3VudF9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAMSEgoKaGFzX3NlY3JldBgGIAEoCCJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIlsKFExpc3RBY2NvdW50c1Jlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMSFAoMdmF1bHRfbG9ja2VkGAIgASgIImQKFlNldEFjY291bnRMYWJlbFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJEg0KBWxhYmVsGAQgASgJIkQKF1NldEFjY291bnRMYWJlbFJlc3BvbnNlEikKB2FjY291bnQYASABKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSJTChRSZW1vdmVBY2NvdW50UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkiRgoVUmVtb3ZlQWNjb3VudFJlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMyigIKD0FjY291bnRzU2VydmljZRJNCgxMaXN0QWNjb3VudHMSHS5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXF1ZXN0Gh4uYWNjb3VudHMuTGlzdEFjY291bnRzUmVzcG9uc2USVgoPU2V0QWNjb3VudExhYmVsEiAuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVxdWVzdBohLmFjY291bnRzLlNldEFjY291bnRMYWJlbFJlc3BvbnNlElAKDVJlbW92ZUFjY291bnQSHi5hY2NvdW50cy5SZW1vdmVBY2NvdW50UmVxdWVzdBofLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXNwb25zZWIGcHJvdG8z");
+  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMifgoOQWNjb3VudFN1bW1hcnkSEAoIcHJvdmlkZXIYASABKAkSEgoKYWNjb3VudF9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAMSEgoKaGFzX3NlY3JldBgGIAEoCCJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIngKFExpc3RBY2NvdW50c1Jlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMSFAoMdmF1bHRfbG9ja2VkGAIgASgIEhsKE3ZhdWx0X3VuaW5pdGlhbGl6ZWQYAyABKAgiZAoWU2V0QWNjb3VudExhYmVsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkSDQoFbGFiZWwYBCABKAkiRAoXU2V0QWNjb3VudExhYmVsUmVzcG9uc2USKQoHYWNjb3VudBgBIAEoCzIYLmFjY291bnRzLkFjY291bnRTdW1tYXJ5IlMKFFJlbW92ZUFjY291bnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCSJGChVSZW1vdmVBY2NvdW50UmVzcG9uc2USLQoJcHJvdmlkZXJzGAEgAygLMhouYWNjb3VudHMuUHJvdmlkZXJBY2NvdW50czKKAgoPQWNjb3VudHNTZXJ2aWNlEk0KDExpc3RBY2NvdW50cxIdLmFjY291bnRzLkxpc3RBY2NvdW50c1JlcXVlc3QaHi5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXNwb25zZRJWCg9TZXRBY2NvdW50TGFiZWwSIC5hY2NvdW50cy5TZXRBY2NvdW50TGFiZWxSZXF1ZXN0GiEuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVzcG9uc2USUAoNUmVtb3ZlQWNjb3VudBIeLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXF1ZXN0Gh8uYWNjb3VudHMuUmVtb3ZlQWNjb3VudFJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * One linked account, as a person sees it.
@@ -123,15 +123,16 @@ export const ListAccountsRequestSchema: GenMessage<ListAccountsRequest> = /*@__P
   messageDesc(file_accounts, 2);
 
 /**
- * What the caller's vault holds, or the fact that it will not open.
+ * What the caller's vault holds, or the fact that it is not open or does not exist yet.
  *
- * **`vault_locked` is a field and not an error, and an empty list is not a locked vault.** The
- * three outcomes a screen must not render identically are: the vault opened and holds nothing
- * (`providers` empty, `vault_locked` false), the login credential changed so the key no longer
- * unwraps (`vault_locked` true), and an I/O or corruption failure (an RPC error carrying the
- * reason). Collapsing the locked case into an empty list would present a recoverable, explainable
- * failure as a normal empty state, and the person would re-link accounts they already have instead
- * of understanding what happened.
+ * **`vault_locked` and `vault_uninitialized` are fields and not errors, and an empty list is
+ * neither.** The four outcomes a screen must not render identically are: the vault is open and
+ * holds nothing (`providers` empty, both flags false), no vault exists yet
+ * (`vault_uninitialized` true — choosing a passphrase creates one), a vault exists and is not
+ * unlocked on this daemon (`vault_locked` true — its passphrase opens it), and an I/O or corruption
+ * failure (an RPC error carrying the reason). Collapsing a closed or absent vault into an empty
+ * list would present a recoverable, explainable state as a normal empty one, and the person would
+ * re-link accounts they already have instead of unlocking the vault that holds them.
  *
  * @generated from message accounts.ListAccountsResponse
  */
@@ -142,12 +143,21 @@ export type ListAccountsResponse = Message<"accounts.ListAccountsResponse"> & {
   providers: ProviderAccounts[];
 
   /**
-   * The vault exists and this session's key does not open it. `providers` is empty and says
+   * A vault exists and is not unlocked on this daemon — it restarted, or nothing has opened it
+   * since. Its passphrase opens it, and nothing in it is lost. `providers` is empty and says
    * nothing about what the vault holds.
    *
    * @generated from field: bool vault_locked = 2;
    */
   vaultLocked: boolean;
+
+  /**
+   * No vault exists for the caller yet; choosing a passphrase creates one. `providers` is empty
+   * because there is nothing to hold accounts, not because a vault holds none.
+   *
+   * @generated from field: bool vault_uninitialized = 3;
+   */
+  vaultUninitialized: boolean;
 };
 
 /**

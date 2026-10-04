@@ -1,8 +1,8 @@
 //! What `accounts.AccountsService` must answer, over a store that is not the vault.
 //!
 //! The store is an in-memory fake rather than a real `SessionVault`: `#keyring` 3/9's vault can only
-//! be obtained by sealing a file, so a test built on one would be exercising that crate's
-//! cryptography and would fail for its `todo!()` rather than for anything this crate owes.
+//! be obtained by sealing a file under a passphrase, so a test built on one would be exercising that
+//! crate's cryptography rather than anything this crate owes.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use pretty_assertions::assert_eq;
 use prost::Message;
 use tddy_accounts::{build_accounts_entry, AccountStore, AccountsError, AccountsServiceImpl};
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::accounts::{
     AccountsService, ListAccountsRequest, ListAccountsResponse, RemoveAccountRequest,
@@ -32,13 +32,13 @@ fn a_credential(provider: &str, account: &str, label: &str) -> CredentialRecord 
         provider: ProviderId::new(provider),
         account: AccountId::new(account),
         label: label.to_string(),
-        secret: format!("shhh-{provider}-{account}"),
+        secret: SecretString::new(format!("shhh-{provider}-{account}")),
         metadata,
         updated_at: 1_726_700_000,
     }
 }
 
-/// A store that answers out of memory. Holds whatever records it was given, or one of the three
+/// A store that answers out of memory. Holds whatever records it was given, or one of the
 /// refusals, and mutates in place so a rename or a removal is observable in the next listing.
 struct AnInMemoryAccountStore {
     session: String,
@@ -62,6 +62,11 @@ impl AnInMemoryAccountStore {
 
     fn locked(mut self) -> Self {
         self.refusal = Some(AccountsError::Locked);
+        self
+    }
+
+    fn without_a_vault_yet(mut self) -> Self {
+        self.refusal = Some(AccountsError::Uninitialized);
         self
     }
 
@@ -145,7 +150,7 @@ async fn listing_from(
     session_token: &str,
 ) -> Result<ListAccountsResponse, Status> {
     a_service(store)
-        .list_accounts(Request::new(ListAccountsRequest {
+        .list_accounts(Request::direct(ListAccountsRequest {
             session_token: session_token.to_string(),
         }))
         .await
@@ -159,7 +164,7 @@ async fn rename_in(
     label: &str,
 ) -> Result<SetAccountLabelResponse, Status> {
     a_service(store)
-        .set_account_label(Request::new(SetAccountLabelRequest {
+        .set_account_label(Request::direct(SetAccountLabelRequest {
             session_token: ADAS_SESSION.to_string(),
             provider: provider.to_string(),
             account_id: account_id.to_string(),
@@ -175,7 +180,7 @@ async fn removal_in(
     account_id: &str,
 ) -> Result<RemoveAccountResponse, Status> {
     a_service(store)
-        .remove_account(Request::new(RemoveAccountRequest {
+        .remove_account(Request::direct(RemoveAccountRequest {
             session_token: ADAS_SESSION.to_string(),
             provider: provider.to_string(),
             account_id: account_id.to_string(),
@@ -200,6 +205,26 @@ fn grouping_of(response: &ListAccountsResponse) -> Vec<(String, Vec<String>)> {
             )
         })
         .collect()
+}
+
+/// Which of the four outcomes a screen tells apart a listing came back as.
+#[derive(Debug, PartialEq, Eq)]
+enum Outcome {
+    Listed { providers: usize },
+    Uninitialized,
+    Locked,
+    Error(Code),
+}
+
+fn outcome_of(listing: Result<ListAccountsResponse, Status>) -> Outcome {
+    match listing {
+        Err(status) => Outcome::Error(status.code),
+        Ok(response) if response.vault_uninitialized => Outcome::Uninitialized,
+        Ok(response) if response.vault_locked => Outcome::Locked,
+        Ok(response) => Outcome::Listed {
+            providers: response.providers.len(),
+        },
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -282,10 +307,12 @@ async fn a_store_that_opened_and_holds_nothing_is_not_reported_as_locked() {
 
     // Then
     assert_eq!(
-        listing
-            .map_err(|status| status.message)
-            .map(|response| (response.providers.len(), response.vault_locked)),
-        Ok((0, false))
+        listing.map_err(|status| status.message).map(|response| (
+            response.providers.len(),
+            response.vault_locked,
+            response.vault_uninitialized
+        )),
+        Ok((0, false, false))
     );
 }
 
@@ -301,10 +328,102 @@ async fn a_locked_vault_is_reported_as_locked_rather_than_as_an_empty_one() {
 
     // Then
     assert_eq!(
-        listing
-            .map_err(|status| status.message)
-            .map(|response| (response.providers.len(), response.vault_locked)),
-        Ok((0, true))
+        listing.map_err(|status| status.message).map(|response| (
+            response.providers.len(),
+            response.vault_locked,
+            response.vault_uninitialized
+        )),
+        Ok((0, true, false))
+    );
+}
+
+#[tokio::test]
+async fn a_subject_with_no_vault_yet_is_reported_as_uninitialized_rather_than_as_an_empty_one() {
+    // Given
+    let store = an_account_store().without_a_vault_yet();
+
+    // When
+    let listing = listing_from(store, ADAS_SESSION).await;
+
+    // Then
+    assert_eq!(
+        listing.map_err(|status| status.message).map(|response| (
+            response.providers.len(),
+            response.vault_locked,
+            response.vault_uninitialized
+        )),
+        Ok((0, false, true))
+    );
+}
+
+#[tokio::test]
+async fn empty_uninitialized_locked_and_unreadable_are_four_different_answers() {
+    // Given
+    let empty = an_account_store();
+    let uninitialized = an_account_store().without_a_vault_yet();
+    let locked = an_account_store().locked();
+    let unreadable = an_account_store().unreadable("the vault file is truncated");
+
+    // When
+    let outcomes = vec![
+        outcome_of(listing_from(empty, ADAS_SESSION).await),
+        outcome_of(listing_from(uninitialized, ADAS_SESSION).await),
+        outcome_of(listing_from(locked, ADAS_SESSION).await),
+        outcome_of(listing_from(unreadable, ADAS_SESSION).await),
+    ];
+
+    // Then
+    assert_eq!(
+        outcomes,
+        vec![
+            Outcome::Listed { providers: 0 },
+            Outcome::Uninitialized,
+            Outcome::Locked,
+            Outcome::Error(Code::Internal),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn renaming_without_a_vault_yet_is_a_failed_precondition_that_says_a_passphrase_creates_one()
+{
+    // Given
+    let store = an_account_store()
+        .holding(a_credential("github", "ada", "Ada at work"))
+        .without_a_vault_yet();
+
+    // When
+    let renamed = rename_in(store, "github", "ada", "Ada — personal").await;
+
+    // Then
+    assert_eq!(
+        renamed.map(|_| ()).map_err(|status| (
+            status.code,
+            status.message.contains("no credential vault exists"),
+            status.message.contains("choosing a passphrase creates one")
+        )),
+        Err((Code::FailedPrecondition, true, true))
+    );
+}
+
+#[tokio::test]
+async fn removing_from_a_locked_vault_says_to_unlock_it_with_the_passphrase_rather_than_re_link() {
+    // Given
+    let store = an_account_store()
+        .holding(a_credential("github", "ada", "Ada at work"))
+        .locked();
+
+    // When
+    let removed = removal_in(store, "github", "ada").await;
+
+    // Then
+    assert_eq!(
+        removed.map(|_| ()).map_err(|status| (
+            status.code,
+            status.message.contains("unlock it with your passphrase"),
+            status.message.contains("re-link")
+        )),
+        Err((Code::FailedPrecondition, true, false))
     );
 }
 
@@ -383,7 +502,7 @@ async fn removing_an_account_leaves_every_other_one_in_place() {
         remaining.map_err(|status| status.message).map(|response| {
             grouping_of(&ListAccountsResponse {
                 providers: response.providers,
-                vault_locked: false,
+                ..ListAccountsResponse::default()
             })
         }),
         Ok(vec![

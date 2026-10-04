@@ -10,17 +10,22 @@ use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 
 /// Why the store could not answer.
 ///
-/// The four outcomes a screen must be able to tell apart are an open-and-empty store (`Ok(vec![])`)
-/// and these three. Collapsing any pair of them would present a recoverable, explainable failure as
-/// a normal state — see the `#keyring` 4/9 PRD on why `vault_locked` is a field and not an error.
+/// The five outcomes a screen must be able to tell apart are an open-and-empty store (`Ok(vec![])`)
+/// and these four. Collapsing any pair of them would present a recoverable, explainable state as a
+/// normal one — see the `#keyring` 4/9 PRD on why `vault_locked` and `vault_uninitialized` are
+/// fields and not errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccountsError {
-    /// The token names no live session, so there is no key and no vault to open. A refusal, never
-    /// an empty listing.
+    /// The token names no live session, so there is no subject and no vault to open. A refusal,
+    /// never an empty listing.
     NoSuchSession,
-    /// A vault exists and this session's key does not unwrap it — the login credential changed.
-    /// Recoverable by re-linking, which is why the screen must say so rather than show nothing.
+    /// A vault exists and is not unlocked on this daemon — it restarted, or nothing has opened the
+    /// vault since. Nothing is lost: its passphrase opens it, and so does a session refresh that
+    /// presents an unlock key.
     Locked,
+    /// No vault exists for this subject yet. Choosing a passphrase creates one; until then there is
+    /// nothing to list, and that is not the same as an empty vault.
+    Uninitialized,
     /// I/O, corruption, or anything else that is neither of the above. Carries the reason **meant
     /// for the person** — which is not always the underlying error's text: an I/O failure names
     /// server-side paths, so it arrives here as a fixed, path-free sentence and its full detail is
@@ -31,8 +36,8 @@ pub enum AccountsError {
 
 /// Read and curate credential records on behalf of one session.
 ///
-/// Every method takes the caller's `session_token` rather than a pre-opened handle: the vault's key
-/// is derived from the session, so there is nothing to open until the token is resolved.
+/// Every method takes the caller's `session_token` rather than a pre-opened handle: the token is what
+/// names the subject whose vault is meant, so there is nothing to look up until it is resolved.
 pub trait AccountStore: Send + Sync {
     /// Every record the session's vault holds, in the store's own `(provider, account)` order.
     fn list(&self, session_token: &str) -> Result<Vec<CredentialRecord>, AccountsError>;

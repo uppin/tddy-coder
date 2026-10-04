@@ -35,16 +35,21 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         request: Request<ListAccountsRequest>,
     ) -> Result<Response<ListAccountsResponse>, Status> {
         let request = request.into_inner();
-        // `Locked` is the one refusal that is an answer rather than an error: the vault exists and
-        // this session cannot open it, which the screen explains instead of showing an empty list.
+        // `Locked` and `Uninitialized` are the refusals that are answers rather than errors: the
+        // vault is closed or does not exist yet, which the screen explains instead of showing an
+        // empty list.
         let response = match self.store.list(&request.session_token) {
             Ok(records) => ListAccountsResponse {
                 providers: grouped_by_provider(&records),
-                vault_locked: false,
+                ..ListAccountsResponse::default()
             },
             Err(AccountsError::Locked) => ListAccountsResponse {
-                providers: Vec::new(),
                 vault_locked: true,
+                ..ListAccountsResponse::default()
+            },
+            Err(AccountsError::Uninitialized) => ListAccountsResponse {
+                vault_uninitialized: true,
+                ..ListAccountsResponse::default()
             },
             Err(refusal) => return Err(status_for(refusal)),
         };
@@ -122,7 +127,7 @@ fn summary_of(record: &CredentialRecord) -> AccountSummary {
             .cloned()
             .unwrap_or_default(),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
-        has_secret: !record.secret.is_empty(),
+        has_secret: !record.secret.expose().is_empty(),
     }
 }
 
@@ -133,8 +138,12 @@ fn status_for(refusal: AccountsError) -> Status {
             Status::unauthenticated("the session token names no signed-in session")
         }
         AccountsError::Locked => Status::failed_precondition(
-            "the credential store cannot be opened with this session's key; \
-             it was sealed under a different login and its accounts must be re-linked",
+            "your credential vault is locked on this daemon; \
+             unlock it with your passphrase — nothing in it is lost",
+        ),
+        AccountsError::Uninitialized => Status::failed_precondition(
+            "no credential vault exists for you on this daemon yet; \
+             choosing a passphrase creates one",
         ),
         AccountsError::Unavailable(reason) => Status::internal(reason),
     }

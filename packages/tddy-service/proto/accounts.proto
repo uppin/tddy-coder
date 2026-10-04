@@ -60,20 +60,25 @@ message ListAccountsRequest {
   string session_token = 1;
 }
 
-// What the caller's vault holds, or the fact that it will not open.
+// What the caller's vault holds, or the fact that it is not open or does not exist yet.
 //
-// **`vault_locked` is a field and not an error, and an empty list is not a locked vault.** The
-// three outcomes a screen must not render identically are: the vault opened and holds nothing
-// (`providers` empty, `vault_locked` false), the login credential changed so the key no longer
-// unwraps (`vault_locked` true), and an I/O or corruption failure (an RPC error carrying the
-// reason). Collapsing the locked case into an empty list would present a recoverable, explainable
-// failure as a normal empty state, and the person would re-link accounts they already have instead
-// of understanding what happened.
+// **`vault_locked` and `vault_uninitialized` are fields and not errors, and an empty list is
+// neither.** The four outcomes a screen must not render identically are: the vault is open and
+// holds nothing (`providers` empty, both flags false), no vault exists yet
+// (`vault_uninitialized` true — choosing a passphrase creates one), a vault exists and is not
+// unlocked on this daemon (`vault_locked` true — its passphrase opens it), and an I/O or corruption
+// failure (an RPC error carrying the reason). Collapsing a closed or absent vault into an empty
+// list would present a recoverable, explainable state as a normal empty one, and the person would
+// re-link accounts they already have instead of unlocking the vault that holds them.
 message ListAccountsResponse {
   repeated ProviderAccounts providers = 1;
-  // The vault exists and this session's key does not open it. `providers` is empty and says
+  // A vault exists and is not unlocked on this daemon — it restarted, or nothing has opened it
+  // since. Its passphrase opens it, and nothing in it is lost. `providers` is empty and says
   // nothing about what the vault holds.
   bool vault_locked = 2;
+  // No vault exists for the caller yet; choosing a passphrase creates one. `providers` is empty
+  // because there is nothing to hold accounts, not because a vault holds none.
+  bool vault_uninitialized = 3;
 }
 
 message SetAccountLabelRequest {

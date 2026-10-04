@@ -2,7 +2,7 @@
 
 **Date**: 2026-09-19
 **Status**: 🚧 In Progress
-**Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `feature/keyring/store` (#510)
+**Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `master` (3/9 `feature/keyring/store`, #510, is merged)
 
 ## Affected Features
 
@@ -44,8 +44,8 @@ After 3/9 a credential is a `(provider, account, secret)` record in an encrypted
 
 - 5/9 asks a person to assign an account to a project. An assignment UI that cannot show what is
   assignable is not usable.
-- A vault that reports `Locked` — the deliberate no-fallback outcome when the login credential
-  changed — has nowhere to say so. Without this screen, the only symptom a person sees is git
+- A vault that is locked on this daemon — it exists, and its passphrase has not been given since
+  the daemon started — or that has not been created yet has nowhere to say so. Without this screen, the only symptom a person sees is git
   operations failing later with no explanation.
 - A stale record (an account revoked at the provider) can never be removed.
 
@@ -75,20 +75,22 @@ message AccountSummary {
 would most plausibly be crossed, so it is enforced by the message shape rather than by discipline.
 `has_secret` is the one bit a UI needs, and one bit is not a credential.
 
-### Three list outcomes, never collapsed
+### Four list outcomes, never collapsed
 
 `ListAccountsResponse` distinguishes states the UI must not render identically:
 
 | Outcome | Meaning | What the screen shows |
 |---|---|---|
-| `accounts: []` | the vault opened and is empty | "No accounts linked yet", with what to do |
-| `vault_locked` | the login credential changed; the KEK no longer unwraps | the lock, and that re-linking is the recovery |
+| `accounts: []` | the vault is open and empty | "No accounts linked yet", with what to do |
+| `vault_uninitialized` | no vault exists yet | that choosing a passphrase creates one, and where the prompt is |
+| `vault_locked` | a vault exists and is not unlocked on this daemon | unlock it with the passphrase; nothing is lost |
 | error | I/O, corruption | the error, verbatim |
 
-⚠ **Collapsing `vault_locked` into an empty list would be a fallback** in the sense CLAUDE.md
-forbids: it presents a recoverable, explainable failure as a normal empty state, and the person
-re-links accounts they already have instead of understanding what happened. The three stay distinct
-end to end — `VaultError::Locked` → a distinct response → a distinct rendering.
+⚠ **Collapsing `vault_locked` or `vault_uninitialized` into an empty list would be a fallback** in
+the sense CLAUDE.md forbids: it presents a recoverable, explainable state as a normal empty one, and
+the person re-links accounts they already have instead of unlocking the vault that holds them. The
+four stay distinct end to end — `VaultState` → a distinct response → a distinct rendering. The
+screen asks for no passphrase itself: the app-wide `CredentialVaultPrompt` does.
 
 ### `/accounts` screen
 
@@ -137,24 +139,25 @@ dependency costs: 14 dependents, 6 of them paying for something they never use.
 ## Implementation Plan
 
 1. `accounts.proto` — the service and its three messages.
-2. `tddy-accounts` — `ListAccounts` over `SessionVault`, with the three outcomes distinct.
+2. `tddy-accounts` — `ListAccounts` over `SessionVaults`, with the four outcomes distinct.
 3. `SetAccountLabel` and `RemoveAccount`.
 4. Register the entry in `runtime.rs`.
 5. `tddy-web`: route constant, predicate, and the `appRoutes` unit tests beside the existing ones.
-6. `AccountsAppPage` + the accounts list, with the three states rendered distinctly.
+6. `AccountsAppPage` + the accounts list, with the four states rendered distinctly.
 7. Nav entry and the `index.tsx` rung.
 8. Cypress component tests with `mountWithRpc` + `anInMemoryRpcBackend`; a Storybook story.
 
 ## Acceptance Criteria
 
 - [ ] `ListAccounts` returns the vault's records grouped by provider, **with no secret in any field**
-- [ ] An empty vault, a locked vault and an error render as three distinct, explained states
+- [ ] An empty vault, no vault yet, a locked vault and an error render as four distinct, explained
+  states
 - [ ] `SetAccountLabel` changes only the label; `account_id` is unchanged and assignments survive
 - [ ] `RemoveAccount` removes exactly one record, behind a confirmation
 - [ ] An unauthenticated or invalid `session_token` is refused, not served an empty list
 - [ ] `/accounts` is reachable from the nav menu and by direct URL
 - [ ] The screen is **not** capability-gated and adds no new reader of `capabilities`
-- [ ] Cypress component tests cover the three list states and both actions
+- [ ] Cypress component tests cover the four list states and both actions
 - [ ] No new `tddy-service` dependency is added to `tddy-credentials`
 
 ## References

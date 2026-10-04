@@ -1,9 +1,9 @@
-//! The production [`AccountStore`]: the vaults a login opened, found by the session's subject.
+//! The production [`AccountStore`]: the vaults a daemon holds, found by the session's subject.
 
 use std::sync::Arc;
 
 use tddy_credentials::{
-    AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError,
+    AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
 
 use crate::store::{AccountStore, AccountsError};
@@ -28,21 +28,41 @@ impl SessionVaultAccountStore {
         Self { vaults, subject_of }
     }
 
-    /// The subject the token's session belongs to, and the open vault it may read.
+    /// The subject the token's session belongs to, and its vault, open on this daemon.
     ///
-    /// A signed-in subject whose vault is not open *here* — the daemon restarted and the browser
-    /// has not refreshed its session yet — is [`AccountsError::Unavailable`], naming why. Not
-    /// `Locked`: nothing says the key would fail, and `Locked` tells the person to re-link. Not an
-    /// empty listing either: the vault may hold accounts this daemon simply cannot read yet.
+    /// A vault that is not open is never an empty listing: a [`VaultState::Locked`] one may hold
+    /// accounts its passphrase would show, and an [`VaultState::Uninitialized`] one does not exist
+    /// to be empty. Reading through [`SessionVaults::use_open`] counts as a use, so a person
+    /// looking at their accounts keeps the vault open for another idle lifetime.
     fn vault_for(&self, session_token: &str) -> Result<(String, Arc<SessionVault>), AccountsError> {
         let subject = (self.subject_of)(session_token).ok_or(AccountsError::NoSuchSession)?;
-        match self.vaults.get(&subject) {
-            Some(vault) => Ok((subject, vault)),
-            None => Err(AccountsError::Unavailable(format!(
-                "the credential store for {subject} is not open on this daemon; \
-                 it opens when you sign in, or when your session next refreshes"
-            ))),
+        if let Some(refusal) = refusal_for_closed(self.vaults.state(&subject)) {
+            return Err(refusal);
         }
+        match self.vaults.use_open(&subject) {
+            Some(vault) => Ok((subject, vault)),
+            // Closed between the two look-ups — idle eviction, the last sign-out, or its file
+            // replaced. Whatever it is now is the answer; it was open a moment ago, and only a
+            // reopen racing this read would make it read open again.
+            None => Err(
+                refusal_for_closed(self.vaults.state(&subject)).unwrap_or_else(|| {
+                    AccountsError::Unavailable(
+                        "the credential vault closed and reopened while it was being read; \
+                         try again"
+                            .to_string(),
+                    )
+                }),
+            ),
+        }
+    }
+}
+
+/// What a vault in `state` refuses with — `None` when it is open and can be read.
+fn refusal_for_closed(state: VaultState) -> Option<AccountsError> {
+    match state {
+        VaultState::Open => None,
+        VaultState::Locked => Some(AccountsError::Locked),
+        VaultState::Uninitialized => Some(AccountsError::Uninitialized),
     }
 }
 
@@ -96,11 +116,10 @@ impl AccountStore for SessionVaultAccountStore {
 /// What a person is told when the vault could not be read or written. Deliberately path-free.
 const STORE_UNREADABLE: &str = "the credential store could not be read or written on this daemon";
 
-/// `Locked` keeps its meaning. The other failures are unavailable, told to the person only as far
-/// as `VaultError` means them to be: `Io` names server-side detail (file paths, OS errors), so the
-/// client gets [`STORE_UNREADABLE`] and the log gets the full error with the subject it belongs
-/// to. `FormatMismatch` and `Crypto` are fixed sentences about the store itself and stay verbatim —
-/// they tell the operator which remedy applies.
+/// `Locked` keeps its meaning. `Io` names server-side detail (file paths, OS errors), so the client
+/// gets [`STORE_UNREADABLE`] and the log gets the full error with the subject it belongs to. Every
+/// other variant's text is a fixed sentence written for the person — none of them names a path —
+/// so it is passed on verbatim: it tells them, or the operator, which remedy applies.
 fn refusal_of(subject: &str, error: VaultError) -> AccountsError {
     match error {
         VaultError::Locked => AccountsError::Locked,
@@ -111,80 +130,107 @@ fn refusal_of(subject: &str, error: VaultError) -> AccountsError {
             );
             AccountsError::Unavailable(STORE_UNREADABLE.to_string())
         }
-        told @ (VaultError::FormatMismatch { .. } | VaultError::Crypto) => {
-            AccountsError::Unavailable(told.to_string())
-        }
+        told @ (VaultError::FormatMismatch { .. }
+        | VaultError::Uninitialized
+        | VaultError::AlreadyInitialized
+        | VaultError::NoFreshLogin
+        | VaultError::AlreadyOpen
+        | VaultError::TooManySetAside { .. }
+        | VaultError::Crypto) => AccountsError::Unavailable(told.to_string()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::Path;
 
     use pretty_assertions::assert_eq;
+    use tddy_credentials::{CredentialStore, SecretString};
 
     use super::*;
 
     const ADA: &str = "ada";
     const ADAS_SESSION: &str = "session-token-for-ada";
-    const ADAS_LOGIN_CREDENTIAL: &[u8] = b"gho_adas_login_credential";
+    const ADAS_PASSPHRASE: &str = "correct horse battery staple";
 
     fn a_credential(account: &str, label: &str) -> CredentialRecord {
         CredentialRecord {
             provider: ProviderId::new("github"),
             account: AccountId::new(account),
             label: label.to_string(),
-            secret: format!("shhh-{account}"),
+            secret: SecretString::new(format!("shhh-{account}")),
             metadata: BTreeMap::new(),
             updated_at: 1_726_700_000,
         }
     }
 
-    /// A daemon's vault registry over a fresh directory, and the resolver that knows Ada's token.
-    fn a_daemon_where_ada_can_sign_in() -> (
-        tempfile::TempDir,
-        Arc<SessionVaults>,
-        SessionVaultAccountStore,
-    ) {
-        let dir = tempfile::tempdir().expect("a temporary directory");
-        let vaults = Arc::new(SessionVaults::new(dir.path()));
-        let subject_of: SessionSubjectResolver =
-            Arc::new(|token: &str| (token == ADAS_SESSION).then(|| ADA.to_string()));
-        let store = SessionVaultAccountStore::new(Arc::clone(&vaults), subject_of);
-        (dir, vaults, store)
+    fn adas_passphrase() -> SecretString {
+        SecretString::new(ADAS_PASSPHRASE)
     }
 
-    fn signed_in_holding(
-        vaults: &SessionVaults,
-        records: Vec<CredentialRecord>,
-    ) -> Arc<SessionVault> {
-        let vault = vaults
-            .unlock(ADA, ADAS_LOGIN_CREDENTIAL)
-            .expect("Ada's vault opens at sign-in");
+    /// Ada chose a passphrase on an earlier run of the daemon, and her vault holds `records`.
+    fn ada_created_her_vault_holding(dir: &Path, records: Vec<CredentialRecord>) {
+        let vault =
+            CredentialStore::create(&CredentialStore::path_in(dir, ADA), &adas_passphrase(), ADA)
+                .expect("Ada's vault is created");
         for record in records {
             vault.put(record).expect("the record is retained");
         }
-        vault
+    }
+
+    /// A daemon's vault registry over `dir`, and the store whose resolver knows Ada's token.
+    fn a_daemon_over(dir: &Path) -> (Arc<SessionVaults>, SessionVaultAccountStore) {
+        let vaults = Arc::new(SessionVaults::new(dir));
+        let subject_of: SessionSubjectResolver =
+            Arc::new(|token: &str| (token == ADAS_SESSION).then(|| ADA.to_string()));
+        let store = SessionVaultAccountStore::new(Arc::clone(&vaults), subject_of);
+        (vaults, store)
+    }
+
+    /// A daemon on which Ada has unlocked her vault, holding `records`, with its open handle.
+    fn ada_unlocked_her_vault_holding(
+        records: Vec<CredentialRecord>,
+    ) -> (
+        tempfile::TempDir,
+        Arc<SessionVault>,
+        SessionVaultAccountStore,
+    ) {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        ada_created_her_vault_holding(dir.path(), records);
+        let (vaults, store) = a_daemon_over(dir.path());
+        vaults
+            .unlock(ADA, &adas_passphrase())
+            .expect("Ada's passphrase opens her vault");
+        let vault = vaults.get(ADA).expect("Ada's vault is open");
+        (dir, vault, store)
+    }
+
+    fn accounts_in(
+        listing: Result<Vec<CredentialRecord>, AccountsError>,
+    ) -> Result<Vec<String>, AccountsError> {
+        listing.map(|records| {
+            records
+                .into_iter()
+                .map(|record| record.account.as_str().to_string())
+                .collect()
+        })
     }
 
     #[test]
-    fn lists_what_the_signed_in_subjects_vault_holds() {
+    fn lists_what_the_signed_in_subjects_open_vault_holds() {
         // Given
-        let (_dir, vaults, store) = a_daemon_where_ada_can_sign_in();
-        signed_in_holding(
-            &vaults,
-            vec![a_credential("bob", "Bot"), a_credential("ada", "Work")],
-        );
+        let (_dir, _vault, store) = ada_unlocked_her_vault_holding(vec![
+            a_credential("bob", "Bot"),
+            a_credential("ada", "Work"),
+        ]);
 
         // When
         let listing = store.list(ADAS_SESSION);
 
         // Then
         assert_eq!(
-            listing.map(|records| records
-                .into_iter()
-                .map(|record| record.account.as_str().to_string())
-                .collect::<Vec<_>>()),
+            accounts_in(listing),
             Ok(vec!["ada".to_string(), "bob".to_string()])
         );
     }
@@ -192,8 +238,8 @@ mod tests {
     #[test]
     fn a_token_no_session_owns_is_refused() {
         // Given
-        let (_dir, vaults, store) = a_daemon_where_ada_can_sign_in();
-        signed_in_holding(&vaults, vec![a_credential("ada", "Work")]);
+        let (_dir, _vault, store) =
+            ada_unlocked_her_vault_holding(vec![a_credential("ada", "Work")]);
 
         // When
         let listing = store.list("a-token-nobody-minted");
@@ -203,25 +249,73 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_in_subject_whose_vault_is_not_open_here_is_unavailable_rather_than_empty() {
-        // Given a daemon that has not opened Ada's vault since it started
-        let (_dir, _vaults, store) = a_daemon_where_ada_can_sign_in();
+    fn a_subject_with_no_vault_file_is_uninitialized_rather_than_empty() {
+        // Given a daemon on which Ada has never chosen a passphrase
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let (_vaults, store) = a_daemon_over(dir.path());
 
         // When
         let listing = store.list(ADAS_SESSION);
 
         // Then
-        assert_eq!(
-            listing.map_err(|refusal| matches!(refusal, AccountsError::Unavailable(_))),
-            Err(true)
+        assert_eq!(listing, Err(AccountsError::Uninitialized));
+    }
+
+    #[test]
+    fn a_vault_that_exists_but_is_not_open_on_this_daemon_is_locked_rather_than_empty() {
+        // Given Ada's vault, created earlier, and a daemon that has not opened it since it started
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        ada_created_her_vault_holding(dir.path(), vec![a_credential("ada", "Work")]);
+        let (_vaults, store) = a_daemon_over(dir.path());
+
+        // When
+        let listing = store.list(ADAS_SESSION);
+
+        // Then
+        assert_eq!(listing, Err(AccountsError::Locked));
+    }
+
+    #[test]
+    fn renaming_in_a_vault_that_is_not_open_is_refused_as_locked() {
+        // Given
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        ada_created_her_vault_holding(dir.path(), vec![a_credential("ada", "Work")]);
+        let (_vaults, store) = a_daemon_over(dir.path());
+
+        // When
+        let renamed = store.set_label(
+            ADAS_SESSION,
+            &ProviderId::new("github"),
+            &AccountId::new("ada"),
+            "Personal",
         );
+
+        // Then
+        assert_eq!(renamed, Err(AccountsError::Locked));
+    }
+
+    #[test]
+    fn removing_from_a_vault_that_does_not_exist_is_refused_as_uninitialized() {
+        // Given
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let (_vaults, store) = a_daemon_over(dir.path());
+
+        // When
+        let removed = store.remove(
+            ADAS_SESSION,
+            &ProviderId::new("github"),
+            &AccountId::new("ada"),
+        );
+
+        // Then
+        assert_eq!(removed, Err(AccountsError::Uninitialized));
     }
 
     #[test]
     fn renaming_changes_the_label_and_keeps_the_secret() {
         // Given
-        let (_dir, vaults, store) = a_daemon_where_ada_can_sign_in();
-        let vault = signed_in_holding(&vaults, vec![a_credential("ada", "Work")]);
+        let (_dir, vault, store) =
+            ada_unlocked_her_vault_holding(vec![a_credential("ada", "Work")]);
 
         // When
         store
@@ -237,7 +331,8 @@ mod tests {
         assert_eq!(
             vault
                 .get(&ProviderId::new("github"), &AccountId::new("ada"))
-                .map(|record| record.map(|record| (record.label, record.secret))),
+                .map(|record| record
+                    .map(|record| (record.label, record.secret.expose().to_string()))),
             Ok(Some(("Personal".to_string(), "shhh-ada".to_string())))
         );
     }
@@ -245,8 +340,7 @@ mod tests {
     #[test]
     fn renaming_an_account_that_is_not_linked_is_refused() {
         // Given
-        let (_dir, vaults, store) = a_daemon_where_ada_can_sign_in();
-        signed_in_holding(&vaults, vec![]);
+        let (_dir, _vault, store) = ada_unlocked_her_vault_holding(vec![]);
 
         // When
         let renamed = store.set_label(
@@ -266,11 +360,10 @@ mod tests {
     #[test]
     fn removing_forgets_exactly_that_record() {
         // Given
-        let (_dir, vaults, store) = a_daemon_where_ada_can_sign_in();
-        let vault = signed_in_holding(
-            &vaults,
-            vec![a_credential("ada", "Work"), a_credential("bob", "Bot")],
-        );
+        let (_dir, vault, store) = ada_unlocked_her_vault_holding(vec![
+            a_credential("ada", "Work"),
+            a_credential("bob", "Bot"),
+        ]);
 
         // When
         store
@@ -283,10 +376,7 @@ mod tests {
 
         // Then
         assert_eq!(
-            vault.list(None).map(|records| records
-                .into_iter()
-                .map(|record| record.account.as_str().to_string())
-                .collect::<Vec<_>>()),
+            accounts_in(vault.list(None).map_err(|error| refusal_of(ADA, error))),
             Ok(vec!["ada".to_string()])
         );
     }
@@ -316,8 +406,8 @@ mod tests {
     #[test]
     fn a_failure_meant_for_the_person_keeps_its_reason() {
         assert_eq!(
-            refusal_of(ADA, VaultError::Crypto),
-            AccountsError::Unavailable(VaultError::Crypto.to_string())
+            refusal_of(ADA, VaultError::TooManySetAside { kept: 5 }),
+            AccountsError::Unavailable(VaultError::TooManySetAside { kept: 5 }.to_string())
         );
     }
 }
