@@ -16,7 +16,7 @@
 mod harness;
 mod same_crate;
 
-use harness::{assert_compiles, AFixtureWorkspace};
+use harness::{assert_compiles, assert_compiles_with_its_tests, AFixtureWorkspace};
 use same_crate::{
     a_move_item_op, an_app_with_a_consumer, moving_items, reparenting_module, the_anchor_over,
 };
@@ -248,4 +248,56 @@ async fn is_refused_where_the_operation_has_no_facade_to_leave() {
             && findings.contains("reparent_module"),
         "the refusal did not say `outside` belongs to `move_item` and `reparent_module`: {findings}"
     );
+}
+
+/// An integration test under `tests/` is compiled as a crate of its own, and reaches the package
+/// through its public paths exactly as a consumer does.
+///
+/// Counting it as inside the crate would re-point it at a module that may not be public to it, and
+/// leave the public path with no facade: the package's own unit tests would pass and its integration
+/// tests would stop compiling.
+#[tokio::test(flavor = "multi_thread")]
+async fn treats_an_integration_test_of_the_same_package_as_outside_the_crate() {
+    // Given a predicate that an integration test under `tests/` reaches through the public path
+    const AN_INTEGRATION_TEST: &str = concat!(
+        "#[test]\n",
+        "fn a_404_is_a_missing_session() {\n",
+        "    assert!(app::pairing::peer_has_no_such_session(404));\n",
+        "}\n",
+    );
+    let workspace = an_app_with_a_consumer(
+        &[
+            ("src/lib.rs", LIB),
+            ("src/answers.rs", AN_EMPTY_ANSWERS_MODULE),
+            ("src/pairing.rs", PAIRING_WITH_TWO_PREDICATES),
+            ("src/handler.rs", A_HANDLER_IN_THE_SAME_CRATE),
+            ("tests/pairing_acceptance.rs", AN_INTEGRATION_TEST),
+        ],
+        &[("src/lib.rs", "pub fn nothing() {}\n")],
+    );
+
+    // When it moves into `answers` with `reexport: outside`
+    moving_items(
+        &workspace,
+        "app/src/pairing.rs",
+        &["peer_has_no_such_session"],
+        "app::answers",
+        Some("outside"),
+    )
+    .await
+    .expect("the move applies");
+
+    // Then the integration test is untouched, the public path still resolves through a facade, and
+    // the package compiles with its tests
+    assert_eq!(
+        workspace.read("app/tests/pairing_acceptance.rs"),
+        AN_INTEGRATION_TEST,
+        "an integration test was re-pointed as if it were part of the library"
+    );
+    assert!(
+        workspace.read("app/src/pairing.rs").contains("pub use"),
+        "no facade was left for the integration test:\n{}",
+        workspace.read("app/src/pairing.rs")
+    );
+    assert_compiles_with_its_tests(&workspace);
 }
