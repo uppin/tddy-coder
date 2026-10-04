@@ -346,6 +346,11 @@ impl PermissionServer {
         if tddy_lsp_executor::lsp_tools::lsp_tools_enabled() {
             tool_router.merge(dynamic_tool_router(&lsp_tool_defs()));
         }
+        // Restructure tools: exposed only when the host signalled (via `TDDY_RESTRUCTURE_TOOLS`)
+        // that it manages a warm index to answer them; forwarded like the `Lsp*` tools.
+        if tddy_core::toolcall::restructure::restructure_tools_enabled() {
+            tool_router.merge(crate::restructure_tools::restructure_tool_router());
+        }
         Self {
             tool_router,
             socket_path,

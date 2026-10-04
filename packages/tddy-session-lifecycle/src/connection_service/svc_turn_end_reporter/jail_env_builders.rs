@@ -56,6 +56,20 @@ impl DaemonSessionHost {
         )]
     }
 
+    /// The `TDDY_RESTRUCTURE_TOOLS` jail env pair — set when the host answers the `restructure_*`
+    /// tools (the daemon manages a warm index and registered the executor), so the in-jail
+    /// `tddy-tools --mcp` advertises them only where a call can be served.
+    pub(crate) fn restructure_tools_env(&self) -> Vec<(String, String)> {
+        if tddy_core::toolcall::restructure::restructure_executor().is_some() {
+            vec![(
+                tddy_core::toolcall::restructure::RESTRUCTURE_TOOLS_ENV.to_string(),
+                "1".to_string(),
+            )]
+        } else {
+            Vec::new()
+        }
+    }
+
     /// The `TDDY_LSP_TOOLS` jail env pair — set when a language server is available for the
     /// session's worktree, so the in-jail `tddy-tools --mcp` exposes the `Lsp*` tools.
     pub(crate) fn lsp_tools_env(&self, worktree_root: &std::path::Path) -> Vec<(String, String)> {

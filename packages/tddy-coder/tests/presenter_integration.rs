@@ -1324,6 +1324,9 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
                 "RefineSessionDocument with PRD visible must not switch to TextInput; got {:?}",
                 presenter.state().mode
             );
+            // The presenter now waits for feedback typed in the prompt bar, so the workflow
+            // cannot finish on its own: there is nothing further to drive.
+            break;
         } else if matches!(presenter.state().mode, AppMode::Select { .. }) {
             presenter.handle_intent(UserIntent::AnswerSelect(0));
         } else if matches!(presenter.state().mode, AppMode::MultiSelect { .. }) {
@@ -1339,6 +1342,11 @@ fn plan_view_refinement_submits_without_dismissing_markdown() {
     assert!(
         triggered_refine,
         "expected to reach MarkdownViewer and issue RefineSessionDocument; last mode: {:?}",
+        presenter.state().mode
+    );
+    assert!(
+        matches!(presenter.state().mode, AppMode::MarkdownViewer { .. }),
+        "the PRD must stay visible while refinement is entered via the prompt bar; got {:?}",
         presenter.state().mode
     );
 }

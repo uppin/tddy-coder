@@ -20,6 +20,19 @@ Two front ends over one engine.
 |---|---|
 | `tddy-tools restructure …` | one operation per process, printing to a console |
 | `tddy-index-daemon` | a warm rust-analyzer index per workspace root, served as `code_index.CodeIndexService` over gRPC and stdio — or one operation in process, then exit |
+| a session's `restructure_*` tool calls | six agent tools — `restructure_load`, `restructure_check`, `restructure_apply`, `restructure_status`, `restructure_plans`, `restructure_anchors` — answered on the host by the warm index, rooted at the session's own worktree, with structured JSON results |
+
+**From a session's tool calls.** An agent restructures through `restructure_*` tool calls, which reach
+the host the way the `Lsp*` tools do and are answered by the daemon-managed index; no
+`TDDY_INDEX_SOCKET` is needed in the jail.
+The host binds the session's worktree itself: a plan or file path is resolved inside it, and one that
+names anything outside — an absolute path elsewhere, a path climbing out with `..` — is refused before
+the index is asked. A run answers one object: the plan, its findings, one entry per applied operation
+(with its `op_id`), notes, the outcome, and a `refusal` (`class`, `message`, `stale`). A run the index
+refuses part-way still answers, so the operations it applied are not lost; an operation that is stale is
+refused **by its id**, taken from the plan's stale list. The tools are advertised to a session only when
+the daemon manages an index; without an `index_daemon:` section none is registered and none is offered.
+See [Warm code-intelligence daemon](warm-code-intelligence-daemon.md).
 
 Every library entry point takes the **workspace root** it acts on; none reads the process directory.
 That is what lets one process serve several worktrees.

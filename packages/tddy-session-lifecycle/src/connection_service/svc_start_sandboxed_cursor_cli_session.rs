@@ -332,6 +332,7 @@ impl DaemonSessionHost {
         }
         env.extend(self.jail_daemon_identity_env());
         env.extend(self.lsp_tools_env(&worktree_path));
+        env.extend(self.restructure_tools_env());
         env.extend(semantic_index_env_pair);
 
         let mut handle = tddy_daemon_sandbox::sandbox_session::spawn_sandbox_runner(

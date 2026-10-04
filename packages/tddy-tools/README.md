@@ -33,7 +33,8 @@ implemented here. Each subcommand's logic lives in the crate that owns its domai
 `tddy_tool_engine`, `tddy_lsp_executor::lsp_tools`, `tddy_workflow_recipes::pr_stack` and
 `tddy_discovery::{roster, subagent_runtime}`. What this crate contributes is the *shape* those
 things take on the wire: the clap surface, the `#[tool]` advertisement, and the router that assembles
-them into one server.
+them into one server. The six `restructure_*` tool definitions are in `restructure_tools.rs`, merged by
+`PermissionServer::new` only when `TDDY_RESTRUCTURE_TOOLS` is set by the host.
 
 ## The rule that decides what lives here
 

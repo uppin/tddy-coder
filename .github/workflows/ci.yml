@@ -68,10 +68,29 @@ jobs:
       - name: cargo clippy
         run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  # Two legs of one job, so the setup below exists once. They split the suite by
+  # what a test needs to run, not by how long it takes (docs/dev/guides/ci.md):
+  #
+  #   Rust tests      everything that runs in this process or against files and
+  #                   sockets it makes itself.
+  #   Rust e2e tests  everything that needs real infrastructure: a LiveKit server in
+  #                   Docker, or a real tddy-supervisor / index-daemon / daemon /
+  #                   coder process. The set is .config/rust-e2e.filterset — the one
+  #                   place it is written; each leg takes it or its complement.
   rust-test:
-    name: Rust tests
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
     needs: rust-build
+    strategy:
+      fail-fast: false # a red e2e leg must not hide the unit leg's result, or the reverse
+      matrix:
+        include:
+          - check: Rust tests
+            junit: junit-rust
+            e2e: false
+          - check: Rust e2e tests
+            junit: junit-rust-e2e
+            e2e: true
     # The first run on a cold cache builds 57 crates including libwebrtc. Later
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
@@ -97,8 +116,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
+          # One cache for both legs: they build the same `--workspace` test targets, so the e2e leg
+          # restores what the other leg saved. Only that leg saves it — two writers on one key would
+          # race, and the second would fail to reserve it.
           shared-key: test
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          save-if: ${{ github.ref == 'refs/heads/master' && !matrix.e2e }}
 
       # nextest builds the test targets itself. What it cannot produce is a
       # binary belonging to another workspace package, which suites like
@@ -123,13 +145,22 @@ jobs:
         # Keep going on failure so the JUnit report still publishes; the report
         # step below is what fails the job.
         continue-on-error: true
-        run: ./dev cargo nextest run --workspace --profile ci --locked
+        # ANDed with the profile's default-filter, so the exclusions in
+        # .config/nextest.toml apply to both legs.
+        run: |
+          e2e="$(cat .config/rust-e2e.filterset)"
+          if [ "${{ matrix.e2e }}" = "true" ]; then
+            filter="$e2e"
+          else
+            filter="not ($e2e)"
+          fi
+          ./dev cargo nextest run --workspace --profile ci --locked -E "$filter"
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
         with:
           report_paths: target/nextest/ci/junit.xml
-          check_name: Rust tests
+          check_name: ${{ matrix.check }}
           detailed_summary: true
           fail_on_failure: true
           require_tests: true
@@ -138,7 +169,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: junit-rust
+          name: ${{ matrix.junit }}
           path: target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 14

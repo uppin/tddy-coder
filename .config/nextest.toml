@@ -14,6 +14,15 @@
 #
 # Keep the skip list short, and give every entry a reason. Everything listed
 # there is coverage the PR gate does not provide.
+#
+# CI runs the suite as two checks, split by what a test needs to run rather than by how long it
+# takes: `Rust tests` and `Rust e2e tests`. The e2e set — tests that need real infrastructure, a
+# LiveKit server in Docker, a live rust-analyzer or a real tddy-supervisor / index-daemon / daemon /
+# coder process — is written once, in `.config/rust-e2e.filterset`. ci.yml hands each leg that
+# expression or its complement with `-E`, which nextest ANDs with the `default-filter` below, so the
+# exclusions apply to both. A test that starts a real LiveKit server, drives a live rust-analyzer or
+# execs one of those processes belongs in that file; a test that only builds the thing in process
+# does not.
 
 [profile.default]
 retries = 0
@@ -96,6 +105,10 @@ package(tddy-code-restructuring) and (
 """
 test-group = "rust-analyzer"
 
+# The binaries listed by name alone at the end of the filter either moved out of the package named
+# in their entry when the daemon was carved up (so a qualified entry matches nothing) or were never
+# listed. `.config/rust-e2e.filterset` carries the same names.
+#
 # Every binary that brings up (or joins) a LiveKit server belongs here, not just the ones that have
 # been seen to flake. Two of them were listed and the other twenty-one leaned on `retries` instead —
 # which is a different mechanism for a different problem: a retry re-runs a test that lost a port
@@ -135,6 +148,18 @@ filter = """
         or binary(token_generation_livekit)
         or binary(token_service_livekit)
     ))
+    or binary(common_room_duplicate_identity_repro)
+    or binary(common_room_set_metadata_handshake_repro)
+    or binary(common_room_key_trust_acceptance)
+    or binary(forward_to_peer_shared_registry)
+    or binary(forwarded_rpc_is_stamped_by_the_receiver)
+    or binary(livekit_peer_daemons_acceptance)
+    or binary(remote_git_livekit_acceptance)
+    or binary(runtime_signing_identity_acceptance)
+    or binary(session_room_acceptance)
+    or binary(session_room_livekit_acceptance)
+    or binary(session_sync_livekit_acceptance)
+    or (package(tddy-daemon) and binary(first_login_enrolment_acceptance))
 )
 """
 test-group = "docker"
