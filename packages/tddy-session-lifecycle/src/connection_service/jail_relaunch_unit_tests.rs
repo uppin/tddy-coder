@@ -233,6 +233,7 @@ async fn a_sandboxed_workspace_session_served_by(
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: Default::default(),
+            accounts: Vec::new(),
         }],
     )
     .expect("register project");

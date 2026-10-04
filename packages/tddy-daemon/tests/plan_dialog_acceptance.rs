@@ -126,6 +126,7 @@ fn a_project_with_a_plan_in_its_worktree() -> AProjectWithAPlan {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .expect("the project is registered");

@@ -32,8 +32,8 @@ use tddy_service::proto::pr_stack::{
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, CreateProjectRequest, CreateProjectResponse,
     ListProjectBranchesRequest, ListProjectBranchesResponse, ListProjectsRequest,
-    ListProjectsResponse, ProjectService, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
+    ListProjectsResponse, ProjectService, SetProjectAccountsRequest, SetProjectAccountsResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_worktree_service::stream::MpscResultStream;

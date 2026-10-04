@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
+use tddy_daemon_rpc::test_util::TestDaemon;
 use tddy_host_service::multi_host::{EligibleDaemonSource, LocalOnlyEligibleDaemonSource};
 use tddy_projects::project_storage;
 use tddy_rpc::{Code, Request};
@@ -39,7 +40,7 @@ fn test_config(os_user: &str) -> DaemonConfig {
     DaemonConfig::load(&path).unwrap()
 }
 
-fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHost {
+fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> TestDaemon {
     let sessions_base = tddy_data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
@@ -47,7 +48,7 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHo
         Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
     let eligible: Arc<dyn EligibleDaemonSource> =
         Arc::new(LocalOnlyEligibleDaemonSource::for_config(&config));
-    DaemonSessionHost::new(
+    TestDaemon::from_host(DaemonSessionHost::new(
         config,
         sessions_base_resolver,
         tddy_data_dir,
@@ -59,7 +60,7 @@ fn test_service(config: DaemonConfig, tddy_data_dir: PathBuf) -> DaemonSessionHo
         }),
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
-    )
+    ))
 }
 
 fn given_a_registered_project(data_dir: &std::path::Path, os_user: &str, project_id: &str) {
@@ -118,7 +119,7 @@ async fn assigning_an_account_to_a_project_persists_it_and_list_projects_carries
 
     // When
     let assigned = service
-        .set_project_accounts(Request::new(a_set_request(vec![an_assignment(
+        .set_project_accounts(Request::direct(a_set_request(vec![an_assignment(
             "github",
             "acct-octocat",
         )])))
@@ -135,7 +136,7 @@ async fn assigning_an_account_to_a_project_persists_it_and_list_projects_carries
     );
 
     let listed = service
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
         }))
@@ -171,7 +172,7 @@ async fn a_project_nobody_assigned_an_account_to_is_listed_as_unassigned() {
 
     // When
     let listed = service
-        .list_projects(Request::new(ListProjectsRequest {
+        .list_projects(Request::direct(ListProjectsRequest {
             session_token: TEST_TOKEN.to_string(),
             local_only: true,
         }))
@@ -196,7 +197,7 @@ async fn assigning_a_new_set_replaces_the_previous_assignments_rather_than_mergi
     given_a_registered_project(data_dir.path(), &os_user, PROJECT_ID);
     let service = test_service(test_config(&os_user), data_dir.path().to_path_buf());
     service
-        .set_project_accounts(Request::new(a_set_request(vec![an_assignment(
+        .set_project_accounts(Request::direct(a_set_request(vec![an_assignment(
             "github",
             "acct-octocat",
         )])))
@@ -205,7 +206,7 @@ async fn assigning_a_new_set_replaces_the_previous_assignments_rather_than_mergi
 
     // When — a second call names a different account at the same provider
     service
-        .set_project_accounts(Request::new(a_set_request(vec![an_assignment(
+        .set_project_accounts(Request::direct(a_set_request(vec![an_assignment(
             "github",
             "acct-hubot",
         )])))
@@ -230,7 +231,7 @@ async fn two_accounts_at_one_provider_are_refused_and_the_stored_set_is_untouche
     given_a_registered_project(data_dir.path(), &os_user, PROJECT_ID);
     let service = test_service(test_config(&os_user), data_dir.path().to_path_buf());
     service
-        .set_project_accounts(Request::new(a_set_request(vec![an_assignment(
+        .set_project_accounts(Request::direct(a_set_request(vec![an_assignment(
             "github",
             "acct-octocat",
         )])))
@@ -239,7 +240,7 @@ async fn two_accounts_at_one_provider_are_refused_and_the_stored_set_is_untouche
 
     // When — a set naming the same provider twice
     let result = service
-        .set_project_accounts(Request::new(a_set_request(vec![
+        .set_project_accounts(Request::direct(a_set_request(vec![
             an_assignment("github", "acct-hubot"),
             an_assignment("github", "acct-octocat"),
         ])))
@@ -273,7 +274,7 @@ async fn assigning_accounts_to_one_project_leaves_every_other_project_unassigned
 
     // When — only one of them is assigned an account
     service
-        .set_project_accounts(Request::new(a_set_request(vec![an_assignment(
+        .set_project_accounts(Request::direct(a_set_request(vec![an_assignment(
             "github",
             "acct-octocat",
         )])))
@@ -296,7 +297,7 @@ async fn assigning_accounts_to_a_project_this_daemon_does_not_know_is_not_found(
 
     // When
     let result = service
-        .set_project_accounts(Request::new(a_set_request(vec![an_assignment(
+        .set_project_accounts(Request::direct(a_set_request(vec![an_assignment(
             "github",
             "acct-octocat",
         )])))
@@ -317,7 +318,7 @@ async fn assigning_accounts_without_a_valid_session_is_unauthenticated() {
 
     // When
     let result = service
-        .set_project_accounts(Request::new(SetProjectAccountsRequest {
+        .set_project_accounts(Request::direct(SetProjectAccountsRequest {
             session_token: "not-a-session".to_string(),
             project_id: PROJECT_ID.to_string(),
             accounts: vec![an_assignment("github", "acct-octocat")],

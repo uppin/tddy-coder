@@ -7,7 +7,7 @@
 
 use pretty_assertions::assert_eq;
 use tddy_accounts::{resolve_account, AccountResolution};
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
 
 // ---------------------------------------------------------------------------
 // Builders
@@ -28,7 +28,7 @@ fn a_credential(provider: &str, account: &str) -> CredentialRecord {
         provider: a_provider(provider),
         account: an_account(account),
         label: format!("{account} at {provider}"),
-        secret: format!("shhh-{provider}-{account}"),
+        secret: SecretString::new(format!("shhh-{provider}-{account}")),
         metadata: std::collections::BTreeMap::new(),
         updated_at: 1_700_000_000,
     }
