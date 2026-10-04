@@ -42,6 +42,7 @@ of the host calls.
 | `conversation_spawn.rs` | `recipe_enables_conversation_spawn`, `conversation_branch_slug`, `GrillMeConversationSpawnHandler`; its `impl` is `conversation_spawn_handler.rs` |
 | `roster_replacement.rs` | `roster_replacement_pairs` (public): the one source of what a session's roster withdraws, used by every sandboxed spawn and relaunch |
 | `claude_cli_spawn.rs` | `spawn_claude_cli_session_inner`, the non-sandboxed Claude CLI spawn, with its steps in `claude_cli_spawn/claude_cli_spawn_steps.rs` (`ClaudeCliWorktreeCut`, `ManagedClaudeCliLaunch`, `ClaudeCliProcess`) |
+| `session_worktree_observer.rs` | the `SessionWorktreeObserver` port, `DaemonSessionHost::with_worktree_observer` and `announce_worktree_ready` |
 
 The attachment progress sink and reporter, `AttachmentMaterialization` and the cleanup are
 `tddy_session_files::attachment_progress`, brought into the host's scope by
@@ -162,7 +163,7 @@ every site in this crate.
 | Module | Children |
 |---|---|
 | `cli_session_manager` | `CliSessionManager`, the PTY session manager and the origin of `TaskRegistry`. `cli_session_manager.rs` (173 production lines) holds the struct, `ControlLeaseInfo` and `LiveKitTerminalAddress`; its `impl` blocks are `pty_handle.rs` (`PtyHandle`, `send_input`), `control_lease.rs`, `argv.rs`, `launch.rs`, `pty_spawn.rs`, `relaunch.rs`, `terminals.rs`, `livekit_terminals.rs` and `livekit_bridge.rs` (serves `terminal.TerminalService` against a PTY handle over LiveKit) |
-| `cursor_cli_spawn` | `spawn_cursor_cli_session_inner` (public module), with `CursorCliSessionRecord<'a>`; `chat.rs` (hooks, `parse_created_chat_id`, `mint_cursor_chat_id`) and `resume.rs` (`resume_cursor_cli_session`) |
+| `cursor_cli_spawn` | `spawn_cursor_cli_session_inner` (public module; a wrapper over `spawn_cursor_cli_session_reporting`, which reports the start's phases), with `CursorCliSessionRecord<'a>`; `chat.rs` (hooks, `parse_created_chat_id`, `mint_cursor_chat_id`) and `resume.rs` (`resume_cursor_cli_session`) |
 | `split_session` | split-session start; `agent_argv.rs` (native-tool constants, roster withdrawals, `split_claude_extra_args`) and `agent_credentials.rs` (the token TTL, `mint_agent_session_token`, `verified_caller`, `RoomPollTokenMinter`). `PERMISSION_PROMPT_TOOL` comes from `tddy-sandbox-recipes` |
 
 ## Modules that live below this crate, and their facades

@@ -13,6 +13,7 @@
 - **Agent conversation tabs (attach a roster agent, talk to it)**: [session-agent-conversation.md](session-agent-conversation.md)
 - **Insecure-origin constraints (plain-http LAN serving)**: [insecure-origin-constraints.md](insecure-origin-constraints.md)
 - **The local host over IPC (the desktop build's own wire)**: [local-host-ipc.md](local-host-ipc.md)
+- **Session start phases and the indexing indicator**: [session-start-and-indexing-progress.md](session-start-and-indexing-progress.md)
 - **Session connections (attaching to a session on any wire)**: [session-connections.md](session-connections.md)
 - **LiveKit presence — owned project count**: [livekit-participant-owned-projects.md](../../../docs/ft/web/livekit-participant-owned-projects.md)
 - **Product (Web area)**: `docs/ft/web/` (e.g. [web-terminal.md](../../../docs/ft/web/web-terminal.md))

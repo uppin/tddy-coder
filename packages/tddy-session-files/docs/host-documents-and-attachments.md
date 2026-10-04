@@ -132,12 +132,12 @@ the attachment API. The staging RPCs keep the original message, where those fiel
 
 ### Materialisation progress
 
-`attachment_progress` holds the types a start carries its attachments through, which hold no
+`attachment_progress` holds the types a start carries its attachments and its phases through, which hold no
 session-host state:
 
 | Item | What it is |
 |---|---|
-| `AttachmentProgressSink` | where progress goes: `streaming(tx)` for `StreamStartSession`, `discarding()` for unary `StartSession`, so both entry points run one code path. A receiver that hung up is ignored; the start is not abandoned because nobody is watching |
+| `AttachmentProgressSink` | where progress goes: `streaming(tx)` for `StreamStartSession`, `discarding()` for unary `StartSession`, so both entry points run one code path. A receiver that hung up is ignored; the start is not abandoned because nobody is watching. It also carries the start's phases: `begin_phase(step)` and `end_phase(step)` send a `StartPhase` event (worktree, semantic index, agent), and a step that fails reports no end — the stream's failure is the end. Discarding drops them like attachment progress |
 | `AttachmentProgressReporter` | one attachment bound to its sink, reporting bytes as they arrive. A forwarded stream ends a relay that goes its per-frame idle timeout without a frame, so reporting only once an attachment has landed would leave that deadline covering a whole cross-host transfer |
 | `AttachmentMaterialization` | one request's context: token, OS user, sessions base, session id, the attachments and the sink, with `session_dir()` |
 | `cleanup_materialized_attachments`, `attachment_size_bytes` | removing a failed request's partial writes; the size of a stored attachment |

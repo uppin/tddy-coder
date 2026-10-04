@@ -13,7 +13,7 @@ deletion are `tddy-session-activity`'s modules, reached here through facades.
 |---|---|---|
 | `ListSessions` | unary | Sessions for the caller's OS user, enriched with agent status, activity and branch views |
 | `StartSession` | unary | Start an agent session (non-interactive callers) |
-| `StreamStartSession` | server stream | Same start path when attachments must be materialized before launch |
+| `StreamStartSession` | server stream | Same start path, reporting attachment materialization and the start's phases (worktree, semantic index, agent) before the one terminal result |
 | `ConnectSession` | unary | Dial-in metadata for an existing session |
 | `ResumeSession` | unary | Resume a stopped session |
 | `SignalSession` | unary | Deliver a signal to a running session |
@@ -22,6 +22,54 @@ deletion are `tddy-session-activity`'s modules, reached here through facades.
 
 `types.proto` types (`HostDocumentScope`, `SessionAgentStatus`, `SessionAgentActivity`,
 `BranchSession`) are imported by this proto because listing and start reach them.
+
+## Start phases
+
+`start_session_core` is the one implementation behind `StartSession` and `StreamStartSession`; the
+`AttachmentProgressSink` it is handed is the only difference. The stream's sink forwards, the unary
+one discards. Each session type's start reports its slow steps through the sink —
+`begin_phase(step)` before and `end_phase(step)` after — and the wire contract is
+[`StartPhase`](../../tddy-service/docs/start-session-phases.md).
+
+| Start | Steps reported |
+|---|---|
+| claude-cli | worktree (`cut_claude_cli_worktree`), semantic index when requested, agent (`spawn_claude_cli_process`) |
+| cursor-cli | the same three, in `spawn_cursor_cli_session_reporting`; `spawn_cursor_cli_session_inner` is its wrapper for a caller with nobody watching |
+| workspace | worktree (the seed), semantic index when requested; the jail is built after the index and reports nothing |
+
+A step that fails reports no end. `stream_start_session_at_session_coordinate` sends the terminal
+event only after the task forwarding the sink's events has drained, so a result never overtakes a
+phase's end; a forwarding task that ends abnormally is logged.
+
+**Not covered.** The sandboxed claude-cli and cursor-cli starts, the tool start and the split start
+report no phases and announce no worktree. Children spawned by a PR-stack orchestrator
+(`StackChildSpawnHandler`) and by a grill-me conversation (`GrillMeConversationSpawnHandler`) pass a
+discarding sink and announce nothing.
+
+## The worktree observer port
+
+What a daemon does with a started session's worktree lives in crates above this one, so the host
+reaches it through a port, `SessionWorktreeObserver` (`connection_service/session_worktree_observer.rs`):
+
+```rust
+pub trait SessionWorktreeObserver: Send + Sync {
+    fn worktree_ready(&self, session_id: &str, worktree: &Path);
+}
+```
+
+- `DaemonSessionHost::with_worktree_observer(Arc<dyn SessionWorktreeObserver>)` installs it. A host
+  with none installed announces nothing.
+- `announce_worktree_ready(sessions_base, session_id)` calls it once per successfully started
+  claude-cli, cursor-cli or workspace session, after the start has finished and from the start's own
+  task, for the unary and the streamed start alike. It reads the worktree back from the session's
+  `.session.yaml`, the one place every session type records it; a record that cannot be read is
+  logged, not failed, since the session already started.
+- An implementation must return promptly and put slow work on a task of its own: starting a session
+  never waits on it.
+
+`tddy-daemon-rpc`'s `IndexWarmupObserver` is the implementation the daemon installs, which warms the
+session's code index
+([code index warm-up](../../tddy-daemon-rpc/docs/architecture.md#code-index-warm-up)).
 
 ## Ownership
 

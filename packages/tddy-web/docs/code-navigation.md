@@ -19,7 +19,8 @@ All under `src/components/session/`:
 
 `SessionsDrawerScreen` resolves a `CodeNavigationService` client for the host that owns the selected
 session (`useDaemonClientFor`) and passes it through `SessionMainPane` as `codeNavigationClient`. Absent,
-the pane is the read-only preview and offers no navigation.
+the pane is the read-only preview and offers no navigation. The same client feeds the header's
+[indexing indicator](session-start-and-indexing-progress.md#indexing-indicator).
 
 ## Positions
 
