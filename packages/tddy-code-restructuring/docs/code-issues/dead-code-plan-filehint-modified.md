@@ -13,6 +13,7 @@
 |---|---|---|
 | 2026-10-02 | 0 | first detection |
 | 2026-10-03 | 0 | #539 (`#live-plan` 7/15) rewrites the field whenever it refreshes a plan's file hints, and still reads it nowhere: the drift report and the live-plan comparisons use `sha256` only. The field's doc comment says "never read; it is there for a person". `hint_of` moved to `plan/codec.rs` in the carve |
+| 2026-10-04 | 0 | #567 (`#live-plan` 15/15) added `type_`, `expr` and `order` to `RefactorOp` in `plan.rs`, which moved the field from line 127 to 133. Re-ran the `grep` below: still one write site (`hint_of`, `plan/codec.rs:217`), no read site outside tests. Unchanged |
 
 ## What the tool found
 

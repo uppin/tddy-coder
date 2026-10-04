@@ -2,13 +2,13 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-10-03
+**Updated:** 2026-10-04
 
 ## Summary
 
-`tddy-tools restructure` replays a JSONL **plan of named intents** (never source text) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
+`tddy-tools restructure` replays a JSONL **plan of named intents** (never source text, apart from one type or one expression where an operation needs it) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — twelve operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twenty operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -206,6 +206,37 @@ operations that must compile only together by giving them the same `"group"`:
 
 How the crate delivers this: [readiness-and-gates.md](../../../packages/tddy-code-restructuring/docs/readiness-and-gates.md#transactional-groups).
 
+## Signature and call-site operations
+
+A signature change breaks every caller, and no assist changes a parameter's type, adds or reorders a
+parameter, or edits one call's arguments. The eight operations from `change_param_type` to
+`reorder_call_args` do, in two halves: the **signature operations** edit only the function's
+declaration, and the **call-site operations** each edit one call. Nothing fans out to callers, so a
+caller is its own operation, and a [transactional group](#transactional-groups) makes the declaration
+and its callers one unit that must compile only at its end:
+
+```jsonl
+{"op":"change_param_type","id":"op-1","group":"retype","anchor":{ … the function … },"name":"count","type":"&str"}
+{"op":"change_call_arg","id":"op-2","group":"retype","anchor":{ … the caller, with a range over the call … },"variant":"1","expr":"\"3\""}
+```
+
+- **`type` and `expr` carry Rust syntax**, the one relaxation of "a plan holds intents only". Each is
+  parsed as exactly one type or one expression and refused as malformed otherwise; an `expr` may carry
+  no statement anywhere inside it. `text`, `code` and `content` are still refused.
+- **A call-site operation is anchored on one call expression**: an item anchor on the function that
+  contains the call, with a range relative to that item covering `callee(args)` or
+  `receiver.method(args)`. A range that is not exactly one call is refused, naming the text.
+- **A group missing a caller is rolled back**, and the refusal carries the compiler's error for the
+  caller left out.
+- **A parameter is renamed with `rename_symbol`** and a range anchor on its name; no symbol anchor
+  names a parameter.
+- **Refused rather than approximated.** A field an operation cannot honour, a missing `name`, `type`,
+  `variant`, `expr` or `order`, an unknown position, a `name` that is not a parameter, an `order` that
+  does not name every entry once, a position past the call's arguments, and `unwrap` on a function that
+  returns neither `Result` nor `Option`.
+
+How the crate delivers this: [signature-rewrites.md](../../../packages/tddy-code-restructuring/docs/signature-rewrites.md).
+
 ## Item anchors
 
 A plan names what an operation acts on in one of three ways:
@@ -270,6 +301,14 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `inline_method` | Inline callee |
 | `remove_unused_param` | Remove a parameter the body never reads, from the declaration and from **every call site in every file**. The anchor names the function and `name` is the parameter. rust-analyzer offers the removal only for an unused parameter, so naming a used one is refused — the refusal names the parameter and says it is used, and nothing is written. A `name` that is not a parameter of the function is refused as well |
 | `convert_tuple_return_to_struct` | `-> (A, B)` becomes `-> Name`, a new tuple struct that keeps the function's visibility, and every destructuring caller is rewritten (`let (a, b) = f()` becomes `let Name(a, b) = f()`). The anchor names the function and `name` is the struct. rust-analyzer names the struct after the function; the engine has the server rename it to `name`, declaration and callers together. A function with no return type is refused |
+| `change_param_type` | Retype one parameter in the declaration. `name` is the parameter, `type` the new type. Callers are left to their own call-site operations |
+| `add_param` | Add a parameter to the declaration: `name`, `type`, and `variant` = `first` (after any receiver), `last` or `after:<param>`. A parameter that already exists is refused |
+| `reorder_params` | Reorder the declaration's parameters. `order` names every parameter once; a missing or repeated name is refused |
+| `change_return_type` | With `type`, rewrite the declaration's `-> …` (or add one); the body and callers are untouched. With `variant` = `wrap_result`, `wrap_option` or `unwrap`, rust-analyzer's own assist rewrites the declaration and the function's returns; callers are untouched. `wrap_result` leaves the error type open, so a `type` operation in the same group names it |
+| `add_call_arg` | Insert an argument into one call: `expr`, and `variant` = `first`, `last` or a one-based position |
+| `remove_call_arg` | Remove one argument from one call, at `variant` |
+| `change_call_arg` | Replace one argument of one call with `expr`, at `variant` |
+| `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
