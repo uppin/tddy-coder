@@ -15,6 +15,8 @@ import {
   projectAddToHostUserRelativePath,
   projectHostBaseLocation,
   projectDefaultBranchSelect,
+  projectAccountRow,
+  projectAccountSelect,
   TEST_IDS,
 } from "../testIds";
 
@@ -121,6 +123,55 @@ export const projectsScreenPage = {
   /** Choose a remote branch as the project's default branch (the dropdown submits on change). */
   setDefaultBranch(projectId: string, mainBranchRef: string) {
     byTestId(projectDefaultBranchSelect(projectId)).select(mainBranchRef);
+  },
+
+  // ---------------------------------------------------------------------------
+  // Account assignments
+  // ---------------------------------------------------------------------------
+
+  /** One provider's assignment row on a project card. */
+  accountRow: (projectId: string, provider: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectAccountRow(projectId, provider), { timeout: 5000, ...options }),
+
+  /** The account `<select>` for a project at one provider. */
+  accountSelect: (projectId: string, provider: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectAccountSelect(projectId, provider), { timeout: 5000, ...options }),
+
+  /** The providers a project offers assignment rows for, in DOM order. */
+  accountRowProviders: (projectId: string): Cypress.Chainable<string[]> =>
+    projectsScreenPage
+      .card(projectId)
+      .find(`[data-testid^='project-account-row-${projectId}-']`)
+      .then(($rows) =>
+        [...$rows].map((el) =>
+          el.getAttribute("data-testid")!.replace(`project-account-row-${projectId}-`, ""),
+        ),
+      ),
+
+  /** The account id currently selected for a project at one provider ("" when unassigned). */
+  assignedAccountId: (projectId: string, provider: string): Cypress.Chainable<string> =>
+    projectsScreenPage
+      .accountSelect(projectId, provider)
+      .find("option:selected")
+      .then(($opt) => ($opt[0] as HTMLOptionElement)?.value ?? ""),
+
+  /** The account ids offered for a project at one provider, in option order. */
+  accountOptionValues: (projectId: string, provider: string): Cypress.Chainable<string[]> =>
+    projectsScreenPage
+      .accountSelect(projectId, provider)
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => (el as HTMLOptionElement).value)),
+
+  /** The labels offered for a project at one provider, in option order. */
+  accountOptionLabels: (projectId: string, provider: string): Cypress.Chainable<string[]> =>
+    projectsScreenPage
+      .accountSelect(projectId, provider)
+      .find("option")
+      .then(($opts) => [...$opts].map((el) => el.textContent ?? "")),
+
+  /** Assign an account to a project at one provider (the dropdown submits on change). */
+  assignAccount(projectId: string, provider: string, accountId: string) {
+    byTestId(projectAccountSelect(projectId, provider)).select(accountId);
   },
 
   // ---------------------------------------------------------------------------

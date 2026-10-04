@@ -46,4 +46,12 @@ impl ProjectHandler for ProjectRpcHandler {
         self.set_project_default_branch_at_project_coordinate(request)
             .await
     }
+
+    async fn set_project_accounts(
+        &self,
+        request: Request<tddy_service::proto::project::SetProjectAccountsRequest>,
+    ) -> Result<Response<tddy_service::proto::project::SetProjectAccountsResponse>, Status> {
+        self.set_project_accounts_at_project_coordinate(request)
+            .await
+    }
 }

@@ -132,6 +132,7 @@ fn a_project_with_a_secondary_worktree() -> Fixture {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         },
     )
     .unwrap();

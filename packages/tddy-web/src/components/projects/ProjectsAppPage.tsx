@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { type ProjectEntry } from "../../gen/project_pb";
 import { ProjectService } from "../../gen/project_pb";
+import { AccountsService } from "../../gen/accounts_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
 import { AppShell } from "../shell/AppShell";
-import { ProjectsScreen } from "./ProjectsScreen";
+import { ProjectsScreen, type AssignableAccount } from "./ProjectsScreen";
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -87,7 +88,64 @@ function useProjectsRpc(
     [client, sessionToken],
   );
 
-  return { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches };
+  const setProjectAccounts = useCallback(
+    (input: {
+      projectId: string;
+      accounts: { provider: string; accountId: string }[];
+      daemonInstanceId: string;
+    }) => {
+      if (!client) return;
+      client
+        .setProjectAccounts({ sessionToken, ...input })
+        .then(() => loadProjects())
+        .catch(() => {});
+    },
+    [client, sessionToken, loadProjects],
+  );
+
+  return {
+    projects,
+    createProject,
+    addProjectToHost,
+    setDefaultBranch,
+    loadProjectBranches,
+    setProjectAccounts,
+  };
+}
+
+/**
+ * The accounts the caller's vault holds, flattened from `ListAccounts`' provider groups. A locked,
+ * absent or unreadable vault yields no assignable accounts; the Accounts screen is where those
+ * states are explained.
+ */
+function useAssignableAccounts(sessionToken: string): AssignableAccount[] {
+  const client = useDaemonClient(AccountsService);
+  const [accounts, setAccounts] = useState<AssignableAccount[]>([]);
+
+  useEffect(() => {
+    if (!client) return;
+    let current = true;
+    client
+      .listAccounts({ sessionToken })
+      .then((res) => {
+        if (!current) return;
+        setAccounts(
+          res.providers.flatMap((group) =>
+            group.accounts.map((a) => ({
+              provider: group.provider,
+              accountId: a.accountId,
+              label: a.label,
+            })),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [client, sessionToken]);
+
+  return accounts;
 }
 
 /**
@@ -110,8 +168,15 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       connectHost(instanceId)?.clientFor(ProjectService) ?? null,
     [connectHost],
   );
-  const { projects, createProject, addProjectToHost, setDefaultBranch, loadProjectBranches } =
-    useProjectsRpc(client, clientForHost, sessionToken ?? "");
+  const accounts = useAssignableAccounts(sessionToken ?? "");
+  const {
+    projects,
+    createProject,
+    addProjectToHost,
+    setDefaultBranch,
+    loadProjectBranches,
+    setProjectAccounts,
+  } = useProjectsRpc(client, clientForHost, sessionToken ?? "");
 
   return (
     <AppShell title="Projects" onNavigate={onNavigate} variant="scroll">
@@ -122,6 +187,8 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         onAddProjectToHost={addProjectToHost}
         onSetDefaultBranch={setDefaultBranch}
         loadProjectBranches={loadProjectBranches}
+        accounts={accounts}
+        onSetProjectAccounts={setProjectAccounts}
       />
     </AppShell>
   );

@@ -11,10 +11,12 @@
 //!
 //! [`AccountSummary::has_secret`]: tddy_service::proto::accounts::AccountSummary::has_secret
 
+mod resolver;
 mod service;
 mod store;
 mod vault_store;
 
+pub use resolver::{resolve_account, AccountResolution};
 pub use service::{build_accounts_entry, AccountsServiceImpl};
 pub use store::{AccountStore, AccountsError};
 pub use vault_store::{SessionSubjectResolver, SessionVaultAccountStore};

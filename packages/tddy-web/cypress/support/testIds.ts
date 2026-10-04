@@ -1398,6 +1398,22 @@ export const projectHostBaseLocation = (daemonInstanceId: string) =>
 export const projectDefaultBranchSelect = (projectId: string) =>
   `project-default-branch-select-${projectId}`;
 
+/** `[data-testid="project-account-row-<projectId>-<provider>"]` — one provider's assignment row on
+ *  a project card. Present for every provider the vault holds accounts at, assigned or not. */
+export const projectAccountRow = (projectId: string, provider: string) =>
+  `project-account-row-${projectId}-${provider}`;
+
+/** `[data-testid="project-account-select-<projectId>-<provider>"]` — the account assigned to a
+ *  project at one provider. Its empty-valued option is "no account assigned", which is a real
+ *  choice and not a placeholder: an unassigned provider resolves to nothing. */
+export const projectAccountSelect = (projectId: string, provider: string) =>
+  `project-account-select-${projectId}-${provider}`;
+
+/** `[data-testid="project-account-unavailable-<projectId>-<provider>"]` — shown beside an
+ *  assignment whose account this host's vault does not hold; distinct from "no account assigned". */
+export const projectAccountUnavailable = (projectId: string, provider: string) =>
+  `project-account-unavailable-${projectId}-${provider}`;
+
 // ---------------------------------------------------------------------------
 // Daemon selector dynamic helpers
 // ---------------------------------------------------------------------------

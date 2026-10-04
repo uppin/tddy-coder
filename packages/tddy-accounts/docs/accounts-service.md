@@ -84,6 +84,36 @@ each serialised on its own, so a write to the same record landing between them i
 Closing it needs an atomic update on `SessionVault`; tracked in
 `docs/dev/todo/2026-10-04-keyring-accounts-rename-lost-update.md`.
 
+## Resolving a project's account
+
+`resolve_account(assignments, provider, held) -> AccountResolution` answers which account a project
+uses for a provider. `assignments` is the project row's whole set
+([`ProjectData.accounts`](../../tddy-projects/docs/project-service.md#account-assignments)) and
+`held` is what this host's vault holds for the session doing the work. Both are plain data, so it is
+a pure function: reading the vault and gating the session happen before it.
+
+| Answer | When |
+|---|---|
+| `Assigned(AccountId)` | exactly one account is assigned for the provider and this host's vault holds it |
+| `NotAssigned` | no account is assigned for the provider |
+| `UnknownOnThisHost(AccountId)` | an account is assigned, but this host's vault holds no such record |
+| `Ambiguous(ProviderId)` | more than one account is assigned for the provider |
+
+**`NotAssigned` resolves to nothing, and nothing is a valid answer.** There is no fallback: not to
+the caller's own login, not to the only account in the vault, not to an unauthenticated request.
+A project with no GitHub account assigned has no GitHub credentials, and an operation that needs
+them says so rather than guessing, because a guess would act under the wrong identity. A vault
+holding exactly one candidate does not change the answer.
+
+`UnknownOnThisHost` is separate from `NotAssigned` because the person did choose: the choice is
+intact and this host cannot see the account. `Ambiguous` is unreachable through
+`SetProjectAccounts`, which refuses two accounts for one provider; it is an answer rather than a
+panic because the registry file can be edited by hand, and reaching it is a defect to report.
+
+The resolver lives here rather than in `tddy-projects` because answering `UnknownOnThisHost` needs
+the vault. `tddy-projects` does not depend on `tddy-credentials`, so the credential store is not on
+the dependency path of every project consumer.
+
 ## Registration
 
 `build_accounts_entry(service)` returns the `ServiceEntry` named `accounts.AccountsService`. The

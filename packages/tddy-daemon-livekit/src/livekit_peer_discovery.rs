@@ -81,8 +81,8 @@ use serde::Deserialize;
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
-    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
+    ProjectEntry as ProtoProjectEntry, SetProjectAccountsRequest, SetProjectAccountsResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
@@ -1519,6 +1519,28 @@ pub async fn forward_set_project_default_branch_via_livekit(
     })
 }
 
+/// Forward **SetProjectAccounts** to another daemon in the common room via LiveKit data-channel
+/// RPC.
+///
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
+pub async fn forward_set_project_accounts_via_livekit(
+    room: &CommonRoom,
+    peer_instance_id: &str,
+    request: &SetProjectAccountsRequest,
+) -> Result<SetProjectAccountsResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "project.ProjectService",
+            "SetProjectAccounts",
+            body,
+        )
+        .await?;
+    SetProjectAccountsResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode SetProjectAccountsResponse: {e}")))
+}
+
 /// Forward **UploadStagedAttachmentChunk** to another daemon in the common room via LiveKit
 /// data-channel RPC.
 ///
@@ -2223,6 +2245,7 @@ mod tests {
             daemon_instance_id: String::new(),
             main_branch_ref: String::new(),
             default_remote: String::new(),
+            accounts: Vec::new(),
         }
     }
 

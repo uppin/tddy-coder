@@ -8,7 +8,7 @@ this crate supplies the `H`.
 
 | Handler | Coordinate | Trait it implements (defined in) | RPCs |
 |---|---|---|---|
-| `ProjectRpcHandler` | `project.ProjectService` (family D) | `ProjectHandler` (`tddy-projects`) | `ListProjects`, `CreateProject`, `AddProjectToHost`, `ListProjectBranches`, `SetProjectDefaultBranch` |
+| `ProjectRpcHandler` | `project.ProjectService` (family D) | `ProjectHandler` (`tddy-projects`) | `ListProjects`, `CreateProject`, `AddProjectToHost`, `ListProjectBranches`, `SetProjectDefaultBranch`, `SetProjectAccounts` |
 | `CatalogRpcHandler` | `catalog.CatalogService` (family A) | `CatalogHandler` (`tddy-discovery`) | `ListTools`, `ListAgents`, `ListAgentModels`, `ListSubagents` |
 | `ExecToolRpcHandler` | `exec_tools.ExecToolService` (family L) | `ExecToolHandler` (`tddy-tool-engine`) | `ExecuteTool`, `StreamExecuteTool`, `ListExecTools`, `ListSessionToolCalls` |
 | `PrStackRpcHandler` | `pr_stack.PrStackService` (family P) | `PrStackHandler` (`tddy-pr-stack`) | `AddPlannedPr`, `GetPrStatus`, `QueryBranch`, `ResolveStackBase`, `LinkStackNode`, `RepointPlannedPr`, `ReorderPlannedPr`, `PullBaseIntoBranch` |

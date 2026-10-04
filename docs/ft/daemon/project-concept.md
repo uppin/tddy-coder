@@ -16,7 +16,22 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `git_url` | Remote URL (e.g. `https://github.com/org/repo.git`) |
 | `main_repo_path` | Absolute path to the cloned repository |
 | `main_branch_ref` | Optional. Remote-tracking ref (`origin/<path>`) used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/release/2025`). Set/updated from the Projects UI. Omitted (legacy) rows resolve live at resolution time (`origin/master` → `origin/main` → `origin/HEAD`); see [Git integration base ref](../coder/git-integration-base-ref.md). |
+| `accounts` | Optional. The accounts the project uses, as provider and account id pairs, at most one per provider. Ids are minted by the credential vault of the host that stored them. Empty means no account is assigned. Set from the Projects UI; see [Account assignment](#account-assignment). |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
+
+## Account assignment
+
+A project names the credential-vault account it uses for each provider. Different projects may use
+different accounts, and several projects may share one. A project uses **one
+account per provider**; assigning two for the same provider is refused, naming the provider.
+Setting accounts replaces the whole list and applies to every host owning the same `project_id`.
+
+A project with no account assigned for a provider resolves to **no account**. Operations that need
+one fail saying so; they never fall back to the caller's own login, to the only account in the vault,
+or to an unauthenticated request. An assignment can name an account that a given host's vault does
+not hold; that host reports the assignment as present but unavailable on this host, which is
+distinct from not assigned. The assignment is stored by the project registry and interpreted by the
+accounts service against the host's vault.
 
 ## Storage
 

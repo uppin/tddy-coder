@@ -65,5 +65,13 @@ pub(super) fn project_entry_from(
         daemon_instance_id,
         main_branch_ref: p.main_branch_ref.clone().unwrap_or_default(),
         default_remote,
+        accounts: p
+            .accounts
+            .iter()
+            .map(|a| tddy_service::proto::project::AccountAssignment {
+                provider: a.provider.clone(),
+                account_id: a.account_id.clone(),
+            })
+            .collect(),
     }
 }

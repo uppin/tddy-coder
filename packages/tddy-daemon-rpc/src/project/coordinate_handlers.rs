@@ -163,6 +163,7 @@ impl ProjectRpcHandler {
             main_branch_ref: None,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(
@@ -342,6 +343,7 @@ impl ProjectRpcHandler {
             main_branch_ref,
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
+            accounts: Vec::new(),
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -458,6 +460,126 @@ impl ProjectRpcHandler {
                 default_remote,
             ))?),
         }))
+    }
+
+    /// Replace which account a project uses at each provider, on this host or a peer owning the
+    /// same `project_id`.
+    ///
+    /// Same routing as [`Self::set_project_default_branch_at_project_coordinate`]: the assignment is
+    /// a property of the logical project, so every host holding a row for it has to learn about it.
+    pub(crate) async fn set_project_accounts_at_project_coordinate(
+        &self,
+        request: Request<tddy_service::proto::project::SetProjectAccountsRequest>,
+    ) -> Result<Response<tddy_service::proto::project::SetProjectAccountsResponse>, Status> {
+        let req = request.into_inner();
+        let github_user = (self.user_resolver)(&req.session_token)
+            .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
+        let os_user = &self
+            .config
+            .os_user_for_github(&github_user)
+            .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
+
+        let project_id = req.project_id.trim();
+        if project_id.is_empty() {
+            return Err(Status::invalid_argument("project_id is required"));
+        }
+
+        let requested_daemon = req.daemon_instance_id.trim();
+        let local_id = local_instance_id_for_config(&self.config);
+        let eligible_ids: Vec<String> = self
+            .eligible_daemon_source
+            .list_eligible_daemons()
+            .iter()
+            .map(|e| e.instance_id.0.clone())
+            .collect();
+        let route = tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route(
+            &local_id,
+            requested_daemon,
+            &eligible_ids,
+        )
+        .map_err(|msg| {
+            log::info!("SetProjectAccounts: rejected daemon routing: {}", msg);
+            Status::failed_precondition(msg)
+        })?;
+
+        if let tddy_daemon_livekit::livekit_peer_discovery::PeerRoute::Forward {
+            peer_instance_id,
+        } = route
+        {
+            log::info!(
+                "SetProjectAccounts: forwarding RPC to remote daemon_instance_id={}",
+                peer_instance_id
+            );
+            let slot = self.common_room_livekit_room.as_ref().ok_or_else(|| {
+                Status::failed_precondition(
+                    "cannot forward SetProjectAccounts: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
+                )
+            })?;
+            let conn_req: tddy_service::proto::project::SetProjectAccountsRequest =
+                wire_same(&req)?;
+            let inner =
+                tddy_daemon_livekit::livekit_peer_discovery::forward_set_project_accounts_via_livekit(
+                    slot,
+                    &peer_instance_id,
+                    &conn_req,
+                )
+                .await?;
+            return Ok(Response::new(wire_same(&inner)?));
+        }
+
+        let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve projects path"))?;
+
+        // Refuse a repeated provider before touching the registry, naming the provider.
+        let mut seen = std::collections::HashSet::new();
+        if let Some(dup) = req
+            .accounts
+            .iter()
+            .find(|a| !seen.insert(a.provider.as_str()))
+        {
+            return Err(Status::invalid_argument(format!(
+                "more than one account assigned for provider {}; a project uses one account per provider",
+                dup.provider
+            )));
+        }
+        if project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(Status::not_found("project not found"));
+        }
+
+        let accounts: Vec<project_storage::AccountAssignment> = req
+            .accounts
+            .iter()
+            .map(|a| project_storage::AccountAssignment {
+                provider: a.provider.clone(),
+                account_id: a.account_id.clone(),
+            })
+            .collect();
+        project_storage::set_project_accounts(&projects_dir, project_id, &accounts)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let stored = project_storage::find_project(&projects_dir, project_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::internal("project vanished after write"))?;
+        log::info!(
+            "SetProjectAccounts: project_id={} accounts={}",
+            project_id,
+            stored.accounts.len()
+        );
+        let repo_root = PathBuf::from(&stored.main_repo_path);
+        let default_remote =
+            entries::resolve_default_remote_or_empty(&projects_dir, &stored.project_id, &repo_root);
+        Ok(Response::new(
+            tddy_service::proto::project::SetProjectAccountsResponse {
+                project: Some(wire_same(&entries::project_entry_from(
+                    &stored,
+                    local_id,
+                    default_remote,
+                ))?),
+            },
+        ))
     }
 
     pub(crate) async fn list_project_branches_at_project_coordinate(

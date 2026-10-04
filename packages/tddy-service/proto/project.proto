@@ -9,7 +9,7 @@ package project;
 // project) but a project outlives every worktree cut from it, and `ListProjectBranches` reads the
 // project's *main checkout*, not a worktree.
 //
-// Imports nothing: its eleven messages are reached by no other service.
+// Imports nothing: its messages are reached by no other service.
 
 service ProjectService {
   rpc ListProjects(ListProjectsRequest) returns (ListProjectsResponse);
@@ -23,6 +23,24 @@ service ProjectService {
   // Set a project's default integration base ref (logical-project scope: forwarded to peer hosts
   // owning the same project_id). See docs/ft/coder/git-integration-base-ref.md.
   rpc SetProjectDefaultBranch(SetProjectDefaultBranchRequest) returns (SetProjectDefaultBranchResponse);
+  // Set which account a project uses at each provider (logical-project scope: forwarded to peer
+  // hosts owning the same project_id, exactly as SetProjectDefaultBranch is). The list REPLACES the
+  // stored one, so two people editing concurrently cannot interleave into a set neither chose. At
+  // most one account per provider; a second is refused rather than silently winning. See
+  // `#keyring` 5/9.
+  rpc SetProjectAccounts(SetProjectAccountsRequest) returns (SetProjectAccountsResponse);
+}
+
+// One provider's account, as assigned to a project.
+//
+// An account id is minted by the daemon that holds the credential and is unique only **within its
+// provider**, so an assignment names both. Carries no secret and no label: it is a reference into a
+// daemon's vault, resolved against `accounts.AccountsService` when it is needed.
+message AccountAssignment {
+  // Provider this assignment is for ("github", "cloudflare", ...).
+  string provider = 1;
+  // Account at that provider, as `accounts.AccountSummary.account_id` reports it.
+  string account_id = 2;
 }
 
 message AddProjectToHostRequest {
@@ -97,6 +115,10 @@ message ProjectEntry {
   // undetected (legacy rows without an upstream and without a stored `remote_name`). Clients use this
   // to normalize `<remote>/<branch>` picker values to local branch names without assuming `origin`.
   string default_remote = 7;
+  // Accounts this project is assigned at each provider. Empty means **unassigned**, which is a
+  // final answer rather than an invitation to guess: with no assignment the daemon resolves no
+  // credential and the operation that wanted one fails. At most one entry per provider.
+  repeated AccountAssignment accounts = 8;
 }
 
 message SetProjectDefaultBranchRequest {
@@ -107,5 +129,19 @@ message SetProjectDefaultBranchRequest {
 }
 
 message SetProjectDefaultBranchResponse {
+  ProjectEntry project = 1;
+}
+
+message SetProjectAccountsRequest {
+  string session_token = 1;
+  string project_id = 2;
+  // The project's whole assignment set after this call. An empty list clears every assignment,
+  // which is how a project is returned to "unassigned" — there is no separate clear RPC.
+  repeated AccountAssignment accounts = 3;
+  // Host to apply this to. Empty or matching the local instance = local; otherwise forwarded.
+  string daemon_instance_id = 4;
+}
+
+message SetProjectAccountsResponse {
   ProjectEntry project = 1;
 }
