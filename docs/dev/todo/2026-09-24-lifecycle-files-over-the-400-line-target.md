@@ -65,3 +65,17 @@ session_coordinate_handlers.rs      414
   so re-measure after it lands, before planning.
 - Whether ≤ 400 is a target worth a PR of its own is the developer's call. 500 is the budget every
   code-issue record and the file-length gate use.
+
+## Status 2026-10-04: files over 500 lines at the end of `#carve` 16a
+
+The developer deferred the 500-line rule for 16a (2026-10-04): re-points and new declarations may
+leave a file over the line, and doc comments are not to be trimmed to get under it. Whole-file line
+counts (`wc -l`, tests included) of the files 16a touched that are over 500, base `37c8144f`:
+
+| File (`src/`) | Base | Final | Grown by |
+|---|---:|---:|---|
+| `connection_service.rs` | 524 | 547 | M0.5: the `mod split_context_from_codebase_host_tests;` declaration with the 20-line doc comment that moved with the test (production lines unchanged: 18 before the first `#[cfg(test)]`) |
+| `connection_service/svc_split_context_from_codebase_host.rs` | 803 | 621 | shrank in M0.5 (the host-building test left); 450 production lines, the rest is its second inline test module |
+
+`cursor_cli_spawn.rs` (532) and `split_session.rs` (1,399) are over 500 whole-file lines at the base
+too and were not touched. No function grew in 16a.

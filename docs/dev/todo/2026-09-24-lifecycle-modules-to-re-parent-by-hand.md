@@ -104,3 +104,11 @@ row, the `mod` lines, the rebased `use` paths), with the public `tddy_session_li
 kept. Then `./test -p tddy-session-lifecycle` against the destructure's baseline (61 targets,
 622 / 22 / 1), and every crate that depends on lifecycle checked with `--all-targets`. Or an engine
 operation that moves a module under a different parent within one crate; none exists.
+
+## Status 2026-10-04
+
+`#carve` 16a ([#531](https://github.com/uppin/tddy-coder/pull/531)) did **not** re-parent the four mixed
+parent/child files (its M0.4 / D8): the developer deferred it, and no hand moves are allowed. The
+engine improvement that closes this is a **`reparent_module` operation**: move a module's file and
+directory under another parent in the same crate and rewrite the `mod` and `use` lines. It is still
+**blocking for node 17**, whose module moves take a parent's children along.

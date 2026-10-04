@@ -37,6 +37,27 @@ existing or new module of the same crate, in any file. With it M0.1 is one `extr
 `peer_session_answer` from the first item, then three moves; M0.6's two type moves
 (`SessionStdioEndpoint`, `ExecToolRoute`) need the same operation.
 
+## Alternatives considered (2026-10-04)
+
+- **Multi-file `items` anchors in `extract_module`** (one anchor listing items of several files, gathered
+  into one new module). Smaller surface, but the engine would have to choose the new module's parent and
+  resolve visibility across files. It composes from the move operation above, so build the move first.
+- **Prerequisite for 16b.** The `#carve` 16b node consumes the M0.1 T3 group, so it re-plans around the
+  missing `peer_session_answer` until this lands.
+
+## Deferred work this blocks
+
+Developer decision (2026-10-04): these items are **deferred until the engine can do them**, not done by hand:
+
+- **M0.1** `peer_session_answer` (4 items from 4 files into one T3 module);
+- **M0.6** `seeded_clone_guard.rs` split (`SessionStdioEndpoint` to T1, `ExecToolRoute` beside `LocalExecTools`);
+- the "group `write_claude_hooks_settings` and `resolve_start_session_claude_binary` with T4" half of M0.2
+  (not contiguous; each is one move once the operation exists; otherwise they move with T4 in 16c).
+
+Follow-ups: [`#carve` same-crate re-parenting](./2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) (M0.4, also
+awaiting developer consent D8) and
+[engine ergonomics seen during #carve 16a](./2026-10-04-restructure-anchors-and-snapshot-friction-seen-in-carve-16a.md).
+
 ## Hand edit?
 
 Not done. The developer's rule for this carve is that an engine gap is not worked around by hand
