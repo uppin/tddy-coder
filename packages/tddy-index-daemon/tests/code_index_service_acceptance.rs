@@ -15,13 +15,14 @@ use std::time::Duration;
 use prost::Message;
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnalyzeEvent, AnchorsRequest, AnchorsResponse, ApplyRequest, CheckRequest,
-    CodeIndexServiceServer, CodeLocation, ComplexityRequest, ComplexityResponse, CoverageRequest,
-    DefinitionRequest, DefinitionResponse, DuplicateTestsRequest, Finding, FunctionComplexity,
-    HoverRequest, HoverResponse, IndexProgress, ListPlansRequest, LoadPlansRequest, LoadedPlan,
+    CodeDiagnostic, CodeIndexServiceServer, CodeLocation, CodeSymbol, ComplexityRequest,
+    ComplexityResponse, CoverageRequest, DefinitionRequest, DefinitionResponse, DiagnosticsRequest,
+    DiagnosticsResponse, DuplicateTestsRequest, Finding, FunctionComplexity, HoverRequest,
+    HoverResponse, IndexProgress, ListPlansRequest, LoadPlansRequest, LoadedPlan,
     PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest, ReferencesResponse,
     ReportRequest, ReportResponse, RestructureEvent, RunOutcome, SourcePosition, SourceRange,
-    UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest,
-    WorkspacesResponse,
+    SymbolsRequest, SymbolsResponse, UnloadPlansRequest, VerifyRequest, VerifyResponse,
+    WarmRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use tddy_index_daemon::{
     build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, CODE_INDEX_SERVICE,
@@ -1436,5 +1437,216 @@ async fn hover_returns_the_type_text() {
         HoverResponse {
             markdown: Some("fn foo() -> u32".to_string()),
         }
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Symbols and diagnostics
+//
+// The fake answers every `textDocument/documentSymbol` with one function, `foo`, at zero-based
+// 10:0–12:1 of the document asked about, and every pull diagnostic with one error at zero-based
+// 5:4–5:9 from `rustc`. The assertions are the service's translation: the asked file relative to
+// the root, one-based byte coordinates, the kind and severity codes passed through.
+
+/// A range spanning lines, one-based, as the wire carries it.
+fn a_range_from(
+    (start_line, start_column): (u32, u32),
+    (end_line, end_column): (u32, u32),
+) -> Option<SourceRange> {
+    Some(SourceRange {
+        start: Some(SourcePosition {
+            line: start_line,
+            column: start_column,
+        }),
+        end: Some(SourcePosition {
+            line: end_line,
+            column: end_column,
+        }),
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn symbols_lists_the_symbols_of_a_file_relative_to_the_root() {
+    // Given a workspace whose language server outlines `src/lib.rs`
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the symbols of that file are asked for
+    let answer: SymbolsResponse = unary_at(
+        &entry,
+        "Symbols",
+        SymbolsRequest {
+            workspace_root: root_of(&workspace),
+            file: "src/lib.rs".to_string(),
+            query: None,
+        },
+    )
+    .await
+    .expect("a file inside the workspace has symbols");
+
+    // Then each is the server's symbol, located in that file in one-based byte coordinates
+    assert_eq!(
+        answer,
+        SymbolsResponse {
+            symbols: vec![CodeSymbol {
+                name: "foo".to_string(),
+                kind: 12,
+                location: Some(a_location_in_the_workspace(
+                    "src/lib.rs",
+                    a_range_from((11, 1), (13, 2))
+                )),
+                container: None,
+            }],
+        }
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_reports_what_the_server_finds_wrong_with_a_file() {
+    // Given a workspace whose language server reports an error in `src/lib.rs`
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the diagnostics of that file are asked for
+    let answer: DiagnosticsResponse = unary_at(
+        &entry,
+        "Diagnostics",
+        DiagnosticsRequest {
+            workspace_root: root_of(&workspace),
+            file: "src/lib.rs".to_string(),
+        },
+    )
+    .await
+    .expect("a file inside the workspace can be diagnosed");
+
+    // Then it is the server's diagnostic, in one-based byte coordinates
+    assert_eq!(
+        answer,
+        DiagnosticsResponse {
+            diagnostics: vec![CodeDiagnostic {
+                range: a_range_on_line(6, 5, 10),
+                severity: 1,
+                message: "unused variable: `x`".to_string(),
+                source: Some("rustc".to_string()),
+            }],
+        }
+    );
+}
+
+/// A workspace holding `src/lib.rs` and `Makefile`, the latter not a Rust source.
+fn a_workspace_with_a_makefile() -> tempfile::TempDir {
+    let workspace = a_workspace_calling_foo();
+    std::fs::write(workspace.path().join("Makefile"), "build:\n\tcargo build\n")
+        .expect("a Makefile");
+    workspace
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn symbols_refuses_a_file_that_is_not_rust_source() {
+    // Given a workspace holding a Makefile
+    let workspace = a_workspace_with_a_makefile();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the symbols of that file are asked for
+    let refusal = unary_at::<_, SymbolsResponse>(
+        &entry,
+        "Symbols",
+        SymbolsRequest {
+            workspace_root: root_of(&workspace),
+            file: "Makefile".to_string(),
+            query: None,
+        },
+    )
+    .await
+    .expect_err("a Makefile has no Rust symbols");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`Makefile` is not a `.rs` file"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn symbols_refuses_a_file_that_climbs_out_of_the_root() {
+    // Given a workspace
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the symbols of a file outside the root, reached with `..`, are asked for
+    let refusal = unary_at::<_, SymbolsResponse>(
+        &entry,
+        "Symbols",
+        SymbolsRequest {
+            workspace_root: root_of(&workspace),
+            file: "../neighbour/src/lib.rs".to_string(),
+            query: None,
+        },
+    )
+    .await
+    .expect_err("a file outside the root is not served");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`../neighbour/src/lib.rs`"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_refuses_a_file_that_is_not_rust_source() {
+    // Given a workspace holding a Makefile
+    let workspace = a_workspace_with_a_makefile();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the diagnostics of that file are asked for
+    let refusal = unary_at::<_, DiagnosticsResponse>(
+        &entry,
+        "Diagnostics",
+        DiagnosticsRequest {
+            workspace_root: root_of(&workspace),
+            file: "Makefile".to_string(),
+        },
+    )
+    .await
+    .expect_err("a Makefile cannot be diagnosed as Rust");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`Makefile` is not a `.rs` file"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_refuses_a_file_that_climbs_out_of_the_root() {
+    // Given a workspace
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the diagnostics of a file outside the root, reached with `..`, are asked for
+    let refusal = unary_at::<_, DiagnosticsResponse>(
+        &entry,
+        "Diagnostics",
+        DiagnosticsRequest {
+            workspace_root: root_of(&workspace),
+            file: "../neighbour/src/lib.rs".to_string(),
+        },
+    )
+    .await
+    .expect_err("a file outside the root is not served");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`../neighbour/src/lib.rs`"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
     );
 }

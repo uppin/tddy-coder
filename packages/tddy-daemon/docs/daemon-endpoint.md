@@ -16,6 +16,14 @@ this crate loads.
 `runtime.rs` derives each `ServiceEntry` from configuration and returns handles; nothing that listens,
 dials, or runs forever is started there.
 
+It also chooses the executor that answers a session's `Lsp*` tools. With an `index_daemon:` section, it
+registers `tddy_lsp_executor::index_backed`'s index-backed executor, whose channel is the
+`IndexDaemonRegistry` (`index_daemon/lsp_channel.rs`: `connect`, the same call the code pane's
+navigation forwards through); without one, it registers the registry-backed `TddyLspExecutor`.
+Registration is first-wins per process, so the choice is made before the registration. The
+`TddyLspExecutor` is built either way, because its registry is what the idle-reaper loop drives; with an
+index selected that registry stays empty.
+
 ### Assembling the session host and the RPC families
 
 `runtime::build` builds the `DaemonSessionHost` with every `with_*` first, then calls

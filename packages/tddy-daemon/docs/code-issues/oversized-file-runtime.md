@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
-**Metrics:** **1,620 production lines** (2026-09-24, #510 HEAD; 1,619 before #510, 1,562 before #509, 1,513 before #508) · budget 500 · **~3.2× over** · residue function `build` is **880 lines** (879 before #510, 878 before #509)
-**Thresholds breached:** length 1620 > 500; `build` 880 > 60
+**Metrics:** **1,650 production lines** (2026-10-03, #570 HEAD; 1,636 on `master` before #570, 1,620 before #574; 1,619 before #510, 1,562 before #509, 1,513 before #508) · budget 500 · **~3.2× over** · residue function `build` is **880 lines** (879 before #510, 878 before #509)
+**Thresholds breached:** length 1650 > 500; `build` 880 > 60
 **Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
-**Status:** Open — regressed 2026-09-24 (1,562 → 1,619 in #509, `#keyring` 2/9; 1,619 → 1,620 in #510, `#keyring` 3/9). Pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508, #509 and #510 grew it and deferred the split because dependents #510–#513 touch this file
+**Status:** Open — regressed 2026-10-03 (+11 from #574, +14 from #570; earlier: 1,562 → 1,619 in #509, `#keyring` 2/9; 1,619 → 1,620 in #510, `#keyring` 3/9). Pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508, #509 and #510 grew it and deferred the split because dependents #510–#513 touch this file
 
 ## Measurement history
 
@@ -24,6 +24,8 @@
 | 2026-09-24 | 1,620 | 1,619 on `origin/master` `35cf2913` → 1,620 after #510 (`#keyring` 3/9): inside `build`, the injection of `auth_result.github_token_store` becomes `credential_vaults` and gains one line, `tddy_daemon_auth::pending_logins::spawn_pending_login_sweep(&vaults)` — the pending-login expiry sweep, spawned where the vaults are handed to the connection host. `build` 879 → 880. Grown; the split is deferred with the developer's consent to a follow-up after `#keyring` lands, because #511–#513 touch this file (`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`) |
 | 2026-09-24 | 1,620 | touched, unchanged: #510's post-wrap follow-up renames the sweep it spawns to `tddy_daemon_auth::vault_lifetimes::spawn_credential_sweep(&vaults)` — the same one line, which now also closes an open vault nothing has used for `github.open_vault_idle_ttl_seconds`. The idle eviction and the sweep's second kind live in `tddy-credentials` and `tddy-daemon-auth`, not here. `build` still 880 |
 | 2026-10-03 | 1,631 | 1,620 on the merge-base with `origin/feature/live-plan/live-plans` → 1,631 after #574 (`#live-plan` 8/15): the `CodeNavigationServiceImpl` construction, its registration with the RPC router and the `index_daemon` registry hand-off, all inside `build`. Grown; the split is deferred with the developer's consent (`docs/dev/todo/2026-10-03-code-navigation-grew-four-oversized-files.md`) |
+
+| 2026-10-03 | 1,650 | 1,636 on `origin/master` (`51b8eb97`, after #574 and #566 merged) → 1,650 after #570 (`#live-plan` 11/15): inside `build`, the `Lsp*` executor is built, its idle-reaper registry taken, and `select_lsp_executor` registers the index-backed executor when `index_daemon:` is configured, the local one otherwise (replacing the one-line `tddy_lsp_executor::register`; the block moved below the `index_daemon` section whose registry it needs). Grown; the split is deferred with the developer's consent (`docs/dev/todo/2026-10-03-session-lsp-tools-grew-runtime-rs.md`) because #571 and #573 touch this file |
 
 ## What the gate found
 
