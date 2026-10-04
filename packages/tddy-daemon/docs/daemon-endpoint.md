@@ -57,7 +57,17 @@ one `SessionVaults` registry `build_auth_entries_admitting` built over `auth_sto
 reads a caller's GitHub token from it. At the same point `build` starts the credential sweep,
 `tddy_daemon_auth::vault_lifetimes::spawn_credential_sweep(&vaults)`, which drops a sign-in's
 waiting GitHub token once `github.pending_login_ttl_seconds` has passed and closes an open vault
-nothing has used for `github.open_vault_idle_ttl_seconds` (no task when both are `0`). No `auth_storage` means neither — see
+nothing has used for `github.open_vault_idle_ttl_seconds` (no task when both are `0`). The same
+registry backs `accounts.AccountsService`: `build` registers
+`tddy_accounts::build_accounts_entry` over a `SessionVaultAccountStore` built from those vaults and a
+clone of the session-token → GitHub-login resolver the other per-user services take (the login is the
+vault's subject)
+([accounts-service.md](../../tddy-accounts/docs/accounts-service.md)). The built `DaemonRuntime` keeps
+the one handle privately and exposes it read-only as `DaemonRuntime::credential_vaults()` — the very
+registry its services hold open, not a second instance over the same directory whose in-memory open
+state would be its own; `tests/accounts_stub_daemon_acceptance.rs` opens a stub user's vault through
+it. No `auth_storage` means none of this — no vaults, no accounts entry, `credential_vaults()` is
+`None` — see
 [auth-service.md § Credential vaults](../../tddy-daemon-auth/docs/auth-service.md#credential-vaults).
 
 `tests/` holds only the suites that exercise this composition — see
