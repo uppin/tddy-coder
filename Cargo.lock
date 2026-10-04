@@ -12285,6 +12285,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "serial_test",
+ "tddy-code-restructuring",
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-auth",

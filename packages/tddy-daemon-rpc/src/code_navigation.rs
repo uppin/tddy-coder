@@ -13,16 +13,19 @@
 //! `FAILED_PRECONDITION` naming that section. There is deliberately no fallback to the agent-tool
 //! language server: two indexes answering the same pane would disagree.
 
+use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    CodeIndexProgress, CodeLocation, CodeNavigationService, CodeNavigationServiceServer,
-    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, OpenPlanRequest,
-    PlanRunEvent, PlanSnapshot, ReferencesRequest, ReferencesResponse, RunPlanRequest,
-    SourcePosition, SourceRange, WatchCodeIndexRequest, WatchPlanRequest,
+    plan_run_event, CodeIndexProgress, CodeLocation, CodeNavigationService,
+    CodeNavigationServiceServer, DefinitionRequest, DefinitionResponse, HoverRequest,
+    HoverResponse, OpenPlanRequest, PlanRunEvent, PlanSnapshot, ReferencesRequest,
+    ReferencesResponse, RunPlanRequest, SourcePosition, SourceRange, WatchCodeIndexRequest,
+    WatchPlanRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
@@ -33,6 +36,12 @@ use crate::code_index_warmup::SessionIndexProgress;
 
 /// How many progress messages `WatchCodeIndex` buffers for a reader that has not drained them yet.
 const WATCH_BUFFER: usize = 8;
+
+/// How often `WatchPlan` asks the index daemon's plan store whether anything changed; the store has
+/// no change feed to follow.
+const PLAN_POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+mod plan;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
 /// `service CodeNavigationService` in `tddy-service/proto/code_navigation.proto`.
@@ -269,7 +278,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<OpenPlanRequest>,
     ) -> Result<Response<PlanSnapshot>, Status> {
         let r = request.into_inner();
-        let _forward = self
+        let mut forward = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -278,21 +287,24 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 None,
             )
             .await?;
-        // TODO(plan-dialog): `LoadPlans` the plan for `_forward.workspace_root`, read its operations
-        // (id, kind, anchor item and file, group) in plan order, and fold in each one's status and
-        // the store's stale reasons.
-        Err(Status::unimplemented(
-            "OpenPlan is not served yet — TODO(plan-dialog)",
-        ))
+        let snapshot = plan::open_snapshot(
+            &mut forward.client,
+            Path::new(&forward.workspace_root),
+            &forward.workspace_root,
+            &forward.file,
+        )
+        .await?;
+        Ok(Response::new(snapshot))
     }
 
-    /// A plan's operations as their status and staleness change.
+    /// A plan's operations as their status and staleness change: the current snapshot, then a new
+    /// one whenever the store reports something different, until the client goes away.
     async fn watch_plan(
         &self,
         request: Request<WatchPlanRequest>,
     ) -> Result<Response<Self::WatchPlanStream>, Status> {
         let r = request.into_inner();
-        let _forward = self
+        let mut forward = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -301,21 +313,57 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 None,
             )
             .await?;
-        // TODO(plan-dialog): send the current snapshot, then a new one whenever `PlanStatus` /
-        // `ListPlans` for the worktree report a changed status or stale reason, until the client
-        // goes away.
-        Err(Status::unimplemented(
-            "WatchPlan is not served yet — TODO(plan-dialog)",
-        ))
+        let rows = plan::read_plan_rows(Path::new(&forward.workspace_root), &forward.file).await?;
+        let mut last = plan::open_snapshot(
+            &mut forward.client,
+            Path::new(&forward.workspace_root),
+            &forward.workspace_root,
+            &forward.file,
+        )
+        .await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+        tokio::spawn(async move {
+            if tx.send(Ok(last.clone())).await.is_err() {
+                return;
+            }
+            loop {
+                tokio::select! {
+                    () = tx.closed() => return,
+                    () = tokio::time::sleep(PLAN_POLL_INTERVAL) => {}
+                }
+                let current = match plan::current_snapshot(
+                    &mut forward.client,
+                    &forward.workspace_root,
+                    &forward.file,
+                    &rows,
+                )
+                .await
+                {
+                    Ok(current) => current,
+                    Err(status) => {
+                        let _ = tx.send(Err(status)).await;
+                        return;
+                    }
+                };
+                if current != last {
+                    if tx.send(Ok(current.clone())).await.is_err() {
+                        return;
+                    }
+                    last = current;
+                }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 
-    /// Apply a plan through the warm index, streaming each operation's outcome.
+    /// Apply a plan through the warm index, streaming each operation's outcome. A run the index
+    /// stops on an error ends with a `failure` event.
     async fn run_plan(
         &self,
         request: Request<RunPlanRequest>,
     ) -> Result<Response<Self::RunPlanStream>, Status> {
         let r = request.into_inner();
-        let _forward = self
+        let mut forward = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -324,12 +372,41 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 None,
             )
             .await?;
-        // TODO(plan-dialog): forward to `code_index.Apply` for the worktree and map each
-        // `RestructureEvent` — operation, note, outcome — onto the stream, ending a failed run with a
-        // `failure` naming the group that rolled back.
-        Err(Status::unimplemented(
-            "RunPlan is not served yet — TODO(plan-dialog)",
-        ))
+        let rows = plan::read_plan_rows(Path::new(&forward.workspace_root), &forward.file).await?;
+        let mut events = forward
+            .client
+            .apply(index::ApplyRequest {
+                workspace_root: forward.workspace_root,
+                plan: forward.file,
+                dry_run: false,
+                resume: false,
+                from: None,
+                stop_after: None,
+            })
+            .await
+            .map_err(tddy_service::to_rpc_status)?
+            .into_inner();
+        let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+        tokio::spawn(async move {
+            loop {
+                let relayed = match events.message().await {
+                    Ok(Some(event)) => match plan::run_event(event) {
+                        Some(event) => event,
+                        None => continue,
+                    },
+                    Ok(None) => return,
+                    Err(status) => plan::run_failure(&tddy_service::to_rpc_status(status), &rows),
+                };
+                let terminal = matches!(
+                    relayed.event,
+                    Some(plan_run_event::Event::Outcome(_) | plan_run_event::Event::Failure(_))
+                );
+                if tx.send(Ok(relayed)).await.is_err() || terminal {
+                    return;
+                }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 

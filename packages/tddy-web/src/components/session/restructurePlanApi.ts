@@ -134,11 +134,24 @@ export function createRestructurePlanApi(
 }
 
 /**
- * Whether a previewed file is a restructure plan: a `.jsonl` whose first line is a plan header —
- * a JSON object carrying a numeric `v` and a `snapshot` object, as `tddy-code-restructuring`'s
- * `Plan::parse` reads it.
+ * Whether a previewed file is a restructure plan: a `.jsonl` whose first line is a plan header — a
+ * JSON object carrying a numeric `v` and either a `snapshot` object (schema v1) or a `files` object
+ * (schema v2), as `tddy-code-restructuring`'s `Plan::parse` reads it. An event log, whose lines are
+ * not headers, is never offered as a plan.
  */
-export function isRestructurePlanFile(_relPath: string, _content: string): boolean {
-  // TODO(plan-dialog): parse the first line of a `.jsonl` file and recognise the plan header.
-  return false;
+export function isRestructurePlanFile(relPath: string, content: string): boolean {
+  if (!relPath.endsWith(".jsonl")) return false;
+  const firstLine = content.split("\n").find((line) => line.trim() !== "");
+  if (firstLine === undefined) return false;
+  let header: unknown;
+  try {
+    header = JSON.parse(firstLine);
+  } catch {
+    return false;
+  }
+  if (typeof header !== "object" || header === null) return false;
+  const { v, snapshot, files } = header as Record<string, unknown>;
+  const isObject = (value: unknown) =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof v === "number" && (isObject(snapshot) || isObject(files));
 }
