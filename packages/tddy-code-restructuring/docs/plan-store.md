@@ -113,6 +113,11 @@ match neither), and refuses an item-anchored plan as `PlanUnverifiable { applied
 
 There is no repair for the crash window; the remainder runs from a new plan file.
 
+The steps above are per operation for an ungrouped one. A [transactional group's](readiness-and-gates.md#transactional-groups)
+members are journalled `completed` as they land, but their plan refresh and `plan_synced` records are
+written together, in plan order, at the group's end once it has compiled; a group that is rolled back or
+crashes leaves the store and the plan file as they were before it.
+
 ## Flush and the file on disk
 
 A flush writes a temporary file beside the plan and renames it. Before writing it compares the file's

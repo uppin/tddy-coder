@@ -276,6 +276,14 @@ pub fn operation(
     )
 }
 
+/// The transactional group an applied operation belongs to, as a line following the operation's.
+///
+/// Stated as a line of its own, as [`visibility`] is, so the operation's line keeps the shape every
+/// front end and every script already reads.
+pub fn group(name: &str) -> String {
+    format!("   group: {name}")
+}
+
 /// One visibility an extraction had to widen, as a line in the run's account.
 ///
 /// Takes the widening already stated because that is the form it travels in: the daemon's apply

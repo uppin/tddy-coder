@@ -86,13 +86,20 @@ edited by another plan is **stale**: `ListPlans` and `PlanStatus` report it with
 reports it as a finding, and `Apply` refuses it before any write. Plans nobody loaded are never
 touched.
 
+**Groups.** An `Apply` of a plan with [transactional groups](rust-code-restructuring.md#transactional-groups)
+gates each group at its end and rolls it back exactly when it does not compile, as the command line
+does. A group's operations are streamed as `OperationApplied` events only once the group has compiled,
+each carrying the group's name (`group`, empty for an ungrouped operation); a rolled-back group streams
+none. A client that goes away between a group's members has the group undone, never left half applied.
+A group that fails its gate ends the stream as `FailedPrecondition`.
+
 ## The service
 
 | RPC | Shape | Notes |
 |---|---|---|
 | `Warm` | server-streaming | Loads a root and reports progress. Idempotent. Every phase the server reports reaches the stream; only the printed console is throttled |
 | `Check` | server-streaming | Every finding in a plan, no writes. Streams one `Finding` per finding |
-| `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation and outcome events |
+| `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation (each naming its group, if any) and outcome events |
 | `Anchors` | unary | An anchor a plan can carry: `items` for named items, or the `item` anchor of the innermost item enclosing `at`. The response holds the anchor's JSON (`anchor_json`) and its absolute span (`range`) |
 | `PlanStatus` | unary | completed / in-flight / pending / failed, and the plan's stale operations with their reasons |
 | `LoadPlans` | unary | Reads plans into the root's plan store, giving every operation an id. Answers the plans held, with operation counts and whether each is dirty |
@@ -129,7 +136,7 @@ transports as two different codes and a new error variant is a compile error:
 | Class | Meaning to a caller |
 |---|---|
 | `InvalidArgument` | the request is wrong — a malformed plan, code text in a plan, an unsupported operation, a file no backend handles, unparseable Rust |
-| `FailedPrecondition` | the tree is wrong — an unreachable root, a relative root, a plan that is not there, a snapshot mismatch, a stale operation at or after the run's start, an existing journal, a plan that changed on disk since it was loaded, a continued run whose plan the journal cannot vouch for, a missing coverage capture |
+| `FailedPrecondition` | the tree is wrong — an unreachable root, a relative root, a plan that is not there, a snapshot mismatch, a stale operation at or after the run's start, an existing journal, a transactional group that did not compile at its end and was rolled back, a plan that changed on disk since it was loaded, a continued run whose plan the journal cannot vouch for, a missing coverage capture |
 | `DeadlineExceeded` | the caller's own deadline expired, or it cancelled; the message says how far the index got |
 | `Unavailable` | the server asked to be asked again |
 | `Internal` | neither caused by the caller nor fixable by them |

@@ -183,6 +183,7 @@ fn an_extraction_of_the_function_body() -> RefactorOp {
         reexport: None,
         to_file: false,
         also: Vec::new(),
+        group: None,
     }
 }
 

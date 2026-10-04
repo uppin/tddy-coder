@@ -28,7 +28,8 @@ Every writing `apply` is bracketed by `cargo check --all-targets` over the packa
 tree that did not compile before the plan is refused with nothing written; a tree the plan's
 accepted operations left uncompilable fails the run, with the compiler's errors, the edits left on
 disk and the way to roll them back. `check --deep` does not run the compiler, so a clean deep check
-is not a promise that the applied tree builds. See
+is not a promise that the applied tree builds. Operations a plan gives the same `"group"` are gated at the
+group's end and rolled back exactly when it does not compile. See
 [docs/readiness-and-gates.md](docs/readiness-and-gates.md).
 
 A plan anchors an operation by **item**: a crate-rooted path such as `tddy_core::workflow::Stack::new`
@@ -114,8 +115,9 @@ except `backends/rust.rs` and `crate_move/test_binary.rs` (see their records in 
 | Area | Modules |
 |---|---|
 | Plan vocabulary | `plan.rs`, `plan/codec.rs` (header codec, `hint_of`), `plan/item_path.rs` |
+| Journal | `journal.rs`, `journal/group.rs` (`PreImage`, `OpenGroup`) |
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
-| Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
+| Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
 | Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs` |
 | Rust backend | `backends/rust.rs`, and beside it `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
 | Cross-crate moves | `crate_move/{moving,cluster,source_scan}.rs` with `moving/facade_writer.rs`, `cluster/stranded.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs` |

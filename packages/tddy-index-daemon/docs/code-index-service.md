@@ -31,7 +31,7 @@ code path rather than a second one.
 | `tree_changes.rs` | The per-root snapshot of the source tree (`*.rs`, `Cargo.toml`, `Cargo.lock`) and the `workspace/didChangeWatchedFiles` notification built from its difference |
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded |
 | `queries.rs` | `Anchors`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `PlanStatus` reads the loaded plan and, like `ListPlans`, lists its stale operations (`StaleOp { op, reason }`). `Verify` answers the three excused-statement counts (`repointed`, `visibility_normalised`, `cfg_test_gates`). `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
-| `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event) |
+| `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event), and gating and rolling back transactional groups through `runner::group_gate` (`GroupRun`), so a group's `OperationApplied` events, each carrying `group`, are sent only once the group compiled |
 | `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, and the translation either side of it |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
@@ -39,7 +39,7 @@ code path rather than a second one.
 | `cli.rs` | The argument shape and the lifetime it selects |
 | `serve.rs` | The three transports and shutdown |
 | `single_shot.rs` | The in-process call and the verdict → exit-status rule |
-| `render.rs` | What a single-shot run tells an operator, and on which stream |
+| `render.rs` | What a single-shot run tells an operator, and on which stream. An applied operation in a group is followed by a `   group: <name>` line (`console::group`) |
 
 ## Codegen
 
@@ -162,6 +162,20 @@ daemon path cannot drift from the cold one. See
   before the outcome event is emitted, so a stream never ends with "applied N of N" over a tree that
   does not compile. Both checks are killed when the request's cancellation token fires.
 
+### Transactional groups
+
+A plan's [transactional groups](../../../docs/ft/coder/rust-code-restructuring.md#transactional-groups)
+are judged inside the apply loop by the library's `runner::group_gate::GroupRun`, the same type the
+command line's loop uses. At a group's first member the loop journals `group_started` and each member's
+pre-images; at its last it runs `cargo check --all-targets` over the packages the group touched, under
+the request's cancellation token, then either journals `group_completed` and refreshes the members into
+the plan store together, or restores the pre-images and journals `group_rolled_back`. Any failure while
+a group is open rolls it back and returns the original error; only `GroupDoesNotCompile` names the gate.
+Cancellation is checked before each operation: a request whose caller has gone rolls the open group back
+at once rather than leaving it for a resume, and a cancel during the group's own check leaves it open
+(`CallerStopped`) for the next resume to roll back. A resume (`--resume`) rolls an open group back before
+it runs anything. `stop_after` is judged only where a group would begin.
+
 ## Refusals
 
 `status.rs` holds one `match` per error type — `RestructureError`, `AnalysisError`, `LspError` — each
@@ -173,6 +187,7 @@ variant, not a cleverer default.
 The compile gate's two variants map by who can fix them: `BaselineDoesNotCompile` is
 `FailedPrecondition` (nothing was written, and the same request fails until the tree is repaired),
 `AppliedTreeDoesNotCompile` is `Internal` (the executor's own accepted operations produced it).
+`GroupDoesNotCompile` is `FailedPrecondition`: the group was rolled back, the tree is as the operations before it left it, and the same request fails identically until the plan or the code changes.
 
 ## Testing
 

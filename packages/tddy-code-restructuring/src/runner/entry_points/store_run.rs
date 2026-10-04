@@ -1,4 +1,5 @@
 use super::super::refuse_a_broken_result;
+use crate::backends::rust::ProgressSink;
 use crate::Result;
 
 use super::super::commit_operation;
@@ -10,8 +11,12 @@ use super::report_visibility;
 use crate::{
     plan_store::PlanStore,
     registry::Workspace,
-    runner::{entry_points::anchor_entry_points, restore_ledger, resume, AppliedRun, StatePaths},
-    BackendRegistry, Journal,
+    runner::{
+        entry_points::anchor_entry_points,
+        group_gate::{GroupGate, GroupRun, Settled},
+        restore_ledger, resume, AppliedRun, StatePaths,
+    },
+    BackendRegistry, Journal, Resolution,
 };
 
 use crate::Overlay;
@@ -153,6 +158,82 @@ pub fn open_plan_run(
     })
 }
 
+/// Tell the progress sink what the run is about to do.
+fn announce_run(options: &Options, total: usize, start: usize) {
+    (options.progress)(&format!(
+        "apply: {total} operation(s){}{}",
+        if options.dry_run { ", dry-run" } else { "" },
+        if start > 0 {
+            format!(", from op {start}")
+        } else {
+            String::new()
+        }
+    ));
+}
+
+/// Whether `--stop-after` has been spent by the time the run reaches operation `index`, saying so
+/// on the progress sink when it has.
+fn stop_limit_reached(options: &Options, start: usize, index: usize) -> bool {
+    let Some(limit) = options.stop_after else {
+        return false;
+    };
+    if index < start + limit {
+        return false;
+    }
+    (options.progress)(&format!(
+        "stopped after {} operation(s) as requested",
+        index - start
+    ));
+    true
+}
+
+/// Bring the plan `key` up to the tree after each of `settled`'s operations, in plan order.
+fn refresh_plan(
+    store: &mut PlanStore,
+    key: &PlanKey,
+    settled: &[(usize, Resolution)],
+    registry: &mut BackendRegistry,
+    journal: &mut Journal,
+    paths: &StatePaths,
+) -> Result<()> {
+    for (member, applied) in settled {
+        applied_op_record::record_applied_op(
+            store, key, *member, applied, registry, journal, paths,
+        )?;
+    }
+    Ok(())
+}
+
+/// Tell the account about each of `settled`'s operations as applied, oldest first, a group member's
+/// line followed by the group it belongs to.
+///
+/// `done` counts everything applied so far, `settled` included.
+fn report_settled(
+    account: &ProgressSink,
+    plan: &Plan,
+    settled: &[(usize, Resolution)],
+    done: usize,
+) {
+    let reported = done - settled.len();
+    for (offset, (member, resolution)) in settled.iter().enumerate() {
+        let op = &plan.ops[*member];
+        if op.group.is_some() {
+            report_visibility(account, resolution);
+        }
+        account(&progress_line(
+            *member,
+            reported + offset,
+            plan.ops.len(),
+            op.op,
+            resolution.edit.changes.len(),
+            true,
+        ));
+        if let Some(name) = &op.group {
+            account(&crate::console::group(name));
+        }
+    }
+}
+
 fn apply_held_plan(
     root: &Path,
     store: &mut PlanStore,
@@ -190,106 +271,106 @@ fn apply_held_plan(
         cancel,
     )?;
     let total = plan.ops.len();
-    (options.progress)(&format!(
-        "apply: {total} operation(s){}{}",
-        if options.dry_run { ", dry-run" } else { "" },
-        if start > 0 {
-            format!(", from op {start}")
-        } else {
-            String::new()
-        }
-    ));
+    announce_run(options, total, start);
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
+    let mut group: Option<GroupRun> = None;
 
-    for (index, op) in plan.ops.iter().enumerate().skip(start) {
-        // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
-        // than raising. Reporting it as a malformed plan — with a usage dump — described a
-        // successful partial run as a defective one.
-        if options
-            .stop_after
-            .is_some_and(|limit| index >= start + limit)
-        {
+    let gate = GroupGate {
+        root,
+        paths: &paths,
+        cancel,
+    };
+    // Any failure inside the loop ends the group it is in, whole: see
+    // [`GroupRun::roll_back_on_failure`].
+    let ran = (|| -> Result<()> {
+        for (index, op) in plan.ops.iter().enumerate().skip(start) {
+            // Honouring `--stop-after` is the run doing what it was told, so it ends the loop rather
+            // than raising. Reporting it as a malformed plan — with a usage dump — described a
+            // successful partial run as a defective one. Never inside a group, though: a group stands
+            // or falls whole, so the limit is judged where a group would begin and its members all
+            // count toward it.
+            if group.is_none() && stop_limit_reached(options, start, index) {
+                stopped_early = true;
+                break;
+            }
+
+            let at = ledger.translate_op(op)?;
             (options.progress)(&format!(
-                "stopped after {} operation(s) as requested",
-                index - start
-            ));
-            stopped_early = true;
-            break;
-        }
-
-        let at = ledger.translate_op(op)?;
-        (options.progress)(&format!(
-            "op {index} of {total}: resolving {:?} in `{}`",
-            op.op,
-            at.anchor.file()
-        ));
-        let resolved = registry
-            .backend_for(Path::new(at.anchor.file()), op.op)?
-            .resolve(
-                &at,
-                &Workspace {
-                    root,
-                    overlay: &overlay,
-                },
-            )?;
-
-        report_visibility(&options.account, &resolved);
-
-        let files = resolved.edit.changes.len();
-        (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
-        if options.dry_run {
-            (options.account)(&progress_line(
-                index,
-                done,
-                plan.ops.len(),
+                "op {index} of {total}: resolving {:?} in `{}`",
                 op.op,
-                files,
-                false,
+                at.anchor.file()
             ));
-            ledger.record(&resolved.edit);
-            overlay.record(root, &resolved.edit)?;
-            done += 1;
-            continue;
-        }
+            let resolved = registry
+                .backend_for(Path::new(at.anchor.file()), op.op)?
+                .resolve(
+                    &at,
+                    &Workspace {
+                        root,
+                        overlay: &overlay,
+                    },
+                )?;
 
-        (options.progress)(&format!(
-            "op {index} of {total}: applying {files} file(s) to disk"
-        ));
-        commit_operation(
-            index,
-            op.id.as_ref().filter(|_| !legacy),
-            &resolved,
-            root,
-            &paths,
-            &mut journal,
-            &mut ledger,
-        )?;
-        if !legacy {
-            record_applied_op(
-                store,
-                key,
+            // A group member's account waits for its group to be kept: see below.
+            if op.group.is_none() || options.dry_run {
+                report_visibility(&options.account, &resolved);
+            }
+
+            let files = resolved.edit.changes.len();
+            (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
+            if options.dry_run {
+                (options.account)(&progress_line(
+                    index,
+                    done,
+                    plan.ops.len(),
+                    op.op,
+                    files,
+                    false,
+                ));
+                ledger.record(&resolved.edit);
+                overlay.record(root, &resolved.edit)?;
+                done += 1;
+                continue;
+            }
+
+            (options.progress)(&format!(
+                "op {index} of {total}: applying {files} file(s) to disk"
+            ));
+            let id = op.id.as_ref().filter(|_| !legacy);
+            GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
+            commit_operation(
                 index,
+                id,
                 &resolved,
-                &mut registry,
-                &mut journal,
+                root,
                 &paths,
+                &mut journal,
+                &mut ledger,
             )?;
+            // A group's members reach the plan store together, once the group has compiled.
+            let on_check = |name: &str| {
+                (options.progress)(&format!(
+                    "op {index} of {total}: checking group `{name}` compiles"
+                ));
+            };
+            let settled =
+                GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, on_check)?;
+            done += 1;
+            let Settled::Ready(ready) = settled else {
+                continue;
+            };
+            if !legacy {
+                refresh_plan(store, key, &ready, &mut registry, &mut journal, &paths)?;
+            }
+            // Reported *after* the commit, so a line in the account means the edit is on disk and in
+            // the journal — and, for a group member, that its group compiled: a member's line waits
+            // for the group's end, so an edit a failed gate rolls back is never reported as applied.
+            report_settled(&options.account, &plan, &ready, done);
         }
-        // Reported *after* the commit, so a line in the account means the edit is on disk and in
-        // the journal. An apply used to report nothing at all — the dry run, where nothing is at
-        // stake, was the only mode that spoke.
-        (options.account)(&progress_line(
-            index,
-            done,
-            plan.ops.len(),
-            op.op,
-            files,
-            true,
-        ));
-        done += 1;
-    }
+        Ok(())
+    })();
+    GroupRun::roll_back_on_failure(&mut group, ran, &gate, &mut journal)?;
 
     let run = AppliedRun {
         journal: &journal,
@@ -305,97 +386,8 @@ fn apply_held_plan(
     })
 }
 
-/// Bring the plan `key` up to the tree after its operation `index` was committed, record that in
-/// the journal, and write the plan back: pending anchors rewritten through the edit
-/// ([`PlanStore::refresh_after_op`]), a digest of them journalled, then the flush.
-///
-/// The order is the point. The journal's `completed` record is already down, so a crash before the
-/// digest leaves an operation with no digest, and a crash after the digest and before the flush
-/// leaves a digest the plan on disk does not match — both of which a resume refuses
-/// ([`RestructureError::PlanOutOfSync`]) instead of reading anchors from a plan that is behind the
-/// tree. The flush is synchronous for the same reason: it is what makes the next resume's check pass.
-///
-/// The plan that ran is settled first, and every *other* held plan is folded through the edit only
-/// after ([`PlanStore::fold_foreign_op`]). A failure folding another plan fails the run, but it must
-/// not leave the plan that ran with an edit on disk and no digest, which its own resume would refuse.
-///
-/// What every apply loop calls after [`commit_operation`], the command line's and the daemon's.
-pub fn record_applied_op(
-    store: &mut PlanStore,
-    key: &PlanKey,
-    index: usize,
-    resolved: &crate::Resolution,
-    resolver: &mut dyn crate::item_anchor::ItemResolver,
-    journal: &mut Journal,
-    paths: &StatePaths,
-) -> Result<()> {
-    let id = store
-        .get(key)
-        .and_then(|held| held.plan.ops.get(index))
-        .and_then(|op| op.id.clone())
-        .ok_or_else(|| {
-            RestructureError::MalformedPlan(format!(
-                "{key} has no operation {index} to refresh from"
-            ))
-        })?;
-    store.refresh_after_op(key, &id, &resolved.edit, resolver)?;
-    let held = store.get(key).ok_or_else(|| {
-        RestructureError::MalformedPlan(format!("{key} is not loaded — load it first"))
-    })?;
-    let digest = crate::plan_store::pending_digest(&held.plan, index);
-    journal.append(
-        &paths.journal,
-        crate::journal::JournalRecord::plan_synced(index, Some(id.clone()), digest),
-    )?;
-    store.flush(key)?;
-    // The other plans last. Folding one can fail on the server, and that fails the run — but the
-    // edit is on disk by now, so the plan that ran must already be one its journal vouches for.
-    store.fold_foreign_op(key, &id, &resolved.edit, resolver)?;
-    settle_folded_plans(store, key)
-}
-
-/// Write back every *other* plan the operation changed by folding it in.
-///
-/// Each one's journal first records a digest of its new pending anchors, then the plan is written,
-/// in the order [`record_applied_op`] gives for the plan that ran: a plan changed under a journal
-/// that still vouched for its old anchors would be refused at its next resume as out of sync.
-fn settle_folded_plans(store: &mut PlanStore, applied: &PlanKey) -> Result<()> {
-    let changed: Vec<PlanKey> = store
-        .list()
-        .into_iter()
-        .filter(|held| held.dirty && held.key != *applied)
-        .map(|held| held.key)
-        .collect();
-    for key in changed {
-        record_resynced_digest(store, &key)?;
-        store.flush(&key)?;
-    }
-    Ok(())
-}
-
-/// Journal the digest of `key`'s pending anchors as they now are, if its journal vouched for others.
-fn record_resynced_digest(store: &PlanStore, key: &PlanKey) -> Result<()> {
-    let Some(held) = store.get(key) else {
-        return Ok(());
-    };
-    let paths = StatePaths::for_plan(store.root(), &store.path_of(key))?;
-    let mut journal = Journal::load(&paths.journal)?;
-    let Some(last) = journal.last_completed() else {
-        return Ok(());
-    };
-    if resume::predates_plan_write_back(&journal) {
-        return Ok(());
-    }
-    let (op, op_id) = (last.op, last.op_id.clone());
-    let digest = crate::plan_store::pending_digest(&held.plan, op);
-    if journal.plan_digest_after(op) == Some(digest.as_str()) {
-        return Ok(());
-    }
-    journal.append(
-        &paths.journal,
-        crate::journal::JournalRecord::plan_synced(op, op_id, digest),
-    )
-}
+mod applied_op_record;
+pub use applied_op_record::*;
 
 /// Refuse a run whose plan has a stale operation it will reach, before anything is read from the
 /// tree or written.
@@ -690,7 +682,7 @@ mod tests {
             .unwrap();
 
         // When the operation is recorded, and the server fails while the other plan is folded
-        let recorded = record_applied_op(
+        let recorded = applied_op_record::record_applied_op(
             &mut store,
             &first,
             0,

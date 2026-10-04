@@ -22,6 +22,7 @@ use std::sync::Arc;
 use tddy_code_restructuring::backends::rust::ProgressSink;
 use tddy_code_restructuring::plan_store::PlanKey;
 use tddy_code_restructuring::registry::Workspace;
+use tddy_code_restructuring::runner::group_gate::{self, GroupGate, GroupRun, Settled};
 use tddy_code_restructuring::runner::{self, Options, PlanRun};
 use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
@@ -69,18 +70,15 @@ pub(crate) fn apply_plan(
     apply_held_plan(root, held, options, client, &cancel, progress, events)
 }
 
-fn apply_held_plan(
-    root: &Path,
+/// The plan `held` names, copied out of the store with the path it is held at.
+///
+/// Before the plan is read out or anything is waited for, a stale operation is refused while
+/// nothing has been written.
+fn read_held_plan(
     held: &HeldPlan,
     options: &Options,
-    client: Arc<LspClient>,
-    cancel: &CancellationToken,
-    progress: ProgressSink,
-    events: &EventSender<RestructureEvent>,
-) -> Result<()> {
-    let (plan, plan_path) = held.with_store(|store| {
-        // Before the plan is read out or anything is waited for: a stale operation is refused while
-        // nothing has been written.
+) -> Result<(tddy_code_restructuring::Plan, std::path::PathBuf)> {
+    held.with_store(|store| {
         runner::refuse_a_stale_pending_op(store, &held.key, options)?;
         store
             .get(&held.key)
@@ -91,7 +89,34 @@ fn apply_held_plan(
                     held.key
                 ))
             })
-    })?;
+    })
+}
+
+/// Bring the held plan up to the tree after each of `settled`'s operations, in plan order.
+fn refresh_held_plan(
+    held: &HeldPlan,
+    settled: &[(usize, Resolution)],
+    registry: &mut tddy_code_restructuring::BackendRegistry,
+    journal: &mut tddy_code_restructuring::Journal,
+    paths: &runner::StatePaths,
+) -> Result<()> {
+    held.with_store(|store| {
+        settled.iter().try_for_each(|(member, applied)| {
+            runner::record_applied_op(store, &held.key, *member, applied, registry, journal, paths)
+        })
+    })
+}
+
+fn apply_held_plan(
+    root: &Path,
+    held: &HeldPlan,
+    options: &Options,
+    client: Arc<LspClient>,
+    cancel: &CancellationToken,
+    progress: ProgressSink,
+    events: &EventSender<RestructureEvent>,
+) -> Result<()> {
+    let (plan, plan_path) = read_held_plan(held, options)?;
 
     // The gates run on a copy of the plan, outside the store's lock: the baseline compile check
     // takes minutes.
@@ -107,82 +132,101 @@ fn apply_held_plan(
     let mut overlay = Overlay::new();
     let mut done = 0usize;
     let mut stopped_early = false;
+    let mut group: Option<GroupRun> = None;
+    // A group's operations, reported once its end gate has passed rather than as they land.
+    let mut unreported: Vec<(usize, Resolution)> = Vec::new();
 
-    for (index, op) in plan.ops.iter().enumerate().skip(start) {
-        // Checked before the operation rather than only inside the index waits: the client that
-        // asked for this run has gone, and writing the rest of its plan into the tree anyway is
-        // the opposite of what its disconnect asked for. The journal makes the remainder resumable.
-        if cancel.is_cancelled() {
-            log::info!(
-                target: "tddy_index_daemon::apply",
-                "stopping after {done} operation(s): nobody is waiting for this run any more"
-            );
-            break;
-        }
-        // Honouring `stop_after` is the run doing what it was told, so it ends the loop rather
-        // than raising: a successful partial run is not a defective one.
-        if options
-            .stop_after
-            .is_some_and(|limit| index >= start + limit)
-        {
-            stopped_early = true;
-            break;
-        }
-
-        let anchor = ledger.translate_anchor(&op.anchor)?;
-        let resolved = registry
-            .backend_for(Path::new(anchor.file()), op.op)?
-            .resolve(
-                &op.with_anchor(anchor),
-                &Workspace {
-                    root,
-                    overlay: &overlay,
-                },
-            )?;
-
-        if options.dry_run {
-            ledger.record(&resolved.edit);
-            overlay.record(root, &resolved.edit)?;
-        } else {
-            runner::commit_operation(
-                index,
-                op.id.as_ref().filter(|_| !legacy),
-                &resolved,
-                root,
-                &paths,
-                &mut journal,
-                &mut ledger,
-            )?;
-            if !legacy {
-                held.with_store(|store| {
-                    runner::record_applied_op(
-                        store,
-                        &held.key,
-                        index,
-                        &resolved,
-                        &mut registry,
-                        &mut journal,
-                        &paths,
-                    )
-                })?;
+    let gate = GroupGate {
+        root,
+        paths: &paths,
+        cancel,
+    };
+    // Any failure inside the loop ends the group it is in, whole: see
+    // [`GroupRun::roll_back_on_failure`].
+    let ran = (|| -> Result<()> {
+        for (index, op) in plan.ops.iter().enumerate().skip(start) {
+            // Checked before the operation rather than only inside the index waits: the client that
+            // asked for this run has gone, and writing the rest of its plan into the tree anyway is
+            // the opposite of what its disconnect asked for. The journal makes the remainder resumable.
+            if cancel.is_cancelled() {
+                log::info!(
+                    target: "tddy_index_daemon::apply",
+                    "stopping after {done} operation(s): nobody is waiting for this run any more"
+                );
+                // A group is never left half applied: nobody is left to judge it, so it is undone.
+                if let Some(open) = group.take() {
+                    group_gate::roll_back_group(root, open.name(), &paths, &mut journal)?;
+                }
+                break;
             }
-        }
-        done += 1;
+            // Honouring `stop_after` is the run doing what it was told, so it ends the loop rather
+            // than raising: a successful partial run is not a defective one. Never inside a group,
+            // which stands or falls whole: the limit is judged where a group would begin.
+            if group.is_none()
+                && options
+                    .stop_after
+                    .is_some_and(|limit| index >= start + limit)
+            {
+                stopped_early = true;
+                break;
+            }
 
-        // Reported *after* the commit, so an event means the edit is on disk and in the journal.
-        emit(
-            events,
-            cancel,
-            operation_event(index, done, plan.ops.len(), op, &resolved, options.dry_run),
-        );
-        for note in &resolved.notes {
-            emit(
+            let anchor = ledger.translate_anchor(&op.anchor)?;
+            let resolved = registry
+                .backend_for(Path::new(anchor.file()), op.op)?
+                .resolve(
+                    &op.with_anchor(anchor),
+                    &Workspace {
+                        root,
+                        overlay: &overlay,
+                    },
+                )?;
+
+            if options.dry_run {
+                ledger.record(&resolved.edit);
+                overlay.record(root, &resolved.edit)?;
+                unreported.push((index, resolved));
+            } else {
+                let id = op.id.as_ref().filter(|_| !legacy);
+                GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
+                runner::commit_operation(
+                    index,
+                    id,
+                    &resolved,
+                    root,
+                    &paths,
+                    &mut journal,
+                    &mut ledger,
+                )?;
+                // A group's members reach the plan store, and the caller's eyes, together, once the
+                // group has compiled.
+                let settled =
+                    GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, |_| {})?;
+                let Settled::Ready(ready) = settled else {
+                    done += 1;
+                    continue;
+                };
+                if !legacy {
+                    refresh_held_plan(held, &ready, &mut registry, &mut journal, &paths)?;
+                }
+                unreported.extend(ready);
+            }
+            done += 1;
+
+            // Reported *after* the commit, so an event means the edit is on disk and in the journal —
+            // and, for a group member, that its group compiled.
+            report_applied(
                 events,
                 cancel,
-                note_event(&tddy_code_restructuring::console::note(note)),
+                &plan,
+                &mut unreported,
+                done,
+                options.dry_run,
             );
         }
-    }
+        Ok(())
+    })();
+    GroupRun::roll_back_on_failure(&mut group, ran, &gate, &mut journal)?;
 
     // Judged before the outcome is sent, so a tree that does not compile ends the stream with the
     // refusal and never with "applied N of N" — the same gate, from the same library, as the cold
@@ -207,6 +251,35 @@ fn apply_held_plan(
         outcome_event(done, plan.ops.len(), stopped_early),
     );
     Ok(())
+}
+
+/// Send the events for the operations that have just been settled, oldest first, and empty `settled`.
+///
+/// `done` counts everything applied so far, `settled` included.
+fn report_applied(
+    events: &EventSender<RestructureEvent>,
+    cancel: &CancellationToken,
+    plan: &tddy_code_restructuring::Plan,
+    settled: &mut Vec<(usize, Resolution)>,
+    done: usize,
+    dry_run: bool,
+) {
+    let reported = done - settled.len();
+    for (offset, (member, resolution)) in settled.drain(..).enumerate() {
+        let event = operation_event(
+            member,
+            reported + offset + 1,
+            plan.ops.len(),
+            &plan.ops[member],
+            &resolution,
+            dry_run,
+        );
+        emit(events, cancel, event);
+        for note in &resolution.notes {
+            let note = tddy_code_restructuring::console::note(note);
+            emit(events, cancel, note_event(&note));
+        }
+    }
 }
 
 /// Where a seam's diagnostic trace goes when `RESTRUCTURE_TRACE` asks for one. The log, because a
@@ -240,6 +313,7 @@ fn operation_event(
                 .map(tddy_code_restructuring::console::widening)
                 .collect(),
             rehearsed_only: dry_run,
+            group: op.group.clone().unwrap_or_default(),
         })),
     }
 }

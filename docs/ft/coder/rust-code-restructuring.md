@@ -78,7 +78,7 @@ A v2 header never refuses a run; a file whose hash drifted, or which is gone, is
 progress line and the plan runs, because an item anchor does not depend on the rest of the file.
 `restructure snapshot` rewrites the header of whichever version the plan has.
 
-Subsequent lines are one `RefactorOp` each; every operation carries an opaque `id` (see [Plan store](#plan-store)). Plans must not contain `text` / `code` / `content`, `create_file`, or `insert_text` — the parser refuses them. Unsupported operations are hard errors, not skips. Files appear because an operation caused them (`to_file` / `extract_module_to_file`), never because a plan declared them.
+Subsequent lines are one `RefactorOp` each; every operation carries an opaque `id` (see [Plan store](#plan-store)) and may carry a `"group"` (see [Transactional groups](#transactional-groups)). A field an operation does not define is refused as malformed, naming it, so a misspelt `group` cannot run its operations ungrouped. Plans must not contain `text` / `code` / `content`, `create_file`, or `insert_text` — the parser refuses them. Unsupported operations are hard errors, not skips. Files appear because an operation caused them (`to_file` / `extract_module_to_file`), never because a plan declared them.
 
 See [`.agents/skills/code-restructuring/references/plan-schema.md`](../../../.agents/skills/code-restructuring/references/plan-schema.md).
 
@@ -157,6 +157,41 @@ current, not only the one being applied.
 One renderer prints the stale operations for the in-process CLI, the daemon and `tddy-tools`.
 
 How the crate delivers this: [plan-store.md](../../../packages/tddy-code-restructuring/docs/plan-store.md#live-plans).
+
+## Transactional groups
+
+Some refactors cannot compile step by step: change a type, then adapt every use. A plan marks the
+operations that must compile only together by giving them the same `"group"`:
+
+```jsonl
+{"op":"rename_symbol","id":"op-1","group":"retype","anchor":{ … },"name":"Level"}
+{"op":"rename_symbol","id":"op-2","group":"retype","anchor":{ … },"name":"Depth"}
+```
+
+- **Authoring.** A group is `"group": "<name>"` on **consecutive** operations. Members that are not
+  next to each other are refused as malformed, naming the group, so a group is always one run of lines.
+  An operation without `group` is ungrouped.
+- **Judged at its end.** `cargo check --all-targets` runs over the packages owning every file the
+  group's members edited, once, after the last member. A group that compiles is kept; its members then
+  reach the plan store together, in plan order (they are not refreshed while the group is open).
+- **Rolled back exactly.** A group that does not compile is undone byte for byte — edited files
+  rewritten, files the group created removed, renames reversed — from the contents the journal holds,
+  and the run stops with ``group `<name>` does not compile at its end, so it was rolled back:`` followed
+  by the compiler's errors. Everything before the group stays applied. **Any** failure inside a group
+  (a member that cannot be resolved or committed, a check that cannot run) rolls the whole group back
+  and reports that failure unchanged. A run that is cancelled leaves the group open instead, for a
+  resume to roll back.
+- **Resume inside a group.** `--resume` finds a group the journal started and never closed, rolls it
+  back, and applies it again from its first member.
+- **Reported once kept.** A group's members are reported as applied only after the group compiled, each
+  followed by a `   group: <name>` line. A rolled-back group reports none of its members.
+- **`check --deep`.** A group with a refused member is one finding naming the group and listing each
+  refused member's reason; the rehearsal does not advance past a refused group.
+- **`stop_after`** is judged where a group would begin, and every member of a group counts toward it.
+- **Ungrouped operations are unchanged.** They are gated once at the end of the run, and a run that
+  fails there leaves its edits on disk.
+
+How the crate delivers this: [readiness-and-gates.md](../../../packages/tddy-code-restructuring/docs/readiness-and-gates.md#transactional-groups).
 
 ## Item anchors
 
@@ -321,6 +356,7 @@ something about it. Read the class before the text.
 | snapshot / journal / anchor mismatches, `the item … changed since the plan was written` | The tree is not in the state the plan was written against, or an anchored item's text is no longer the text its fingerprint names | Repair the tree, re-snapshot, or re-anchor the item with `restructure anchors` | `FailedPrecondition` |
 | `the tree does not compile before the plan runs …` | `apply`'s baseline `cargo check` failed; nothing was written | Make the tree compile, then apply again | `FailedPrecondition` |
 | `N of M operation(s) were applied, and the tree no longer compiles …` | Every operation was accepted and the compiler rejects the result. The edits are left on disk and in the journal | Fix the compiler-named errors by hand, or roll back as the message says (restore the touched paths from git, remove the journal) | `Internal` |
+| ``group `<name>` does not compile at its end, so it was rolled back: …`` | A transactional group's members were accepted and the compiler rejects the tree they leave together. The group was undone exactly; earlier operations stay applied | Fix the plan so the group compiles at its end, or the code it depends on | `FailedPrecondition` |
 
 The distinction is not cosmetic. These were one class until a live extraction was refused twice with
 `plan is malformed` over a plan that was correct both times, sending its author to edit the one thing
@@ -423,7 +459,8 @@ real loss anywhere keeps the reflow of the other leftovers reported beside it.
 3. Author intents in JSONL; `restructure check` (optionally `--deep`) before apply.
 4. `apply --dry-run`, then apply; `verify --against HEAD` after successful extract operations.
    `apply` runs `cargo check --all-targets` over the touched packages before and after, and fails the
-   run when the result does not compile, and ends with [the tidy](#the-tidy).
+   run when the result does not compile, and ends with [the tidy](#the-tidy). Operations that cannot
+   compile one by one go in a [transactional group](#transactional-groups), gated and rolled back as a unit.
 5. `cargo fmt --all`, then the baseline suite. Relocated bodies sit at a new indentation, and a body
    correctly wrapped at one indentation is not correctly wrapped at another — at any scale beyond a
    few items this is every run, and `cargo fmt --all --check` is the first thing CI's lint step does.
@@ -519,6 +556,7 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   applied plan's own v2 `files` hints are not rewritten by its own apply.
 - **`tddy-tools restructure snapshot` of an item-anchored plan starts a cold language server**, even
   with a daemon running; there is no `Snapshot` RPC.
+- **A rolled-back group leaves an empty directory** it created a file in; the file is removed, the directory is not.
 - **An apply consumes its plan file.** A run rewrites the plan as it goes, so a plan whose apply
   failed and was rolled back is stale; re-running it is refused as an item that changed. Regenerate
   the plan.

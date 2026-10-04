@@ -125,19 +125,9 @@ impl Rendered {
     /// The widenings come off the event already stated — the daemon's apply loop states each one
     /// with `console::widening` — so all that is left is the account's own prefix.
     fn operation(&self, operation: &OperationApplied) {
-        for widened in &operation.visibility {
-            say(&console::visibility(widened));
+        for line in operation_lines(operation) {
+            say(&line);
         }
-        say(&console::operation(
-            operation.index as usize,
-            // The event carries how many operations are *done*, which is already this one
-            // included; the renderer counts from the one before it, as the cold path's loop does.
-            (operation.done as usize).saturating_sub(1),
-            operation.total as usize,
-            &operation.kind,
-            operation.files.len(),
-            !operation.rehearsed_only,
-        ));
     }
 
     /// What the whole run amounted to.
@@ -292,9 +282,67 @@ fn a_comparison(response: &VerifyResponse) -> Comparison {
     }
 }
 
+/// The lines of [`Rendered::operation`]: widenings, the operation, and its group when it has one.
+fn operation_lines(operation: &OperationApplied) -> Vec<String> {
+    let mut lines: Vec<String> = operation
+        .visibility
+        .iter()
+        .map(|widened| console::visibility(widened))
+        .collect();
+    lines.push(console::operation(
+        operation.index as usize,
+        // The event carries how many operations are *done*, which is already this one
+        // included; the renderer counts from the one before it, as the cold path's loop does.
+        (operation.done as usize).saturating_sub(1),
+        operation.total as usize,
+        &operation.kind,
+        operation.files.len(),
+        !operation.rehearsed_only,
+    ));
+    if !operation.group.is_empty() {
+        lines.push(console::group(&operation.group));
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_operation_in_a_group_names_the_group_after_its_line() {
+        // Given an applied operation that belongs to the group `signature`
+        let operation = OperationApplied {
+            index: 2,
+            done: 3,
+            total: 5,
+            kind: "RenameSymbol".to_string(),
+            group: "signature".to_string(),
+            ..OperationApplied::default()
+        };
+
+        // When it is rendered
+        let lines = operation_lines(&operation);
+
+        // Then the operation's line is followed by the group's
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some("   group: signature")
+        );
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn an_ungrouped_operation_renders_no_group_line() {
+        // Given an applied operation outside any group
+        let operation = OperationApplied::default();
+
+        // When it is rendered
+        let lines = operation_lines(&operation);
+
+        // Then only the operation's own line appears
+        assert_eq!(lines.len(), 1);
+    }
 
     /// The daemon counts what a restructure's expected churn set aside, and the console states it
     /// the way the in-process `verify` does — a front end that dropped it would say less than the

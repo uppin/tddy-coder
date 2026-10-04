@@ -440,6 +440,7 @@ mod tests {
             reexport: None,
             to_file: false,
             also: Vec::new(),
+            group: None,
         }
     }
 
