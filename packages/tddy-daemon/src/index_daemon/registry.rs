@@ -322,22 +322,6 @@ impl tddy_daemon_rpc::code_navigation::IndexChannelSource for IndexDaemonRegistr
     }
 }
 
-/// The registry is also the channel the index-backed `Lsp*` executor asks.
-///
-/// `tddy_lsp_executor::index_backed::IndexLspExecutor` cannot name [`IndexDaemonRegistry`] — this
-/// crate depends on it, not the other way round — so it takes an
-/// [`IndexChannel`](tddy_lsp_executor::index_backed::IndexChannel) port, and this is the registry
-/// answering it: the same [`IndexDaemonRegistry::connect`] the code pane's navigation forwards
-/// through, so a session's tools and the pane ask one index.
-#[async_trait::async_trait]
-impl tddy_lsp_executor::index_backed::IndexChannel for IndexDaemonRegistry {
-    async fn connect(&self) -> Result<tonic::transport::Channel, String> {
-        IndexDaemonRegistry::connect(self)
-            .await
-            .map_err(|err| err.to_string())
-    }
-}
-
 /// How a task that has reached a terminal state got there, or `None` while it is still running.
 fn how_it_died(handle: &Arc<TaskHandle>) -> Option<String> {
     match handle.status() {

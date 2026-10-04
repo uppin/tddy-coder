@@ -220,29 +220,23 @@ streamed start instead of the unary one.
 
 `tests/unbundle_endpoint.rs::every_module_left_in_the_daemon_is_one_of_the_endpoint_set` lets
 `tddy-daemon/src` hold wiring only. After the base was rewritten (its navigation service already moved
-to `tddy-daemon-rpc` behind an `IndexChannelSource` port) it named one file, `index_daemon/lsp_channel.rs`
-(parent-owned), and this PR's own `code_index_warmup.rs` would have been a second. Both are gone from
-the daemon:
+to `tddy-daemon-rpc` behind an `IndexChannelSource` port) the one file this PR would have added to that
+list was its own `code_index_warmup.rs`; the parent-owned `index_daemon/lsp_channel.rs` was the other,
+and the parent resolved it itself (#live-plan 11/15, `ec72da38`: it names the module among the endpoint's
+wiring modules, with its own rationale). This PR therefore leaves `index_daemon/` untouched.
 
 - `code_index_warmup.rs` is born in `tddy-daemon-rpc/src/` (its progress holder is read by the
   navigation service there, and that crate cannot depend on the daemon); it dials through the port, and
   its acceptance suite stays in `tddy-daemon/tests` beside `code_navigation_acceptance.rs`, which needs
-  the daemon's registry.
-- `lsp_channel.rs`'s 19 lines (`impl IndexChannel for IndexDaemonRegistry`) are folded into
-  `index_daemon/registry.rs`, next to the base's own `impl IndexChannelSource for IndexDaemonRegistry`:
-  the registry answering the two ports it serves, in the one file the whitelist already admits. File
-  deleted, `mod lsp_channel;` dropped. Parent-owned files edited: `index_daemon.rs`, `index_daemon/registry.rs`.
+  the daemon's registry. `tddy-daemon` gains no non-wiring module from this PR.
 
 Result (scoped): `unbundle_endpoint` 4/4, `test_placement` 4/4, `code_index_warmup_acceptance` 6/6,
-`code_navigation_acceptance` 7/7, `tddy-lsp-executor` (13 unit, 1 e2e, 13 `lsp_tools_via_index`) green,
-clippy `-D warnings` clean.
+`code_navigation_acceptance` 7/7, clippy `-D warnings` clean.
 
-An earlier plan to move the whole registry cluster to a crate with the restructure engine was abandoned
-once the base made it unnecessary; the engine defect it hit is recorded in
+An earlier plan to move the whole registry cluster to a crate with the restructure engine, and a
+fold of `lsp_channel.rs` into `registry.rs`, were both dropped once the parent whitelisted the file;
+the engine defect the move hit is recorded in
 [`docs/dev/todo/2026-10-04-restructure-move-cluster-to-crate-leaves-a-modules-directory-children-behind.md`](../todo/2026-10-04-restructure-move-cluster-to-crate-leaves-a-modules-directory-children-behind.md).
-
-**Docs to correct at wrap** (not edited here — `packages/*/docs/` goes through the changeset workflow):
-`packages/tddy-daemon/docs/daemon-endpoint.md:21` still names `index_daemon/lsp_channel.rs`.
 
 ## Refactoring Needed
 
