@@ -59,3 +59,49 @@ async fn moves_an_item_into_the_module_that_imports_it() {
     );
     assert_compiles(&workspace);
 }
+
+/// The import is usually not of the defining module: the parent re-exports the source with a glob, and
+/// the destination names the item through the parent (`use super::ExecToolRoute;`).
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_an_item_into_the_module_that_imports_it_through_a_glob_reexport() {
+    // Given a destination that imports the item through the crate root's glob of the source module
+    let workspace = an_app_holding(&[
+        (
+            "src/lib.rs",
+            "pub mod answers;\nmod pairing;\npub use pairing::*;\n",
+        ),
+        ("src/pairing.rs", PAIRING),
+        (
+            "src/answers.rs",
+            concat!(
+                "use super::peer_has_no_such_session;\n",
+                "\n",
+                "pub fn answer(code: u32) -> bool {\n",
+                "    peer_has_no_such_session(code)\n",
+                "}\n",
+            ),
+        ),
+    ]);
+
+    // When the item moves into that module
+    moving_items(
+        &workspace,
+        "src/pairing.rs",
+        &["peer_has_no_such_session"],
+        "app::answers",
+        None,
+    )
+    .await
+    .expect("the move applies");
+
+    // Then it is defined there once, and the tree compiles
+    let arrived = workspace.read("src/answers.rs");
+    assert_eq!(
+        arrived
+            .matches("peer_has_no_such_session(code: u32)")
+            .count(),
+        1,
+        "the item is not defined exactly once:\n{arrived}"
+    );
+    assert_compiles(&workspace);
+}
