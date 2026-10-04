@@ -11,7 +11,7 @@ Full codebase exploration that grounded this plan:
 
 ## Stack
 
-`#live-plan` 11/15 — branch `feature/live-plan/session-lsp-tools`, base `feature/live-plan/transactional-groups`.
+`#live-plan` 11/15 — branch `feature/live-plan/session-lsp-tools`, base `master` (its parents #539, #574, #569 and #566 have merged; the PR was re-based onto `master` on 2026-10-04).
 PR: [#570](https://github.com/uppin/tddy-coder/pull/570)
 
 **Position.** Appended after #539, in green-wave order: wave 1 #539, code-navigation, signature-assists · wave 2 transactional-groups, session-lsp-tools, indexing-indicators · wave 3 plan-dialog, session-restructure-tools, signature-rewrites; inside each wave the node with the most transitive dependents leads.
@@ -251,8 +251,8 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
 
 ### File length gate (step 3.5)
 
-- 🔴 `packages/tddy-daemon/src/runtime.rs`: 1,631 → 1,645 production lines (+14). **Deferred with the
-  developer's consent** — #571, #573 and #574 touch the file. Recorded in
+- 🔴 `packages/tddy-daemon/src/runtime.rs`: 1,636 → 1,650 production lines (+14). **Deferred with the
+  developer's consent** — #571 and #573 touch the file. Recorded in
   `packages/tddy-daemon/docs/code-issues/oversized-file-runtime.md` and
   `docs/dev/todo/2026-10-03-session-lsp-tools-grew-runtime-rs.md`.
 - Every other changed non-test file is under 500 (largest new: `index_backed.rs`, 385).
