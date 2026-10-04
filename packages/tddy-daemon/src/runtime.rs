@@ -1069,11 +1069,6 @@ pub async fn build(
                 index_daemon.socket_path().display()
             );
             tasks.index_daemon = Some(index_daemon.clone());
-            // TODO(session-restructure-tools): register
-            // `tddy_lsp_executor::restructure_via_index::IndexRestructureExecutor::new(registry)`
-            // with `tddy_core::toolcall::restructure::register_restructure_executor`, so a
-            // session's `restructure_*` tool calls ask this index; without `index_daemon:` nothing
-            // is registered and the tools are not advertised.
             index_daemon_registry = Some(index_daemon);
         }
 
@@ -1157,6 +1152,15 @@ pub async fn build(
         let index_channel = index_daemon_registry.clone().map(|registry| {
             Arc::new(registry) as Arc<dyn tddy_lsp_executor::index_backed::IndexChannel>
         });
+        // The same index answers the session's `restructure_*` tools. Without `index_daemon:`
+        // nothing is registered, so the tools are not advertised to any session.
+        if let Some(index_channel) = index_channel.clone() {
+            tddy_core::toolcall::restructure::register_restructure_executor(Arc::new(
+                tddy_lsp_executor::restructure_via_index::IndexRestructureExecutor::new(
+                    index_channel,
+                ),
+            ));
+        }
         tddy_core::toolcall::lsp::register_lsp_executor(
             tddy_lsp_executor::index_backed::select_lsp_executor(
                 index_channel,
