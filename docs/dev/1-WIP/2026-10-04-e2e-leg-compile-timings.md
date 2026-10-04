@@ -6,7 +6,7 @@
 
 Node 3 of 5 of the `#e2e-leg` stack, PR [#580](https://github.com/uppin/tddy-coder/pull/580) (branch `feature/e2e-leg/compile-timings`, PR base `feature/e2e-leg/deadline-and-scenarios`). It consumes nothing from nodes 1 or 2.
 
-**Green state:** all five script tests pass; the workflow steps and `ci.md` are in. Still open: dispatch `Rust compile timings` once, then record the verdict in the source note. The `UNIT_DATA` shape for lib/bin unit-test units (no `(test "x")` target) is assumed to be `mode: test` with the package as `name` — unverified against real cargo output until that run.
+**Green state:** all five script tests pass; the workflow steps and `ci.md` are in. Still open: dispatch `Rust compile timings` once, then record the verdict in the source note. The first real run showed the fixtures' `UNIT_DATA` shape was wrong (`mode` is `todo`; test units are marked by target ` test "x" (test)` / ` lib (test)`), which made the CI-run summary report 0% / `stop`; the parser and fixtures were corrected to the real shape and the artifact re-read locally (53.3%, proceed). The next dispatch will show the corrected summary on CI.
 
 **Contract state (commit 2, now implemented):** `scripts/ci-e2e-timing.ts` publishes `perBinaryTimings`, `compileShare`, `verdict` and `SPLIT_WORTH_IT_PERCENT` with `throw` bodies; all five tests in `scripts/ci-e2e-timing.test.ts` fail on them (verified, 5 of 5; inline fixtures, no fixture files). Run with `./dev bun test ./scripts/ci-e2e-timing.test.ts` (bun needs the `./` to treat it as a path). The acceptance-test review gate was not held separately (the developer asked for the whole stack to be prepared without stopping).
 
@@ -48,7 +48,7 @@ A `--timings` build compiles every test target (the 80-binary `tddy-daemon` case
 - [x] `scripts/ci-e2e-timing.ts` with two commands: `junit <path>` (per-binary run time table) and `compile-share <timings.html> <filterset>` (share of compile on e2e test targets vs the rest)
 - [x] The e2e leg appends the per-binary table to `$GITHUB_STEP_SUMMARY` after nextest (also when tests fail)
 - [x] A manual-dispatch-only job `Rust compile timings` runs `cargo test --no-run --workspace --locked --timings`, uploads the HTML report as an artifact and writes `compile-share` to its summary
-- [ ] The measured verdict (share, threshold 25%, decision) is recorded in the source note when this node is greened
+- [x] The measured verdict (share, threshold 25%, decision) is recorded in the source note when this node is greened
 
 ## Technical Changes
 
@@ -73,8 +73,8 @@ A `--timings` build compiles every test target (the 80-binary `tddy-daemon` case
 
 - [x] Script and its tests against fixtures
 - [x] Summary step in the e2e leg
-- [ ] Manual timings job, run once, report kept — job added; **not yet dispatched** (needs the branch on GitHub)
-- [ ] The verdict recorded and the decision written into the source note
+- [x] Manual timings job, run once, report kept — run 37220592932, artifact `cargo-timings`
+- [x] The verdict recorded and the decision written into the source note — 53.3%, proceed
 
 ## Testing Plan
 
@@ -158,7 +158,8 @@ Real dependency edges:
 - **Tests (scoped to `scripts/`):** `./dev bun test ./scripts/ci-e2e-timing.test.ts` — 8 pass. Three added at wrap: compound `package() and binary()` filterset term, empty report, unsupported predicate is an error.
 - **Production readiness:** no TODO/FIXME or debug output in the script; `console.log` is the CLI's output. `ci.yml` parses; the new steps have **not run on CI**.
 - **File length:** `ci-e2e-timing.ts` 237 lines, under the 500 budget.
-- **Open:** the `Rust compile timings` job is undispatched and its verdict unrecorded; the lib/bin unit-test unit shape in `UNIT_DATA` is assumed.
+- **Measured:** 53.3% of summed compile time is other test targets → proceed (recorded in the source note). The dispatched run's own summary was wrong (old parser, 0% / stop); the fix is on this branch and not yet re-run on CI.
+- **Open:** USER REVIEW; wrap, which waits on the parent PR #579 wrapping first.
 
 ## TODO
 
@@ -171,10 +172,10 @@ Real dependency edges:
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] Update documentation with progress
 - [ ] Run the script tests (`./dev bun test ./scripts/ci-e2e-timing.test.ts`) and read the CI summary
-- [ ] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
+- [x] Validate changes (/validate-changes)
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes the discovery file
 - [ ] USER REVIEW — work complete, decide next steps

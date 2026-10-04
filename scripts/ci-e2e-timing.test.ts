@@ -15,13 +15,16 @@ const JUNIT = `<?xml version="1.0" encoding="UTF-8"?>
   </testsuite>
 </testsuites>`;
 
-/** The shape cargo writes into `cargo-timing.html`: one object per compiled unit. */
+/**
+ * The shape cargo writes into `cargo-timing.html`, taken from a real `--timings` report: one object
+ * per compiled unit, `mode` is `todo` for a compile, and a test unit is marked by its target string.
+ */
 function aTimingsReport(units: Array<{ name: string; target: string; seconds: number }>): string {
   const data = units.map((unit, i) => ({
     i,
     name: unit.name,
     version: "0.1.0",
-    mode: unit.target.includes("(test") ? "test" : "build",
+    mode: "todo",
     target: unit.target,
     features: [],
     duration: unit.seconds,
@@ -54,10 +57,10 @@ describe("per-binary timings", () => {
 describe("compile share", () => {
   const report = aTimingsReport([
     { name: "tokio", target: "", seconds: 50 },
-    { name: "tddy-daemon", target: ' (test "multi_host_acceptance")', seconds: 20 },
-    { name: "tddy-livekit", target: ' (test "rpc_scenarios")', seconds: 10 },
-    { name: "tddy-core", target: ' (test "plain_unit_binary")', seconds: 15 },
-    { name: "tddy-core", target: ' (test "another_unit_binary")', seconds: 5 },
+    { name: "tddy-daemon", target: ' test "multi_host_acceptance" (test)', seconds: 20 },
+    { name: "tddy-livekit", target: ' test "rpc_scenarios" (test)', seconds: 10 },
+    { name: "tddy-core", target: ' test "plain_unit_binary" (test)', seconds: 15 },
+    { name: "tddy-core", target: ' test "another_unit_binary" (test)', seconds: 5 },
   ]);
 
   test("the_compile_share_counts_only_test_targets_named_by_the_filterset", () => {
@@ -79,9 +82,9 @@ describe("compile share", () => {
 
   test("a_package_and_binary_filterset_term_counts_only_that_binary_of_that_package", () => {
     const twoPackagesOneName = aTimingsReport([
-      { name: "tddy-daemon", target: ' (test "first_login_enrolment_acceptance")', seconds: 10 },
-      { name: "tddy-daemon", target: ' (test "unrelated_daemon_binary")', seconds: 30 },
-      { name: "tddy-core", target: ' (test "first_login_enrolment_acceptance")', seconds: 5 },
+      { name: "tddy-daemon", target: ' test "first_login_enrolment_acceptance" (test)', seconds: 10 },
+      { name: "tddy-daemon", target: ' test "unrelated_daemon_binary" (test)', seconds: 30 },
+      { name: "tddy-core", target: ' test "first_login_enrolment_acceptance" (test)', seconds: 5 },
     ]);
 
     const share = compileShare(
@@ -91,6 +94,19 @@ describe("compile share", () => {
 
     expect(share.e2eTestSeconds).toBe(10);
     expect(share.otherTestSeconds).toBe(35);
+  });
+
+  test("a_librarys_unit_tests_and_a_build_script_run_are_not_integration_targets", () => {
+    const share = compileShare(
+      aTimingsReport([
+        { name: "tddy-supervisor", target: " lib (test)", seconds: 8 },
+        { name: "tddy-core", target: " build script (run)", seconds: 4 },
+      ]),
+      "package(tddy-supervisor) and kind(test)",
+    );
+
+    expect(share.e2eTestSeconds).toBe(8);
+    expect(share.otherSeconds).toBe(4);
   });
 
   test("a_report_without_units_has_no_time_to_share_and_names_every_filterset_binary", () => {

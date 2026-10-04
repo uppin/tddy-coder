@@ -75,12 +75,15 @@ export function compileShare(timingsHtml: string, filterset: string): CompileSha
   const testBinaries = new Set<string>();
 
   for (const unit of readUnits(timingsHtml)) {
-    if (unit.mode !== "test") {
+    // Cargo marks a test unit by its target, not its `mode` (which is `todo` for every compile):
+    // ` test "name" (test)` for an integration target, ` lib (test)` / ` bin "name" (test)` for
+    // unit tests inside a package.
+    if (!/\(test\)\s*$/.test(unit.target)) {
       otherSeconds += unit.duration;
       continue;
     }
-    // A named integration target is `(test "x")`; a lib or bin unit-test unit runs as its package.
-    const binary = /\(test "([^"]+)"\)/.exec(unit.target)?.[1] ?? unit.name;
+    // A lib's unit tests run as their package; nextest names that binary by the package.
+    const binary = /^\s*(?:test|bin) "([^"]+)"/.exec(unit.target)?.[1] ?? unit.name;
     testBinaries.add(binary);
     if (matches({ pkg: unit.name, binary })) e2eTestSeconds += unit.duration;
     else otherTestSeconds += unit.duration;
@@ -101,7 +104,6 @@ export function compileShare(timingsHtml: string, filterset: string): CompileSha
 
 interface ReportUnit {
   name: string;
-  mode: string;
   target: string;
   duration: number;
 }

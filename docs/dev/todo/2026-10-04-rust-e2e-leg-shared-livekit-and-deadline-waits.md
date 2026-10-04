@@ -208,10 +208,12 @@ share of the 1,525s — **not measured; see the gate below.**
 
 **Gate, before any Cargo.toml churn.** Measure the share. Run `cargo test --no-run --workspace --timings`
 (or `cargo build --timings` on the test profile) in CI once and keep the HTML report as an artifact: test
-targets appear as `pkg (test "name")` with their own durations. Sum them for the e2e targets and for the
+targets appear with the target string ` test "name" (test)` (unit tests inside a package as ` lib (test)`; `mode` is `todo` for every compile) and their own durations. Sum them for the e2e targets and for the
 rest. **Proceed only if the target the leg would skip is a meaningful share** — a rule of thumb: ≥ 25% of
 the leg's compile. Below that, prefer the cache fix and `nextest archive` above, which attack the
 dependency compile.
+
+**Measured 2026-10-04** (`Rust compile timings` job, `cargo test --no-run --workspace --locked --timings`, cold; report `cargo-timings`, run 37220592932; read by `scripts/ci-e2e-timing.ts compile-share`): of 6,683 s of summed unit compile time, **e2e test targets 560 s (8.4%), other test targets 3,563 s (53.3%), everything else 2,561 s (38.3%)**. The e2e leg would stop compiling the other test targets, so the skippable share is **53.3% — at or above the 25% threshold: proceed** with 3a. The unit leg would skip only 8.4%. Every filterset binary appears in the report. Caveat: the shares are of *summed* unit durations, which run in parallel, so they are a proxy for the leg's wall-clock compile, not a measurement of it; the saving should be confirmed by timing the first split leg.
 
 **Alternatives considered.**
 
