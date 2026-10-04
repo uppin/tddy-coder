@@ -430,8 +430,8 @@ Range `origin/master..HEAD` (merge-base `b42eb558`), production lines to the fir
 
 | File | Before → after | Action |
 |---|---|---|
-| `packages/tddy-daemon/src/runtime.rs` | 1,677 → 1,689 | 🔴 **Not decomposed** — pre-existing; #512 (5/9) and other stacks also touch it; recorded in `oversized-file-runtime` / `complexity-runtime-build` and the post-stack split entry `2026-09-24-keyring-store-deferred-oversized-file-splits.md`. Needs developer consent to defer this PR's +12 |
-| `packages/tddy-service/build.rs` | 709 → 723 | 🔴 **Not decomposed** — pre-existing; #512 (5/9) also adds a prost pass to it; recorded in `oversized-file-build` and the same post-stack entry. Needs developer consent to defer this PR's +14 |
+| `packages/tddy-daemon/src/runtime.rs` | 1,677 → 1,689 | 🔴 **Not decomposed** — pre-existing, and this PR did not push it past 500; other stacks and nodes also touch it (#512's file list shows it only because #512 sits on an older 4/9 tip — 5/9's own commits do not edit it); recorded in `oversized-file-runtime` / `complexity-runtime-build` and the post-stack split entry `2026-09-24-keyring-store-deferred-oversized-file-splits.md`. Needs developer consent to defer this PR's +12 |
+| `packages/tddy-service/build.rs` | 709 → 723 | 🔴 **Not decomposed** — pre-existing, and this PR did not push it past 500; open PRs #63, #68, #118 and #178 also edit it; recorded in `oversized-file-build` and the same post-stack entry. Needs developer consent to defer this PR's +14 |
 
 Every new file is under budget: `vault_store.rs` 142, `service.rs` 164, `AccountsScreen.tsx` 205,
 `AccountsAppPage.tsx` 140.
