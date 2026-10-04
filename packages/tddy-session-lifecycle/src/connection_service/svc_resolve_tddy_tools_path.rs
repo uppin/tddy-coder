@@ -38,8 +38,6 @@ impl DaemonSessionHost {
     }
 }
 
-pub(in crate::connection_service) mod svc_host_builders;
-
 /// [`DaemonSessionHost::resolve_tddy_tools_path`] over the one field it reads, so a family handler
 /// above this crate (`tddy-daemon-rpc`'s catalogue, probing an agent's models) resolves the binary
 /// exactly the way session start does, without holding the host.
