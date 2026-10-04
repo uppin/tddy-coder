@@ -123,7 +123,7 @@ fn snapshot_of(
     rows: &[PlanRow],
     status: &index::PlanStatusResponse,
 ) -> PlanSnapshot {
-    // TODO(plan-dialog): `PlanStatus` reports journal counts, not a status per operation, so the
+    // TODO(docs/dev/todo/2026-10-04-plan-dialog-status-is-approximate-after-a-partial-run.md): `PlanStatus` reports journal counts, not a status per operation, so the
     // counts are laid over the plan in order — completed, then in flight, then failed. That is
     // exact for a run from the start of a plan and approximate after a `from` or `stop_after` run;
     // exact rows need a per-operation status on the index daemon's `PlanStatus`.

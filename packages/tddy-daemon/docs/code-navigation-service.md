@@ -11,6 +11,9 @@ then forwards it. `tddy-daemon` wires it; the handler itself is
 | `References` | Every reference to that symbol, its declaration included |
 | `Hover` | The language server's hover markdown for it; unset when there is none |
 | `WatchCodeIndex` | A session's code-index warm-up: latest progress, then each change, ending after `ready` or `error` |
+| `OpenPlan` | Load a restructure plan file of the worktree into the index's plan store; its operations with status and staleness |
+| `WatchPlan` | The same snapshot, then a new one whenever a status or stale reason changes |
+| `RunPlan` | Apply the plan through the index, streaming each operation's outcome |
 
 The wire contract is [`tddy-service/proto/code_navigation.proto`](../../tddy-service/docs/code-navigation-proto.md).
 `runtime.rs` builds `CodeNavigationServiceImpl` from the daemon's `WorktreeServiceImpl` and, when an
@@ -51,6 +54,14 @@ empty.
 `IndexDaemonRegistry::connect` has this service as its production caller. `tddy-index-daemon` is a
 dependency of `tddy-daemon-rpc` (for the generated `code_index` client), and only a dev-dependency of
 this crate.
+
+## Restructure plans
+
+The plan calls take the path above — the same authorisation, the same refusal of an unlisted worktree
+or a `rel_path` that leaves it, the same dial — and then read the plan file from the worktree and
+forward to `LoadPlans`, `PlanStatus` and `Apply`. The daemon holds no code of its own for them; how the
+rows, statuses and run events are built is in
+[tddy-daemon-rpc's restructure plans](../../tddy-daemon-rpc/docs/architecture.md#restructure-plans).
 
 ## Warming a session's index
 
@@ -104,3 +115,15 @@ and dial are the production ones.
 | watching a session nothing warmed | the stream ends at once with nothing |
 | a warm failure is reported with its reason | the last message carries `error`, and the warm does not panic |
 | another user's watch is refused | `NotFound`, the same as for a missing session, and nothing is recorded for the id |
+
+`tests/plan_dialog_acceptance.rs` (the same stand-in program, with a fake `code_index` server that holds
+one plan's store state and answers `LoadPlans`, `ListPlans` and `PlanStatus` from it, and replays a script
+for `Apply`):
+
+| Test | Pins |
+|---|---|
+| `open_plan_loads_the_plan_for_the_session_worktree` | the fake is asked to load the plan under the listed worktree, and the snapshot lists every operation pending with its id, kind, item, file and group |
+| `watch_plan_reports_a_stale_operation_with_its_reason` | the stale operation's row carries the store's reason |
+| `run_plan_streams_each_operations_outcome` | each applied operation arrives as it lands, and the stream ends with the outcome |
+| `run_plan_reports_a_group_that_did_not_compile_as_rolled_back` | an `Apply` ending in the group refusal ends the stream with a failure naming the group and the ids of that group's operations only |
+| `a_worktree_not_listed_for_the_project_is_refused` | `FailedPrecondition`, and the index daemon is never started |

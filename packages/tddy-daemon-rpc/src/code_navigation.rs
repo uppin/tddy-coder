@@ -35,8 +35,6 @@ use crate::code_index_warmup::SessionIndexProgress;
 /// How many progress messages `WatchCodeIndex` buffers for a reader that has not drained them yet.
 const WATCH_BUFFER: usize = 8;
 
-/// How often `WatchPlan` asks the index daemon's plan store whether anything changed; the store has
-/// no change feed to follow.
 mod plan;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
