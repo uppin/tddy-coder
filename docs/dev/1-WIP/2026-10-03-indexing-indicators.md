@@ -304,6 +304,23 @@ Production lines, counted to the first `#[cfg(test)]`; every deferral below has 
 
 `tddy-rust-typescript-tests/gen/session_pb.ts` (1540 → 1640) is generated `buf` output and excluded by design.
 
+### /analyze-clean-code (2026-10-04, head `c75381a4`)
+
+Measured every Rust function overlapping a line this PR adds (script: function extent by brace matching, parameters by top-level commas, nesting by brace depth; production code only) plus the TypeScript by reading. **Raw rubric score: F** — eleven touched functions are over a limit — **but none is a function this PR wrote**: every "must refactor" item is a pre-existing function this PR extended. The functions this PR wrote are all within limits.
+
+| Metric | Excellent | Acceptable | Needs attention | Must refactor |
+|---|---|---|---|---|
+| Function length (touched, Rust) | 17 | 3 | 3 | 8 |
+| Parameter count | — | — | — | 3 (`SessionHost::new` 8, `cursor_cli_semantic_env` 7, `spawn_cursor_cli_session_inner` >5) |
+
+**Written by this PR, all within limits:** `warm_for_session` (36 lines, 4 params), `warm` (30, 4), `resolve_owned_session_dir` (12), `follow`, `latest`, `record`, `web_progress`, `announce_worktree_ready`; `watch_code_index` is 37 lines at nesting 4 (needs attention: the spawned follow loop).
+
+**Pre-existing must-refactor functions this PR made longer** (lines added by this PR in brackets): `runtime.rs::build` 928 [+39], `svc_start_session_core.rs::start_session_core` 373 [+19], `cursor_cli_spawn.rs::spawn_cursor_cli_session_reporting` 251 [+50, the phase reporting around the former inner function], `claude_cli_spawn.rs::spawn_claude_cli_session_inner` 263 [+8], `session_coordinate_handlers.rs::stream_start_session_at_session_coordinate` 91 [+11], `cursor_cli_spawn.rs::spawn_cursor_cli_session_inner` [+29, a pass-through wrapper over many parameters], `cursor_cli_semantic_env` (6 → 7 parameters, `progress` added). Others touched by one to three lines: `spawn_child` 116, `start_claude_cli_session` 104, `SessionHost::new` 92 (8 parameters), `spawn_conversation` 74, `managed_claude_cli_launch` 62.
+
+**Magic values:** none in what this PR adds (the watch buffer is the named `WATCH_BUFFER`). **Naming:** no single-letter names. **Duplication:** the `clone sessions_base / clone session_id → start → announce_worktree_ready` block appears twice in `svc_start_session_core.rs` (claude-cli, cursor-cli) — a small helper candidate, left as is. **Oversized files:** see the file-length gate above (all deferred).
+
+Not refactored here: the long functions are the same ones the file-length records and the restructure engine already track; splitting them in a stacked PR would collide with #572 and the parents.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-03-indexing-indicators-initial-discovery.md`)
@@ -325,8 +342,8 @@ Production lines, counted to the first `#[cfg(test)]`; every deferral below has 
 - [x] Refactor test issues
 - [x] Validate production readiness (/validate-prod-ready)
 - [x] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues — none applied; developer chose report-only: the over-limit functions are pre-existing, tracked by the file-length records, and a split would collide with #572
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-indexing-indicators-initial-discovery.md`
