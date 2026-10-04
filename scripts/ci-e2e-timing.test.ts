@@ -76,6 +76,34 @@ describe("compile share", () => {
 
     expect(share.missingFromReport).toContain("renamed_away_acceptance");
   });
+
+  test("a_package_and_binary_filterset_term_counts_only_that_binary_of_that_package", () => {
+    const twoPackagesOneName = aTimingsReport([
+      { name: "tddy-daemon", target: ' (test "first_login_enrolment_acceptance")', seconds: 10 },
+      { name: "tddy-daemon", target: ' (test "unrelated_daemon_binary")', seconds: 30 },
+      { name: "tddy-core", target: ' (test "first_login_enrolment_acceptance")', seconds: 5 },
+    ]);
+
+    const share = compileShare(
+      twoPackagesOneName,
+      "package(tddy-daemon) and binary(first_login_enrolment_acceptance)",
+    );
+
+    expect(share.e2eTestSeconds).toBe(10);
+    expect(share.otherTestSeconds).toBe(35);
+  });
+
+  test("a_report_without_units_has_no_time_to_share_and_names_every_filterset_binary", () => {
+    const share = compileShare(aTimingsReport([]), "binary(rpc_scenarios)");
+
+    expect(share.totalSeconds).toBe(0);
+    expect(share.e2eLegSkippablePercent).toBe(0);
+    expect(share.missingFromReport).toEqual(["rpc_scenarios"]);
+  });
+
+  test("a_filterset_predicate_it_cannot_evaluate_is_an_error_not_a_guess", () => {
+    expect(() => compileShare(report, "test(some_name)")).toThrow(/unsupported filterset predicate/);
+  });
 });
 
 describe("verdict", () => {

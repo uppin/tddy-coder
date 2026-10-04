@@ -154,7 +154,11 @@ Real dependency edges:
 
 ## Validation Results
 
-(Populated by validation commands.)
+- **Rebase / leak check:** current on `feature/e2e-leg/deadline-and-scenarios`; `origin/<base>..HEAD` is this PR's three commits only; no deletions.
+- **Tests (scoped to `scripts/`):** `./dev bun test ./scripts/ci-e2e-timing.test.ts` — 8 pass. Three added at wrap: compound `package() and binary()` filterset term, empty report, unsupported predicate is an error.
+- **Production readiness:** no TODO/FIXME or debug output in the script; `console.log` is the CLI's output. `ci.yml` parses; the new steps have **not run on CI**.
+- **File length:** `ci-e2e-timing.ts` 237 lines, under the 500 budget.
+- **Open:** the `Rust compile timings` job is undispatched and its verdict unrecorded; the lib/bin unit-test unit shape in `UNIT_DATA` is assumed.
 
 ## TODO
 
