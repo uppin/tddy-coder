@@ -4,7 +4,9 @@
 **Status**: 🚧 In Progress
 **Type**: Feature (CI infrastructure)
 
-Node 5 of 5 of the `#e2e-leg` stack (branch `feature/e2e-leg/parallel-livekit`, PR base `feature/e2e-leg/shared-livekit-ci`). The last node: it consumes nodes 1 and 4.
+Node 5 of 5 of the `#e2e-leg` stack, PR [#582](https://github.com/uppin/tddy-coder/pull/582) (branch `feature/e2e-leg/parallel-livekit`, PR base `feature/e2e-leg/shared-livekit-ci`). The last node: it consumes nodes 1 and 4.
+
+**Contract state (commit 2):** `scripts/nextest-docker-group.ts` publishes `binariesStartingTheTestkit`, `dockerGroup` and `isSerialised` with `throw` bodies; both tests in `scripts/nextest-docker-group.test.ts` fail on them (verified, 2 of 2; run with `./dev bun test ./scripts/nextest-docker-group.test.ts`). The second test (names in the group must exist in the package they name) is a drift check and may pass once implemented even before the group is lifted. The acceptance-test review gate was not held separately (the developer asked for the whole stack to be prepared without stopping).
 
 ## Initial Discovery
 
@@ -160,10 +162,10 @@ Real dependency edges:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (none: CI infrastructure, no product area)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Read the CI e2e leg over several runs (`scripts/ci-status.sh --watch`, `--failures`)
