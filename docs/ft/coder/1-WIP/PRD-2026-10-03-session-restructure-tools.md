@@ -29,4 +29,4 @@ against the daemon-managed warm index on the session's own worktree, with struct
 - [x] `restructure_check` on a plan in the worktree returns its findings as JSON.
 - [x] `restructure_apply` applies through the warm index and returns per-op outcomes; a stale op is refused by id.
 - [x] A plan path outside the session's worktree is refused host-side.
-- [ ] From inside a jail the tools reach the host; without `index_daemon:` they are not advertised.
+- [~] **Deferred** — From inside a jail the tools reach the host; without `index_daemon:` they are not advertised. The gate (`mcp_tool_advertisement_audit`) and the host executor are tested; the daemon registration and the jail env export are verified by compile and clippy only, and no in-jail end-to-end test exists. Tracked in `docs/dev/todo/2026-10-04-session-restructure-tools-no-jail-end-to-end-test.md`.

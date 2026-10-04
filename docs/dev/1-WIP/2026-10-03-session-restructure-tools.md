@@ -202,7 +202,7 @@ _(populated during development)_
 - **Warning:** `run_json` returns `Err` when the follow-up `PlanStatus` call fails, discarding the operations the run already applied. A refusal should keep them.
 - **Info:** the load/status/plans/anchors tools and the registration/env export have no test.
 - **Fixed in `/pr-wrap`:** the `PlanStatus` failure is now reported as `refusal.stale_error` beside the refusal (key present only on failure; documented in the module docs), keeping the applied operations. `execute` (115 lines) split into one method per tool. Eight tests added (load, plans, status, anchors, a failed stale lookup, a non-`failed_precondition` refusal, two outside-worktree refusals); the executor suite is 12 tests.
-- **Still untested:** the daemon registration and the jail env export (compile and clippy only); no in-jail end-to-end test, so the PRD's jail criterion is **not verified**.
+- **Still untested:** the daemon registration and the jail env export (compile and clippy only); no in-jail end-to-end test, so the PRD's jail criterion is **deferred** with the developer's agreement (2026-10-04) — `docs/dev/todo/2026-10-04-session-restructure-tools-no-jail-end-to-end-test.md`.
 
 ### File length gate (`/pr-wrap` 3.5)
 
