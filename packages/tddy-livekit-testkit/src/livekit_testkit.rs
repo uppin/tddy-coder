@@ -15,8 +15,10 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::GenericImage;
 use testcontainers::ImageExt;
 
-const LIVEKIT_IMAGE: &str = "livekit/livekit-server";
-const LIVEKIT_TAG: &str = "master";
+/// The pinned server image, `name:tag`. One file is the source of truth, so the testkit, the CI
+/// server script (`scripts/livekit-ci-server.sh`) and `run-livekit-testkit-server` cannot drift.
+// TODO(shared-livekit-ci): the pin is not yet verified by two consecutive suite runs on CI.
+const LIVEKIT_IMAGE_REF: &str = include_str!("../../../.config/livekit-server.image");
 const DEV_API_KEY: &str = "devkey";
 const DEV_API_SECRET: &str = "secret";
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -93,10 +95,14 @@ impl LiveKitTestkit {
             }
         }
 
+        let (image_name, image_tag) = LIVEKIT_IMAGE_REF
+            .trim()
+            .split_once(':')
+            .ok_or_else(|| anyhow::anyhow!("livekit-server.image must be name:tag"))?;
         log::debug!(
             "LiveKitTestkit::start launching {}:{} container",
-            LIVEKIT_IMAGE,
-            LIVEKIT_TAG
+            image_name,
+            image_tag
         );
 
         // Find three free ports on the host. LiveKit embeds its internal (container) port
@@ -115,7 +121,7 @@ impl LiveKitTestkit {
             .with_port(port_ws.tcp())
             .with_expected_status_code(200u16);
 
-        let image = GenericImage::new(LIVEKIT_IMAGE, LIVEKIT_TAG)
+        let image = GenericImage::new(image_name, image_tag)
             .with_wait_for(WaitFor::from(http_wait))
             .with_cmd([
                 "--dev",

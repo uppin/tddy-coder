@@ -330,6 +330,35 @@ coming back. A false green is worse than a red one.
 | `cloud_init_acceptance` (the two tests CI does not run) | Nothing structural — each bakes from the bare cloud image like the one that does run. They are left out because a second and third bake buys inspection of an artifact the `Cloudinit VM boot` check already boots |
 | `vm_library_acceptance`, the two `tddy-vm-build` CLI suites | Not yet triaged for whether they transitively need a baked base |
 
+## The shared LiveKit server
+
+The `Rust e2e tests` leg starts one LiveKit server before nextest and removes it after, as two
+workflow steps (`Start shared LiveKit server`, and `Stop shared LiveKit server` with `if: always()`),
+both `scripts/livekit-ci-server.sh`. `start` runs the pinned image, waits for the Twirp API (bounded by
+`LIVEKIT_CI_READY_TIMEOUT_SECS`, default 60; on timeout it prints the URL and the container's logs and
+fails), and appends `LIVEKIT_TESTKIT_WS_URL` to `$GITHUB_ENV`, so `LiveKitTestkit::start()` reuses it
+instead of launching a container. Each of the three ports (7880 signalling, 7881 ICE/TCP, 7882
+ICE/UDP) is published on the same number inside and outside the container, because LiveKit embeds
+its container ports in ICE candidates. `stop` is safe to run twice. The unit leg starts nothing.
+
+The image is pinned in one file, `.config/livekit-server.image`, read by the script,
+`./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
+a one-line edit.
+`./run-livekit-testkit-server --stop` removes the local reusable server.
+
+The `docker` override in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a
+LiveKit test stuck on a dead server is killed and named in minutes rather than at the job's limit.
+It is `60s × 3`: a green e2e run's slowest single test took 40 s and the next 20 s, so a test still
+running after three minutes is stuck, not slow. Re-size it from the per-binary table when the
+slowest test changes.
+
+### The hang-protection drill
+
+Dispatch the workflow by hand with `kill_livekit_after_seconds` set (say `120`) and the e2e leg
+removes the shared server that many seconds after its start step (`scripts/livekit-ci-server.sh
+stop-after SECONDS`, detached so it lands while nextest runs). The leg must then fail within minutes
+with the stuck tests named, not run on to the job limit. Leave the input empty for a normal run.
+
 ## Flaky tests
 
 The LiveKit testkit picks a free port by binding `:0` and releasing it, leaving a

@@ -9,6 +9,14 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      kill_livekit_after_seconds:
+        description: >-
+          Hang-protection drill: remove the e2e leg's shared LiveKit server this many seconds after
+          nextest starts. The leg must then fail within minutes, naming a test. Leave empty for a
+          normal run.
+        required: false
+        default: ""
 
 # One run per PR. A new push cancels the run still in flight rather than
 # queueing behind it — the older result is worthless once the branch moves.
@@ -140,6 +148,19 @@ jobs:
           find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
           find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
 
+      # The e2e leg's LiveKit tests share one pinned server (see docs/dev/guides/ci.md) instead of
+      # starting a container each. The script exports LIVEKIT_TESTKIT_WS_URL through $GITHUB_ENV.
+      - name: Start shared LiveKit server
+        if: ${{ matrix.e2e }}
+        timeout-minutes: 5
+        run: scripts/livekit-ci-server.sh start
+
+      - name: Drill — remove the shared LiveKit server mid-run
+        if: ${{ matrix.e2e && inputs.kill_livekit_after_seconds != '' }}
+        env:
+          KILL_AFTER: ${{ inputs.kill_livekit_after_seconds }}
+        run: scripts/livekit-ci-server.sh stop-after "$KILL_AFTER"
+
       - name: cargo nextest
         id: nextest
         # Keep going on failure so the JUnit report still publishes; the report
@@ -155,6 +176,11 @@ jobs:
             filter="not ($e2e)"
           fi
           ./dev cargo nextest run --workspace --profile ci --locked -E "$filter"
+
+      - name: Stop shared LiveKit server
+        if: ${{ always() && matrix.e2e }}
+        timeout-minutes: 2
+        run: scripts/livekit-ci-server.sh stop
 
       # Where the e2e leg's run time goes, per test binary, on the check's summary page — from the
       # JUnit nextest just wrote, so it costs nothing. Skipped only when nextest wrote none (a build

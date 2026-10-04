@@ -17,13 +17,28 @@
 #
 # Or: eval $(./run-livekit-testkit-server | grep '^export ')
 #
-# Requires Docker. Uses livekit/livekit-server:master with --dev mode.
+# Stop and remove it:
+#   ./run-livekit-testkit-server --stop
+#
+# Requires Docker. Uses the image pinned in .config/livekit-server.image with --dev mode.
 
 set -euo pipefail
 
-LIVEKIT_IMAGE="livekit/livekit-server:master"
+LIVEKIT_IMAGE="$(tr -d '[:space:]' <"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.config/livekit-server.image")"
 LIVEKIT_PORT=7880
+LIVEKIT_ICE_TCP_PORT=7881
+LIVEKIT_ICE_UDP_PORT=7882
 CONTAINER_NAME="tddy-livekit-testkit"
+
+if [[ "${1:-}" == "--stop" ]]; then
+  if [[ -n "$(docker ps -aq -f "name=^${CONTAINER_NAME}$")" ]]; then
+    docker rm -f "${CONTAINER_NAME}" >/dev/null
+    echo "Removed ${CONTAINER_NAME}" >&2
+  else
+    echo "${CONTAINER_NAME} is not running" >&2
+  fi
+  exit 0
+fi
 
 # Check for existing running container
 existing=$(docker ps -q -f "name=^${CONTAINER_NAME}$" 2>/dev/null || true)
@@ -50,14 +65,17 @@ else
     ws_url="ws://127.0.0.1:${host_port}"
   else
     # Create new container with fixed name for reuse.
-    # All ports use dynamic mapping (0:PORT) to avoid conflicts.
+    # Each port is published on the same number inside and outside the container: LiveKit
+    # embeds its container ports in ICE candidates, so a remapped port is unreachable for media.
     # --node-ip 127.0.0.1 so ICE uses localhost.
     echo "Creating new LiveKit container: ${CONTAINER_NAME}" >&2
     docker run -d --name "${CONTAINER_NAME}" \
-      -p "0:${LIVEKIT_PORT}" \
-      -p "0:7881" \
-      -p "0:7882/udp" \
-      "${LIVEKIT_IMAGE}" --dev --bind 0.0.0.0 --node-ip 127.0.0.1
+      -p "${LIVEKIT_PORT}:${LIVEKIT_PORT}" \
+      -p "${LIVEKIT_ICE_TCP_PORT}:${LIVEKIT_ICE_TCP_PORT}" \
+      -p "${LIVEKIT_ICE_UDP_PORT}:${LIVEKIT_ICE_UDP_PORT}/udp" \
+      -e "UDP_PORT=${LIVEKIT_ICE_UDP_PORT}" \
+      "${LIVEKIT_IMAGE}" --dev --bind 0.0.0.0 --node-ip 127.0.0.1 \
+      --config-body "$(printf 'port: %s\nrtc:\n  tcp_port: %s\n' "${LIVEKIT_PORT}" "${LIVEKIT_ICE_TCP_PORT}")"
 
     echo "Waiting for LiveKit HTTP endpoint..." >&2
     for _ in $(seq 1 30); do
@@ -89,4 +107,4 @@ echo "To run tests against this instance:"
 echo "  export LIVEKIT_TESTKIT_WS_URL=${ws_url}"
 echo "  cargo test -p tddy-livekit -p tddy-livekit-testkit"
 echo ""
-echo "To stop and remove: docker rm -f ${CONTAINER_NAME}"
+echo "To stop and remove: ./run-livekit-testkit-server --stop"
