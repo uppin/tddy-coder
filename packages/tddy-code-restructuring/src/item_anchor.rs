@@ -244,6 +244,15 @@ pub fn has_item_anchors(plan: &Plan) -> bool {
         .any(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }))
 }
 
+/// Whether the plan file at `path` holds item anchors. A plan that cannot be read or parsed has
+/// none to resolve, and says why when the command that named it reads it.
+pub fn plan_file_has_item_anchors(path: &Path) -> bool {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| Plan::parse(&text).ok())
+        .is_some_and(|plan| has_item_anchors(&plan))
+}
+
 /// One anchor in snapshot coordinates: an item anchor becomes the range it names, anything else is
 /// already there.
 fn lower(anchor: &Anchor, root: &Path, resolver: &mut dyn ItemResolver) -> Result<Anchor> {

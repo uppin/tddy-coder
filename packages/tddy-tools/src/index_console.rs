@@ -31,7 +31,8 @@ use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::{Comparison, Excused};
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
-    PlanStatusResponse, PlansResponse, RestructureEvent, RunOutcome, VerifyResponse,
+    PlanStatusResponse, PlansResponse, RestructureEvent, RunOutcome, SnapshotResponse,
+    VerifyResponse,
 };
 
 /// One line of a run's answer, on the console this front end owns.
@@ -194,6 +195,18 @@ pub(crate) fn plans(response: &PlansResponse) {
         })
         .collect();
     for line in console::loaded_plans(&held) {
+        say(&line);
+    }
+}
+
+/// What a snapshot did to `plan`'s header, in the words the in-process run uses.
+pub(crate) fn snapshotted(plan: &str, response: &SnapshotResponse) {
+    let stale: Vec<(&str, &str)> = response
+        .stale
+        .iter()
+        .map(|found| (found.op.as_str(), found.reason.as_str()))
+        .collect();
+    for line in console::snapshot_lines(plan, response.paths as usize, response.rewritten, &stale) {
         say(&line);
     }
 }

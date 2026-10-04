@@ -7,9 +7,10 @@ the plan store's fold, re-resolution and stale-operation reporting. Each gap car
 
 None of them makes a plan wrong or an `apply` unsafe on its own: `Apply` refuses a stale operation at
 or after its start, and for item anchors the resolver's fingerprint refusal is the last line at apply
-time. The gaps are on the *reporting*, *lifetime* and *routing* side. Items 1–3 carry a
-`TODO(live-plans)` marker in the code that names this file; items 4–8 came out of the validation
-review of the node and have none, because each is a design choice the first cut made on purpose.
+time. The gaps are on the *reporting*, *lifetime* and *routing* side. Items 1 and 3 carry a
+`TODO(live-plans)` marker in the code that names this file (item 2's was removed when it closed);
+items 4–8 came out of the validation review of the node and have none, because each is a design
+choice the first cut made on purpose.
 
 ## 1. An item anchor in a file that was deleted does not go stale
 
@@ -25,17 +26,19 @@ exist as a second argument (or to probe `Path::is_file` itself) and mark every o
 `item not found in <file>`. A test: load a plan anchored in `a.rs`, delete `a.rs`, let the tree-change
 path observe it, and read `ListPlans` — the op is stale.
 
-## 2. `tddy-tools restructure snapshot` of an item-anchored plan starts its own rust-analyzer
+## 2. ~~`tddy-tools restructure snapshot` of an item-anchored plan starts its own rust-analyzer~~ — CLOSED
 
-`restructure snapshot` re-resolves a v2 plan's item anchors once (`rebase_plan_file`). In-process that
-costs a cold index; through `tddy-tools`, which otherwise routes every command at a running daemon
-when `TDDY_INDEX_SOCKET` is set, `answered_without_an_index` keeps `snapshot` on the in-process path
-because there is no `Snapshot` RPC. A carve that keeps a warm daemon therefore still pays six to ten
-minutes to rebase one plan.
+**Closed by** [`2026-10-04-restructure-same-crate-moves`](../1-WIP/2026-10-04-restructure-same-crate-moves.md) (E3,
+D5): `code_index.CodeIndexService` gained a `Snapshot` RPC beside `Check`/`Apply`, answering the
+`SnapshotRewrite` (`rewritten`, `paths`, the stale operations) from the root's warm client. `index_client`
+calls it for a plan with item anchors, and `answered_without_an_index` keeps only a plan with none in
+process. The `TODO(live-plans)` marker in `tddy-tools/src/index_client.rs` is gone. Delete this section
+at the wrap.
 
-**What would close it.** A `Snapshot` RPC beside `Check`/`Apply` taking a plan and returning the
-`SnapshotRewrite` (including its stale operations); `index_client` calls it and
-`answered_without_an_index` stops listing `snapshot` for item-anchored plans.
+*What it was:* `restructure snapshot` re-resolves a v2 plan's item anchors once (`rebase_plan_file`);
+`answered_without_an_index` kept it in process for want of an RPC, so a carve with a warm daemon still paid
+six to ten minutes to rebase one plan, and a machine with no rust-analyzer on `PATH` got
+`lsp server exited`.
 
 ## 3. An operation the plan already ran can be reported stale
 

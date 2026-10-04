@@ -22,8 +22,8 @@ use crate::index::WorkspaceIndex;
 use crate::operations::{joined, plan_path};
 use crate::proto::code_index::{
     AnchorsRequest, AnchorsResponse, ListPlansRequest, LoadPlansRequest, LoadedPlan,
-    PlanStatusRequest, PlanStatusResponse, PlansResponse, SourcePosition, SourceRange, StaleOp,
-    UnloadPlansRequest, VerifyRequest, VerifyResponse,
+    PlanStatusRequest, PlanStatusResponse, PlansResponse, SnapshotRequest, SnapshotResponse,
+    SourcePosition, SourceRange, StaleOp, UnloadPlansRequest, VerifyRequest, VerifyResponse,
 };
 use crate::status::status_of;
 
@@ -110,6 +110,64 @@ async fn anchor_covering(
                 column: range.end.col,
             }),
         }),
+    })
+}
+
+/// Rewrite a plan's snapshot header to the tree as it stands, and for an item-anchored plan
+/// re-resolve its anchors on the root's warm index.
+///
+/// Split in two for the reason [`serve_anchors`] is: the whole answer, refusal included, passes
+/// through [`Activity::recorded`].
+pub(crate) async fn serve_snapshot(
+    index: &WorkspaceIndex,
+    request: SnapshotRequest,
+) -> Result<SnapshotResponse, Status> {
+    let (activity, root) = Activity::arrived("snapshot", index, &request.workspace_root).await?;
+    activity.recorded(snapshotted(index, root, request).await)
+}
+
+/// The rewrite itself, with the root already resolved and its arrival already recorded.
+///
+/// Takes the root's queue: it writes the plan file and reads the tree the hashes are taken from,
+/// both of which a concurrent apply is changing. A server is acquired only for a plan that has item
+/// anchors, as in-process: a header is hashed without one, and waiting for an index the answer never
+/// consults would make a cheap command as slow as a cold one.
+async fn snapshotted(
+    index: &WorkspaceIndex,
+    root: PathBuf,
+    request: SnapshotRequest,
+) -> Result<SnapshotResponse, Status> {
+    let plan = plan_path(&root, &request.plan)?;
+    let options = Options {
+        command: Command::Snapshot,
+        target: Some(plan.clone()),
+        progress: logged_progress(),
+        trace: logged_trace,
+        ..Options::default()
+    };
+
+    let _queued = index.hold(&root).await;
+    let client = if item_anchor::plan_file_has_item_anchors(&plan) {
+        Some(index.client_for(&root).await?)
+    } else {
+        None
+    };
+
+    // Dropped with the handler when the caller goes, which is the cancellation the index wait
+    // listens to: see `anchor_covering`.
+    let cancel = CancellationToken::new();
+    let _stop_when_dropped = cancel.clone().drop_guard();
+    let rewrite = tokio::task::spawn_blocking(move || {
+        runner::snapshot_resolving(&root, options, client, cancel.clone())
+    })
+    .await
+    .map_err(|failure| joined("snapshot", &failure))?
+    .map_err(|refusal| status_of(&refusal))?;
+
+    Ok(SnapshotResponse {
+        paths: rewrite.paths as u32,
+        rewritten: rewrite.rewritten,
+        stale: stale_on_the_wire(&rewrite.stale),
     })
 }
 

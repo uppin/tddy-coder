@@ -287,15 +287,12 @@ fn needs_lsp_client(options: &Options) -> bool {
     }
 }
 
-/// Whether the plan `options` names holds item anchors. A plan that cannot be read or parsed has
-/// none to resolve, and says why when the command reads it.
+/// Whether the plan `options` names holds item anchors.
 fn names_item_anchors(options: &Options) -> bool {
     options
         .plan()
         .ok()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| crate::Plan::parse(&text).ok())
-        .is_some_and(|plan| crate::item_anchor::has_item_anchors(&plan))
+        .is_some_and(|path| crate::item_anchor::plan_file_has_item_anchors(&path))
 }
 
 #[cfg(test)]

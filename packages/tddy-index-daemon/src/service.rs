@@ -21,9 +21,9 @@ use crate::proto::code_index::{
     DefinitionRequest, DefinitionResponse, DiagnosticsRequest, DiagnosticsResponse,
     DuplicateTestsRequest, HoverRequest, HoverResponse, IndexProgress, ListPlansRequest,
     LoadPlansRequest, PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest,
-    ReferencesResponse, ReportRequest, ReportResponse, RestructureEvent, SymbolsRequest,
-    SymbolsResponse, UnloadPlansRequest, VerifyRequest, VerifyResponse, WarmRequest,
-    WorkspacesRequest, WorkspacesResponse,
+    ReferencesResponse, ReportRequest, ReportResponse, RestructureEvent, SnapshotRequest,
+    SnapshotResponse, SymbolsRequest, SymbolsResponse, UnloadPlansRequest, VerifyRequest,
+    VerifyResponse, WarmRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use crate::queries;
 use crate::symbols;
@@ -104,6 +104,16 @@ impl CodeIndexService for CodeIndexServiceImpl {
         request: tddy_rpc::Request<ApplyRequest>,
     ) -> Result<tddy_rpc::Response<Self::ApplyStream>, tddy_rpc::Status> {
         operations::serve_apply(&self.index, request.into_inner())
+            .await
+            .map(tddy_rpc::Response::new)
+    }
+
+    /// Rewrite a plan's snapshot header, re-resolving its item anchors on the warm index.
+    async fn snapshot(
+        &self,
+        request: tddy_rpc::Request<SnapshotRequest>,
+    ) -> Result<tddy_rpc::Response<SnapshotResponse>, tddy_rpc::Status> {
+        queries::serve_snapshot(&self.index, request.into_inner())
             .await
             .map(tddy_rpc::Response::new)
     }

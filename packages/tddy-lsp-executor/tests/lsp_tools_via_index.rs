@@ -253,6 +253,13 @@ impl CodeIndexService for AFakeIndex {
         Err(not_part_of_this_fake())
     }
 
+    async fn snapshot(
+        &self,
+        _request: tddy_rpc::Request<index::SnapshotRequest>,
+    ) -> Result<tddy_rpc::Response<index::SnapshotResponse>, tddy_rpc::Status> {
+        Err(not_part_of_this_fake())
+    }
+
     async fn verify(
         &self,
         _request: tddy_rpc::Request<index::VerifyRequest>,
