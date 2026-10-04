@@ -4,10 +4,10 @@
 **Source:** `packages/tddy-code-restructuring/src/backends/rust/item_move/outside.rs`, changeset
 [`2026-10-04-restructure-same-crate-moves`](../1-WIP/2026-10-04-restructure-same-crate-moves.md)
 
-- **"Outside" means another package, not another compilation target.** A file of the same package that
-  names the crate from outside (`tests/`, `examples/`, `benches/`, a second binary) is counted *inside*:
-  it is re-pointed like a caller in `src/`, and it does not earn the item a facade. A package whose own
-  integration tests must keep the old path wants `glob` or `named`.
+- **"Outside" means another target's reach, read from the default layout only.** A file of the same
+  package outside `src/` (`tests/`, `examples/`, `benches/`), and `src/main.rs` / `src/bin/**` of a
+  package that also has `src/lib.rs`, count as outside (fixed 2026-10-04). A custom `[lib] path` or
+  `[[bin]] path` in the manifest is **not read**: such a package is misjudged.
 - **The module facade names exactly the module.** `reparent_module` with `outside` leaves
   `pub use <new parent>::<module>;` (or nothing), the same line `glob` leaves; there is no per-item
   facade inside a moved module, so one outside caller of any item in the tree keeps the whole old path.

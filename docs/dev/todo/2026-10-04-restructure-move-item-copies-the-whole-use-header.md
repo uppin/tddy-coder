@@ -30,3 +30,9 @@ surplus as `unused_imports` warnings; the operation says so in its notes.
 Ask the server which of the copied statements the moved code resolves through (semantic tokens over the
 destination after the move, as `extract_module`'s `unresolved_names` does), and drop the rest at resolve time.
 That makes a partial run clean and removes the dependency on the tidy.
+
+**2026-10-05 update (moving the lifecycle items):** the copied header is now filtered for **reachability**:
+an import of a module the destination cannot see is dropped when the moved code names nothing from it,
+or the module's declaration is widened when it does; a group the destination binds part of is written
+as one `use` per unbound name. The header is still copied whole otherwise (trait imports have no name
+in the moved text), so the unused-import tidy remains what removes the surplus.

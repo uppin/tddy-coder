@@ -119,16 +119,16 @@ Commits are ordered engine, then docs, then lifecycle, so the diff can be read i
   keeping an item-anchored `snapshot` in process.
 - [ ] **E4 docs**: `plan-schema.md` (op table; the sentence "Rust has no whole-symbol move" is replaced),
   `SKILL.md`, `rust-code-restructuring.md`, `warm-code-intelligence-daemon.md`, package docs.
-- [ ] **L0 lifecycle baseline**: `./test -p tddy-session-lifecycle`: **575 passed, the 22 failures by name
+- [x] **L0 lifecycle baseline**: `./test -p tddy-session-lifecycle`: **575 passed, the 22 failures by name
   (list in the 16a history entry), 1 ignored**, re-run on this branch before the first move.
-- [ ] **L1 M0.2 (T4 half)**: `write_claude_hooks_settings`, `resolve_start_session_claude_binary` into the
+- [x] **L1 M0.2 (T4 half)**: `write_claude_hooks_settings`, `resolve_start_session_claude_binary` into the
   T4 module, via `move_item`.
-- [ ] **L2 M0.1**: `peer_session_answer`: `extract_module` for the first item, `move_item` for the other
-  three (`reexport: none`), `reparent_module` to the right parent if the first extract landed under the
-  wrong file.
-- [ ] **L3 M0.6**: `SessionStdioEndpoint` to T1, `ExecToolRoute` beside `LocalExecTools`, via `move_item`.
-- [ ] **L4 M0.4**: `reparent_module` for the rows in D7.
-- [ ] **L5 gate**: after the last plan, once: `cargo fmt --check`, `cargo clippy -p <touched> --all-targets
+- [x] **L2 M0.1**: `peer_session_answer`: one `move_item` with `name` creates the module under
+  `connection_service` (D1 amended: `extract_module` cannot re-point callers), then one plan moves the
+  other three in, `reexport: outside`.
+- [x] **L3 M0.6**: `SessionStdioEndpoint` to T1, `ExecToolRoute` beside `LocalExecTools`, via `move_item`.
+- [x] **L4 M0.4**: `reparent_module` for the rows in D7.
+- [x] **L5 gate**: after the last plan, once: `cargo fmt --check`, `cargo clippy -p <touched> --all-targets
   -D warnings`, `./test -p tddy-session-lifecycle` held to L0 by name, `restructure verify --against
   <ref before the first lifecycle plan>`, the comment-line multiset, and the acceptance checks below.
 - [ ] **Code Quality**: scoped clippy and fmt on every touched package; no function over 150 lines grows; new
@@ -265,7 +265,48 @@ E1 also: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` 
 clean for `tddy-tools` and `tddy-index-daemon`; `cargo fmt --check` reports only the four files of the red
 commit (see [the todo](../todo/2026-10-04-restructure-red-tests-are-not-rustfmt-clean.md)).
 
-_(the rest is filled by `/validate-changes` and `/pr-wrap`)_
+### Lifecycle moves (L0-L5), scoped to `tddy-session-lifecycle`
+
+Reference before the first lifecycle plan: `5ce8c4d9`. One commit per plan (`01`-`11` in
+`2026-10-04-restructure-same-crate-moves-plans/`), each applied with `check --deep`, `apply --dry-run`,
+`apply` (its own compile gate), `verify --against HEAD` ("every statement accounted for"). No hand edit.
+
+| Gate | Result |
+|---|---|
+| L0 baseline, before the first plan | 575 passed, 22 failed, 1 ignored; the 22 names are the 16a list |
+| `cargo fmt --check` (`tddy-session-lifecycle`, `tddy-code-restructuring`), `cargo clippy -p tddy-session-lifecycle --all-targets -D warnings` | clean |
+| L5 `./test -p tddy-session-lifecycle` | 575 passed, 22 failed, 1 ignored: **the same 22 names** |
+| `cargo check --all-targets` on `tddy-session-lifecycle`, `tddy-daemon-rpc`, `tddy-telegram-control`, `tddy-daemon`, `tddy-desktop`, `tddy-session-agents` | clean (no consumer crate edited) |
+| comment-line multiset of the 41 touched `.rs` files, `5ce8c4d9` vs HEAD | 0 lost, 0 gained |
+| `restructure verify --against 5ce8c4d9` | whole-repo, so it also counts the engine commits; the lifecycle-side differences are exactly the re-pointed qualifiers (`split_pairing` x2, `resolve_worktree_root_for_session` x4, `resolve_start_session_claude_binary`, the `SessionStdioEndpoint` insert), each paired with its re-pointed form among the gained statements |
+| A1 | the four names are each defined once, in `peer_session_answer` (the second `resolve_exec_tool_worktree` is the host *method*) |
+| A2 | no lifecycle file names the four through `split_start`, `workspace_session`, `split_session` or `svc_resolve_os_user` (facades `pub use` them for consumers) |
+| A3 | `seeded_clone_guard.rs` defines neither; `SessionStdioEndpoint` is in `svc_start_claude_cli_session.rs`, `ExecToolRoute` in `local_exec_tools.rs` |
+| A4 | both helpers are in `service_util.rs`; `hooks_and_urls.rs` names neither |
+| A5 | the six D7 modules and `svc_host_builders` (with `rpc_activity`, `first_admission_token`) sit under their destinations; the old directories hold no file (empty directories remain: see the todo) |
+| A6 | the baseline by name and the `cargo check` row above |
+| A7 | no hand edit: every defect met was fixed in the engine (below) |
+| production lines (500 budget deferred) | counted to the first inline `#[cfg(test)] mod` (`#[cfg(test)] mod x;` declarations included, so higher than the module-layout figures): `connection_service.rs` 547 -> 551 (the only file over 500, 4 lines more), the others -16..+4 except `local_exec_tools.rs` (+17, `ExecToolRoute`), `service_util.rs` (+32, the two helpers); no function grew |
+
+**Engine gaps the lifecycle moves found, each fixed test-first in this PR** (D8: a refusal stops the moves
+and is fixed in the engine):
+
+1. `reexport: outside` counted a package's `tests/`, `examples/`, `benches/` (and a binary beside a library)
+   as inside (`467a339a`).
+2. `check --deep` refused every item-anchored `move_item` ("names no module-level item"): the preflight read
+   the lowered range (`5ce8c4d9`).
+3. `extract_module` could not compose M0.1: it cannot re-point callers. D1 amended: `move_item` with `name`
+   creates its destination (`94a81f2b`).
+4. A later move into an existing module did not widen that module's `mod` declaration; copied imports of a
+   module the destination cannot see broke the build; a group import was copied whole over a binding the
+   destination had; imports landed below the first item of an empty file; a facade and a re-pointed `use`
+   bound one name twice in the source file (`444e2289`).
+5. The destination's own `use` of the moving item (also through a glob re-export) was counted as a name
+   clash (`c242889a`, `10927378`).
+6. A re-parented module's `super::Name` was respelled through its old parent's *private import* of `Name`
+   (`5decaa4b`).
+
+Remaining limits: [the todo](../todo/2026-10-05-restructure-same-crate-moves-limits-found-moving-lifecycle.md).
 
 ## TODO
 
