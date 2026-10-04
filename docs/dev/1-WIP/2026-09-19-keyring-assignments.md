@@ -1,7 +1,7 @@
 # Changeset: Project → account assignments
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — implementation complete, docs (M7) outstanding
 **Type**: Feature
 **Stack**: `#keyring` 5/9 · branch `feature/keyring/assignments` · base `feature/keyring/accounts` (#511)
 
@@ -156,14 +156,14 @@ node extends are small and not among the measured ones). `tddy-accounts` is new 
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-assignments.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-assignments.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: field + proto + resolver signature + failing tests (wave 2, commit 2)
-- [ ] **Storage**: `ProjectData.accounts` and its round-trip
-- [ ] **Proto + handler**: `SetProjectAccounts`, forwarding, the same-provider refusal
-- [ ] **Resolver**: four answers in `tddy-accounts`
-- [ ] **Web**: the per-provider account control and its picker
-- [ ] **Testing**: storage, handler, resolver, Cypress component
+- [x] **Draft PR contract**: field + proto + resolver signature + failing tests (wave 2, commit 2)
+- [x] **Storage**: `ProjectData.accounts` and its round-trip
+- [x] **Proto + handler**: `SetProjectAccounts`, forwarding, the same-provider refusal
+- [x] **Resolver**: four answers in `tddy-accounts`
+- [x] **Web**: the per-provider account control and its picker
+- [x] **Testing**: storage, handler, resolver, Cypress component
 - [ ] **Package Documentation**: `tddy-projects`, `tddy-accounts`, `tddy-web`
-- [ ] **Code Quality**: scoped clippy; CI green
+- [x] **Code Quality**: scoped clippy; CI green
 
 ## Technical Changes
 
@@ -205,12 +205,12 @@ node extends are small and not among the measured ones). `tddy-accounts` is new 
 
 ## Implementation Milestones
 
-- [ ] **M1** — `ProjectData.accounts` + storage round-trip
-- [ ] **M2** — proto: `ProjectEntry.accounts`, `SetProjectAccounts`, generated code
-- [ ] **M3** — handler: replace-whole-list, same-provider refusal, forwarding
-- [ ] **M4** — the resolver and its four answers
-- [ ] **M5** — `ListProjects` carries the assignment
-- [ ] **M6** — Projects-screen control and picker
+- [x] **M1** — `ProjectData.accounts` + storage round-trip
+- [x] **M2** — proto: `ProjectEntry.accounts`, `SetProjectAccounts`, generated code
+- [x] **M3** — handler: replace-whole-list, same-provider refusal, forwarding
+- [x] **M4** — the resolver and its four answers
+- [x] **M5** — `ListProjects` carries the assignment
+- [x] **M6** — Projects-screen control and picker
 - [ ] **M7** — documentation for the three packages
 
 ## Testing Plan
@@ -288,7 +288,7 @@ Scoped to the packages this commit changes behaviourally. Whole-workspace green 
 |---|---|---|---|
 | Baseline, before this commit | `./test -p tddy-projects -p tddy-accounts -p tddy-service --no-fail-fast` | 160 | 9 |
 | After this commit | same | 163 | 22 |
-| New acceptance target | `./test -p tddy-session-lifecycle --test set_project_accounts_acceptance` | 1 | 6 |
+| New acceptance target | `./test -p tddy-session-lifecycle --test set_project_accounts_acceptance` (since relocated to `tddy-daemon-rpc/tests/` — see Validation Results) | 1 | 6 |
 | Web acceptance | `cypress run --component --spec cypress/component/ProjectAccountsAcceptance.cy.tsx` | 1 | 7 |
 | Web regression | `cypress run --component --spec cypress/component/ProjectsScreenAcceptance.cy.tsx` | 13 | 0 |
 
@@ -344,21 +344,55 @@ this commit for the same reason 4/9 reverted it: the file belongs in 2/9's diff.
 
 ## Acceptance Criteria
 
-- [ ] `accounts` round-trips through `projects.yaml`; an absent field reads as empty
-- [ ] `SetProjectAccounts` replaces the whole list and is forwarded to peers owning the `project_id`
-- [ ] Two accounts of one provider are refused, with the provider named
-- [ ] `Assigned`, `NotAssigned` and `UnknownOnThisHost` are three distinct answers
-- [ ] **An unassigned project resolves to nothing, with a sole vault account present**
-- [ ] `ListProjects` carries the assignment
-- [ ] The Projects screen shows the three states distinctly and can change the assignment
-- [ ] `tddy-projects` gains no dependency on `tddy-credentials`
-- [ ] No git or GitHub call site changes in this node
+- [x] `accounts` round-trips through `projects.yaml`; an absent field reads as empty
+- [x] `SetProjectAccounts` replaces the whole list and is forwarded to peers owning the `project_id`
+- [x] Two accounts of one provider are refused, with the provider named
+- [x] `Assigned`, `NotAssigned` and `UnknownOnThisHost` are three distinct answers
+- [x] **An unassigned project resolves to nothing, with a sole vault account present**
+- [x] `ListProjects` carries the assignment
+- [x] The Projects screen shows the three states distinctly and can change the assignment
+- [x] `tddy-projects` gains no dependency on `tddy-credentials`
+- [x] No git or GitHub call site changes in this node
 
 ## TODO
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
 - [x] Publish the draft-PR contract — wave 2
-- [ ] M1–M7
-- [ ] Package documentation for `tddy-projects`, `tddy-accounts`, `tddy-web`
+- [x] M1–M6
+- [ ] M7 — package documentation for `tddy-projects`, `tddy-accounts`, `tddy-web`
 - [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
+
+## Validation Results
+
+**Validated** 2026-10-04 against `origin/master` (`a2afa9df`), range `origin/master..HEAD` = this PR's five commits only.
+
+| Check | Result |
+|---|---|
+| Stack gate / leak check | ✅ rebased onto latest `master`; no parent commits in range |
+| Build (`cargo check --all-targets`, scoped) | ✅ `tddy-accounts`, `tddy-projects`, `tddy-daemon-rpc`, `tddy-daemon-livekit`, `tddy-daemon`, `tddy-service`, `tddy-session-lifecycle`, `tddy-session-files`, `tddy-telegram-control`, `tddy-worktree-service` |
+| Scoped tests | ✅ `./test -p tddy-projects -p tddy-accounts -p tddy-daemon-rpc` 316 passed / 0 failed; `-p tddy-service` incl. `unbundle_service_split` ok |
+| Cypress component | ✅ `ProjectAccountsAcceptance` 8/8, `ProjectsScreenAcceptance` 13/13 |
+| Generated-code drift | ✅ `scripts/generated-code.sh check` up to date |
+| Boundaries | ✅ no `tddy-credentials` dependency in `tddy-projects`; no git/GitHub call site touched; no new external dependency; no deletions |
+| No fallback | ✅ `resolve_account` returns `NotAssigned` for an unassigned project, with a sole vault account present |
+
+**Contract changes since the draft:**
+
+- The acceptance test `set_project_accounts_acceptance.rs` moved from `tddy-session-lifecycle` to
+  `tddy-daemon-rpc/tests/` because master's `#carve` moved `ProjectService` into `tddy-daemon-rpc`.
+- Red-test fixtures only: `SecretString`, `Request::direct`, `accounts: Vec::new()` literals.
+- `ProjectAccountsAcceptance.cy.tsx`: the container test gained a `listAccounts` handler its own
+  Given already described.
+- 🆕 `forward_set_project_accounts_via_livekit` (`tddy-daemon-livekit`) — the forwarding sibling the
+  handler needed; not named in the draft contract.
+
+**Findings (non-blocking):**
+
+- ⚠️ `ProjectsAppPage.tsx`: `setProjectAccounts` and `useAssignableAccounts` swallow RPC errors
+  (`.catch(() => {})`), so a refused or failed assignment is silent. This mirrors the existing
+  `setDefaultBranch`; changing one without the other would diverge, so it is left for a follow-up.
+- ⚠️ `set_project_accounts_at_project_coordinate` is ~120 lines and repeats the repeated-provider
+  refusal that `project_storage::set_project_accounts` also enforces (handler for the status code,
+  storage as the invariant). It mirrors `set_project_default_branch_at_project_coordinate`.
+- ℹ️ `daemon-livekit` forwarder is compile-checked only; its test suite was not run locally.
