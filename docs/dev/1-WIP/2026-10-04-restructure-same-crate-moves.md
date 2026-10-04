@@ -109,10 +109,10 @@ Commits are ordered engine, then docs, then lifecycle, so the diff can be read i
   needs no server; the authored move (extract item text by byte range, insert into the destination,
   restore the moved items' `use` needs, widen visibility minimally and report it, re-point callers from
   the server's reference set or leave a `reexport` facade); logic in `backends/rust/item_move/`.
-- [ ] **E2 `reparent_module`**: `RefactorKind::ReparentModule`; `git mv` of the file and directory; both
+- [x] **E2 `reparent_module`**: `RefactorKind::ReparentModule`; `git mv` of the file and directory; both
   parent forms on both ends; `mod` declaration moved with its visibility and attributes; path re-pointing
   and `super::` rebasing; logic in `backends/rust/module_reparent/`.
-- [ ] **E3 ergonomics**: the repo-root hint in `owning_package`; `restructure warm` (tddy-tools client,
+- [x] **E3 ergonomics**: the repo-root hint in `owning_package`; `restructure warm` (tddy-tools client,
   `RestructureCommand::Warm`) and `run-index-daemon` warming by default (`--no-warm`); a `Snapshot` RPC
   on `code_index.CodeIndexService` (proto change, regenerated code under the drift gate
   `scripts/generated-code.sh`), `index_client` calling it and `answered_without_an_index` no longer
@@ -251,7 +251,7 @@ the whole-workspace answer is CI's.
 |---|---|---|---|
 | **E0 baseline** (`61bb5fda`, before any engine change) | 1004 | 26 | exactly the red tests: `move_item_acceptance` 13/13, `reparent_module_acceptance` 12/12, `anchors_package_relative_path::names_the_repo_root_path_when_given_one_relative_to_a_package`. No pre-existing failure; 1 ignored (doc test) |
 | **E1** (`move_item`) | 1062 | 13 | the 12 `reparent_module` tests and the anchors one: E2 and E3 are not started. `move_item_acceptance` 13/13 |
-| **E2** (`reparent_module`, uncommitted: one acceptance test cannot be satisfied) | 1097 | 2 | `anchors_package_relative_path::names_the_repo_root_path_when_given_one_relative_to_a_package` (E3's) and `reparent_module_acceptance::leaves_a_glob_facade_that_keeps_every_caller_unchanged`: it asserts `src/split.rs` byte-identical after the move, but the new parent must receive the `mod` declaration. With that one assertion relaxed to "ends with the original text" the test passes (run once, then restored). `reparent_module_acceptance` 11/12; `move_item_acceptance` 13/13 and `move_item_beyond_the_basics_acceptance` 4/4 unchanged; `reparent_module_beyond_the_basics_acceptance` (new) 4/4; 1 ignored (doc test) |
+| **E2** (`reparent_module`, `3852b12e`) | 1100 | 1 | only `anchors_package_relative_path::names_the_repo_root_path_when_given_one_relative_to_a_package` (E3's). `reparent_module_acceptance` 12/12 after the facade test's assertion was corrected (the new parent must gain the `mod` declaration, so it now asserts the parent still ends with what it said) |
 | **E3** (ergonomics: repo-root hint, `restructure warm` and `run-index-daemon` warming, `Snapshot` RPC; three commits) | 1100 (`tddy-code-restructuring`) + 558 (`tddy-index-daemon`, `tddy-tools`) | 0 | none. `tddy-index-daemon` + `tddy-tools` baseline on the tree before E3's code (`9deec46e`): 551 passed, 2 failed (exactly E3's red tests: `refuses_to_warm_without_a_daemon_and_names_the_script_that_starts_one`, `routes_a_snapshot_of_an_item_anchored_plan_at_the_warm_daemon`), 9 ignored; after: 558 passed, 0 failed, 11 ignored (the two new script production tests). `anchors_package_relative_path` 2/2. The ignored `leaves_the_root_warm_on_the_daemon_it_was_asked_to_warm` run deliberately against a real rust-analyzer: passed (4.9s). `detached_daemon_production` (6 ignored production tests, real script and `nix develop`): 6/6. `scripts/generated-code.sh check` could not run (`protoc-gen-es` absent: JS deps not installed); `code_index.proto` is in no manifest entry and no generated file of it is committed, so there is nothing for the gate to compare |
 
 E1 also: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean; `cargo check --all-targets`

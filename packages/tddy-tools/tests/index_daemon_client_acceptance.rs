@@ -596,11 +596,7 @@ fn refuses_to_warm_without_a_daemon_and_names_the_script_that_starts_one() {
         .expect("the run completes");
 
     // Then it refuses, naming the script
-    let said = format!(
-        "{}{}",
-        console(&output).join("\n"),
-        narration(&output)
-    );
+    let said = format!("{}{}", console(&output).join("\n"), narration(&output));
     assert!(
         !output.status.success(),
         "`warm` claimed success with no daemon to warm: {said}"
