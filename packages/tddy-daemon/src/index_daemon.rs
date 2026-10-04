@@ -16,7 +16,6 @@
 //! stop it when this daemon shuts down.
 
 mod error;
-mod lsp_channel;
 mod registry;
 mod spawn;
 

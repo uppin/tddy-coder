@@ -166,8 +166,10 @@ streamed start instead of the unary one.
   agent through `AttachmentProgressSink::{begin_phase, end_phase}`. ⚠ The sandboxed claude-cli and
   cursor-cli, tool and split starts do **not** yet — `TODO(indexing-indicators)` in
   `svc_start_session_core.rs`.
-- ✅ `code_index_warmup::warm_for_session` warms through `IndexDaemonRegistry::connect`; a failed or
-  short warm ends with `error` set; a first `Starting` record is written before the task spawns.
+- ✅ `code_index_warmup::warm_for_session` warms through the `IndexChannelSource` port (the base's
+  `tddy-daemon-rpc` port, which the daemon's `IndexDaemonRegistry` implements); a failed or short warm
+  ends with `error` set; a first `Starting` record is written before the task spawns. The module lives
+  in `tddy-daemon-rpc`, beside the navigation service that reads its progress.
 - ✅ `watch_code_index` follows `SessionIndexProgress` to `ready` / `error`; `index_progress`'s
   `#[allow(dead_code)]` is gone.
 - ✅ Runtime hook: new port `SessionWorktreeObserver` (`tddy-session-lifecycle`), installed with
@@ -213,6 +215,34 @@ streamed start instead of the unary one.
 - **`warm_for_session` is a free function returning `Option<JoinHandle<()>>`** — `None` is "nothing
   started" (no `index_daemon:`, or no `Cargo.toml` at the worktree root), the handle lets a caller
   (and a test) await a warm that is otherwise detached.
+
+## Restructuring
+
+`tests/unbundle_endpoint.rs::every_module_left_in_the_daemon_is_one_of_the_endpoint_set` lets
+`tddy-daemon/src` hold wiring only. After the base was rewritten (its navigation service already moved
+to `tddy-daemon-rpc` behind an `IndexChannelSource` port) it named one file, `index_daemon/lsp_channel.rs`
+(parent-owned), and this PR's own `code_index_warmup.rs` would have been a second. Both are gone from
+the daemon:
+
+- `code_index_warmup.rs` is born in `tddy-daemon-rpc/src/` (its progress holder is read by the
+  navigation service there, and that crate cannot depend on the daemon); it dials through the port, and
+  its acceptance suite stays in `tddy-daemon/tests` beside `code_navigation_acceptance.rs`, which needs
+  the daemon's registry.
+- `lsp_channel.rs`'s 19 lines (`impl IndexChannel for IndexDaemonRegistry`) are folded into
+  `index_daemon/registry.rs`, next to the base's own `impl IndexChannelSource for IndexDaemonRegistry`:
+  the registry answering the two ports it serves, in the one file the whitelist already admits. File
+  deleted, `mod lsp_channel;` dropped. Parent-owned files edited: `index_daemon.rs`, `index_daemon/registry.rs`.
+
+Result (scoped): `unbundle_endpoint` 4/4, `test_placement` 4/4, `code_index_warmup_acceptance` 6/6,
+`code_navigation_acceptance` 7/7, `tddy-lsp-executor` (13 unit, 1 e2e, 13 `lsp_tools_via_index`) green,
+clippy `-D warnings` clean.
+
+An earlier plan to move the whole registry cluster to a crate with the restructure engine was abandoned
+once the base made it unnecessary; the engine defect it hit is recorded in
+[`docs/dev/todo/2026-10-04-restructure-move-cluster-to-crate-leaves-a-modules-directory-children-behind.md`](../todo/2026-10-04-restructure-move-cluster-to-crate-leaves-a-modules-directory-children-behind.md).
+
+**Docs to correct at wrap** (not edited here — `packages/*/docs/` goes through the changeset workflow):
+`packages/tddy-daemon/docs/daemon-endpoint.md:21` still names `index_daemon/lsp_channel.rs`.
 
 ## Refactoring Needed
 
