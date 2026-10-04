@@ -1,3 +1,5 @@
+mod session_attachment_materialization;
+
 use tddy_service::proto::session::HostDocumentRef;
 
 /// The scope every side of this resolves against — `types.proto`'s, which `connection.proto` and
