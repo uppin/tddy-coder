@@ -75,6 +75,13 @@ binaries, add its binary to the filterset, and — for a LiveKit one — to the 
 keeps those tests off each other's ports. The two lists carry the same LiveKit names on purpose; the
 group also covers `tddy-livekit`'s own suites.
 
+A LiveKit test names its room with `LiveKitTestkit::unique_room("<purpose>")`, never a fixed
+literal: the `docker` group is the only thing keeping two tests off each other's rooms, and it is
+not a name-level guarantee (under nextest each test is its own process, so `#[serial]` does nothing).
+Unique names are what make a server shared by the job, or tests running side by side, safe. The guard
+test `livekit_tests_use_unique_rooms` in `tddy-livekit-testkit` fails on a fixed room. See
+[testing.md](testing.md#test-rooms-come-from-unique_room).
+
 **Known drift: the `rust-analyzer` group.** `.config/nextest.toml` serialises the rust-analyzer
 binaries (indexing is the contended resource, and two servers loading a crate graph can expire a
 bounded indexing budget), but it names 10 of the 31 restructuring binaries that use the harness. The
