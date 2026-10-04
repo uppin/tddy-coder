@@ -451,3 +451,23 @@ Every new file is under budget: `vault_store.rs` 142, `service.rs` 164, `Account
 `AccountsAppPage.tsx` (+17/−4), so restructuring them here would turn #515's diff into conflicts
 (`/pr-wrap` step 4 stack rule). Do them on a follow-up branch after the stack lands, or in #515.
 No magic values (`SUBJECT_METADATA_KEY`, `STORE_UNREADABLE` named); no duplication in production code.
+
+### Final validation and gates — 2026-10-04 (`/pr-wrap` steps 5–6, scoped)
+
+Branch current with `origin/master`; `origin/master..HEAD` is this PR's commits only; no parent-owned
+path in the diff. No new finding.
+
+| Gate | Result |
+|---|---|
+| `./dev cargo fmt` | clean, no changes |
+| `./dev cargo clippy -p tddy-accounts -p tddy-service -p tddy-daemon --all-targets -- -D warnings` | ✅ clean |
+| `./test -p tddy-accounts -p tddy-service -p tddy-daemon` | ✅ 390 passed, 0 failed, 1 ignored |
+| `scripts/generated-code.sh check` | ✅ all four gen dirs up to date |
+| `bun test src/routing` | ✅ 98 passed, 0 failed |
+| Cypress `AccountsScreenAcceptance.cy.tsx` | ✅ 11/11 |
+| Cypress `models/ModelsNavAcceptance.cy.tsx` | ✅ 3/3 |
+| Cypress `PresenceCapabilityGatingAcceptance.cy.tsx` | ✅ 16/16 |
+
+Whole-workspace health is CI's (`scripts/ci-status.sh`), not claimed from these runs.
+
+**Wrap (step 7) not run**: the stub-provider daemon vault item is open by developer decision.
