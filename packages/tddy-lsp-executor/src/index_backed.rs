@@ -171,7 +171,8 @@ impl LspExecutor for IndexLspExecutor {
     /// `ReadLints` is refused rather than answered by a second language server of this executor's
     /// own: that one would disagree with the index every other pane asks.
     fn workspace_diagnostics(&self, _repo_dir: &Path) -> Result<Value, String> {
-        // TODO: a workspace-wide `Diagnostics` (empty `file`) would let `ReadLints` use the index.
+        // TODO(docs/dev/todo/2026-10-04-read-lints-is-refused-through-the-warm-index.md): a
+        // workspace-wide `Diagnostics` would let `ReadLints` use the index.
         Err("ReadLints is not available through the warm index: it reports diagnostics one file at a time — use LspDiagnostics with a file".to_string())
     }
 }

@@ -239,6 +239,15 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
   `"./src/lib.rs"` was bound as `./src/lib.rs`. Fixed by collecting only `Normal` components.
 - 🔲 `Symbols` with a `query` at the index daemon — blocked on the shared fake language server.
 ### From @prod-ready (Production Readiness)
+
+- ✅ The `ReadLints` `TODO` carried no issue reference and lived only in this changeset, which is deleted at
+  wrap — now `TODO(docs/dev/todo/2026-10-04-read-lints-is-refused-through-the-warm-index.md)`, with that
+  entry written.
+- ℹ️ With `index_daemon:` set, the daemon still builds a `TddyLspExecutor` that is never asked (only its
+  registry, which the idle reaper drives and which stays empty, and the `existing` argument of
+  `select_lsp_executor`). Acceptable: it keeps the deployment switch a single expression.
+- ℹ️ Each tool call dials a fresh channel (`IndexLspExecutor::client`) and re-reads the line it converts a
+  column against. Neither is a correctness issue; both are cheap to cache if a profile asks.
 ### From @analyze-clean-code (Code Quality)
 
 ## Validation Results
@@ -267,6 +276,19 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
   Needed. After the fixes: 13 `lsp_tools_via_index` tests, 13 `index_backed` unit tests, 39
   `code_index_service_acceptance` tests.
 - **Scoped run:** `./test -p tddy-lsp-executor -p tddy-index-daemon`: **168 passed, 0 failed**.
+
+### /validate-prod-ready — 2026-10-04
+
+- **Files checked:** 11 production files (`.rs`, `.proto`, `Cargo.toml`); test files and `#[cfg(test)]`
+  modules excluded.
+- **Mock/fake/stub in production:** none (one hit is the comment on a `[dev-dependencies]` entry).
+- **Dev fallbacks / env-conditional code:** none. `select_lsp_executor` is a deployment switch, not a
+  fallback: with an index, the existing executor is never asked, and `ReadLints` is refused rather than
+  answered by a second language server.
+- **`unwrap` / `expect` / `panic!` / `todo!` / `unimplemented!`:** none. **Debug output** (`println!`,
+  `dbg!`): none. **Dead code:** none (clippy `-D warnings` clean; the stub-era `#[allow(dead_code)]` is gone).
+- **TODO/FIXME:** 1 — `ReadLints`, now tracked (see Refactoring Needed). **Blockers: 0. Warnings: 1, fixed.**
+- **Status:** ✅ Ready.
 
 ### Scoped gates — 2026-10-03 (packages touched only: `tddy-lsp-executor`, `tddy-index-daemon`, `tddy-daemon`)
 
@@ -301,10 +323,10 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
 - [x] Validate changes (/validate-changes)
 - [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
