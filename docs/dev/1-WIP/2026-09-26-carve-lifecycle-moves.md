@@ -78,7 +78,7 @@ What 16a–16e left, per topic:
   {`sandbox_rpc_handler`, `pr_stack`} (16d, 16e);
 - the three traits each defined in their topic's ports module and implemented once on
   `DaemonSessionHost` in lifecycle's wiring ports file;
-- the four mixed parent/child files re-parented (16a), so a module move no longer drags another
+- the four mixed parent/child files re-parented (**not done in 16a**: deferred, see "Carried from 16a"), so a module move no longer drags another
   topic's child with it.
 
 **This node is one node** (decided 2026-09-26). It could be cut one receiver per node later, and that
@@ -135,6 +135,26 @@ Implementing one here collides with the PR that owns it.
 | **16b** `#carve` 17, lifecycle-ports-agents | `agent_host_callbacks` (`trait AgentHostCallbacks`, roster handle), T3 converted, `AgentRosterState` with 12 fields | moves T3 and `agent_host_callbacks` into `tddy-session-agents` | change `AgentRosterState` or `AgentHostCallbacks` |
 | **16a** `#carve` 16, lifecycle-ports (#531) | T7, T8, T10, T11 converted; `peer_session_answer`, `daemon_urls`, `session_notification_publishing`; four files re-parented; the host-constructing split-context test in its own lifecycle file | moves each leaf topic into its receiver | re-parent or re-split a file |
 
+## Carried from 16a (2026-10-04)
+
+16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3 and deferred four items until the
+engine can do them (the developer's decision, 2026-10-04; never by hand). This node's plan assumed three of them were
+done, so read every "from 16a" below against this list:
+
+| 16a item | State | Consequence for this node |
+|---|---|---|
+| **M0.4** re-parent the four mixed parent/child files (D8) | **Deferred.** Needs the developer's consent (D8) and an engine `reparent_module` operation ([`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md)) | **Blocking.** A module move takes its children, so each of the four must be re-parented first, or this node moves each nested module individually (untested for a parent that itself moves). `PresenterObserverDeps` and `mint_first_admission_token` still sit under wiring's `svc_host_builders` |
+| **M0.1** the `peer_session_answer` module | **Not delivered**; the four items stay in their files ([`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md)) | The T3 rows naming `peer_session_answer` do not hold until the engine's same-crate move exists |
+| **M0.6** the `seeded_clone_guard.rs` split | **Not delivered**, same gap | `ExecToolRoute` and `SessionStdioEndpoint` are still in that file; `ExecToolRoute`'s move to `tddy-session-agents` depends on the split |
+| the T4 half of M0.2 (`write_claude_hooks_settings`, `resolve_start_session_claude_binary`) | Skipped; carried by 16c | none, once 16c lands |
+
+16a also left `session_notifications` as a facade over the new `session_notification_publishing` module (visible as
+`pub(crate)` only, because the engine writes `mod x; pub use x::*;`).
+
+**Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
+#573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
+failures by name, 1 ignored**.
+
 ## Draft PR contract
 
 This is a mechanical move, the first of the pr-stack skill's two named exceptions ("a purely
@@ -180,7 +200,7 @@ The scan followed `deferred-work/references/planning-cross-check.md`. No record 
 | [restructure defects from the first cross-crate move](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md) (item 3: `pub(crate)` → `pub`) | ⚠ **During** | This node widens what crosses a crate, and nothing else |
 | [check misses a module name the destination already has](../todo/2026-09-25-restructure-check-misses-a-module-name-the-destination-already-has.md) | ⚠ **During** | The only collision, `session_notifications`, was renamed in 16a (`session_notification_publishing`). None of the modules arriving in agents, files, livekit or kernel shares a name with theirs (near-misses: agents' `ports`, the kernel's `agent_tool_socket` and `peer_forwarding`) |
 | [check misses a body path to a module staying behind](../todo/2026-09-25-restructure-check-misses-a-body-path-to-a-module-staying-behind.md) | ⚠ **During** | Checks A2/A4 of 16a–16e were the manual version; the compile gate catches the rest |
-| [lifecycle modules to re-parent by hand](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) | ✅ resolved in 16a | — |
+| [lifecycle modules to re-parent by hand](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) | ⛔ **Blocking, deferred from 16a** (needs developer consent D8 and an engine `reparent_module`) | see "Carried from 16a" |
 | [2026-09-09 untested complexity hotspots](../todo/2026-09-09-tddy-daemon-untested-complexity-hotspots.md) | ⚠ **During** | Re-measured per owning crate after the moves |
 | [lifecycle files over the 400-line target](../todo/2026-09-24-lifecycle-files-over-the-400-line-target.md), [functions over 150](../todo/2026-09-24-lifecycle-functions-still-over-150-lines.md) | ⚠ **During** | Entries move with their files; re-homed to the receiving crate's name at wrap |
 | [restructure verify cannot exit zero for an extract module](../todo/2026-09-18-restructure-verify-cannot-exit-zero-for-an-extract-module.md) | ⚠ **During** | `verify --against` accounted by hand per receiver |
@@ -356,7 +376,7 @@ R1:
 ./dev cargo test -p <receiver> --no-fail-fast -- --test-threads=1   # each existing receiver
 ```
 
-Lifecycle's expected: **562 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Lifecycle's expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit` passes
 when re-run alone. The 22 known red (macOS):
 
@@ -673,8 +693,8 @@ Settled by the developer (2026-09-26), carried here:
 - **`test_util` (366 lines; no D-number in the master plan).** Gate it behind a feature, or move it to a
   testkit crate. It counts toward B5's size. **Recommended: a `test-util` feature**, since its users are
   lifecycle's own integration suites.
-- **D8 alternative (closed in 16a).** 16a re-parented the four mixed files; if the developer had
-  declined, this node would move each nested module individually, which is untested for a parent that
+- **D8 (open, deferred from 16a).** 16a did not re-parent the four mixed files (2026-10-04); until it
+  is done, or the engine gains `reparent_module`, this node would move each nested module individually, which is untested for a parent that
   itself moves.
 
 ## Validation results
