@@ -545,3 +545,4 @@ mod conversation_worktree_jail_route_unit_tests;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
+mod peer_session_answer;

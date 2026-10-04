@@ -40,13 +40,6 @@ impl SplitStartFailure {
     }
 }
 
-pub(crate) fn peer_has_no_such_session(status: &Status) -> bool {
-    matches!(
-        status.code,
-        tddy_rpc::Code::FailedPrecondition | tddy_rpc::Code::NotFound
-    )
-}
-
 /// Validate `StartSessionRequest.split_agent`: the agent session, on another daemon, that a
 /// `workspace` session is being created to hold the worktree for.
 ///
