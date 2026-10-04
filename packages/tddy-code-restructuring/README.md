@@ -86,6 +86,10 @@ requests reads the tree on disk again after each one. See
 `remove_unused_param` and `convert_tuple_return_to_struct` rewrite every caller as well as the declaration,
 through rust-analyzer's own assists; see [docs/signature-assists.md](docs/signature-assists.md).
 
+`change_param_type`, `add_param`, `reorder_params`, `change_return_type`, `add_call_arg`, `remove_call_arg`,
+`change_call_arg` and `reorder_call_args` edit one declaration or one call, so a group pairs a signature
+change with its callers; see [docs/signature-rewrites.md](docs/signature-rewrites.md).
+
 `move_cluster_to_crate` moves a **set** of modules as one unit — `anchor` is the first member and
 `also` names the rest — in a single edit, so the tree is never half-moved. That is what makes a
 mutually-referencing group movable at all: moved one at a time, each module's reference to a sibling
@@ -119,7 +123,7 @@ except `backends/rust.rs` and `crate_move/test_binary.rs` (see their records in 
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
 | Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs` |
-| Rust backend | `backends/rust.rs`, and beside it `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
+| Rust backend | `backends/rust.rs`, and beside it `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
 | Cross-crate moves | `crate_move/{moving,cluster,source_scan}.rs` with `moving/facade_writer.rs`, `cluster/stranded.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs` |
 
 Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream

@@ -99,6 +99,9 @@ fn moving_the_test_binary(group: Option<&str>) -> RefactorOp {
         to_file: false,
         also: Vec::new(),
         group: group.map(str::to_string),
+        type_: None,
+        expr: None,
+        order: Vec::new(),
     }
 }
 

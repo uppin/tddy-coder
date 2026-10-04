@@ -420,5 +420,18 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         }
     }
 
+    // `type` and `expr` are the two fields that carry Rust syntax; each must be exactly one type or
+    // one expression, or the plan is refused before any server is spawned.
+    if let Some(type_) = op.type_.as_deref() {
+        super::rust_syntax::one_type(type_)?;
+    }
+    if let Some(expr) = op.expr.as_deref() {
+        super::rust_syntax::one_expr(expr)?;
+    }
+
+    signature_fields::refuse_a_signature_operation_it_cannot_honour(&op)?;
+
     Ok(op)
 }
+
+mod signature_fields;

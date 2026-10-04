@@ -124,16 +124,67 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `inline_method` | symbol | — | — | ✅ |
 | `remove_unused_param` | symbol or item (the function) | `name` (the parameter) | — | ✅ |
 | `convert_tuple_return_to_struct` | symbol or item (the function) | `name` (the new struct) | — | ✅ |
+| `change_param_type` | symbol or item (the function) | `name` (the parameter), `type` | — | ✅ |
+| `add_param` | symbol or item (the function) | `name`, `type`, `variant` = `first` \| `last` \| `after:<param>` | — | ✅ |
+| `reorder_params` | symbol or item (the function) | `order` (every parameter name, once) | — | ✅ |
+| `change_return_type` | symbol or item (the function) | `type`, or `variant` = `wrap_result` \| `wrap_option` \| `unwrap` | — | ✅ |
+| `add_call_arg` | item + relative range over one call | `expr`, `variant` = `first` \| `last` \| one-based index | — | ✅ |
+| `remove_call_arg` | same | `variant` = `first` \| `last` \| one-based index | — | ✅ |
+| `change_call_arg` | same | `variant` = position, `expr` | — | ✅ |
+| `reorder_call_args` | same | `order` (every argument position, once) | — | ✅ |
 | `organize_imports` | symbol | — | ✅ | — |
 | `add_missing_imports` | symbol | — | ✅ | — |
 
-Every operation but one is backed by a real assist in the engine that claims it. Where a cell is
+Every operation but two groups is backed by a real assist in the engine that claims it: `extract_class` (below) and the signature and call-site operations (see **Signature and call-site operations**). Where a cell is
 empty the engine has no equivalent, and the executor refuses the operation rather than approximating
-it. The ⚠️ marks the exception — see **`extract_class` is hand-written** below.
+it. The ⚠️ marks `extract_class` — see **`extract_class` is hand-written** below.
 
 `variant` selects between actions the engine offers for the same operation. Omitting it keeps the
 behaviour an operation had before the field existed (`inner`, `alias`), and a name the operation does
 not define is refused rather than ignored.
+
+### Signature and call-site operations
+
+The eight operations from `change_param_type` to `reorder_call_args` change a function's signature
+and, one call at a time, its callers. The signature operations edit **only the declaration**; there
+is no fan-out, so every caller is its own call-site operation. A change that breaks callers is
+written as a `group` (see Transactional groups above): the signature operation plus one call-site operation
+per caller, judged by the compiler once at the group's end.
+
+```jsonl
+{"op":"change_param_type","group":"retype","anchor":{"kind":"item","item":"ledger::pricing::label","file":"src/pricing.rs"},"name":"count","type":"&str"}
+{"op":"change_call_arg","group":"retype","anchor":{"kind":"item","item":"ledger::checkout::basket","file":"src/checkout.rs","start":{"line":2,"col":5},"end":{"line":2,"col":17}},"variant":"1","expr":"\"3\""}
+```
+
+- **Fields.** `type` (a Rust type), `expr` (a call argument) and `order` are the only fields that
+  carry anything but a name. `type` and `expr` are each parsed with `syn` as **exactly one** `Type` /
+  `Expr`: two of them, trailing text, or an `expr` carrying a statement anywhere inside it (a block, a
+  closure body) is refused as malformed. `text`, `code` and `content` are still refused. `order` is
+  parameter names for `reorder_params` and one-based argument positions for `reorder_call_args`; it
+  must name every entry once, and a missing or repeated one is refused naming it.
+- **Positions.** `variant` on a call-site operation is `first`, `last` or a one-based index; on
+  `add_param` it is `first` (after any receiver), `last` or `after:<param>`.
+- **Call-site anchor.** An **item anchor on the function containing the call, with a range relative to
+  that item over exactly one call expression** (`callee(args)` or `receiver.method(args)`). A call-site
+  operation without that range is refused when the plan is read; a range that is not one call, or
+  whose argument count `syn` and the scan disagree on, is refused naming the text.
+- **`change_return_type`** takes exactly one of `type` and `variant`. `type` rewrites the `-> …` in
+  the declaration (or adds it to a function with none) and leaves the body and callers alone. `variant`
+  asks rust-analyzer's own assist (`wrap_result`, `wrap_option`, `unwrap`): the declaration and the
+  function's own returns are rewritten, callers are not. `wrap_result` leaves the error type open
+  (`_`), so pair it with a `type` operation in the same group to name it. `unwrap` is refused unless
+  the function returns a `Result` or an `Option`.
+- **Refusals.** A field an operation cannot honour (`type` on `rename_symbol`, `expr` on a signature
+  operation, …) is refused rather than ignored; a missing `name`, `type`, `variant`, `expr` or `order`
+  is refused before any server starts; so is an unknown `add_param` or `change_return_type` `variant`.
+  A `name` that is not a parameter of the function, an `add_param` of a parameter that exists, an
+  `after:` naming none, and a position past the call's arguments are refused naming it.
+- **A parameter is renamed through `rename_symbol` with a range anchor on its name**, since
+  rust-analyzer's outline does not list parameters and no symbol anchor names one:
+
+  ```jsonl
+  {"op":"rename_symbol","anchor":{"kind":"range","file":"src/spawn.rs","start":{"line":364,"col":29},"end":{"line":364,"col":40}},"name":"binary"}
+  ```
 
 ### Notes that matter when planning
 
@@ -462,6 +513,7 @@ fields; what is relaxed is that the result is authored by this package rather th
 ## What a plan may not contain
 
 `create_file`, `insert_text`, `delete_range`, or any `text` / `code` / `content` field. The parser
-rejects all of them, `extract_class` included. This is the guarantee that no hand-written code
+rejects all of them, `extract_class` included. (`type` and `expr` are the two fields that carry Rust
+syntax, and each is one parsed type or expression, never a statement or an item.) This is the guarantee that no hand-written code
 enters a restructure *through a plan* — distinct from, and stronger than, the claim that every
 character of a result comes from an engine, which `extract_class` alone does not meet.

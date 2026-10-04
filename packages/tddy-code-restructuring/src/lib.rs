@@ -33,8 +33,8 @@ pub use journal::{Journal, JournalRecord, OpStatus, OpenGroup, PreImage};
 pub use ledger::{LedgerCheckpoint, PositionLedger};
 pub use overlay::Overlay;
 pub use plan::{
-    Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, OpId, Plan, Reexport, RefactorKind,
-    RefactorOp,
+    Anchor, FileHint, Fingerprint, ItemPath, ItemSegment, OpId, OrderKey, Plan, Reexport,
+    RefactorKind, RefactorOp,
 };
 pub use registry::{BackendRegistry, LanguageBackend};
 pub use runner::state_directory_for_plan;

@@ -260,7 +260,7 @@ pub(super) fn return_type_position(text: &str, function_name: Position) -> Optio
 
 /// The offsets of the `(` and `)` around the parameters of the function whose name starts at
 /// `name_at`.
-fn parameter_list(code: &str, name_at: usize) -> Option<(usize, usize)> {
+pub(super) fn parameter_list(code: &str, name_at: usize) -> Option<(usize, usize)> {
     let bytes = code.as_bytes();
     let after_name = name_at + identifier_length(bytes.get(name_at..)?);
     let open = skip_whitespace(
@@ -325,7 +325,7 @@ fn struct_declarations(text: &str) -> Vec<(String, usize)> {
 }
 
 /// Whether the byte at `index` is the `>` of a `->`, which closes nothing.
-fn arrow_before(bytes: &[u8], index: usize) -> bool {
+pub(super) fn arrow_before(bytes: &[u8], index: usize) -> bool {
     bytes[index] == b'>' && index > 0 && bytes[index - 1] == b'-'
 }
 
@@ -367,7 +367,7 @@ fn skip_generics(bytes: &[u8], at: usize) -> usize {
     at
 }
 
-fn skip_whitespace(bytes: &[u8], from: usize) -> usize {
+pub(super) fn skip_whitespace(bytes: &[u8], from: usize) -> usize {
     from + bytes[from.min(bytes.len())..]
         .iter()
         .take_while(|byte| byte.is_ascii_whitespace())
@@ -382,7 +382,7 @@ fn identifier_length(bytes: &[u8]) -> usize {
 }
 
 /// The byte offset of a one-based position.
-fn offset_at(text: &str, position: Position) -> Option<usize> {
+pub(super) fn offset_at(text: &str, position: Position) -> Option<usize> {
     let line_start = text
         .split_inclusive('\n')
         .take(position.line.checked_sub(1)? as usize)
