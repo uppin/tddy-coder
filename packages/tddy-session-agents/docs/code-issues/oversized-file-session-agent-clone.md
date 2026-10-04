@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-01 | 1,158 | first record. Recorded because PR #560's boundaries ("no peer-clone changes") put this file next to the change, so a later node that does touch it should know the size it starts from |
+| 2026-10-04 | 1,157 | 1,158 → 1,157 after `#e2e-leg` 2/5 (#579): `SessionAgentCloneSpec.common_room_slot` becomes `common_room` and holds a `CommonRoom`. Not grown; unchanged class |
 
 ## What the tool found
 

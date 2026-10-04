@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-09-19 | 1565 | 1520 → 1565 in this PR (`SandboxedCodebaseSupport` + the advertisement) |
 | 2026-09-23 | 1,638 | master 1,565 → 1,638 after #508 (`#keyring` 1/9: the signing-key advertisement fields, `AdvertisedSigningKey`, `peer_signing_public_keys`, the shared identity rule) — grown by #508; split deferred to a follow-up after #keyring lands because dependents #509–#513 touch it |
+| 2026-10-04 | 1,636 | 1,638 on `master` (`6faef323`) → 1,636 after `#e2e-leg` 2/5 (#579): the forwarding call sites take a `CommonRoom` instead of the bare room slot (a type change at the seam, −2). Not grown; still over budget, the split still deferred |
 
 ## What would close it — designed seams
 

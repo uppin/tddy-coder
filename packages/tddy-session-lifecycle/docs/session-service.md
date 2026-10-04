@@ -131,7 +131,7 @@ by both the host and the handlers. Each is shared, not copied: `Clone` hands out
 | Component | Where | What it is |
 |---|---|---|
 | `RpcActivity` | `relay_idle` (`tddy-daemon-kernel`, re-exported here) | the daemon's idle tracker, when it has one; `record()` is what every RPC handler bumps so a relay daemon does not shut down mid-session. `RpcActivity::on(tracker)`, or `Default` for none |
-| `PeerRouting` | `peer_routing` (`tddy-daemon-livekit`, re-exported here) | this daemon's routing identity, the eligible peers and the common-room slot: `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `eligible_daemon_source`, `common_room_livekit_room`. A session RPC and an exec-tool RPC addressed at the same daemon therefore agree on who owns the call |
+| `PeerRouting` | `peer_routing` (`tddy-daemon-livekit`, re-exported here) | this daemon's routing identity, the eligible peers and the `CommonRoom` handle (room slot and forward deadline): `classify_addressed_daemon_route`, `common_room_slot`, `rpc_served_by_peer`, `eligible_daemon_source`, `common_room_livekit_room`. A session RPC and an exec-tool RPC addressed at the same daemon therefore agree on who owns the call |
 | `LocalExecTools` | `connection_service` | where a tool runs on this daemon — a sandboxed session's jail, the session's own checkout, or a hosted agent clone — over the task registry, workspace sandboxes, hosted clones and a `WorkspaceSandboxProvisioner`: `run_exec_tool_locally`, `run_hosted_clone_tool`, `hosted_clone_for`. A roster agent's turn loop and the `ExecuteTool` RPC take this one path |
 
 Free functions over the fields they read, so a handler behaves exactly as the host does without

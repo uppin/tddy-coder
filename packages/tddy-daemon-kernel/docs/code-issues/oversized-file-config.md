@@ -5,7 +5,7 @@
 **Detected:** 2026-09-19 by structural audit
 **Metrics:** **1,491 production lines** (2026-10-04, #579 `#e2e-leg` 2/5; 1,476 on 2026-09-24, #510 after its idle-vault follow-up; 1,474 at #510's wrap; 1,447 at detection, 2,511 total and first `#[cfg(test)]` at `:1448` then) — **2.9× the 500-line budget** · 19 structs · 11 `resolve_*` functions · 5 env-var consts · `DaemonConfig` carries 33 fields (struct/field counts not re-derived 2026-09-24)
 **Restructure:** required — `extract_module`, `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-04 (1,476 → 1,491 in #579, `#e2e-leg` 2/5: the peer-forward deadline setting; recorded, not fixed), and 2026-09-24 (1,470 → 1,472 in #509, `#keyring` 2/9; 1,472 → 1,476 in #510, `#keyring` 3/9, across its wrap and its idle-vault follow-up; split deferred with consent each time) — **unclaimed**
+**Status:** Open — regressed 2026-10-04 (1,476 → 1,491 in #579, `#e2e-leg` 2/5: the peer-forward deadline setting; recorded, not fixed; split deferred with the developer's consent, relayed 2026-10-04, to its own PR — no later `#e2e-leg` node touches this file), and 2026-09-24 (1,470 → 1,472 in #509, `#keyring` 2/9; 1,472 → 1,476 in #510, `#keyring` 3/9, across its wrap and its idle-vault follow-up; split deferred with consent each time) — **unclaimed**
 **Verified:** ✅ hand-verified 2026-09-19 — see *Verified by hand*
 
 ## Measurement history

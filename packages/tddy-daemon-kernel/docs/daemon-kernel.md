@@ -192,6 +192,31 @@ not in a crate with seventeen dependents that only parses the setting.
 tests (absent, `0`, a value past the ceiling read as given, and the two refusals naming the
 setting), so `config.rs` — far over its size budget — carries each field and a one-line pointer.
 
+## `peer_forward_timeout_secs` and `CommonRoom` — how long a forward to a peer waits
+
+`DaemonConfig.peer_forward_timeout_secs` (`u64`, default **30**, taken from
+`peer_forwarding::PEER_FORWARD_TIMEOUT`) bounds how long a daemon waits for a peer in the common room
+to answer a forwarded unary RPC, or to open a forwarded server stream. `peer_forward_timeout()` returns
+it as a `Duration`, clamped to at least one second, so `0` means one second (as for
+`spawn_worker_request_timeout_secs`). An absent key means 30 s.
+
+`peer_forwarding::CommonRoom` is the handle every forwarding call goes through. It holds the room slot
+and that deadline, built once with `CommonRoom::from_config(slot, &config)`; `slot()` gives the
+`Arc<RwLock<Option<Arc<Room>>>>` to the code that joins or replaces the connection, and
+`forward_timeout()` the deadline. `forward_to_peer`, `forward_to_peer_within` (an explicit deadline, for
+a call the peer spends minutes serving) and `forward_server_stream_to_peer` are its methods. The deadline
+rides with the slot because the slot is the one thing every call site already holds, and because a
+process-wide value would be shared by the several daemons the e2e tests run in one process.
+
+- The **open** of a forwarded stream waits `forward_timeout()`. The idle wait **between frames** of a
+  forwarded stream is the fixed `PEER_FORWARD_STREAM_IDLE_TIMEOUT` (30 s), not a setting: it is held
+  above the roster's service threshold by a test and below `ROSTER_KEEPALIVE_INTERVAL * 2` by a
+  compile-time assertion.
+- A timeout is `DeadlineExceeded` naming the seconds waited. A peer that has left the common room is
+  still refused up front (`refuse_departed_daemon`), never waited out.
+- The remote managed worktree's split-start forward uses
+  `spawn_worker_request_timeout + peer_forward_timeout`, so a longer setting lengthens it too.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)
