@@ -276,9 +276,33 @@ Analysed 13 tests in 4 files: `start_phase_acceptance.rs` (2), `code_index_warmu
 |---|---|---|
 | WARNING | `code_index_warmup_acceptance.rs` `without_an_index_daemon_no_warm_starts` | two behaviours in one test (no warm starts; watching ends empty) — split |
 | WARNING | `code_index_warmup_acceptance.rs` `a_warm_failure_is_reported_and_the_session_stays_usable` | name promises "the session stays usable"; the body asserts only the reported failure — name states what it pins |
-| WARNING | `tddy-connectrpc-testkit` `registerServerStreamFallback` | process-wide, load-bearing for ~25 specs, and the package has no tests; "explicit stream wins" and "unary error becomes the stream's error" are pinned only incidentally — **not fixed here**: the package has no test runner, so pinning it is its own piece of work |
+| ✅ fixed | `tddy-connectrpc-testkit` `registerServerStreamFallback` | had no tests of its own; now `cypress/component/ServerStreamFallback.cy.tsx` (7 tests) pins the unary answer through both registration paths, an explicit stream winning, the error code, the recording and the no-fallback case — driven from tddy-web's Cypress because the testkit package has no runner |
 | INFO | `CreateSessionAttachmentProgress.cy.tsx` rewritten test | asserts the phase text and the created session in one scenario, and builds the `phase` wire event inline; the other tests in the file do the same |
 | INFO | web | no test pins END clearing the phase or a stream error ending it |
+
+### /validate-prod-ready (2026-10-04, head `644cb0a2`)
+
+Scanned the 700 lines this PR adds to 26 production files (tests, generated code and Cypress support excluded) against the base. No mock or fake code, no debug output (`println!`/`dbg!`/`console.*`), no environment-conditional behaviour, no fallbacks; the `#[allow(dead_code)]` the contract commit carried is gone. One `TODO(indexing-indicators)` remains (`svc_start_session_core.rs:58`), pointing at its deferral entry; three `.expect("the session progress map")` guard a mutex that can only be poisoned by a panic while held.
+
+| Severity | Where | Finding |
+|---|---|---|
+| ✅ fixed | `code_index_warmup.rs` `SessionIndexProgress::watch` | the entry-creating subscribe had no production caller (only a test helper); removed, the helper uses `follow` |
+| ✅ fixed | `session_coordinate_handlers.rs` | `let _ = forwarding.await` discarded a `JoinError`; now logged as a warning, ordering guarantee unchanged |
+| INFO | `code_index_warmup.rs` `SessionIndexProgress` | entries for warmed sessions are never freed |
+
+### File-length gate (/pr-wrap step 3.5, 2026-10-04, base `c3567fde`)
+
+Production lines, counted to the first `#[cfg(test)]`; every deferral below has the developer's consent and a record.
+
+| File | Before → after | Outcome |
+|---|---|---|
+| `tddy-session-lifecycle/src/cursor_cli_spawn.rs` | 445 → 532 | 🔴 **this PR crossed 500** — deferred with consent: `docs/dev/todo/2026-10-04-cursor-cli-spawn-crossed-the-file-budget-in-indexing-indicators.md`; code-issue record regressed |
+| `tddy-daemon/src/runtime.rs` | 1650 → 1668 | 🔴 grew — stack rule (dependent #572 and parents touch it): record updated, split deferred to after the stack lands |
+| `tddy-worktree-service/src/service.rs` | 752 → 777 | 🔴 grew — stack rule (#572 touches it): record updated |
+| `tddy-web/.../CreateSessionPane.tsx` | 783 → 785 | 🔴 grew — stack rule: new record `oversized-file-create-session-pane.md` |
+| `tddy-web/.../SessionMainPane.tsx` | 666 → 674 | 🔴 grew — stack rule: new record `oversized-file-session-main-pane.md` |
+
+`tddy-rust-typescript-tests/gen/session_pb.ts` (1540 → 1640) is generated `buf` output and excluded by design.
 
 ## TODO
 
@@ -292,15 +316,15 @@ Analysed 13 tests in 4 files: `start_phase_acceptance.rs` (2), `code_index_warmu
 - [x] TDD Red — write failing unit/integration tests
 - [x] TDD Green — implement with quality code (⚠ sandboxed / tool / split starts deferred to `docs/dev/todo/` — see Technical Debt)
 - [x] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
+- [x] Repeat Red→Green→Update cycle until feature complete
 - [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest — local scoped run done; CI not yet read
 - [x] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)

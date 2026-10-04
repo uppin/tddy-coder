@@ -7,7 +7,7 @@
 **CRAP:** **CRAP 930** · complexity 30 · rank 6/50 in this crate · **never executed by any test**
 **Thresholds breached:** length 337 > 60; parameters 9 > 5 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — narrowed 2026-09-24 by #524 (337 → 244 lines); the remaining seams are refused by the engine (T: `SpawnStackParent<'_>`; E4: early returns) — **unclaimed**
+**Status:** Open — regressed 2026-10-04 (file crossed the 500-production-line budget in #571: 445 → 532). Narrowed 2026-09-24 by #524 (337 → 244 lines); the remaining seams are refused by the engine (T: `SpawnStackParent<'_>`; E4: early returns) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 337 | 4 | 10 | 20 | first detection |
 | 2026-09-24 | 244 | — | — | — | #524: plans `03` (chat and resume out), `15` (6 extract-methods) and DRY #5–#8. What is left: the worktree-source `match` and its two early returns, the `stack_parent` calls the engine refuses (T), and the call sites. Nesting, branches and exits not re-derived; lines by the plan's fn-line-to-closing-brace count (337 at the merge-base) |
+| 2026-10-04 | not re-derived (file: **532** production lines, 445 at base `c3567fde`) | — | — | — | #571 (`#live-plan` 12/15): +87 lines in the file — the `spawn_cursor_cli_session_reporting` wrapper and the phase reporting around `spawn_cursor_cli_session_inner`. File count: `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}' packages/tddy-session-lifecycle/src/cursor_cli_spawn.rs` (no `#[cfg(test)]` block, so the whole file). The file now also holds helper fns (`cut_cursor_cli_worktree`, `prepare_cursor_cli_launch`, `spawn_cursor_cli_process`, …) beyond the one function. Growth deferred with the developer's consent: `docs/dev/todo/2026-10-04-cursor-cli-spawn-crossed-the-file-budget-in-indexing-indicators.md` |
 
 ## What the tool found
 
