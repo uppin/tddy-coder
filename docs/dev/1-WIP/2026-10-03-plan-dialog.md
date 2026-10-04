@@ -121,6 +121,7 @@ which of those calls green chooses; `Apply` replays a script. Registered in `tes
 | `watch_plan_reports_a_stale_operation_with_its_reason` | ❌ failing | own stub: `WatchPlan` → `Unimplemented` |
 | `run_plan_streams_each_operations_outcome` | ❌ failing | own stub: `RunPlan` → `Unimplemented` |
 | `a_worktree_not_listed_for_the_project_is_refused` | ✅ passes by design | the stubs authorise through code-navigation's `authorise_and_connect` before answering, so the refusal (and "index daemon never started") already holds |
+| `run_plan_reports_a_group_that_did_not_compile_as_rolled_back` | ✅ passing | the fake's `Apply` ends in the real `GroupDoesNotCompile` wording (FAILED_PRECONDITION); `RunPlan` must end in a failure naming `geometry` with `rolled_back == [op-move]` (not the ungrouped `op-rename`) |
 
 ### tddy-web — `cypress/component/RestructurePlanDialog.cy.tsx`
 
@@ -134,6 +135,7 @@ the mid-run state exactly. Page object `cypress/support/pages/restructurePlanDia
 | the dialog lists operations with status and group | ❌ failing | own stub: `RestructurePlanDialog` loads no rows |
 | a stale operation disables run and names it | ❌ failing | own stub: no rows, no stale notice |
 | running turns each row applied as its event arrives | ❌ failing | own stub: no rows, Run never runs |
+| a failing group shows its operations rolled back and no other row | ✅ passing | a run stream ending in a failure event with `rolledBack: [op-move]`: that row shows `rolled_back`, the applied rename stays `applied` |
 
 None of the failures reaches a parent's stub.
 

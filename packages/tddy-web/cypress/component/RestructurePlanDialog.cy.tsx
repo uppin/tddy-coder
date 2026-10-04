@@ -25,6 +25,7 @@ import {
   PlanOperationSchema,
   PlanOperationStatus,
   PlanRunEventSchema,
+  PlanRunFailureSchema,
   PlanRunOutcomeSchema,
   PlanSnapshotSchema,
   type PlanSnapshot,
@@ -205,6 +206,32 @@ function aHostRunningThePlan(gate: Gate, runs: RunPlanRequest[]): InMemoryRpcBac
   });
 }
 
+/**
+ * A host whose run lands the rename, then ends in the failure of the group `geometry`, which was
+ * rolled back as a whole: its operation is `op-move`, and the rename stands.
+ */
+function aHostWhereTheGeometryGroupFailsToCompile(): InMemoryRpcBackend {
+  return anInMemoryRpcBackend().implement(CodeNavigationService, {
+    openPlan: () => thePlanSnapshot(),
+    async *watchPlan() {
+      yield thePlanSnapshot();
+    },
+    async *runPlan() {
+      yield anOperationApplied("op-rename", 0, 1);
+      yield create(PlanRunEventSchema, {
+        event: {
+          case: "failure",
+          value: create(PlanRunFailureSchema, {
+            message: "group `geometry` does not compile at its end, so it was rolled back: E0432",
+            group: "geometry",
+            rolledBack: ["op-move"],
+          }),
+        },
+      });
+    },
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Mounting
 // ---------------------------------------------------------------------------
@@ -317,4 +344,16 @@ it("running turns each row applied as its event arrives", () => {
 
   // Then
   restructurePlanDialogPage.status("op-move").should("have.text", "applied");
+});
+
+it("a failing group shows its operations rolled back and no other row", () => {
+  // Given
+  openThePlanDialog(aHostWhereTheGeometryGroupFailsToCompile());
+
+  // When — the run lands the rename, then the geometry group fails and is rolled back.
+  restructurePlanDialogPage.run().click();
+
+  // Then — only the group's operation shows rolled back; the rename that landed stays applied.
+  restructurePlanDialogPage.status("op-move").should("have.text", "rolled_back");
+  restructurePlanDialogPage.status("op-rename").should("have.text", "applied");
 });

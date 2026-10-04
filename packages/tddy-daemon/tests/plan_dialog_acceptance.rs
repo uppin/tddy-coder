@@ -176,6 +176,7 @@ fn canonical(path: &Path) -> String {
 struct AFakePlanStore {
     stale: Arc<Mutex<Vec<index::StaleOp>>>,
     apply_script: Arc<Mutex<Vec<index::RestructureEvent>>>,
+    apply_refusal: Arc<Mutex<Option<tddy_rpc::Status>>>,
     loads_asked: Arc<Mutex<Vec<index::LoadPlansRequest>>>,
     applies_asked: Arc<Mutex<Vec<index::ApplyRequest>>>,
 }
@@ -184,6 +185,7 @@ fn a_plan_store_with_nothing_stale() -> AFakePlanStore {
     AFakePlanStore {
         stale: Arc::new(Mutex::new(Vec::new())),
         apply_script: Arc::new(Mutex::new(Vec::new())),
+        apply_refusal: Arc::new(Mutex::new(None)),
         loads_asked: Arc::new(Mutex::new(Vec::new())),
         applies_asked: Arc::new(Mutex::new(Vec::new())),
     }
@@ -205,6 +207,12 @@ impl AFakePlanStore {
     /// The same store, whose `Apply` streams `events` and ends.
     fn applying_with(self, events: Vec<index::RestructureEvent>) -> Self {
         *self.apply_script.lock().expect("the apply script") = events;
+        self
+    }
+
+    /// The same store, whose `Apply` stream ends in `refusal` after its scripted events.
+    fn refusing_the_apply_with(self, refusal: tddy_rpc::Status) -> Self {
+        *self.apply_refusal.lock().expect("the apply refusal") = Some(refusal);
         self
     }
 
@@ -244,6 +252,14 @@ fn an_operation_applied(index: u32, op_id: &str, done: u32) -> index::Restructur
             },
         )),
     }
+}
+
+/// The refusal the index gives when a transactional group did not compile at its end, worded as
+/// `RestructureError::GroupDoesNotCompile` is and classed as `status_of` classes it.
+fn a_group_that_does_not_compile(group: &str) -> tddy_rpc::Status {
+    tddy_rpc::Status::failed_precondition(format!(
+        "group `{group}` does not compile at its end, so it was rolled back: E0432 unresolved import"
+    ))
 }
 
 fn a_run_outcome(applied: u32) -> index::RestructureEvent {
@@ -310,9 +326,19 @@ impl CodeIndexService for AFakePlanStore {
             .expect("the request log")
             .push(request.into_inner());
         let events = self.apply_script.lock().expect("the apply script").clone();
-        let (tx, rx) = mpsc::channel(events.len().max(1));
+        let refusal = self
+            .apply_refusal
+            .lock()
+            .expect("the apply refusal")
+            .clone();
+        let (tx, rx) = mpsc::channel(events.len() + 1);
         for event in events {
             tx.send(Ok(event)).await.expect("the apply stream is open");
+        }
+        if let Some(refusal) = refusal {
+            tx.send(Err(refusal))
+                .await
+                .expect("the apply stream is open");
         }
         Ok(tddy_rpc::Response::new(ReceiverStream::new(rx)))
     }
@@ -738,6 +764,40 @@ async fn run_plan_streams_each_operations_outcome() {
             },
         ]
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn run_plan_reports_a_group_that_did_not_compile_as_rolled_back() {
+    // Given an index that lands the ungrouped rename, then refuses the geometry group's end state
+    let project = a_project_with_a_plan_in_its_worktree();
+    let store = a_plan_store_with_nothing_stale()
+        .applying_with(vec![an_operation_applied(0, "op-rename", 1)])
+        .refusing_the_apply_with(a_group_that_does_not_compile("geometry"));
+    let host = an_index_daemon_host_serving(store).await;
+    let entry = the_entry_for(&project, Some(host.registry()));
+
+    // When the dialog runs the plan
+    let run = stream_at(
+        &entry,
+        "RunPlan",
+        RunPlanRequest {
+            session_token: TEST_TOKEN.to_string(),
+            project_id: project.project_id.clone(),
+            worktree_path: project.worktree_path.clone(),
+            rel_path: THE_PLAN.to_string(),
+        },
+    )
+    .await;
+    let events: Vec<PlanRunEvent> = everything_delivered_by(run).await;
+
+    // Then the run ends in a failure naming the geometry group, with the group's operations
+    // rolled back and the ungrouped rename, which stands, left out
+    let failure = match events.last().and_then(|event| event.event.clone()) {
+        Some(plan_run_event::Event::Failure(failure)) => failure,
+        other => panic!("the run should end in a failure, ended in {other:?}"),
+    };
+    assert_eq!(failure.group, "geometry");
+    assert_eq!(failure.rolled_back, vec!["op-move".to_string()]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
