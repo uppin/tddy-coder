@@ -1532,6 +1532,7 @@ Measured 2026-10-04 on `feature/carve/lifecycle-ports`, scoped to `tddy-session-
   - T10's `PresenterObserverDeps` and T7's `mint_first_admission_token` still sit under wiring's `svc_host_builders` (D8 deferred), reached from `handler_state.rs` through `pub(in crate::connection_service)` module visibility.
   - `crate::session_notifications::SessionNotificationPublishing` is now reached as `session_notifications::session_notification_publishing::…` (the glob facade names the module `pub(crate)` only, because the engine writes `mod x; pub use x::*;`).
   - A4 for the leaves was done by re-pointing; `placement.rs` named `crate::livekit_peer_discovery` only in a doc link.
+- **`/validate-changes` (2026-10-04, after rebasing onto master `6faef323`):** leak check clean (`origin/master..HEAD` is this PR's 7 commits); the diff is 29 files in `tddy-session-lifecycle` plus docs, with no consumer, `tddy-session-agents` or `Cargo` edits and no deleted paths (boundaries held); no `todo!`/`unimplemented!`/`unsafe`/stdout in added lines (the only added `expect`s are in the relocated M0.5 test); `cargo check -p tddy-session-lifecycle --all-targets` clean after the rebase. Hand conversions read as re-points only (`self.x` to parameters, statements and log lines carried over). **Info:** `DemoVmState.config` is a clone of the host's `DaemonConfig`, where the old service read the host's field live; the host never assigns `config` after construction, so the two are equivalent, but a future reloadable config would need a shared handle. `./test -p tddy-session-lifecycle` re-run on the rebased tree (onto `6faef323`): 575 passed / 22 failed / 1 ignored, the failing set identical to the baseline by name; `cargo fmt --check` and `cargo clippy -p tddy-session-lifecycle --all-targets -- -D warnings` clean.
 - **Environment:** the disk filled during M3's gate (`target/` 39 GB); `./clean` freed it. No code was affected.
 
 ## TODO
@@ -1540,11 +1541,11 @@ Measured 2026-10-04 on `feature/carve/lifecycle-ports`, scoped to `tddy-session-
 - [x] Create changeset: this document
 - [x] D15 decided: cut into 16a–16e + node 17; successor changesets written
 - [ ] USER REVIEW: D1, D5 (T3 half), D6, D8, D9, D11 before 16a's `/green`; the rest before their node
-- [ ] Rebase onto #526 once it is green
+- [x] Rebase onto #526 once it is green (#526 was squash-merged into master as `084338f4`, so this node was rebased with `--onto origin/master` and the PR base repointed to `master`; re-rebased 2026-10-04 onto master `6faef323`)
 - [x] Record the baseline (M0): 575 / 22 / 1 (the base moved: master's #571/#573 and others)
 - [x] Implementation M0 (M0.2 engine part, M0.3, M0.5), M1, M2, M3
 - [ ] **Deferred until the engine can do them** (carried by 16b and node 17): M0.1 and M0.6 ([`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md), [`2026-10-04-restructure-anchors-and-snapshot-friction-seen-in-carve-16a`](../todo/2026-10-04-restructure-anchors-and-snapshot-friction-seen-in-carve-16a.md)), the T4 half of M0.2, M0.4 / D8 ([`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md))
-- [ ] `/validate-changes`
+- [x] `/validate-changes` (2026-10-04, see "Validation results")
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`): this document is wrapped first, so the successor
   changesets carry their own copies of what they need
