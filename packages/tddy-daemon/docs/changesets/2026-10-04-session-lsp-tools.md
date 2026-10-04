@@ -13,6 +13,9 @@ registry-backed one without. It no longer calls `tddy_lsp_executor::register`, w
 executor and would leave a second, unused one behind. See
 [daemon-endpoint.md](../daemon-endpoint.md).
 
+`tests/unbundle_endpoint.rs` lists `index_daemon/lsp_channel.rs` among the endpoint's wiring modules, with
+the reason it qualifies and cannot live elsewhere.
+
 `tests/code_navigation_acceptance.rs`'s fake index gains the two new methods of the extended trait, each
 answering `not_part_of_this_fake`.
 

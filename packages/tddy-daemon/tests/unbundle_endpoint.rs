@@ -104,11 +104,11 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// Paths relative to `src/`, not bare file names. A bare-name whitelist that had to admit
 /// `index_daemon/registry.rs` would have admitted *any* `registry.rs` anywhere under `src/` —
 /// including a session module reintroduced under that name, which is the one thing this test
-/// exists to catch. Qualifying the three `index_daemon/` submodules by their directory keeps the
+/// exists to catch. Qualifying the four `index_daemon/` submodules by their directory keeps the
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 19] = [
+    const ENDPOINT: [&str; 20] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -132,6 +132,12 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         "index_daemon/error.rs",
         "index_daemon/registry.rs",
         "index_daemon/spawn.rs",
+        // `IndexDaemonRegistry` as the `IndexChannel` a session's index-backed `Lsp*` executor
+        // dials: a four-line delegation to `connect`. Wiring by the same criterion — no RPC
+        // method, no session state, no `SessionHost`, and its only caller is `runtime.rs`, which
+        // hands the registry to `select_lsp_executor`. It can live nowhere else: the port is
+        // `tddy-lsp-executor`'s, which this crate depends on, and the registry is this crate's.
+        "index_daemon/lsp_channel.rs",
         // The unix socket an embedded daemon serves to co-located agents — the only channel a
         // process spawned beside a jailed checkout has to this daemon, since `RuntimeHost::Embedded`
         // runs no HTTP listener. Wiring by this test's criterion: it implements no RPC method (it
