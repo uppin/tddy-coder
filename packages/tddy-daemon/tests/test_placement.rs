@@ -44,7 +44,7 @@ fn test_binaries_of(crate_name: &str) -> BTreeSet<String> {
 /// kind cannot move at all, because `CARGO_MANIFEST_DIR` would then name whichever crate it landed
 /// in and the assertion would silently be about something else. `tddy-workflow-recipes`'
 /// `proto_workflow_contracts.rs` is the same shape and stays put for the same reason.
-const BELONGS_HERE: [&str; 28] = [
+const BELONGS_HERE: [&str; 29] = [
     "session_agent_remote_acceptance.rs",
     "remote_managed_worktree_cross_host_acceptance.rs",
     "split_session_resume_acceptance.rs",
@@ -66,6 +66,8 @@ const BELONGS_HERE: [&str; 28] = [
     "local_socket_family_wiring_acceptance.rs",
     // Mounts `runtime::build` for both hosts: which of them enrols a first login is its decision.
     "first_login_enrolment_acceptance.rs",
+    // Mounts `runtime::build` and reads the vaults it shares through `DaemonRuntime`'s accessor.
+    "accounts_stub_daemon_acceptance.rs",
     // Names `tddy_daemon::index_daemon`, which this crate defines.
     "index_daemon_lifecycle_acceptance.rs",
     // Names `tddy_daemon::code_navigation` and `tddy_daemon::index_daemon`, which this crate defines.
