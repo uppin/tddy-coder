@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 use tddy_core::toolcall::lsp::{LspExecutor, LspQuery};
-use tddy_index_daemon::proto::code_index as index;
+use tddy_index_daemon::proto::code_index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_lsp::{Diagnostic, Location, Position, Range, SymbolInfo};
 use tonic::transport::Channel;
@@ -63,6 +63,11 @@ impl IndexLspExecutor {
     }
 }
 
+/// The daemon's own explanation of a failed call, without the gRPC status framing.
+fn message_of(status: tonic::Status) -> String {
+    status.message().to_string()
+}
+
 impl LspExecutor for IndexLspExecutor {
     /// Whether the worktree holds a Rust workspace, the one language the index serves.
     fn is_available(&self, repo_dir: &Path) -> bool {
@@ -76,12 +81,12 @@ impl LspExecutor for IndexLspExecutor {
             let answered = self
                 .client()
                 .await?
-                .diagnostics(index::DiagnosticsRequest {
+                .diagnostics(code_index::DiagnosticsRequest {
                     workspace_root: repo_dir.display().to_string(),
                     file,
                 })
                 .await
-                .map_err(|status| status.message().to_string())?
+                .map_err(message_of)?
                 .into_inner();
             let mut columns = Columns::within(repo_dir);
             let diagnostics = answered
@@ -115,13 +120,13 @@ impl LspExecutor for IndexLspExecutor {
         let answered = block_on(async {
             self.client()
                 .await?
-                .hover(index::HoverRequest {
+                .hover(code_index::HoverRequest {
                     workspace_root: request.workspace_root,
                     file: request.file,
                     position: request.position,
                 })
                 .await
-                .map_err(|status| status.message().to_string())
+                .map_err(message_of)
         })?
         .into_inner();
         Ok(json!({ "hover": answered.markdown }))
@@ -136,13 +141,13 @@ impl LspExecutor for IndexLspExecutor {
         let answered = block_on(async {
             self.client()
                 .await?
-                .symbols(index::SymbolsRequest {
+                .symbols(code_index::SymbolsRequest {
                     workspace_root: repo_dir.display().to_string(),
                     file,
                     query: query.symbol_query.clone(),
                 })
                 .await
-                .map_err(|status| status.message().to_string())
+                .map_err(message_of)
         })?
         .into_inner();
         let mut columns = Columns::within(repo_dir);
@@ -188,7 +193,7 @@ enum Navigation {
 struct PositionRequest {
     workspace_root: String,
     file: String,
-    position: Option<index::SourcePosition>,
+    position: Option<code_index::SourcePosition>,
 }
 
 impl IndexLspExecutor {
@@ -204,7 +209,7 @@ impl IndexLspExecutor {
         Ok(PositionRequest {
             workspace_root: repo_dir.display().to_string(),
             file,
-            position: Some(index::SourcePosition {
+            position: Some(code_index::SourcePosition {
                 line: query.line + 1,
                 column: column + 1,
             }),
@@ -223,7 +228,7 @@ impl IndexLspExecutor {
             let mut client = self.client().await?;
             match navigation {
                 Navigation::Definition => client
-                    .definition(index::DefinitionRequest {
+                    .definition(code_index::DefinitionRequest {
                         workspace_root: request.workspace_root,
                         file: request.file,
                         position: request.position,
@@ -231,7 +236,7 @@ impl IndexLspExecutor {
                     .await
                     .map(|answer| answer.into_inner().locations),
                 Navigation::References => client
-                    .references(index::ReferencesRequest {
+                    .references(code_index::ReferencesRequest {
                         workspace_root: request.workspace_root,
                         file: request.file,
                         position: request.position,
@@ -239,7 +244,7 @@ impl IndexLspExecutor {
                     .await
                     .map(|answer| answer.into_inner().locations),
             }
-            .map_err(|status| status.message().to_string())
+            .map_err(message_of)
         })?;
         let mut columns = Columns::within(repo_dir);
         answered
@@ -296,7 +301,7 @@ impl<'a> Columns<'a> {
 
     /// A location the index answered — relative to the worktree unless `outside_root` — as the
     /// tools' location: a `file://` URI and a zero-based range.
-    fn lsp_location(&mut self, location: &index::CodeLocation) -> Result<Location, String> {
+    fn lsp_location(&mut self, location: &code_index::CodeLocation) -> Result<Location, String> {
         let path = if location.outside_root {
             PathBuf::from(&location.file)
         } else {
@@ -311,7 +316,7 @@ impl<'a> Columns<'a> {
     fn lsp_range(
         &mut self,
         path: &Path,
-        range: Option<index::SourceRange>,
+        range: Option<code_index::SourceRange>,
     ) -> Result<Range, String> {
         let range = range.ok_or("the index answered a range without bounds")?;
         Ok(Range {
@@ -323,7 +328,7 @@ impl<'a> Columns<'a> {
     fn lsp_position(
         &mut self,
         path: &Path,
-        position: Option<index::SourcePosition>,
+        position: Option<code_index::SourcePosition>,
     ) -> Result<Position, String> {
         let position = position
             .filter(|at| at.line >= 1 && at.column >= 1)

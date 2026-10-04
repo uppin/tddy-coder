@@ -250,6 +250,13 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
   column against. Neither is a correctness issue; both are cheap to cache if a profile asks.
 ### From @analyze-clean-code (Code Quality)
 
+- ✅ `.map_err(|status| status.message().to_string())` repeated four times in `index_backed.rs` — one
+  `message_of` helper.
+- ✅ The module alias `index` collided in meaning with the `index` field and parameter in the same file —
+  alias renamed `code_index`.
+- ℹ️ Pre-existing, not this PR's: `runtime.rs::build` (over 60 lines; +14 here, tracked in
+  `complexity-runtime-build`) and `navigation.rs::locations_at` (5 parameters, code-navigation's).
+
 ## Validation Results
 
 ### /validate-changes — 2026-10-03
@@ -290,6 +297,15 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
 - **TODO/FIXME:** 1 — `ReadLints`, now tracked (see Refactoring Needed). **Blockers: 0. Warnings: 1, fixed.**
 - **Status:** ✅ Ready.
 
+### /analyze-clean-code — 2026-10-04
+
+- **Score: A.** 27 functions in this PR's new code: length ≤ 20 lines: 20, 21–40: 7 (longest 39);
+  nesting ≤ 2: 23, 3: 4; parameters ≤ 3: 26, 4: 1. No needs-attention and no must-refactor items.
+- **File length:** every file this PR wrote is under 500 production lines (largest `index_backed.rs`,
+  392). Over budget and pre-existing: `runtime.rs` — see the file length gate below.
+- **Magic values:** none new (`Duration::from_secs(300)` in `runtime.rs` was moved, not introduced).
+- **Duplication / naming:** two minor items, both fixed (see Refactoring Needed).
+
 ### Scoped gates — 2026-10-03 (packages touched only: `tddy-lsp-executor`, `tddy-index-daemon`, `tddy-daemon`)
 
 - `cargo fmt`: clean. `cargo clippy -p … --all-targets -- -D warnings`: clean.
@@ -327,8 +343,8 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
 - [x] Refactor test issues
 - [x] Validate production readiness (/validate-prod-ready)
 - [x] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
 - [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-session-lsp-tools-initial-discovery.md`
