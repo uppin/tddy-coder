@@ -15,17 +15,15 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    plan_run_event, CodeIndexProgress, CodeLocation, CodeNavigationService,
-    CodeNavigationServiceServer, DefinitionRequest, DefinitionResponse, HoverRequest,
-    HoverResponse, OpenPlanRequest, PlanRunEvent, PlanSnapshot, ReferencesRequest,
-    ReferencesResponse, RunPlanRequest, SourcePosition, SourceRange, WatchCodeIndexRequest,
-    WatchPlanRequest,
+    CodeIndexProgress, CodeLocation, CodeNavigationService, CodeNavigationServiceServer,
+    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, OpenPlanRequest,
+    PlanRunEvent, PlanSnapshot, ReferencesRequest, ReferencesResponse, RunPlanRequest,
+    SourcePosition, SourceRange, WatchCodeIndexRequest, WatchPlanRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
@@ -39,8 +37,6 @@ const WATCH_BUFFER: usize = 8;
 
 /// How often `WatchPlan` asks the index daemon's plan store whether anything changed; the store has
 /// no change feed to follow.
-const PLAN_POLL_INTERVAL: Duration = Duration::from_secs(1);
-
 mod plan;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
@@ -287,11 +283,12 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 None,
             )
             .await?;
+        let rows = plan::read_plan_rows(Path::new(&forward.workspace_root), &forward.file).await?;
         let snapshot = plan::open_snapshot(
             &mut forward.client,
-            Path::new(&forward.workspace_root),
             &forward.workspace_root,
             &forward.file,
+            &rows,
         )
         .await?;
         Ok(Response::new(snapshot))
@@ -314,45 +311,22 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
             )
             .await?;
         let rows = plan::read_plan_rows(Path::new(&forward.workspace_root), &forward.file).await?;
-        let mut last = plan::open_snapshot(
+        let last = plan::open_snapshot(
             &mut forward.client,
-            Path::new(&forward.workspace_root),
             &forward.workspace_root,
             &forward.file,
+            &rows,
         )
         .await?;
         let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
-        tokio::spawn(async move {
-            if tx.send(Ok(last.clone())).await.is_err() {
-                return;
-            }
-            loop {
-                tokio::select! {
-                    () = tx.closed() => return,
-                    () = tokio::time::sleep(PLAN_POLL_INTERVAL) => {}
-                }
-                let current = match plan::current_snapshot(
-                    &mut forward.client,
-                    &forward.workspace_root,
-                    &forward.file,
-                    &rows,
-                )
-                .await
-                {
-                    Ok(current) => current,
-                    Err(status) => {
-                        let _ = tx.send(Err(status)).await;
-                        return;
-                    }
-                };
-                if current != last {
-                    if tx.send(Ok(current.clone())).await.is_err() {
-                        return;
-                    }
-                    last = current;
-                }
-            }
-        });
+        tokio::spawn(plan::follow(
+            forward.client,
+            forward.workspace_root,
+            forward.file,
+            rows,
+            last,
+            tx,
+        ));
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 
@@ -373,7 +347,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
             )
             .await?;
         let rows = plan::read_plan_rows(Path::new(&forward.workspace_root), &forward.file).await?;
-        let mut events = forward
+        let events = forward
             .client
             .apply(index::ApplyRequest {
                 workspace_root: forward.workspace_root,
@@ -387,25 +361,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
             .map_err(tddy_service::to_rpc_status)?
             .into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
-        tokio::spawn(async move {
-            loop {
-                let relayed = match events.message().await {
-                    Ok(Some(event)) => match plan::run_event(event) {
-                        Some(event) => event,
-                        None => continue,
-                    },
-                    Ok(None) => return,
-                    Err(status) => plan::run_failure(&tddy_service::to_rpc_status(status), &rows),
-                };
-                let terminal = matches!(
-                    relayed.event,
-                    Some(plan_run_event::Event::Outcome(_) | plan_run_event::Event::Failure(_))
-                );
-                if tx.send(Ok(relayed)).await.is_err() || terminal {
-                    return;
-                }
-            }
-        });
+        tokio::spawn(plan::relay_run(events, rows, tx));
         Ok(Response::new(ReceiverStream::new(rx)))
     }
 }

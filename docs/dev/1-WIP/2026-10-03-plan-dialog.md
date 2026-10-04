@@ -83,7 +83,8 @@ Real dependency edges, as opposed to the branch line:
 ## Affected Packages
 
 - **tddy-service**: [README.md](../../../packages/tddy-service/README.md) — `OpenPlan`, `WatchPlan`, `RunPlan` on `code_navigation.proto`
-- **tddy-daemon**: [README.md](../../../packages/tddy-daemon/README.md) — forwarding to `LoadPlans`/`PlanStatus`/`ListPlans`/`Apply`
+- **tddy-daemon-rpc**: [README.md](../../../packages/tddy-daemon-rpc/README.md) — `code_navigation` forwarding to `LoadPlans`/`PlanStatus`/`Apply`; `code_navigation/plan.rs` rows, snapshots and run relay
+- **tddy-daemon**: [README.md](../../../packages/tddy-daemon/README.md) — `plan_dialog_acceptance.rs`
 - **tddy-web**: [README.md](../../../packages/tddy-web/README.md) — plan-file entry point, dialog, Run with progress
 
 ## Related Feature Documentation
@@ -164,13 +165,45 @@ _(populated during development)_
 ## Refactoring Needed
 
 ### From @validate-changes (Change Validation)
+
+- Fixed: `WatchPlan` read and parsed the plan file twice (`read_plan_rows`, then again inside `open_snapshot`); `open_snapshot` now takes the rows (`code_navigation.rs`, `code_navigation/plan.rs`).
+- Fixed: this changeset still placed the handlers and the `tddy-code-restructuring` dependency in `tddy-daemon`; they are in `tddy-daemon-rpc` (Affected Packages and Sequencing facts updated).
+- Open (doc): `## Acceptance Tests` / `## Technical Debt & Production Readiness` still describe the red-phase stubs and failing tests; wrap (/wrap-context-docs) rewrites them.
+
 ### From @validate-tests (Test Quality)
+
+- Fixed: `aWorktreeHoldingThePlan` re-implemented the `CodeNavigationService` stub that `aHostHoldingThePlan` already provides; it now composes it (`RestructurePlanDialog.cy.tsx`).
+- Left, deliberate: the run test has two When/Then pairs because the gate pins mid-run state exactly; splitting would need a second gate per test.
+- Coverage gaps, both recorded in the changeset as deferred: a failing group showing rolled back (needs transactional-groups), and a watch that delivers a second snapshot (poll interval is 1 s; no test seam without a production branch).
+
 ### From @prod-ready (Production Readiness)
+
+- No mock code, fallbacks, debug output or unused code in this PR's production files.
+- One marker, kept: `TODO(plan-dialog)` in `packages/tddy-daemon-rpc/src/code_navigation/plan.rs` (`snapshot_of`) — `PlanStatus` gives journal counts only, so per-operation status is laid over the plan in order and is approximate after a `from`/`stop_after` run. An exact fix needs a per-operation status on #539's `PlanStatus` RPC, which this node must not change. Defer to a follow-up.
+- Info: `PlanOperationStatus::ROLLED_BACK` is never produced by the daemon; the dialog derives it from a failure event's `rolled_back` ids.
+
 ### From @analyze-clean-code (Code Quality)
+
+- Fixed: `watch_plan` (~55 lines, nesting 5) and `run_plan` (~50 lines) spawned inline loops; the loops are now `plan::follow` and `plan::relay_run`, and `PLAN_POLL_INTERVAL` moved beside them.
+- Left: `authorise_and_connect` call repeated in the three plan methods (the three request messages are distinct types; a helper would need a trait over generated messages).
+- File length: no touched production file is at 500 lines.
 
 ## Validation Results
 
-_(populated by validation commands)_
+**Last run**: 2026-10-04. Scoped to `tddy-daemon-rpc`, `tddy-daemon` and the single Cypress spec `RestructurePlanDialog.cy.tsx`; the rest is CI's.
+
+| Gate | Result |
+|---|---|
+| `cargo clippy -p tddy-daemon-rpc -p tddy-daemon --tests -- -D warnings` | clean |
+| `cargo test -p tddy-daemon --test plan_dialog_acceptance --test code_navigation_acceptance` | 4 + 7 passed, 0 failed |
+| `cargo test -p tddy-daemon-rpc --lib code_navigation` | 6 passed, 0 failed |
+| Cypress component `RestructurePlanDialog.cy.tsx` | 5 passed, 0 failed |
+
+- **validate-changes**: Responsibility delivered (three calls authorised through `authorise_and_connect`; plan-file detection; dialog with operations, status, group, stale reason, Run). Boundaries held: no index-daemon change, no worktree scan. No `## Dependencies` surface implemented; no dependent behaviour. Diff is this node's files only (4 commits over base).
+- **validate-tests**: 11 tests analysed (4 Rust acceptance, 2 Rust unit, 5 Cypress); 1 warning fixed, 0 critical.
+- **validate-prod-ready**: ⚠️ Gaps — 0 blockers, 1 documented `TODO(plan-dialog)` (see above).
+- **analyze-clean-code**: B to A after the extractions; 0 must-refactor.
+- **File length** (production lines, merge-base to now): `code_navigation.rs` 300 to 406, `plan.rs` 0 to 292, `RestructurePlanDialog.tsx` 0 to 167, `restructurePlanApi.ts` 0 to 157, `WorktreeCodePane.tsx` 126 to 161. None at 500.
 
 ## TODO
 
@@ -185,17 +218,17 @@ _(populated by validation commands)_
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-plan-dialog-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

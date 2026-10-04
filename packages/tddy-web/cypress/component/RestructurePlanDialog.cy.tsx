@@ -131,7 +131,7 @@ function aGate(): Gate {
 // Backends
 // ---------------------------------------------------------------------------
 
-/** A worktree holding the plan and an event log, whose host opens the plan as `snapshot`. */
+/** A worktree holding the plan and an event log, whose host opens the plan with nothing stale. */
 function aWorktreeHoldingThePlan(): InMemoryRpcBackend {
   const directories: Record<string, Array<{ name: string; isDir: boolean }>> = {
     "": [
@@ -145,7 +145,7 @@ function aWorktreeHoldingThePlan(): InMemoryRpcBackend {
     [THE_PLAN]: THE_PLAN_JSONL,
     [AN_EVENT_LOG]: AN_EVENT_LOG_JSONL,
   };
-  return anInMemoryRpcBackend()
+  return aHostHoldingThePlan()
     .implement(WorktreeService, {
       listWorktreeDirectory: (req) =>
         create(ListWorktreeDirectoryResponseSchema, {
@@ -157,12 +157,6 @@ function aWorktreeHoldingThePlan(): InMemoryRpcBackend {
           truncated: false,
           byteSize: BigInt((files[req.relPath] ?? "").length),
         }),
-    })
-    .implement(CodeNavigationService, {
-      openPlan: () => thePlanSnapshot(),
-      async *watchPlan() {
-        yield thePlanSnapshot();
-      },
     });
 }
 

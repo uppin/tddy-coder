@@ -7,6 +7,7 @@
 //! stale reasons are folded in.
 
 use std::path::Path;
+use std::time::Duration;
 
 use tddy_code_restructuring::{Anchor, Plan, RefactorOp};
 use tddy_index_daemon::proto::code_index as index;
@@ -17,7 +18,12 @@ use tddy_service::proto::code_navigation::{
     PlanRunFailure, PlanRunOutcome, PlanSnapshot,
 };
 use tddy_worktree_service::worktree_files::read_worktree_file_utf8;
+use tokio::sync::mpsc::Sender;
 use tonic::transport::Channel;
+
+/// How often `WatchPlan` asks the index daemon's plan store whether anything changed; the store has
+/// no change feed to follow.
+const PLAN_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 /// One operation of a plan file, as the plan spells it.
 pub(super) struct PlanRow {
@@ -76,15 +82,14 @@ fn anchor_item(anchor: &Anchor) -> String {
     }
 }
 
-/// Load the plan into the index's store for `root`, then describe it: the rows from the file, each
-/// with its status and the store's stale reason.
+/// Load the plan into the index's store for `workspace_root`, then describe it: the `rows` read from
+/// the file, each with its status and the store's stale reason.
 pub(super) async fn open_snapshot(
     client: &mut CodeIndexServiceClient<Channel>,
-    root: &Path,
     workspace_root: &str,
     rel_path: &str,
+    rows: &[PlanRow],
 ) -> Result<PlanSnapshot, Status> {
-    let rows = read_plan_rows(root, rel_path).await?;
     client
         .load_plans(index::LoadPlansRequest {
             workspace_root: workspace_root.to_string(),
@@ -92,7 +97,7 @@ pub(super) async fn open_snapshot(
         })
         .await
         .map_err(tddy_service::to_rpc_status)?;
-    current_snapshot(client, workspace_root, rel_path, &rows).await
+    current_snapshot(client, workspace_root, rel_path, rows).await
 }
 
 /// The plan's rows as the store reports them now.
@@ -158,6 +163,66 @@ fn snapshot_of(
     PlanSnapshot {
         rel_path: rel_path.to_string(),
         operations,
+    }
+}
+
+/// Send `last`, then a new snapshot whenever the store reports something different, until the
+/// reader goes away or the store fails (the failure is sent as the stream's last item).
+pub(super) async fn follow(
+    mut client: CodeIndexServiceClient<Channel>,
+    workspace_root: String,
+    rel_path: String,
+    rows: Vec<PlanRow>,
+    mut last: PlanSnapshot,
+    tx: Sender<Result<PlanSnapshot, Status>>,
+) {
+    if tx.send(Ok(last.clone())).await.is_err() {
+        return;
+    }
+    loop {
+        tokio::select! {
+            () = tx.closed() => return,
+            () = tokio::time::sleep(PLAN_POLL_INTERVAL) => {}
+        }
+        let current = match current_snapshot(&mut client, &workspace_root, &rel_path, &rows).await {
+            Ok(current) => current,
+            Err(status) => {
+                let _ = tx.send(Err(status)).await;
+                return;
+            }
+        };
+        if current != last {
+            if tx.send(Ok(current.clone())).await.is_err() {
+                return;
+            }
+            last = current;
+        }
+    }
+}
+
+/// Relay the index's apply `events` as the dialog's run events until the run's terminal event, the
+/// end of the stream, or the reader going away.
+pub(super) async fn relay_run(
+    mut events: tonic::Streaming<index::RestructureEvent>,
+    rows: Vec<PlanRow>,
+    tx: Sender<Result<PlanRunEvent, Status>>,
+) {
+    loop {
+        let relayed = match events.message().await {
+            Ok(Some(event)) => match run_event(event) {
+                Some(event) => event,
+                None => continue,
+            },
+            Ok(None) => return,
+            Err(status) => run_failure(&tddy_service::to_rpc_status(status), &rows),
+        };
+        let terminal = matches!(
+            relayed.event,
+            Some(plan_run_event::Event::Outcome(_) | plan_run_event::Event::Failure(_))
+        );
+        if tx.send(Ok(relayed)).await.is_err() || terminal {
+            return;
+        }
     }
 }
 
