@@ -6,8 +6,8 @@
 //! locally would hand the caller this daemon's own answer wearing another host's name.
 //!
 //! This module is the two halves of that: [`classify_peer_route`] decides whether a call is ours,
-//! and [`CommonRoom::forward_to_peer`] / [`CommonRoom::forward_server_stream_to_peer`] carry it to the daemon it belongs
-//! to. They live in the kernel because the *subsystems* that route — hosts today, more later — are
+//! and [`CommonRoom::forward_to_peer`] / [`CommonRoom::forward_server_stream_to_peer`] carry it to
+//! the daemon it belongs to. They live in the kernel because the *subsystems* that route — hosts today, more later — are
 //! leaving the daemon crate, while the common-room connection they route over stays in it.
 //!
 //! `livekit_peer_discovery` re-exports every name here, so no caller in the daemon changed.

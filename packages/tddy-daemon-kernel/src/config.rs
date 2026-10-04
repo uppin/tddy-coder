@@ -16,7 +16,7 @@ fn default_spawn_worker_request_timeout_secs() -> u64 {
 }
 
 fn default_peer_forward_timeout_secs() -> u64 {
-    30
+    crate::peer_forwarding::PEER_FORWARD_TIMEOUT.as_secs()
 }
 
 fn default_common_room_set_metadata_timeout_secs() -> u64 {
