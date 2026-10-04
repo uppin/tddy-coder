@@ -236,7 +236,7 @@ impl DaemonSessionHost {
             extra_args,
         } = launch;
         let hook_token = Uuid::new_v4().to_string();
-        hooks_and_urls::write_claude_hooks_settings(
+        crate::connection_service::service_util::write_claude_hooks_settings(
             &context_dir,
             &tddy_core::HookCommandParams {
                 tddy_tools_path: &tddy_tools_path.to_string_lossy(),
@@ -252,7 +252,9 @@ impl DaemonSessionHost {
                 session_id,
                 context_dir,
                 req.model.trim(),
-                &hooks_and_urls::resolve_start_session_claude_binary(&self.config),
+                &crate::connection_service::service_util::resolve_start_session_claude_binary(
+                    &self.config,
+                ),
                 Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
                 Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
                 req.dangerously_skip_permissions,

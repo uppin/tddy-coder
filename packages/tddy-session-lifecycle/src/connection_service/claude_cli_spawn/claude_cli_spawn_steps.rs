@@ -135,7 +135,7 @@ pub(super) fn install_claude_cli_hooks(
     // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
     // Write failure is warn-and-continue so it never blocks the session from starting.
     let hook_token = Uuid::new_v4().to_string();
-    hooks_and_urls::write_claude_hooks_settings(
+    crate::connection_service::service_util::write_claude_hooks_settings(
         worktree_path,
         &tddy_core::HookCommandParams {
             tddy_tools_path: &tddy_tools_path,
