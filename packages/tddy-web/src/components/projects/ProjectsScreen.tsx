@@ -87,6 +87,52 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
   return groups;
 }
 
+interface AssignmentRow {
+  provider: string;
+  /** "" when the project holds no assignment at this provider. */
+  assignedAccountId: string;
+  /** The assigned account is not among this host's vault accounts for the provider. */
+  assignedUnavailable: boolean;
+  options: AssignableAccount[];
+}
+
+/**
+ * One row per provider the vault holds an account at, in vault order, plus a row for any provider
+ * the project is assigned at whose account this host does not know — that assignment is still real
+ * and must be visible, as "unavailable", never silently shown as unassigned.
+ */
+function assignmentRowsFor(
+  assigned: { provider: string; accountId: string }[],
+  vault: AssignableAccount[],
+): AssignmentRow[] {
+  const providers = [...new Set([...vault.map((a) => a.provider), ...assigned.map((a) => a.provider)])];
+  return providers.map((provider) => {
+    const options = vault.filter((a) => a.provider === provider);
+    const assignedAccountId = assigned.find((a) => a.provider === provider)?.accountId ?? "";
+    return {
+      provider,
+      assignedAccountId,
+      assignedUnavailable:
+        assignedAccountId !== "" && !options.some((a) => a.accountId === assignedAccountId),
+      options,
+    };
+  });
+}
+
+/** The whole assignment set with one provider's entry replaced, or removed when `accountId` is "". */
+function withAssignment(
+  assigned: { provider: string; accountId: string }[],
+  provider: string,
+  accountId: string,
+): { provider: string; accountId: string }[] {
+  const others = assigned.filter((a) => a.provider !== provider);
+  if (accountId === "") return others;
+  const existing = assigned.some((a) => a.provider === provider);
+  return existing
+    ? assigned.map((a) => (a.provider === provider ? { provider, accountId } : a))
+    : [...others, { provider, accountId }];
+}
+
 /**
  * The branch to show selected when a project has no stored default: mirror the daemon's live
  * resolution order (`<remote>/master`, then `<remote>/main`), else the first branch. The remote is
@@ -213,12 +259,6 @@ function ProjectCard({
   accounts: ProjectsScreenProps["accounts"];
   onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
 }) {
-  // TODO(#keyring 5/9): render one assignment row per provider present in `accounts`, each a
-  // `<select>` whose empty-valued option is "no account assigned" and whose change replaces the
-  // project's whole set via `onSetProjectAccounts`. Until then a project card offers no assignment
-  // control, so every project stays unassigned from the screen's point of view.
-  void accounts;
-  void onSetProjectAccounts;
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
     [group.hosts],
@@ -253,6 +293,17 @@ function ProjectCard({
     () => new Map(daemons.map((d) => [d.instanceId, d.reposBasePath])),
     [daemons],
   );
+
+  const assignmentRows = useMemo(
+    () => assignmentRowsFor(group.accounts, accounts),
+    [group.accounts, accounts],
+  );
+  const assignAccount = (provider: string, accountId: string) =>
+    onSetProjectAccounts({
+      projectId: group.projectId,
+      accounts: withAssignment(group.accounts, provider, accountId),
+      daemonInstanceId: primaryHost,
+    });
 
   const [addOpen, setAddOpen] = useState(false);
   const [selectedHost, setSelectedHost] = useState("");
@@ -290,6 +341,44 @@ function ProjectCard({
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="mb-3 flex flex-col gap-1">
+        {assignmentRows.map((row) => (
+          <div
+            key={row.provider}
+            data-testid={`project-account-row-${group.projectId}-${row.provider}`}
+            className="flex items-center gap-2 text-sm"
+          >
+            <span className="text-muted-foreground">{row.provider}</span>
+            <select
+              data-testid={`project-account-select-${group.projectId}-${row.provider}`}
+              value={row.assignedAccountId}
+              onChange={(e) => assignAccount(row.provider, e.target.value)}
+              className="rounded border border-border px-2 py-1"
+            >
+              <option value="">No account assigned</option>
+              {row.assignedUnavailable ? (
+                <option value={row.assignedAccountId}>
+                  Unavailable on this host ({row.assignedAccountId})
+                </option>
+              ) : null}
+              {row.options.map((option) => (
+                <option key={option.accountId} value={option.accountId}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {row.assignedUnavailable ? (
+              <span
+                data-testid={`project-account-unavailable-${group.projectId}-${row.provider}`}
+                className="text-destructive"
+              >
+                The assigned account is not in this host's vault
+              </span>
+            ) : null}
+          </div>
+        ))}
       </div>
 
       <div className="flex flex-col gap-1">

@@ -272,8 +272,27 @@ pub fn set_project_accounts(
     project_id: &str,
     accounts: &[AccountAssignment],
 ) -> anyhow::Result<()> {
-    let _ = (projects_dir, project_id, accounts);
-    todo!("(#keyring 5/9): refuse a repeated provider, then replace the row's whole account set")
+    log::info!(
+        "set_project_accounts: project_id={} accounts={}",
+        project_id,
+        accounts.len()
+    );
+    let mut seen = std::collections::HashSet::new();
+    for a in accounts {
+        if !seen.insert(a.provider.as_str()) {
+            anyhow::bail!(
+                "more than one account assigned for provider {}; a project uses one account per provider",
+                a.provider
+            );
+        }
+    }
+    let mut projects = read_projects(projects_dir)?;
+    let project = projects
+        .iter_mut()
+        .find(|p| p.project_id == project_id)
+        .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
+    project.accounts = accounts.to_vec();
+    write_projects(projects_dir, &projects)
 }
 
 /// Resolved `main_repo_path` for `project_id` on `host_key` (simulated host or daemon instance id).

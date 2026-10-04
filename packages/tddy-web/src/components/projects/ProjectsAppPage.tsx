@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Client } from "@connectrpc/connect";
 import { type ProjectEntry } from "../../gen/project_pb";
 import { ProjectService } from "../../gen/project_pb";
+import { AccountsService } from "../../gen/accounts_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
@@ -112,10 +113,40 @@ function useProjectsRpc(
   };
 }
 
-// TODO(#keyring 5/9): read the assignable accounts from `AccountsService.listAccounts` (4/9) over
-// the selected daemon and flatten the provider groups into this list. Until then the Projects
-// screen is offered nothing to assign, so it renders no assignment rows.
-const NOT_YET_FETCHED: AssignableAccount[] = [];
+/**
+ * The accounts the caller's vault holds, flattened from `ListAccounts`' provider groups. A locked,
+ * absent or unreadable vault yields no assignable accounts; the Accounts screen is where those
+ * states are explained.
+ */
+function useAssignableAccounts(sessionToken: string): AssignableAccount[] {
+  const client = useDaemonClient(AccountsService);
+  const [accounts, setAccounts] = useState<AssignableAccount[]>([]);
+
+  useEffect(() => {
+    if (!client) return;
+    let current = true;
+    client
+      .listAccounts({ sessionToken })
+      .then((res) => {
+        if (!current) return;
+        setAccounts(
+          res.providers.flatMap((group) =>
+            group.accounts.map((a) => ({
+              provider: group.provider,
+              accountId: a.accountId,
+              label: a.label,
+            })),
+          ),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [client, sessionToken]);
+
+  return accounts;
+}
 
 /**
  * Data container for the dedicated Projects screen (`/projects`). RPC wiring lives in
@@ -137,6 +168,7 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       connectHost(instanceId)?.clientFor(ProjectService) ?? null,
     [connectHost],
   );
+  const accounts = useAssignableAccounts(sessionToken ?? "");
   const {
     projects,
     createProject,
@@ -155,7 +187,7 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         onAddProjectToHost={addProjectToHost}
         onSetDefaultBranch={setDefaultBranch}
         loadProjectBranches={loadProjectBranches}
-        accounts={NOT_YET_FETCHED}
+        accounts={accounts}
         onSetProjectAccounts={setProjectAccounts}
       />
     </AppShell>

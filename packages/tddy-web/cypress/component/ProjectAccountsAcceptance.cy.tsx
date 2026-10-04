@@ -21,6 +21,7 @@ import {
   type AssignableAccount,
 } from "../../src/components/projects/ProjectsScreen";
 import { type ProjectEntry } from "../../src/gen/project_pb";
+import { AccountsService } from "../../src/gen/accounts_pb";
 import { ProjectService } from "../../src/gen/project_pb";
 import type { DaemonHost } from "../../src/lib/participantRole";
 import { SelectedDaemonProvider } from "../../src/rpc/selectedDaemon";
@@ -287,10 +288,21 @@ it("sends the remaining assignments when a provider is returned to unassigned", 
 
 it("assigns an account over the daemon and shows it after the list refreshes", () => {
   // Given a daemon serving one unassigned project and a vault holding one github account
-  const backend = aProjectsBackend([aProject({})]).onUnary(
-    ProjectService.method.listProjectBranches,
-    () => ({ branches: [], defaultRemote: "origin" }),
-  );
+  const backend = aProjectsBackend([aProject({})])
+    .onUnary(ProjectService.method.listProjectBranches, () => ({
+      branches: [],
+      defaultRemote: "origin",
+    }))
+    .onUnary(AccountsService.method.listAccounts, () => ({
+      providers: [
+        {
+          provider: "github",
+          accounts: [{ provider: "github", accountId: "acct-octocat", label: "Octocat" }],
+        },
+      ],
+      vaultLocked: false,
+      vaultUninitialized: false,
+    }));
 
   // When
   mountWithRpc(mountProjectsAppPage(), backend);

@@ -81,8 +81,8 @@ use serde::Deserialize;
 use tddy_service::proto::exec_tools::{ExecuteToolChunk, ExecuteToolRequest};
 use tddy_service::proto::project::{
     AddProjectToHostRequest, AddProjectToHostResponse, ListProjectsRequest, ListProjectsResponse,
-    ProjectEntry as ProtoProjectEntry, SetProjectDefaultBranchRequest,
-    SetProjectDefaultBranchResponse,
+    ProjectEntry as ProtoProjectEntry, SetProjectAccountsRequest, SetProjectAccountsResponse,
+    SetProjectDefaultBranchRequest, SetProjectDefaultBranchResponse,
 };
 use tddy_service::proto::session::{
     DeleteSessionRequest, DeleteSessionResponse, StartSessionEvent, StartSessionRequest,
@@ -1517,6 +1517,28 @@ pub async fn forward_set_project_default_branch_via_livekit(
     SetProjectDefaultBranchResponse::decode(out.as_slice()).map_err(|e| {
         tddy_rpc::Status::internal(format!("decode SetProjectDefaultBranchResponse: {e}"))
     })
+}
+
+/// Forward **SetProjectAccounts** to another daemon in the common room via LiveKit data-channel
+/// RPC.
+///
+/// Thin encode/decode wrapper around [`forward_to_peer`].
+pub async fn forward_set_project_accounts_via_livekit(
+    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    peer_instance_id: &str,
+    request: &SetProjectAccountsRequest,
+) -> Result<SetProjectAccountsResponse, tddy_rpc::Status> {
+    let body = request.encode_to_vec();
+    let out = forward_to_peer(
+        room_slot,
+        peer_instance_id,
+        "project.ProjectService",
+        "SetProjectAccounts",
+        body,
+    )
+    .await?;
+    SetProjectAccountsResponse::decode(out.as_slice())
+        .map_err(|e| tddy_rpc::Status::internal(format!("decode SetProjectAccountsResponse: {e}")))
 }
 
 /// Forward **UploadStagedAttachmentChunk** to another daemon in the common room via LiveKit

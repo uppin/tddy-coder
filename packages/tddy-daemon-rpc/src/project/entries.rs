@@ -65,8 +65,13 @@ pub(super) fn project_entry_from(
         daemon_instance_id,
         main_branch_ref: p.main_branch_ref.clone().unwrap_or_default(),
         default_remote,
-        // TODO(#keyring 5/9): carry `p.accounts` onto the wire. Until then every response reports a
-        // project as unassigned, which the Projects screen renders as "no account assigned".
-        accounts: Vec::new(),
+        accounts: p
+            .accounts
+            .iter()
+            .map(|a| tddy_service::proto::project::AccountAssignment {
+                provider: a.provider.clone(),
+                account_id: a.account_id.clone(),
+            })
+            .collect(),
     }
 }

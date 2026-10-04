@@ -46,6 +46,20 @@ pub fn resolve_account(
     provider: &ProviderId,
     held: &[CredentialRecord],
 ) -> AccountResolution {
-    let _ = (assignments, provider, held);
-    todo!("(#keyring 5/9): one assignment for the provider, matched against what this host holds")
+    let mut for_provider = assignments.iter().filter(|(p, _)| p == provider);
+    let Some((_, account)) = for_provider.next() else {
+        // No fallback: not the caller's login, not a sole vault account.
+        return AccountResolution::NotAssigned;
+    };
+    if for_provider.next().is_some() {
+        return AccountResolution::Ambiguous(provider.clone());
+    }
+    if held
+        .iter()
+        .any(|r| &r.provider == provider && &r.account == account)
+    {
+        AccountResolution::Assigned(account.clone())
+    } else {
+        AccountResolution::UnknownOnThisHost(account.clone())
+    }
 }

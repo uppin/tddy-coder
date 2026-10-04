@@ -1409,6 +1409,11 @@ export const projectAccountRow = (projectId: string, provider: string) =>
 export const projectAccountSelect = (projectId: string, provider: string) =>
   `project-account-select-${projectId}-${provider}`;
 
+/** `[data-testid="project-account-unavailable-<projectId>-<provider>"]` — shown beside an
+ *  assignment whose account this host's vault does not hold; distinct from "no account assigned". */
+export const projectAccountUnavailable = (projectId: string, provider: string) =>
+  `project-account-unavailable-${projectId}-${provider}`;
+
 // ---------------------------------------------------------------------------
 // Daemon selector dynamic helpers
 // ---------------------------------------------------------------------------
