@@ -214,6 +214,13 @@ export const TEST_IDS = {
   worktreeCodeHover: "worktree-code-hover",
   worktreeCodeReferencesAction: "worktree-code-references-action",
   worktreeCodeReferences: "worktree-code-references",
+  // Restructure plan dialog (docs/ft/web/1-WIP/PRD-2026-10-03-plan-dialog.md)
+  worktreeCodeOpenAsPlan: "worktree-code-open-as-plan",
+  restructurePlanDialog: "restructure-plan-dialog",
+  restructurePlanTitle: "restructure-plan-title",
+  restructurePlanStaleNotice: "restructure-plan-stale-notice",
+  restructurePlanRun: "restructure-plan-run",
+  restructurePlanClose: "restructure-plan-close",
 
   // Sessions drawer screen
   sessionsDrawerScreen: "sessions-drawer-screen",
@@ -1033,6 +1040,16 @@ export const worktreeCodeIdentifier = (line: number, column: number) =>
 /** `[data-testid="worktree-code-reference-<relPath>-<line>"]` — one entry of the references list. */
 export const worktreeCodeReference = (relPath: string, line: number) =>
   `worktree-code-reference-${relPath}-${line}`;
+
+/** `[data-testid="restructure-plan-row-<opId>"]` — one operation's row in the plan dialog. */
+export const restructurePlanRow = (opId: string) => `restructure-plan-row-${opId}`;
+
+/**
+ * `[data-testid="restructure-plan-row-<opId>-<column>"]` — one cell of an operation's row: `id`,
+ * `op`, `item`, `group`, `status` or `stale`.
+ */
+export const restructurePlanCell = (opId: string, column: string) =>
+  `restructure-plan-row-${opId}-${column}`;
 
 /** `[data-testid="sessions-terminal-tab-<terminalId>"]` — a single bash terminal tab. */
 export const sessionsTerminalTab = (terminalId: string) =>

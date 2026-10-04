@@ -21,6 +21,9 @@ tddy-credentials = { path = "../tddy-credentials" }
 tddy-github = { path = "../tddy-github" }
 # The generated `code_index` client `CodeNavigationServiceImpl` forwards through.
 tddy-index-daemon = { path = "../tddy-index-daemon" }
+# `Plan::parse`: the plan dialog's rows come from the plan file, which the index daemon's plan calls
+# do not describe operation by operation.
+tddy-code-restructuring = { path = "../tddy-code-restructuring" }
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-model-registry = { path = "../tddy-model-registry" }
 tddy-projects = { path = "../tddy-projects" }
@@ -38,7 +41,7 @@ log = "0.4"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "rt", "time", "macros"] }
 # `ReceiverStream`, the type `code_navigation.WatchCodeIndex` streams its progress through.
 tokio-stream = "0.1"
 # `Channel`, the port's product; the version the daemon and the index daemon dial with.

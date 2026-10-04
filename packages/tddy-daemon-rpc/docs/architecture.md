@@ -37,6 +37,37 @@ reachable by another user. It then follows the session's `watch` channel: the la
 replacement, ending after a message with `ready` or `error`. A session nothing warmed ends the stream
 empty. The stream buffers eight messages (`WATCH_BUFFER`) for a reader that has not drained them.
 
+## Restructure plans
+
+`code_navigation/plan.rs` serves the plan half of `CodeNavigationService` (`OpenPlan`, `WatchPlan`,
+`RunPlan`). Every call authorises and dials through the same `authorise_and_connect` the navigation calls
+use, so a plan file is reachable only where the worktree service would let it be read, and the same
+`FailedPrecondition` / `Unavailable` answers apply without an `index_daemon:` section or a reachable
+index.
+
+The index daemon answers less than the dialog lists: `LoadPlans` carries an operation count and the stale
+list, `PlanStatus` journal counts. So the rows come from the plan file:
+
+| Step | What it does |
+|---|---|
+| `read_plan_rows` | reads the file through `read_worktree_file_utf8` (the listed-file gate and size cap of `WorktreeService`; a truncated read is refused), parses it with `tddy-code-restructuring`'s `Plan::parse`, assigns the ids the store assigns (`op-<n>`), and keeps each operation's id, kind, anchor item and file, and group |
+| `open_snapshot` | `LoadPlans` for the worktree, then `current_snapshot` |
+| `current_snapshot` | `PlanStatus`, then `snapshot_of` |
+| `snapshot_of` | lays the journal counts over the rows in plan order — completed `APPLIED`, then in flight, then `FAILED`, the rest `PENDING` — and sets each row's `stale_reason` from the store's stale list by op id. Exact for a plan run from its start; approximate for one whose journal does not describe a prefix of the plan |
+
+The plan file is read once per call, and its rows are reused by the watch and run loops. `WatchPlan`
+sends the opening snapshot, then `follow` polls `current_snapshot` every second (the store has no change
+feed) and sends a snapshot only when it differs from the last; a store failure is the stream's last item.
+Streams buffer eight messages (`WATCH_BUFFER`).
+
+`RunPlan` calls `code_index.Apply` with `dry_run`, `resume`, `from` and `stop_after` all unset, so a run
+is always the whole plan. `relay_run` maps the index's events: an applied operation, a note and the
+outcome carry over; indexing progress and findings are dropped. The outcome and a failure are terminal.
+A transactional group that does not compile reaches this service only as a `FailedPrecondition` whose
+message begins ``group `<name>` does not compile``; `run_failure` reads the group name from that wording
+and lists the ids of every row in that group as `rolled_back`, since the group is restored together. Any
+other stream error is a `failure` with no group.
+
 ## Code index warm-up
 
 `code_index_warmup.rs` warms a session's code index in the background and keeps its latest progress.

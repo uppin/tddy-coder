@@ -1,7 +1,7 @@
 # Worktree Code Pane
 
 **Route:** `#/sessions` (within `SessionsDrawerScreen`)
-**Components:** `WorktreeCodePane`, `WorktreeFileTree`, `CodeBlock`, `CodeNavigationOverlays` (`packages/tddy-web/src/components/session/`)
+**Components:** `WorktreeCodePane`, `WorktreeFileTree`, `CodeBlock`, `CodeNavigationOverlays`, `RestructurePlanDialog` (`packages/tddy-web/src/components/session/`)
 **Mount point:** `SessionMainPane` (`packages/tddy-web/src/components/sessions/`)
 
 ## Overview
@@ -114,6 +114,33 @@ Not every session warms on start. Sandboxed, tool and split sessions, and childr
 PR-stack orchestrator or a grill-me conversation, trigger no warm-up and show no indicator; their index
 loads on the first navigation request.
 
+## Restructure plans
+
+A restructure plan is a `.jsonl` file whose first line is a plan header. Previewing one shows an
+**Open as plan** entry above the preview; any other `.jsonl` file, such as an event log, does not. The
+entry is offered only where the session's host serves code navigation.
+
+Opening it shows a dialog with one row per operation of the plan, in plan order:
+
+- the operation's **id**, its **kind** (`rename_symbol`, …), the **item and file** it anchors to, and
+  the **group** it belongs to (blank when it stands alone);
+- its **status** — pending, in flight, applied, failed or rolled back — kept current while the dialog is
+  open;
+- whether it **still points at existing code**. An operation whose item changed, is no longer found in
+  its file, or was edited by another plan shows *stale — `<reason>`* in its row.
+
+A stale operation disables **Run**, and the dialog names every stale operation with its reason. Otherwise
+**Run** applies the whole plan through the warm index. Each row turns applied as its operation lands. If a
+transactional group does not compile at its end, the run stops with the reason, and every operation of
+that group shows **rolled back** while operations applied outside the group stay applied. Run is refused
+while another run holds the worktree. Statuses read from the journal are exact for a plan run from its
+start and approximate for one whose journal does not describe a prefix of the plan.
+
+The plan's operations come from the plan file in the worktree, which is read under the same rules as any
+other file of the pane, so a plan can be opened only from a listed worktree of the session's project. The
+plan is loaded, checked and applied by the [warm code-intelligence daemon](../coder/warm-code-intelligence-daemon.md);
+nothing lists plans by scanning the worktree — the entry point is previewing the plan file.
+
 ## Backend contract
 
 Two new **`ConnectionService`** RPCs, rooted at the worktree and secured like `RemoveWorktree`
@@ -127,7 +154,7 @@ reads under the worktree root):
   `content_utf8`, `truncated`, `byte_size`.
 
 Navigation uses a third service, **`code_navigation.CodeNavigationService`**
-(`Definition`, `References`, `Hover`; and `WatchCodeIndex(session_token, session_id)`, the indexing indicator's stream), keyed by the same `session_token`, `project_id` and
+(`Definition`, `References`, `Hover`; `WatchCodeIndex(session_token, session_id)`, the indexing indicator's stream; and `OpenPlan`, `WatchPlan` and `RunPlan`, the plan dialog's calls), keyed by the same `session_token`, `project_id` and
 `worktree_path` plus the file's `rel_path` and a position. It authorises the worktree through the same
 listed-worktree check as the file RPCs, rejects a `rel_path` that leaves the worktree, and answers
 `FAILED_PRECONDITION` naming the `index_daemon:` configuration section when the daemon has none.
@@ -165,3 +192,10 @@ outside the worktree root.
 11. **Rust only, authorised.** Non-`.rs` files offer no navigation. A `worktree_path` not listed for the
     project is rejected, and a daemon with no `index_daemon:` section answers `FAILED_PRECONDITION`
     naming it.
+12. **Open as plan.** Previewing a plan file shows "Open as plan"; previewing any other `.jsonl` file does not.
+13. **Operations listed.** The dialog lists every operation with its id, op, item/file, group and status.
+14. **Stale operations.** An operation whose item changed shows "stale — item changed", and Run is disabled
+    and names it.
+15. **Run.** Run applies the plan; each operation's row turns applied as its event arrives, and a failing
+    group shows its operations rolled back.
+16. **Plans are authorised.** A `worktree_path` not listed for the project is refused by the plan calls.
