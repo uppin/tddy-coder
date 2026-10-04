@@ -396,6 +396,7 @@ fn an_applied_operation(index: u32, op_id: &str) -> index::RestructureEvent {
             visibility: vec![],
             rehearsed_only: false,
             op_id: op_id.to_string(),
+            group: String::new(),
         })),
     }
 }
