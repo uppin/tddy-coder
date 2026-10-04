@@ -33,6 +33,10 @@ use tempfile::TempDir;
 /// The plan every scenario names, relative to the session's worktree.
 const THE_PLAN: &str = "plans/split.jsonl";
 
+/// The operation of [`THE_PLAN`] the index finds stale, and the reason it gives.
+const THE_STALE_OP: &str = "op-2";
+const THE_STALE_REASON: &str = "item changed";
+
 /// A session's worktree holding a two-operation restructure plan at [`THE_PLAN`].
 struct ASessionWorktree {
     dir: TempDir,
@@ -327,31 +331,39 @@ impl CodeIndexService for AFakeIndex {
     }
 }
 
+const INDEX_SOCKET: &str = "index.sock";
+
 /// `fake`, served on an AF_UNIX socket of its own and dialled per call, as the daemon's registry
 /// dials the managed index daemon.
 struct AnIndexOnASocket {
     dir: TempDir,
+    /// The serving task, aborted on drop so the socket directory outlives it.
+    server: tokio::task::JoinHandle<Result<(), tonic::transport::Error>>,
 }
 
 async fn an_index_serving(fake: AFakeIndex) -> AnIndexOnASocket {
-    let host = AnIndexOnASocket {
-        dir: TempDir::new().expect("a directory for the index socket"),
-    };
-    let listener =
-        tokio::net::UnixListener::bind(host.socket_path()).expect("the fake index binds");
-    tokio::spawn(
+    let dir = TempDir::new().expect("a directory for the index socket");
+    let listener = tokio::net::UnixListener::bind(dir.path().join(INDEX_SOCKET))
+        .expect("the fake index binds");
+    let server = tokio::spawn(
         tonic::transport::Server::builder()
             .add_service(TonicCodeIndexServiceServer::new(
                 CodeIndexServiceTonicAdapter::new(Arc::new(fake)),
             ))
             .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(listener)),
     );
-    host
+    AnIndexOnASocket { dir, server }
+}
+
+impl Drop for AnIndexOnASocket {
+    fn drop(&mut self) {
+        self.server.abort();
+    }
 }
 
 impl AnIndexOnASocket {
     fn socket_path(&self) -> PathBuf {
-        self.dir.path().join("index.sock")
+        self.dir.path().join(INDEX_SOCKET)
     }
 }
 
@@ -445,7 +457,7 @@ fn the_reported_operation(index: u32, op_id: &str) -> Value {
 
 /// How the index refuses a run whose next operation is stale (`RestructureError::StaleOperation`).
 fn the_stale_refusal_of(op: &str) -> String {
-    format!("operation `{op}` of {THE_PLAN} is stale (item changed) — re-anchor it before applying")
+    format!("operation `{op}` of {THE_PLAN} is stale ({THE_STALE_REASON}) — re-anchor it before applying")
 }
 
 fn a_plan_status_holding_stale(op: &str, reason: &str) -> index::PlanStatusResponse {
@@ -469,7 +481,7 @@ fn a_loaded_plan_holding_stale(plan: &str, ops: u32, stale_op: &str) -> index::L
         dirty: true,
         stale: vec![index::StaleOp {
             op: stale_op.to_string(),
-            reason: "item changed".to_string(),
+            reason: THE_STALE_REASON.to_string(),
         }],
     }
 }
@@ -480,7 +492,7 @@ fn the_reported_plan_holding_stale(plan: &str, ops: u32, stale_op: &str) -> Valu
         "plan": plan,
         "ops": ops,
         "dirty": true,
-        "stale": [{ "op": stale_op, "reason": "item changed" }],
+        "stale": [{ "op": stale_op, "reason": THE_STALE_REASON }],
     })
 }
 
@@ -593,8 +605,8 @@ async fn restructure_apply_refuses_a_stale_operation_by_id() {
     let worktree = a_session_worktree();
     let fake = a_fake_index()
         .applying_with(vec![an_applied_operation(0, "op-1")])
-        .refusing_the_apply_with(&the_stale_refusal_of("op-2"))
-        .answering_plan_status_with(a_plan_status_holding_stale("op-2", "item changed"));
+        .refusing_the_apply_with(&the_stale_refusal_of(THE_STALE_OP))
+        .answering_plan_status_with(a_plan_status_holding_stale(THE_STALE_OP, THE_STALE_REASON));
     let executor = the_registered_executor(an_index_serving(fake.clone()).await);
 
     // When the agent applies the plan
@@ -636,40 +648,11 @@ async fn restructure_apply_refuses_a_stale_operation_by_id() {
             "outcome": null,
             "refusal": {
                 "class": "failed_precondition",
-                "message": the_stale_refusal_of("op-2"),
-                "stale": [{ "op": "op-2", "reason": "item changed" }],
+                "message": the_stale_refusal_of(THE_STALE_OP),
+                "stale": [{ "op": THE_STALE_OP, "reason": THE_STALE_REASON }],
             },
         }))
     );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_plan_path_outside_the_session_worktree_is_refused() {
-    // Given a session worktree, a neighbouring session's worktree holding a plan, and a warm index
-    let worktree = a_session_worktree();
-    let neighbour = a_session_worktree();
-    let fake = a_fake_index().applying_with(vec![an_outcome(0, 2)]);
-    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
-    let neighbours_plan = neighbour.root().join(THE_PLAN).display().to_string();
-
-    // When the agent applies the neighbour's plan
-    let answer = the_agent_calls(
-        &executor,
-        "restructure_apply",
-        worktree.root(),
-        json!({ "plan": neighbours_plan }),
-    )
-    .await;
-
-    // Then the host refuses it, naming the plan
-    assert_eq!(
-        answer,
-        Err(format!(
-            "{neighbours_plan} is outside the session's worktree"
-        ))
-    );
-    // And the index never heard of it
-    assert_eq!(fake.what_it_was_asked(), vec![]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -677,7 +660,7 @@ async fn restructure_load_asks_the_index_for_worktree_relative_plans_and_returns
     // Given a session worktree, and a warm index that holds the plan once loaded, one operation stale
     let worktree = a_session_worktree();
     let fake = a_fake_index().answering_plans_with(index::PlansResponse {
-        plans: vec![a_loaded_plan_holding_stale(THE_PLAN, 2, "op-2")],
+        plans: vec![a_loaded_plan_holding_stale(THE_PLAN, 2, THE_STALE_OP)],
     });
     let executor = the_registered_executor(an_index_serving(fake.clone()).await);
     let absolute_plan = worktree.root().join(THE_PLAN).display().to_string();
@@ -702,7 +685,7 @@ async fn restructure_load_asks_the_index_for_worktree_relative_plans_and_returns
     // And the agent gets the plans the index holds, with their stale operations
     assert_eq!(
         answer,
-        Ok(json!({ "plans": [the_reported_plan_holding_stale(THE_PLAN, 2, "op-2")] }))
+        Ok(json!({ "plans": [the_reported_plan_holding_stale(THE_PLAN, 2, THE_STALE_OP)] }))
     );
 }
 
@@ -743,7 +726,7 @@ async fn restructure_status_asks_the_index_for_the_worktree_relative_plan_and_re
     // Given a session worktree, and a warm index whose plan has one operation done, one stale
     let worktree = a_session_worktree();
     let fake = a_fake_index()
-        .answering_plan_status_with(a_plan_status_holding_stale("op-2", "item changed"));
+        .answering_plan_status_with(a_plan_status_holding_stale(THE_STALE_OP, THE_STALE_REASON));
     let executor = the_registered_executor(an_index_serving(fake.clone()).await);
 
     // When the agent asks for the plan's status by its worktree-relative path
@@ -771,7 +754,7 @@ async fn restructure_status_asks_the_index_for_the_worktree_relative_plan_and_re
             "in_flight": 0,
             "pending": 1,
             "failed": 0,
-            "stale": [{ "op": "op-2", "reason": "item changed" }],
+            "stale": [{ "op": THE_STALE_OP, "reason": THE_STALE_REASON }],
         }))
     );
 }
@@ -825,7 +808,7 @@ async fn a_failed_stale_lookup_is_reported_beside_the_refusal_and_keeps_the_appl
     let worktree = a_session_worktree();
     let fake = a_fake_index()
         .applying_with(vec![an_applied_operation(0, "op-1")])
-        .refusing_the_apply_with(&the_stale_refusal_of("op-2"))
+        .refusing_the_apply_with(&the_stale_refusal_of(THE_STALE_OP))
         .failing_plan_status_with(tddy_rpc::Status::internal("the plan store is unreadable"));
     let executor = the_registered_executor(an_index_serving(fake.clone()).await);
 
@@ -850,7 +833,7 @@ async fn a_failed_stale_lookup_is_reported_beside_the_refusal_and_keeps_the_appl
             "outcome": null,
             "refusal": {
                 "class": "failed_precondition",
-                "message": the_stale_refusal_of("op-2"),
+                "message": the_stale_refusal_of(THE_STALE_OP),
                 "stale": [],
                 "stale_error": "the plan store is unreadable",
             },
@@ -858,15 +841,20 @@ async fn a_failed_stale_lookup_is_reported_beside_the_refusal_and_keeps_the_appl
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_refusal_other_than_failed_precondition_names_its_class_and_does_not_look_for_stale_operations(
-) {
-    // Given a warm index that applies the first operation, then refuses the run as invalid
-    let worktree = a_session_worktree();
-    let fake = a_fake_index()
+/// The apply of [`THE_PLAN`] after which the index refuses the run as invalid, and — were it asked —
+/// would name a stale operation.
+fn an_apply_refused_as_invalid() -> AFakeIndex {
+    a_fake_index()
         .applying_with(vec![an_applied_operation(0, "op-1")])
         .refusing_the_apply_as(tddy_rpc::Status::invalid_argument("op-2 names no item"))
-        .answering_plan_status_with(a_plan_status_holding_stale("op-2", "item changed"));
+        .answering_plan_status_with(a_plan_status_holding_stale(THE_STALE_OP, THE_STALE_REASON))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refusal_that_is_not_a_stale_operation_names_its_class() {
+    // Given a warm index that applies the first operation, then refuses the run as invalid
+    let worktree = a_session_worktree();
+    let fake = an_apply_refused_as_invalid();
     let executor = the_registered_executor(an_index_serving(fake.clone()).await);
 
     // When the agent applies the plan
@@ -895,39 +883,70 @@ async fn a_refusal_other_than_failed_precondition_names_its_class_and_does_not_l
             },
         }))
     );
-    // And the index was only asked to apply, never for the plan's status
-    assert_eq!(
-        fake.what_it_was_asked()
-            .iter()
-            .filter(|asked| matches!(asked, AskedOfTheIndex::PlanStatus(_)))
-            .count(),
-        0
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_file_outside_the_session_worktree_is_refused_before_the_index_hears_of_it() {
+async fn a_refusal_that_is_not_a_stale_operation_does_not_ask_for_stale_ones() {
+    // Given a warm index that applies the first operation, then refuses the run as invalid
+    let worktree = a_session_worktree();
+    let fake = an_apply_refused_as_invalid();
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent applies the plan
+    let _ = the_agent_calls(
+        &executor,
+        "restructure_apply",
+        worktree.root(),
+        json!({ "plan": THE_PLAN }),
+    )
+    .await;
+
+    // Then the index was only asked to apply, never for the plan's status
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::Apply(index::ApplyRequest {
+            workspace_root: worktree.root_string(),
+            plan: THE_PLAN.to_string(),
+            dry_run: false,
+            resume: false,
+            from: None,
+            stop_after: None,
+        })]
+    );
+}
+
+/// The agent's `tool` call naming — through `args_naming` — a path inside a neighbouring session's
+/// worktree (`in_the_neighbour`, relative to it), and what the host and the index made of it.
+async fn refusing_a_path_outside(
+    tool: &str,
+    in_the_neighbour: &str,
+    args_naming: impl FnOnce(&str) -> Value,
+) {
     // Given a session worktree, a neighbouring session's worktree, and a warm index
     let worktree = a_session_worktree();
     let neighbour = a_session_worktree();
     let fake = a_fake_index();
     let executor = the_registered_executor(an_index_serving(fake.clone()).await);
-    let neighbours_file = neighbour.root().join("src/lib.rs").display().to_string();
+    let neighbours_path = neighbour
+        .root()
+        .join(in_the_neighbour)
+        .display()
+        .to_string();
 
-    // When the agent anchors an item of the neighbour's file
+    // When the agent's call names the neighbour's path
     let answer = the_agent_calls(
         &executor,
-        "restructure_anchors",
+        tool,
         worktree.root(),
-        json!({ "file": neighbours_file, "items": ["Circle"] }),
+        args_naming(&neighbours_path),
     )
     .await;
 
-    // Then the host refuses it, naming the file
+    // Then the host refuses it, naming the path
     assert_eq!(
         answer,
         Err(format!(
-            "{neighbours_file} is outside the session's worktree"
+            "{neighbours_path} is outside the session's worktree"
         ))
     );
     // And the index never heard of it
@@ -935,30 +954,47 @@ async fn a_file_outside_the_session_worktree_is_refused_before_the_index_hears_o
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_plan_outside_the_session_worktree_is_refused_when_loading_it() {
-    // Given a session worktree, a neighbouring session's worktree holding a plan, and a warm index
-    let worktree = a_session_worktree();
-    let neighbour = a_session_worktree();
-    let fake = a_fake_index();
-    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
-    let neighbours_plan = neighbour.root().join(THE_PLAN).display().to_string();
-
-    // When the agent loads its own plan together with the neighbour's
-    let answer = the_agent_calls(
-        &executor,
-        "restructure_load",
-        worktree.root(),
-        json!({ "plans": [THE_PLAN, neighbours_plan] }),
+async fn a_plan_path_outside_the_session_worktree_is_refused() {
+    refusing_a_path_outside(
+        "restructure_apply",
+        THE_PLAN,
+        |plan| json!({ "plan": plan }),
     )
     .await;
+}
 
-    // Then the host refuses the load, naming the neighbour's plan
-    assert_eq!(
-        answer,
-        Err(format!(
-            "{neighbours_plan} is outside the session's worktree"
-        ))
-    );
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_outside_the_session_worktree_is_refused_before_the_index_hears_of_it() {
+    refusing_a_path_outside(
+        "restructure_anchors",
+        "src/lib.rs",
+        |file| json!({ "file": file, "items": ["Circle"] }),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_outside_the_session_worktree_is_refused_when_loading_it() {
+    refusing_a_path_outside(
+        "restructure_load",
+        THE_PLAN,
+        |plan| json!({ "plans": [THE_PLAN, plan] }),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_missing_plan_argument_is_refused_before_the_index_hears_of_it() {
+    // Given a session worktree and a warm index
+    let worktree = a_session_worktree();
+    let fake = a_fake_index();
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent checks without naming a plan
+    let answer = the_agent_calls(&executor, "restructure_check", worktree.root(), json!({})).await;
+
+    // Then the host refuses the call, naming the missing argument
+    assert_eq!(answer, Err("plan is required".to_string()));
     // And the index never heard of it
     assert_eq!(fake.what_it_was_asked(), vec![]);
 }
