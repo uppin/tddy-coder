@@ -27,7 +27,9 @@ use tempfile::TempDir;
 // ---------------------------------------------------------------------------------------------
 // Session worktrees
 
-/// A session's worktree: `src/main.rs` calls `foo`, which `src/lib.rs` defines on line 11.
+/// A session's worktree: `src/main.rs` calls `foo`, which `src/lib.rs` defines on line 11, and
+/// `src/accents.rs` opens with a comment whose accents and emoji put `foo` at UTF-16 column 7 but
+/// byte column 10.
 struct ASessionWorktree {
     dir: TempDir,
 }
@@ -45,6 +47,7 @@ fn a_session_worktree() -> ASessionWorktree {
         format!("{}fn foo() {{}}\n", "//\n".repeat(10)),
     )
     .expect("lib.rs");
+    std::fs::write(dir.path().join("src/accents.rs"), "// é🎉 foo\n").expect("accents.rs");
     ASessionWorktree { dir }
 }
 
@@ -74,8 +77,11 @@ impl ASessionWorktree {
 #[derive(Clone, Default)]
 struct AFakeIndex {
     definition_answer: index::DefinitionResponse,
+    references_answer: index::ReferencesResponse,
+    hover_answer: index::HoverResponse,
     symbols_answer: index::SymbolsResponse,
     diagnostics_answer: index::DiagnosticsResponse,
+    refusal: Option<String>,
     asked: Arc<Mutex<Vec<AskedOfTheIndex>>>,
 }
 
@@ -83,6 +89,8 @@ struct AFakeIndex {
 #[derive(Debug, Clone, PartialEq)]
 enum AskedOfTheIndex {
     Definition(index::DefinitionRequest),
+    References(index::ReferencesRequest),
+    Hover(index::HoverRequest),
     Symbols(index::SymbolsRequest),
     Diagnostics(index::DiagnosticsRequest),
 }
@@ -94,6 +102,22 @@ fn a_fake_index() -> AFakeIndex {
 impl AFakeIndex {
     fn answering_definitions_with(mut self, answer: index::DefinitionResponse) -> Self {
         self.definition_answer = answer;
+        self
+    }
+
+    fn answering_references_with(mut self, answer: index::ReferencesResponse) -> Self {
+        self.references_answer = answer;
+        self
+    }
+
+    fn answering_hovers_with(mut self, answer: index::HoverResponse) -> Self {
+        self.hover_answer = answer;
+        self
+    }
+
+    /// Every request is answered with an error status carrying `message` instead of an answer.
+    fn refusing_everything_with(mut self, message: &str) -> Self {
+        self.refusal = Some(message.to_string());
         self
     }
 
@@ -111,8 +135,13 @@ impl AFakeIndex {
         self.asked.lock().expect("the request log").clone()
     }
 
-    fn record(&self, asked: AskedOfTheIndex) {
+    /// Logs `asked`, then reports the configured refusal, if any.
+    fn record(&self, asked: AskedOfTheIndex) -> Result<(), tddy_rpc::Status> {
         self.asked.lock().expect("the request log").push(asked);
+        match &self.refusal {
+            Some(message) => Err(tddy_rpc::Status::failed_precondition(message.clone())),
+            None => Ok(()),
+        }
     }
 }
 
@@ -132,7 +161,7 @@ impl CodeIndexService for AFakeIndex {
         &self,
         request: tddy_rpc::Request<index::DefinitionRequest>,
     ) -> Result<tddy_rpc::Response<index::DefinitionResponse>, tddy_rpc::Status> {
-        self.record(AskedOfTheIndex::Definition(request.into_inner()));
+        self.record(AskedOfTheIndex::Definition(request.into_inner()))?;
         Ok(tddy_rpc::Response::new(self.definition_answer.clone()))
     }
 
@@ -140,7 +169,7 @@ impl CodeIndexService for AFakeIndex {
         &self,
         request: tddy_rpc::Request<index::SymbolsRequest>,
     ) -> Result<tddy_rpc::Response<index::SymbolsResponse>, tddy_rpc::Status> {
-        self.record(AskedOfTheIndex::Symbols(request.into_inner()));
+        self.record(AskedOfTheIndex::Symbols(request.into_inner()))?;
         Ok(tddy_rpc::Response::new(self.symbols_answer.clone()))
     }
 
@@ -148,22 +177,24 @@ impl CodeIndexService for AFakeIndex {
         &self,
         request: tddy_rpc::Request<index::DiagnosticsRequest>,
     ) -> Result<tddy_rpc::Response<index::DiagnosticsResponse>, tddy_rpc::Status> {
-        self.record(AskedOfTheIndex::Diagnostics(request.into_inner()));
+        self.record(AskedOfTheIndex::Diagnostics(request.into_inner()))?;
         Ok(tddy_rpc::Response::new(self.diagnostics_answer.clone()))
     }
 
     async fn references(
         &self,
-        _request: tddy_rpc::Request<index::ReferencesRequest>,
+        request: tddy_rpc::Request<index::ReferencesRequest>,
     ) -> Result<tddy_rpc::Response<index::ReferencesResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.record(AskedOfTheIndex::References(request.into_inner()))?;
+        Ok(tddy_rpc::Response::new(self.references_answer.clone()))
     }
 
     async fn hover(
         &self,
-        _request: tddy_rpc::Request<index::HoverRequest>,
+        request: tddy_rpc::Request<index::HoverRequest>,
     ) -> Result<tddy_rpc::Response<index::HoverResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.record(AskedOfTheIndex::Hover(request.into_inner()))?;
+        Ok(tddy_rpc::Response::new(self.hover_answer.clone()))
     }
 
     async fn warm(
@@ -381,6 +412,8 @@ fn the_registered_executor(
 #[derive(Debug, Clone, Copy)]
 enum LspTool {
     Definition,
+    References,
+    Hover,
     Symbols,
     Diagnostics,
 }
@@ -396,6 +429,15 @@ fn a_query_at(file: &str, line: u32, character: u32) -> LspQuery {
     }
 }
 
+/// A workspace symbol search for `symbol_query`, which names `file` only because the tool's schema
+/// requires one.
+fn a_workspace_symbol_search(symbol_query: &str, file: &str) -> LspQuery {
+    LspQuery {
+        symbol_query: Some(symbol_query.to_string()),
+        ..a_query_at(file, 0, 0)
+    }
+}
+
 /// What the agent's `tool` call against `worktree` answers, run on a blocking thread exactly as
 /// `tddy_tool_engine`'s `Lsp*` dispatch runs it.
 async fn the_agent_calls(
@@ -407,6 +449,8 @@ async fn the_agent_calls(
     let executor = Arc::clone(executor);
     tokio::task::spawn_blocking(move || match tool {
         LspTool::Definition => executor.definition(&worktree, &query),
+        LspTool::References => executor.references(&worktree, &query),
+        LspTool::Hover => executor.hover(&worktree, &query),
         LspTool::Symbols => executor.symbols(&worktree, &query),
         LspTool::Diagnostics => executor.diagnostics(&worktree, &query),
     })
@@ -463,6 +507,15 @@ fn the_index_s_definition_of_foo() -> index::DefinitionResponse {
             range: an_index_range_on_line(11, 4, 7),
             outside_root: false,
         }],
+    }
+}
+
+/// `foo` as the index locates it in `src/lib.rs`, on line 11 at one-based bytes 4 to 7.
+fn the_index_s_location_of_foo() -> index::CodeLocation {
+    index::CodeLocation {
+        file: "src/lib.rs".to_string(),
+        range: an_index_range_on_line(11, 4, 7),
+        outside_root: false,
     }
 }
 
@@ -568,16 +621,14 @@ async fn a_path_outside_the_session_worktree_is_refused_on_the_host() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn lsp_symbols_and_diagnostics_are_answered_by_the_index() {
-    // Given a session worktree and a warm index that outlines src/lib.rs and diagnoses src/main.rs
+async fn lsp_symbols_are_answered_by_the_index() {
+    // Given a session worktree and a warm index that outlines src/lib.rs
     let worktree = a_session_worktree();
-    let fake = a_fake_index()
-        .answering_symbols_with(the_index_s_symbols_of_lib())
-        .answering_diagnostics_with(the_index_s_diagnostics_of_main());
+    let fake = a_fake_index().answering_symbols_with(the_index_s_symbols_of_lib());
     let existing = the_existing_executor();
     let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
 
-    // When the agent asks for the symbols of src/lib.rs and the diagnostics of src/main.rs
+    // When the agent asks for the symbols of src/lib.rs
     let symbols = the_agent_calls(
         &executor,
         LspTool::Symbols,
@@ -585,28 +636,15 @@ async fn lsp_symbols_and_diagnostics_are_answered_by_the_index() {
         a_query_at("src/lib.rs", 0, 0),
     )
     .await;
-    let diagnostics = the_agent_calls(
-        &executor,
-        LspTool::Diagnostics,
-        worktree.root(),
-        a_query_at("src/main.rs", 0, 0),
-    )
-    .await;
 
-    // Then the index was asked for each, rooted at the session's worktree
+    // Then the index was asked for that file's symbols, rooted at the session's worktree
     assert_eq!(
         fake.what_it_was_asked(),
-        vec![
-            AskedOfTheIndex::Symbols(index::SymbolsRequest {
-                workspace_root: worktree.root_string(),
-                file: "src/lib.rs".to_string(),
-                query: None,
-            }),
-            AskedOfTheIndex::Diagnostics(index::DiagnosticsRequest {
-                workspace_root: worktree.root_string(),
-                file: "src/main.rs".to_string(),
-            }),
-        ]
+        vec![AskedOfTheIndex::Symbols(index::SymbolsRequest {
+            workspace_root: worktree.root_string(),
+            file: "src/lib.rs".to_string(),
+            query: None,
+        })]
     );
     // And the symbols are the existing tool's JSON, zero-based
     assert_eq!(
@@ -623,7 +661,36 @@ async fn lsp_symbols_and_diagnostics_are_answered_by_the_index() {
             }]
         }))
     );
-    // And so are the diagnostics
+    // And the existing executor was not asked
+    assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lsp_diagnostics_are_answered_by_the_index() {
+    // Given a session worktree and a warm index that diagnoses src/main.rs
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_diagnostics_with(the_index_s_diagnostics_of_main());
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for the diagnostics of src/main.rs
+    let diagnostics = the_agent_calls(
+        &executor,
+        LspTool::Diagnostics,
+        worktree.root(),
+        a_query_at("src/main.rs", 0, 0),
+    )
+    .await;
+
+    // Then the index was asked for that file's diagnostics, rooted at the session's worktree
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::Diagnostics(index::DiagnosticsRequest {
+            workspace_root: worktree.root_string(),
+            file: "src/main.rs".to_string(),
+        })]
+    );
+    // And the diagnostics are the existing tool's JSON, zero-based
     assert_eq!(
         diagnostics,
         Ok(json!({
@@ -635,7 +702,242 @@ async fn lsp_symbols_and_diagnostics_are_answered_by_the_index() {
             }]
         }))
     );
-    // And the existing executor was not asked for either
+    // And the existing executor was not asked
+    assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lsp_references_are_answered_by_the_index() {
+    // Given a session worktree and a warm index that knows where `foo` is referenced
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_references_with(index::ReferencesResponse {
+        locations: vec![the_index_s_location_of_foo()],
+    });
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for the references of the call to `foo` (zero-based 1:4 of src/main.rs)
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::References,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the index was asked for references, not definitions, at the one-based position
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::References(index::ReferencesRequest {
+            workspace_root: worktree.root_string(),
+            file: "src/main.rs".to_string(),
+            position: Some(index::SourcePosition { line: 2, column: 5 }),
+        })]
+    );
+    // And the agent gets the locations under the `references` key
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "references": [{
+                "uri": worktree.uri_of("src/lib.rs"),
+                "range": an_lsp_range_on_line(10, 3, 6),
+            }]
+        }))
+    );
+    // And the existing executor was not asked
+    assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lsp_hover_is_answered_by_the_index() {
+    // Given a session worktree and a warm index that can describe `foo`
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_hovers_with(index::HoverResponse {
+        markdown: Some("fn foo()".to_string()),
+    });
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent hovers the call to `foo` (zero-based 1:4 of src/main.rs)
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::Hover,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the index was asked to hover at the one-based position
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::Hover(index::HoverRequest {
+            workspace_root: worktree.root_string(),
+            file: "src/main.rs".to_string(),
+            position: Some(index::SourcePosition { line: 2, column: 5 }),
+        })]
+    );
+    // And the agent gets the markdown under the `hover` key
+    assert_eq!(answer, Ok(json!({ "hover": "fn foo()" })));
+    // And the existing executor was not asked
+    assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_symbol_search_asks_the_index_with_the_query_and_no_file() {
+    // Given a session worktree and a warm index
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_symbols_with(the_index_s_symbols_of_lib());
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent searches the workspace for `foo`, naming a file outside the worktree
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::Symbols,
+        worktree.root(),
+        a_workspace_symbol_search("foo", "/sessions/elsewhere/src/lib.rs"),
+    )
+    .await;
+
+    // Then the index was asked for that query with an empty file, and nothing was refused
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::Symbols(index::SymbolsRequest {
+            workspace_root: worktree.root_string(),
+            file: String::new(),
+            query: Some("foo".to_string()),
+        })]
+    );
+    assert!(answer.is_ok(), "the search was refused: {answer:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_zero_based_utf16_column_reaches_the_index_as_a_one_based_byte_column() {
+    // Given a worktree whose src/accents.rs has `foo` after an accent and an emoji, at UTF-16
+    // column 7 and byte offset 10
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_definitions_with(the_index_s_definition_of_foo());
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for the definition at zero-based 0:7
+    let _ = the_agent_calls(
+        &executor,
+        LspTool::Definition,
+        worktree.root(),
+        a_query_at("src/accents.rs", 0, 7),
+    )
+    .await;
+
+    // Then the index was asked at one-based line 1, byte column 11
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::Definition(index::DefinitionRequest {
+            workspace_root: worktree.root_string(),
+            file: "src/accents.rs".to_string(),
+            position: Some(index::SourcePosition {
+                line: 1,
+                column: 11
+            }),
+        })]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_one_based_byte_column_from_the_index_comes_back_as_a_zero_based_utf16_column() {
+    // Given a worktree whose src/accents.rs has `foo` after an accent and an emoji, and an index
+    // that locates `foo` there at one-based bytes 11 to 14
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_definitions_with(index::DefinitionResponse {
+        locations: vec![index::CodeLocation {
+            file: "src/accents.rs".to_string(),
+            range: an_index_range_on_line(1, 11, 14),
+            outside_root: false,
+        }],
+    });
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for a definition
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::Definition,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the range is zero-based line 0, UTF-16 columns 7 to 10
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "locations": [{
+                "uri": worktree.uri_of("src/accents.rs"),
+                "range": an_lsp_range_on_line(0, 7, 10),
+            }]
+        }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_location_outside_the_index_root_is_answered_by_its_own_file_uri() {
+    // Given a session worktree and an index that locates the definition in a dependency's source,
+    // outside its root
+    let worktree = a_session_worktree();
+    let dependency = TempDir::new().expect("a dependency's source directory");
+    let dependency_file = dependency.path().join("registry_crate.rs");
+    std::fs::write(&dependency_file, "pub fn foo() {}\n").expect("the dependency's source");
+    let fake = a_fake_index().answering_definitions_with(index::DefinitionResponse {
+        locations: vec![index::CodeLocation {
+            file: dependency_file.display().to_string(),
+            range: an_index_range_on_line(1, 8, 11),
+            outside_root: true,
+        }],
+    });
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for the definition of the call to `foo`
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::Definition,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the location is that absolute path's file URI, not joined onto the worktree
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "locations": [{
+                "uri": format!("file://{}", dependency_file.display()),
+                "range": an_lsp_range_on_line(0, 7, 10),
+            }]
+        }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_error_from_the_index_is_the_tools_error_and_the_existing_executor_is_not_asked() {
+    // Given a session worktree and an index that refuses every request
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().refusing_everything_with("the crate graph is still loading");
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for a definition
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::Definition,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the tool fails with the index's message
+    assert_eq!(answer, Err("the crate graph is still loading".to_string()));
+    // And the existing executor was not asked in the index's place
     assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
 }
 

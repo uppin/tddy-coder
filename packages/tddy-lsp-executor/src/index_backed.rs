@@ -361,13 +361,19 @@ pub fn bind_to_session_worktree(worktree: &Path, file: &str) -> Result<String, S
         Err(_) if Path::new(file).is_absolute() => return Err(refused()),
         Err(_) => Path::new(file),
     };
-    let stays_inside = relative
-        .components()
-        .all(|part| matches!(part, Component::Normal(_) | Component::CurDir));
-    if !stays_inside || relative.as_os_str().is_empty() {
+    let mut bound = PathBuf::new();
+    for part in relative.components() {
+        match part {
+            Component::Normal(name) => bound.push(name),
+            Component::CurDir => {}
+            _ => return Err(refused()),
+        }
+    }
+    // Nothing left of `""` or `.`: the worktree itself, which is no file.
+    if bound.as_os_str().is_empty() {
         return Err(refused());
     }
-    Ok(relative.to_string_lossy().into_owned())
+    Ok(bound.to_string_lossy().into_owned())
 }
 
 /// The executor a host registers: the index-backed one when it manages an index, `existing`
@@ -439,5 +445,62 @@ mod tests {
             bound,
             Err("/sessions/two/worktree/src/lib.rs is outside the session's worktree".to_string())
         );
+    }
+
+    #[test]
+    fn an_empty_file_is_refused() {
+        // Given a session worktree
+        let worktree = Path::new("/sessions/one/worktree");
+
+        // When an empty file name is bound
+        let bound = bind_to_session_worktree(worktree, "");
+
+        // Then it is refused
+        assert_eq!(bound, Err(" is outside the session's worktree".to_string()));
+    }
+
+    #[test]
+    fn the_worktree_itself_named_as_a_dot_is_refused() {
+        // Given a session worktree
+        let worktree = Path::new("/sessions/one/worktree");
+
+        // When the worktree's own directory is named
+        let bound = bind_to_session_worktree(worktree, ".");
+
+        // Then it is refused, because it is no file
+        assert_eq!(
+            bound,
+            Err(". is outside the session's worktree".to_string())
+        );
+    }
+
+    #[test]
+    fn a_sibling_directory_sharing_the_worktrees_name_as_a_prefix_is_refused() {
+        // Given a session worktree and a sibling whose name starts with the worktree's
+        let worktree = Path::new("/sessions/one/worktree");
+
+        // When a file in that sibling is bound
+        let bound = bind_to_session_worktree(worktree, "/sessions/one/worktree-evil/src/lib.rs");
+
+        // Then it is refused, naming the file
+        assert_eq!(
+            bound,
+            Err(
+                "/sessions/one/worktree-evil/src/lib.rs is outside the session's worktree"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_file_named_with_a_leading_current_directory_is_bound_without_it() {
+        // Given a session worktree
+        let worktree = Path::new("/sessions/one/worktree");
+
+        // When a file is named relative to the current directory
+        let bound = bind_to_session_worktree(worktree, "./src/lib.rs");
+
+        // Then it is bound to the file inside the worktree
+        assert_eq!(bound, Ok("src/lib.rs".to_string()));
     }
 }

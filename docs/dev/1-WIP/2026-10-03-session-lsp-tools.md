@@ -173,8 +173,8 @@ still built there, and its registry still drives the idle reaper.
   `read_lints_is_refused_through_the_index_and_not_answered_by_the_existing_executor`, which also
   asserts the existing executor is not asked. TODO: a workspace-wide `Diagnostics` (empty `file`)
   would lift it.
-- `LspReferences` / `LspHover` through the index are not tested here: they are the same shape as
-  `LspDefinition` over code-navigation's RPCs, and adding them would only grow the fake.
+- `LspReferences` / `LspHover` through the index: pinned (`lsp_references_are_answered_by_the_index`,
+  `lsp_hover_is_answered_by_the_index`), so a swapped Definition/References arm no longer passes.
 - `is_available` for the index-backed executor (it gates the tools' exposure) is not pinned: true when the worktree root holds a `Cargo.toml`.
 - No daemon-level test proves the hook selects the index executor: the process-global
   `register_lsp_executor` is first-wins per process, and the runtime registers before any test can
@@ -182,7 +182,13 @@ still built there, and its registry still drives the idle reaper.
 - The worktree binding (`bind_to_session_worktree`) and the index's `file_within` are both lexical
   (`..` and absolute paths are refused), so a symlink inside the worktree that points outside it is
   followed by neither. Not pinned and not closed here.
-- UTF-16 ↔ byte column conversion is implemented by reading the line from disk (inputs and answers) but pinned only on ASCII lines.
+- UTF-16 ↔ byte column conversion is implemented by reading the line from disk (inputs and answers);
+  pinned in both directions on a line with a multi-byte character and an emoji
+  (`src/accents.rs`: `// é🎉 foo`). Surrogate pairs are covered by the emoji; combining sequences are not.
+- Workspace symbol search (`symbol_query`): pinned at the executor (asks the index with the query and an
+  empty file). **Not pinned at the index daemon**: the shared fake language server
+  (`tddy-lsp/tests/bin/fake_lsp.rs`) answers only `textDocument/documentSymbol`, not `workspace/symbol`,
+  and it is another package's fixture.
 
 **Dependency weight:** `tddy-lsp-executor` now depends on `tddy-index-daemon` (+ `tonic`,
 `async-trait`), so `tddy-session-lifecycle`, `tddy-sandbox-app` and `tddy-tools` (already a
@@ -222,6 +228,16 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
 - ✅ `ReadLints` refusal message carried ~24 stray spaces — fixed.
 - ✅ The `ReadLints` refusal was untested — pinned (see Technical Debt).
 ### From @validate-tests (Test Quality)
+
+- ✅ `lsp_symbols_and_diagnostics_are_answered_by_the_index` asserted two behaviours — split into
+  `lsp_symbols_are_answered_by_the_index` and `lsp_diagnostics_are_answered_by_the_index`.
+- ✅ Implemented paths with no test — added: References, Hover, workspace symbol query, UTF-16 ↔ byte in
+  both directions, an `outside_root` location, an index error (existing executor not asked), the new
+  `Symbols`/`Diagnostics` RPCs refusing a non-`.rs` file and a `..` climb, and four
+  `bind_to_session_worktree` edge cases.
+- ✅ Two real bugs the new tests found in `bind_to_session_worktree`: `"."` was accepted as a file, and
+  `"./src/lib.rs"` was bound as `./src/lib.rs`. Fixed by collecting only `Normal` components.
+- 🔲 `Symbols` with a `query` at the index daemon — blocked on the shared fake language server.
 ### From @prod-ready (Production Readiness)
 ### From @analyze-clean-code (Code Quality)
 
@@ -240,6 +256,17 @@ cycle. A thin `code_index` client crate would remove the weight; not done here.
 - **Build:** `tddy-lsp-executor`, `tddy-index-daemon`, `tddy-daemon` build clean.
 - **Findings:** 2 warnings (stray whitespace in a user-visible message; untested refusal) — both fixed.
   2 infos (lexical-only path binding; parent file edit) — recorded above.
+
+### /validate-tests — 2026-10-04
+
+- **Analysed:** 11 tests this PR added (5 executor integration, 4 `bind_to_session_worktree` unit, 2 index
+  acceptance) plus the fake-index edit in `code_navigation_acceptance.rs`.
+- **Anti-patterns:** none critical. No always-passing tests, `#[ignore]`, sleeps, tautologies or
+  description/body mismatches; Given/When/Then, named helpers and meaningful fixture values throughout.
+- **Warnings (all fixed):** one test asserting two behaviours; the coverage gaps listed under Refactoring
+  Needed. After the fixes: 13 `lsp_tools_via_index` tests, 13 `index_backed` unit tests, 39
+  `code_index_service_acceptance` tests.
+- **Scoped run:** `./test -p tddy-lsp-executor -p tddy-index-daemon`: **168 passed, 0 failed**.
 
 ### Scoped gates — 2026-10-03 (packages touched only: `tddy-lsp-executor`, `tddy-index-daemon`, `tddy-daemon`)
 

@@ -1532,3 +1532,121 @@ async fn diagnostics_reports_what_the_server_finds_wrong_with_a_file() {
         }
     );
 }
+
+/// A workspace holding `src/lib.rs` and `Makefile`, the latter not a Rust source.
+fn a_workspace_with_a_makefile() -> tempfile::TempDir {
+    let workspace = a_workspace_calling_foo();
+    std::fs::write(workspace.path().join("Makefile"), "build:\n\tcargo build\n")
+        .expect("a Makefile");
+    workspace
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn symbols_refuses_a_file_that_is_not_rust_source() {
+    // Given a workspace holding a Makefile
+    let workspace = a_workspace_with_a_makefile();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the symbols of that file are asked for
+    let refusal = unary_at::<_, SymbolsResponse>(
+        &entry,
+        "Symbols",
+        SymbolsRequest {
+            workspace_root: root_of(&workspace),
+            file: "Makefile".to_string(),
+            query: None,
+        },
+    )
+    .await
+    .expect_err("a Makefile has no Rust symbols");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`Makefile` is not a `.rs` file"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn symbols_refuses_a_file_that_climbs_out_of_the_root() {
+    // Given a workspace
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the symbols of a file outside the root, reached with `..`, are asked for
+    let refusal = unary_at::<_, SymbolsResponse>(
+        &entry,
+        "Symbols",
+        SymbolsRequest {
+            workspace_root: root_of(&workspace),
+            file: "../neighbour/src/lib.rs".to_string(),
+            query: None,
+        },
+    )
+    .await
+    .expect_err("a file outside the root is not served");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`../neighbour/src/lib.rs`"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_refuses_a_file_that_is_not_rust_source() {
+    // Given a workspace holding a Makefile
+    let workspace = a_workspace_with_a_makefile();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the diagnostics of that file are asked for
+    let refusal = unary_at::<_, DiagnosticsResponse>(
+        &entry,
+        "Diagnostics",
+        DiagnosticsRequest {
+            workspace_root: root_of(&workspace),
+            file: "Makefile".to_string(),
+        },
+    )
+    .await
+    .expect_err("a Makefile cannot be diagnosed as Rust");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`Makefile` is not a `.rs` file"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_refuses_a_file_that_climbs_out_of_the_root() {
+    // Given a workspace
+    let workspace = a_workspace_calling_foo();
+    let entry = a_host_over_fake_language_servers();
+
+    // When the diagnostics of a file outside the root, reached with `..`, are asked for
+    let refusal = unary_at::<_, DiagnosticsResponse>(
+        &entry,
+        "Diagnostics",
+        DiagnosticsRequest {
+            workspace_root: root_of(&workspace),
+            file: "../neighbour/src/lib.rs".to_string(),
+        },
+    )
+    .await
+    .expect_err("a file outside the root is not served");
+
+    // Then it is an invalid argument naming the file
+    assert_eq!(refusal.code(), tddy_rpc::Code::InvalidArgument);
+    assert!(
+        refusal.message().contains("`../neighbour/src/lib.rs`"),
+        "the refusal should name the file, got: {}",
+        refusal.message()
+    );
+}
