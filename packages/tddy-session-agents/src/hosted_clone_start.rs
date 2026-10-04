@@ -65,7 +65,7 @@ pub fn start_hosted_agent_clone(
         first_admission_token: placement.first_admission_token.clone(),
         first_admission_url: placement.first_admission_url.clone(),
         first_admission_room: placement.first_admission_room.clone(),
-        common_room_slot: state.peer_routing.common_room_livekit_room().cloned(),
+        common_room: state.peer_routing.common_room_livekit_room().cloned(),
     };
     let hosted = Arc::clone(state.hosted_agent_clones);
     let clone_id = codebase_session_id.to_string();

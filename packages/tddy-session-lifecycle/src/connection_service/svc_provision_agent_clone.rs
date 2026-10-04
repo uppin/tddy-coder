@@ -86,7 +86,7 @@ impl DaemonSessionHost {
             ..StartSessionRequest::default()
         };
         // The split forward's deadline, for the split forward's reason: giving up after the ordinary
-        // 30 s would mean erroring while the peer is still cloning, and a peer that carried on would
+        // forward deadline would mean erroring while the peer is still cloning, and a peer that carried on would
         // leave a checkout on a host nobody is watching.
         let answered =
             tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
@@ -184,7 +184,7 @@ impl DaemonSessionHost {
         // indistinguishable from their status codes alone: a forward attempted with no room fails
         // locally with `failed_precondition`, exactly as a peer that does not have the session does.
         // Without this check a momentary disconnect would read as "already torn down".
-        if slot.read().await.is_none() {
+        if slot.slot().read().await.is_none() {
             return Err(Status::failed_precondition(format!(
                 "cannot reach the common room to delete session {session_id}'s clone \
                  {codebase_session_id} on daemon {daemon_instance_id}, so its checkout is still \

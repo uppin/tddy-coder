@@ -17,7 +17,8 @@ use livekit::prelude::*;
 use serial_test::serial;
 use tokio::sync::RwLock;
 
-use tddy_daemon_livekit::livekit_peer_discovery::{daemon_rpc_identity, forward_to_peer};
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_livekit::livekit_peer_discovery::{daemon_rpc_identity, CommonRoom};
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
@@ -35,15 +36,16 @@ async fn a_forwarded_rpc_is_stamped_with_the_transport_the_receiving_daemon_took
     let fleet = Fleet::start().await;
 
     // When the forwarder carries a call to the peer
-    let answer = forward_to_peer(
-        &fleet.forwarders_room,
-        PEER_INSTANCE_ID,
-        "test.TransportService",
-        "WhichTransport",
-        Vec::new(),
-    )
-    .await
-    .expect("the peer answers the forwarded call");
+    let answer = fleet
+        .forwarders_room
+        .forward_to_peer(
+            PEER_INSTANCE_ID,
+            "test.TransportService",
+            "WhichTransport",
+            Vec::new(),
+        )
+        .await
+        .expect("the peer answers the forwarded call");
 
     // Then the peer was told the room it received the call on
     assert_eq!(String::from_utf8_lossy(&answer), "LiveKit");
@@ -64,7 +66,7 @@ impl RpcService for TransportNamer {
 /// One LiveKit server; a peer daemon serving [`TransportNamer`] under its RPC identity; and the
 /// forwarding daemon's common-room connection, in the room slot `forward_to_peer` reads.
 struct Fleet {
-    forwarders_room: Arc<RwLock<Option<Arc<Room>>>>,
+    forwarders_room: CommonRoom,
     _peer: AbortedOnDrop,
     _livekit: LiveKitTestkit,
 }
@@ -113,7 +115,10 @@ impl Fleet {
         .expect("the forwarder joins the common room");
         sees_participant(&room, &mut events, &peer_identity).await;
         Self {
-            forwarders_room: Arc::new(RwLock::new(Some(Arc::new(room)))),
+            forwarders_room: CommonRoom::from_config(
+                Arc::new(RwLock::new(Some(Arc::new(room)))),
+                &DaemonConfig::default(),
+            ),
             _peer: peer,
             _livekit: livekit,
         }

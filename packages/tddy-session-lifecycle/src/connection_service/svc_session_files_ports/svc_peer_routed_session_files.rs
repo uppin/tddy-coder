@@ -54,7 +54,7 @@ use crate::livekit_peer_discovery::PeerRoute;
 
 use tddy_rpc::Status;
 
-use super::CommonRoomSlot;
+use crate::livekit_peer_discovery::CommonRoom;
 
 use tddy_session_files::SessionFilesServiceImpl;
 
@@ -96,7 +96,7 @@ impl PeerRoutedSessionFiles {
         rpc_name: &str,
         session_token: &str,
         daemon_instance_id: &str,
-    ) -> Result<Option<(&CommonRoomSlot, String)>, Status> {
+    ) -> Result<Option<(&CommonRoom, String)>, Status> {
         self.connection.resolve_os_user(session_token)?;
         let PeerRoute::Forward { peer_instance_id } =
             self.connection.classify_daemon_route(daemon_instance_id)?

@@ -428,8 +428,8 @@ async fn a_forwarded_rpc_reaches_a_peer_serving_under_its_daemon_prefixed_identi
     let env = two_daemons().await;
 
     // When — A forwards a staging upload to the peer
-    // 30s: matches the forward's own deadline (`PEER_FORWARD_TIMEOUT`), so a hang shows up as this
-    // test failing rather than as a suite that never finishes.
+    // 30s: matches the default forward deadline (`peer_forward_timeout_secs`), so a hang shows up
+    // as this test failing rather than as a suite that never finishes.
     tokio::time::timeout(
         Duration::from_secs(30),
         stage_on_peer(&env.service_a, "reached.md", b"the peer answered"),
@@ -631,8 +631,9 @@ async fn stream_read_host_document_forwards_to_the_peer_that_owns_the_document()
     stage_on_peer(&env.service_a, "big-remote.bin", &document).await;
 
     // When — A opens the streaming read against the peer
-    // 30s: opening a forwarded stream is bounded by `PEER_FORWARD_TIMEOUT`; this wait exists so a
-    // missing deadline fails the test instead of hanging it.
+    // 30s: opening a forwarded stream is bounded by the default forward deadline
+    // (`peer_forward_timeout_secs`); this wait exists so a missing deadline fails the test instead
+    // of hanging it.
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a
@@ -808,8 +809,8 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
     );
 
     // When — A starts the session on the peer, over the streaming RPC, referencing its own staged bytes
-    // 30s: matches the forward's own deadline for opening the stream (`PEER_FORWARD_TIMEOUT`), so a
-    // hang fails this test instead of hanging the suite.
+    // 30s: matches the default forward deadline for opening the stream
+    // (`peer_forward_timeout_secs`), so a hang fails this test instead of hanging the suite.
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a

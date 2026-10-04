@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::prelude::Room;
 use tddy_model_registry::ModelRegistryStore;
 use tddy_rpc::Status;
 use tddy_session_agents::AgentRosterState;
@@ -62,7 +61,7 @@ impl DaemonSessionHost {
 
     /// The common-room LiveKit slot a request is forwarded to a peer through, when configured.
     #[must_use]
-    pub fn common_room_livekit_room(&self) -> Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>> {
+    pub fn common_room_livekit_room(&self) -> Option<crate::livekit_peer_discovery::CommonRoom> {
         self.peer_routing.common_room_livekit_room().cloned()
     }
 

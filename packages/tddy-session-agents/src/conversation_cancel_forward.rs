@@ -4,6 +4,7 @@ use prost::Message as _;
 
 use tddy_service::proto::session_agents_svc::CancelAgentConversationRequest;
 
+use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
 use tddy_rpc::Status;
 
 pub async fn forward_cancel_agent_conversation(
@@ -11,10 +12,9 @@ pub async fn forward_cancel_agent_conversation(
     session_id: &str,
     daemon_instance_id: &str,
     conversation_id: &str,
-    slot: &std::sync::Arc<tokio::sync::RwLock<Option<std::sync::Arc<livekit::Room>>>>,
+    room: &CommonRoom,
 ) -> Result<(), Status> {
-    tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer(
-        slot,
+    room.forward_to_peer(
         daemon_instance_id,
         crate::SERVICE_NAME,
         "CancelAgentConversation",

@@ -3,9 +3,9 @@
 **Location:** `packages/tddy-daemon-kernel/src/config.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by structural audit
-**Metrics:** **1,476 production lines** (2026-09-24, #510 after its idle-vault follow-up; 1,474 at #510's wrap; 1,447 at detection, 2,511 total and first `#[cfg(test)]` at `:1448` then) — **2.9× the 500-line budget** · 19 structs · 11 `resolve_*` functions · 5 env-var consts · `DaemonConfig` carries 33 fields (struct/field counts not re-derived 2026-09-24)
+**Metrics:** **1,491 production lines** (2026-10-04, #579 `#e2e-leg` 2/5; 1,476 on 2026-09-24, #510 after its idle-vault follow-up; 1,474 at #510's wrap; 1,447 at detection, 2,511 total and first `#[cfg(test)]` at `:1448` then) — **2.9× the 500-line budget** · 19 structs · 11 `resolve_*` functions · 5 env-var consts · `DaemonConfig` carries 33 fields (struct/field counts not re-derived 2026-09-24)
 **Restructure:** required — `extract_module`, `/code-restructuring` territory
-**Status:** Open — regressed 2026-09-24 (1,470 → 1,472 in #509, `#keyring` 2/9; 1,472 → 1,476 in #510, `#keyring` 3/9, across its wrap and its idle-vault follow-up; split deferred with consent each time) — **unclaimed**
+**Status:** Open — regressed 2026-10-04 (1,476 → 1,491 in #579, `#e2e-leg` 2/5: the peer-forward deadline setting; recorded, not fixed), and 2026-09-24 (1,470 → 1,472 in #509, `#keyring` 2/9; 1,472 → 1,476 in #510, `#keyring` 3/9, across its wrap and its idle-vault follow-up; split deferred with consent each time) — **unclaimed**
 **Verified:** ✅ hand-verified 2026-09-19 — see *Verified by hand*
 
 ## Measurement history
@@ -17,6 +17,7 @@
 | 2026-09-24 | 1,472 | — | — | 1,470 on the merge-base with `origin/master` (`4e7157d2`) → 1,472 after #509 (`#keyring` 2/9): `users:` becomes the shared `LiveUsers` holder. Grown; the split is deferred with the developer's consent — #509's `## Boundaries` rules it out inside the stack and #510–#513 touch this file (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). First `#[cfg(test)]` now at L1473 |
 | 2026-09-24 | 1,474 | 2,538 | — | 1,472 on `origin/master` `35cf2913` → 1,474 after #510 (`#keyring` 3/9): `GitHubConfig.pending_login_ttl_seconds`, the field and its one-line `#[serde(default)]` pointer — the type, its default (600 s) and its validation live in the new `pending_login_ttl.rs`, so `config.rs` carries only the field. The `auth_storage` doc comment is reworded in place (the vault, not `github-tokens.json`), no net lines. Grown; the split is deferred with the developer's consent to a follow-up after `#keyring` lands (`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`). First `#[cfg(test)]` now at L1475 |
 | 2026-09-24 | 1,476 | 2,540 | — | 1,474 at #510's wrap (`0918ff8c`) → 1,476 after #510's post-wrap follow-up: `GitHubConfig.open_vault_idle_ttl_seconds`, the field and its one-line `#[serde(default, …)]` pointer. Both lifetime fields are now plain `Option<u64>` — their defaults and ceilings moved to `tddy-daemon-auth`'s `vault_lifetimes.rs`, so the kernel need not depend on `tddy-github`; the two lines per field are unchanged by that. Grown; still deferred with the developer's consent to the same follow-up (`docs/dev/todo/2026-09-24-keyring-store-deferred-oversized-file-splits.md`). First `#[cfg(test)]` now at L1477 |
+| 2026-10-04 | 1,491 | 2,581 | — | 1,476 on `master` (`b42eb558`) → 1,491 after `#e2e-leg` 2/5 (#579): `peer_forward_timeout_secs`, its default function, its accessor and their doc comments (+15; the tests sit after the first `#[cfg(test)]` and are not counted). Grown; recorded, not fixed here — the changeset's Prerequisites name this record and limit the node to a field, a default and an accessor. First `#[cfg(test)]` now at L1492 |
 
 ## What the tool found
 

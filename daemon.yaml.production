@@ -115,6 +115,11 @@ local:
 # Max seconds for git clone / session spawn (hung worker fails with DEADLINE_EXCEEDED). Default: 300.
 # spawn_worker_request_timeout_secs: 300
 
+# Max seconds a call forwarded to a peer daemon in the common room (or the opening of a forwarded
+# stream) waits for the peer to answer before failing with DEADLINE_EXCEEDED. Minimum 1. Default: 30.
+# The idle timeout between frames of a forwarded stream is fixed and not set here.
+# peer_forward_timeout_secs: 30
+
 # livekit:
 #   url: ws://127.0.0.1:7880
 #   api_key: "<key>"

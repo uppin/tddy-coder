@@ -5,10 +5,6 @@ use crate::workspace_session;
 
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 
-use livekit::prelude::Room;
-
-use std::sync::Arc;
-
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
 use std::path::Path;
@@ -101,7 +97,7 @@ impl DaemonSessionHost {
     pub(crate) fn common_room_slot(
         &self,
         rpc_name: &str,
-    ) -> Result<&Arc<tokio::sync::RwLock<Option<Arc<Room>>>>, Status> {
+    ) -> Result<&crate::livekit_peer_discovery::CommonRoom, Status> {
         self.peer_routing.common_room_slot(rpc_name)
     }
 

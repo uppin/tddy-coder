@@ -16,10 +16,6 @@ use tddy_service::proto::session::DeleteSessionRequest;
 
 use super::super::SplitStartFailure;
 
-use livekit::prelude::Room;
-
-use std::sync::Arc;
-
 impl DaemonSessionHost {
     /// Delete the `workspace` session holding a split session's worktree on `codebase_instance_id`.
     ///
@@ -31,7 +27,7 @@ impl DaemonSessionHost {
     /// peer's answer proves — see the `peer_has_no_such_session` arm below.
     pub(crate) async fn tear_down_codebase_session(
         &self,
-        slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+        slot: &crate::livekit_peer_discovery::CommonRoom,
         codebase_instance_id: &str,
         codebase_session_id: &str,
         session_token: &str,
@@ -137,7 +133,7 @@ impl DaemonSessionHost {
         // session". Without this check the two are indistinguishable, and a momentary disconnect
         // would be read as "already torn down", completing the local delete and stranding the
         // worktree on the codebase host — the exact leak the paired teardown exists to prevent.
-        if slot.read().await.is_none() {
+        if slot.slot().read().await.is_none() {
             return Err(Status::failed_precondition(format!(
                     "cannot reach the common room to delete the paired workspace session \
                  {codebase_session} on daemon {codebase_daemon}, so its worktree's fate is unknown; \

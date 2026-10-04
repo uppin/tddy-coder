@@ -10,7 +10,7 @@ use std::sync::Arc;
 use livekit::prelude::Room;
 use tddy_rpc::Status;
 
-use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
+use crate::livekit_peer_discovery::{local_instance_id_for_config, CommonRoom, PeerRoute};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_host_service::multi_host::EligibleDaemonSource;
 
@@ -25,7 +25,7 @@ pub struct PeerRouting {
     config: DaemonConfig,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     /// When set, LiveKit **Room** handle for forwarding a request to peer daemons in `common_room`.
-    common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
+    common_room_livekit_room: Option<CommonRoom>,
 }
 
 impl PeerRouting {
@@ -36,6 +36,8 @@ impl PeerRouting {
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     ) -> Self {
+        let common_room_livekit_room =
+            common_room_livekit_room.map(|slot| CommonRoom::from_config(slot, &config));
         Self {
             config,
             eligible_daemon_source,
@@ -49,9 +51,10 @@ impl PeerRouting {
         &self.eligible_daemon_source
     }
 
-    /// The common-room LiveKit slot a request is forwarded to a peer through, when configured.
+    /// The common room a request is forwarded to a peer through, when configured; it carries the
+    /// deadline `config.peer_forward_timeout_secs` names.
     #[must_use]
-    pub fn common_room_livekit_room(&self) -> Option<&Arc<tokio::sync::RwLock<Option<Arc<Room>>>>> {
+    pub fn common_room_livekit_room(&self) -> Option<&CommonRoom> {
         self.common_room_livekit_room.as_ref()
     }
 
@@ -120,10 +123,7 @@ impl PeerRouting {
         Ok(route)
     }
 
-    pub fn common_room_slot(
-        &self,
-        rpc_name: &str,
-    ) -> Result<&Arc<tokio::sync::RwLock<Option<Arc<Room>>>>, Status> {
+    pub fn common_room_slot(&self, rpc_name: &str) -> Result<&CommonRoom, Status> {
         self.common_room_livekit_room.as_ref().ok_or_else(|| {
             Status::failed_precondition(format!(
                 "cannot forward {rpc_name}: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)"
@@ -166,15 +166,10 @@ impl PeerRouting {
             return Ok(None);
         };
         log::info!("{rpc_name}: forwarding RPC to remote daemon_instance_id={peer_instance_id}");
-        let slot = self.common_room_slot(rpc_name)?;
-        let answered = crate::livekit_peer_discovery::forward_to_peer(
-            slot,
-            &peer_instance_id,
-            service,
-            rpc_name,
-            req.encode_to_vec(),
-        )
-        .await?;
+        let room = self.common_room_slot(rpc_name)?;
+        let answered = room
+            .forward_to_peer(&peer_instance_id, service, rpc_name, req.encode_to_vec())
+            .await?;
         Resp::decode(answered.as_slice())
             .map(Some)
             .map_err(|e| Status::internal(format!("decode {rpc_name} response from peer: {e}")))
@@ -205,10 +200,9 @@ impl PeerRouting {
             return Ok(None);
         };
         log::info!("{rpc_name}: forwarding stream to remote daemon_instance_id={peer_instance_id}");
-        let slot = self.common_room_slot(rpc_name)?;
+        let room = self.common_room_slot(rpc_name)?;
         let decoding = rpc_name.to_string();
-        crate::livekit_peer_discovery::forward_server_stream_to_peer(
-            slot,
+        room.forward_server_stream_to_peer(
             &peer_instance_id,
             service,
             rpc_name,

@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_livekit::livekit_peer_discovery::{LiveKitDiscoveryHandles, PEER_FORWARD_TIMEOUT};
+use tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles;
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
@@ -73,7 +73,12 @@ daemon_instance_id: "{LOCAL_INSTANCE_ID}"
     serde_yaml::from_str(&yaml).expect("config must parse")
 }
 
-/// A daemon that gives a spawn — its own, and by assumption a peer's — `secs` to finish.
+/// An ordinary forward deadline that is not the 30 s default, so a split forward that ignored the
+/// setting would not add it.
+const CONFIGURED_PEER_FORWARD_SECS: u64 = 45;
+
+/// A daemon that gives a spawn — its own, and by assumption a peer's — `secs` to finish, and an
+/// ordinary forward `CONFIGURED_PEER_FORWARD_SECS`.
 ///
 /// Deliberately not the 300 s default: a deadline that merely *happened* to exceed the budget on
 /// the default configuration would look right while ignoring the setting entirely.
@@ -85,6 +90,7 @@ users:
     os_user: "testuser"
 daemon_instance_id: "{LOCAL_INSTANCE_ID}"
 spawn_worker_request_timeout_secs: {secs}
+peer_forward_timeout_secs: {CONFIGURED_PEER_FORWARD_SECS}
 "#
     );
     serde_yaml::from_str(&yaml).expect("config must parse")
@@ -603,9 +609,10 @@ async fn start_session_with_a_known_codebase_daemon_and_no_livekit_room_fails_pr
 //
 // A split start is served by the codebase daemon resolving the project — cloning it first if it does
 // not have it — and cutting a worktree, work that daemon bounds by its own
-// `spawn_worker_request_timeout` (300 s by default). The ordinary `PEER_FORWARD_TIMEOUT` is 30 s, so
-// a plain forward would give up while the peer was still building and leave the checkout behind on a
-// host the operator may not be watching. That is one of the two criticals this changeset fixes; the
+// `spawn_worker_request_timeout` (300 s by default). The ordinary forward deadline
+// (`peer_forward_timeout_secs`, 30 s by default) is far shorter, so a plain forward would give up
+// while the peer was still building and leave the checkout behind on a host the operator may not
+// be watching. That is one of the two criticals this changeset fixes; the
 // other half — naming the B-side session before asking for it — is pinned by
 // `a_worktree_failure_on_the_codebase_daemon_leaves_no_session_behind` in the cross-host suite.
 //
@@ -630,7 +637,7 @@ async fn the_split_forward_waits_out_the_worktree_budget_plus_one_ordinary_forwa
     // value is what it waits out rather than a constant.
     assert_eq!(
         deadline,
-        Duration::from_secs(600) + PEER_FORWARD_TIMEOUT,
+        Duration::from_secs(600) + Duration::from_secs(CONFIGURED_PEER_FORWARD_SECS),
         "the split forward must be derived from spawn_worker_request_timeout_secs; got {deadline:?}"
     );
 }
@@ -647,7 +654,7 @@ async fn the_split_forward_outlives_the_worktree_budget_the_codebase_daemon_give
 
     // Then — erroring while the peer is still building is the state that stranded a worktree, so
     // this must never be the shorter of the two. The cost is a vanished peer surfacing after this
-    // wait rather than after 30 s, which the PRD accepts as the cheaper failure.
+    // wait rather than after the forward deadline, which the PRD accepts as the cheaper failure.
     assert!(
         deadline > peers_worktree_budget,
         "the split forward deadline ({deadline:?}) must outlast the worktree budget the codebase daemon gives itself ({peers_worktree_budget:?})"

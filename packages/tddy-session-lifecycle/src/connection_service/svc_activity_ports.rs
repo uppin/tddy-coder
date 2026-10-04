@@ -246,14 +246,9 @@ impl PeerRoutedActivity {
         Resp: prost::Message + Default,
     {
         let slot = self.connection.common_room_slot(rpc_name)?;
-        let answered = crate::livekit_peer_discovery::forward_to_peer(
-            slot,
-            peer,
-            ACTIVITY_SERVICE,
-            rpc_name,
-            request.encode_to_vec(),
-        )
-        .await?;
+        let answered = slot
+            .forward_to_peer(peer, ACTIVITY_SERVICE, rpc_name, request.encode_to_vec())
+            .await?;
         Resp::decode(answered.as_slice())
             .map_err(|e| Status::internal(format!("decode {rpc_name} answer from peer: {e}")))
     }

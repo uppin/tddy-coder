@@ -101,21 +101,21 @@ impl DaemonSessionHost {
         }
 
         let slot = self.common_room_slot("AttachSessionAgent")?;
-        let answered = crate::livekit_peer_discovery::forward_to_peer(
-            slot,
-            owning_daemon,
-            "catalog.CatalogService",
-            "ListSubagents",
-            ListSubagentsRequest {}.encode_to_vec(),
-        )
-        .await
-        .map_err(|e| {
-            Status::unavailable(format!(
-                "daemon '{owning_daemon}' owns agent '{named_as}' but did not answer \
+        let answered = slot
+            .forward_to_peer(
+                owning_daemon,
+                "catalog.CatalogService",
+                "ListSubagents",
+                ListSubagentsRequest {}.encode_to_vec(),
+            )
+            .await
+            .map_err(|e| {
+                Status::unavailable(format!(
+                    "daemon '{owning_daemon}' owns agent '{named_as}' but did not answer \
                  ListSubagents ({}); nothing was attached and no checkout was created",
-                e.message()
-            ))
-        })?;
+                    e.message()
+                ))
+            })?;
         let listed = ListSubagentsResponse::decode(answered.as_slice())
             .map_err(|e| Status::internal(format!("decode ListSubagentsResponse: {e}")))?;
 

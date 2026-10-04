@@ -15,7 +15,8 @@ use prost::Message;
 use serial_test::serial;
 use tokio::sync::RwLock;
 
-use tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer;
+use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
 use tddy_livekit::{LiveKitParticipant, LiveKitRpcClientFactory};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_service::proto::test::{EchoRequest, EchoResponse};
@@ -87,7 +88,10 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
     .map_err(|e| anyhow::anyhow!("local connect: {}", e))?;
     wait_for_participant(&room, &mut events, &rpc_identity(PEER_INSTANCE_ID)).await?;
     let room = Arc::new(room);
-    let room_slot = Arc::new(RwLock::new(Some(room.clone())));
+    let common_room = CommonRoom::from_config(
+        Arc::new(RwLock::new(Some(room.clone()))),
+        &DaemonConfig::default(),
+    );
 
     // sanity: nothing has registered a shared registry for this room yet
     assert!(
@@ -98,13 +102,14 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
     // When — several concurrent forwards to the same peer over the one common-room connection
     let mut handles = Vec::new();
     for i in 0..10 {
-        let slot = room_slot.clone();
+        let common_room = common_room.clone();
         handles.push(tokio::spawn(async move {
             let body = EchoRequest {
                 message: format!("forward-{i}"),
             }
             .encode_to_vec();
-            let bytes = forward_to_peer(&slot, PEER_INSTANCE_ID, "test.EchoService", "Echo", body)
+            let bytes = common_room
+                .forward_to_peer(PEER_INSTANCE_ID, "test.EchoService", "Echo", body)
                 .await
                 .expect("forward_to_peer should return the peer's echo");
             EchoResponse::decode(&bytes[..])

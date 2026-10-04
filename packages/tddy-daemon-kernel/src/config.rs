@@ -1222,8 +1222,7 @@ impl DaemonConfig {
 
     /// How long a forward to a peer daemon waits for its answer (see `peer_forward_timeout_secs`).
     pub fn peer_forward_timeout(&self) -> Duration {
-        // TODO(deadline-and-scenarios): implement
-        todo!("DaemonConfig::peer_forward_timeout")
+        Duration::from_secs(self.peer_forward_timeout_secs.max(1))
     }
 
     /// How long to watch a freshly spawned session process for an immediate exit.

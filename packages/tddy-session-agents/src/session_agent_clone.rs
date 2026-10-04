@@ -472,7 +472,7 @@ pub struct CloneMirrorSpec {
     /// `AdmitOwningDaemon` over the common room every daemon already joined. `None` when this
     /// daemon has no LiveKit discovery (a test fixture), in which case the re-admit loop is skipped
     /// and the first admission token is used as a one-shot join.
-    pub common_room_slot: Option<Arc<tokio::sync::RwLock<Option<Arc<livekit::prelude::Room>>>>>,
+    pub common_room: Option<tddy_daemon_livekit::livekit_peer_discovery::CommonRoom>,
 }
 
 /// Join the session's room, restore the checkout from its WIP ref, and keep it equal until the room
@@ -507,8 +507,7 @@ pub async fn run_clone_mirror(
     // daemon for a fresh token and rejoins. A re-admit that returns `FAILED_PRECONDITION` means
     // the facilitating daemon revoked the admission (the last agent this daemon owned detached),
     // and the mirror stops — never silently, and never as a half-alive checkout nobody mirrors.
-    let handshake_enabled =
-        !spec.first_admission_token.is_empty() && spec.common_room_slot.is_some();
+    let handshake_enabled = !spec.first_admission_token.is_empty() && spec.common_room.is_some();
     log::info!(
         target: "tddy_daemon::session_agent_clone",
         "agent clone {}: starting mirror of session {} into {} (handshake={}, \
@@ -767,7 +766,7 @@ async fn re_admit(spec: &CloneMirrorSpec, _room_name: &str) -> Result<(String, S
     use prost::Message as _;
     use tddy_service::proto::session_admission::AdmitOwningDaemonRequest;
 
-    let slot = spec.common_room_slot.clone().ok_or_else(|| {
+    let common_room = spec.common_room.clone().ok_or_else(|| {
         "the common room is not connected on this daemon; cannot re-admit".to_string()
     })?;
     let body = AdmitOwningDaemonRequest {
@@ -784,27 +783,27 @@ async fn re_admit(spec: &CloneMirrorSpec, _room_name: &str) -> Result<(String, S
         spec.facilitating_daemon_instance_id,
         spec.session_id
     );
-    let response = tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer(
-        &slot,
-        &spec.facilitating_daemon_instance_id,
-        "session_admission.SessionAdmissionService",
-        "AdmitOwningDaemon",
-        body,
-    )
-    .await
-    .map_err(|e| {
-        log::warn!(
-            target: "tddy_daemon::session_agent_clone",
-            "agent clone {}: re-admit RPC returned an error: code={:?} message={}",
-            spec.codebase_session_id,
-            e.code(),
-            e.message()
-        );
-        format!(
-            "re-admit RPC to the facilitating daemon failed: {}",
-            e.message()
+    let response = common_room
+        .forward_to_peer(
+            &spec.facilitating_daemon_instance_id,
+            "session_admission.SessionAdmissionService",
+            "AdmitOwningDaemon",
+            body,
         )
-    })?;
+        .await
+        .map_err(|e| {
+            log::warn!(
+                target: "tddy_daemon::session_agent_clone",
+                "agent clone {}: re-admit RPC returned an error: code={:?} message={}",
+                spec.codebase_session_id,
+                e.code(),
+                e.message()
+            );
+            format!(
+                "re-admit RPC to the facilitating daemon failed: {}",
+                e.message()
+            )
+        })?;
     let decoded = tddy_service::proto::session_admission::AdmitOwningDaemonResponse::decode(
         response.as_slice(),
     )

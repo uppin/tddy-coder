@@ -8,9 +8,9 @@ mod ports;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use livekit::prelude::Room;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
+use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
 use tddy_host_service::multi_host::EligibleDaemonSource;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_spawn::spawn_worker::SpawnClient;
@@ -23,7 +23,7 @@ pub struct ProjectRpcHandler {
     tddy_data_dir: PathBuf,
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     spawn_client: Option<Arc<SpawnClient>>,
-    common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
+    common_room_livekit_room: Option<CommonRoom>,
 }
 
 impl ProjectRpcHandler {

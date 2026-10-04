@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use livekit::prelude::Room;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_session_files::service::{SessionContextScope, SessionContextScopes};
@@ -39,9 +38,6 @@ const SESSION_FILES_SERVICE: &str = tddy_service::SESSION_FILES_SERVICE;
 /// rather than picking one of the three keeps the log honest — the refusals themselves carry no
 /// method name in either case.
 const CONTEXT_SCOPE_CALLER: &str = "SessionFilesService context read";
-
-/// The common-room handle a forward is sent over.
-type CommonRoomSlot = Arc<tokio::sync::RwLock<Option<Arc<Room>>>>;
 
 impl DaemonSessionHost {
     /// The `session_files.SessionFilesService` entry this daemon registers.

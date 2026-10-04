@@ -381,8 +381,8 @@ pub fn merge_discovered_peers_ordered(
 /// crate, while the common-room connection they route over stays in it. Re-exported so every
 /// caller's path is unchanged and there stays one implementation of each.
 pub use tddy_daemon_kernel::peer_forwarding::{
-    classify_peer_route, daemon_rpc_identity, forward_server_stream_to_peer, forward_to_peer,
-    forward_to_peer_within, PeerRoute, PEER_FORWARD_STREAM_IDLE_TIMEOUT, PEER_FORWARD_TIMEOUT,
+    classify_peer_route, daemon_rpc_identity, CommonRoom, PeerRoute,
+    PEER_FORWARD_STREAM_IDLE_TIMEOUT, PEER_FORWARD_TIMEOUT,
 };
 
 /// Backwards-compatible alias kept so that the internal `StartSession` handler (which references
@@ -668,7 +668,7 @@ pub use tddy_daemon_kernel::daemon_identity::{
 pub struct LiveKitEligibleDaemonSource {
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
-    room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    common_room: CommonRoom,
 }
 
 impl LiveKitEligibleDaemonSource {
@@ -677,10 +677,11 @@ impl LiveKitEligibleDaemonSource {
         registry: Arc<CommonRoomPeerRegistry>,
         room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
     ) -> Self {
+        let common_room = CommonRoom::from_config(room_slot, &config);
         Self {
             config,
             registry,
-            room_slot,
+            common_room,
         }
     }
 
@@ -740,25 +741,25 @@ impl EligibleDaemonSource for LiveKitEligibleDaemonSource {
         if remotes.is_empty() {
             return Vec::new();
         }
-        let room_slot = self.room_slot.clone();
+        let common_room = self.common_room.clone();
         let session_token = session_token.to_string();
         let peer_ids: Vec<String> = remotes.into_iter().map(|r| r.instance_id.0).collect();
         aggregate_peer_project_entries(peer_ids, PEER_PROJECT_FANOUT_TIMEOUT, move |peer_id| {
-            let room_slot = room_slot.clone();
+            let common_room = common_room.clone();
             let session_token = session_token.clone();
             async move {
                 let req = ListProjectsRequest {
                     session_token,
                     local_only: true,
                 };
-                let bytes = forward_to_peer(
-                    &room_slot,
-                    &peer_id,
-                    "project.ProjectService",
-                    "ListProjects",
-                    req.encode_to_vec(),
-                )
-                .await?;
+                let bytes = common_room
+                    .forward_to_peer(
+                        &peer_id,
+                        "project.ProjectService",
+                        "ListProjects",
+                        req.encode_to_vec(),
+                    )
+                    .await?;
                 ListProjectsResponse::decode(bytes.as_slice())
                     .map(|resp| resp.projects)
                     .map_err(|e| {
@@ -1358,17 +1359,17 @@ async fn common_room_discovery_cycle(
 
 /// Forward **StartSession** to another daemon in the common room via LiveKit data-channel RPC.
 ///
-/// Thin encode/decode wrapper around [`forward_to_peer`].
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
 pub async fn forward_start_session_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &StartSessionRequest,
 ) -> Result<StartSessionResponse, tddy_rpc::Status> {
     forward_start_session_via_livekit_within(
-        room_slot,
+        room,
         peer_instance_id,
         request,
-        PEER_FORWARD_TIMEOUT,
+        room.forward_timeout(),
     )
     .await
 }
@@ -1376,23 +1377,23 @@ pub async fn forward_start_session_via_livekit(
 /// [`forward_start_session_via_livekit`] with an explicit deadline.
 ///
 /// A start the peer serves by cloning a project and cutting a worktree outlasts the ordinary forward
-/// deadline; see [`forward_to_peer_within`].
+/// deadline; see [`CommonRoom::forward_to_peer_within`].
 pub async fn forward_start_session_via_livekit_within(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &StartSessionRequest,
     deadline: Duration,
 ) -> Result<StartSessionResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer_within(
-        room_slot,
-        peer_instance_id,
-        "session.SessionService",
-        "StartSession",
-        body,
-        deadline,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer_within(
+            peer_instance_id,
+            "session.SessionService",
+            "StartSession",
+            body,
+            deadline,
+        )
+        .await?;
     StartSessionResponse::decode(out.as_slice())
         .map_err(|e| tddy_rpc::Status::internal(format!("decode StartSessionResponse: {e}")))
 }
@@ -1400,18 +1401,17 @@ pub async fn forward_start_session_via_livekit_within(
 /// Forward **StreamStartSession** to another daemon in the common room, yielding the peer's
 /// start-session events (attachment progress, then the terminal result).
 ///
-/// Thin decode wrapper around [`forward_server_stream_to_peer`]. The session — and its
+/// Thin decode wrapper around [`CommonRoom::forward_server_stream_to_peer`]. The session — and its
 /// attachments — live on the peer; only the events cross back.
 pub async fn forward_stream_start_session_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &StartSessionRequest,
 ) -> Result<
     tokio::sync::mpsc::UnboundedReceiver<Result<StartSessionEvent, tddy_rpc::Status>>,
     tddy_rpc::Status,
 > {
-    forward_server_stream_to_peer(
-        room_slot,
+    room.forward_server_stream_to_peer(
         peer_instance_id,
         "session.SessionService",
         "StreamStartSession",
@@ -1431,18 +1431,18 @@ pub async fn forward_stream_start_session_via_livekit(
 /// to delete the paired `workspace` session that holds a split session's worktree — including the
 /// teardown of a split start that failed after the peer had already created it.
 pub async fn forward_delete_session_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &DeleteSessionRequest,
 ) -> Result<DeleteSessionResponse, tddy_rpc::Status> {
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        "session.SessionService",
-        "DeleteSession",
-        request.encode_to_vec(),
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "session.SessionService",
+            "DeleteSession",
+            request.encode_to_vec(),
+        )
+        .await?;
     DeleteSessionResponse::decode(out.as_slice())
         .map_err(|e| tddy_rpc::Status::internal(format!("decode DeleteSessionResponse: {e}")))
 }
@@ -1450,19 +1450,18 @@ pub async fn forward_delete_session_via_livekit(
 /// Forward **StreamExecuteTool** to another daemon in the common room, yielding the peer's result
 /// frames.
 ///
-/// Thin decode wrapper around [`forward_server_stream_to_peer`]: a frame that fails to decode — or a
+/// Thin decode wrapper around [`CommonRoom::forward_server_stream_to_peer`]: a frame that fails to decode — or a
 /// stream that stops without its `last` frame — terminates the relay with a status, so a caller
 /// reassembling a tool result never mistakes a truncated one for the whole answer.
 pub async fn forward_stream_execute_tool_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &ExecuteToolRequest,
 ) -> Result<
     tokio::sync::mpsc::UnboundedReceiver<Result<ExecuteToolChunk, tddy_rpc::Status>>,
     tddy_rpc::Status,
 > {
-    forward_server_stream_to_peer(
-        room_slot,
+    room.forward_server_stream_to_peer(
         peer_instance_id,
         "exec_tools.ExecToolService",
         "StreamExecuteTool",
@@ -1478,21 +1477,21 @@ pub async fn forward_stream_execute_tool_via_livekit(
 
 /// Forward **AddProjectToHost** to another daemon in the common room via LiveKit data-channel RPC.
 ///
-/// Thin encode/decode wrapper around [`forward_to_peer`].
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
 pub async fn forward_add_project_to_host_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &AddProjectToHostRequest,
 ) -> Result<AddProjectToHostResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        "project.ProjectService",
-        "AddProjectToHost",
-        body,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "project.ProjectService",
+            "AddProjectToHost",
+            body,
+        )
+        .await?;
     AddProjectToHostResponse::decode(out.as_slice())
         .map_err(|e| tddy_rpc::Status::internal(format!("decode AddProjectToHostResponse: {e}")))
 }
@@ -1500,21 +1499,21 @@ pub async fn forward_add_project_to_host_via_livekit(
 /// Forward **SetProjectDefaultBranch** to another daemon in the common room via LiveKit data-channel
 /// RPC.
 ///
-/// Thin encode/decode wrapper around [`forward_to_peer`].
+/// Thin encode/decode wrapper around [`CommonRoom::forward_to_peer`].
 pub async fn forward_set_project_default_branch_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &SetProjectDefaultBranchRequest,
 ) -> Result<SetProjectDefaultBranchResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        "project.ProjectService",
-        "SetProjectDefaultBranch",
-        body,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            "project.ProjectService",
+            "SetProjectDefaultBranch",
+            body,
+        )
+        .await?;
     SetProjectDefaultBranchResponse::decode(out.as_slice()).map_err(|e| {
         tddy_rpc::Status::internal(format!("decode SetProjectDefaultBranchResponse: {e}"))
     })
@@ -1528,19 +1527,19 @@ pub async fn forward_set_project_default_branch_via_livekit(
 /// it under that same constant, and a forward addressed at a name the peer does not serve fails on
 /// the peer at runtime — see the constant's own documentation.
 pub async fn forward_upload_staged_attachment_chunk_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &UploadStagedAttachmentChunkRequest,
 ) -> Result<UploadStagedAttachmentChunkResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        tddy_service::SESSION_FILES_SERVICE,
-        "UploadStagedAttachmentChunk",
-        body,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "UploadStagedAttachmentChunk",
+            body,
+        )
+        .await?;
     UploadStagedAttachmentChunkResponse::decode(out.as_slice()).map_err(|e| {
         tddy_rpc::Status::internal(format!("decode UploadStagedAttachmentChunkResponse: {e}"))
     })
@@ -1549,19 +1548,19 @@ pub async fn forward_upload_staged_attachment_chunk_via_livekit(
 /// Forward **ListStagedAttachments** to another daemon in the common room via LiveKit
 /// data-channel RPC.
 pub async fn forward_list_staged_attachments_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &ListStagedAttachmentsRequest,
 ) -> Result<ListStagedAttachmentsResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        tddy_service::SESSION_FILES_SERVICE,
-        "ListStagedAttachments",
-        body,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "ListStagedAttachments",
+            body,
+        )
+        .await?;
     ListStagedAttachmentsResponse::decode(out.as_slice()).map_err(|e| {
         tddy_rpc::Status::internal(format!("decode ListStagedAttachmentsResponse: {e}"))
     })
@@ -1570,19 +1569,19 @@ pub async fn forward_list_staged_attachments_via_livekit(
 /// Forward **DeleteStagedAttachment** to another daemon in the common room via LiveKit
 /// data-channel RPC.
 pub async fn forward_delete_staged_attachment_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &DeleteStagedAttachmentRequest,
 ) -> Result<DeleteStagedAttachmentResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        tddy_service::SESSION_FILES_SERVICE,
-        "DeleteStagedAttachment",
-        body,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "DeleteStagedAttachment",
+            body,
+        )
+        .await?;
     DeleteStagedAttachmentResponse::decode(out.as_slice()).map_err(|e| {
         tddy_rpc::Status::internal(format!("decode DeleteStagedAttachmentResponse: {e}"))
     })
@@ -1590,19 +1589,19 @@ pub async fn forward_delete_staged_attachment_via_livekit(
 
 /// Forward **ReadHostDocument** to another daemon in the common room via LiveKit data-channel RPC.
 pub async fn forward_read_host_document_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &ReadHostDocumentRequest,
 ) -> Result<ReadHostDocumentResponse, tddy_rpc::Status> {
     let body = request.encode_to_vec();
-    let out = forward_to_peer(
-        room_slot,
-        peer_instance_id,
-        tddy_service::SESSION_FILES_SERVICE,
-        "ReadHostDocument",
-        body,
-    )
-    .await?;
+    let out = room
+        .forward_to_peer(
+            peer_instance_id,
+            tddy_service::SESSION_FILES_SERVICE,
+            "ReadHostDocument",
+            body,
+        )
+        .await?;
     ReadHostDocumentResponse::decode(out.as_slice())
         .map_err(|e| tddy_rpc::Status::internal(format!("decode ReadHostDocumentResponse: {e}")))
 }
@@ -1610,19 +1609,18 @@ pub async fn forward_read_host_document_via_livekit(
 /// Forward **StreamReadHostDocument** to another daemon in the common room, yielding the peer's
 /// document frames.
 ///
-/// Thin decode wrapper around [`forward_server_stream_to_peer`]: a frame that fails to decode
+/// Thin decode wrapper around [`CommonRoom::forward_server_stream_to_peer`]: a frame that fails to decode
 /// terminates the stream with a status, so a caller reassembling the document never treats a
 /// malformed frame as the document's end.
 pub async fn forward_stream_read_host_document_via_livekit(
-    room_slot: &Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    room: &CommonRoom,
     peer_instance_id: &str,
     request: &ReadHostDocumentRequest,
 ) -> Result<
     tokio::sync::mpsc::UnboundedReceiver<Result<HostDocumentChunk, tddy_rpc::Status>>,
     tddy_rpc::Status,
 > {
-    forward_server_stream_to_peer(
-        room_slot,
+    room.forward_server_stream_to_peer(
         peer_instance_id,
         tddy_service::SESSION_FILES_SERVICE,
         "StreamReadHostDocument",
