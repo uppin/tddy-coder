@@ -53,6 +53,23 @@ Each project card exposes a **default branch** selector — the project's integr
   logical project**, the daemon applies it to every host row that owns the same `project_id`
   (peer-forwarded like **Add to host**), and the selection persists across hosts.
 
+## Accounts
+
+Each project card has an account control **per provider**, one row for each provider the signed-in
+person's credential vault has an account at (plus any provider the project is assigned at that the
+vault lacks). A row is in one of three states, shown distinctly:
+
+- **assigned** — the chosen account's label;
+- **No account assigned** — the person never chose one, and operations needing one will say so
+  rather than use another;
+- **Unavailable on this host** — an account is assigned, but this host's vault does not hold it.
+
+The choices come from the accounts list of the [accounts screen](accounts-screen.md). Choosing sends
+**`SetProjectAccounts`** with the project's whole assignment list; as with the default branch, the
+assignment is a property of the logical project and is applied to every host owning the same
+`project_id`. A locked or missing vault shows no account rows. See
+[Project concept § Account assignment](../daemon/project-concept.md#account-assignment).
+
 ## Adding a project to a host
 
 **`AddProjectToHost`** makes an existing project available on a target host while

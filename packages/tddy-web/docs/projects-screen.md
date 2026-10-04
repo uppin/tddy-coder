@@ -29,6 +29,26 @@ Container + presentational split, mirroring `VmsAppPage`/`WorktreesAppPage`:
     its advertised **base clone location** (`DaemonHost.reposBasePath`, from the daemon's
     common-room advertisement).
 
+## Account assignment
+
+Each project card carries a per-provider account control, rendered by `ProjectsScreen` from
+`ProjectEntry.accounts` and the accounts the vault holds (`AssignableAccount`):
+
+- **One row per provider** the vault has an account at, plus a row for any provider the project is
+  assigned at but the vault lacks. A locked, uninitialized or absent vault yields no assignable
+  accounts, so it yields no rows for providers the project is not assigned at.
+- A row shows one of three distinct states: **assigned** (the account's label selected),
+  **no account assigned** (the select's empty-valued option, a real choice and not a placeholder),
+  or **unavailable on this host** (the project names an account this host's vault does not hold,
+  shown beside the select, never as unassigned).
+- The picker's options come from `AccountsService.ListAccounts` (`useAssignableAccounts` in
+  `ProjectsAppPage`). Choosing sends `SetProjectAccounts` with the **full** assignment list for the
+  project, the other providers' entries unchanged, and the daemon replaces the whole set.
+
+Test IDs: `project-account-row-<projectId>-<provider>`, `project-account-select-<projectId>-<provider>`,
+`project-account-unavailable-<projectId>-<provider>`. Acceptance:
+`cypress/component/ProjectAccountsAcceptance.cy.tsx`.
+
 ## Role derivation
 
 Both this screen's host list and the presence table's Role column classify a common-room participant

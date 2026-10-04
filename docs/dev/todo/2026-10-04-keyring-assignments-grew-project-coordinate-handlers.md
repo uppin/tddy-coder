@@ -29,3 +29,11 @@ the end. Seam B is now the largest.
 Also see the same handler's near-duplicate of the repeated-provider refusal in
 `tddy-projects::project_storage::set_project_accounts` — a split is the moment to decide which of the two
 owns it.
+
+## Also deferred with it: the handler prelude
+
+`set_project_accounts_at_project_coordinate` is **114 lines** and `set_project_default_branch_at_project_coordinate`
+is **101** (limit 60). Both open with the same ~50-line authenticate → OS user → `project_id` → classify
+route → forward prelude. Extract one `authenticate_and_route` returning a local-or-forward decision and
+use it from both — do it in the same change as the split above, since both rewrite the same file.
+
