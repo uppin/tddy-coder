@@ -14,6 +14,7 @@
 |---|---|---|---|---|
 | 2026-09-19 | 1 of 7 modules | 14 | 6 | first detection |
 | 2026-09-26 | 1 of 15 modules | 17 | not re-derived | #526 (`#carve` 15/21) added `relay_idle` and `local_token_tonic_adapter` (neither names the SDK; 13 → 15 modules, 4,947 → 5,066 lines) and a dependent, `tddy-terminal-rpc`, whose `pty_runtime` now reaches `privilege_drop` directly. `peer_forwarding.rs` is still the only SDK consumer (`:18`, `:132`, `:150`). Module and dependent counts by `git ls-tree` and `grep tddy-daemon-kernel packages/*/Cargo.toml` at `22787218` |
+| 2026-10-04 | 1 of 15 modules | not re-derived | not re-derived | `#e2e-leg` 2/5 (#579) added `CommonRoom` to `peer_forwarding.rs` (the room slot plus the deadline; the three forwarders became its methods): 266 → 304 production lines. Still the **only** SDK consumer in the crate, and no new dependent or dependency. Unchanged class; the extraction is still the remedy |
 
 ## What the tool found
 

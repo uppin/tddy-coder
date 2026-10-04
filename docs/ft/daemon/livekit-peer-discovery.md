@@ -14,7 +14,10 @@ When **`livekit.enabled`** is `true` and **`livekit.common_room`** is set togeth
 | `livekit.enabled` | Whether this daemon joins the common room at all. **Defaults to `false`**, so discovery is opt-in: a complete block with no `enabled: true` names a room the daemon stays out of. Switching it off preserves the credentials below, so it is not the same as deleting them. |
 | `livekit.url`, `livekit.api_key`, `livekit.api_secret` | LiveKit project access; required for discovery and forwarding. |
 | `livekit.common_room` | Non-empty room name shared by all daemons that should see each other. When unset or blank, the daemon lists only the local eligible row and does not join a discovery room. |
+| `peer_forward_timeout_secs` | How long a daemon waits for a peer to answer a forwarded unary RPC, or to open a forwarded server stream, before failing with `DEADLINE_EXCEEDED` (the error names the seconds waited). Minimum 1; **default 30**. The idle wait between frames of a forwarded stream is fixed at 30 s and is not part of this setting. |
 | `daemon_instance_id` | Optional stable id for this process; default derives from the hostname. Must be distinct per physical daemon when multiple hosts share a room. |
+
+**Peer-forward deadline.** A peer that is in the room but silent is the case the deadline exists for, so a forward always has one. An operator on a fleet with fast links can shorten it and one on a slow link can lengthen it; a daemon with no `peer_forward_timeout_secs` waits 30 s. A peer that has left the room is refused immediately rather than waited out. The kernel mechanics are in [`daemon-kernel.md`](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md#peer_forward_timeout_secs-and-commonroom--how-long-a-forward-to-a-peer-waits).
 
 Spawned sessions continue to use **`livekit.common_room`** for collaboration when configured; per-session LiveKit identities follow existing **`livekit_server_identity_for_session`** rules.
 

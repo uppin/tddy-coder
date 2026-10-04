@@ -256,22 +256,22 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
             daemon_instance_id: owner.to_string(),
             ..request.clone()
         };
-        let peer = crate::livekit_peer_discovery::forward_server_stream_to_peer(
-            slot,
-            owner,
-            SESSION_AGENT_SERVICE,
-            "PromptAgentConversation",
-            forwarded.encode_to_vec(),
-            |bytes| {
-                tddy_service::proto::session_agents_svc::AgentConversationChunk::decode(
-                    bytes.as_slice(),
-                )
-                .map_err(|e| {
-                    Status::internal(format!("decode AgentConversationChunk from peer: {e}"))
-                })
-            },
-        )
-        .await?;
+        let peer = slot
+            .forward_server_stream_to_peer(
+                owner,
+                SESSION_AGENT_SERVICE,
+                "PromptAgentConversation",
+                forwarded.encode_to_vec(),
+                |bytes| {
+                    tddy_service::proto::session_agents_svc::AgentConversationChunk::decode(
+                        bytes.as_slice(),
+                    )
+                    .map_err(|e| {
+                        Status::internal(format!("decode AgentConversationChunk from peer: {e}"))
+                    })
+                },
+            )
+            .await?;
         Ok(peer)
     }
 
@@ -288,8 +288,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
             daemon_instance_id: owner.to_string(),
             ..request.clone()
         };
-        crate::livekit_peer_discovery::forward_server_stream_to_peer(
-            slot,
+        slot.forward_server_stream_to_peer(
             owner,
             SESSION_AGENT_SERVICE,
             "ResumeAgentConversation",

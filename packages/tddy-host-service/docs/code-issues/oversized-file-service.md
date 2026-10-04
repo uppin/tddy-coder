@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-24 | 939 | first detection. The size predates #509 (939 at merge-base `4e7157d2`). #509 changed 6 lines (3+/3−), all of them the `os_user_for_github` binding (`let os_user = self…` → `&self…`). It did not grow the file |
+| 2026-10-04 | 934 | 939 on `master` (`6faef323`) → 934 after `#e2e-leg` 2/5 (#579): the host's forwards go through a `CommonRoom` (`HostServiceImpl::with_common_room` builds it from the host's own `DaemonConfig`). Not grown; unchanged class |
 
 ## What would close it — candidate seams (not proven)
 

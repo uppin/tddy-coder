@@ -99,7 +99,7 @@ cannot be owned by a test (`ContainerAsync` drop) — it is owned by whatever ru
 the same JUnit script before and after. Do it in two steps — shared server first with the group still
 serial (proves isolation and lifecycle), then lift the group (proves the parallelism).
 
-### 2. The deadline waits (~110s of 472s, 4 tests; one fixed)
+### 2. The deadline waits (~110s of 472s, 4 tests; two fixed, one split)
 
 **Verified.**
 
@@ -120,21 +120,18 @@ serial (proves isolation and lifecycle), then lift the group (proves the paralle
   deadline path unnoticed. **Measured locally against Docker: 40.5s → 16.7s** (10.2s of it is the fleet's
   setup, ~6s the two evictions). Same technique applies to any test that "kills" a daemon with
   `abort()` and then waits: look for it.
-- The seam for test 1 above is half there: `forward_to_peer_within(…, deadline)` takes the deadline, and
-  `forward_to_peer` is a one-line wrapper over it with the constant. But ~10 call sites use the wrapper
-  (`tddy-daemon-livekit/src/livekit_peer_discovery.rs`, `peer_routing.rs`, `tddy-host-service/src/service.rs`),
-  and `forward_server_stream_to_peer` uses the constant directly, twice.
-- To shorten the one remaining deadline test, **make the deadline a real daemon setting**
-  (`peer_forward_timeout_seconds`, default 30) threaded to those call sites; the test sets 2s. This is
-  production configuration with a production default, not a test branch. Keep the guard that
-  `PEER_FORWARD_STREAM_IDLE_TIMEOUT` and `PASS_LONG_ENOUGH_TO_BE_SERVICE` constrain each other (a test in
-  `session_agent_roster_acceptance.rs` pins it), and update the comment in the deadline test that says its
-  outer 60s is "longer than the 30s deadline". (An earlier version of this note also proposed failing fast
-  for a peer known to be gone; that already exists — `refuse_departed_daemon` — and was never reached
-  because of the test above.)
-- `rpc_scenarios` (30.8s) is **one test** that runs every scenario in sequence, with a `sleep(2s)` and
-  10–20s inner timeouts. Each scenario already takes a `room_name` parameter. Split it into one test per
-  scenario: the scenarios then run in parallel once (1) lands, and a failure names the scenario.
+- **Done in `#e2e-leg` 2/5 ([#579](https://github.com/uppin/tddy-coder/pull/579)):** the deadline is a real
+  daemon setting, `peer_forward_timeout_secs` (default 30, clamped to 1 s), carried by a `CommonRoom`
+  handle that replaced the bare room slot at about 24 call sites; the open deadline of a forwarded
+  stream follows it and the idle timeout stays fixed (the guard against
+  `PASS_LONG_ENOUGH_TO_BE_SERVICE` is untouched). The silent-peer test sets 2 s and still asserts
+  `DeadlineExceeded` (6.25 s measured against a real server, from ~31 s). Corrections found on the way:
+  the setting is `_secs` like its neighbours, not `_seconds`; the fixed-deadline call sites were about
+  24, most holding only the room slot.
+- **Done in the same PR:** `rpc_scenarios` is one test per scenario (ten, plus the existing second),
+  each starting its own LiveKit handle, assertions unchanged. The inner timeouts were 3/5/10/10 s plus
+  one `sleep(2s)`, not "10-20 s". The scenarios can run in parallel once step 3 lifts the `docker`
+  group; **sharing one server across them is step 1's work, not done here.**
 - `common_room_set_metadata_handshake_repro` (13.3s) spends 12s on purpose: a **negative** assertion that
   the room slot stays populated for 12s after the initial fill (the SDK's signalling timeout is 5s). It is
   the property under test. Leave it, or shorten the window with a stated margin over 5s — low priority.
@@ -252,7 +249,7 @@ the leg fail in minutes with a named test, not time out at the job limit. Concre
 2. CI start/stop steps and the pinned image; `slow-timeout` for the leg. **Gate:** the kill-the-server drill.
 3. Lift the `docker` group for the LiveKit binaries. **Gate:** measured run time and a flake count over
    several runs.
-4. The deadline setting (and the split of `rpc_scenarios`).
+4. ~~The deadline setting (and the split of `rpc_scenarios`).~~ Landed in #579 (`#e2e-leg` 2/5). **Gate still open:** the e2e leg's run time with the 2 s deadline test and the split scenarios, read off CI.
 5. The cache question, then the `--timings` measurement from 3a. If test targets are a meaningful share,
    do 3a (features, `required-features`, the generated target list, the lint); otherwise `nextest archive`.
 

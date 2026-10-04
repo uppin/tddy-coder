@@ -419,7 +419,8 @@ half-built split session is left behind.
 
 **Two things are required to actually deliver that**, and the obvious implementation has neither:
 
-1. **A knows the B-side session id before it asks.** `PEER_FORWARD_TIMEOUT` is 30 s, but B's own
+1. **A knows the B-side session id before it asks.** The peer-forward deadline
+   (`peer_forward_timeout_secs`, 30 s by default) is short, but B's own
    worktree creation is bounded by `spawn_worker_request_timeout` (300 s by default) and B may
    `git clone` the project first. A forward that times out therefore tells A nothing about whether
    B went on to build the worktree — and without a name for it, teardown is impossible. A generates
@@ -428,10 +429,10 @@ half-built split session is left behind.
    reported and refuses the start: a peer that cannot honour the request cannot give the guarantee.
 2. **The forward outlives B's own budget.** With only the caller-chosen id, A would tear down at
    30 s and B would carry on building the worktree afterwards. The split forward therefore uses
-   `spawn_worker_request_timeout + PEER_FORWARD_TIMEOUT`.
+   `spawn_worker_request_timeout + peer_forward_timeout_secs`.
 
 The cost of (2) is worth stating: a codebase daemon whose RPC participant has vanished now surfaces
-after roughly 330 s rather than 30 s. That is the price of never orphaning a checkout on a host the
+after roughly 330 s (with the default setting) rather than 30 s. That is the price of never orphaning a checkout on a host the
 operator may not be watching.
 
 ### Agent working directory

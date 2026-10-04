@@ -14,9 +14,7 @@ use std::time::Duration;
 use livekit::Room;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
-use tddy_daemon_kernel::peer_forwarding::{
-    classify_peer_route, forward_server_stream_to_peer, forward_to_peer, PeerRoute,
-};
+use tddy_daemon_kernel::peer_forwarding::{classify_peer_route, CommonRoom, PeerRoute};
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::host::{
@@ -66,7 +64,7 @@ pub struct HostServiceImpl {
     eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
     /// The common room a forwarded call travels over. `None` is a daemon with no peers, and every
     /// forward refuses with `FailedPrecondition` rather than answering locally.
-    common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
+    common_room_livekit_room: Option<CommonRoom>,
     /// Bumped on every RPC that reaches this service, so relay mode's idle timer sees host traffic.
     idle_tracker: Option<Arc<IdleTimeoutTracker>>,
     /// Durable record of every host seen, behind `ListKnownHosts`.
@@ -144,10 +142,11 @@ impl HostServiceImpl {
         self
     }
 
-    /// The common-room connection a forwarded call travels over.
+    /// The common-room connection a forwarded call travels over; forwards wait the deadline this
+    /// service's config names (`peer_forward_timeout_secs`).
     #[must_use]
     pub fn with_common_room(mut self, room: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>) -> Self {
-        self.common_room_livekit_room = Some(room);
+        self.common_room_livekit_room = Some(CommonRoom::from_config(room, &self.config));
         self
     }
 
@@ -293,10 +292,7 @@ impl HostServiceImpl {
         Ok(route)
     }
 
-    fn common_room_slot(
-        &self,
-        rpc_name: &str,
-    ) -> Result<&Arc<tokio::sync::RwLock<Option<Arc<Room>>>>, Status> {
+    fn common_room_slot(&self, rpc_name: &str) -> Result<&CommonRoom, Status> {
         self.common_room_livekit_room.as_ref().ok_or_else(|| {
             Status::failed_precondition(format!(
                 "cannot forward {rpc_name}: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)"
@@ -323,15 +319,15 @@ impl HostServiceImpl {
         else {
             return Ok(None);
         };
-        let slot = self.common_room_slot(rpc_name)?;
-        let answered = forward_to_peer(
-            slot,
-            &peer_instance_id,
-            SERVICE_NAME,
-            rpc_name,
-            req.encode_to_vec(),
-        )
-        .await?;
+        let room = self.common_room_slot(rpc_name)?;
+        let answered = room
+            .forward_to_peer(
+                &peer_instance_id,
+                SERVICE_NAME,
+                rpc_name,
+                req.encode_to_vec(),
+            )
+            .await?;
         Resp::decode(answered.as_slice())
             .map(Some)
             .map_err(|e| Status::internal(format!("decode {rpc_name} response from peer: {e}")))
@@ -355,10 +351,9 @@ impl HostServiceImpl {
         else {
             return Ok(None);
         };
-        let slot = self.common_room_slot(rpc_name)?;
+        let room = self.common_room_slot(rpc_name)?;
         let decoding = rpc_name.to_string();
-        forward_server_stream_to_peer(
-            slot,
+        room.forward_server_stream_to_peer(
             &peer_instance_id,
             SERVICE_NAME,
             rpc_name,

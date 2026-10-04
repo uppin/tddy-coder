@@ -220,14 +220,14 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                         )
                     })?;
                     let body = req.encode_to_vec();
-                    let out = tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "exec_tools.ExecToolService",
-                        "ListExecTools",
-                        body,
-                    )
-                    .await?;
+                    let out = slot
+                        .forward_to_peer(
+                            &peer_instance_id,
+                            "exec_tools.ExecToolService",
+                            "ListExecTools",
+                            body,
+                        )
+                        .await?;
                     let inner = ConnListExecToolsResponse::decode(out.as_slice()).map_err(|e| {
                         Status::internal(format!("decode ListExecToolsResponse: {e}"))
                     })?;
@@ -300,14 +300,14 @@ impl tddy_tool_engine::exec_tool_service::ExecToolHandler for ExecToolRpcHandler
                         )
                     })?;
                     let body = req.encode_to_vec();
-                    let out = tddy_daemon_livekit::livekit_peer_discovery::forward_to_peer(
-                        slot,
-                        &peer_instance_id,
-                        "exec_tools.ExecToolService",
-                        "ListSessionToolCalls",
-                        body,
-                    )
-                    .await?;
+                    let out = slot
+                        .forward_to_peer(
+                            &peer_instance_id,
+                            "exec_tools.ExecToolService",
+                            "ListSessionToolCalls",
+                            body,
+                        )
+                        .await?;
                     let inner =
                         ConnListSessionToolCallsResponse::decode(out.as_slice()).map_err(|e| {
                             Status::internal(format!("decode ListSessionToolCallsResponse: {e}"))

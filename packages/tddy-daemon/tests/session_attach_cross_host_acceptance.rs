@@ -57,6 +57,9 @@ const LOCAL_INSTANCE_ID: &str = "attach-cross-host-local";
 const PEER_INSTANCE_ID: &str = "attach-cross-host-peer";
 const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
+/// The forward deadline the silent-peer test configures, in seconds.
+const FORWARD_DEADLINE_SECS: u64 = 2;
+
 const TEST_PROJECT_ID: &str = "attach-cross-host-proj";
 const STAGING_ID: &str = "cccccccc-cccc-7ccc-8ccc-cccccccccccc";
 
@@ -154,9 +157,11 @@ async fn a_daemon(
     os_user: &str,
     repo: &Path,
     user_resolver: UserResolver,
+    peer_forward_timeout_secs: u64,
 ) -> Daemon {
     let (config_dir, config_path) = write_livekit_daemon_yaml(ws_url, instance_id, os_user);
-    let config = DaemonConfig::load(&config_path).unwrap();
+    let mut config = DaemonConfig::load(&config_path).unwrap();
+    config.peer_forward_timeout_secs = peer_forward_timeout_secs;
 
     let sessions = tempfile::tempdir().unwrap();
     let staging = tempfile::tempdir().unwrap();
@@ -261,6 +266,14 @@ struct TwoDaemons {
 }
 
 async fn two_daemons() -> TwoDaemons {
+    two_daemons_forwarding_within(
+        tddy_daemon_kernel::peer_forwarding::PEER_FORWARD_TIMEOUT.as_secs(),
+    )
+    .await
+}
+
+/// Two daemons whose forwards to each other give up after `peer_forward_timeout_secs`.
+async fn two_daemons_forwarding_within(peer_forward_timeout_secs: u64) -> TwoDaemons {
     let livekit = LiveKitTestkit::start()
         .await
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
@@ -279,6 +292,7 @@ async fn two_daemons() -> TwoDaemons {
         &os_user,
         repo_dir.path(),
         user_resolver.clone(),
+        peer_forward_timeout_secs,
     )
     .await;
     let local = a_daemon(
@@ -287,6 +301,7 @@ async fn two_daemons() -> TwoDaemons {
         &os_user,
         repo_dir.path(),
         user_resolver,
+        peer_forward_timeout_secs,
     )
     .await;
 
@@ -413,8 +428,8 @@ async fn a_forwarded_rpc_reaches_a_peer_serving_under_its_daemon_prefixed_identi
     let env = two_daemons().await;
 
     // When — A forwards a staging upload to the peer
-    // 30s: matches the forward's own deadline (`PEER_FORWARD_TIMEOUT`), so a hang shows up as this
-    // test failing rather than as a suite that never finishes.
+    // 30s: matches the default forward deadline (`peer_forward_timeout_secs`), so a hang shows up
+    // as this test failing rather than as a suite that never finishes.
     tokio::time::timeout(
         Duration::from_secs(30),
         stage_on_peer(&env.service_a, "reached.md", b"the peer answered"),
@@ -443,16 +458,18 @@ async fn a_forwarded_rpc_reaches_a_peer_serving_under_its_daemon_prefixed_identi
 #[tokio::test]
 #[serial]
 async fn a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadline() {
-    // Given — two daemons, then the peer's RPC participant is taken down
-    let env = two_daemons().await;
+    // Given — two daemons configured to give up on a peer after 2s, then the peer's RPC
+    // participant is taken down
+    let env = two_daemons_forwarding_within(FORWARD_DEADLINE_SECS).await;
     env.peer_rpc_run.abort();
 
     // When — A forwards a staging upload to the now-silent peer
-    // 60s: the forward's own deadline is 30s (`PEER_FORWARD_TIMEOUT`), and this outer wait exists
-    // only to fail the test instead of hanging it if that deadline is missing — so it has to be
-    // comfortably longer than the deadline it is checking.
+    // 20s: ten times the 2s forward deadline. The outer wait exists only to fail the test instead
+    // of hanging it if the deadline is missing, and it is still far shorter than the 30s default,
+    // so a deadline that ignores the setting fails here rather than passing slowly.
+    let started = std::time::Instant::now();
     let outcome = tokio::time::timeout(
-        Duration::from_secs(60),
+        Duration::from_secs(20),
         env.service_a
             .session_files_service()
             .upload_staged_attachment_chunk(Request::direct(UploadStagedAttachmentChunkRequest {
@@ -472,6 +489,17 @@ async fn a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadl
     // the missing deadline undetected.
     let status = outcome.expect_err("a forward to a silent peer must fail");
     assert_eq!(status.code, Code::DeadlineExceeded, "got {status:?}");
+    assert!(
+        status
+            .message
+            .contains(&format!("timed out after {FORWARD_DEADLINE_SECS}s")),
+        "the error must name the configured deadline: {status:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "took {:?}",
+        started.elapsed()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -603,8 +631,9 @@ async fn stream_read_host_document_forwards_to_the_peer_that_owns_the_document()
     stage_on_peer(&env.service_a, "big-remote.bin", &document).await;
 
     // When — A opens the streaming read against the peer
-    // 30s: opening a forwarded stream is bounded by `PEER_FORWARD_TIMEOUT`; this wait exists so a
-    // missing deadline fails the test instead of hanging it.
+    // 30s: opening a forwarded stream is bounded by the default forward deadline
+    // (`peer_forward_timeout_secs`); this wait exists so a missing deadline fails the test instead
+    // of hanging it.
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a
@@ -780,8 +809,8 @@ async fn stream_start_session_on_the_peer_reports_progress_while_staged_bytes_cr
     );
 
     // When — A starts the session on the peer, over the streaming RPC, referencing its own staged bytes
-    // 30s: matches the forward's own deadline for opening the stream (`PEER_FORWARD_TIMEOUT`), so a
-    // hang fails this test instead of hanging the suite.
+    // 30s: matches the default forward deadline for opening the stream
+    // (`peer_forward_timeout_secs`), so a hang fails this test instead of hanging the suite.
     let mut stream = tokio::time::timeout(
         Duration::from_secs(30),
         env.service_a
