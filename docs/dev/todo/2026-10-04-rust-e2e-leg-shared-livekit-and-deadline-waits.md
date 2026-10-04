@@ -140,12 +140,80 @@ and arm64 but **none for the test job**, and the repo's Actions cache is **9.4 o
 **Not verified:** *why* master never saves a test cache (size pressure and a failing save step are the two
 candidates; the master log I read was inconclusive). Find that out first — it changes everything below.
 
-- Restricting the e2e leg's *build* to the packages in the filterset (`-p …`) is possible, but nextest
-  builds every binary of a package, and the e2e binaries sit in packages that also hold unit tests, so the
-  saving is limited to purely-e2e packages. The unit leg cannot skip compiling the e2e binaries at all.
+- Restricting by *package* (`-p`, `--exclude`) is too coarse: the e2e binaries sit in packages that also
+  hold unit tests. **Restricting by test *target* is possible — see 3a.** (An earlier version of this note
+  said the unit leg cannot skip compiling the e2e binaries; that was wrong. Cargo has no "exclude this
+  target" flag, but `required-features` gives the same effect.)
 - `cargo nextest archive` once, then run both legs from the archive, turns two compiles into one. It does
   **not** shorten the critical path by itself (the compile still precedes the run); it halves the CPU spent
   and removes the second cold cache. Worth it only after the cache question is answered.
+
+### 3a. Split the compile by test target: e2e builds only e2e targets, the rest never builds them
+
+**The goal.** `Rust tests` must not compile the e2e test binaries, and `Rust e2e tests` must not compile
+the other ~700. Today both run `nextest run --workspace` and nextest builds every test target of every
+package before the filterset decides what to run, so each leg compiles and **links** the other's tests
+too. Each file in `tests/` is its own crate and its own binary (758 of them), so this is likely a real
+share of the 1,525s — **not measured; see the gate below.**
+
+**Verified** on a throwaway two-crate workspace (cargo and nextest, via `./dev`; not on this repo):
+
+| Command | What gets built |
+|---|---|
+| `cargo test --no-run --workspace` where `[[test]] name = "a_e2e"` has `required-features = ["e2e"]` | the lib unit tests and every ungated integration test; **the gated target is silently skipped** |
+| `… --workspace --features a/e2e,b/e2e --test a_e2e --test b_e2e` | **only** those two test executables — no lib unit tests, no other integration test |
+| `… --workspace --test a_e2e` without the feature | an error naming the missing feature (so the feature must always be passed) |
+| `--test <name>` where the name exists in only one workspace member | fine; the other members are not an error |
+| `cargo nextest list/run` with the same flags, and `-E <filterset>` on top | identical selection; the filterset still composes |
+
+**Design.**
+
+1. Give every package that owns an e2e test target an empty feature `e2e = []` and mark each e2e target
+   `[[test]] name = "…" required-features = ["e2e"]`. Auto-discovery keeps working for every other file
+   in `tests/`; the stanza only configures the one it names. An empty feature changes no dependency, so
+   both legs still share one compiled dependency graph (and one cache).
+2. **Unit leg:** the command is unchanged (`nextest run --workspace --profile ci`); the gated targets are
+   skipped by cargo, so they are not compiled. The `not (…)` filterset becomes unnecessary.
+3. **E2E leg:** `nextest run --workspace --profile ci --features <pkg>/e2e,… --test <name> --test <name> …`.
+   Generate the argument list instead of writing it: `cargo metadata --format-version 1` lists each
+   target's `required-features`, so a small script (`scripts/rust-e2e-targets.sh`) can print every target
+   gated on `e2e` and the `pkg/e2e` features to enable. **The Cargo.toml stanzas then become the single
+   source of what is e2e**, and `.config/rust-e2e.filterset` goes away (its `kind(test)` and
+   `package(...)` terms are only approximations of it).
+4. **Lib unit tests of the e2e packages** (e.g. the 176 in `tddy-supervisor`, the 761 in
+   `tddy-code-restructuring`) stay in the unit leg, as now.
+
+**Trade-offs to decide, not assume.**
+
+- **Local runs change.** `cargo test` and `./test -p tddy-daemon` would skip the e2e targets unless the
+  feature is on. Either `./test` enables every `e2e` feature by default (and CI's unit leg is the only
+  place they are off), or it grows a flag. Pick one and document it in `AGENTS.md`'s Commands table;
+  a developer who silently stops running the LiveKit tests locally is the failure to avoid.
+- **A new e2e test that is not gated** runs in the unit leg without anyone noticing. Keep a cheap lint
+  (`scripts/…`, run in `Rust lint`) that fails when a test file uses `LiveKitTestkit`, the restructuring
+  `harness`, or `CARGO_BIN_EXE_tddy-supervisor`/`-index-daemon`/`-daemon`/`-coder` and is **not** gated.
+  The criteria are derivable, which is what makes the lint possible.
+- **Churn:** ~12 `Cargo.toml` files and ~77 `[[test]]` stanzas (46 binaries in the original set + the 31
+  restructuring ones). Mechanical, but it touches shared manifests, so land it on its own.
+- **What it does not save.** The dependency graph — the `webrtc` stack, the daemon and index-daemon
+  libraries — compiles in both legs regardless. A leg saves its *test-target* compile and link, and
+  nothing else. If most of the 1,525s is dependencies, this changes little.
+
+**Gate, before any Cargo.toml churn.** Measure the share. Run `cargo test --no-run --workspace --timings`
+(or `cargo build --timings` on the test profile) in CI once and keep the HTML report as an artifact: test
+targets appear as `pkg (test "name")` with their own durations. Sum them for the e2e targets and for the
+rest. **Proceed only if the target the leg would skip is a meaningful share** — a rule of thumb: ≥ 25% of
+the leg's compile. Below that, prefer the cache fix and `nextest archive` above, which attack the
+dependency compile.
+
+**Alternatives considered.**
+
+- *Dedicated e2e crates* (move the test files out of their packages): removes the need for features,
+  but moves ~77 files and their fixtures, and breaks `CARGO_BIN_EXE_*` for the tests that exec their own
+  package's binary. Too invasive for this.
+- *`nextest archive`* — one compile, two legs run from it. The opposite trade (one build, no split);
+  it saves CPU, not wall-clock, and it keeps compiling the other leg's tests. Compare it with 3a on
+  measured numbers; the two are not combinable without losing the point of either.
 
 ### 4. Smaller items
 
@@ -175,7 +243,8 @@ the leg fail in minutes with a named test, not time out at the job limit. Concre
 3. Lift the `docker` group for the LiveKit binaries. **Gate:** measured run time and a flake count over
    several runs.
 4. The deadline setting (and the split of `rpc_scenarios`).
-5. The cache question, then `nextest archive` if it still pays.
+5. The cache question, then the `--timings` measurement from 3a. If test targets are a meaningful share,
+   do 3a (features, `required-features`, the generated target list, the lint); otherwise `nextest archive`.
 
 **Do not** put a branch in production code that only the tests take, and do not weaken a deadline test
 into a bare `is_err()`: the test asserts `DeadlineExceeded` on purpose, so that a missing deadline cannot
