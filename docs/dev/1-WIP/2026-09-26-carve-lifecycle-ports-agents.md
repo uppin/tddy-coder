@@ -87,7 +87,7 @@ linear nodes, leaves first:
 - **No crate moves.** Nothing leaves `tddy-session-lifecycle`, and no module is re-exported from
   another crate. Moving is node 17's (`#carve 21`), and only with the `tddy-tools restructure` engine: a refusal
   means stop and ask; hand edits after a move are build corrections only, with a todo per new cause.
-- **No behaviour change.** The node holds the baseline on its own: 562 passed, the same 22 failures by
+- **No behaviour change.** The node holds the baseline on its own: 575 passed, the same 22 failures by
   name, 1 ignored (see "Baseline").
 - **Public `tddy_session_lifecycle::…` paths stay reachable.** No consumer crate is edited
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`). The exception is a
@@ -120,6 +120,29 @@ Implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | **16a** `#carve` 16, lifecycle-ports (#531, `feature/carve/lifecycle-ports`) | M0: the free `mint_first_admission_token` over `config` and `session_admissions`, the free `split_forward_deadline` and `session_dir_for` (host methods kept as wiring delegators); the T3 module `peer_session_answer` holding `peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session`, `resolve_exec_tool_worktree`; `daemon_urls` with `advertise_daemon_url`; `svc_turn_end_reporter.rs` no longer parents `jail_env_builders` (re-parented); `ExecToolRoute` beside `LocalExecTools`. M3: T8's `AttachmentState` | T3 bodies call the three free functions, `peer_session_answer` and `daemon_urls` directly, and never through the host | re-do any M0 cut, re-parent a file, convert T7/T8/T10/T11, or touch `SessionStdioEndpoint` / `ExecToolRoute` |
 | `#carve` 15 lifecycle-split (#526) | `tddy_session_agents::AgentRosterState<'a>` (10 fields), lifecycle's `agent_roster_state()` builder, and the 11 T3 functions in `tddy-session-agents` | T3 bodies call the 11 functions with the (widened) state | move a function into `tddy-session-agents`, or change the 11 functions' signatures |
+
+## Carried from 16a (2026-10-04)
+
+16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3 and **deferred four items to
+the engine** (the developer's decision, 2026-10-04: not done by hand, done after the engine improves). This
+node's plan below was written before that and assumes some of them. Where a row below says "from 16a", read
+it against this list.
+
+| 16a item | State after 16a | What it means for this node |
+|---|---|---|
+| **M0.1** the `peer_session_answer` T3 module (`peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session`, free `resolve_exec_tool_worktree`) | **Not delivered.** The four items stay in `connection_service/split_start.rs`, `split_session.rs`, `workspace_session.rs` and `connection_service/svc_resolve_os_user.rs`. The engine has no same-crate move across files: [`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md) | The rows that say `peer_session_answer` is "imports only" or that a T3 file calls the free `resolve_exec_tool_worktree` from there do not hold. T3 callers (`local_agent_codebase_access`) reach those items in their current files, which are other topics' or host-bound files (A2/A4). **Open, this node's call:** wait for the engine move, or re-point those T3 callers and file the edge. Do not move the four items by hand without the developer's consent |
+| **M0.6** the `seeded_clone_guard.rs` split (`SessionStdioEndpoint` to T1, `ExecToolRoute` beside `LocalExecTools`) | **Not delivered**, same engine gap | The `seeded_clone_guard` row ("`SessionStdioEndpoint` and `ExecToolRoute` left in 16a") is wrong: both are still in that file. D-row "`ExecToolRoute` moves to `tddy-session-agents` in node 17" depends on the split |
+| **M0.4** re-parent the four mixed parent/child files (D8) | **Deferred**: needs the developer's consent (D8) and an engine `reparent_module` operation ([`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md)) | Still blocking for node 17. `mint_first_admission_token` and `PresenterObserverDeps` consequently sit under wiring's `svc_host_builders`, reached from `handler_state.rs` through `pub(in crate::connection_service)` |
+| the "group `write_claude_hooks_settings` and `resolve_start_session_claude_binary` with T4" half of **M0.2** | Skipped (not contiguous); moves with T4 in 16c | None here |
+
+What 16a did deliver, and this node consumes: the free `mint_first_admission_token(config, session_admissions,
+session_id, owning_daemon_instance_id)` in `svc_resolve_tddy_tools_path/svc_host_builders/first_admission_token.rs`
+(with a `DaemonSessionHost` delegator in `handler_state.rs`), `daemon_urls` (`connection_service/hooks_and_urls/daemon_urls.rs`),
+and the free `split_forward_deadline` and `session_dir_for`.
+
+**Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
+#573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
+failures by name, 1 ignored**.
 
 ## Draft PR contract
 
@@ -184,7 +207,7 @@ on it once node 17 lands T3 there.
   `session_agent_clone::clone_worktree_path`; keep the delegators listed in Responsibility, in wiring
 - [ ] **M4.6 imports**: every T3 file names foundations by their defining crate (A4); the free T3 files
   (`agent_roster` T3 part, `seed_codebase`, `roster_replacement`, `peer_session_answer`) get imports only
-- [ ] **Baseline** after the milestone: 562 / 22 / 1, the same 22 by name; `tddy-session-agents` 72
+- [ ] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents` 72
   passed. clippy and fmt clean on lifecycle and `tddy-session-agents`. `cargo check --all-targets`
   clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
 - [ ] **Acceptance checks** A1–A8 for 16a's topics plus T3
@@ -329,7 +352,7 @@ Recorded on 16a's tip, and the acceptance criterion after the milestone:
   --skip sandboxed_bash_pty_action_streams_output
 ```
 
-Expected: **562 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit`
 passes when re-run alone, so it is not a regression.
 
@@ -439,7 +462,7 @@ item range until 16c and 16e convert them).
 | A5 | No file in 16a's topics or T3 clones the host. Hand-offs clone the topic's owned handle | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in those files is empty |
 | A6 | `AgentHostCallbacks` is defined once, in `agent_host_callbacks`, and implemented once, on `DaemonSessionHost`, in the wiring ports file. It holds exactly {`worktree_snapshot`, `run_exec_tool_locally`, `local_exec_tools`} + `session_room_roster` if D2 is approved. `SplitHost` and `LaunchHost` do not exist yet | `grep -rn 'trait AgentHostCallbacks'` gives one hit; `grep -rn 'impl .*AgentHostCallbacks for DaemonSessionHost'` gives one hit, in wiring; the trait's method list matches; `grep -rn 'trait SplitHost\|trait LaunchHost'` is empty |
 | A7 | The public API is unchanged: no consumer edit, and every facade still resolves | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty, and `cargo check --all-targets` is clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` (`tddy-desktop` on CI: it embeds the web bundle) |
-| A8 | Behaviour: the baseline | 562 passed, the same 22 by name, 1 ignored, after M4; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
+| A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after M4; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
 | A9 | `AgentRosterState` has exactly the 12 fields, and `tddy-session-agents` changed nowhere else | `git diff <base> --stat -- packages/tddy-session-agents` lists only `agent_roster_state.rs` (plus any in-crate test constructing it); `./dev cargo test -p tddy-session-agents` at 72 passed |
 
 ## Decisions & trade-offs
@@ -535,7 +558,7 @@ Tasks executed at wrap:
 - [ ] A5: no host clone in a T3 file; the five hand-offs clone the roster handle (grep empty)
 - [ ] A6: `AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only; no `SplitHost` / `LaunchHost` yet
 - [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 562 / 22 / 1, the same 22 by name; `restructure verify` accounted
+- [ ] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted
 - [ ] A9: `AgentRosterState` has 12 fields and `tddy-session-agents` changed nowhere else; its tests at 72 passed
 
 **Documentation**
