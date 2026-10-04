@@ -348,7 +348,16 @@ a one-line edit; the pin is not yet proven by two consecutive green e2e runs.
 
 The `docker` override in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a
 LiveKit test stuck on a dead server is killed and named in minutes rather than at the job's limit.
-Its value is a conservative placeholder until it is sized from the per-binary timing table.
+It is `60s × 3`: a green e2e run's slowest single test took 40 s and the next 20 s, so a test still
+running after three minutes is stuck, not slow. Re-size it from the per-binary table when the
+slowest test changes.
+
+### The hang-protection drill
+
+Dispatch the workflow by hand with `kill_livekit_after_seconds` set (say `120`) and the e2e leg
+removes the shared server that many seconds after its start step (`scripts/livekit-ci-server.sh
+stop-after SECONDS`, detached so it lands while nextest runs). The leg must then fail within minutes
+with the stuck tests named, not run on to the job limit. Leave the input empty for a normal run.
 
 ## Flaky tests
 

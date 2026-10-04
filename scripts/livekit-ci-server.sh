@@ -3,6 +3,9 @@
 #
 #   scripts/livekit-ci-server.sh start   start it, wait for its API, export LIVEKIT_TESTKIT_WS_URL
 #   scripts/livekit-ci-server.sh stop    remove it (safe to run twice)
+#   scripts/livekit-ci-server.sh stop-after SECONDS
+#                                        the hang-protection drill: remove it SECONDS from now, in the
+#                                        background, so the tests lose their server mid-run
 #
 # `start` appends `LIVEKIT_TESTKIT_WS_URL=ws://127.0.0.1:PORT` to $GITHUB_ENV, which is how the tests
 # find it: `LiveKitTestkit::start()` reuses a server instead of launching its own when that variable
@@ -67,11 +70,22 @@ stop() {
   fi
 }
 
+# Detached (nohup, backgrounded) so it outlives this step, which is the point: the removal must land
+# while a later step (nextest) is running.
+stop_after() {
+  local seconds="${1:?usage: $0 stop-after SECONDS}"
+  [[ "${seconds}" =~ ^[0-9]+$ ]] || { echo "stop-after needs whole seconds, got '${seconds}'" >&2; exit 2; }
+  nohup bash -c 'sleep "$1"; docker rm -f "$2"' _ "${seconds}" "${CONTAINER_NAME}" \
+    >/dev/null 2>&1 </dev/null &
+  echo "DRILL: LiveKit server ${CONTAINER_NAME} will be removed in ${seconds}s" >&2
+}
+
 case "${1:-}" in
   start) start ;;
   stop) stop ;;
+  stop-after) stop_after "${2:-}" ;;
   *)
-    echo "usage: $0 start|stop" >&2
+    echo "usage: $0 start|stop|stop-after SECONDS" >&2
     exit 2
     ;;
 esac

@@ -165,6 +165,6 @@ filter = """
 test-group = "docker"
 # A test blocked on a LiveKit server that died stops being slow and starts being stuck; without this
 # it waits for the job's 150-minute limit. Terminated tests are reported by name.
-# TODO(shared-livekit-ci): conservative guess, no timing data yet. Re-size `period` from the node-3
-# per-binary table (longest legitimate test plus headroom), then tighten `terminate-after`.
-slow-timeout = { period = "120s", terminate-after = 5 }
+# Sized from a green e2e run's JUnit (run 37222869563, 820f86aa): the slowest single test took 39.8 s
+# and the next 20.2 s, so a test still running after 3 minutes (4.5x the slowest) is stuck, not slow.
+slow-timeout = { period = "60s", terminate-after = 3 }

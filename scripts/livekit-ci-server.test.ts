@@ -35,8 +35,8 @@ esac`,
     chmodSync(path, 0o755);
   }
 
-  run(command: "start" | "stop") {
-    const result = Bun.spawnSync([SERVER_SCRIPT, command], {
+  run(...args: string[]) {
+    const result = Bun.spawnSync([SERVER_SCRIPT, ...args], {
       env: {
         ...process.env,
         PATH: `${this.dir}:${process.env.PATH}`,
@@ -52,6 +52,11 @@ esac`,
     };
   }
 
+  /** The docker calls so far, read fresh: a detached removal lands after `run` has returned. */
+  dockerCalls() {
+    return existsSync(this.dockerLog) ? readFileSync(this.dockerLog, "utf8") : "";
+  }
+
   cleanup() {
     rmSync(this.dir, { recursive: true, force: true });
   }
@@ -59,6 +64,13 @@ esac`,
 
 let runner: ACiRunner | undefined;
 afterEach(() => runner?.cleanup());
+
+async function waitUntil(condition: () => boolean, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await Bun.sleep(100);
+  }
+}
 
 function aHealthyRunner() {
   runner = new ACiRunner({ apiAnswers: true });
@@ -113,6 +125,26 @@ describe("stopping the server", () => {
     expect(first.docker).toMatch(/rm -f/);
     expect(first.status).toBe(0);
     expect(second.status).toBe(0);
+  });
+});
+
+describe("the hang-protection drill", () => {
+  test("stop_after_returns_at_once_and_removes_the_container_later", async () => {
+    const ci = aHealthyRunner();
+    ci.run("start");
+
+    const scheduled = ci.run("stop-after", "1");
+
+    expect(scheduled.status).toBe(0);
+    expect(scheduled.docker).not.toMatch(/rm -f/);
+    await waitUntil(() => /rm -f/.test(ci.dockerCalls()));
+    expect(ci.dockerCalls()).toMatch(/rm -f/);
+  });
+
+  test("stop_after_refuses_a_duration_that_is_not_whole_seconds", () => {
+    const { status } = aHealthyRunner().run("stop-after", "soon");
+
+    expect(status).not.toBe(0);
   });
 });
 
