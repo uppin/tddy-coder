@@ -146,7 +146,11 @@ pub(super) fn has_path_attribute(block: &str) -> bool {
 /// Where a new declaration goes in the module spanning `scope` of `text`, and the text to write:
 /// below the last declaration of a module with a file of its own, else at the head of the module
 /// under its inner docs, with a blank line after it.
-pub(super) fn insertion(text: &str, scope: &Range<usize>, declaration: &str) -> (usize, String) {
+pub(in crate::backends::rust) fn insertion(
+    text: &str,
+    scope: &Range<usize>,
+    declaration: &str,
+) -> (usize, String) {
     let last = items_of_module(&text[scope.clone()])
         .children
         .iter()

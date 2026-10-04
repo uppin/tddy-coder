@@ -1,13 +1,15 @@
 //! What the plan and the text of the tree already say about a move, before any server exists.
 //!
-//! A destination that is not there, a name it already declares and a destination that is the items'
+//! A destination that is not there (or, for a line that names a module to create, a parent that is
+//! not there or already declares the name), a name it already declares and a destination that is the items'
 //! own module are lexical facts. Reading them here is what lets `check` report them without paying
 //! for an index, and what lets `apply` refuse a plan that cannot be honoured before it spawns one.
 
 use std::collections::BTreeSet;
 
 use super::super::{failure, is_identifier};
-use super::destination::{find_module, package_of, Lookup, Module, Package};
+use super::creation::{self, Destination};
+use super::destination::{find_module, package_of, Lookup, Package};
 use super::written_in;
 use crate::crate_move::source_scan::items_of_module;
 use crate::plan::{Anchor, ItemPath, RefactorOp};
@@ -19,6 +21,8 @@ pub(in crate::backends::rust) struct Named {
     pub(in crate::backends::rust) package: Package,
     pub(in crate::backends::rust) to: String,
     pub(in crate::backends::rust) module: Vec<String>,
+    /// The name of a module the move creates inside `module`, when the plan line carries `name`.
+    pub(in crate::backends::rust) creates: Option<String>,
 }
 
 /// `to` read against the package the anchor's file belongs to.
@@ -48,6 +52,7 @@ pub(in crate::backends::rust) fn named_by(
         module: pieces.map(str::to_string).collect(),
         package,
         to: to.to_string(),
+        creates: op.name.clone(),
     })
 }
 
@@ -95,25 +100,28 @@ pub(super) fn destination_for(
     named: &Named,
     source: &[String],
     names: &[String],
-) -> Result<Module> {
+) -> Result<Destination> {
     match obstacles(workspace, named, source, names)? {
         (found, _) if !found.is_empty() => Err(failure(found.join("; "))),
-        (_, Some(module)) => Ok(module),
+        (_, Some(destination)) => Ok(destination),
         (_, None) => Err(failure(format!("`{}` does not exist", named.to))),
     }
 }
 
-/// The findings, and the destination when it exists.
+/// The findings, and the destination when it exists (or, for a move that creates it, can be made).
 fn obstacles(
     workspace: &Workspace<'_>,
     named: &Named,
     source: &[String],
     names: &[String],
-) -> Result<(Vec<String>, Option<Module>)> {
+) -> Result<(Vec<String>, Option<Destination>)> {
     let module = match find_module(workspace, &named.package, &named.module)? {
         Lookup::Found(module) => module,
         Lookup::Missing { at } => return Ok((vec![does_not_exist(named, at)], None)),
     };
+    if let Some(name) = &named.creates {
+        return creation::within(workspace, named, name, module);
+    }
 
     if module.path == source {
         let subject = if names.is_empty() {
@@ -127,7 +135,7 @@ fn obstacles(
                  declared in",
                 named.to
             )],
-            Some(module),
+            Some(Destination::existing(module)),
         ));
     }
 
@@ -144,7 +152,7 @@ fn obstacles(
             )
         })
         .collect();
-    Ok((clashes, Some(module)))
+    Ok((clashes, Some(Destination::existing(module))))
 }
 
 /// The finding for a destination whose path stops existing at segment `at` of the module path.
@@ -153,10 +161,16 @@ pub(in crate::backends::rust) fn does_not_exist(named: &Named, at: usize) -> Str
         .chain(named.module[..at].iter().map(String::as_str))
         .collect::<Vec<_>>()
         .join("::");
-    format!(
-        "`{}` does not exist: `{parent}` declares no module `{}`. A move never creates a module — \
-         make it first, with `extract_module`",
+    let missing = format!(
+        "`{}` does not exist: `{parent}` declares no module `{}`",
         named.to, named.module[at]
+    );
+    if named.creates.is_some() {
+        return missing;
+    }
+    format!(
+        "{missing}. A move creates a module only when its line carries a `name`: `to` is then the \
+         parent the new module is declared in"
     )
 }
 

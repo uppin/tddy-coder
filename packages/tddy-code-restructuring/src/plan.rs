@@ -384,7 +384,8 @@ pub struct RefactorOp {
     pub id: Option<OpId>,
     pub op: RefactorKind,
     pub anchor: Anchor,
-    /// New symbol name, for extractions and renames.
+    /// New symbol name, for extractions and renames. On a `move_item` it names a module the move
+    /// creates: `to` is then that module's parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Destination path, for moves.
@@ -1662,5 +1663,17 @@ mod tests {
                 .all(|reason| reason.contains("names no module-level item to move")),
             "{refusals:?}"
         );
+    }
+
+    #[test]
+    fn rejects_a_name_on_reparent_module_which_creates_no_module() {
+        let line = r#"{"op":"reparent_module","anchor":{"kind":"items","file":"src/a.rs","items":["app::a::m"],"fingerprints":["sha256:ab"]},"to":"app::b","name":"x"}"#;
+
+        let refusal = match Plan::parse(&plan_with(line)) {
+            Err(RestructureError::MalformedPlan(reason)) => reason,
+            other => format!("not refused as malformed: {other:?}"),
+        };
+
+        assert!(refusal.contains("creates no module"), "{refusal}");
     }
 }

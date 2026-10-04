@@ -379,6 +379,12 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
             "the module that becomes the parent",
             "a range or a symbol names no `mod` declaration to move",
         )?;
+        if op.name.is_some() {
+            return Err(malformed(
+                "`reparent_module` creates no module: `name` belongs to `move_item`, which declares \
+                 a new module in `to` when its line carries one",
+            ));
+        }
         if op.reexport == Some(Reexport::Named) {
             return Err(malformed(
                 "`reparent_module` cannot write a named facade: a module has no items of its own \

@@ -19,7 +19,7 @@ pub(super) struct MovedFile {
 
 /// The directory the children of `module` live in: the directory of its file's children, then the
 /// inline modules the module sits in below that file.
-pub(super) fn directory_of(root: &Path, module: &Module) -> Result<PathBuf> {
+pub(in crate::backends::rust) fn directory_of(root: &Path, module: &Module) -> Result<PathBuf> {
     let file_depth = module_path_of(root, &module.file)?.len() - 1;
     Ok(module.path[file_depth..]
         .iter()

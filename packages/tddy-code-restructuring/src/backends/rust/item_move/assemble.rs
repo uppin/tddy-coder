@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use super::super::seam_refusal;
+use super::creation;
 use super::destination::{Module, Package};
 use super::facade;
 use super::imports::{self, Source};
@@ -37,6 +38,8 @@ pub(super) struct Moving<'a> {
     /// The items the source module keeps that the moved code names.
     pub(super) reached: &'a [Item],
     pub(super) destination: &'a Module,
+    /// The parent that declares the destination, and its name, when the move creates it.
+    pub(super) created: Option<(&'a Module, &'a str)>,
     /// The callers the move re-points: under `outside`, only the ones in the item's own crate.
     pub(super) sites: &'a [Site],
     /// The moved names a facade is left for under `outside`.
@@ -89,6 +92,15 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         .entry(moving.source_file.to_string())
         .or_default()
         .push(leave_behind(moving, &region, &landing));
+    if let Some((parent, name)) = moving.created {
+        let visibility = declared_visibility(moving, parent, &texts, &region, &landing);
+        let (at, written) =
+            creation::declaration(&texts[&parent.file], &parent.scope, &visibility, name);
+        edits
+            .entry(parent.file.clone())
+            .or_default()
+            .push(Edit::insert(at, written));
+    }
 
     let mut files = BTreeMap::new();
     for (path, mut list) in edits {
@@ -109,12 +121,43 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
     })
 }
 
+/// The visibility the created module is declared with: the narrowest that lets every caller the move
+/// re-points, and the facade it leaves behind, reach it.
+fn declared_visibility(
+    moving: &Moving<'_>,
+    parent: &Module,
+    texts: &BTreeMap<String, String>,
+    region: &Range<usize>,
+    landing: &Landing,
+) -> String {
+    let mut scope = Scope::Within(parent.path.clone());
+    let facade = outside::facade_items(moving.reexport, &landing.written, moving.outside);
+    if !moving.reexport.repoints_callers() || !facade.is_empty() {
+        scope = scope.widened_to(moving.source);
+    }
+    if moving.reexport.repoints_callers() {
+        for item in &moving.run.items {
+            scope = match users_of(moving, texts, region, &item.name) {
+                Some(users) => users
+                    .iter()
+                    .fold(scope, |scope, user| scope.widened_to(user)),
+                None => Scope::Public,
+            };
+        }
+    }
+    scope.spelled_in(&parent.path)
+}
+
 fn original_texts(moving: &Moving<'_>) -> Result<BTreeMap<String, String>> {
     let mut texts = BTreeMap::new();
     texts.insert(
         moving.source_file.to_string(),
         moving.source_text.to_string(),
     );
+    if let Some((parent, _)) = moving.created {
+        texts.insert(parent.file.clone(), moving.workspace.read(&parent.file)?);
+        texts.insert(moving.destination.file.clone(), String::new());
+    }
     let wanted =
         std::iter::once(&moving.destination.file).chain(moving.sites.iter().map(|site| &site.path));
     for path in wanted {

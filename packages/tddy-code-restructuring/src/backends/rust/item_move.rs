@@ -8,8 +8,12 @@
 //!
 //! What is lexical is answered before a server exists ([`preflight`]): a destination module that is
 //! not there, a name it already declares, and a destination that is the items' own module.
+//!
+//! The destination must exist, unless the plan line carries `name`: then `to` is the parent and the
+//! move declares a new, empty module of that name in it first ([`creation`]).
 
 pub(super) mod assemble;
+mod creation;
 pub(super) mod destination;
 pub(super) mod facade;
 mod imports;
@@ -93,20 +97,23 @@ impl RustBackend {
             source: &source,
             run: &run,
             reached: &reached,
-            destination: &destination,
+            destination: &destination.module,
+            created: destination.parent.as_ref().zip(named.creates.as_deref()),
             sites: &reach.sites,
             outside: &reach.outside,
             reexport,
         })?;
 
-        let changes = assembled
-            .files
-            .into_iter()
-            .map(|(path, (old, new))| FileEdit::Change {
+        let mut changes = Vec::new();
+        for (path, (old, new)) in assembled.files {
+            if path == destination.module.file && destination.parent.is_some() {
+                changes.push(FileEdit::Create { path: path.clone() });
+            }
+            changes.push(FileEdit::Change {
                 path,
                 edits: seam_survey::minimal_edits(&old, &new),
-            })
-            .collect();
+            });
+        }
         Ok(Resolution {
             edit: WorkspaceEdit { changes },
             report: assembled.report,

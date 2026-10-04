@@ -13,9 +13,9 @@
 //! change are edited, so comments and formatting arrive as they were.
 
 mod assemble;
-mod declaration;
+pub(super) mod declaration;
 mod reading;
-mod relocation;
+pub(super) mod relocation;
 mod survey;
 mod visibility;
 

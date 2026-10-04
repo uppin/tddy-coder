@@ -199,11 +199,17 @@ the acceptance, and they are checked by the L5 gate plus these scripted checks, 
 
 Recommended answers are first; **D1, D2, D3, D7 need your review before `/green`.**
 
-- **D1: destination must exist, or the move creates it?** *Recommended: it must exist.* A move that creates a
-  file is a `create_file` by another name (`SKILL.md`: "No `create_file`"). A new module is made by
-  `extract_module` (from the first item) or by an earlier `reparent_module`, so M0.1 composes from
-  operations that exist. Cost: M0.1 is three steps, not one. Alternative: `move_item` creates the module
-  (`create: true`): shorter plans, a wider operation.
+- **D1: destination must exist, or the move creates it?** **AMENDED 2026-10-04 by the developer: a
+  `move_item` line that carries `name` creates its destination**, because `extract_module` cannot
+  re-point callers (it refuses, or leaves a facade only a hand edit can remove), so a topic module
+  gathered from items in several files (M0.1) could not be composed. With `name`, `to` is the
+  **parent** and a new, empty module `name` is declared in it (`<parent dir>/<name>.rs`; parent forms
+  `<parent>.rs` and `<parent>/mod.rs`; the crate root too), with the narrowest visibility its callers
+  and facade need; the items then move in as before. Refused: a parent that does not exist, a parent
+  that already declares `name`. Without `name`, `to` is an existing module and a missing one is
+  refused (a typo cannot grow a file). `reparent_module` does **not** create: it refuses `name`.
+  Originally *recommended: it must exist*, a new module being made by `extract_module` or an earlier
+  `reparent_module`; the cost was a three-step M0.1.
 - **D2: vocabulary.** *Recommended: two new kinds.* `move_symbol` and `move_file` are claimed by the
   TypeScript backend ("TypeScript Move to file"); giving them a Rust meaning would make one name mean two
   transformations. Alternative: back `move_symbol` for Rust.
