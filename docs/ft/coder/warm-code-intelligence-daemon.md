@@ -232,6 +232,14 @@ that executor; this is a choice of deployment, not a fallback within one — wit
 that executor is never asked. `ReadLints`, which reports a whole workspace, is refused through the
 index, because diagnostics are answered per file; the refusal points the agent at `LspDiagnostics`.
 
+The same index serves a session's restructuring. An agent's `restructure_load`, `restructure_check`,
+`restructure_apply`, `restructure_status`, `restructure_plans` and `restructure_anchors` calls are
+answered by it, rooted at the session's own worktree and with every plan or file path bound inside it
+on the host ([Rust code restructuring](rust-code-restructuring.md#entry-points) states the results).
+The daemon registers the executor only when `index_daemon:` is configured, and exports the gate that
+advertises the tools to a session's jail only then, so a session is never offered a tool that cannot be
+served.
+
 A started session also **warms** its index. When a Claude CLI, Cursor CLI or workspace session's
 worktree exists and holds a Rust workspace (a `Cargo.toml` at its root), tddy-daemon calls `Warm` for
 it in the background — which starts the index daemon if nothing has — and keeps the latest progress per
@@ -249,7 +257,7 @@ path that exists without a daemon installed.
 - [Rust code restructuring](rust-code-restructuring.md) — the operations, the plan format, waiting
 - [Rust code analysis](rust-code-analysis.md) — coverage, CRAP, duplicate tests, the complexity cache
 - [Reusable LSP](reusable-lsp.md) — the registry both hosts share, and what a long-lived host needs
-- Package: [`packages/tddy-lsp-executor/docs/index-backed-executor.md`](../../../packages/tddy-lsp-executor/docs/index-backed-executor.md) — the executor that answers a session's `Lsp*` tools from this index
+- Package: [`packages/tddy-lsp-executor/docs/index-backed-executor.md`](../../../packages/tddy-lsp-executor/docs/index-backed-executor.md) — the executors that answer a session's `Lsp*` and `restructure_*` tools from this index
 - [RPC multi-transport](rpc-multi-transport.md) — the transport contract this service is served under
 - Package: [`packages/tddy-index-daemon/docs/code-index-service.md`](../../../packages/tddy-index-daemon/docs/code-index-service.md)
 

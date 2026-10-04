@@ -77,7 +77,6 @@ its changeset wraps.
 | PRD | Affects |
 |-----|---------|
 | [Restructure refusal truth and authoring gates](1-WIP/PRD-2026-09-17-restructure-refusal-truth-and-authoring-gates.md) | [Rust code restructuring](rust-code-restructuring.md) — refusal classes, import restoration, a leftover-reference preflight, `restructure snapshot`, and the authoring gates |
-| [Restructure tool calls in sessions](1-WIP/PRD-2026-10-03-session-restructure-tools.md) | [Rust code restructuring](rust-code-restructuring.md), [Warm code-intelligence daemon](warm-code-intelligence-daemon.md) — `#live-plan` stack |
 
 ## Integration Points
 

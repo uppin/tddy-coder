@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 615 | 5 | 17 | 32 | first detection |
 | 2026-09-24 | 342 | — | — | — | #524: plans `09b`, `09c`, `13` (the helpers into `jail_*` modules) and `18`, and DRY #5–#7 (615 → 342). What is left: the 23-parameter signature (~50 lines), three early returns and the two parameter-struct literals; the length goes with DRY #1's request struct, which waits on coverage |
+| 2026-10-04 | — | — | — | — | touched by #573 (`#live-plan` 14/15): one added line, `env.extend(self.restructure_tools_env())`, beside the existing `lsp_tools_env` one (file 493 → 494 lines). Metrics not re-derived |
 
 ## What the tool found
 

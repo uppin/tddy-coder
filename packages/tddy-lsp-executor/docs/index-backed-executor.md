@@ -14,6 +14,7 @@ and [Reusable LSP](../../../docs/ft/coder/reusable-lsp.md). The service it asks:
 | `IndexChannel` | An async port: `connect() -> tonic Channel`, starting the index if nothing has. The daemon implements it for `IndexDaemonRegistry` by delegating to `connect`, so the registry stays in `tddy-daemon`, which depends on this crate and not the other way round |
 | `IndexLspExecutor` | An `LspExecutor` whose every method asks the index through an `IndexChannel`. Each call dials a fresh client |
 | `bind_to_session_worktree(worktree, file)` | The host-side binding: the queried `file` as a path relative to the session's worktree, or a refusal |
+| `restructure_via_index::IndexRestructureExecutor` | A `RestructureExecutor` (the port in `tddy_core::toolcall::restructure`) answering the six `restructure_*` tools through an `IndexChannel`; see [The restructure tools](#the-restructure-tools) |
 | `select_lsp_executor(index, existing)` | The deployment switch: the index-backed executor when the host has an index, `existing` otherwise |
 
 ## One worktree, bound on the host
@@ -68,6 +69,35 @@ server of this crate's own would disagree with the index every other pane asks, 
 fallback. Backlog:
 [`2026-10-04-read-lints-is-refused-through-the-warm-index.md`](../../../docs/dev/todo/2026-10-04-read-lints-is-refused-through-the-warm-index.md).
 
+## The restructure tools
+
+`restructure_via_index::IndexRestructureExecutor` answers a session's `restructure_*` tools from the
+same index through the same `IndexChannel`. One method per tool, each dialling a fresh client:
+
+| Tool | Index call |
+|---|---|
+| `restructure_load` | `LoadPlans` (each plan bound to the worktree) |
+| `restructure_plans` | `ListPlans` |
+| `restructure_check` | `Check` (`deep`, `file_budget`) |
+| `restructure_apply` | `Apply` (`dry_run`, `resume`, `from`, `stop_after`) |
+| `restructure_status` | `PlanStatus` |
+| `restructure_anchors` | `Anchors` (`file`, `items`, optional `at` range) |
+
+Every plan and file path goes through `bind_to_session_worktree`, so a path outside the worktree is
+refused with `<path> is outside the session's worktree` before the index is asked, and the workspace
+root is always the host's. `Check` and `Apply` stream: the executor folds the events into one run
+object (`plan`, `findings`, `operations`, `notes`, `outcome`, `refusal`). A status the index ends the
+stream with becomes `refusal` — `class` (the gRPC class in snake case), `message` and `stale` — and the
+operations applied before it stay in the answer. For a `failed_precondition` the executor then asks
+`PlanStatus` for the plan's stale operations, so a stale operation is refused **by its id**; if that
+lookup itself fails, `stale` is empty and `stale_error` carries the message, never replacing the run.
+An `Err` is a failure before or at reaching the index: a missing or malformed argument, a path outside
+the worktree, an index that cannot be reached.
+
+`tddy-daemon` registers it with `register_restructure_executor` when `index_daemon:` is configured, and
+the jail's `TDDY_RESTRUCTURE_TOOLS` is exported only when an executor is registered; the gate, the six
+names and the port are in `tddy-toolcall` (`tddy_core::toolcall::restructure`).
+
 ## Selection
 
 `select_lsp_executor` is a deployment switch, not a fallback: with an index the executor passed as
@@ -83,6 +113,13 @@ dependency means every dependent of this crate — `tddy-session-lifecycle`, `td
 `code_index` client crate would remove that weight.
 
 ## Testing
+
+`tests/restructure_tools_via_index.rs` (14) pins the restructure tools against a fake `code_index` server on an
+AF_UNIX socket: the request each tool sends, the run object for `check` and `apply`, a stale operation
+refused by id, a refusal that is not a stale operation, a failed stale lookup that keeps the applied
+operations, a missing argument, and a path outside the worktree refused for `apply`, `load` and
+`anchors`, with the index never asked. The daemon registration and the jail env export have no test of
+their own; see `docs/dev/todo/2026-10-04-session-restructure-tools-no-jail-end-to-end-test.md`.
 
 `tests/lsp_tools_via_index.rs` runs every call through `select_lsp_executor` on a blocking thread, as
 `tddy_tool_engine`'s `Lsp*` dispatch does, against a fake `code_index` server on an AF_UNIX socket

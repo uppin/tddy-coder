@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs:623` — `build`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
-**Metrics:** **928 lines** (2026-10-04, #571 HEAD, brace matching; 910 before #571 by the same count — 905 by the earlier scan at #570 HEAD; 891 before #570, 806 at detection) · **nesting depth 5** · 2 parameters · 20 branch/match lines · 15 early exits (the 2026-09-23 exit count; the first row's 10 used a different count)
+**Metrics:** **937 lines** (2026-10-04, #571 HEAD, brace matching; 910 before #571 by the same count — 905 by the earlier scan at #570 HEAD; 891 before #570, 806 at detection) · **nesting depth 5** · 2 parameters · 20 branch/match lines · 15 early exits (the 2026-09-23 exit count; the first row's 10 used a different count)
 **Thresholds breached:** length 928 > 60; nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — regressed 2026-10-04 (+18 from #571, to 928 lines by brace matching; earlier, 806 → 905 since detection: +14 from #570; +2 from #494, +45 from #508, +1 from #509, +1 from #510, +11 from #574) — **unclaimed**
+**Status:** Open — regressed 2026-10-04 (+9 from #573, +18 from #571, to 928 lines by brace matching; earlier, 806 → 905 since detection: +14 from #570; +2 from #494, +45 from #508, +1 from #509, +1 from #510, +11 from #574) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -23,6 +23,7 @@
 | 2026-10-03 | 891 | 5 | — | — | 880 on `origin/feature/live-plan/live-plans` → 891 after #574 (`#live-plan` 8/15): the `CodeNavigationServiceImpl` construction and its `rpc_entries.push`, inside `build` (+11 lines, comment included). Nesting by indentation unchanged; branches and exits not re-derived. Split deferred with the developer's consent (`docs/dev/todo/2026-10-03-code-navigation-grew-four-oversized-files.md`), as for `oversized-file-runtime` |
 | 2026-10-04 | 905 | 5 | — | — | 891 → 905 after #570 (`#live-plan` 11/15), +14 by the same scan that measures 896 → 910 on `origin/master` (`51b8eb97`): the `Lsp*` executor is built inside `build`, its idle-reaper registry taken, and `select_lsp_executor` registers the index-backed executor when `index_daemon:` is configured — the block moved below the `index_daemon` section whose registry it needs. Grown; the split is deferred with the developer's consent (`docs/dev/todo/2026-10-03-session-lsp-tools-grew-runtime-rs.md`) because #571 and #573 touch this file |
 | 2026-10-04 | 928 | 5 | — | — | 910 → 928 after #571 (`#live-plan` 12/15), +18, by brace matching from the `pub async fn build` line on `origin/feature/live-plan/session-lsp-tools` and on HEAD (the 905 above is the earlier scan's count of the same function; the two scans differ by 5). Inside `build`: the `index_daemon` block moved above the session host's construction, the `SessionIndexProgress` holder, the `with_worktree_observer` installation and `with_index_progress` on the navigation service. Nesting by indentation unchanged; branches and exits not re-derived. Grown; the split is deferred because dependent #572 and its parents touch this file (the stack rule), as for `oversized-file-runtime` |
+| 2026-10-04 | 937 | — | — | — | 928 → 937 after #573 (`#live-plan` 14/15), +9, by brace matching from the `pub async fn build(` line to its closing brace: the `IndexRestructureExecutor` registration inside `build`, beside the `Lsp*` registration and from the same `IndexChannel`. Grown; the split is deferred with the other `runtime.rs` work (`docs/dev/todo/2026-10-04-session-restructure-tools-grew-two-oversized-files.md`) |
 
 ## What the tool found
 

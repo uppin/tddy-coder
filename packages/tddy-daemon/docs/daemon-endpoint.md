@@ -24,6 +24,11 @@ Registration is first-wins per process, so the choice is made before the registr
 `TddyLspExecutor` is built either way, because its registry is what the idle-reaper loop drives; with an
 index selected that registry stays empty.
 
+With an `index_daemon:` section it also registers `tddy_lsp_executor::restructure_via_index::IndexRestructureExecutor`,
+from the same `IndexChannel`, with `register_restructure_executor`; without the section nothing is
+registered and a session's `restructure_*` tools are not advertised. The jail gate is derived from that
+registration (`restructure_tools_env` in `tddy-session-lifecycle`), so the two cannot disagree.
+
 When `index_daemon:` is configured, `runtime::build` constructs the `IndexDaemonRegistry` **before** the
 session host, because the host's `SessionWorktreeObserver` (`tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver`)
 holds the registry, as an `IndexChannelSource`, to warm each started session's code index. The same

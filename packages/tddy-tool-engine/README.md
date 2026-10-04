@@ -35,6 +35,11 @@ hand-copied clone of it in its MCP shape, with matched guard tests in both crate
 two in step; it now derives its `RemoteToolDef`s from this function at the single point that needs
 that shape, the same way it derives the `Lsp*` tools from `tddy_lsp_executor`.
 
+The six `restructure_*` names are routed (`restructure_tools.rs`) to the executor registered through
+`tddy_core::toolcall::restructure`; with none registered the answer is `no warm index available`, and
+the `RemoteShell` engine refuses them as it refuses the `Lsp*` tools. The executor itself lives in
+`tddy-lsp-executor`, so no index client reaches `tddy-sandbox-runner`.
+
 The MCP shape itself — `RemoteToolDef`, `build_dynamic_tool_list`, `dynamic_tool_router`,
 `dispatch_dynamic_tool` — stays in `tddy-tools`, which is the crate that speaks MCP. Putting it here
 would mean `rmcp` in a crate every workspace-session host links, and `dispatch_dynamic_tool`

@@ -14,6 +14,7 @@
 | 2026-09-18 | 1,722 | 41 | 0% | 465 | first detection |
 | 2026-09-24 | — | — | never executed | 414 | #524 touched it only through merges of proven-identical copies: DRY #3 (project lookup, metadata), #5 (semantic index), #6 (initial changeset), #7 (worktree cut): 465 → 414. Its suite is still red on this host (the RPC bridge is never installed), so it is still unexecuted, and it was not restructured, per this record. CRAP and complexity not re-derived |
 | 2026-10-03 | — | — | never executed | 414 | touched by PR #576 (caller sync) and **unchanged by it**: one call gains its arguments, `sandbox_rpc_handler(session_id, &session_dir)`, so the jail's bridge is bound to its session. Same line count on `0ce696aa` and `4f2a3b66`; no branch added |
+| 2026-10-04 | — | — | never executed | — | touched by #573 (`#live-plan` 14/15): one added line, `env.extend(self.restructure_tools_env())`, beside the existing `lsp_tools_env` one (file 445 → 446 lines); still never executed by any test |
 
 ## What the tool found
 
