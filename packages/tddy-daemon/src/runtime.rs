@@ -168,12 +168,22 @@ pub struct DaemonRuntime {
     pub index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     /// Everything this runtime needs running but has not started: see [`RuntimeTasks`].
     pub tasks: RuntimeTasks,
+    /// The credential vaults the auth and accounts services share, when `auth_storage` is set.
+    /// Private, read through [`DaemonRuntime::credential_vaults`].
+    credential_vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>,
 }
 
 impl DaemonRuntime {
     /// The names of the services this runtime hosts, in registration order.
     pub fn service_names(&self) -> Vec<&str> {
         self.entries.iter().map(|entry| entry.name).collect()
+    }
+
+    /// The very vaults this runtime's services hold open — one handle, not a second instance over
+    /// the same directory, whose in-memory open state would be its own. `None` without
+    /// `auth_storage`, where nothing keeps a credential.
+    pub fn credential_vaults(&self) -> Option<&Arc<tddy_daemon_auth::SessionVaults>> {
+        self.credential_vaults.as_ref()
     }
 
     /// The child processes this daemon spawned, as a handle a signal task can own.
@@ -868,6 +878,7 @@ pub async fn build(
             })
         };
         let ss_user_resolver = user_resolver.clone();
+        let accounts_user_resolver = user_resolver.clone();
         let remote_git_user_resolver = user_resolver.clone();
         // Every project a daemon serves is resolved against *that OS user's own* registry, so
         // this mirrors `sessions_base_resolver` one directory down.
@@ -1502,6 +1513,17 @@ pub async fn build(
         // The entry comes from `tddy-screen-sharing` rather than being assembled here: the
         // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
         rpc_entries.push(tddy_screen_sharing::build_screen_sharing_entry(ss_svc));
+
+        // AccountsService — what the caller's credential vault holds, never a secret. The session
+        // token resolves to the GitHub login, which is the vault's subject. Not registered without
+        // `auth_storage`: there is no vault to show, and nothing stands in for one.
+        if let Some(vaults) = auth_result.credential_vaults.clone() {
+            rpc_entries.push(tddy_accounts::build_accounts_entry(
+                tddy_accounts::AccountsServiceImpl::new(Arc::new(
+                    tddy_accounts::SessionVaultAccountStore::new(vaults, accounts_user_resolver),
+                )),
+            ));
+        }
     }
 
     // The daemon's own settings, read and written by its UI. Registered for every host — a desktop
@@ -1555,6 +1577,7 @@ pub async fn build(
         relay_shutdown,
         index_daemon: index_daemon_registry,
         tasks,
+        credential_vaults: auth_result.credential_vaults,
     })
 }
 

@@ -1,5 +1,6 @@
 # tddy-web documentation
 
+- **Accounts screen (the credential vault's accounts, rename and remove)**: [accounts-screen.md](accounts-screen.md)
 - **Capability gating (media and presence surfaces)**: [capability-gating.md](capability-gating.md)
 - **Changeset history**: [changesets/](changesets/)
 - **Code navigation (definition, hover, references in the code pane)**: [code-navigation.md](code-navigation.md)

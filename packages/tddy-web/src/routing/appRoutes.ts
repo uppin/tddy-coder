@@ -106,6 +106,20 @@ export function isProjectsPath(pathname: string): boolean {
   return pathname === PROJECTS_ROUTE;
 }
 
+/**
+ * Canonical path for the Accounts screen — the credentials a daemon holds, one row per linked
+ * account, grouped by provider.
+ */
+export const ACCOUNTS_ROUTE = "/accounts";
+
+/**
+ * Returns true only for `/accounts`. Does NOT match `/accounts-archive` or any other path that
+ * merely starts with `/accounts` — the screen owns exactly one path, as Projects and Hosts do.
+ */
+export function isAccountsPath(pathname: string): boolean {
+  return pathname === ACCOUNTS_ROUTE;
+}
+
 /** Canonical path for the Hosts screen — every host tddy has seen, reachable or not. */
 export const HOSTS_ROUTE = "/hosts";
 
