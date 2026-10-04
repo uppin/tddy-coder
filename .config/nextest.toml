@@ -17,11 +17,12 @@
 #
 # CI runs the suite as two checks, split by what a test needs to run rather than by how long it
 # takes: `Rust tests` and `Rust e2e tests`. The e2e set — tests that need real infrastructure, a
-# LiveKit server in Docker or a real tddy-supervisor / index-daemon / daemon / coder process — is
-# written once, in `.config/rust-e2e.filterset`. ci.yml hands each leg that expression or its
-# complement with `-E`, which nextest ANDs with the `default-filter` below, so the exclusions apply
-# to both. A test that starts a real LiveKit server or execs one of those processes belongs in that
-# file; a test that only builds the thing in process does not.
+# LiveKit server in Docker, a live rust-analyzer or a real tddy-supervisor / index-daemon / daemon /
+# coder process — is written once, in `.config/rust-e2e.filterset`. ci.yml hands each leg that
+# expression or its complement with `-E`, which nextest ANDs with the `default-filter` below, so the
+# exclusions apply to both. A test that starts a real LiveKit server, drives a live rust-analyzer or
+# execs one of those processes belongs in that file; a test that only builds the thing in process
+# does not.
 
 [profile.default]
 retries = 0

@@ -6,12 +6,15 @@
 [Continuous integration](../guides/ci.md#rust-tests-and-rust-e2e-tests).
 
 `Rust tests` is split in two checks by what a test needs: `Rust tests` (everything that runs in
-process) and `Rust e2e tests` (tests that need a LiveKit server in Docker, or a real
+process) and `Rust e2e tests` (tests that need a LiveKit server in Docker, a live rust-analyzer, or a real
 `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process). One matrix job runs both legs, from
 one filterset, `.config/rust-e2e.filterset`, which each leg takes or negates; each leg publishes its
 own report and JUnit artifact.
 
-- The set is 41 filterset terms: 35 LiveKit-backed test binaries (plus the testkit's own), the
+- The 31 `tddy-code-restructuring` test binaries that use the live rust-analyzer harness are in the set
+  (about 950s of the unit leg's 1,618s of summed test time); 9 binaries and the crate's 761 in-process
+  lib tests stay in `Rust tests`. The `rust-analyzer` nextest group still names only 10 of the 31.
+- The rest of the set is 41 filterset terms: 35 LiveKit-backed test binaries (plus the testkit's own), the
   supervisor's integration binaries, and four daemon-class binaries — `dual_transport_acceptance`,
   `ping_answers_only_a_live_listener`, `index_daemon_client_acceptance`, `acceptance_daemon` — and
   `stdio_remote_control_acceptance`.

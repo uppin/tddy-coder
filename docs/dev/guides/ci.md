@@ -53,7 +53,7 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 | Check | Runs | Needs |
 |-------|------|-------|
 | `Rust tests` | every test not in the e2e set | nothing outside the process, the files and the sockets it makes itself |
-| `Rust e2e tests` | the e2e set | real infrastructure: a **LiveKit server in Docker**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
+| `Rust e2e tests` | the e2e set | real infrastructure: a **LiveKit server in Docker**, a **live rust-analyzer**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
 
 They are the two legs of one matrix job in `ci.yml`, so the setup — fixture binaries, nix, caches,
 the JUnit report — exists once. A failing leg does not cancel the other, and each reports its own
@@ -63,16 +63,24 @@ separate (`test`, `test-e2e`).
 **The set is written once, in [`.config/rust-e2e.filterset`](../../../.config/rust-e2e.filterset).** The
 `e2e` leg runs that nextest filterset and the other leg runs its complement, both with `-E`, which
 nextest combines with the profile's `default-filter` — so the exclusions below apply to both. A
-test belongs in the file when it **starts a real LiveKit server** (it uses `tddy-livekit-testkit`) or
-**execs one of those processes**; a test that builds the same thing in process does not. The
+test belongs in the file when it **starts a real LiveKit server** (it uses `tddy-livekit-testkit`),
+**drives a live rust-analyzer** (in `tddy-code-restructuring`: it uses the `tests/harness` module, which
+spawns the server over a real cargo workspace) or **execs one of those processes**; a test that builds the same thing in process does not. The
 `tddy-e2e` package is named for its purpose, but most of it — the gRPC and PTY workflow tests — runs
 the presenter in memory, and stays in `Rust tests`; only its LiveKit tests and
 `stdio_remote_control_acceptance` (a real `tddy-coder`) are in the set.
 
-When you add a test that uses the LiveKit testkit or spawns one of those binaries, add its binary to
-the filterset, and — for a LiveKit one — to the `docker` test-group in `.config/nextest.toml`, which
+When you add a test that uses the LiveKit testkit, the restructuring harness or spawns one of those
+binaries, add its binary to the filterset, and — for a LiveKit one — to the `docker` test-group in `.config/nextest.toml`, which
 keeps those tests off each other's ports. The two lists carry the same LiveKit names on purpose; the
 group also covers `tddy-livekit`'s own suites.
+
+**Known drift: the `rust-analyzer` group.** `.config/nextest.toml` serialises the rust-analyzer
+binaries (indexing is the contended resource, and two servers loading a crate graph can expire a
+bounded indexing budget), but it names 10 of the 31 restructuring binaries that use the harness. The
+other 21, including the five slowest, run in parallel with each other. Serialising all 31 is the
+intent of the group's own comment, and would cost roughly 8–10 minutes of run time in the e2e leg
+(their summed test time is ~950s); it has not been done.
 
 **Whether `Rust e2e tests` is required is set in the repository's branch protection, not in
 `ci.yml`**, so adding the check does not by itself change what `#automerge` waits for. Until it is
