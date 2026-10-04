@@ -251,7 +251,7 @@ test code).
 |---|---:|---|---|---|
 | `cs/svc_spawn_split_agent.rs` | 445 | 8 methods → SS:<br>• `spawn_split_agent` (110);<br>• `spawn_split_agent_process` reads `claude_cli_manager`;<br>• `join_split_livekit_room`: **2 × `self.clone()`**, for `RemoteCheckout::new(Arc::new(self.clone()))` (becomes AHC `worktree_snapshot`, through `SplitHost`) and the room-roster closure (becomes `session_room_roster`);<br>• `agent_session_token_for` and two sites read `session_tokens()` (an SS field and a refusal fn);<br>• `split_forward_deadline` is the free fn (16a);<br>• `write_split_agent_metadata` is free.<br>It names `CliSessionManager::start_with_options` and `PtyHandle` (CLI, below) | cluster → `tddy-session-split` | code issue (110, 9 params) |
 | `cs/svc_spawn_split_agent/svc_paired_codebase_teardown.rs` | 178 | `tear_down_codebase_session`, `delete_paired_codebase_session` (95) → SS, **`SH::delete_session`** (it re-enters `delete_session_at_session_coordinate`, T1c) | in the cluster | code issue (95) |
-| `split_claude_cli_start.rs` (re-parented off the T8 file in 16a, under the T4 group) | 178 | `start_split_claude_cli_session` (146) → SS. It calls T3 `resolve_specialized_agent_defs` through the roster handle and `split_forward_deadline` (free) | in the cluster | code issue (146, near 150) |
+| `split_claude_cli_start.rs` (the re-parent off the T8 file was **deferred** in 16a (M0.4); it still sits under the T8 file) | 178 | `start_split_claude_cli_session` (146) → SS. It calls T3 `resolve_specialized_agent_defs` through the roster handle and `split_forward_deadline` (free) | in the cluster | code issue (146, near 150) |
 | `cs/svc_split_context_from_codebase_host.rs` (T4 part) | 409 | `split_context_from_codebase_host` (132) → SS. `context_manifest_of`, `context_file_batch_of` and `session_files_of_this_daemon` hand `Arc::new(self.clone()).session_files_service()` (`PeerRoutedSessionFiles`, wiring) → **`SH::session_files`** (D3). The file's T1 part (`resume_sandboxed_claude_cli_session`, 62) stays a host method: 16d | in the cluster | mixed file (the T1 part is extracted in 16d) |
 | `cs/svc_start_sandboxed_codebase_session.rs` | 267 | 4 methods → SS. `start_sandboxed_codebase_session` calls `start_session_core` → **`SH::start_workspace_session`** (the T1↔T4 cut). `reprovision_colocated_checkout_jail` calls `provision_workspace_tool_sandbox` (T4) | in the cluster | — |
 | `cs/split_start.rs` | 125 | no change except imports. It names `workspace_session::PairedAgentSession` (so `workspace_session` goes to split, D5) | in the cluster | — |
@@ -263,7 +263,7 @@ test code).
 | `attached_initial_prompt` (from `cli_branch_starts.rs`) | ~20 | moved into T4 (M5.3), over `AttachmentState` and `stack_doc_attachments` | in the cluster | T4 → T1 edge, cut by the move |
 | T4's `hooks_and_urls` group (`write_claude_hooks_settings`, `resolve_start_session_claude_binary`, from 16a) | 16 + 3 | imports only | in the cluster | — |
 | `cs/service_util.rs` | 293 | no change (free); imports | in the cluster | its two `pub use` (`spawn_blocking_with_timeout`, `await_supervised_with_timeout`) are read by `tddy-daemon-rpc`; the facade is kept |
-| `workspace_session.rs` | 266 | no change (free; `resolve_worktree_root_for_session` left for T3 in 16a); imports | in the cluster | `tddy-daemon` reaches it through the facade |
+| `workspace_session.rs` | 266 | no change (free; `resolve_worktree_root_for_session` stays here: M0.1 was deferred in 16a); imports | in the cluster | `tddy-daemon` reaches it through the facade |
 
 ### Per-file inventory: CLI PTY runtime (1,709 lines, imports only)
 
@@ -518,7 +518,7 @@ Settled by the developer (2026-09-26), carried here:
   node 17).
   - Why: both are used by the launch topic above and T4, and `split_start` names
     `workspace_session::PairedAgentSession`.
-  - `resolve_worktree_root_for_session` already went to T3 (16a), because agents calls it.
+  - `resolve_worktree_root_for_session` was to go to T3 in 16a (M0.1), because agents calls it. **16a did not move it** (M0.1 is deferred until the engine can); it stays in `workspace_session.rs`.
   - The alternative home for `service_util` is `tddy-worktree-service`, which would gain
     `tddy-semantic-index` and `chrono`.
   - **Recommended: the split topic.**
