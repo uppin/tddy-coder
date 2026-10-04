@@ -132,7 +132,10 @@ pub struct DaemonSessionHost {
     /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
     session_stdio: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<String, seeded_clone_guard::SessionStdioEndpoint>,
+            std::collections::HashMap<
+                String,
+                crate::connection_service::svc_start_claude_cli_session::SessionStdioEndpoint,
+            >,
         >,
     >,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
