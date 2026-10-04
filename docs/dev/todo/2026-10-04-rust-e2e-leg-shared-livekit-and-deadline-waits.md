@@ -208,10 +208,12 @@ share of the 1,525s — **not measured; see the gate below.**
 
 **Gate, before any Cargo.toml churn.** Measure the share. Run `cargo test --no-run --workspace --timings`
 (or `cargo build --timings` on the test profile) in CI once and keep the HTML report as an artifact: test
-targets appear as `pkg (test "name")` with their own durations. Sum them for the e2e targets and for the
+targets appear with the target string ` test "name" (test)` (unit tests inside a package as ` lib (test)`; `mode` is `todo` for every compile) and their own durations. Sum them for the e2e targets and for the
 rest. **Proceed only if the target the leg would skip is a meaningful share** — a rule of thumb: ≥ 25% of
 the leg's compile. Below that, prefer the cache fix and `nextest archive` above, which attack the
 dependency compile.
+
+**Measured 2026-10-04** (`Rust compile timings` job, `cargo test --no-run --workspace --locked --timings`, cold; report `cargo-timings`, run 37220592932; read by `scripts/ci-e2e-timing.ts compile-share`): of 6,683 s of summed unit compile time, **e2e test targets 560 s (8.4%), other test targets 3,563 s (53.3%), everything else 2,561 s (38.3%)**. The e2e leg would stop compiling the other test targets, so the skippable share is **53.3% — at or above the 25% threshold: proceed** with 3a. The unit leg would skip only 8.4%. Every filterset binary appears in the report. Caveat: the shares are of *summed* unit durations, which run in parallel, so they are a proxy for the leg's wall-clock compile, not a measurement of it; the saving should be confirmed by timing the first split leg.
 
 **Alternatives considered.**
 
@@ -229,8 +231,8 @@ dependency compile.
   would cost ~8–10 minutes of run time in this leg (their summed time is ~950s) — so do it **after** (1)
   and (2), when the rest of the leg is fast enough that it is the long pole. Two `tddy-index-daemon` files
   and one `tddy-tools` file also say they run a live rust-analyzer and are not in the e2e set.
-- **Report the e2e per-binary timing in the check summary**, so the next regression shows up as a number
-  rather than a 35-minute job.
+- ~~Report the e2e per-binary timing in the check summary.~~ Done: the e2e leg's step summary lists every
+  test binary with its time and test count (`scripts/ci-e2e-timing.ts junit`, `docs/dev/guides/ci.md`).
 
 ## Why it was left
 
@@ -250,8 +252,9 @@ the leg fail in minutes with a named test, not time out at the job limit. Concre
 3. Lift the `docker` group for the LiveKit binaries. **Gate:** measured run time and a flake count over
    several runs.
 4. ~~The deadline setting (and the split of `rpc_scenarios`).~~ Landed in #579 (`#e2e-leg` 2/5). **Gate still open:** the e2e leg's run time with the 2 s deadline test and the split scenarios, read off CI.
-5. The cache question, then the `--timings` measurement from 3a. If test targets are a meaningful share,
-   do 3a (features, `required-features`, the generated target list, the lint); otherwise `nextest archive`.
+5. ~~The cache question, then the `--timings` measurement from 3a.~~ Measured: the e2e leg would skip 53.3% of
+   its compile, over the 25% gate. The split itself is now its own entry:
+   [split the compile by test target](./2026-10-04-split-e2e-leg-compile-by-test-target.md).
 
 **Do not** put a branch in production code that only the tests take, and do not weaken a deadline test
 into a bare `is_err()`: the test asserts `DeadlineExceeded` on purpose, so that a missing deadline cannot

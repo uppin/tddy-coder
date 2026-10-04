@@ -156,6 +156,16 @@ jobs:
           fi
           ./dev cargo nextest run --workspace --profile ci --locked -E "$filter"
 
+      # Where the e2e leg's run time goes, per test binary, on the check's summary page — from the
+      # JUnit nextest just wrote, so it costs nothing. Skipped only when nextest wrote none (a build
+      # failure); a script error is not swallowed.
+      - name: Summarise e2e run time per binary
+        if: ${{ matrix.e2e && !cancelled() }}
+        run: |
+          if [ -f target/nextest/ci/junit.xml ]; then
+            ./dev bun scripts/ci-e2e-timing.ts junit target/nextest/ci/junit.xml >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
         with:
@@ -173,6 +183,52 @@ jobs:
           path: target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 14
+
+  # Manual only. Compiles every test target cold with `--timings` (20+ minutes) to answer one
+  # question: how much of a leg's compile would a per-target split skip? See
+  # docs/dev/guides/ci.md. It never runs on a push or a PR.
+  rust-compile-timings:
+    name: Rust compile timings
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false
+
+      # A cold build is the point: a restored `target/` would hide the compile time being measured.
+      - name: Build every test target with timings
+        run: ./dev cargo test --no-run --workspace --locked --timings
+
+      - name: Summarise compile share
+        run: |
+          ./dev bun scripts/ci-e2e-timing.ts compile-share \
+            target/cargo-timings/cargo-timing.html .config/rust-e2e.filterset >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload timings report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/cargo-timing.html
+          if-no-files-found: warn
+          retention-days: 30
 
   rust-build:
     name: Rust build

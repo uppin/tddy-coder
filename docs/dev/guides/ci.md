@@ -93,6 +93,22 @@ intent of the group's own comment, and would cost roughly 8–10 minutes of run 
 `ci.yml`**, so adding the check does not by itself change what `#automerge` waits for. Until it is
 made required, a red `Rust e2e tests` does not block a merge.
 
+### Where the e2e leg's time goes
+
+- **Per-binary run time**, on every e2e run: the leg's step summary lists each test binary, slowest
+  first, with its test count and the total. It is read from the JUnit nextest already wrote
+  (`scripts/ci-e2e-timing.ts junit`), so it adds no run time.
+- **Compile share**, on demand: dispatch the workflow manually and the `Rust compile timings` job
+  runs `cargo test --no-run --workspace --locked --timings` **cold**, uploads the HTML as the
+  `cargo-timings` artifact and writes how much of the compile went to e2e test targets, to other test
+  targets and to everything else (`scripts/ci-e2e-timing.ts compile-share`). It never runs on a push
+  or a PR. The e2e set is evaluated from `.config/rust-e2e.filterset` itself (`binary()`,
+  `package()`, `kind(test)`, `and`/`or`/`not`), so the two cannot drift.
+- **The gate**: splitting the compile by test target is worth its ~12 manifests and ~77 `[[test]]`
+  stanzas only if the e2e leg would skip at least **25%** of its compile; the summary says `proceed`
+  or `stop`. Filterset binaries missing from the report are named, so a renamed test binary shows up
+  rather than silently counting as zero.
+
 ## Generated code
 
 `Generated code` regenerates every committed `*_pb.ts` and fails if the result
