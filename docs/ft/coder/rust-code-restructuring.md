@@ -2,13 +2,13 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-10-04
+**Updated:** 2026-10-05
 
 ## Summary
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text, apart from one type or one expression where an operation needs it) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — twenty operations, five subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twenty-two operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -59,6 +59,7 @@ tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at L:C[-L:C]
 tddy-tools restructure verify --against <git-ref>
+tddy-tools restructure warm
 ```
 
 **`--indexing-budget` was withdrawn.** A run now waits until it succeeds or its caller stops it, so
@@ -71,7 +72,8 @@ there is no budget to state. See [Waiting](#waiting).
 | `load` / `unload` / `plans` | Hold plans in the index daemon's [plan store](#plan-store): `load` reads each plan once and gives every operation an id, `unload` writes changed plans back and drops them (`--all` for every plan of the tree), `plans` lists what is held. All three need the index daemon (`TDDY_INDEX_SOCKET`) and are refused without one |
 | `status` | completed / in_flight / pending / failed |
 | `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many **production lines** — lines before the first `#[cfg(test)]` that opens a `mod`, so a file's inline tests are not counted; other languages count every line — a report, never a gate |
-| `snapshot` | Rewrite the plan's line-1 header from the working tree. A plan of range and symbol anchors keeps every operation line byte-identical and needs no index. A plan of **item** anchors is also re-resolved against the current tree through rust-analyzer: hints and the fingerprints of unchanged items are rewritten, and each operation whose item changed or is gone is reported and left as written (see [Live plans](#live-plans)) |
+| `snapshot` | Rewrite the plan's line-1 header from the working tree. A plan of range and symbol anchors keeps every operation line byte-identical and needs no index, and is answered in process. A plan of **item** anchors is also re-resolved against the current tree through rust-analyzer: hints and the fingerprints of unchanged items are rewritten, and each operation whose item changed or is gone is reported and left as written (see [Live plans](#live-plans)). With `TDDY_INDEX_SOCKET` set that re-resolution runs on the daemon's warm index (the `Snapshot` RPC); without it the command starts a rust-analyzer of its own |
+| `warm` | Load this tree's crate graph into the index daemon and narrate its progress until the graph is queryable, so the first real request does not pay for the load. A daemon-only command: with no daemon configured it is refused, naming `./run-index-daemon` as what starts one. It ends only on the daemon's final `ready` message, and a stream that closes without one is an error, not a warm root. `./run-index-daemon` runs it for its own checkout (see [Warm code-intelligence daemon](warm-code-intelligence-daemon.md#running-it)) |
 | `anchors` | Emit an anchor a plan can carry. `--items A,B` emits an `items` anchor covering the named adjacent items (trivia included); `--at L:C[-L:C]` emits an `item` anchor for the innermost item enclosing that position, with its relative range, fingerprint and hint filled in. See [Item anchors](#item-anchors) |
 | | `--items` names are bare (`Alpha`), module-qualified (`krate::module::Alpha`), or `<Type>` / `<Type>#N` for an inherent `impl` block (the Nth when a type has several); a comma inside `<…>` belongs to the type, so `<Pair<A, B>>` is one item. One rule (`item_anchor::parse_item_list`) reads the list for the in-process CLI, the daemon's command line and `tddy-tools` alike |
 
@@ -263,8 +265,10 @@ impl that two impls share is addressed with the trait, `…::<Stack as Display>:
 count from the item's first line, outer attributes and doc comments included; both omitted means the
 item itself, at its name, which is what `rename_symbol`, `move_module_to_crate` and `inline_method` act
 on. An `items` anchor, `{"kind":"items","file":…,"items":[…],"fingerprints":[…]}`, is a contiguous run
-of sibling items for `extract_module`, resolved to the span from the first item's first line to the
-last item's last line.
+of sibling items for `extract_module` and `move_item` (or one `mod` declaration, for `reparent_module`),
+resolved to the span from the first item's first line to the last item's last line. `move_item` and
+`reparent_module` take only `items` or `item` anchors: a range or a symbol names no module-level item or
+`mod` declaration, and the plan is refused as malformed.
 
 **Resolution.** Every item anchor is resolved once, at run open, against the tree the run starts on,
 by walking rust-analyzer's document outline. A plan written against an older tree therefore runs as
@@ -297,6 +301,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `rename_symbol` | LSP rename, applied to **every** document rust-analyzer returns edits for, not only the anchor's own file |
 | `extract_module` | `reexport`: glob / named / none; optional `to_file` |
 | `extract_module_to_file` | Move items to new file |
+| `move_item` | Move a contiguous run of module-level items into **another module of the same crate**, in any file. See [Same-crate moves](#same-crate-moves) |
+| `reparent_module` | Move a module's file, and the directory of its children, under **another parent of the same crate**. See [Same-crate moves](#same-crate-moves) |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
 | `remove_unused_param` | Remove a parameter the body never reads, from the declaration and from **every call site in every file**. The anchor names the function and `name` is the parameter. rust-analyzer offers the removal only for an unused parameter, so naming a used one is refused — the refusal names the parameter and says it is used, and nothing is written. A `name` that is not a parameter of the function is refused as well |
@@ -312,6 +318,67 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
+
+### Same-crate moves
+
+`move_item` and `reparent_module` stay inside one crate: `to` is a module path rooted at the package
+name, and a path in another crate is refused (`move_module_to_crate` is the cross-crate move).
+rust-analyzer has no assist for either. Like the cross-crate moves they are written by this package and
+informed by the server: the outline says where each item is, `textDocument/references` says who names
+it, and everything else is a function of the files' text. The moved text is copied by byte range, so doc
+comments, attributes and ordinary comments arrive unchanged.
+
+| | `move_item` | `reparent_module` |
+|---|---|---|
+| Anchor | an `items` anchor (or a single `item` anchor on a name) over whole module-level items of one file, contiguous | an `items` anchor on the module's `mod` declaration in its old parent; one module per operation |
+| `to` | the destination module, which must exist; with `name`, its **parent** | the new parent, which must exist and have a file of its own |
+| `name` | creates a new, empty module `name` in `to` (`<parent dir>/<name>.rs`, under a `<parent>.rs`, a `<parent>/mod.rs` or the crate root), declared with the narrowest visibility its callers and facade need, and moves the items into it | refused: nothing is created |
+| `reexport` | `glob`, `named`, `none` (or absent), `outside` | `glob`, `none` (or absent), `outside`; `named` is refused, because a module has no items of its own to list |
+
+**What `reexport` means.** `glob` leaves `pub use <destination>::*;` where the items were (for a module:
+`pub use <new parent>::<module>;` at its old visibility) and re-points no caller. `named` leaves one grouped
+`pub use` per visibility tier naming the moved items. `none`, or no `reexport`, **re-points every caller**
+the server found, which is the difference from `extract_module`, where `none` refuses when another file
+reaches the items: a move exists to give the code a new home with its callers following.
+`outside` re-points the callers inside the library crate that holds the moved code, and leaves a facade
+only for what something outside that crate reaches. A caller is outside when it is in another package, or in
+the same package outside its library: `tests/`, `examples/` and `benches/`, and a `src/main.rs` or
+`src/bin/**` beside a `src/lib.rs`. Outside callers are never edited, so the path they name keeps
+resolving; an item nothing outside reaches leaves no facade and, if it was `pub`, loses its old public
+path. Only the default target layout is read (a custom `[lib] path` or `[[bin]] path` is not). `outside` is
+refused as malformed on every other operation.
+
+**A topic module is built from these.** A `move_item` with `name` makes the module and fills it from one
+file; further `move_item` lines gather items from other files into it; `reparent_module` puts a module
+under the parent its topic belongs to. `extract_module` cannot do this: it cannot re-point callers, so it
+refuses or leaves a facade only a hand edit removes.
+
+**What is refused, and when.** Where the text answers it nothing is spawned, and `check` reports it
+without an index. `move_item`: a destination that does not exist (the message names the first missing
+segment and says a module is created only by a line that carries `name`), a name the destination already
+declares (`E0428`), a destination that is the items' own module, and, with `name`, a parent that does not
+exist or already declares it. `reparent_module`: a destination that does not exist, a name the new
+parent declares, a destination inside the module being moved, a module declared inline (it has no file),
+`#[path]` on the declaration or any `mod` of the moved tree, an inline new parent, a declaration sharing
+its line with other code, and a target file that already exists. On both, `also` and `to_file` are
+refused. Once the server has answered, `move_item` also refuses a range inside an `impl` (a member
+cannot move alone; move the `impl` block), an anchor that cuts an item in half, a module among the items
+(that is `reparent_module`), and a moved name inside a nested `use` group.
+
+**Visibility.** Widening is not a refusal: a private item the moved code reaches is widened where it
+stays, and a moved private item its callers need is widened where it lands, only as far as they need and
+each reported. `reparent_module` respells the `mod` declaration's visibility the same way and rebases the
+relative paths in the moved files (`super::x`, `use super::*;`) so they reach what they reached.
+
+**Imports.** The source module's top-level `use` items travel to the destination (a head written from the
+crate root, anything the destination already binds left out, an import of a module the destination cannot
+see dropped, or that module's declaration widened when the moved code names it). A trait import has no
+name in the moved text, so the copy is whole, and a **complete** run's [tidy](#the-tidy) removes the
+unused ones; a run stopped early leaves them as warnings and says so.
+
+**Gates.** `check --deep` resolves a move the way `apply` does and writes nothing; it hands the static
+preflight the lines the item anchor covers, so a well-formed item-anchored `move_item` plan is accepted
+there. A `reparent_module` moves files with `git mv`, so history follows.
 
 Invariants: moves that need history use `git mv`; visibility widenings are reviewable output
 (journal plus the caller's sink), not silent; **nothing in the library writes to stdout** — progress
@@ -606,8 +673,6 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
 - **A foreign edit overlapping an operation the plan already ran** marks that operation stale in
   `ListPlans`; `apply` ignores it, since it refuses only operations at or after its start. The
   applied plan's own v2 `files` hints are not rewritten by its own apply.
-- **`tddy-tools restructure snapshot` of an item-anchored plan starts a cold language server**, even
-  with a daemon running; there is no `Snapshot` RPC.
 - **A rolled-back group leaves an empty directory** it created a file in; the file is removed, the directory is not.
 - **An apply consumes its plan file.** A run rewrites the plan as it goes, so a plan whose apply
   failed and was rolled back is stale; re-running it is refused as an item that changed. Regenerate
@@ -724,5 +789,42 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   what a string holds is data the suite asserts on, and rewriting it would change the assertion.
 - **`check` has no static preflight for `move_test_binary_to_crate`.** The plan's vocabulary refusals
   are reported; the anchor's path shape and the facade walk are resolved at apply time.
+- **`move_item` widens module-level items, not the fields and `impl` members that go with them.** A
+  private field of a moved struct that an `impl` left behind reads, a private method of an `impl` left
+  behind that the moved code calls, and the reverse, are not surveyed (the outline gives such a member
+  no module path). The edit is applied, the compile gate stops the run at the `E0616`/`E0624` site, and
+  the edit stays on disk to roll back.
+- **`move_item` copies the source module's whole `use` header.** A trait import has no name in the moved
+  text, so no reading of it can say which imports to leave out. A complete run's tidy removes the unused
+  ones on the compiler's evidence; a run stopped early with `--stop-after` leaves `unused_imports`
+  warnings. An import of the moving item through an aliased `use` (`use a::X as Y`) is not recognised by
+  the name-clash check, so a destination that imports it under an alias is refused as a clash; a
+  `super::Name` that names a module's own glob import is not followed.
+- **`move_item` refusals and blind spots.** A moved name inside a nested `use` group, a declaration
+  whose keyword is on a line above its name, and an inline destination written on one line
+  (`mod answers {}`) are refused. A `use` inside a function body that names a moved item counts as an
+  import for the whole module scope, so the compile gate reports a second function that relied on a glob
+  for the same name. A package with both `src/lib.rs` and `src/main.rs` that shares modules between
+  them (`#[path]`) is read as one crate. `name` creates one module; a path of several new modules is
+  several lines. A created module's declaration is widened by a later move into it only along the
+  `mod` declarations on the path to the destination: a `pub use` chain that re-exports the destination
+  under another name is not followed.
+- **`reparent_module` widens the module's declaration, not what its tree reaches.** A private item of the
+  old parent or an ancestor that the moved tree names (`super::host_name()`), a `pub(super)` or
+  `pub(in path)` item of the moved module that its old parent names, and an absolute
+  `pub(in crate::host::attachments)` written into the tree are not respelled. The compile gate stops the
+  run at the `E0603` site.
+- **`reparent_module` limits.** `reexport: glob` writes the module's own re-export, not a glob of the new
+  parent, and a facade leaves the new parent changed (the declaration is written there). The new parent
+  must be a module with a file of its own. The declaration must sit on lines of its own. A file in the
+  module's directory that no `mod` reaches (an `include_str!` data file) stays behind, and the directories
+  the move empties stay on disk. A `use` that starts with the module's own name inside a group, or
+  unqualified (`use attachments::x;`), is refused: write the path in full. References under an inactive
+  `cfg` are surveyed as the server evaluated them. A module with both `a.rs` and `a/mod.rs` is read as
+  `a.rs`.
+- **`reexport: outside` reads the default target layout.** A custom `[lib] path` or `[[bin]] path` is not
+  read, and such a package is misjudged. The facade for a module is exactly the module, so one outside
+  caller of any item in it keeps the whole old path. The partition makes one manifest walk per distinct
+  referring file, which a workspace with thousands of referring files pays once per file.
 - Restructuring tests that start rust-analyzer are load-sensitive; run affected suites with `--test-threads=1` when binding a server.
 - Typed `tddy-lsp` assist methods are not yet first-class; restructuring uses `request_raw` / `notify_raw`.

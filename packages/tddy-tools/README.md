@@ -119,9 +119,10 @@ pulled stays in the caller's worktree; nothing is un-applied).
 
 `restructure` is `tddy_code_restructuring::restructure_cli` for the command line, or the
 `code_index.CodeIndexService` of a running `tddy-index-daemon` when **`TDDY_INDEX_SOCKET`** is set
-(`index_client.rs`, rendered by `index_console.rs`). `load`, `unload` and `plans` need the daemon;
-`snapshot` stays in process, so a `snapshot` of an item-anchored plan starts its own language server
-even with a daemon running. `--items` is read by `tddy_code_restructuring::item_anchor::parse_item_list`,
+(`index_client.rs`, rendered by `index_console.rs`). `load`, `unload`, `plans` and `warm` need the daemon
+(`warm` loads the tree's crate graph into it and waits until it is queryable); `snapshot` stays in process
+for a plan with no item anchors, and for one with item anchors is the daemon's `Snapshot` RPC, which
+re-resolves them on the warm index. `--items` is read by `tddy_code_restructuring::item_anchor::parse_item_list`,
 the same rule as the other front ends. The stale operations a daemon reports on `ListPlans`,
 `PlanStatus` and `Check` are printed by `console::stale_operations`, the renderer the in-process CLI
 uses, so the two paths read alike; `Apply` refuses a stale operation (`FailedPrecondition`) before

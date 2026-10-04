@@ -73,7 +73,8 @@ for readers and is never read.
                                                           // omit both for "the item itself, at its name"
  "fingerprint":"sha256:…",                   // the item's whole lines when the anchor was written
  "hint":{"line":188,"col":9}}                // absolute, orientation only
-{"kind":"items","file":"src/lib.rs",         // a run of sibling items, for extract_module
+{"kind":"items","file":"src/lib.rs",         // a run of sibling items, for extract_module and move_item;
+                                             // one `mod` declaration, for reparent_module
  "items":["c::m::A","c::m::B"],"fingerprints":["sha256:…","sha256:…"]}
 ```
 
@@ -120,6 +121,8 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `move_module_to_crate` | symbol | `to`, `reexport` = `glob` \| `none` | — | ✅ |
 | `move_cluster_to_crate` | symbol (first member) | `also` (the other members' anchors), `to`, `reexport` | — | ✅ |
 | `move_test_binary_to_crate` | the test binary's path | `to` | — | ✅ |
+| `move_item` | `items` anchor (or one `item` anchor) over whole module-level items of one file | `to` (the destination module; with `name`, its parent), `name` (creates the destination), `reexport` = `glob` \| `named` \| `none` \| `outside` | — | ✅ |
+| `reparent_module` | `items` anchor on the module's `mod` declaration | `to` (the new parent), `reexport` = `glob` \| `none` \| `outside` | — | ✅ |
 | `extract_trait` | range at the `impl` keyword | `name` | — | ✅ |
 | `inline_method` | symbol | — | — | ✅ |
 | `remove_unused_param` | symbol or item (the function) | `name` (the parameter) | — | ✅ |
@@ -186,12 +189,85 @@ per caller, judged by the compiler once at the group's end.
   {"op":"rename_symbol","anchor":{"kind":"range","file":"src/spawn.rs","start":{"line":364,"col":29},"end":{"line":364,"col":40}},"name":"binary"}
   ```
 
+### Same-crate moves (`move_item` and `reparent_module`)
+
+Neither operation leaves its crate: `to` is a module path rooted at the package name (`-` read as `_`)
+of the package that owns the anchor's file, and a path in another crate is refused (a move between
+crates is `move_module_to_crate`). rust-analyzer has no assist for either, so the engine writes them,
+informed by the server: where an item is comes from the document outline, who names it from
+`textDocument/references`. The moved text is copied by byte range, so doc comments, attributes and
+ordinary comments arrive as they were.
+
+```jsonl
+{"op":"move_item","anchor":{"kind":"items","file":"src/a.rs","items":["app::a::check","app::a::pair"],"fingerprints":["sha256:…","sha256:…"]},"to":"app::answers","reexport":"none"}
+{"op":"move_item","anchor":{"kind":"items","file":"src/a.rs","items":["app::a::check"],"fingerprints":["sha256:…"]},"name":"answers","to":"app","reexport":"outside"}
+{"op":"reparent_module","anchor":{"kind":"items","file":"src/host.rs","items":["app::host::attachments"],"fingerprints":["sha256:…"]},"to":"app::split","reexport":"outside"}
+```
+
+| | `move_item` | `reparent_module` |
+|---|---|---|
+| Anchor | `items` (or a single `item` on a name), one file, whole module-level items, contiguous. A range or symbol anchor is refused as malformed. A member of an `impl` cannot move alone | an `items` anchor on the module's **`mod` declaration** in its old parent, emitted by `restructure anchors <old parent's file> --items <module>`; one module per operation |
+| `to` | the destination module, which must exist. With `name`: its **parent** | the new parent, which must exist and have a file of its own (an inline new parent is refused) |
+| `name` | creates a new, empty module `name` in `to` before the items arrive: `<parent dir>/<name>.rs`, declared with the narrowest visibility the callers and the facade need. The parent may be a `<parent>.rs`, a `<parent>/mod.rs` or the crate root | refused: `reparent_module` creates nothing |
+| `reexport` | `glob` leaves `pub use <destination>::*;` where the items were; `named` leaves one grouped `pub use` per visibility naming the moved items; neither re-points a caller. `none` or absent **re-points every caller** found by the server. `outside`: see below | `glob` leaves `pub use <new parent>::<module>;` (at the module's old visibility) in the old parent and re-points nothing; `none` or absent re-points every caller; `named` is refused, because a module has no items of its own to list. `outside`: see below |
+
+**`none` means a different thing here than in `extract_module`.** There it refuses when another file
+names the items; a move exists to give them a new home with their callers following, so here it
+re-points them.
+
+**`reexport: outside`** (both operations) re-points the callers **inside the library crate that holds
+the moved code**, as `none` does, and leaves a facade only for what something **outside** that crate
+reaches, written as `named` writes it (for a module: the one `pub use` line). A caller counts as outside
+when it is in another package, or in the same package outside the library: its `tests/`, `examples/`
+and `benches/`, and `src/main.rs` or `src/bin/**` of a package that also has a `src/lib.rs`. Outside
+callers are never edited, so the path they use keeps resolving through the facade. Nothing outside
+reaching an item leaves no facade, and an item that was `pub` loses its old public path then. Only
+the default target layout is read: a custom `[lib] path` or `[[bin]] path` in the manifest is not, and
+such a package is misjudged. `outside` on any other operation is refused as malformed.
+
+**Refused before a server starts** (`check` reports them too, with no index): `to` missing; `move_item`
+destination that does not exist, a name the destination already declares (`E0428`), a destination that is
+the items' own module, and with `name` a parent that does not exist or already declares `name`;
+`reparent_module` destination that does not exist, a name the new parent declares, a destination inside
+the module being moved, a module declared inline (`mod x { … }`, with no file to move), `#[path]` on the
+declaration or on any `mod` in the moved tree, a declaration that shares its line with other code, and a
+target file that already exists. `also` and `to_file` are refused on both.
+
+**Refused when the move is resolved** (`check --deep` and `apply`): an anchor that covers no module-level item or cuts one in half; a
+range inside an `impl` (move the `impl` block itself); a module among the moved items (that is
+`reparent_module`); a moved name written inside a nested `use` group, or an import this reading cannot
+parse (write one `use` per path); a declaration whose keyword is on a line above its name; an inline
+destination written on one line (`mod answers {}`).
+
+**Widening is not a refusal.** A private item the moved code reaches is widened where it stays, and a
+moved private item its callers need is widened where it lands, only as far as they need and with
+each change reported. What it does not widen: a private **field or method** of a type split by the move,
+and the private items of a `reparent_module`d tree and of its old ancestors. Those end the run at the
+compile gate (`E0616`, `E0624`, `E0603`), loudly, with the edit left on disk.
+
+**Imports.** The source module's top-level `use` items are copied to the destination (a head written
+from the crate root, anything the destination already binds left out, a module the destination cannot
+see dropped or its declaration widened), and a trait import has no name in the moved text, so the copy
+is whole. A **complete** run's tidy removes the unused ones; a run stopped early with `--stop-after`
+leaves them as `unused_imports` warnings, and says so in its notes.
+
+`reparent_module` moves the module's file and every file its `mod` declarations lead to with `git mv`
+(`<parent>.rs` and `<parent>/mod.rs` forms on both ends), moves the `mod` declaration with its
+attributes and respells its visibility only as far as the callers need, re-points every path that named
+the module, and rebases the relative paths inside the moved files (`super::x`, `use super::*;`) so
+they reach what they reached. Files in the module's directory that no declaration reaches stay behind,
+and the directories the move empties stay on disk.
+
 ### Notes that matter when planning
 
 - **`move_symbol` carries private-only dependencies with the symbol.** TypeScript always does this;
   `with_private_deps: false` is refused rather than silently ignored.
-- **Rust has no whole-symbol move.** To split a Rust file, group the items with `extract_module` and
-  then run `extract_module_to_file`, whose anchor is a caret on the `mod` keyword.
+- **Items move between modules of one crate with `move_item`, and a module moves under another parent
+  with `reparent_module`** (see [Same-crate moves](#same-crate-moves-move_item-and-reparent_module)).
+  `move_symbol` and `move_file` are TypeScript's and have no Rust meaning. To cut a new module out of
+  a file, group the items with `extract_module` (with `to_file` it gets its file too); a plan that
+  gathers items from several files into a new module starts with a `move_item` that carries `name`.
+  Outside `to_file`, a separate `extract_module_to_file` takes a caret on the `mod` keyword.
 - **A mutually-referencing set moves with `move_cluster_to_crate`, not with several
   `move_module_to_crate` ops.** `anchor` is the first member and `also` carries the rest, as anchors
   of the same shape. The whole set resolves into **one** edit, so the tree is never half-moved — and

@@ -2,7 +2,7 @@
 
 **Product area:** Coder / tddy-tools
 **Status:** Active
-**Updated:** 2026-10-03
+**Updated:** 2026-10-05
 
 ## Summary
 
@@ -100,6 +100,7 @@ A group that fails its gate ends the stream as `FailedPrecondition`.
 | `Warm` | server-streaming | Loads a root and reports progress. Idempotent. Every phase the server reports reaches the stream; only the printed console is throttled |
 | `Check` | server-streaming | Every finding in a plan, no writes. Streams one `Finding` per finding |
 | `Apply` | server-streaming | Executes a plan. Streams indexing, per-operation (each naming its group, if any) and outcome events |
+| `Snapshot` | unary | Rewrites a plan's snapshot header to the tree as it stands and answers `{paths, rewritten, stale}`: how many files the header names, whether it differed and was replaced, and the operations of an item-anchored plan whose item changed or went (each left as written). A language server is acquired from the root's warm index **only** for a plan with item anchors, to re-resolve them; a plan with none is hashed without one, because waiting for an index the answer never consults would make a cheap command as slow as a cold one. Serialized per root, since it writes the plan file and reads the tree |
 | `Anchors` | unary | An anchor a plan can carry: `items` for named items, or the `item` anchor of the innermost item enclosing `at`. The response holds the anchor's JSON (`anchor_json`) and its absolute span (`range`) |
 | `PlanStatus` | unary | completed / in-flight / pending / failed, and the plan's stale operations with their reasons |
 | `LoadPlans` | unary | Reads plans into the root's plan store, giving every operation an id. Answers the plans held, with operation counts and whether each is dirty |
@@ -129,8 +130,9 @@ nowhere else to go; and a stream is the only back-channel a handler gets, so **a
 dropped receiver is how the service learns its caller has gone away** and cancels the work. A unary
 handler has no way to find that out.
 
-`Warm.ready` currently means a live server holds the root, not that its graph is loaded — see the
-backlog entry of that name.
+`Warm.ready` is the stream's final message and means the root's crate graph is loaded and queryable: a
+per-root latch fed by rust-analyzer's own `experimental/serverStatus` says so, and a second `Warm` of a
+loaded root is immediate.
 
 ### Refusals
 
@@ -148,12 +150,31 @@ transports as two different codes and a new error variant is a compile error:
 ## Running it
 
 ```bash
-eval $(./run-index-daemon | grep '^export ')   # exports TDDY_INDEX_SOCKET
+eval $(./run-index-daemon | grep '^export ')   # starts or reuses, warms, then exports TDDY_INDEX_SOCKET
 tddy-tools restructure check plan.jsonl        # now costs the assist, not the index
+./run-index-daemon --no-warm                   # start or reuse, but leave the crate graph unloaded
+tddy-tools restructure warm                    # load this tree's crate graph into the daemon by hand
 ./run-index-daemon --status                    # dials the socket; non-zero if nothing answers
 ./run-index-daemon --stop
 TDDY_INDEX_DAEMON_BIN=/path/to/tddy-index-daemon ./run-index-daemon   # run a prebuilt daemon
 ```
+
+**The script warms its checkout by default.** Once the daemon answers (whether it was just started or
+reused), the script runs `tddy-tools restructure warm` with the daemon's socket, from the checkout root,
+and returns when the crate graph is queryable. Without it the first real request waits for the load
+silently, for more than five minutes on this workspace. The `tddy-tools` it runs is the one beside the
+daemon binary, built with the daemon (`cargo build -p tddy-index-daemon -p tddy-tools`) unless
+`--no-warm` is given, and, with `TDDY_INDEX_DAEMON_BIN`, whatever sits next to that binary: when it is
+not an executable file the script says so and does not warm. The client's output goes to stderr with the
+rest of the narration, so stdout stays the one `export` line. A warm that fails is reported and changes
+nothing else: the daemon is running, so the `export` line is still printed and the exit code is the one
+the start earned. `--no-warm` is the script's first argument, and loading the graph unasked is what it
+opts out of.
+
+`tddy-tools restructure warm` dials the daemon like any other command and is refused naming
+`./run-index-daemon` when `TDDY_INDEX_SOCKET` is unset, because a crate graph loaded by a process that
+then exits is dropped with it. It reads the `Warm` stream until its `ready` message and treats a stream
+that ends without one as a failure.
 
 **A prebuilt daemon outlives rebuilds.** By default the script builds and runs this checkout's
 `target/debug/tddy-index-daemon`, so rebuilding the checkout replaces the binary a long carve is
@@ -263,9 +284,10 @@ path that exists without a daemon installed.
 
 ## Known limitations
 
-- **`Warm.ready` means a live server holds the root**, not that its graph is loaded. Read the log's
-  warm/cold line for the real answer. It is also `ready` for a root whose index rust-analyzer reports
-  as degraded; the first operation on that root is refused, quoting the server's message.
+- **`Warm.ready` waits for the graph to be loaded, and a degraded index still ends it.** A root whose
+  index rust-analyzer reports as degraded is `ready` too; the first operation on that root is refused,
+  quoting the server's message. `Workspaces` lists a root as `ready` whenever a live server holds it,
+  whether or not its graph has loaded.
 - **A capture stops between tests, not mid-test.** A client that hangs up is noticed within one
   test of a capture and one signature of a duplicate-test detection, and the instrumented build is
   a single unit that cannot be interrupted once it has begun — so a disconnect during the build

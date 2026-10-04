@@ -194,8 +194,9 @@ The bar, and the first test is the one that matters:
 2. **It must be smaller than the change it enables.** A restructure that dwarfs its feature has
    become the work — replan it on its own merits.
 3. **It must be behaviour-preserving and expressible in the vocabulary.** Check the operation table
-   in `code-restructuring/references/plan-schema.md` first. Rust has no whole-symbol move, and
-   `extract_module` refuses to lift one member out of an `impl` its siblings call. A seam the tools
+   in `code-restructuring/references/plan-schema.md` first. Rust moves items only between modules of one crate
+   (`move_item`) and whole modules across crates (`move_module_to_crate`); a single item has no move to
+   another crate, and `extract_module` refuses to lift one member out of an `impl` its siblings call. A seam the tools
    cannot reach is not a `/code-restructuring` job, and saying so is more useful than proposing one.
 4. **The blast radius is measured, not guessed.** Give the caller count.
 

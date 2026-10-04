@@ -7,9 +7,9 @@ the test suites are [test-suites.md](test-suites.md).
 
 ## Sizes, and how they are counted
 
-115 non-test `src/*.rs` files hold about **20,800 production lines**. One file is over 500
+116 non-test `src/*.rs` files hold about **20,800 production lines**. One file is over 500
 production lines, `cursor_cli_spawn.rs` (532); the next largest are
-`connection_service/svc_start_sandboxed_claude_cli_session.rs` (494), `connection_service.rs` (484)
+`connection_service/svc_start_sandboxed_claude_cli_session.rs` (495), `connection_service.rs` (488)
 and `connection_service/svc_start_session_core.rs` (480). Six production functions are over 150
 lines, each with a recorded reason: five in
 [`docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md`](../../../docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md),
@@ -25,7 +25,7 @@ applies the rule is in the change history,
 
 ## `connection_service`: the RPC host
 
-`connection_service.rs` (484 production lines) holds `DaemonSessionHost`, its `mod` declarations,
+`connection_service.rs` (488 production lines) holds `DaemonSessionHost`, its `mod` declarations,
 and the `pub use` lines that keep the crate's public paths stable. Everything else is a child
 module. Each `svc_*` file is an `impl DaemonSessionHost` block for one step or family, so every child
 reads the host's private fields directly and needs `pub(super)` at most. A child's own children use
@@ -38,7 +38,9 @@ of the host calls.
 |---|---|
 | `placement.rs` | `CodebasePlacement` and the `classify_*` functions: where a session's agent and its worktree go. `pub use`d, because `tddy-daemon-rpc`'s suites name them |
 | `worktree_source.rs` | `WorktreeSource` |
-| `split_start.rs` | `SplitStartFailure` and split-placement resolution |
+| `split_start.rs` | `SplitStartFailure` and split-placement resolution; its child `split_start/split_claude_cli_start.rs` holds `start_split_claude_cli_session` |
+| `peer_session_answer.rs` | the four free items that read or classify a peer's answer about a session: `peer_has_no_such_session` (a peer's `FailedPrecondition` or `NotFound`), `split_pairing` (the codebase daemon and session a split session is paired with, `None` for half a pairing), `resolve_worktree_root_for_session` and the free `resolve_exec_tool_worktree` (not the host method of the same name). A `pub(crate)` module; `workspace_session` and `connection_service` re-export the two that something outside the crate names (`resolve_worktree_root_for_session`, `resolve_exec_tool_worktree`), and the other two have no facade |
+| `seeded_clone_guard.rs` | `SeededAgent`, `SeededCloneGuard` and the release it carries. `SessionStdioEndpoint` (the reverse stdio endpoint to a spawned `tddy-coder`) is in `svc_start_claude_cli_session.rs`, and `ExecToolRoute` (where one exec tool call runs) beside `LocalExecTools` in `local_exec_tools.rs` |
 | `managed_launch.rs` | `ManagedLaunch` and `prepare_managed_workflow_inner` |
 | `stack_seed_validation.rs` | `validate_stack_seed_base_session`, `session_repo_is_in_project` (public) |
 | `stack_child_spawn.rs` | the `StackChildSpawnHandler` struct; its `impl` is `child_spawn_handler.rs` |
@@ -86,7 +88,7 @@ function in `svc_start_session_core.rs`.
 | `…/relaunch_jail_dirs.rs` | `prepare_relaunch_dirs`, `refresh_relaunch_context_dir` |
 | `…/relaunch_jail_steps.rs` | `relaunch_managed_workflow`, `resolve_relaunch_binaries`, `relaunch_jail_env`, `spawn_relaunched_runner`, `bridge_relaunched_jail` |
 | `svc_start_sandboxed_cursor_cli_session.rs` | `start_sandboxed_cursor_cli_session`, in one function |
-| `svc_turn_end_reporter/jail_env_builders.rs` | `specialized_subagent_env`, `jail_daemon_identity_env`, `lsp_tools_env`, which all three use |
+| `svc_start_sandboxed_claude_cli_session/jail_env_builders.rs` | `specialized_subagent_env`, `jail_daemon_identity_env`, `lsp_tools_env`, which all three use |
 
 The Claude and relaunch paths are cut into matching steps. The three paths are still separate
 copies of one launch sequence. Merging them waits on test coverage:
@@ -98,7 +100,7 @@ copies of one launch sequence. Merging them waits on test coverage:
 |---|---|
 | `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `join_split_livekit_room`, `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>` |
 | `svc_spawn_split_agent/svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session |
-| `svc_materialize_staged_attachment/split_claude_cli_start.rs` | `start_split_claude_cli_session` |
+| `split_start/split_claude_cli_start.rs` | `start_split_claude_cli_session` |
 | `svc_split_context_from_codebase_host.rs` | the split agent's context from the codebase host |
 | `svc_start_sandboxed_codebase_session.rs` | a workspace start combined with `spawn_split_agent` |
 
@@ -126,27 +128,36 @@ LiveKit forwarding clients, and those crates deliberately do not grow a transpor
 
 ### The host builders
 
-`svc_resolve_tddy_tools_path.rs` (51 lines) holds `resolve_tddy_tools_path`. The host constructor
-`DaemonSessionHost::new` and every `with_*` / `set_*` builder are in
-`svc_resolve_tddy_tools_path/svc_host_builders.rs`, with three children:
-`presenter_observer_spawn.rs` (`PresenterObserverDeps` and its `maybe_spawn_presenter_observer`),
-`rpc_activity.rs` (`record_rpc_activity`) and `first_admission_token.rs` (the free function
-`mint_first_admission_token`). The builders'
-file also holds the "sandbox RPC bridge not installed" refusal a sandboxed start meets when the
+`svc_resolve_tddy_tools_path.rs` (49 lines) holds `resolve_tddy_tools_path`. The host constructor
+`DaemonSessionHost::new` and every `with_*` / `set_*` builder are in `svc_host_builders.rs`, beside the
+struct they build, with two children: `rpc_activity.rs` (`record_rpc_activity`) and
+`first_admission_token.rs` (the free function `mint_first_admission_token`).
+`PresenterObserverDeps` and its `maybe_spawn_presenter_observer` are in
+`presenter_observer_task/presenter_observer_spawn.rs`, under the module that runs the task they start.
+The builders' file also holds the "sandbox RPC bridge not installed" refusal a sandboxed start meets when the
 runtime never called `install_sandbox_rpc_bridge`.
 
 ### Other modules cut out of their topic's neighbours
 
-These sit under the file they were cut from, not yet under their topic's parent
+Four modules that belong to topics already moved out of the crate, or about to, sit under the file
+they were cut from, because their destination is a receiver crate and not a parent here
 ([`docs/dev/todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md`](../../../docs/dev/todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md)):
 
 | Module | Holds |
 |---|---|
 | `svc_resolve_os_user/os_user_resolution.rs` | the free function `resolve_os_user(config, user_resolver, session_token)`, re-exported by `svc_resolve_os_user.rs` as `connection_service::resolve_os_user` |
-| `svc_resolve_os_user/session_attachment_materialization.rs` | `impl AttachmentState`: `prepare_session_attachments`, `materialize_session_attachments` |
-| `svc_resolve_os_user/local_exec_tool_dispatch.rs` | `run_exec_tool_locally` |
 | `svc_resolve_listed_worktree/session_dir_lookup.rs` | the free function `session_dir_for(tddy_data_dir, session_id)` |
-| `svc_resolve_listed_worktree/session_room_opening.rs` | `ensure_session_room` |
+| `svc_host_builders/rpc_activity.rs` | `record_rpc_activity` |
+| `svc_host_builders/first_admission_token.rs` | `mint_first_admission_token` |
+
+The other modules that were cut from a neighbour's file sit under the parent of their topic:
+
+| Module | Parent | Holds |
+|---|---|---|
+| `svc_materialize_staged_attachment/session_attachment_materialization.rs` | `svc_materialize_staged_attachment` | `impl AttachmentState`: `prepare_session_attachments`, `materialize_session_attachments` |
+| `local_exec_tools/local_exec_tool_dispatch.rs` | `local_exec_tools` | `run_exec_tool_locally` |
+| `svc_ensure_session_room_for_agents/session_room_opening.rs` | `svc_ensure_session_room_for_agents` | `ensure_session_room` |
+| `split_start/split_claude_cli_start.rs`, `svc_start_sandboxed_claude_cli_session/jail_env_builders.rs`, `presenter_observer_task/presenter_observer_spawn.rs` | `split_start`, `svc_start_sandboxed_claude_cli_session`, `presenter_observer_task` | see the tables above |
 
 ## Per-topic state, and the topics that name no host
 
@@ -157,7 +168,7 @@ those fields as parameters:
 | Topic | What its bodies take | Defined in | Built by `DaemonSessionHost::…` |
 |---|---|---|---|
 | Demo VM | `DemoVmState`: `demo_vm_state` (the per-session VM table, shared with the host), `tddy_data_dir`, `user_resolver`, `rpc_activity` (shared) and `config` (a clone) | `activity_hub.rs`, which also holds `DemoVmHandle`. `impl DemoVmState` in `demo_vm_coordinate_handlers.rs` (start, stop and status at a coordinate) | `demo_vm_service_state()`. `DemoVmServiceImpl` holds the state; its constructor `DemoVmServiceImpl::new(Arc<DaemonSessionHost>)` is public and takes the host, so it stays in `svc_demo_vm_ports.rs` beside `demo_vm_entry` |
-| Presenter observer | `PresenterObserverDeps`: `tddy_data_dir`, `presenter_event_sink` and `session_notification_bus` (both shared) | `svc_host_builders/presenter_observer_spawn.rs`, with `maybe_spawn_presenter_observer`. `presenter_observer_task.rs` and `presenter_intent_client.rs` take plain arguments | `presenter_observer_deps()`; `maybe_spawn_presenter_observer` stays a host method that delegates |
+| Presenter observer | `PresenterObserverDeps`: `tddy_data_dir`, `presenter_event_sink` and `session_notification_bus` (both shared) | `presenter_observer_task/presenter_observer_spawn.rs`, with `maybe_spawn_presenter_observer`. `presenter_observer_task.rs` and `presenter_intent_client.rs` take plain arguments | `presenter_observer_deps()`; `maybe_spawn_presenter_observer` stays a host method that delegates |
 | Attachments | `AttachmentState<'a>`, borrowed for one call: `config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`. No hand-off to a task needs an owned form | `svc_materialize_staged_attachment.rs`, with the staged-file and host-document materializers. `session_attachment_materialization.rs` has `prepare_session_attachments` and `materialize_session_attachments` | `attachment_state()`; `prepare_session_attachments` stays a host method that delegates |
 | Admission token and OS user | no state value: free functions of the two or three fields they read | `mint_first_admission_token(config, session_admissions, session_id, owning_daemon_instance_id)` in `first_admission_token.rs`; `resolve_os_user(config, user_resolver, session_token)` in `os_user_resolution.rs` | `mint_first_admission_token` (`handler_state.rs`) and `resolve_os_user` (`svc_resolve_os_user.rs`), both delegators |
 
@@ -199,6 +210,7 @@ Each of these is the one definition several start, resume and spawn paths call:
 | `index_session_worktree` | build the session's semantic index over its worktree, blocking until it is terminal. A missing embedder or a failed index is an error, with no unindexed fallback | all five indexing paths |
 | `spawn_blocking_with_timeout`, `await_supervised_with_timeout` | a blocking or supervised task under a deadline (public, for the RPC handlers above this crate) | the list, start and resume paths |
 | `push_new_branch_to_origin_if_requested`, `resume_agent_and_recipe` | the push a start may request; the agent and recipe a resume restores | start and resume |
+| `write_claude_hooks_settings`, `resolve_start_session_claude_binary` | the `.claude/settings.local.json` that wires a session's lifecycle hooks into the directory `claude` runs in (warn and continue); the `claude` binary the interactive start runs, through `config::resolve_claude_binary_path` so the interactive and sandboxed paths never pick differently | the non-sandboxed Claude spawn and its steps, the split agent spawn |
 
 The "trim, and treat empty as unset" conversion is `tddy_daemon_kernel::trim_to_option`, used at
 every site in this crate.
@@ -279,8 +291,8 @@ The crate declares no topics. This grouping comes from module docs and function 
 | 4 | Split and sandboxed-codebase sessions | `split_session`, `split_start`, `svc_spawn_split_agent`, `svc_split_context_from_codebase_host`, `svc_start_sandboxed_codebase_session` |
 | 5 | Session catalog: list with enrichment, read, delete, notifications, workspace sessions | `session_notifications` (a facade) and `session_notification_publishing` (`SessionNotificationPublishing`), `workspace_session`; listing, reading and deletion are in `tddy-session-activity` |
 | 6 | Terminals, PTY runtime, and the tasks and actions RPCs | `cli_session_manager`, `terminal_session_adapter`, `svc_terminal_ports`; the PTY runtime is in `tddy-terminal-rpc`, the tasks and actions services in `tddy-daemon-sandbox` |
-| 7 | Routing, peers, OS user, room admission, local token, relay idle | `svc_resolve_os_user` (the host's routing delegations, `resolve_exec_tool_worktree`), `os_user_resolution`, `first_admission_token`; routing and admission are in `tddy-daemon-livekit`, the local token and relay idle in `tddy-daemon-kernel` |
-| 8 | Attachments and session files | `svc_materialize_staged_attachment`, `svc_resolve_os_user/session_attachment_materialization`, `svc_session_files_ports`; the progress types are in `tddy-session-files` |
+| 7 | Routing, peers, OS user, room admission, local token, relay idle | `svc_resolve_os_user` (the host's routing delegations and the host's `resolve_exec_tool_worktree`), `peer_session_answer` (the free `resolve_exec_tool_worktree`, `peer_has_no_such_session`, `split_pairing`), `os_user_resolution`, `first_admission_token`; routing and admission are in `tddy-daemon-livekit`, the local token and relay idle in `tddy-daemon-kernel` |
+| 8 | Attachments and session files | `svc_materialize_staged_attachment`, `svc_materialize_staged_attachment/session_attachment_materialization`, `svc_session_files_ports`; the progress types are in `tddy-session-files` |
 | 9 | Stacked, child and conversation spawns, and PR-stack links | `stack_parent`, `stack_seed_validation`, `stack_child_spawn`, `child_spawn_handler`, `conversation_spawn*`, `svc_pr_status_for_caller` |
 | 10 | Activity ports and presenter observation | `svc_activity_ports`, `presenter_observer_spawn`, `presenter_observer_task`, `presenter_intent_client` |
 | 11 | Demo VM | `activity_hub` (`DemoVmState`, `DemoVmHandle`), `demo_vm_coordinate_handlers`, `svc_demo_vm_ports` |

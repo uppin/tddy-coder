@@ -1,6 +1,6 @@
 # complexity: delete_paired_codebase_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent/svc_paired_codebase_teardown.rs:83` — `delete_paired_codebase_session`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent/svc_paired_codebase_teardown.rs:79` — `delete_paired_codebase_session`
 **Moved:** 2026-09-24 by #524 plan `05` (`8b55523e`), from `connection_service/svc_spawn_split_agent.rs:337`, with the teardown it belongs to; this record was `complexity-svc-spawn-split-agent-delete-paired-codebase-session.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -17,6 +17,7 @@
 | 2026-09-18 | 61 | 3 | 3 | 5 | first detection |
 | 2026-09-24 | 95 | — | — | — | touched by #509 (`#keyring` 2/9) and **unchanged by it**: one `Request::new` → `Request::direct`, no lines added. Now at `svc_spawn_split_agent.rs:410`, **95 lines on the merge-base with `origin/master` (`4e7157d2`) and HEAD** — the 61 → 95 growth since detection predates #509 and is unattributed. Nesting, branches and exits not re-derived on the record's scale (the hand scan gives identical values on base and HEAD) |
 | 2026-09-24 | unchanged | — | — | — | #524: moved whole by plan `05`, body unchanged. (The plan's fn-line-to-closing-brace count gives 95 both before and after the move; the 61 above is the detection scan's measure) |
+| 2026-10-05 | 96 | — | — | — | touched by the same-crate moves: `split_pairing` and `peer_has_no_such_session` are now named through `connection_service::peer_session_answer`, and rustfmt wraps the longer `let Some((codebase_daemon, codebase_session)) = …` over two lines: **+1** (95 to 96, fn line to closing brace on `origin/master` and at HEAD). The function starts at `:79` on both, not `:83` as the header said. Nesting, branches and exits not re-derived |
 
 ## What the tool found
 

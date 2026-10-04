@@ -117,7 +117,7 @@ Commits are ordered engine, then docs, then lifecycle, so the diff can be read i
   on `code_index.CodeIndexService` (proto change, regenerated code under the drift gate
   `scripts/generated-code.sh`), `index_client` calling it and `answered_without_an_index` no longer
   keeping an item-anchored `snapshot` in process.
-- [ ] **E4 docs**: `plan-schema.md` (op table; the sentence "Rust has no whole-symbol move" is replaced),
+- [x] **E4 docs** (2026-10-05; the feature, skill and package docs, the changelog and history entries): `plan-schema.md` (op table; the sentence "Rust has no whole-symbol move" is replaced),
   `SKILL.md`, `rust-code-restructuring.md`, `warm-code-intelligence-daemon.md`, package docs.
 - [x] **L0 lifecycle baseline**: `./test -p tddy-session-lifecycle`: **575 passed, the 22 failures by name
   (list in the 16a history entry), 1 ignored**, re-run on this branch before the first move.
