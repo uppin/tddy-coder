@@ -63,10 +63,7 @@ fn a_crate_whose_module_sits_under(
     let split = the_file_of("split", split_as_mod_rs);
     an_app_holding(&[
         ("src/lib.rs", LIB),
-        (
-            &host,
-            &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}"),
-        ),
+        (&host, &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}")),
         ("src/host/attachments.rs", AN_ATTACHMENTS_MODULE),
         (&split, A_SPLIT_THAT_IMPORTS_IT),
         ("src/audit.rs", AN_AUDIT_THAT_NAMES_IT_INLINE),
@@ -169,7 +166,10 @@ async fn moves_a_directory_shaped_module_with_its_children() {
     // Given `attachments` declaring a child `staging`
     let workspace = an_app_holding(&[
         ("src/lib.rs", LIB),
-        ("src/host.rs", &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}")),
+        (
+            "src/host.rs",
+            &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}"),
+        ),
         (
             "src/host/attachments.rs",
             "pub mod staging;\n\npub fn materialize() -> u32 {\n    staging::stage()\n}\n",
@@ -285,7 +285,10 @@ async fn leaves_a_glob_facade_that_keeps_every_caller_unchanged() {
         workspace.read("src/host.rs")
     );
     assert_eq!(workspace.read("src/split.rs"), A_SPLIT_THAT_IMPORTS_IT);
-    assert_eq!(workspace.read("src/audit.rs"), AN_AUDIT_THAT_NAMES_IT_INLINE);
+    assert_eq!(
+        workspace.read("src/audit.rs"),
+        AN_AUDIT_THAT_NAMES_IT_INLINE
+    );
     assert_compiles(&workspace);
 }
 
@@ -312,7 +315,8 @@ async fn carries_the_declarations_visibility_and_attribute_to_the_new_parent() {
     // Then `split` declares it the same way
     let declared = workspace.read("src/split.rs");
     assert!(
-        declared.contains("#[allow(dead_code)]") && declared.contains("pub(crate) mod attachments;"),
+        declared.contains("#[allow(dead_code)]")
+            && declared.contains("pub(crate) mod attachments;"),
         "the declaration's attribute or visibility was lost:\n{declared}"
     );
     assert_compiles(&workspace);
@@ -346,7 +350,10 @@ async fn refuses_a_module_name_the_new_parent_already_declares() {
     // Given `split` already declaring an `attachments` of its own
     let workspace = an_app_holding(&[
         ("src/lib.rs", LIB),
-        ("src/host.rs", &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}")),
+        (
+            "src/host.rs",
+            &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}"),
+        ),
         ("src/host/attachments.rs", AN_ATTACHMENTS_MODULE),
         ("src/split.rs", "pub mod attachments;\n"),
         ("src/split/attachments.rs", AN_ATTACHMENTS_MODULE),
@@ -375,7 +382,10 @@ async fn refuses_a_destination_inside_the_module_being_moved() {
     // Given `attachments` with a child `staging`
     let workspace = an_app_holding(&[
         ("src/lib.rs", LIB),
-        ("src/host.rs", &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}")),
+        (
+            "src/host.rs",
+            &format!("pub mod attachments;\n\n{THE_HOST_ITSELF}"),
+        ),
         (
             "src/host/attachments.rs",
             "pub mod staging;\n\npub fn materialize() -> u32 {\n    0\n}\n",

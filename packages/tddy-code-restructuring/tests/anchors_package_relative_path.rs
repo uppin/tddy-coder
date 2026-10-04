@@ -22,7 +22,10 @@ const A_WORKSPACE_OF_ONE_PACKAGE_BELOW_THE_ROOT: [(&str, &str); 3] = [
         "crates/app/Cargo.toml",
         "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
     ),
-    ("crates/app/src/lib.rs", "pub fn answer() -> u32 {\n    42\n}\n"),
+    (
+        "crates/app/src/lib.rs",
+        "pub fn answer() -> u32 {\n    42\n}\n",
+    ),
 ];
 
 #[tokio::test(flavor = "multi_thread")]

@@ -53,11 +53,7 @@ pub fn a_reparent_module_op(anchor: &Anchor, to: &str, reexport: Option<&str>) -
 }
 
 /// The anchor `restructure anchors <file> --items <names>` emits, as a plan would carry it.
-pub async fn the_anchor_over(
-    workspace: &AFixtureWorkspace,
-    file: &str,
-    names: &[&str],
-) -> Anchor {
+pub async fn the_anchor_over(workspace: &AFixtureWorkspace, file: &str, names: &[&str]) -> Anchor {
     the_anchor_command_emits(workspace, file, names, None)
         .await
         .expect("the anchors command emits an anchor over the named items")

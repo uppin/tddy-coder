@@ -414,11 +414,9 @@ async fn refuses_a_destination_module_that_does_not_exist() {
     let anchor = the_anchor_over(&workspace, "src/pairing.rs", &["peer_has_no_such_session"]).await;
 
     // When a static check reads the plan
-    let findings = what_a_static_check_finds_in(
-        &workspace,
-        a_move_item_op(&anchor, "app::nowhere", None),
-    )
-    .await;
+    let findings =
+        what_a_static_check_finds_in(&workspace, a_move_item_op(&anchor, "app::nowhere", None))
+            .await;
 
     // Then it says which module is missing
     let said = findings.join("\n");
@@ -445,11 +443,9 @@ async fn refuses_a_name_the_destination_already_declares() {
     let anchor = the_anchor_over(&workspace, "src/pairing.rs", &["peer_has_no_such_session"]).await;
 
     // When a static check reads the plan
-    let findings = what_a_static_check_finds_in(
-        &workspace,
-        a_move_item_op(&anchor, "app::answers", None),
-    )
-    .await;
+    let findings =
+        what_a_static_check_finds_in(&workspace, a_move_item_op(&anchor, "app::answers", None))
+            .await;
 
     // Then the clash is named, with the destination that holds it
     let said = findings.join("\n");
@@ -467,11 +463,9 @@ async fn refuses_a_destination_that_is_the_items_own_module() {
     let anchor = the_anchor_over(&workspace, "src/pairing.rs", &["peer_has_no_such_session"]).await;
 
     // When the plan names `pairing` as the destination
-    let findings = what_a_static_check_finds_in(
-        &workspace,
-        a_move_item_op(&anchor, "app::pairing", None),
-    )
-    .await;
+    let findings =
+        what_a_static_check_finds_in(&workspace, a_move_item_op(&anchor, "app::pairing", None))
+            .await;
 
     // Then it is refused, saying the item is already there
     let said = findings.join("\n");
