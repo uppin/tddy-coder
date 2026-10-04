@@ -3,7 +3,7 @@
 //! and when it ends, all before the terminal result, so the create pane can show which step the
 //! host is in rather than a disabled button.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-03-indexing-indicators.md
+//! Feature docs: docs/ft/web/session-drawer.md (Start progress) and docs/ft/web/session-code-pane.md (Indexing indicator)
 //!
 //! A `claude-cli` session is the harness: it is the session type the create pane starts most, it
 //! has all three steps, and it starts in-process here — a real project repository with an `origin`

@@ -3,7 +3,7 @@
 //! latest progress per session, and deliver it over `code_navigation.WatchCodeIndex` until the index
 //! is ready — or until the warm fails, which is reported and never takes the session with it.
 //!
-//! PRD: docs/ft/web/1-WIP/PRD-2026-10-03-indexing-indicators.md
+//! Feature docs: docs/ft/web/session-drawer.md (Start progress) and docs/ft/web/session-code-pane.md (Indexing indicator)
 //!
 //! The index daemon is real process management over a stand-in, exactly as in
 //! `code_navigation_acceptance.rs`: the registry starts a shell script that points the socket it

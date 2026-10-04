@@ -1579,7 +1579,7 @@ export const SessionService: GenService<{
    *
    * Around the slow steps of a start it also emits a StartPhase as each begins and ends — the
    * worktree, the semantic index when one was asked for, the agent — so the create pane can say
-   * what the host is doing (docs/ft/web/1-WIP/PRD-2026-10-03-indexing-indicators.md).
+   * what the host is doing (packages/tddy-service/docs/start-session-phases.md).
    *
    * @generated from rpc session.SessionService.StreamStartSession
    */

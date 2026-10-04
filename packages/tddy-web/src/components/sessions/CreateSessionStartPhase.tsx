@@ -17,7 +17,7 @@ export interface CreateSessionStartPhaseProps {
  * The line under the form naming the step of the start the host is in — the worktree, the semantic
  * index, the agent — while Create is disabled. Renders nothing between steps.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-03-indexing-indicators.md
+ * Feature docs: docs/ft/web/session-drawer.md (Start progress) and docs/ft/web/session-code-pane.md (Indexing indicator)
  */
 export function CreateSessionStartPhase({ step }: CreateSessionStartPhaseProps) {
   if (step === null || step === StartPhase_Step.UNSPECIFIED) return null;

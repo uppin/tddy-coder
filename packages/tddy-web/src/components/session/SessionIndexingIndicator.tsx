@@ -20,7 +20,7 @@ type IndexState = { kind: "progress"; progress: CodeIndexProgress } | { kind: "f
  *
  * Follows `code_navigation.WatchCodeIndex(session)`; never blocks the session.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-10-03-indexing-indicators.md
+ * Feature docs: docs/ft/web/session-drawer.md (Start progress) and docs/ft/web/session-code-pane.md (Indexing indicator)
  */
 export function SessionIndexingIndicator({
   client,
