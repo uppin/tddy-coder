@@ -105,6 +105,38 @@ pub const PEER_FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 /// `tests/session_agent_roster_acceptance.rs`.
 pub const PEER_FORWARD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The common room as every forwarding call sees it: the room slot **and** how long a forward to a
+/// peer may wait. The deadline rides with the slot because the slot is the one thing every
+/// forwarding call site already holds, so the setting reaches all of them without a global (the
+/// e2e tests run several daemons in one process) and without a new argument on each.
+#[derive(Clone)]
+pub struct CommonRoom {
+    slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    forward_timeout: Duration,
+}
+
+impl CommonRoom {
+    /// A handle over `slot` whose forwards wait `config.peer_forward_timeout()`.
+    pub fn from_config(
+        slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+        config: &crate::config::DaemonConfig,
+    ) -> Self {
+        // TODO(deadline-and-scenarios): implement
+        let _ = (slot, config);
+        todo!("CommonRoom::from_config")
+    }
+
+    /// The room slot, as the forwarders take it today.
+    pub fn slot(&self) -> &Arc<tokio::sync::RwLock<Option<Arc<Room>>>> {
+        &self.slot
+    }
+
+    /// How long a forward to a peer waits for its answer.
+    pub fn forward_timeout(&self) -> Duration {
+        self.forward_timeout
+    }
+}
+
 fn peer_forward_deadline_status(
     service: &str,
     method: &str,
@@ -263,4 +295,22 @@ where
         }
     });
     Ok(rx)
+}
+
+#[cfg(test)]
+mod common_room_tests {
+    use super::*;
+    use crate::config::DaemonConfig;
+
+    #[test]
+    fn a_common_room_carries_the_deadline_the_config_names() {
+        let config = DaemonConfig {
+            peer_forward_timeout_secs: 7,
+            ..Default::default()
+        };
+
+        let room = CommonRoom::from_config(Arc::new(tokio::sync::RwLock::new(None)), &config);
+
+        assert_eq!(room.forward_timeout(), Duration::from_secs(7));
+    }
 }

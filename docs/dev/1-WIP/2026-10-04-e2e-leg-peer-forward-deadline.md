@@ -4,7 +4,9 @@
 **Status**: 🚧 In Progress
 **Type**: Feature (daemon setting) + Refactor (test split)
 
-Node 2 of 5 of the `#e2e-leg` stack (branch `feature/e2e-leg/deadline-and-scenarios`, PR base `feature/e2e-leg/unique-rooms`). It consumes nothing from node 1.
+Node 2 of 5 of the `#e2e-leg` stack, PR [#579](https://github.com/uppin/tddy-coder/pull/579) (branch `feature/e2e-leg/deadline-and-scenarios`, PR base `feature/e2e-leg/unique-rooms`). It consumes nothing from node 1.
+
+**Contract state (commit 2):** see *Draft PR contract*. The acceptance-test review gate was not held separately (the developer asked for the whole stack to be prepared without stopping); review the test list before `/green`.
 
 ## Initial Discovery
 
@@ -167,10 +169,12 @@ This PR does **not**:
 
 The first push of this PR publishes:
 
-- `DaemonConfig::peer_forward_timeout_secs` field, `peer_forward_timeout()` accessor (body `// TODO(deadline-and-scenarios): implement`), and the common-room handle type with the signatures the forwarders will take.
-- Failing tests: the three config tests; the deadline test at 2 s. The split `rpc_scenarios` tests are written as the ten scenario tests and pass-through the existing bodies — they are a refactor and are not expected to fail.
+- `DaemonConfig::peer_forward_timeout_secs` (field, default 30) and `peer_forward_timeout()` (body `// TODO(deadline-and-scenarios): implement`).
+- `CommonRoom` in `tddy-daemon-kernel::peer_forwarding`: `from_config(slot, &DaemonConfig)` (body `// TODO`), `slot()`, `forward_timeout()`. The forwarders do **not** take it yet; moving them and the ~24 call sites onto it is `/green`'s work in this PR.
+- Failing tests: the three config tests and `a_common_room_carries_the_deadline_the_config_names` (verified failing on the `todo!()` bodies, 4 of 4), and the silent-peer deadline test, rewritten to configure 2 s through the daemon config and assert `DeadlineExceeded` naming 2 s (compiles; it needs Docker and was **not run locally** — it fails today because the setting is not read, so the forward waits out 30 s against a 20 s outer wait).
+- The `rpc_scenarios` split is a refactor with no new behaviour to fail on; it is done in `/green`, not in the contract.
 
-`/green` implements the deadline end to end and moves every call site in this same PR; it must never merge in the contract state.
+`/green` implements the deadline end to end, moves every call site, and splits `rpc_scenarios` in this same PR; it must never merge in the contract state.
 
 ## Green wave
 
@@ -197,10 +201,10 @@ Real dependency edges:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-daemon-kernel -p tddy-daemon-livekit -p tddy-host-service -p tddy-session-lifecycle -p tddy-session-agents -p tddy-daemon-rpc -p tddy-livekit`) and read the e2e leg on CI

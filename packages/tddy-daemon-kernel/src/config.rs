@@ -15,6 +15,10 @@ fn default_spawn_worker_request_timeout_secs() -> u64 {
     300
 }
 
+fn default_peer_forward_timeout_secs() -> u64 {
+    30
+}
+
 fn default_common_room_set_metadata_timeout_secs() -> u64 {
     60
 }
@@ -365,6 +369,11 @@ pub struct DaemonConfig {
     /// `clone_as_user`). Minimum effective value is 1.
     #[serde(default = "default_spawn_worker_request_timeout_secs")]
     pub spawn_worker_request_timeout_secs: u64,
+    /// Max seconds a forwarded unary RPC to a peer daemon, or the opening of a forwarded server
+    /// stream, may wait for the peer to answer before failing with `DeadlineExceeded`. Minimum
+    /// effective value is 1. The per-frame idle timeout of a forwarded stream is not configurable.
+    #[serde(default = "default_peer_forward_timeout_secs")]
+    pub peer_forward_timeout_secs: u64,
     /// How long a freshly spawned session process is watched for an immediate exit before the
     /// spawn is reported as successful. Minimum effective value is 1ms.
     #[serde(default = "default_spawn_startup_grace_period_ms")]
@@ -488,6 +497,7 @@ impl Default for DaemonConfig {
             repos_base_path: None,
             spawn_mouse: true,
             spawn_worker_request_timeout_secs: default_spawn_worker_request_timeout_secs(),
+            peer_forward_timeout_secs: default_peer_forward_timeout_secs(),
             spawn_startup_grace_period_ms: default_spawn_startup_grace_period_ms(),
             spawn_startup_poll_interval_ms: default_spawn_startup_poll_interval_ms(),
             agent_warmup: AgentWarmupConfig::default(),
@@ -1208,6 +1218,12 @@ impl DaemonConfig {
     pub fn spawn_worker_request_timeout(&self) -> Duration {
         let secs = self.spawn_worker_request_timeout_secs.max(1);
         Duration::from_secs(secs)
+    }
+
+    /// How long a forward to a peer daemon waits for its answer (see `peer_forward_timeout_secs`).
+    pub fn peer_forward_timeout(&self) -> Duration {
+        // TODO(deadline-and-scenarios): implement
+        todo!("DaemonConfig::peer_forward_timeout")
     }
 
     /// How long to watch a freshly spawned session process for an immediate exit.
@@ -2536,5 +2552,31 @@ mod livekit_enabled_tests {
 
         // Then it says off — an absent block behaves exactly as it always has
         assert!(!enabled, "an absent livekit block was called switched on");
+    }
+}
+
+#[cfg(test)]
+mod peer_forward_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn the_peer_forward_deadline_defaults_to_thirty_seconds() {
+        let c = DaemonConfig::default();
+        assert_eq!(c.peer_forward_timeout().as_secs(), 30);
+    }
+
+    #[test]
+    fn the_peer_forward_deadline_is_read_from_the_daemon_yaml() {
+        let c: DaemonConfig = serde_yaml::from_str("peer_forward_timeout_secs: 2\n").expect("yaml");
+        assert_eq!(c.peer_forward_timeout().as_secs(), 2);
+    }
+
+    #[test]
+    fn a_zero_peer_forward_deadline_is_clamped_to_one_second() {
+        let c = DaemonConfig {
+            peer_forward_timeout_secs: 0,
+            ..Default::default()
+        };
+        assert_eq!(c.peer_forward_timeout().as_secs(), 1);
     }
 }
