@@ -143,6 +143,35 @@ impl WorktreeServiceImpl {
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))
     }
 
+    /// The directory of session `session_id` under the caller's own sessions base — the one rule
+    /// that says a session is the caller's: token → OS user → `<sessions base>/sessions/<id>`.
+    /// Not checked against disk; see [`Self::resolve_owned_session_dir`] for that.
+    fn session_dir_for(&self, os_user: &str, session_id: &str) -> Result<PathBuf, Status> {
+        tddy_core::session_lifecycle::validate_session_id_segment(session_id)
+            .map_err(|e| Status::invalid_argument(e.message()))?;
+        let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
+            .ok_or_else(|| Status::internal("could not resolve sessions base"))?;
+        Ok(sessions_base
+            .join(tddy_core::output::SESSIONS_SUBDIR)
+            .join(session_id))
+    }
+
+    /// Authenticates the caller and returns the directory of `session_id` when it exists under the
+    /// caller's own OS user. A session of another user, and one that does not exist, are the same
+    /// `NotFound` — the answer must not reveal which session ids exist.
+    pub fn resolve_owned_session_dir(
+        &self,
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<PathBuf, Status> {
+        let os_user = self.authorize(session_token)?;
+        let session_dir = self.session_dir_for(&os_user, session_id.trim())?;
+        if !session_dir.is_dir() {
+            return Err(Status::not_found("session not found"));
+        }
+        Ok(session_dir)
+    }
+
     /// The project's main repository **on this host**, or the refusal that says why not.
     ///
     /// Every method here starts with this, in this order, and the order is the contract: an invalid
@@ -460,11 +489,7 @@ impl WorktreeService for WorktreeServiceImpl {
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
         let main_repo = self.resolve_main_repo(&os_user, project_id)?;
-        let sessions_base = sessions_base_for_user(&os_user, Some(&self.tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve sessions base"))?;
-        let session_dir = sessions_base
-            .join(tddy_core::output::SESSIONS_SUBDIR)
-            .join(session_id);
+        let session_dir = self.session_dir_for(&os_user, session_id)?;
 
         let repo_blocking = main_repo.clone();
         let session_dir_blocking = session_dir.clone();

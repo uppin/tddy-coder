@@ -28,6 +28,30 @@ never names that registry and `tddy-daemon` keeps only wiring. Without a source 
 `FailedPrecondition`; there is no fallback to another language server. The request path and the
 end-to-end test are in [tddy-daemon's code-navigation-service.md](../../tddy-daemon/docs/code-navigation-service.md).
 
+`WatchCodeIndex` is the one method that does not forward: it follows the code-index warm-up progress
+the service holds for a session (`with_index_progress` hands it the holder the warm-up records into).
+It authorises through the worktree service's `resolve_owned_session_dir` — token → OS user →
+`<sessions base>/sessions/<id>` must exist — before looking anything up, so a foreign session and a
+missing one answer the same `NotFound`, and a progress `error` (which can carry paths) is never
+reachable by another user. It then follows the session's `watch` channel: the latest progress, each
+replacement, ending after a message with `ready` or `error`. A session nothing warmed ends the stream
+empty. The stream buffers eight messages (`WATCH_BUFFER`) for a reader that has not drained them.
+
+## Code index warm-up
+
+`code_index_warmup.rs` warms a session's code index in the background and keeps its latest progress.
+
+| Item | What it is |
+|---|---|
+| `SessionIndexProgress` | one `tokio::sync::watch` channel per session id, holding the latest `CodeIndexProgress`. `record` replaces it; `latest` reads it; `follow` subscribes without creating an entry, so following an id nothing warmed (or one the caller does not own) leaves no trace. Entries of warmed sessions are not freed. The holder is `Clone`: the warm-ups and `WatchCodeIndex` share one |
+| `warm_for_session(index_daemon, progress, session_id, worktree)` | starts `code_index.Warm` for `worktree` on its own task and returns its `JoinHandle`, or `None` when nothing was started: no `IndexChannelSource`, or no `Cargo.toml` at the worktree root. A first `Starting` record is written before the task spawns, so a watcher arriving first finds a warm under way. The warm dials through `IndexChannelSource::connect` — the forwarding path navigation uses, which starts the index daemon on first use — and records each `IndexProgress` as a `CodeIndexProgress`. A failed or short warm (the stream ends before `ready`) ends with one record whose `error` says why, and is logged; it never fails the session |
+| `IndexWarmupObserver` | the implementation of `tddy-session-lifecycle`'s [`SessionWorktreeObserver`](../../tddy-session-lifecycle/docs/session-service.md#the-worktree-observer-port) port: `worktree_ready` calls `warm_for_session` and detaches the task |
+
+"Ready" is the index daemon's `Warm` `ready`, which waits for the graph; the registry's own readiness
+(its socket is bound) is not used for it. Without an `index_daemon:` section nothing warms and no
+progress exists. A session started by a path that does not announce its worktree (see the session
+host's not-covered list) is never warmed: its index loads on its first navigation request.
+
 ## Why a crate above the lifecycle crate
 
 Each handler's body needs session-host state *and* crates that sit between the lifecycle crate and

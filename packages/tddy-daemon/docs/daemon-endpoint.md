@@ -24,6 +24,13 @@ Registration is first-wins per process, so the choice is made before the registr
 `TddyLspExecutor` is built either way, because its registry is what the idle-reaper loop drives; with an
 index selected that registry stays empty.
 
+When `index_daemon:` is configured, `runtime::build` constructs the `IndexDaemonRegistry` **before** the
+session host, because the host's `SessionWorktreeObserver` (`tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver`)
+holds the registry, as an `IndexChannelSource`, to warm each started session's code index. The same
+`SessionIndexProgress` holder is handed to the `CodeNavigationServiceImpl` that serves
+`WatchCodeIndex`. Without the section no observer is installed. See
+[code-navigation-service.md](code-navigation-service.md#warming-a-sessions-index).
+
 ### Assembling the session host and the RPC families
 
 `runtime::build` builds the `DaemonSessionHost` with every `with_*` first, then calls

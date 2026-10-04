@@ -108,6 +108,19 @@ function deriveAlias(serviceMethod: string): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * The Connect end-of-stream envelope (flag 0x02, empty JSON object `{}` = success, no trailers).
+ * A Connect client rejects a stream that closes without one.
+ */
+export function connectEndOfStreamFrame(): Uint8Array {
+  const payload = new TextEncoder().encode("{}");
+  const out = new Uint8Array(5 + payload.length);
+  out[0] = 0x02;
+  out[4] = payload.length;
+  out.set(payload, 5);
+  return out;
+}
+
+/**
  * Encode one or more proto messages as a ConnectRPC server-streaming response body
  * (`application/connect+proto`): each message is wrapped in a 5-byte envelope (1 flag byte —
  * 0x00 = uncompressed, no end-of-stream — plus a 4-byte big-endian length) followed by the payload.

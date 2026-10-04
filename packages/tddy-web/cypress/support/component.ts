@@ -4,6 +4,9 @@ import { mountWithRpc } from "./rpc/inMemory.tsx";
 import { agentActivityRegistry } from "../../src/components/sessions/agentActivityRegistry";
 import { sessionNotificationRegistry } from "../../src/components/sessions/sessionNotificationRegistry";
 import { UploadProgressProvider } from "../../src/rpc/uploadProgress";
+import { create } from "@bufbuild/protobuf";
+import { registerServerStreamFallback } from "tddy-connectrpc-testkit";
+import { SessionService, StartSessionEventSchema } from "../../src/gen/session_pb";
 
 /** The Agent Activity and session-notification stores are app-lifetime module singletons; component
  *  tests share one JS context across cases, so clear their per-session state before each test to keep
@@ -41,3 +44,12 @@ Cypress.Commands.add("mount", (jsx, options = {}) => {
  * cares about behaviour rather than wire format.
  */
 Cypress.Commands.add("mountWithRpc", mountWithRpc);
+
+/** The form always starts a session over `StreamStartSession`, whose last event is the unary answer.
+ *  Specs that stub only the unary `startSession` keep working: the stream runs that handler and emits
+ *  its answer as the single `result` event. A spec that implements the stream itself wins. */
+registerServerStreamFallback({
+  unary: SessionService.method.startSession,
+  stream: SessionService.method.streamStartSession,
+  toEvent: (result) => create(StartSessionEventSchema, { event: { case: "result", value: result } }),
+});

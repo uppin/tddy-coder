@@ -11,6 +11,9 @@
 //! `DaemonRpcFamilies` port, which the composition root fills.
 
 pub mod catalog;
+/// Background warm-up of a session's code index and its latest progress — see
+/// [`code_index_warmup::warm_for_session`].
+pub mod code_index_warmup;
 pub mod code_navigation;
 pub mod exec_tool;
 pub mod families;

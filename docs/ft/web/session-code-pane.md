@@ -92,6 +92,28 @@ session host's daemon, which authorises each request exactly as it authorises a 
 Positions are one-based lines and one-based **byte** columns throughout, so identifiers after
 multi-byte characters resolve correctly. Locations are relative to the worktree root.
 
+## Indexing indicator
+
+When a session's worktree is ready and the host has a warm code-intelligence index configured, the host
+loads that worktree's index in the background; the session is usable at once and navigation answers
+whenever the index can. The **session header** (the row above the base view, left of the toggles)
+shows the load:
+
+- **Loading** — *Indexing — `<phase>` `<n>`%*, following the index's own phase and percentage.
+- **Ready** — nothing. The indicator disappears.
+- **Failed** — *Indexing failed — `<reason>`*. The session is unaffected.
+- **Nothing warming** — nothing. A host without an `index_daemon:` section, a worktree that is not a
+  Rust workspace (no `Cargo.toml` at its root), and a session whose start does not trigger a warm-up
+  show no indicator at all.
+
+Progress comes from the session's **owning host**, over the same client as code navigation, and only the
+session's owner may watch it. "Ready" means the index has loaded the worktree's graph, not merely that
+its server is running.
+
+Not every session warms on start. Sandboxed, tool and split sessions, and children spawned by a
+PR-stack orchestrator or a grill-me conversation, trigger no warm-up and show no indicator; their index
+loads on the first navigation request.
+
 ## Backend contract
 
 Two new **`ConnectionService`** RPCs, rooted at the worktree and secured like `RemoveWorktree`
@@ -105,7 +127,7 @@ reads under the worktree root):
   `content_utf8`, `truncated`, `byte_size`.
 
 Navigation uses a third service, **`code_navigation.CodeNavigationService`**
-(`Definition`, `References`, `Hover`), keyed by the same `session_token`, `project_id` and
+(`Definition`, `References`, `Hover`; and `WatchCodeIndex(session_token, session_id)`, the indexing indicator's stream), keyed by the same `session_token`, `project_id` and
 `worktree_path` plus the file's `rel_path` and a position. It authorises the worktree through the same
 listed-worktree check as the file RPCs, rejects a `rel_path` that leaves the worktree, and answers
 `FAILED_PRECONDITION` naming the `index_daemon:` configuration section when the daemon has none.

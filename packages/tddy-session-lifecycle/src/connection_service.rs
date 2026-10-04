@@ -201,7 +201,13 @@ pub struct DaemonSessionHost {
     /// than serving a room without them — see [`crate::rpc_families`], which owns it (hence
     /// `pub(crate)`).
     pub(crate) rpc_families: Option<Arc<dyn crate::rpc_families::DaemonRpcFamilies>>,
+    /// Told of each started session's worktree — see [`SessionWorktreeObserver`]. `None` on a host
+    /// whose embedder acts on nothing of the kind.
+    worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
 }
+
+mod session_worktree_observer;
+pub use session_worktree_observer::SessionWorktreeObserver;
 
 mod seed_codebase;
 pub use seed_codebase::*;

@@ -25,6 +25,15 @@ on the host as its `DaemonRpcFamilies` port, which is the only way session code 
 families. The edge is one-way: nothing below this crate depends on it, not even as a
 dev-dependency.
 
+### Code navigation and index warm-up
+
+`CodeNavigationServiceImpl` serves `code_navigation.CodeNavigationService`: definition, references and
+hover forwarded to the warm index, and `WatchCodeIndex`, a session's index warm-up progress.
+`code_index_warmup` starts that warm-up when a session's worktree appears (`IndexWarmupObserver`, the
+daemon's end of `tddy-session-lifecycle`'s `SessionWorktreeObserver` port) and keeps the latest
+progress per session. See [Code navigation](./docs/architecture.md#code-navigation) and
+[Code index warm-up](./docs/architecture.md#code-index-warm-up).
+
 ### Conversation worktrees
 
 `ExecToolRpcHandler::conversation_worktree` serves `ExecToolService/ConversationWorktree` (`Pull`,

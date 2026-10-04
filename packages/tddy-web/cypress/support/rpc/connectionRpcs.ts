@@ -16,8 +16,8 @@
 import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
 
 import { type ProjectEntry } from "../../../src/gen/project_pb";
-import { ConnectSessionRequestSchema, ConnectSessionResponseSchema, DeleteSessionRequestSchema, ResumeSessionResponseSchema, StartSessionResponseSchema, type SessionEntry } from "../../../src/gen/session_pb";
-import { toArrayBuffer, decodeProtoRequestBody } from "./protoRpc";
+import { ConnectSessionRequestSchema, ConnectSessionResponseSchema, DeleteSessionRequestSchema, ResumeSessionResponseSchema, StartSessionEventSchema, StartSessionResponseSchema, type SessionEntry } from "../../../src/gen/session_pb";
+import { toArrayBuffer, decodeProtoRequestBody, encodeConnectStreamFrames, connectEndOfStreamFrame } from "./protoRpc";
 import {
   anAuthStatusAuthenticated,
   aConnectSessionResponse,
@@ -283,18 +283,35 @@ export function interceptResumeSession(sessionId: string): void {
   }).as("resumeSession");
 }
 
-/** Intercept StartSession with a given sessionId. */
+/** The route every session start goes through: the server-streaming `StreamStartSession`. */
+export const START_SESSION_STREAM_ROUTE = "**/rpc/session.SessionService/StreamStartSession";
+
+/**
+ * A complete `StreamStartSession` response body: one `StartSessionEvent` carrying the
+ * `StartSessionResponse` result, then the end-of-stream envelope. Serve it as `application/connect+proto`.
+ */
+export function aStartSessionStreamBody(response: ReturnType<typeof create<typeof StartSessionResponseSchema>>): ArrayBuffer {
+  const resultEvent = toBinary(
+    StartSessionEventSchema,
+    create(StartSessionEventSchema, { event: { case: "result", value: response } }),
+  );
+  const frames = new Uint8Array(encodeConnectStreamFrames([resultEvent]));
+  const endOfStream = connectEndOfStreamFrame();
+  const out = new Uint8Array(frames.length + endOfStream.length);
+  out.set(frames, 0);
+  out.set(endOfStream, frames.length);
+  return toArrayBuffer(out);
+}
+
+/** Intercept StreamStartSession (the route every start uses) with a given sessionId. */
 export function interceptStartSession(sessionId: string): void {
-  const responseBody = toArrayBuffer(
-    toBinary(
-      StartSessionResponseSchema,
-      create(StartSessionResponseSchema, {
-        sessionId,
-        livekitRoom: `room-${sessionId}`,
-        livekitUrl: "ws://127.0.0.1:7880",
-        livekitServerIdentity: "server-new",
-      }),
-    ),
+  const responseBody = aStartSessionStreamBody(
+    create(StartSessionResponseSchema, {
+      sessionId,
+      livekitRoom: `room-${sessionId}`,
+      livekitUrl: "ws://127.0.0.1:7880",
+      livekitServerIdentity: "server-new",
+    }),
   );
   // Use middleware: true so this handler runs BEFORE any non-middleware handler (e.g. an
   // anonymous capturing handler registered after this call in the test).
@@ -310,15 +327,15 @@ export function interceptStartSession(sessionId: string): void {
   // skip subsequent handlers (confirmed from Cypress runner source: finish(true) skips, finish(false)
   // propagates).
   cy.intercept(
-    "**/rpc/session.SessionService/StartSession",
+    START_SESSION_STREAM_ROUTE,
     { method: "POST", middleware: true },
     (req) => {
       req.on("before:response", (res) => {
         // Replace whatever upstream response arrives (e.g. 404 from Vite dev server) with the
-        // canned proto response so that the component's startSession() resolves successfully.
+        // canned stream response so that the component's startSession() resolves successfully.
         res.send({
           statusCode: 200,
-          headers: { "Content-Type": "application/proto" },
+          headers: { "Content-Type": "application/connect+proto" },
           body: responseBody,
         });
       });

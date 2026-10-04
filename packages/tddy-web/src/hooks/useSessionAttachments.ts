@@ -19,9 +19,11 @@ import type { MessageInitShape } from "@bufbuild/protobuf";
 import type {
   SessionService,
   SessionAttachmentSchema,
+  StartPhase_Step,
   StartSessionRequestSchema,
   StartSessionResponse,
 } from "../gen/session_pb";
+import { StartPhase_Boundary } from "../gen/session_pb";
 import type { SessionFilesService } from "../gen/session_files_pb";
 import {
   duplicateBasenames,
@@ -79,6 +81,11 @@ export interface SessionAttachments {
   attachments: PendingAttachment[];
   /** Per-row progress while a creation is in flight, keyed by basename. */
   progress: AttachmentProgressByBasename;
+  /**
+   * The slow step of the start the host last reported beginning (`StartPhase`) — worktree, semantic
+   * index, agent — or `null` when no step is under way or the start is not being streamed.
+   */
+  startPhase: StartPhase_Step | null;
   /**
    * Host local files are uploaded to and that every staged ref is stamped with — the daemon this
    * form's client is connected to, which is not necessarily the host that runs the session.
@@ -220,6 +227,8 @@ export function useSessionAttachments({
   );
   const [pickRefusal, setPickRefusal] = useState<string | null>(null);
   const [progress, setProgress] = useState<Record<string, AttachmentProgress>>({});
+  // The step of the start the host reported beginning and has not yet ended.
+  const [startPhase, setStartPhase] = useState<StartPhase_Step | null>(null);
   const [hostDocPickerOpen, setHostDocPickerOpen] = useState(false);
 
   // What has already reached a staging host, by row id. A submit that fails — a branch conflict, most
@@ -374,20 +383,33 @@ export function useSessionAttachments({
     request: StartSessionRequestInit,
   ): Promise<StartSessionResponse | null> => {
     let result: StartSessionResponse | null = null;
-    for await (const event of client.streamStartSession(request)) {
-      if (cancelledRef.current) return null;
-      if (event.event.case === "attachmentProgress") {
-        const reported = event.event.value;
-        setProgress((prev) => ({
-          ...prev,
-          [reported.basename]: {
-            percent: percentDone(Number(reported.bytesDone), Number(reported.bytesTotal)),
-            phase: "materializing",
-          },
-        }));
-      } else if (event.event.case === "result") {
-        result = event.event.value;
+    try {
+      for await (const event of client.streamStartSession(request)) {
+        if (cancelledRef.current) return null;
+        if (event.event.case === "attachmentProgress") {
+          const reported = event.event.value;
+          setProgress((prev) => ({
+            ...prev,
+            [reported.basename]: {
+              percent: percentDone(Number(reported.bytesDone), Number(reported.bytesTotal)),
+              phase: "materializing",
+            },
+          }));
+        } else if (event.event.case === "result") {
+          result = event.event.value;
+        } else if (event.event.case === "phase") {
+          const { step, boundary } = event.event.value;
+          if (boundary === StartPhase_Boundary.BEGIN) {
+            setStartPhase(step);
+          } else if (boundary === StartPhase_Boundary.END) {
+            setStartPhase((current) => (current === step ? null : current));
+          }
+        }
       }
+    } finally {
+      // A step that fails sends no END (the stream errors instead), so the phase is cleared when the
+      // stream is over, however it ended.
+      if (!cancelledRef.current) setStartPhase(null);
     }
     if (result === null) {
       throw new Error("the host ended the start-session stream without a result");
@@ -398,6 +420,7 @@ export function useSessionAttachments({
   return {
     attachments,
     progress,
+    startPhase,
     stagingDaemonInstanceId,
     problem: describeAttachmentProblem(attachments),
     pickRefusal,

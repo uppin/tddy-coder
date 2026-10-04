@@ -11,14 +11,17 @@ use tddy_service::proto::session::StartSessionResponse;
 use crate::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 use crate::cli_session_manager::CliSessionManager;
 use crate::config::{resolve_cursor_binary_path, DaemonConfig};
+use crate::connection_service::AttachmentProgressSink;
 use crate::connection_service::{
     effective_spawn_branch, session_worktree_source, spawned_branch_of_session, WorktreeSource,
 };
 use crate::project_storage;
+use tddy_service::proto::session::start_phase::Step as StartStep;
 
 mod chat;
 pub use chat::*;
 
+/// [`spawn_cursor_cli_session_reporting`] for a caller with nobody watching the start's steps.
 #[allow(clippy::too_many_arguments)]
 pub async fn spawn_cursor_cli_session_inner(
     config: &DaemonConfig,
@@ -63,6 +66,82 @@ pub async fn spawn_cursor_cli_session_inner(
     // naming the concrete daemon type would drag it through every caller of a function that
     // otherwise mentions nothing of the kind.
     agent_clones: &dyn crate::connection_service::SeededAgentClones,
+) -> Result<Response<StartSessionResponse>, Status> {
+    spawn_cursor_cli_session_reporting(
+        config,
+        tddy_data_dir,
+        cli_manager,
+        os_user,
+        session_id,
+        session_token,
+        sessions_base,
+        model,
+        project_id,
+        branch_worktree_intent,
+        new_branch_name,
+        selected_integration_base_ref,
+        selected_branch_to_work_on,
+        repo_path,
+        stack_parent,
+        initial_prompt,
+        managed_codebase,
+        agents,
+        managed_recipe,
+        semantic_index,
+        create_remote_branch,
+        task_registry,
+        agent_clones,
+        &AttachmentProgressSink::discarding(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn spawn_cursor_cli_session_reporting(
+    config: &DaemonConfig,
+    tddy_data_dir: &Path,
+    cli_manager: &Arc<CliSessionManager>,
+    os_user: &str,
+    session_id: &str,
+    // Authorizes the `workspace` starts this session's seeded agents need on their own hosts; the
+    // peer sees the same token the client presented here.
+    session_token: &str,
+    sessions_base: PathBuf,
+    model: &str,
+    project_id: &str,
+    branch_worktree_intent: &str,
+    new_branch_name: &str,
+    selected_integration_base_ref: &str,
+    selected_branch_to_work_on: &str,
+    // Client-supplied local checkout to run against directly (StartSessionRequest.repo_path).
+    // When non-empty it wins over `project_id`: the session's worktree IS this path (no git
+    // worktree is created and it is never removed on session end). Empty → resolve from
+    // `project_id` as before.
+    repo_path: &str,
+    // The spawn's PR-stack parent, and the daemon that resolves what the child bases off — this one
+    // when it owns the parent, the daemon named in the request when it does not.
+    stack_parent: crate::connection_service::SpawnStackParent<'_>,
+    initial_prompt: &str,
+    managed_codebase: bool,
+    // The session's starting agent roster, already resolved against the request's
+    // `specialized_agents` by the caller (docs/ft/daemon/session-agent-roster.md). Resolved there
+    // rather than here because qualifying an id needs this daemon's def sources *and* its registry
+    // assistants, and this free function is handed neither.
+    agents: &mut [tddy_core::SessionAgentRecord],
+    managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,
+    // When true, index the worktree before launch (blocking; aborts on failure) and point the
+    // `SemanticSearch` tool at the per-session index via `TDDY_SEMANTIC_INDEX_DB`.
+    semantic_index: bool,
+    // When true (new_branch_from_base only), push the new branch to origin at session start.
+    create_remote_branch: bool,
+    task_registry: &tddy_task::TaskRegistry,
+    // This daemon in its capacity as the claimant of the clones the roster's peer-owned agents
+    // read. A parameter rather than something built here because this is a free function, and
+    // naming the concrete daemon type would drag it through every caller of a function that
+    // otherwise mentions nothing of the kind.
+    agent_clones: &dyn crate::connection_service::SeededAgentClones,
+    // Where the start's phases (worktree, semantic index, agent) are announced.
+    progress: &AttachmentProgressSink,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -113,6 +192,7 @@ pub async fn spawn_cursor_cli_session_inner(
                     selected_integration_base_ref,
                 )
                 .await?;
+            progress.begin_phase(StartStep::Worktree);
             let wt = cut_cursor_cli_worktree(
                 selected_integration_base_ref,
                 create_remote_branch,
@@ -123,6 +203,7 @@ pub async fn spawn_cursor_cli_session_inner(
                 chain_base_ref,
             )
             .await?;
+            progress.end_phase(StartStep::Worktree);
             // The child's branch now exists, so the planned node it materializes can record it —
             // which is what makes that node's descendants spawnable at all, since they base onto
             // `<remote>/<branch>` (`Stack::base_ref_for_spawn`). Until this call a cursor-cli child
@@ -213,12 +294,14 @@ pub async fn spawn_cursor_cli_session_inner(
         task_registry,
         &session_dir,
         &worktree_path,
+        progress,
     )
     .await?;
 
     // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume
     // continues this chat instead of opening a new one.
+    progress.begin_phase(StartStep::Agent);
     let (cursor_chat_id, handle) = spawn_cursor_cli_process(
         cli_manager,
         session_id,
@@ -229,6 +312,7 @@ pub async fn spawn_cursor_cli_session_inner(
         session_env,
     )
     .await?;
+    progress.end_phase(StartStep::Agent);
 
     let pid = handle.pid;
     write_cursor_cli_session_metadata(CursorCliSessionRecord {
@@ -349,9 +433,11 @@ async fn cursor_cli_semantic_env(
     task_registry: &tddy_task::TaskRegistry,
     session_dir: &Path,
     worktree_path: &Path,
+    progress: &AttachmentProgressSink,
 ) -> Result<Vec<(String, String)>, Status> {
     let mut session_env: Vec<(String, String)> = Vec::new();
     if semantic_index {
+        progress.begin_phase(StartStep::SemanticIndex);
         crate::connection_service::index_session_worktree(
             tddy_data_dir,
             task_registry,
@@ -360,6 +446,7 @@ async fn cursor_cli_semantic_env(
             session_dir,
         )
         .await?;
+        progress.end_phase(StartStep::SemanticIndex);
         session_env.push(tddy_semantic_index::semantic_index::semantic_index_env(
             session_dir,
         ));

@@ -7,7 +7,7 @@
 **CRAP:** **CRAP 80** · complexity 80 · rank 46/50 in this crate · **fully covered** (CRAP == complexity means coverage 1.0)
 **Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — narrowed 2026-09-24 by #524 (857 → 358); what is left is its early-return guards, which the engine refuses to extract (E4, plan `19`) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
+**Status:** Open — regressed 2026-10-04 (358 → 373, +15 from #571); narrowed 2026-09-24 by #524 (857 → 358); what is left is its early-return guards, which the engine refuses to extract (E4, plan `19`) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
@@ -18,6 +18,7 @@
 | 2026-09-23 | 857 | 6 | — | — | 854 on master before #520 (+12 since detection, unrecorded); +3 from #520 (`#carve` 11/12) — rustfmt re-wraps the peer-roster and common-room reads that moved behind `self.peer_routing`. No control flow added: nesting, and `return`/`?` count, identical to master; branches not re-derived |
 | 2026-09-24 | 857 | 6 | — | — | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count; nesting and `return`/`?` count identical on the merge-base with `origin/master` (`4e7157d2`) and HEAD; branches not re-derived |
 | 2026-09-24 | 358 | — | — | — | #524: plans `10a` and `10b` (15 extract-methods between the returns) and DRY #2, #4, #8 (857 → 358). Plan `19` authored the four branch bodies and the agent-allowlist check as extract-methods; each was refused for its early returns (E4) |
+| 2026-10-04 | 373 | — | — | — | #571 (`#live-plan` 12/15): 358 → 373 (+15), by brace matching from the `fn start_session_core` line on `origin/feature/live-plan/session-lsp-tools` (which reproduces the 358 above) and on HEAD. Added: the `begin_phase` / `end_phase` calls around the workspace start's seed and semantic index, the `announce_worktree_ready` call after each of the three reporting starts, and the `sessions_base` / `session_id` captures the claude-cli and cursor-cli branches take before their `.await?`. Nesting, branches and exits not re-derived. Not split: the remaining seams are the early-return guards the engine refuses (E4) |
 
 ## What the tool found
 

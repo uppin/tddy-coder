@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-worktree-service/src/service.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-24 — `/pr-wrap` step 3.5 file-length gate on #509 (`#keyring` 2/9), production lines counted to the first `#[cfg(test)]`
-**Metrics:** **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.5× over**
-**Thresholds breached:** length 752 > 500
+**Metrics:** **777 production lines** (2026-10-04, #571; `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 752 at 2026-09-24) — originally **752 production lines** of 752 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.55× over**
+**Thresholds breached:** length 777 > 500
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-04 (+25 from #571) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-24 | 752 | first detection. The size predates #509 (753 at merge-base `4e7157d2`). #509 changed 1 line (0+/1−), dropping `.map(str::to_string)` from `authorize`'s `os_user_for_github` chain. It did not grow the file |
+| 2026-10-04 | 777 | 752 at the base `c3567fde` → 777 after #571 (`#live-plan` 12/15): +25 lines, the session-ownership helper `session_dir_for` / `resolve_owned_session_dir`. Grown; the split is deferred because dependent #572 touches this file (the stack rule). Not claimed by any PR. The seam line ranges above predate this growth and must be re-derived |
 
 ## What would close it — candidate seams (not proven)
 

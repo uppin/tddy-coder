@@ -10,12 +10,20 @@ then forwards it. `tddy-daemon` wires it; the handler itself is
 | `Definition` | Where the symbol at a position of a worktree file is defined |
 | `References` | Every reference to that symbol, its declaration included |
 | `Hover` | The language server's hover markdown for it; unset when there is none |
+| `WatchCodeIndex` | A session's code-index warm-up: latest progress, then each change, ending after `ready` or `error` |
 
 The wire contract is [`tddy-service/proto/code_navigation.proto`](../../tddy-service/docs/code-navigation-proto.md).
 `runtime.rs` builds `CodeNavigationServiceImpl` from the daemon's `WorktreeServiceImpl` and, when an
 `index_daemon:` section exists, its `IndexDaemonRegistry` — handed over as the handler's
 `IndexChannelSource` port, which `index_daemon/registry.rs` implements — and registers the entry
 beside the worktree service it borrows. The daemon holds no RPC method of its own for this service.
+
+When an `index_daemon:` section exists, `runtime.rs` also builds one `SessionIndexProgress` holder,
+hands it to the service (`with_index_progress`), and installs an `IndexWarmupObserver` on the session
+host (`DaemonSessionHost::with_worktree_observer`) that records into the same holder. The index-daemon
+block therefore precedes the session host's construction in `build`, so the observer can hold the
+registry. Without the section nothing is installed: no session is warmed and `WatchCodeIndex` ends
+empty.
 
 ## The path every request takes
 
@@ -44,6 +52,28 @@ beside the worktree service it borrows. The daemon holds no RPC method of its ow
 dependency of `tddy-daemon-rpc` (for the generated `code_index` client), and only a dev-dependency of
 this crate.
 
+## Warming a session's index
+
+A started claude-cli, cursor-cli or workspace session announces its worktree to the host's
+`SessionWorktreeObserver`; the daemon's observer then runs `code_index.Warm` for that worktree in the
+background, through the same registry channel every navigation request uses (the first warm starts the
+index daemon). Starting a session never waits on it. Progress is recorded per session id and read by
+`WatchCodeIndex`; a warm that fails is recorded as the session's last progress with its reason. The
+mechanics are in
+[tddy-daemon-rpc's code index warm-up](../../tddy-daemon-rpc/docs/architecture.md#code-index-warm-up).
+
+Only a worktree with a `Cargo.toml` at its root is warmed, because the index serves Rust. A session
+whose start does not announce its worktree is never warmed — the sandboxed, tool and split starts, and
+children spawned by a PR-stack orchestrator or a grill-me conversation — and its index loads on its
+first navigation request.
+
+## Who may watch
+
+`WatchCodeIndex` is keyed by session id, not by a worktree path, and applies the worktree service's
+`resolve_owned_session_dir`: token → OS user → `<sessions base>/sessions/<id>` must exist. A session
+of another user and one that does not exist answer the same `NotFound`. It is the one ownership model
+the worktree service's `RestoreSessionWorktree` shares.
+
 ## Transport
 
 The service is registered among the daemon's RPC entries, so it is reachable over the transports the
@@ -63,3 +93,14 @@ and dial are the production ones.
 | a worktree not listed for the project is refused | `FailedPrecondition`, the fake is never asked, the registry is never started |
 | no `index_daemon:` section | `FailedPrecondition` naming `index_daemon` |
 | the first request starts the index daemon | the stand-in is launched with `--grpc-uds <socket>` and the registry reports that socket running |
+
+`tests/code_index_warmup_acceptance.rs` (the same stand-in, with a fake `Warm` stream the test drives):
+
+| Test | Pins |
+|---|---|
+| a session on a Rust worktree starts warm once its worktree exists | `warm_for_session` starts a warm for the worktree; `WatchCodeIndex` joins it |
+| `WatchCodeIndex` delivers phase, percentage and ready | the stream carries the fake's progress and ends after `ready` |
+| without an index daemon no warm starts | no warm, no progress, and `WatchCodeIndex` ends empty |
+| watching a session nothing warmed | the stream ends at once with nothing |
+| a warm failure is reported with its reason | the last message carries `error`, and the warm does not panic |
+| another user's watch is refused | `NotFound`, the same as for a missing session, and nothing is recorded for the id |

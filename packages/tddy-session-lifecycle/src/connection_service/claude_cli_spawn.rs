@@ -25,6 +25,10 @@ use std::path::Path;
 
 use crate::config::DaemonConfig;
 
+use super::AttachmentProgressSink;
+
+use tddy_service::proto::session::start_phase::Step as StartStep;
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn spawn_claude_cli_session_inner(
     config: &DaemonConfig,
@@ -54,6 +58,9 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     create_remote_branch: bool,
     ssh_config_host: &str,
     task_registry: &TaskRegistry,
+    // Where the start's phases (worktree, semantic index, agent) are announced; discarding for a
+    // caller with nobody watching.
+    progress: &AttachmentProgressSink,
 ) -> Result<Response<StartSessionResponse>, Status> {
     if model.trim().is_empty() {
         return Err(Status::invalid_argument(
@@ -111,6 +118,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // Create the real git worktree (blocking: involves git fetch + git worktree add), or materialize
     // on an SSH target when `ssh_config_host` is set.
     let ssh_alias = ssh_config_host.trim();
+    progress.begin_phase(StartStep::Worktree);
     let worktree_path = claude_cli_spawn_steps::cut_claude_cli_worktree(
         claude_cli_spawn_steps::ClaudeCliWorktreeCut {
             config,
@@ -125,6 +133,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         },
     )
     .await?;
+    progress.end_phase(StartStep::Worktree);
 
     // The child's branch now exists (and, when requested, is on origin), so a pr-stack
     // orchestrator's planned node can record it — which is what lets this node's descendants be
@@ -181,6 +190,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
                 child_spawn_handler,
                 conversation_spawn_handler,
                 semantic_index,
+                progress,
                 task_registry,
                 session_dir: &session_dir,
                 worktree_path: &worktree_path,
@@ -189,6 +199,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         )
         .await?;
 
+    progress.begin_phase(StartStep::Agent);
     let handle = claude_cli_spawn_steps::spawn_claude_cli_process(
         claude_cli_spawn_steps::ClaudeCliProcess {
             os_user,
@@ -207,6 +218,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         },
     )
     .await?;
+    progress.end_phase(StartStep::Agent);
 
     let pid = handle.pid;
 

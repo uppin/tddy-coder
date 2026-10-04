@@ -66,6 +66,7 @@ impl DaemonSessionHost {
         start: CliStart,
         stack_parent_for_claude_cli: Option<String>,
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
+        progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
         self.start_claude_cli_session(
             os_user,
@@ -88,6 +89,7 @@ impl DaemonSessionHost {
             req.semantic_index,
             req.create_remote_branch,
             req.ssh_config_host.trim(),
+            progress,
         )
         .await
     }
@@ -172,6 +174,7 @@ impl DaemonSessionHost {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn spawn_cursor_cli_from_request(
         &self,
         req: &StartSessionRequest,
@@ -180,8 +183,9 @@ impl DaemonSessionHost {
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
         mut started_agents: Vec<tddy_core::SessionAgentRecord>,
         clones: super::super::DaemonSeedCloneClaimant,
+        progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        crate::cursor_cli_spawn::spawn_cursor_cli_session_inner(
+        crate::cursor_cli_spawn::spawn_cursor_cli_session_reporting(
             &self.config,
             &self.tddy_data_dir,
             &self.claude_cli_manager,
@@ -214,6 +218,7 @@ impl DaemonSessionHost {
             req.create_remote_branch,
             &self.task_registry,
             &clones,
+            progress,
         )
         .await
     }

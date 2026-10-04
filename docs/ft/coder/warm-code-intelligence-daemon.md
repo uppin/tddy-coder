@@ -232,6 +232,15 @@ that executor; this is a choice of deployment, not a fallback within one — wit
 that executor is never asked. `ReadLints`, which reports a whole workspace, is refused through the
 index, because diagnostics are answered per file; the refusal points the agent at `LspDiagnostics`.
 
+A started session also **warms** its index. When a Claude CLI, Cursor CLI or workspace session's
+worktree exists and holds a Rust workspace (a `Cargo.toml` at its root), tddy-daemon calls `Warm` for
+it in the background — which starts the index daemon if nothing has — and keeps the latest progress per
+session; the web's session header follows it
+([Indexing indicator](../web/session-code-pane.md#indexing-indicator)). Starting a session never waits
+on it, and a warm that fails is reported with its reason and leaves the session usable. Sandboxed,
+tool and split sessions, and children spawned by a PR-stack orchestrator or a grill-me conversation,
+trigger no warm; their index loads on their first navigation request.
+
 A developer can equally start the same binary by hand with `run-index-daemon`, which is the only
 path that exists without a daemon installed.
 

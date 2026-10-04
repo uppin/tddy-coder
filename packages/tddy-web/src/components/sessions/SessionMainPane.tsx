@@ -36,6 +36,7 @@ import {
 import { randomUuid } from "../../lib/randomId";
 import { SessionRuntime } from "./SessionRuntime";
 import { resolveWorkflowView } from "./workflowViews";
+import { SessionIndexingIndicator } from "../session/SessionIndexingIndicator";
 import { WorktreeCodePane } from "../session/WorktreeCodePane";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import type { ToolShortcutDef } from "../../lib/toolShortcuts";
@@ -494,6 +495,13 @@ export function SessionMainPane({
           {/* Header toggles — always visible when a session is selected */}
           {selectedSession && (
             <div className="flex items-center justify-end gap-1 px-2 py-1 border-b border-border flex-shrink-0">
+              {codeNavigationClient && (
+                <SessionIndexingIndicator
+                  client={codeNavigationClient}
+                  sessionToken={sessionToken}
+                  sessionId={selectedSession.sessionId}
+                />
+              )}
               {/* One transcript per pane: the overlay replays exactly what the Activities view is
                   already showing, so it is suppressed there — and only there. It stays the only way
                   to read the transcript for an active session and for a dormant session whose base

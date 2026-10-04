@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file session.proto.
  */
 export const file_session: GenFile = /*@__PURE__*/
-  fileDesc("Cg1zZXNzaW9uLnByb3RvEgdzZXNzaW9uIs0BChNBZ2VudENsb25lUGxhY2VtZW50EhIKCnNlc3Npb25faWQYASABKAkSJwofZmFjaWxpdGF0aW5nX2RhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdmYWNpbGl0YXRpbmdfZGFlbW9uX3VybBgDIAEoCRIdChVmaXJzdF9hZG1pc3Npb25fdG9rZW4YBCABKAkSGwoTZmlyc3RfYWRtaXNzaW9uX3VybBgFIAEoCRIcChRmaXJzdF9hZG1pc3Npb25fcm9vbRgGIAEoCSKSAQohQXR0YWNobWVudE1hdGVyaWFsaXphdGlvblByb2dyZXNzEhAKCGJhc2VuYW1lGAEgASgJEhgKEGF0dGFjaG1lbnRfaW5kZXgYAiABKA0SGAoQYXR0YWNobWVudF9jb3VudBgDIAEoDRISCgpieXRlc19kb25lGAQgASgEEhMKC2J5dGVzX3RvdGFsGAUgASgEImQKDkJyYW5jaENvbmZsaWN0Eg4KBmJyYW5jaBgBIAEoCRIjCgVvd25lchgCIAEoCzIULnR5cGVzLkJyYW5jaFNlc3Npb24SHQoVc3VnZ2VzdGVkX2JyYW5jaF9uYW1lGAMgASgJIkIKFUNvbm5lY3RTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiZAoWQ29ubmVjdFNlc3Npb25SZXNwb25zZRIUCgxsaXZla2l0X3Jvb20YASABKAkSEwoLbGl2ZWtpdF91cmwYAiABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYAyABKAkiQQoURGVsZXRlU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIiMKFURlbGV0ZVNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCCJjChpHZXRXb3JrdHJlZVNuYXBzaG90UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAMgASgJIsoBChtHZXRXb3JrdHJlZVNuYXBzaG90UmVzcG9uc2USEwoLaGVhZF9jb21taXQYASABKAkSDgoGYnJhbmNoGAIgASgJEhUKDWNoYW5nZWRfcGF0aHMYAyADKAkSFQoNY2hhbmdlZF9maWxlcxgEIAEoDRITCgtsaW5lc19hZGRlZBgFIAEoAxIVCg1saW5lc19yZW1vdmVkGAYgASgDEhcKD3VudHJhY2tlZF9maWxlcxgHIAEoDRITCgthdHRhY2htZW50cxgIIAMoCSKVAQoPSG9zdERvY3VtZW50UmVmEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgBIAEoCRInCgVzY29wZRgCIAEoDjIYLnR5cGVzLkhvc3REb2N1bWVudFNjb3BlEhIKCnNlc3Npb25faWQYAyABKAkSEgoKcHJvamVjdF9pZBgEIAEoCRIVCg1yZWxhdGl2ZV9wYXRoGAUgASgJIiwKE0xpc3RTZXNzaW9uc1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSI/ChRMaXN0U2Vzc2lvbnNSZXNwb25zZRInCghzZXNzaW9ucxgBIAMoCzIVLnNlc3Npb24uU2Vzc2lvbkVudHJ5IkEKFFJlc3VtZVNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJ3ChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkikgEKEVNlc3Npb25BdHRhY2htZW50EhAKCGJhc2VuYW1lGAEgASgJEi4KBnN0YWdlZBgCIAEoCzIcLnNlc3Npb24uU3RhZ2VkQXR0YWNobWVudFJlZkgAEjEKDWhvc3RfZG9jdW1lbnQYAyABKAsyGC5zZXNzaW9uLkhvc3REb2N1bWVudFJlZkgAQggKBnNvdXJjZSK+AQoRU2Vzc2lvbkNvbnRleHREb2MSCwoDa2V5GAEgASgJEhAKCGJhc2VuYW1lGAIgASgJEgwKBHBhdGgYAyABKAkSEwoLZGVzY3JpcHRpb24YBCABKAkSDgoGZXhpc3RzGAUgASgIEiwKBGtpbmQYBiABKA4yHi5zZXNzaW9uLlNlc3Npb25Db250ZXh0RG9jS2luZBISCgpzaXplX2J5dGVzGAcgASgEEhUKDXJlbGF0aXZlX3BhdGgYCCABKAkiwAYKDFNlc3Npb25FbnRyeRISCgpzZXNzaW9uX2lkGAEgASgJEhIKCmNyZWF0ZWRfYXQYAiABKAkSDgoGc3RhdHVzGAMgASgJEhEKCXJlcG9fcGF0aBgEIAEoCRILCgNwaWQYBSABKA0SEQoJaXNfYWN0aXZlGAYgASgIEhIKCnByb2plY3RfaWQYByABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAggASgJEhUKDXdvcmtmbG93X2dvYWwYCSABKAkSFgoOd29ya2Zsb3dfc3RhdGUYCiABKAkSFwoPZWxhcHNlZF9kaXNwbGF5GAsgASgJEg0KBWFnZW50GAwgASgJEg0KBW1vZGVsGA0gASgJEhsKE3BlbmRpbmdfZWxpY2l0YXRpb24YDiABKAgSFwoPYWN0aXZpdHlfc3RhdHVzGA8gASgJEgwKBHRvb2wYECABKAkSFAoMc2Vzc2lvbl90eXBlGBEgASgJEhIKCnVwZGF0ZWRfYXQYEiABKAkSFAoMbGl2ZWtpdF9yb29tGBMgASgJEhsKE3ByZXZpb3VzX3Nlc3Npb25faWQYFCABKAkSHwoXb3JjaGVzdHJhdG9yX3Nlc3Npb25faWQYFSABKAkSDgoGcmVjaXBlGBYgASgJEhcKD3N0YWNrX3BsYW5fanNvbhgXIAEoCRIQCghieXRlc19pbhgYIAEoBBIRCglieXRlc19vdXQYGSABKAQSHQoVbGFzdF9kYXRhX3JlY2VpdmVkX2F0GBogASgJEjAKDGNvbnRleHRfZG9jcxgbIAMoCzIaLnNlc3Npb24uU2Vzc2lvbkNvbnRleHREb2MSDgoGYnJhbmNoGBwgASgJEiMKG2NvZGViYXNlX2RhZW1vbl9pbnN0YW5jZV9pZBgdIAEoCRIbChNjb2RlYmFzZV9zZXNzaW9uX2lkGB4gASgJEi8KDGFnZW50X3N0YXR1cxgfIAEoDjIZLnR5cGVzLlNlc3Npb25BZ2VudFN0YXR1cxIyCg1sYXN0X2FjdGl2aXR5GCAgASgLMhsudHlwZXMuU2Vzc2lvbkFnZW50QWN0aXZpdHkSFwoPc3NoX2NvbmZpZ19ob3N0GCEgASgJImgKFFNpZ25hbFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIOCgZzaWduYWwYAyABKAUSFQoNY29udHJvbF90b2tlbhgEIAEoCSI0ChVTaWduYWxTZXNzaW9uUmVzcG9uc2USCgoCb2sYASABKAgSDwoHbWVzc2FnZRgCIAEoCSJLChNTcGxpdEFnZW50UGxhY2VtZW50EhIKCnNlc3Npb25faWQYASABKAkSIAoYYWdlbnRfZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIlgKE1N0YWdlZEF0dGFjaG1lbnRSZWYSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAEgASgJEhIKCnN0YWdpbmdfaWQYAiABKAkSEQoJZmlsZV9uYW1lGAMgASgJIpgBChFTdGFydFNlc3Npb25FdmVudBJJChNhdHRhY2htZW50X3Byb2dyZXNzGAEgASgLMiouc2Vzc2lvbi5BdHRhY2htZW50TWF0ZXJpYWxpemF0aW9uUHJvZ3Jlc3NIABIvCgZyZXN1bHQYAiABKAsyHS5zZXNzaW9uLlN0YXJ0U2Vzc2lvblJlc3BvbnNlSABCBwoFZXZlbnQi9AcKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIRCgl0b29sX3BhdGgYAiABKAkSEgoKcHJvamVjdF9pZBgDIAEoCRINCgVhZ2VudBgEIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYBSABKAkSDgoGcmVjaXBlGAYgASgJEhQKDHNlc3Npb25fdHlwZRgHIAEoCRINCgVtb2RlbBgIIAEoCRIeChZicmFuY2hfd29ya3RyZWVfaW50ZW50GAkgASgJEhcKD25ld19icmFuY2hfbmFtZRgKIAEoCRIlCh1zZWxlY3RlZF9pbnRlZ3JhdGlvbl9iYXNlX3JlZhgLIAEoCRIiChpzZWxlY3RlZF9icmFuY2hfdG9fd29ya19vbhgMIAEoCRIWCg5pbml0aWFsX3Byb21wdBgNIAEoCRIXCg9wZXJtaXNzaW9uX21vZGUYDiABKAkSFAoMc3RhY2tfcGFyZW50GA8gASgJEg8KB3NhbmRib3gYECABKAgSGAoQbWFuYWdlZF9jb2RlYmFzZRgRIAEoCBIaChJzcGVjaWFsaXplZF9hZ2VudHMYEiADKAkSEQoJcmVwb19wYXRoGBggASgJEhMKC2NsYXVkZV9hcmdzGBkgAygJEiQKHGRhbmdlcm91c2x5X3NraXBfcGVybWlzc2lvbnMYGiABKAgSFgoOc2VtYW50aWNfaW5kZXgYGyABKAgSHAoUY3JlYXRlX3JlbW90ZV9icmFuY2gYHCABKAgSLwoLYXR0YWNobWVudHMYHSADKAsyGi5zZXNzaW9uLlNlc3Npb25BdHRhY2htZW50EhoKEm9uX2JyYW5jaF9jb25mbGljdBgeIAEoCRIgChhwcl9zdGFja19iYXNlX3Nlc3Npb25faWQYHyABKAkSIwobY29kZWJhc2VfZGFlbW9uX2luc3RhbmNlX2lkGCAgASgJEhwKFHJlcXVlc3RlZF9zZXNzaW9uX2lkGCEgASgJEjEKC2FnZW50X2Nsb25lGCIgASgLMhwuc2Vzc2lvbi5BZ2VudENsb25lUGxhY2VtZW50EjEKC3NwbGl0X2FnZW50GCMgASgLMhwuc2Vzc2lvbi5TcGxpdEFnZW50UGxhY2VtZW50EicKH3N0YWNrX3BhcmVudF9kYWVtb25faW5zdGFuY2VfaWQYJCABKAkSFQoNc3RhY2tfbm9kZV9pZBglIAEoCRIXCg9zc2hfY29uZmlnX2hvc3QYJiABKAkSGgoSc2FuZGJveGVkX2NvZGViYXNlGCcgASgISgQIExAUSgQIFBAVSgQIFRAWSgQIFhAXSgQIFxAYIqgBChRTdGFydFNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCRIwCg9icmFuY2hfY29uZmxpY3QYBSABKAsyFy5zZXNzaW9uLkJyYW5jaENvbmZsaWN0KmcKFVNlc3Npb25Db250ZXh0RG9jS2luZBIlCiFTRVNTSU9OX0NPTlRFWFRfRE9DX0tJTkRfTUFOSUZFU1QQABInCiNTRVNTSU9OX0NPTlRFWFRfRE9DX0tJTkRfQVRUQUNITUVOVBABKkMKBlNpZ25hbBIRCg1TSUdOQUxfU0lHSU5UEAASEgoOU0lHTkFMX1NJR1RFUk0QARISCg5TSUdOQUxfU0lHS0lMTBACMqEFCg5TZXNzaW9uU2VydmljZRJLCgxMaXN0U2Vzc2lvbnMSHC5zZXNzaW9uLkxpc3RTZXNzaW9uc1JlcXVlc3QaHS5zZXNzaW9uLkxpc3RTZXNzaW9uc1Jlc3BvbnNlEksKDFN0YXJ0U2Vzc2lvbhIcLnNlc3Npb24uU3RhcnRTZXNzaW9uUmVxdWVzdBodLnNlc3Npb24uU3RhcnRTZXNzaW9uUmVzcG9uc2USUAoSU3RyZWFtU3RhcnRTZXNzaW9uEhwuc2Vzc2lvbi5TdGFydFNlc3Npb25SZXF1ZXN0Ghouc2Vzc2lvbi5TdGFydFNlc3Npb25FdmVudDABElEKDkNvbm5lY3RTZXNzaW9uEh4uc2Vzc2lvbi5Db25uZWN0U2Vzc2lvblJlcXVlc3QaHy5zZXNzaW9uLkNvbm5lY3RTZXNzaW9uUmVzcG9uc2USTgoNUmVzdW1lU2Vzc2lvbhIdLnNlc3Npb24uUmVzdW1lU2Vzc2lvblJlcXVlc3QaHi5zZXNzaW9uLlJlc3VtZVNlc3Npb25SZXNwb25zZRJOCg1TaWduYWxTZXNzaW9uEh0uc2Vzc2lvbi5TaWduYWxTZXNzaW9uUmVxdWVzdBoeLnNlc3Npb24uU2lnbmFsU2Vzc2lvblJlc3BvbnNlEk4KDURlbGV0ZVNlc3Npb24SHS5zZXNzaW9uLkRlbGV0ZVNlc3Npb25SZXF1ZXN0Gh4uc2Vzc2lvbi5EZWxldGVTZXNzaW9uUmVzcG9uc2USYAoTR2V0V29ya3RyZWVTbmFwc2hvdBIjLnNlc3Npb24uR2V0V29ya3RyZWVTbmFwc2hvdFJlcXVlc3QaJC5zZXNzaW9uLkdldFdvcmt0cmVlU25hcHNob3RSZXNwb25zZWIGcHJvdG8z", [file_types]);
+  fileDesc("Cg1zZXNzaW9uLnByb3RvEgdzZXNzaW9uIs0BChNBZ2VudENsb25lUGxhY2VtZW50EhIKCnNlc3Npb25faWQYASABKAkSJwofZmFjaWxpdGF0aW5nX2RhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIfChdmYWNpbGl0YXRpbmdfZGFlbW9uX3VybBgDIAEoCRIdChVmaXJzdF9hZG1pc3Npb25fdG9rZW4YBCABKAkSGwoTZmlyc3RfYWRtaXNzaW9uX3VybBgFIAEoCRIcChRmaXJzdF9hZG1pc3Npb25fcm9vbRgGIAEoCSKSAQohQXR0YWNobWVudE1hdGVyaWFsaXphdGlvblByb2dyZXNzEhAKCGJhc2VuYW1lGAEgASgJEhgKEGF0dGFjaG1lbnRfaW5kZXgYAiABKA0SGAoQYXR0YWNobWVudF9jb3VudBgDIAEoDRISCgpieXRlc19kb25lGAQgASgEEhMKC2J5dGVzX3RvdGFsGAUgASgEIooCCgpTdGFydFBoYXNlEiYKBHN0ZXAYASABKA4yGC5zZXNzaW9uLlN0YXJ0UGhhc2UuU3RlcBIuCghib3VuZGFyeRgCIAEoDjIcLnNlc3Npb24uU3RhcnRQaGFzZS5Cb3VuZGFyeSJYCgRTdGVwEhQKEFNURVBfVU5TUEVDSUZJRUQQABIRCg1TVEVQX1dPUktUUkVFEAESFwoTU1RFUF9TRU1BTlRJQ19JTkRFWBACEg4KClNURVBfQUdFTlQQAyJKCghCb3VuZGFyeRIYChRCT1VOREFSWV9VTlNQRUNJRklFRBAAEhIKDkJPVU5EQVJZX0JFR0lOEAESEAoMQk9VTkRBUllfRU5EEAIiZAoOQnJhbmNoQ29uZmxpY3QSDgoGYnJhbmNoGAEgASgJEiMKBW93bmVyGAIgASgLMhQudHlwZXMuQnJhbmNoU2Vzc2lvbhIdChVzdWdnZXN0ZWRfYnJhbmNoX25hbWUYAyABKAkiQgoVQ29ubmVjdFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJkChZDb25uZWN0U2Vzc2lvblJlc3BvbnNlEhQKDGxpdmVraXRfcm9vbRgBIAEoCRITCgtsaXZla2l0X3VybBgCIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgDIAEoCSJBChREZWxldGVTZXNzaW9uUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiIwoVRGVsZXRlU2Vzc2lvblJlc3BvbnNlEgoKAm9rGAEgASgIImMKGkdldFdvcmt0cmVlU25hcHNob3RSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAyABKAkiygEKG0dldFdvcmt0cmVlU25hcHNob3RSZXNwb25zZRITCgtoZWFkX2NvbW1pdBgBIAEoCRIOCgZicmFuY2gYAiABKAkSFQoNY2hhbmdlZF9wYXRocxgDIAMoCRIVCg1jaGFuZ2VkX2ZpbGVzGAQgASgNEhMKC2xpbmVzX2FkZGVkGAUgASgDEhUKDWxpbmVzX3JlbW92ZWQYBiABKAMSFwoPdW50cmFja2VkX2ZpbGVzGAcgASgNEhMKC2F0dGFjaG1lbnRzGAggAygJIpUBCg9Ib3N0RG9jdW1lbnRSZWYSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAEgASgJEicKBXNjb3BlGAIgASgOMhgudHlwZXMuSG9zdERvY3VtZW50U2NvcGUSEgoKc2Vzc2lvbl9pZBgDIAEoCRISCgpwcm9qZWN0X2lkGAQgASgJEhUKDXJlbGF0aXZlX3BhdGgYBSABKAkiLAoTTGlzdFNlc3Npb25zUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIj8KFExpc3RTZXNzaW9uc1Jlc3BvbnNlEicKCHNlc3Npb25zGAEgAygLMhUuc2Vzc2lvbi5TZXNzaW9uRW50cnkiQQoUUmVzdW1lU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIncKFVJlc3VtZVNlc3Npb25SZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEhQKDGxpdmVraXRfcm9vbRgCIAEoCRITCgtsaXZla2l0X3VybBgDIAEoCRIfChdsaXZla2l0X3NlcnZlcl9pZGVudGl0eRgEIAEoCSKSAQoRU2Vzc2lvbkF0dGFjaG1lbnQSEAoIYmFzZW5hbWUYASABKAkSLgoGc3RhZ2VkGAIgASgLMhwuc2Vzc2lvbi5TdGFnZWRBdHRhY2htZW50UmVmSAASMQoNaG9zdF9kb2N1bWVudBgDIAEoCzIYLnNlc3Npb24uSG9zdERvY3VtZW50UmVmSABCCAoGc291cmNlIr4BChFTZXNzaW9uQ29udGV4dERvYxILCgNrZXkYASABKAkSEAoIYmFzZW5hbWUYAiABKAkSDAoEcGF0aBgDIAEoCRITCgtkZXNjcmlwdGlvbhgEIAEoCRIOCgZleGlzdHMYBSABKAgSLAoEa2luZBgGIAEoDjIeLnNlc3Npb24uU2Vzc2lvbkNvbnRleHREb2NLaW5kEhIKCnNpemVfYnl0ZXMYByABKAQSFQoNcmVsYXRpdmVfcGF0aBgIIAEoCSLABgoMU2Vzc2lvbkVudHJ5EhIKCnNlc3Npb25faWQYASABKAkSEgoKY3JlYXRlZF9hdBgCIAEoCRIOCgZzdGF0dXMYAyABKAkSEQoJcmVwb19wYXRoGAQgASgJEgsKA3BpZBgFIAEoDRIRCglpc19hY3RpdmUYBiABKAgSEgoKcHJvamVjdF9pZBgHIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYCCABKAkSFQoNd29ya2Zsb3dfZ29hbBgJIAEoCRIWCg53b3JrZmxvd19zdGF0ZRgKIAEoCRIXCg9lbGFwc2VkX2Rpc3BsYXkYCyABKAkSDQoFYWdlbnQYDCABKAkSDQoFbW9kZWwYDSABKAkSGwoTcGVuZGluZ19lbGljaXRhdGlvbhgOIAEoCBIXCg9hY3Rpdml0eV9zdGF0dXMYDyABKAkSDAoEdG9vbBgQIAEoCRIUCgxzZXNzaW9uX3R5cGUYESABKAkSEgoKdXBkYXRlZF9hdBgSIAEoCRIUCgxsaXZla2l0X3Jvb20YEyABKAkSGwoTcHJldmlvdXNfc2Vzc2lvbl9pZBgUIAEoCRIfChdvcmNoZXN0cmF0b3Jfc2Vzc2lvbl9pZBgVIAEoCRIOCgZyZWNpcGUYFiABKAkSFwoPc3RhY2tfcGxhbl9qc29uGBcgASgJEhAKCGJ5dGVzX2luGBggASgEEhEKCWJ5dGVzX291dBgZIAEoBBIdChVsYXN0X2RhdGFfcmVjZWl2ZWRfYXQYGiABKAkSMAoMY29udGV4dF9kb2NzGBsgAygLMhouc2Vzc2lvbi5TZXNzaW9uQ29udGV4dERvYxIOCgZicmFuY2gYHCABKAkSIwobY29kZWJhc2VfZGFlbW9uX2luc3RhbmNlX2lkGB0gASgJEhsKE2NvZGViYXNlX3Nlc3Npb25faWQYHiABKAkSLwoMYWdlbnRfc3RhdHVzGB8gASgOMhkudHlwZXMuU2Vzc2lvbkFnZW50U3RhdHVzEjIKDWxhc3RfYWN0aXZpdHkYICABKAsyGy50eXBlcy5TZXNzaW9uQWdlbnRBY3Rpdml0eRIXCg9zc2hfY29uZmlnX2hvc3QYISABKAkiaAoUU2lnbmFsU2Vzc2lvblJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg4KBnNpZ25hbBgDIAEoBRIVCg1jb250cm9sX3Rva2VuGAQgASgJIjQKFVNpZ25hbFNlc3Npb25SZXNwb25zZRIKCgJvaxgBIAEoCBIPCgdtZXNzYWdlGAIgASgJIksKE1NwbGl0QWdlbnRQbGFjZW1lbnQSEgoKc2Vzc2lvbl9pZBgBIAEoCRIgChhhZ2VudF9kYWVtb25faW5zdGFuY2VfaWQYAiABKAkiWAoTU3RhZ2VkQXR0YWNobWVudFJlZhIaChJkYWVtb25faW5zdGFuY2VfaWQYASABKAkSEgoKc3RhZ2luZ19pZBgCIAEoCRIRCglmaWxlX25hbWUYAyABKAkivgEKEVN0YXJ0U2Vzc2lvbkV2ZW50EkkKE2F0dGFjaG1lbnRfcHJvZ3Jlc3MYASABKAsyKi5zZXNzaW9uLkF0dGFjaG1lbnRNYXRlcmlhbGl6YXRpb25Qcm9ncmVzc0gAEi8KBnJlc3VsdBgCIAEoCzIdLnNlc3Npb24uU3RhcnRTZXNzaW9uUmVzcG9uc2VIABIkCgVwaGFzZRgDIAEoCzITLnNlc3Npb24uU3RhcnRQaGFzZUgAQgcKBWV2ZW50IvQHChNTdGFydFNlc3Npb25SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEQoJdG9vbF9wYXRoGAIgASgJEhIKCnByb2plY3RfaWQYAyABKAkSDQoFYWdlbnQYBCABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAUgASgJEg4KBnJlY2lwZRgGIAEoCRIUCgxzZXNzaW9uX3R5cGUYByABKAkSDQoFbW9kZWwYCCABKAkSHgoWYnJhbmNoX3dvcmt0cmVlX2ludGVudBgJIAEoCRIXCg9uZXdfYnJhbmNoX25hbWUYCiABKAkSJQodc2VsZWN0ZWRfaW50ZWdyYXRpb25fYmFzZV9yZWYYCyABKAkSIgoac2VsZWN0ZWRfYnJhbmNoX3RvX3dvcmtfb24YDCABKAkSFgoOaW5pdGlhbF9wcm9tcHQYDSABKAkSFwoPcGVybWlzc2lvbl9tb2RlGA4gASgJEhQKDHN0YWNrX3BhcmVudBgPIAEoCRIPCgdzYW5kYm94GBAgASgIEhgKEG1hbmFnZWRfY29kZWJhc2UYESABKAgSGgoSc3BlY2lhbGl6ZWRfYWdlbnRzGBIgAygJEhEKCXJlcG9fcGF0aBgYIAEoCRITCgtjbGF1ZGVfYXJncxgZIAMoCRIkChxkYW5nZXJvdXNseV9za2lwX3Blcm1pc3Npb25zGBogASgIEhYKDnNlbWFudGljX2luZGV4GBsgASgIEhwKFGNyZWF0ZV9yZW1vdGVfYnJhbmNoGBwgASgIEi8KC2F0dGFjaG1lbnRzGB0gAygLMhouc2Vzc2lvbi5TZXNzaW9uQXR0YWNobWVudBIaChJvbl9icmFuY2hfY29uZmxpY3QYHiABKAkSIAoYcHJfc3RhY2tfYmFzZV9zZXNzaW9uX2lkGB8gASgJEiMKG2NvZGViYXNlX2RhZW1vbl9pbnN0YW5jZV9pZBggIAEoCRIcChRyZXF1ZXN0ZWRfc2Vzc2lvbl9pZBghIAEoCRIxCgthZ2VudF9jbG9uZRgiIAEoCzIcLnNlc3Npb24uQWdlbnRDbG9uZVBsYWNlbWVudBIxCgtzcGxpdF9hZ2VudBgjIAEoCzIcLnNlc3Npb24uU3BsaXRBZ2VudFBsYWNlbWVudBInCh9zdGFja19wYXJlbnRfZGFlbW9uX2luc3RhbmNlX2lkGCQgASgJEhUKDXN0YWNrX25vZGVfaWQYJSABKAkSFwoPc3NoX2NvbmZpZ19ob3N0GCYgASgJEhoKEnNhbmRib3hlZF9jb2RlYmFzZRgnIAEoCEoECBMQFEoECBQQFUoECBUQFkoECBYQF0oECBcQGCKoAQoUU3RhcnRTZXNzaW9uUmVzcG9uc2USEgoKc2Vzc2lvbl9pZBgBIAEoCRIUCgxsaXZla2l0X3Jvb20YAiABKAkSEwoLbGl2ZWtpdF91cmwYAyABKAkSHwoXbGl2ZWtpdF9zZXJ2ZXJfaWRlbnRpdHkYBCABKAkSMAoPYnJhbmNoX2NvbmZsaWN0GAUgASgLMhcuc2Vzc2lvbi5CcmFuY2hDb25mbGljdCpnChVTZXNzaW9uQ29udGV4dERvY0tpbmQSJQohU0VTU0lPTl9DT05URVhUX0RPQ19LSU5EX01BTklGRVNUEAASJwojU0VTU0lPTl9DT05URVhUX0RPQ19LSU5EX0FUVEFDSE1FTlQQASpDCgZTaWduYWwSEQoNU0lHTkFMX1NJR0lOVBAAEhIKDlNJR05BTF9TSUdURVJNEAESEgoOU0lHTkFMX1NJR0tJTEwQAjKhBQoOU2Vzc2lvblNlcnZpY2USSwoMTGlzdFNlc3Npb25zEhwuc2Vzc2lvbi5MaXN0U2Vzc2lvbnNSZXF1ZXN0Gh0uc2Vzc2lvbi5MaXN0U2Vzc2lvbnNSZXNwb25zZRJLCgxTdGFydFNlc3Npb24SHC5zZXNzaW9uLlN0YXJ0U2Vzc2lvblJlcXVlc3QaHS5zZXNzaW9uLlN0YXJ0U2Vzc2lvblJlc3BvbnNlElAKElN0cmVhbVN0YXJ0U2Vzc2lvbhIcLnNlc3Npb24uU3RhcnRTZXNzaW9uUmVxdWVzdBoaLnNlc3Npb24uU3RhcnRTZXNzaW9uRXZlbnQwARJRCg5Db25uZWN0U2Vzc2lvbhIeLnNlc3Npb24uQ29ubmVjdFNlc3Npb25SZXF1ZXN0Gh8uc2Vzc2lvbi5Db25uZWN0U2Vzc2lvblJlc3BvbnNlEk4KDVJlc3VtZVNlc3Npb24SHS5zZXNzaW9uLlJlc3VtZVNlc3Npb25SZXF1ZXN0Gh4uc2Vzc2lvbi5SZXN1bWVTZXNzaW9uUmVzcG9uc2USTgoNU2lnbmFsU2Vzc2lvbhIdLnNlc3Npb24uU2lnbmFsU2Vzc2lvblJlcXVlc3QaHi5zZXNzaW9uLlNpZ25hbFNlc3Npb25SZXNwb25zZRJOCg1EZWxldGVTZXNzaW9uEh0uc2Vzc2lvbi5EZWxldGVTZXNzaW9uUmVxdWVzdBoeLnNlc3Npb24uRGVsZXRlU2Vzc2lvblJlc3BvbnNlEmAKE0dldFdvcmt0cmVlU25hcHNob3QSIy5zZXNzaW9uLkdldFdvcmt0cmVlU25hcHNob3RSZXF1ZXN0GiQuc2Vzc2lvbi5HZXRXb3JrdHJlZVNuYXBzaG90UmVzcG9uc2ViBnByb3RvMw", [file_types]);
 
 /**
  * @generated from message session.AgentClonePlacement
@@ -129,6 +129,96 @@ export const AttachmentMaterializationProgressSchema: GenMessage<AttachmentMater
   messageDesc(file_session, 1);
 
 /**
+ * One slow step of a session start beginning or ending.
+ *
+ * A step that fails sends no END: the stream terminates with the failure instead, so the last BEGIN
+ * a consumer saw names the step that failed.
+ *
+ * @generated from message session.StartPhase
+ */
+export type StartPhase = Message<"session.StartPhase"> & {
+  /**
+   * @generated from field: session.StartPhase.Step step = 1;
+   */
+  step: StartPhase_Step;
+
+  /**
+   * @generated from field: session.StartPhase.Boundary boundary = 2;
+   */
+  boundary: StartPhase_Boundary;
+};
+
+/**
+ * Describes the message session.StartPhase.
+ * Use `create(StartPhaseSchema)` to create a new message.
+ */
+export const StartPhaseSchema: GenMessage<StartPhase> = /*@__PURE__*/
+  messageDesc(file_session, 2);
+
+/**
+ * @generated from enum session.StartPhase.Step
+ */
+export enum StartPhase_Step {
+  /**
+   * @generated from enum value: STEP_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Fetching the project and cutting the session's git worktree.
+   *
+   * @generated from enum value: STEP_WORKTREE = 1;
+   */
+  WORKTREE = 1,
+
+  /**
+   * Building the session's semantic index over that worktree; only when the request asked for it.
+   *
+   * @generated from enum value: STEP_SEMANTIC_INDEX = 2;
+   */
+  SEMANTIC_INDEX = 2,
+
+  /**
+   * Launching the session's agent in the worktree.
+   *
+   * @generated from enum value: STEP_AGENT = 3;
+   */
+  AGENT = 3,
+}
+
+/**
+ * Describes the enum session.StartPhase.Step.
+ */
+export const StartPhase_StepSchema: GenEnum<StartPhase_Step> = /*@__PURE__*/
+  enumDesc(file_session, 2, 0);
+
+/**
+ * @generated from enum session.StartPhase.Boundary
+ */
+export enum StartPhase_Boundary {
+  /**
+   * @generated from enum value: BOUNDARY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: BOUNDARY_BEGIN = 1;
+   */
+  BEGIN = 1,
+
+  /**
+   * @generated from enum value: BOUNDARY_END = 2;
+   */
+  END = 2,
+}
+
+/**
+ * Describes the enum session.StartPhase.Boundary.
+ */
+export const StartPhase_BoundarySchema: GenEnum<StartPhase_Boundary> = /*@__PURE__*/
+  enumDesc(file_session, 2, 1);
+
+/**
  * A refused session creation: the requested new branch is already owned by another session.
  *
  * @generated from message session.BranchConflict
@@ -163,7 +253,7 @@ export type BranchConflict = Message<"session.BranchConflict"> & {
  * Use `create(BranchConflictSchema)` to create a new message.
  */
 export const BranchConflictSchema: GenMessage<BranchConflict> = /*@__PURE__*/
-  messageDesc(file_session, 2);
+  messageDesc(file_session, 3);
 
 /**
  * @generated from message session.ConnectSessionRequest
@@ -185,7 +275,7 @@ export type ConnectSessionRequest = Message<"session.ConnectSessionRequest"> & {
  * Use `create(ConnectSessionRequestSchema)` to create a new message.
  */
 export const ConnectSessionRequestSchema: GenMessage<ConnectSessionRequest> = /*@__PURE__*/
-  messageDesc(file_session, 3);
+  messageDesc(file_session, 4);
 
 /**
  * @generated from message session.ConnectSessionResponse
@@ -212,7 +302,7 @@ export type ConnectSessionResponse = Message<"session.ConnectSessionResponse"> &
  * Use `create(ConnectSessionResponseSchema)` to create a new message.
  */
 export const ConnectSessionResponseSchema: GenMessage<ConnectSessionResponse> = /*@__PURE__*/
-  messageDesc(file_session, 4);
+  messageDesc(file_session, 5);
 
 /**
  * @generated from message session.DeleteSessionRequest
@@ -234,7 +324,7 @@ export type DeleteSessionRequest = Message<"session.DeleteSessionRequest"> & {
  * Use `create(DeleteSessionRequestSchema)` to create a new message.
  */
 export const DeleteSessionRequestSchema: GenMessage<DeleteSessionRequest> = /*@__PURE__*/
-  messageDesc(file_session, 5);
+  messageDesc(file_session, 6);
 
 /**
  * @generated from message session.DeleteSessionResponse
@@ -251,7 +341,7 @@ export type DeleteSessionResponse = Message<"session.DeleteSessionResponse"> & {
  * Use `create(DeleteSessionResponseSchema)` to create a new message.
  */
 export const DeleteSessionResponseSchema: GenMessage<DeleteSessionResponse> = /*@__PURE__*/
-  messageDesc(file_session, 6);
+  messageDesc(file_session, 7);
 
 /**
  * Asks the daemon holding a checkout to measure it. `session_id` names the session on the
@@ -284,7 +374,7 @@ export type GetWorktreeSnapshotRequest = Message<"session.GetWorktreeSnapshotReq
  * Use `create(GetWorktreeSnapshotRequestSchema)` to create a new message.
  */
 export const GetWorktreeSnapshotRequestSchema: GenMessage<GetWorktreeSnapshotRequest> = /*@__PURE__*/
-  messageDesc(file_session, 7);
+  messageDesc(file_session, 8);
 
 /**
  * The same fields `snapshot_worktree` produces locally, so a remote measurement and a local one are
@@ -342,7 +432,7 @@ export type GetWorktreeSnapshotResponse = Message<"session.GetWorktreeSnapshotRe
  * Use `create(GetWorktreeSnapshotResponseSchema)` to create a new message.
  */
 export const GetWorktreeSnapshotResponseSchema: GenMessage<GetWorktreeSnapshotResponse> = /*@__PURE__*/
-  messageDesc(file_session, 8);
+  messageDesc(file_session, 9);
 
 /**
  * Reference to a document that already exists on a connected host — an artifacts/ planning doc, a
@@ -400,7 +490,7 @@ export type HostDocumentRef = Message<"session.HostDocumentRef"> & {
  * Use `create(HostDocumentRefSchema)` to create a new message.
  */
 export const HostDocumentRefSchema: GenMessage<HostDocumentRef> = /*@__PURE__*/
-  messageDesc(file_session, 9);
+  messageDesc(file_session, 10);
 
 /**
  * @generated from message session.ListSessionsRequest
@@ -417,7 +507,7 @@ export type ListSessionsRequest = Message<"session.ListSessionsRequest"> & {
  * Use `create(ListSessionsRequestSchema)` to create a new message.
  */
 export const ListSessionsRequestSchema: GenMessage<ListSessionsRequest> = /*@__PURE__*/
-  messageDesc(file_session, 10);
+  messageDesc(file_session, 11);
 
 /**
  * @generated from message session.ListSessionsResponse
@@ -434,7 +524,7 @@ export type ListSessionsResponse = Message<"session.ListSessionsResponse"> & {
  * Use `create(ListSessionsResponseSchema)` to create a new message.
  */
 export const ListSessionsResponseSchema: GenMessage<ListSessionsResponse> = /*@__PURE__*/
-  messageDesc(file_session, 11);
+  messageDesc(file_session, 12);
 
 /**
  * @generated from message session.ResumeSessionRequest
@@ -456,7 +546,7 @@ export type ResumeSessionRequest = Message<"session.ResumeSessionRequest"> & {
  * Use `create(ResumeSessionRequestSchema)` to create a new message.
  */
 export const ResumeSessionRequestSchema: GenMessage<ResumeSessionRequest> = /*@__PURE__*/
-  messageDesc(file_session, 12);
+  messageDesc(file_session, 13);
 
 /**
  * @generated from message session.ResumeSessionResponse
@@ -488,7 +578,7 @@ export type ResumeSessionResponse = Message<"session.ResumeSessionResponse"> & {
  * Use `create(ResumeSessionResponseSchema)` to create a new message.
  */
 export const ResumeSessionResponseSchema: GenMessage<ResumeSessionResponse> = /*@__PURE__*/
-  messageDesc(file_session, 13);
+  messageDesc(file_session, 14);
 
 /**
  * One document attached to a session at start. The daemon running the session materializes each
@@ -536,7 +626,7 @@ export type SessionAttachment = Message<"session.SessionAttachment"> & {
  * Use `create(SessionAttachmentSchema)` to create a new message.
  */
 export const SessionAttachmentSchema: GenMessage<SessionAttachment> = /*@__PURE__*/
-  messageDesc(file_session, 14);
+  messageDesc(file_session, 15);
 
 /**
  * A planning document surfaced for a session (web Docs tab, child "Start session" prompts): either
@@ -599,7 +689,7 @@ export type SessionContextDoc = Message<"session.SessionContextDoc"> & {
  * Use `create(SessionContextDocSchema)` to create a new message.
  */
 export const SessionContextDocSchema: GenMessage<SessionContextDoc> = /*@__PURE__*/
-  messageDesc(file_session, 15);
+  messageDesc(file_session, 16);
 
 /**
  * @generated from message session.SessionEntry
@@ -845,7 +935,7 @@ export type SessionEntry = Message<"session.SessionEntry"> & {
  * Use `create(SessionEntrySchema)` to create a new message.
  */
 export const SessionEntrySchema: GenMessage<SessionEntry> = /*@__PURE__*/
-  messageDesc(file_session, 16);
+  messageDesc(file_session, 17);
 
 /**
  * @generated from message session.SignalSessionRequest
@@ -879,7 +969,7 @@ export type SignalSessionRequest = Message<"session.SignalSessionRequest"> & {
  * Use `create(SignalSessionRequestSchema)` to create a new message.
  */
 export const SignalSessionRequestSchema: GenMessage<SignalSessionRequest> = /*@__PURE__*/
-  messageDesc(file_session, 17);
+  messageDesc(file_session, 18);
 
 /**
  * @generated from message session.SignalSessionResponse
@@ -901,7 +991,7 @@ export type SignalSessionResponse = Message<"session.SignalSessionResponse"> & {
  * Use `create(SignalSessionResponseSchema)` to create a new message.
  */
 export const SignalSessionResponseSchema: GenMessage<SignalSessionResponse> = /*@__PURE__*/
-  messageDesc(file_session, 18);
+  messageDesc(file_session, 19);
 
 /**
  * What makes a `workspace` session an agent clone. See StartSessionRequest.agent_clone.
@@ -936,7 +1026,7 @@ export type SplitAgentPlacement = Message<"session.SplitAgentPlacement"> & {
  * Use `create(SplitAgentPlacementSchema)` to create a new message.
  */
 export const SplitAgentPlacementSchema: GenMessage<SplitAgentPlacement> = /*@__PURE__*/
-  messageDesc(file_session, 19);
+  messageDesc(file_session, 20);
 
 /**
  * Reference to a file in a host's pre-session staging area.
@@ -972,12 +1062,12 @@ export type StagedAttachmentRef = Message<"session.StagedAttachmentRef"> & {
  * Use `create(StagedAttachmentRefSchema)` to create a new message.
  */
 export const StagedAttachmentRefSchema: GenMessage<StagedAttachmentRef> = /*@__PURE__*/
-  messageDesc(file_session, 20);
+  messageDesc(file_session, 21);
 
 /**
- * One event of a StreamStartSession response: progress while attachments materialize, then exactly
- * one terminal result. The result is always the last event; a failure terminates the stream with a
- * status instead, never with a result.
+ * One event of a StreamStartSession response: progress while attachments materialize and the start's
+ * phases begin and end, then exactly one terminal result. The result is always the last event; a
+ * failure terminates the stream with a status instead, never with a result.
  *
  * @generated from message session.StartSessionEvent
  */
@@ -997,6 +1087,12 @@ export type StartSessionEvent = Message<"session.StartSessionEvent"> & {
      */
     value: StartSessionResponse;
     case: "result";
+  } | {
+    /**
+     * @generated from field: session.StartPhase phase = 3;
+     */
+    value: StartPhase;
+    case: "phase";
   } | { case: undefined; value?: undefined };
 };
 
@@ -1005,7 +1101,7 @@ export type StartSessionEvent = Message<"session.StartSessionEvent"> & {
  * Use `create(StartSessionEventSchema)` to create a new message.
  */
 export const StartSessionEventSchema: GenMessage<StartSessionEvent> = /*@__PURE__*/
-  messageDesc(file_session, 21);
+  messageDesc(file_session, 22);
 
 /**
  * @generated from message session.StartSessionRequest
@@ -1357,7 +1453,7 @@ export type StartSessionRequest = Message<"session.StartSessionRequest"> & {
  * Use `create(StartSessionRequestSchema)` to create a new message.
  */
 export const StartSessionRequestSchema: GenMessage<StartSessionRequest> = /*@__PURE__*/
-  messageDesc(file_session, 22);
+  messageDesc(file_session, 23);
 
 /**
  * @generated from message session.StartSessionResponse
@@ -1398,7 +1494,7 @@ export type StartSessionResponse = Message<"session.StartSessionResponse"> & {
  * Use `create(StartSessionResponseSchema)` to create a new message.
  */
 export const StartSessionResponseSchema: GenMessage<StartSessionResponse> = /*@__PURE__*/
-  messageDesc(file_session, 23);
+  messageDesc(file_session, 24);
 
 /**
  * Whether a context doc is recipe-owned or user-attached (docs/ft/coder/session-attachments.md).
@@ -1480,6 +1576,10 @@ export const SessionService: GenService<{
    * exactly one terminal StartSessionResponse. A failure terminates the stream with the error and
    * never emits a result; the partial attachments are rolled back first. Unary StartSession stays
    * the entry point for every non-interactive caller.
+   *
+   * Around the slow steps of a start it also emits a StartPhase as each begins and ends — the
+   * worktree, the semantic index when one was asked for, the agent — so the create pane can say
+   * what the host is doing (packages/tddy-service/docs/start-session-phases.md).
    *
    * @generated from rpc session.SessionService.StreamStartSession
    */

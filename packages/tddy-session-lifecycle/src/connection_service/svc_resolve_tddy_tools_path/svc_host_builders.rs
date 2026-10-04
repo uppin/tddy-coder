@@ -116,6 +116,7 @@ impl DaemonSessionHost {
             // Installed by the composition root once the handlers above this crate are built
             // from this host (`with_rpc_families`).
             rpc_families: None,
+            worktree_observer: None,
         }
     }
 

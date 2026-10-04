@@ -528,6 +528,28 @@ stack (no branch, unresolvable, another repository, already owned by another orc
 in the form's own error strip and nothing is created. Rules, refusals and the seeded node's contents:
 [PR stacking § Seeding the stack from an existing session](../coder/pr-stacking.md#seeding-the-stack-from-an-existing-session-added-2026-08-13).
 
+### Start progress
+
+Creating a session fetches the project and cuts a worktree and, when asked, builds a semantic index
+before the agent launches. While that runs, Create is disabled and the line under the form names the
+step the host is in:
+
+| Step | Text |
+|---|---|
+| Fetching the project and cutting the worktree | *Creating worktree…* |
+| Building the semantic index (only when the form asked for one) | *Indexing (semantic)…* |
+| Launching the agent | *Starting agent…* |
+
+The line shows with or without attachments, changes as each step begins, and disappears when the start
+ends — by creating the session or by failing. It appears for Claude CLI, Cursor CLI and workspace
+sessions. A start that reports no steps (a sandboxed session, a tool session, a split session) keeps the
+disabled button and shows no step text.
+
+The same stream carries each attachment's materialisation progress; see
+[Session attachments](../coder/session-attachments.md#streamstartsession--start-with-materialization-progress).
+Once the session exists, the code index loads in the background and the session header shows its
+progress: [Indexing indicator](session-code-pane.md#indexing-indicator).
+
 ### Post-Create
 
 On success, `SessionsDrawerScreen` navigates to `/sessions/:newId` and auto-attaches
@@ -559,7 +581,7 @@ interface CreateSessionPaneProps {
 - `ListAgents` — agent dropdown (tool sessions)
 - `ListSessions` — populate the PR stack parent picker and the stack-base picker from one fetch (best-effort; failure hides both)
 - `ListProjectBranches` — branch dropdown when "work on existing branch"
-- `StartSession` — create + start the session
+- `StreamStartSession` — create + start the session, streaming the start's steps and attachment progress and ending with the result
 
 ## PR-Stack Session Grouping
 

@@ -19,13 +19,19 @@ use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    CodeLocation, CodeNavigationService, CodeNavigationServiceServer, DefinitionRequest,
-    DefinitionResponse, HoverRequest, HoverResponse, ReferencesRequest, ReferencesResponse,
-    SourcePosition, SourceRange,
+    CodeIndexProgress, CodeLocation, CodeNavigationService, CodeNavigationServiceServer,
+    DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, ReferencesRequest,
+    ReferencesResponse, SourcePosition, SourceRange, WatchCodeIndexRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Channel;
+
+use crate::code_index_warmup::SessionIndexProgress;
+
+/// How many progress messages `WatchCodeIndex` buffers for a reader that has not drained them yet.
+const WATCH_BUFFER: usize = 8;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
 /// `service CodeNavigationService` in `tddy-service/proto/code_navigation.proto`.
@@ -50,6 +56,8 @@ pub struct CodeNavigationServiceImpl {
     worktrees: Arc<WorktreeServiceImpl>,
     /// The index daemon this runtime manages; `None` when no `index_daemon:` section asked for one.
     index_daemon: Option<Arc<dyn IndexChannelSource>>,
+    /// Each session's latest code-index warm-up progress, which `WatchCodeIndex` follows.
+    index_progress: SessionIndexProgress,
 }
 
 /// An authorised request, ready to be asked of the index: a client on the index daemon's channel
@@ -71,6 +79,7 @@ impl CodeNavigationServiceImpl {
         Self {
             worktrees,
             index_daemon,
+            index_progress: SessionIndexProgress::new(),
         }
     }
 
@@ -106,10 +115,20 @@ impl CodeNavigationServiceImpl {
             position: position.map(index_position),
         })
     }
+
+    /// The same service, reporting warm-up progress from `index_progress` — the holder
+    /// [`crate::code_index_warmup::warm_for_session`] records into.
+    #[must_use]
+    pub fn with_index_progress(mut self, index_progress: SessionIndexProgress) -> Self {
+        self.index_progress = index_progress;
+        self
+    }
 }
 
 #[async_trait::async_trait]
 impl CodeNavigationService for CodeNavigationServiceImpl {
+    type WatchCodeIndexStream = ReceiverStream<Result<CodeIndexProgress, Status>>;
+
     /// Where the symbol at a position is defined.
     async fn definition(
         &self,
@@ -198,6 +217,46 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         Ok(Response::new(HoverResponse {
             markdown: answer.markdown,
         }))
+    }
+
+    /// A session's code-index warm-up: its latest progress, then each change, ending after `ready`
+    /// or `error` — or at once, for a session nothing warmed.
+    async fn watch_code_index(
+        &self,
+        request: Request<WatchCodeIndexRequest>,
+    ) -> Result<Response<Self::WatchCodeIndexStream>, Status> {
+        let r = request.into_inner();
+        // The session must be the caller's, as the worktree service decides it, before any of its
+        // progress — an `error` can carry paths — is looked up.
+        self.worktrees
+            .resolve_owned_session_dir(&r.session_token, &r.session_id)?;
+        let Some(mut watching) = self.index_progress.follow(r.session_id.trim()) else {
+            // Nothing warmed this session: an empty stream, as for any session never warmed.
+            let (_, rx) = tokio::sync::mpsc::channel(1);
+            return Ok(Response::new(ReceiverStream::new(rx)));
+        };
+        let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
+        tokio::spawn(async move {
+            // The latest value is delivered on joining, then each change; a change is a
+            // replacement, so a slow reader sees the newest rather than every step.
+            loop {
+                let latest = watching.borrow_and_update().clone();
+                if let Some(progress) = latest {
+                    let finished = progress.ready || !progress.error.is_empty();
+                    if tx.send(Ok(progress)).await.is_err() || finished {
+                        return;
+                    }
+                } else {
+                    // Nothing warmed this session: a warm records its first progress before
+                    // `warm_for_session` returns, so there is nothing to wait for.
+                    return;
+                }
+                if watching.changed().await.is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Response::new(ReceiverStream::new(rx)))
     }
 }
 
