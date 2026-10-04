@@ -89,7 +89,7 @@ linear nodes, leaves first:
 - **No crate moves.** Nothing leaves `tddy-session-lifecycle`, and no module is re-exported from
   another crate. Moving is node 17's (`#carve 21`), and only with the `tddy-tools restructure` engine: a refusal
   means stop and ask; hand edits after a move are build corrections only, with a todo per new cause.
-- **No behaviour change.** The node holds the baseline on its own: 562 passed, the same 22 failures by
+- **No behaviour change.** The node holds the baseline on its own: 575 passed, the same 22 failures by
   name, 1 ignored (see "Baseline").
 - **Public `tddy_session_lifecycle::…` paths stay reachable.** No consumer crate is edited
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`). The exception is a
@@ -122,6 +122,25 @@ Implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | **16b** `#carve` 17, lifecycle-ports-agents (`feature/carve/lifecycle-ports-agents`) | T3 converted: `trait AgentHostCallbacks` (`worktree_snapshot`, `run_exec_tool_locally`, `local_exec_tools`, + `session_room_roster` if D2 approved) and its host impl; the owned roster handle; `AgentRosterState` with `session_admissions` and `model_registry`; `resolve_specialized_agent_defs` as a T3 function | `SplitHost: AgentHostCallbacks` extends the trait; `start_split_claude_cli_session` and `split_withdrawals_from_codebase_host` resolve defs through the roster handle; `join_split_livekit_room` uses the inherited `worktree_snapshot` and `session_room_roster` | add, remove or re-sign an `AgentHostCallbacks` method; change the roster handle or `AgentRosterState`; convert any T3 method |
 | **16a** `#carve` 16, lifecycle-ports (#531) | the free `split_forward_deadline` (host method kept as a wiring delegator); `write_claude_hooks_settings` and `resolve_start_session_claude_binary` grouped with T4, and the URL trio in `daemon_urls`; `peer_has_no_such_session`, `split_pairing` and `resolve_worktree_root_for_session` moved to T3's `peer_session_answer`; `split_claude_cli_start` re-parented off the T8 file and `svc_host_builders` off `svc_resolve_tddy_tools_path.rs`; the host-constructing inline test moved out of `svc_split_context_from_codebase_host.rs`; T8's `AttachmentState` | T4 calls the free fns and `daemon_urls` directly; `attached_initial_prompt` takes `AttachmentState` | re-do a cut, re-parent a file, or convert T8 |
+
+## Carried from 16a (2026-10-04)
+
+16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3, and deferred four items
+(the developer's decision, 2026-10-04: after the engine improves, not by hand). Two of them reach this node:
+
+- **The T4 half of M0.2 is not done.** 16a was to group `write_claude_hooks_settings` and
+  `resolve_start_session_claude_binary` with T4. They are not contiguous in `hooks_and_urls.rs`, and moving them
+  needs the same-crate move the engine lacks ([`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md)).
+  They stay in `connection_service/hooks_and_urls.rs`. The row "T4's `hooks_and_urls` group ... imports only" below
+  does not hold: this node either takes the grouping (when the engine can) or re-points T4's imports to where they are.
+- **M0.1 (`peer_session_answer`) and M0.6 (the `seeded_clone_guard` split) are not done**, same gap. Check any T4 call
+  of the four `peer_session_answer` items (`peer_has_no_such_session`, `split_pairing`,
+  `resolve_worktree_root_for_session`, `resolve_exec_tool_worktree`) against their current files.
+- M0.4 (the re-parent, D8) is deferred and still blocks node 17; see [`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md).
+
+**Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
+#573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
+failures by name, 1 ignored**.
 
 ## Draft PR contract
 
@@ -192,7 +211,7 @@ The scan followed `deferred-work/references/planning-cross-check.md`. No record 
   crate (A4): `crate::pty_runtime` → `tddy_terminal_rpc::pty_runtime`, `crate::session_deletion` →
   `tddy_session_activity::…`
 - [ ] **M5.6 re-point wiring callers** of T4 host methods; keep the delegators (Responsibility)
-- [ ] **Baseline** after the milestone: 562 / 22 / 1, the same 22 by name; `tddy-session-agents`
+- [ ] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
 - [ ] **Acceptance checks** A1–A8 for 16a's topics, T3, T4/SU/WS and CLI
@@ -335,7 +354,7 @@ Recorded on 16b's tip, and the acceptance criterion after the milestone:
   --skip sandboxed_bash_pty_action_streams_output
 ```
 
-Expected: **562 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit`
 passes when re-run alone, so it is not a regression.
 
@@ -442,7 +461,7 @@ range until 16d extracts it.
 | A5 | No file in 16a's topics, T3, T4/SU/WS or CLI clones the host. Hand-offs clone the topic's owned handle | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in those files is empty |
 | A6 | `SplitHost` is defined once, in `split_ports`, as `trait SplitHost: AgentHostCallbacks`, and implemented once, on `DaemonSessionHost`, in the wiring ports file. It holds exactly {`start_workspace_session`, `delete_session`} + the D3-approved {`session_files`, `session_agents`} (+ `session_room_services` only if D2 left `session_room_roster` off `AgentHostCallbacks`). `AgentHostCallbacks` is unchanged since 16b. `LaunchHost` does not exist yet | `grep -rn 'trait SplitHost'` gives one hit; `grep -rn 'impl .*SplitHost for DaemonSessionHost'` gives one hit, in wiring; the method list matches; `git diff <16b tip> -- <agent_host_callbacks file>` is empty; `grep -rn 'trait LaunchHost'` is empty |
 | A7 | The public API is unchanged: no consumer edit, and every facade still resolves | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty, and `cargo check --all-targets` is clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` (`tddy-desktop` on CI: it embeds the web bundle) |
-| A8 | Behaviour: the baseline | 562 passed, the same 22 by name, 1 ignored, after M5; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
+| A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after M5; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
 
 ## Decisions & trade-offs
 
@@ -537,7 +556,7 @@ Tasks executed at wrap:
 - [ ] A5: no host clone in a T4 file; the three hand-offs clone the split handle or call `SplitHost` (grep empty)
 - [ ] A6: `SplitHost: AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only; `AgentHostCallbacks` unchanged; no `LaunchHost` yet
 - [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 562 / 22 / 1, the same 22 by name; `restructure verify` accounted
+- [ ] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted
 - [ ] `start_split_claude_cli_session` ≤ 150 lines; no touched file ≥ 500
 
 **Documentation**
