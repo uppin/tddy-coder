@@ -4,6 +4,11 @@
 it. `LiveKitTestkit::start()` launches a Docker container, or reuses the server named by
 `LIVEKIT_TESTKIT_WS_URL`; the API key and secret (`devkey` / `secret`) are shared by every test.
 
+The server image is pinned to a release tag, never `:master`. The reference lives in one file,
+`.config/livekit-server.image` at the repository root, which the testkit compiles in and
+`scripts/livekit-ci-server.sh` and `./run-livekit-testkit-server` read, so a test that launches its own
+container and the shared CI server run the same server.
+
 ## API
 
 | Method | Returns |

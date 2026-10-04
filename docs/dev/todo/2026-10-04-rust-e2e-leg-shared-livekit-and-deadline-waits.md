@@ -248,7 +248,15 @@ the leg fail in minutes with a named test, not time out at the job limit. Concre
 1. ~~Unique-room helper in the testkit; migrate the constants; settle the room-enumerating tests.~~ Code
    landed in #578 with the `docker` group still serial. **Gate still open:** two consecutive runs green,
    and a run with the binaries shuffled (`--test-threads` / nextest `--partition`) green — read off CI.
-2. CI start/stop steps and the pinned image; `slow-timeout` for the leg. **Gate:** the kill-the-server drill.
+2. ~~CI start/stop steps and the pinned image; `slow-timeout` for the leg.~~ Code landed in #581
+   (`#e2e-leg` 4/5): `scripts/livekit-ci-server.sh`, the start/always-stop steps, the pin
+   (`.config/livekit-server.image`, `v1.13.7`), `slow-timeout = 60s × 3` sized from a green run (slowest
+   test 39.8 s), and the drill input (`kill_livekit_after_seconds`). **Gates still open, all read off CI:**
+   (a) the pin has not been run twice green against a shared server, nor once with binaries shuffled;
+   (b) the drill has not been dispatched, so its result — the leg failing within minutes with a named
+   test — is unrecorded; (c) the e2e job's `timeout-minutes` is still the shared 150, left because only a
+   warm-cache run (34 min) has been measured and the cap exists for a cold one — tighten it once the
+   shared-server leg's cold and warm times are both known (node 5 measures them).
 3. Lift the `docker` group for the LiveKit binaries. **Gate:** measured run time and a flake count over
    several runs.
 4. ~~The deadline setting (and the split of `rpc_scenarios`).~~ Landed in #579 (`#e2e-leg` 2/5). **Gate still open:** the e2e leg's run time with the 2 s deadline test and the split scenarios, read off CI.

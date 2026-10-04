@@ -343,7 +343,7 @@ its container ports in ICE candidates. `stop` is safe to run twice. The unit leg
 
 The image is pinned in one file, `.config/livekit-server.image`, read by the script,
 `./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
-a one-line edit; the pin is not yet proven by two consecutive green e2e runs.
+a one-line edit.
 `./run-livekit-testkit-server --stop` removes the local reusable server.
 
 The `docker` override in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a
