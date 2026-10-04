@@ -12,17 +12,20 @@ use std::ops::Range;
 
 use super::super::early_return::masked_to_code;
 use super::scope::Scope;
-use super::text::{is_identifier_byte, Edit};
+use super::text::{enclosing_modules, is_identifier_byte, Edit};
 
 /// The module the code leaves and the one it arrives in, below the crate root.
-pub(super) struct Modules<'a> {
-    pub(super) from: &'a [String],
-    pub(super) to: &'a [String],
+pub(in crate::backends::rust) struct Modules<'a> {
+    pub(in crate::backends::rust) from: &'a [String],
+    pub(in crate::backends::rust) to: &'a [String],
+    /// A module that moves whole with the code, when it does: a relative path that reaches into it
+    /// still reaches the same place, and the visibilities written in the code keep their meaning.
+    pub(in crate::backends::rust) travelling: Option<&'a [String]>,
 }
 
 /// The edits over `region` of `text` that keep every relative path and visibility meaning what it
 /// meant. `claimed` are spans another edit owns — an item's own visibility — and are left alone.
-pub(super) fn edits(
+pub(in crate::backends::rust) fn edits(
     text: &str,
     region: Range<usize>,
     modules: &Modules<'_>,
@@ -34,7 +37,7 @@ pub(super) fn edits(
     let mut found = Vec::new();
 
     for span in &visibilities {
-        if claimed.iter().any(|other| overlaps(other, span)) {
+        if modules.travelling.is_some() || claimed.iter().any(|other| overlaps(other, span)) {
             continue;
         }
         found.extend(visibility_edit(text, span.clone(), modules));
@@ -43,7 +46,8 @@ pub(super) fn edits(
     let mut at = region.start;
     while at < region.end {
         let in_visibility = visibilities.iter().any(|span| span.contains(&at));
-        if !in_visibility {
+        let claimed_by_another = claimed.iter().any(|span| span.contains(&at));
+        if !in_visibility && !claimed_by_another {
             if let Some(edit) = path_edit(&masked, at, modules, moved_names) {
                 at = edit.end.max(at + 1);
                 found.push(edit);
@@ -97,8 +101,9 @@ fn path_edit(
         return None;
     }
 
+    let (from, to) = modules_at(masked, at, modules);
     let mut cursor = at;
-    let mut arrives_at = modules.from.to_vec();
+    let mut arrives_at = from.clone();
     let mut chain = 0usize;
     loop {
         let rest = &masked[cursor..];
@@ -116,18 +121,40 @@ fn path_edit(
         return None;
     }
 
+    if modules
+        .travelling
+        .is_some_and(|inside| arrives_at.starts_with(inside))
+    {
+        return None;
+    }
+
     // `self::name` for a name that travels with the code still names its own module.
     let named: String = masked[cursor..]
         .chars()
         .take_while(|character| character.is_alphanumeric() || *character == '_')
         .collect();
-    if arrives_at == modules.from && moved_names.contains(&named) {
+    if arrives_at == from && moved_names.contains(&named) {
         return None;
     }
 
     let written = &masked[at..cursor];
-    let respelled = relative_to(&arrives_at, modules.to);
+    let respelled = relative_to(&arrives_at, &to);
     (respelled != written).then(|| Edit::replace(at..cursor, respelled))
+}
+
+/// The module the code at `at` is written in, before and after the move.
+///
+/// Code that travels whole carries its inline modules along, and a `super::` inside one of them
+/// names the module around it, not the one the file is.
+fn modules_at(masked: &str, at: usize, modules: &Modules<'_>) -> (Vec<String>, Vec<String>) {
+    let mut from = modules.from.to_vec();
+    let mut to = modules.to.to_vec();
+    if modules.travelling.is_some() {
+        let inline = enclosing_modules(masked, at);
+        from.extend(inline.iter().cloned());
+        to.extend(inline);
+    }
+    (from, to)
 }
 
 /// The path prefix, ending in `::`, that reaches `target` from the module `from`.
@@ -167,6 +194,7 @@ mod tests {
             &Modules {
                 from: &from,
                 to: &to,
+                travelling: None,
             },
             &BTreeSet::new(),
             &[],

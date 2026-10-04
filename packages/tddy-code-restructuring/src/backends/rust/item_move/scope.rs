@@ -9,7 +9,7 @@
 
 /// A visibility, as the module subtree it covers.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum Scope {
+pub(in crate::backends::rust) enum Scope {
     Public,
     /// The module at this path below the crate root, and every module under it.
     Within(Vec<String>),
@@ -20,7 +20,7 @@ impl Scope {
     ///
     /// `None` for a spelling that is not one of the forms rustc accepts, or that climbs above the
     /// crate root — the caller reports it rather than guessing what it meant.
-    pub(super) fn parse(visibility: &str, module: &[String]) -> Option<Scope> {
+    pub(in crate::backends::rust) fn parse(visibility: &str, module: &[String]) -> Option<Scope> {
         let text = visibility.trim();
         if text.is_empty() || text == "pub(self)" {
             return Some(Scope::Within(module.to_vec()));
@@ -53,7 +53,7 @@ impl Scope {
     }
 
     /// The narrowest scope that covers this one and `module`.
-    pub(super) fn widened_to(self, module: &[String]) -> Scope {
+    pub(in crate::backends::rust) fn widened_to(self, module: &[String]) -> Scope {
         match self {
             Scope::Public => Scope::Public,
             Scope::Within(path) => {
@@ -68,7 +68,7 @@ impl Scope {
     }
 
     /// The keyword that gives an item written in `at` this scope. Empty for private.
-    pub(super) fn spelled_in(&self, at: &[String]) -> String {
+    pub(in crate::backends::rust) fn spelled_in(&self, at: &[String]) -> String {
         match self {
             Scope::Public => "pub".to_string(),
             Scope::Within(path) if path == at => String::new(),

@@ -13,14 +13,14 @@ use crate::Result;
 
 /// One replacement over the original text of a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Edit {
-    pub(super) start: usize,
-    pub(super) end: usize,
-    pub(super) text: String,
+pub(in crate::backends::rust) struct Edit {
+    pub(in crate::backends::rust) start: usize,
+    pub(in crate::backends::rust) end: usize,
+    pub(in crate::backends::rust) text: String,
 }
 
 impl Edit {
-    pub(super) fn replace(span: Range<usize>, text: impl Into<String>) -> Edit {
+    pub(in crate::backends::rust) fn replace(span: Range<usize>, text: impl Into<String>) -> Edit {
         Edit {
             start: span.start,
             end: span.end,
@@ -28,7 +28,7 @@ impl Edit {
         }
     }
 
-    pub(super) fn insert(at: usize, text: impl Into<String>) -> Edit {
+    pub(in crate::backends::rust) fn insert(at: usize, text: impl Into<String>) -> Edit {
         Edit::replace(at..at, text)
     }
 }
@@ -36,7 +36,7 @@ impl Edit {
 /// `text` with every edit applied. Each edit addresses the original text.
 ///
 /// Edits that overlap are refused: two rewrites of the same bytes would have one silently win.
-pub(super) fn applied(text: &str, edits: &[Edit]) -> Result<String> {
+pub(in crate::backends::rust) fn applied(text: &str, edits: &[Edit]) -> Result<String> {
     let mut order: Vec<usize> = (0..edits.len()).collect();
     order.sort_by_key(|&index| (edits[index].start, edits[index].end, index));
 
@@ -60,7 +60,7 @@ pub(super) fn applied(text: &str, edits: &[Edit]) -> Result<String> {
 }
 
 /// The byte offset where one-based `line` starts, or the end of the text past its last line.
-pub(super) fn line_start(text: &str, line: u32) -> usize {
+pub(in crate::backends::rust) fn line_start(text: &str, line: u32) -> usize {
     let mut offset = 0usize;
     for _ in 1..line {
         match text[offset..].find('\n') {
@@ -72,7 +72,7 @@ pub(super) fn line_start(text: &str, line: u32) -> usize {
 }
 
 /// The byte offset just past the newline that ends one-based `line`, or the end of the text.
-pub(super) fn line_end(text: &str, line: u32) -> usize {
+pub(in crate::backends::rust) fn line_end(text: &str, line: u32) -> usize {
     let start = line_start(text, line);
     text[start..]
         .find('\n')
@@ -80,13 +80,13 @@ pub(super) fn line_end(text: &str, line: u32) -> usize {
 }
 
 /// The byte offset of the start of the line after the one holding `offset`.
-pub(super) fn next_line_start(text: &str, offset: usize) -> usize {
+pub(in crate::backends::rust) fn next_line_start(text: &str, offset: usize) -> usize {
     text[offset..]
         .find('\n')
         .map_or(text.len(), |index| offset + index + 1)
 }
 
-pub(super) fn is_identifier_byte(byte: u8) -> bool {
+pub(in crate::backends::rust) fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
 }
 
@@ -101,7 +101,7 @@ pub(super) fn identifiers_in(text: &str) -> BTreeSet<String> {
 }
 
 /// How many `{` enclose `offset` in the masked text.
-pub(super) fn depth_at(masked: &str, offset: usize) -> usize {
+pub(in crate::backends::rust) fn depth_at(masked: &str, offset: usize) -> usize {
     masked.as_bytes()[..offset]
         .iter()
         .fold(0usize, |depth, byte| match byte {
@@ -170,7 +170,7 @@ pub(super) fn split_use(statement: &str) -> Option<(&str, &str)> {
 }
 
 /// The names of the inline modules that enclose `offset`, outermost first.
-pub(super) fn enclosing_modules(text: &str, offset: usize) -> Vec<String> {
+pub(in crate::backends::rust) fn enclosing_modules(text: &str, offset: usize) -> Vec<String> {
     let mut names = Vec::new();
     let mut scope = 0..text.len();
     loop {
@@ -237,7 +237,7 @@ pub(super) fn use_insertion(text: &str, scope: Range<usize>) -> (usize, bool) {
 /// A qualifier is whatever plain path leads to the name — `crate::pairing::`, `super::`. A
 /// qualified self type (`<T as Trait>::name`) is not a path this can read, and is left to the
 /// caller to find still named after the rewrite.
-pub(super) fn qualifier_start(text: &str, at: usize) -> usize {
+pub(in crate::backends::rust) fn qualifier_start(text: &str, at: usize) -> usize {
     let mut first = at;
     while let Some(head) = text[..first].strip_suffix("::") {
         let segment = head

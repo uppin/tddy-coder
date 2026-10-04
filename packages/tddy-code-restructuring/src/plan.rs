@@ -229,6 +229,19 @@ pub enum RefactorKind {
     /// `none` (or absent) re-points every caller, which is the difference from `extract_module`,
     /// where `none` refuses when another file reaches the items.
     MoveItem,
+    /// Moves a module, with the directory of its children, under **another existing module of the
+    /// same crate**.
+    ///
+    /// Anchored by an `items` (or single `item`) anchor on the module's `mod` declaration in its old
+    /// parent; `to` is the new parent's module path, rooted at the package name, and must already
+    /// exist. The module's files are moved with `git mv`, the declaration travels with its visibility
+    /// and attributes, and every path that named the module is re-pointed from the server's reference
+    /// set. Not [`Self::moves_across_crates`], for the reason [`Self::MoveItem`] is not.
+    ///
+    /// `reexport: glob` leaves `pub use <new parent>::<module>;` in the old parent and re-points no
+    /// caller; `none` (or absent) re-points every caller. `named` is refused: a module has no
+    /// per-item facade, and `glob` is the word for the one a module needs.
+    ReparentModule,
     /// rust-analyzer `Remove unused parameter`: drops a parameter the body never reads, from the
     /// declaration and from every call site. Anchored on the function; `name` is the parameter.
     ///
@@ -1127,6 +1140,59 @@ mod tests {
 
         assert!(
             error.contains("to_file") && error.contains("MoveItem"),
+            "{error}"
+        );
+    }
+
+    const A_MOD_DECLARATION_ANCHOR: &str = r#"{"kind":"items","file":"src/host.rs","items":["app::host::attachments"],"fingerprints":["sha256:f"]}"#;
+
+    #[test]
+    fn reads_a_reparent_module_with_the_facade_it_asks_for() {
+        let plan = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"reparent_module","anchor":{A_MOD_DECLARATION_ANCHOR},"to":"app::split","reexport":"glob"}}"#
+        )))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::ReparentModule);
+        assert_eq!(plan.ops[0].reexport, Some(Reexport::Glob));
+        assert!(!plan.ops[0].op.moves_across_crates());
+    }
+
+    #[test]
+    fn refuses_a_reparent_module_that_names_no_new_parent() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"reparent_module","anchor":{A_MOD_DECLARATION_ANCHOR}}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("reparent_module") && error.contains("`to`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_reparent_module_anchored_by_range() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"reparent_module","anchor":{"kind":"range","file":"src/host.rs","start":{"line":1,"col":1},"end":{"line":1,"col":20}},"to":"app::split"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("anchors by item"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_named_facade_for_a_module() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"reparent_module","anchor":{A_MOD_DECLARATION_ANCHOR},"to":"app::split","reexport":"named"}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("reparent_module") && error.contains("glob"),
             "{error}"
         );
     }

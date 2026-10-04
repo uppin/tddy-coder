@@ -9,17 +9,17 @@
 //! What is lexical is answered before a server exists ([`preflight`]): a destination module that is
 //! not there, a name it already declares, and a destination that is the items' own module.
 
-mod assemble;
-mod destination;
-mod facade;
+pub(super) mod assemble;
+pub(super) mod destination;
+pub(super) mod facade;
 mod imports;
 mod outline;
-mod placement;
-mod preflight;
-mod rebase;
-mod scope;
-mod sites;
-mod text;
+pub(super) mod placement;
+pub(super) mod preflight;
+pub(super) mod rebase;
+pub(super) mod scope;
+pub(super) mod sites;
+pub(super) mod text;
 
 use std::collections::BTreeMap;
 
@@ -49,7 +49,7 @@ impl RustBackend {
         workspace: &Workspace<'_>,
     ) -> Result<Resolution> {
         let file = op.anchor.file();
-        let named = preflight::named_by(workspace, op)?;
+        let named = preflight::named_by(workspace, op, "move_item")?;
         let source_text = workspace.read(file)?;
 
         // Answered by the text, so answered before a server exists.
@@ -73,7 +73,12 @@ impl RustBackend {
             "move_item: surveying the callers of {} item(s)",
             run.items.len()
         ));
-        let sites = self.sites_of(&uri, workspace, file, &source_text, &run.items)?;
+        let moved: Vec<(&str, &Value)> = run
+            .items
+            .iter()
+            .map(|item| (item.name.as_str(), &item.position))
+            .collect();
+        let sites = self.sites_of(&uri, workspace, file, &source_text, &moved)?;
         let left = outline::left_behind(&symbols, &source_text, &run);
         let reached = self.reached_by_the_moved_code(&uri, &source_text, &left, &run)?;
 
@@ -118,21 +123,22 @@ impl RustBackend {
         }
     }
 
-    /// Every place that names one of `items`, in any file the server knows.
-    fn sites_of(
+    /// Every place that names one of `named` (a name and where the server reports it, in the file at
+    /// `uri`), in any file the server knows.
+    pub(super) fn sites_of(
         &mut self,
         uri: &str,
         workspace: &Workspace<'_>,
         file: &str,
         source_text: &str,
-        items: &[Item],
+        named: &[(&str, &Value)],
     ) -> Result<Vec<Site>> {
         let mut texts: BTreeMap<String, String> = BTreeMap::new();
         texts.insert(file.to_string(), source_text.to_string());
         let mut sites: Vec<Site> = Vec::new();
 
-        for item in items {
-            let references = self.references_at(uri, &item.position)?;
+        for (name, position) in named {
+            let references = self.references_at(uri, position)?;
             for reference in references.as_array().into_iter().flatten() {
                 let referrer = reference
                     .get("uri")
@@ -155,7 +161,7 @@ impl RustBackend {
                     sites.push(Site {
                         path,
                         offset,
-                        name: item.name.clone(),
+                        name: (*name).to_string(),
                     });
                 }
             }

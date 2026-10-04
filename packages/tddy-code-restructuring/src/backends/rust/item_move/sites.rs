@@ -20,41 +20,69 @@ use crate::Result;
 
 /// One place that names a moved item: the file, the byte offset of the name, and which item.
 #[derive(Debug, Clone)]
-pub(super) struct Site {
-    pub(super) path: String,
-    pub(super) offset: usize,
-    pub(super) name: String,
+pub(in crate::backends::rust) struct Site {
+    pub(in crate::backends::rust) path: String,
+    pub(in crate::backends::rust) offset: usize,
+    pub(in crate::backends::rust) name: String,
 }
 
 /// The path of the destination as a file writes it: inside the crate, and from outside it.
-pub(super) struct Qualifiers {
-    pub(super) same_crate: String,
-    pub(super) extern_crate: String,
+pub(in crate::backends::rust) struct Qualifiers {
+    pub(in crate::backends::rust) same_crate: String,
+    pub(in crate::backends::rust) extern_crate: String,
 }
 
 /// What re-pointing a file needs to know about the move.
-pub(super) struct Context<'a> {
-    pub(super) root: &'a Path,
-    pub(super) destination: &'a Module,
-    pub(super) crate_name: &'a str,
-    pub(super) qualifiers: &'a Qualifiers,
+pub(in crate::backends::rust) struct Context<'a> {
+    pub(in crate::backends::rust) root: &'a Path,
+    pub(in crate::backends::rust) destination: &'a Module,
+    pub(in crate::backends::rust) crate_name: &'a str,
+    pub(in crate::backends::rust) qualifiers: &'a Qualifiers,
     /// Whether callers are re-pointed. With a facade they are not: the old path still resolves.
-    pub(super) repoint: bool,
+    pub(in crate::backends::rust) repoint: bool,
     /// The lines that move, in the file that holds them.
-    pub(super) region: (&'a str, Range<usize>),
+    pub(in crate::backends::rust) region: (&'a str, Range<usize>),
+    /// Files that move whole, with the module that owns them: a relative qualifier written in one
+    /// is rebased with the file rather than re-pointed.
+    pub(in crate::backends::rust) moved_files: &'a [String],
+}
+
+impl Context<'_> {
+    /// Whether the code at `offset` of `path` moves with the items.
+    fn moves_with_the_code(&self, path: &str, offset: usize) -> bool {
+        (self.region.0 == path && self.region.1.contains(&offset))
+            || self.moved_files.iter().any(|file| file == path)
+    }
+
+    /// Whether the qualifier `written` in front of a moved name is left as written because the
+    /// code it is in moves: a path that is only `self::`/`super::` steps still reaches the same
+    /// module from the new place, and one with a named step is re-pointed instead.
+    fn keeps_its_qualifier(&self, path: &str, offset: usize, written: &str) -> bool {
+        let relative = written.starts_with("self::") || written.starts_with("super::");
+        if self.moved_files.iter().any(|file| file == path) {
+            return written
+                .split("::")
+                .all(|step| step.is_empty() || step == "self" || step == "super");
+        }
+        relative && self.moves_with_the_code(path, offset)
+    }
 }
 
 /// The module a file is, below the crate root, when it is a file of the crate being moved within.
 ///
 /// `None` for a file of another crate, or one outside `src/` (a test binary, an example), which name
 /// the crate from outside.
-pub(super) fn module_of_file(root: &Path, crate_name: &str, path: &str) -> Option<Vec<String>> {
+pub(in crate::backends::rust) fn module_of_file(
+    root: &Path,
+    crate_name: &str,
+    path: &str,
+) -> Option<Vec<String>> {
     let mut full = module_path_of(root, path).ok()?;
     (full.first().map(String::as_str) == Some(crate_name)).then(|| full.split_off(1))
 }
 
 /// The edits that re-point `sites` in one file.
-pub(super) fn edits_for_file(
+pub(in crate::backends::rust) fn edits_for_file(
     context: &Context<'_>,
     path: &str,
     text: &str,
@@ -68,7 +96,7 @@ pub(super) fn edits_for_file(
     } else {
         &context.qualifiers.extern_crate
     };
-    let in_region = |offset: usize| context.region.0 == path && context.region.1.contains(&offset);
+    let in_region = |offset: usize| context.moves_with_the_code(path, offset);
     let in_destination = |offset: usize| {
         base.as_ref().is_some_and(|base| {
             let inside = enclosing_modules(text, offset);
@@ -92,6 +120,17 @@ pub(super) fn edits_for_file(
             continue;
         }
         handled.extend(inside.iter().map(|site| site.offset));
+        let (heads, inside): (Vec<&Site>, Vec<&Site>) = inside
+            .into_iter()
+            .partition(|site| starts_a_path(&masked, site));
+        if context.repoint {
+            for site in heads {
+                edits.extend(requalified(context, path, text, site, qualifier)?);
+            }
+        }
+        if inside.is_empty() {
+            continue;
+        }
         let drop = in_destination(statement.start);
         for site in &inside {
             covered.insert((enclosing_modules(text, statement.start), site.name.clone()));
@@ -109,13 +148,8 @@ pub(super) fn edits_for_file(
 
     let mut needed: BTreeMap<Vec<String>, BTreeSet<&str>> = BTreeMap::new();
     for site in sites.iter().filter(|site| !handled.contains(&site.offset)) {
-        let start = qualifier_start(text, site.offset);
-        if start < site.offset {
-            let relative =
-                text[start..].starts_with("self::") || text[start..].starts_with("super::");
-            if !(in_region(site.offset) && relative) {
-                edits.push(Edit::replace(start..site.offset, format!("{qualifier}::")));
-            }
+        if qualifier_start(text, site.offset) < site.offset {
+            edits.extend(requalified(context, path, text, site, qualifier)?);
             continue;
         }
         if in_region(site.offset) || in_destination(site.offset) {
@@ -130,19 +164,68 @@ pub(super) fn edits_for_file(
         }
     }
 
-    for (chain, names) in needed {
-        let scope = scope_of(text, &chain).unwrap_or(0..text.len());
-        let (at, blank) = use_insertion(text, scope);
-        let mut lines: String = names
-            .iter()
-            .map(|name| format!("use {qualifier}::{name};\n"))
-            .collect();
-        if blank {
-            lines.push('\n');
-        }
-        edits.push(Edit::insert(at, lines));
-    }
+    edits.extend(imports_for(text, qualifier, &needed));
     Ok(edits)
+}
+
+/// The `use` items that bring each name of `needed` into the module (reached through the inline
+/// modules `chain`) that names it bare.
+fn imports_for(
+    text: &str,
+    qualifier: &str,
+    needed: &BTreeMap<Vec<String>, BTreeSet<&str>>,
+) -> Vec<Edit> {
+    needed
+        .iter()
+        .map(|(chain, names)| {
+            let scope = scope_of(text, chain).unwrap_or(0..text.len());
+            let (at, blank) = use_insertion(text, scope);
+            let mut lines: String = names
+                .iter()
+                .map(|name| format!("use {qualifier}::{name};\n"))
+                .collect();
+            if blank {
+                lines.push('\n');
+            }
+            Edit::insert(at, lines)
+        })
+        .collect()
+}
+
+/// Whether the name at `site` is followed by more of its path: it is a step on the way to
+/// something else (`Kind::Variant`, `module::item`), not where the path ends.
+fn starts_a_path(masked: &str, site: &Site) -> bool {
+    masked[site.offset + site.name.len()..].starts_with("::")
+}
+
+/// The edit that points the qualifier written in front of `site` at the new home, or none when the
+/// code moves and the qualifier still reaches the same place.
+///
+/// Only a qualifier can be re-pointed: a name that starts its path has nothing in front of it to
+/// replace, and is refused rather than guessed at.
+fn requalified(
+    context: &Context<'_>,
+    path: &str,
+    text: &str,
+    site: &Site,
+    qualifier: &str,
+) -> Result<Option<Edit>> {
+    let start = qualifier_start(text, site.offset);
+    if start == site.offset {
+        return Err(seam_refusal(format!(
+            "`{}` in {path} starts a path inside a `use`, so it cannot be re-pointed: write the \
+             path in full and plan again",
+            site.name
+        )));
+    }
+    let written = &text[start..site.offset];
+    if context.keeps_its_qualifier(path, site.offset, written) {
+        return Ok(None);
+    }
+    Ok(Some(Edit::replace(
+        start..site.offset,
+        format!("{qualifier}::"),
+    )))
 }
 
 /// The `use` item `statement`, written again with the names that moved pointing at their new home.

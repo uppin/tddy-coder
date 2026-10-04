@@ -285,6 +285,8 @@ mod reexports;
 
 pub(crate) mod source_scan;
 
+pub(crate) mod module_files;
+
 mod survey;
 
 mod module_home;

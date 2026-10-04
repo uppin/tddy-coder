@@ -36,6 +36,7 @@ mod inline_paths;
 mod introduced;
 mod item_move;
 mod item_path;
+mod module_reparent;
 mod nested_modules;
 mod prelude_shadow;
 mod readiness;
@@ -62,7 +63,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 21] = [
+const SUPPORTED: [RefactorKind; 22] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -74,6 +75,7 @@ const SUPPORTED: [RefactorKind; 21] = [
     RefactorKind::MoveClusterToCrate,
     RefactorKind::MoveTestBinaryToCrate,
     RefactorKind::MoveItem,
+    RefactorKind::ReparentModule,
     RefactorKind::RemoveUnusedParam,
     RefactorKind::ConvertTupleReturnToStruct,
     RefactorKind::ChangeParamType,
@@ -1009,6 +1011,9 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::MoveItem {
             return item_move::findings(op, workspace);
         }
+        if op.op == RefactorKind::ReparentModule {
+            return module_reparent::findings(op, workspace);
+        }
         let Anchor::Range { start, end, .. } = &op.anchor else {
             return Ok(Vec::new());
         };
@@ -1162,6 +1167,12 @@ impl RustBackend {
         // the cross-crate moves, and opens the document for itself.
         if op.op == RefactorKind::MoveItem {
             return self.move_items(op, workspace);
+        }
+
+        // Moves a module and its directory under another parent of the same crate, authored here
+        // the same way and opening the parent's document for itself.
+        if op.op == RefactorKind::ReparentModule {
+            return self.reparent_module(op, workspace);
         }
 
         // The same operation over a set, and one edit rather than one per member: a

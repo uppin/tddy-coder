@@ -14,28 +14,32 @@ use crate::registry::Workspace;
 use crate::Result;
 
 /// The destination a plan names: the package it is in, and the module path below the crate root.
-pub(super) struct Named {
-    pub(super) package: Package,
-    pub(super) to: String,
-    pub(super) module: Vec<String>,
+pub(in crate::backends::rust) struct Named {
+    pub(in crate::backends::rust) package: Package,
+    pub(in crate::backends::rust) to: String,
+    pub(in crate::backends::rust) module: Vec<String>,
 }
 
 /// `to` read against the package the anchor's file belongs to.
 ///
 /// Refused when it is absent or names another crate: a move stays inside one crate, and the plan
 /// that wants more is a `move_module_to_crate`.
-pub(super) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Named> {
+pub(in crate::backends::rust) fn named_by(
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+    operation: &str,
+) -> Result<Named> {
     let to = op
         .to
         .as_deref()
-        .ok_or_else(|| failure("`move_item` needs `to`: the module the items move into"))?;
+        .ok_or_else(|| failure(format!("`{operation}` needs `to`: the module to move into")))?;
     let package = package_of(workspace.root, op.anchor.file())?;
     let mut pieces = to.split("::").map(str::trim);
     let crate_name = pieces.next().unwrap_or_default();
     if crate_name.replace('-', "_") != package.crate_name {
         return Err(failure(format!(
-            "`{to}` is in `{crate_name}`, and the items are in `{}`: `move_item` stays inside one \
-             crate",
+            "`{to}` is in `{crate_name}`, and the anchor is in `{}`: `{operation}` stays inside \
+             one crate",
             package.crate_name
         )));
     }
@@ -49,7 +53,7 @@ pub(super) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Nam
 /// The module of the items an anchor names, below the crate root, and their names.
 ///
 /// `None` for an anchor that does not name items by path.
-pub(super) fn anchored(op: &RefactorOp) -> Option<(Vec<String>, Vec<String>)> {
+pub(in crate::backends::rust) fn anchored(op: &RefactorOp) -> Option<(Vec<String>, Vec<String>)> {
     let paths: &[ItemPath] = match &op.anchor {
         Anchor::Items { items, .. } => items,
         Anchor::Item { item, .. } => std::slice::from_ref(item),
@@ -73,7 +77,7 @@ pub(super) fn anchored(op: &RefactorOp) -> Option<(Vec<String>, Vec<String>)> {
 ///
 /// Every finding rather than the first, because a plan is checked to be fixed in one pass.
 pub(super) fn findings(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Vec<String>> {
-    let named = named_by(workspace, op)?;
+    let named = named_by(workspace, op, "move_item")?;
     let Some((source, names)) = anchored(op) else {
         return Ok(vec![
             "`move_item` anchors by item (`items`, or a single `item`): a range or a symbol names \
@@ -107,20 +111,7 @@ fn obstacles(
 ) -> Result<(Vec<String>, Option<Module>)> {
     let module = match find_module(workspace, &named.package, &named.module)? {
         Lookup::Found(module) => module,
-        Lookup::Missing { at } => {
-            let parent = std::iter::once(named.package.crate_name.as_str())
-                .chain(named.module[..at].iter().map(String::as_str))
-                .collect::<Vec<_>>()
-                .join("::");
-            return Ok((
-                vec![format!(
-                    "`{}` does not exist: `{parent}` declares no module `{}`. A move never \
-                     creates a module — make it first, with `extract_module`",
-                    named.to, named.module[at]
-                )],
-                None,
-            ));
-        }
+        Lookup::Missing { at } => return Ok((vec![does_not_exist(named, at)], None)),
     };
 
     if module.path == source {
@@ -155,9 +146,22 @@ fn obstacles(
     Ok((clashes, Some(module)))
 }
 
+/// The finding for a destination whose path stops existing at segment `at` of the module path.
+pub(in crate::backends::rust) fn does_not_exist(named: &Named, at: usize) -> String {
+    let parent = std::iter::once(named.package.crate_name.as_str())
+        .chain(named.module[..at].iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join("::");
+    format!(
+        "`{}` does not exist: `{parent}` declares no module `{}`. A move never creates a module — \
+         make it first, with `extract_module`",
+        named.to, named.module[at]
+    )
+}
+
 /// The names a module's own text binds at its top level: what it defines, the modules it declares
 /// and what its `use` items bring into scope.
-pub(super) fn names_declared_in(module_text: &str) -> BTreeSet<String> {
+pub(in crate::backends::rust) fn names_declared_in(module_text: &str) -> BTreeSet<String> {
     let items = items_of_module(module_text);
     let mut names: BTreeSet<String> = items.defined.into_iter().collect();
     names.extend(items.children.into_iter().map(|child| child.name));

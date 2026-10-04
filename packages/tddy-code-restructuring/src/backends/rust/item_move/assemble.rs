@@ -48,7 +48,7 @@ pub(super) struct Assembled {
 }
 
 /// The path of a module from the crate root, as a file inside the crate writes it.
-fn written_from_the_root(module: &[String]) -> String {
+pub(in crate::backends::rust) fn written_from_the_root(module: &[String]) -> String {
     std::iter::once("crate")
         .chain(module.iter().map(String::as_str))
         .collect::<Vec<_>>()
@@ -270,6 +270,7 @@ fn repoint_callers(
         qualifiers: &qualifiers,
         repoint: moving.reexport == Reexport::None,
         region: (moving.source_file, region.clone()),
+        moved_files: &[],
     };
     let files: BTreeSet<&String> = moving.sites.iter().map(|site| &site.path).collect();
     for path in files {
@@ -298,6 +299,7 @@ fn moved_text(
     let modules = Modules {
         from: moving.source,
         to: &moving.destination.path,
+        travelling: None,
     };
     let source_edits = edits.entry(moving.source_file.to_string()).or_default();
     source_edits.extend(rebase::edits(
@@ -333,14 +335,7 @@ fn moved_text(
 fn leave_behind(moving: &Moving<'_>, region: &Range<usize>, landing: &Landing) -> Edit {
     let qualifier = written_from_the_root(&moving.destination.path);
     let lines = facade::lines(moving.reexport, &qualifier, moving.source, &landing.written);
-    let text = moving.source_text;
-    let mut end = region.end;
-    let after_blank = region.start == 0 || text[..region.start].ends_with("\n\n");
-    if lines.is_empty() && after_blank && text[end..].starts_with('\n') {
-        end += 1;
-    }
-    let replacement: String = lines.iter().map(|line| format!("{line}\n")).collect();
-    Edit::replace(region.start..end, replacement)
+    placement::vacated(moving.source_text, region, &lines)
 }
 
 /// The edits to the destination: the imports the moved code needs, then the moved text itself.

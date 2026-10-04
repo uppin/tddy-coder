@@ -284,7 +284,15 @@ async fn leaves_a_glob_facade_that_keeps_every_caller_unchanged() {
         "no facade was left in the old parent:\n{}",
         workspace.read("src/host.rs")
     );
-    assert_eq!(workspace.read("src/split.rs"), A_SPLIT_THAT_IMPORTS_IT);
+    // `split` is the new parent, so it gains the `mod` declaration; what it already said about the
+    // module is what must not change
+    assert!(
+        workspace
+            .read("src/split.rs")
+            .ends_with(A_SPLIT_THAT_IMPORTS_IT),
+        "the importing caller was edited although a facade stands in for the old path:\n{}",
+        workspace.read("src/split.rs")
+    );
     assert_eq!(
         workspace.read("src/audit.rs"),
         AN_AUDIT_THAT_NAMES_IT_INLINE

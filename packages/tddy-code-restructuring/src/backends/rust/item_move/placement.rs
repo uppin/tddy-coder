@@ -58,6 +58,23 @@ pub(super) fn insertion(text: &str, scope: &Range<usize>, moved: &str) -> Result
     Ok(Edit::insert(closing_line, format!("{lead}{indented}")))
 }
 
+/// What stands where the lines `region` were, now that they have left `text`: `lines` (a facade,
+/// each ending a line of its own) or nothing, in which case the blank line that separated the
+/// region from what follows goes too, so no double blank line is left behind.
+pub(in crate::backends::rust) fn vacated(
+    text: &str,
+    region: &Range<usize>,
+    lines: &[String],
+) -> Edit {
+    let mut end = region.end;
+    let after_blank = region.start == 0 || text[..region.start].ends_with("\n\n");
+    if lines.is_empty() && after_blank && text[end..].starts_with('\n') {
+        end += 1;
+    }
+    let replacement: String = lines.iter().map(|line| format!("{line}\n")).collect();
+    Edit::replace(region.start..end, replacement)
+}
+
 /// Where the first inline `#[cfg(test)]` module of the module begins, its attributes included.
 fn test_module_start(text: &str, scope: &Range<usize>) -> Option<usize> {
     let items = items_of_module(&text[scope.clone()]);

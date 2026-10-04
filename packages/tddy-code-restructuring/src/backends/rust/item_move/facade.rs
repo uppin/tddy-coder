@@ -14,7 +14,7 @@ use crate::plan::Reexport;
 ///
 /// `glob` re-exports the whole destination, as the cross-crate move does; `named` lists only what
 /// moved, one line per visibility. `none` leaves nothing.
-pub(super) fn lines(
+pub(in crate::backends::rust) fn lines(
     reexport: Reexport,
     qualifier: &str,
     source: &[String],

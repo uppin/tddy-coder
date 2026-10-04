@@ -15,14 +15,14 @@ use crate::Result;
 
 /// The package a file belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Package {
+pub(in crate::backends::rust) struct Package {
     /// Relative to the repository root. Empty when the manifest sits at the root.
-    pub(super) dir: PathBuf,
+    pub(in crate::backends::rust) dir: PathBuf,
     /// The crate's name, as a path writes it (dashes read as underscores).
-    pub(super) crate_name: String,
+    pub(in crate::backends::rust) crate_name: String,
 }
 
-pub(super) fn package_of(root: &Path, file: &str) -> Result<Package> {
+pub(in crate::backends::rust) fn package_of(root: &Path, file: &str) -> Result<Package> {
     let (dir, name) = owning_package(root, file)?;
     Ok(Package {
         dir,
@@ -33,14 +33,14 @@ pub(super) fn package_of(root: &Path, file: &str) -> Result<Package> {
 /// A module of the crate: its file, the span of its own items inside that file, and its path below
 /// the crate root.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Module {
-    pub(super) file: String,
-    pub(super) scope: Range<usize>,
-    pub(super) path: Vec<String>,
+pub(in crate::backends::rust) struct Module {
+    pub(in crate::backends::rust) file: String,
+    pub(in crate::backends::rust) scope: Range<usize>,
+    pub(in crate::backends::rust) path: Vec<String>,
 }
 
 /// The outcome of looking for a module.
-pub(super) enum Lookup {
+pub(in crate::backends::rust) enum Lookup {
     Found(Module),
     /// The first segment of the path that nothing declares.
     Missing {
@@ -51,7 +51,7 @@ pub(super) enum Lookup {
 /// The module at `path` below the crate root of `package`, followed through the `mod` declarations.
 ///
 /// A package with both `src/lib.rs` and `src/main.rs` is tried library first.
-pub(super) fn find_module(
+pub(in crate::backends::rust) fn find_module(
     workspace: &Workspace<'_>,
     package: &Package,
     path: &[String],

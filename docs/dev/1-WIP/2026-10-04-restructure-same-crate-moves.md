@@ -251,6 +251,7 @@ the whole-workspace answer is CI's.
 |---|---|---|---|
 | **E0 baseline** (`61bb5fda`, before any engine change) | 1004 | 26 | exactly the red tests: `move_item_acceptance` 13/13, `reparent_module_acceptance` 12/12, `anchors_package_relative_path::names_the_repo_root_path_when_given_one_relative_to_a_package`. No pre-existing failure; 1 ignored (doc test) |
 | **E1** (`move_item`) | 1062 | 13 | the 12 `reparent_module` tests and the anchors one: E2 and E3 are not started. `move_item_acceptance` 13/13 |
+| **E2** (`reparent_module`, uncommitted: one acceptance test cannot be satisfied) | 1097 | 2 | `anchors_package_relative_path::names_the_repo_root_path_when_given_one_relative_to_a_package` (E3's) and `reparent_module_acceptance::leaves_a_glob_facade_that_keeps_every_caller_unchanged`: it asserts `src/split.rs` byte-identical after the move, but the new parent must receive the `mod` declaration. With that one assertion relaxed to "ends with the original text" the test passes (run once, then restored). `reparent_module_acceptance` 11/12; `move_item_acceptance` 13/13 and `move_item_beyond_the_basics_acceptance` 4/4 unchanged; `reparent_module_beyond_the_basics_acceptance` (new) 4/4; 1 ignored (doc test) |
 
 E1 also: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean; `cargo check --all-targets`
 clean for `tddy-tools` and `tddy-index-daemon`; `cargo fmt --check` reports only the four files of the red

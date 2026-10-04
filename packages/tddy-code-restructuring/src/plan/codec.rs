@@ -344,7 +344,10 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     }
 
     if op.reexport.is_some()
-        && !matches!(op.op, RefactorKind::ExtractModule | RefactorKind::MoveItem)
+        && !matches!(
+            op.op,
+            RefactorKind::ExtractModule | RefactorKind::MoveItem | RefactorKind::ReparentModule
+        )
         && !op.op.moves_across_crates()
     {
         return Err(malformed(format!(
@@ -358,16 +361,29 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     // module — the one thing a plan of intents must never do on the author's behalf. Its anchor is
     // the items it moves, by path: a range or a symbol names no module-level item.
     if op.op == RefactorKind::MoveItem {
-        if op.to.is_none() {
+        names_a_destination_and_anchors_by_item(
+            &op,
+            "move_item",
+            "the module the items move into",
+            "a range or a symbol names no module-level item to move",
+        )?;
+    }
+
+    // The same two rules for a module move, whose anchor is the module's `mod` declaration. A
+    // `named` facade lists items, and a module has none to list: the one it needs is the module
+    // itself, which is what `glob` writes.
+    if op.op == RefactorKind::ReparentModule {
+        names_a_destination_and_anchors_by_item(
+            &op,
+            "reparent_module",
+            "the module that becomes the parent",
+            "a range or a symbol names no `mod` declaration to move",
+        )?;
+        if op.reexport == Some(Reexport::Named) {
             return Err(malformed(
-                "`move_item` needs `to`: the module the items move into, rooted at the package \
-                 name like an item path",
-            ));
-        }
-        if !matches!(op.anchor, Anchor::Items { .. } | Anchor::Item { .. }) {
-            return Err(malformed(
-                "`move_item` anchors by item (`items`, or a single `item`): a range or a symbol \
-                 names no module-level item to move",
+                "`reparent_module` cannot write a named facade: a module has no items of its own \
+                 to list — use `glob`, which leaves `pub use <new parent>::<module>;` where the \
+                 module was",
             ));
         }
     }
@@ -457,3 +473,23 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 }
 
 mod signature_fields;
+
+/// The destination and the by-item anchor an operation within one crate cannot do without.
+fn names_a_destination_and_anchors_by_item(
+    op: &RefactorOp,
+    operation: &str,
+    destination: &str,
+    anchor_reason: &str,
+) -> Result<()> {
+    if op.to.is_none() {
+        return Err(malformed(format!(
+            "`{operation}` needs `to`: {destination}, rooted at the package name like an item path"
+        )));
+    }
+    if !matches!(op.anchor, Anchor::Items { .. } | Anchor::Item { .. }) {
+        return Err(malformed(format!(
+            "`{operation}` anchors by item (`items`, or a single `item`): {anchor_reason}"
+        )));
+    }
+    Ok(())
+}
