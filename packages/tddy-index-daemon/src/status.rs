@@ -40,6 +40,7 @@ pub fn status_of(error: &RestructureError) -> Status {
         | RestructureError::PlanUnverifiable { .. }
         | RestructureError::PlanChangedOnDisk { .. }
         | RestructureError::NeedsIndexDaemon { .. }
+        | RestructureError::WarmNeedsIndexDaemon
         | RestructureError::StaleOperation { .. }
         | RestructureError::AnchorInvalidated { .. }
         | RestructureError::JournalExists

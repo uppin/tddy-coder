@@ -19,7 +19,7 @@ use tddy_code_restructuring::restructure_cli::{
 };
 use tddy_index_daemon::proto::code_index::{
     AnchorsRequest, ApplyRequest, CheckRequest, ListPlansRequest, LoadPlansRequest,
-    PlanStatusRequest, SourcePosition, SourceRange, UnloadPlansRequest, VerifyRequest,
+    PlanStatusRequest, SourcePosition, SourceRange, UnloadPlansRequest, VerifyRequest, WarmRequest,
 };
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tonic::transport::Channel;
@@ -63,7 +63,8 @@ fn answered_without_an_index(command: &RestructureCommand) -> bool {
         | RestructureCommand::Verify(_)
         | RestructureCommand::Load(_)
         | RestructureCommand::Unload(_)
-        | RestructureCommand::Plans => false,
+        | RestructureCommand::Plans
+        | RestructureCommand::Warm => false,
     }
 }
 
@@ -116,6 +117,7 @@ async fn restructure_at(socket: &Path, args: RestructureArgs) -> Result<()> {
         RestructureCommand::Load(load) => self::load(&mut client, root, load).await,
         RestructureCommand::Unload(unload) => self::unload(&mut client, root, unload).await,
         RestructureCommand::Plans => self::plans(&mut client, root).await,
+        RestructureCommand::Warm => self::warm(&mut client, root).await,
     }
 }
 
@@ -134,6 +136,32 @@ async fn client_at(socket: &Path) -> Result<CodeIndexServiceClient<Channel>> {
             )
         })?;
     Ok(CodeIndexServiceClient::new(channel))
+}
+
+/// Load the tree's crate graph into the daemon, narrating its progress until the root is queryable.
+///
+/// Ends only on the stream's `ready` message: a stream that closed without one is a daemon that
+/// stopped waiting, not a root that is warm, and reporting it as warm would send the next request
+/// to pay for the load this command was run to take off it.
+async fn warm(client: &mut CodeIndexServiceClient<Channel>, workspace_root: String) -> Result<()> {
+    let request = WarmRequest {
+        workspace_root: workspace_root.clone(),
+    };
+    let mut events = client.warm(request).await.map_err(refused)?.into_inner();
+    let mut rendered = Rendered::new(false);
+    let mut ready = false;
+    while let Some(progress) = events.message().await.map_err(refused)? {
+        rendered.indexing(&progress);
+        ready = progress.ready;
+    }
+    if !ready {
+        anyhow::bail!(
+            "the index daemon ended the warm of {workspace_root} without reporting its crate \
+             graph queryable"
+        );
+    }
+    index_console::warmed(&workspace_root);
+    Ok(())
 }
 
 /// Everything wrong with a plan, without writing anything.

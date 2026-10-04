@@ -282,6 +282,8 @@ fn needs_lsp_client(options: &Options) -> bool {
         Command::Status | Command::Verify | Command::Load | Command::Unload | Command::Plans => {
             false
         }
+        // The graph a warm loads is the daemon's to hold; this process has none to load it into.
+        Command::Warm => false,
     }
 }
 
@@ -355,6 +357,7 @@ mod tests {
         assert!(!needs_lsp_client(&parse(&["check", "plan.jsonl"])));
         assert!(!needs_lsp_client(&parse(&["status", "plan.jsonl"])));
         assert!(!needs_lsp_client(&parse(&["verify", "--against", "HEAD"])));
+        assert!(!needs_lsp_client(&parse(&["warm"])));
     }
 
     /// The cold path's half of the same judgement the warm one makes in `verdict_on_outcome`.

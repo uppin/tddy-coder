@@ -149,6 +149,13 @@ pub enum RestructureError {
          export TDDY_INDEX_SOCKET"
     )]
     NeedsIndexDaemon { command: String },
+    /// `restructure warm` asked of a run with no daemon: a crate graph loaded by this process is
+    /// dropped with it, so there is nothing for a warm to leave behind.
+    #[error(
+        "`restructure warm` loads a crate graph for an index daemon to hold, and there is no \
+         daemon to hold it — start one with ./run-index-daemon and export TDDY_INDEX_SOCKET"
+    )]
+    WarmNeedsIndexDaemon,
     #[error("the language server is still catching up with an earlier change")]
     ServerCatchingUp,
     /// The server stayed unable to answer one method, as distinct from the plan being wrong.
