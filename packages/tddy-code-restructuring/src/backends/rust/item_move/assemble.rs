@@ -13,6 +13,7 @@ use super::destination::{Module, Package};
 use super::facade;
 use super::imports::{self, Source};
 use super::outline::{visibility_edit, Item, Run};
+use super::outside;
 use super::placement;
 use super::preflight::names_declared_in;
 use super::rebase::{self, Modules};
@@ -36,7 +37,10 @@ pub(super) struct Moving<'a> {
     /// The items the source module keeps that the moved code names.
     pub(super) reached: &'a [Item],
     pub(super) destination: &'a Module,
+    /// The callers the move re-points: under `outside`, only the ones in the item's own crate.
     pub(super) sites: &'a [Site],
+    /// The moved names a facade is left for under `outside`.
+    pub(super) outside: &'a BTreeSet<String>,
     pub(super) reexport: Reexport,
 }
 
@@ -176,7 +180,7 @@ fn visibilities(
             written.clone()
         };
         let mut scope = starts_as.clone().widened_to(destination);
-        scope = if moving.reexport == Reexport::None {
+        scope = if moving.reexport.repoints_callers() {
             match users_of(moving, texts, region, &item.name) {
                 Some(users) => users
                     .iter()
@@ -268,7 +272,7 @@ fn repoint_callers(
         destination: moving.destination,
         crate_name: &moving.package.crate_name,
         qualifiers: &qualifiers,
-        repoint: moving.reexport == Reexport::None,
+        repoint: moving.reexport.repoints_callers(),
         region: (moving.source_file, region.clone()),
         moved_files: &[],
     };
@@ -334,7 +338,8 @@ fn moved_text(
 /// What stands where the lines were: nothing, or the facade that keeps the old path resolving.
 fn leave_behind(moving: &Moving<'_>, region: &Range<usize>, landing: &Landing) -> Edit {
     let qualifier = written_from_the_root(&moving.destination.path);
-    let lines = facade::lines(moving.reexport, &qualifier, moving.source, &landing.written);
+    let items = outside::facade_items(moving.reexport, &landing.written, moving.outside);
+    let lines = facade::lines(moving.reexport, &qualifier, moving.source, &items);
     placement::vacated(moving.source_text, region, &lines)
 }
 

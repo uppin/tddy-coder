@@ -50,7 +50,7 @@ pub(super) fn landing(
         written.clone()
     };
     let mut scope = starts_as.clone().widened_to(new);
-    scope = if reexport == Reexport::None {
+    scope = if reexport.repoints_callers() {
         match users_of(workspace, request, survey, sites)? {
             Some(users) => users
                 .iter()

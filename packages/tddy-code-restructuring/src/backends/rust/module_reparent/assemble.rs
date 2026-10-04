@@ -8,6 +8,7 @@ use std::ops::Range;
 
 use super::super::item_move::assemble::written_from_the_root;
 use super::super::item_move::facade;
+use super::super::item_move::outside;
 use super::super::item_move::placement::vacated;
 use super::super::item_move::rebase::{self, Modules};
 use super::super::item_move::sites::{edits_for_file, Context, Qualifiers, Site};
@@ -26,7 +27,10 @@ pub(super) struct Reparenting<'a> {
     pub(super) workspace: &'a Workspace<'a>,
     pub(super) request: &'a Reparent,
     pub(super) survey: &'a Survey,
+    /// The callers the move re-points: under `outside`, only the ones in the module's own crate.
     pub(super) sites: &'a [Site],
+    /// The module's name when something outside the crate reaches it under `outside`.
+    pub(super) outside: &'a BTreeSet<String>,
     pub(super) reexport: Reexport,
 }
 
@@ -130,7 +134,7 @@ fn repoint_callers(
         destination: &moving.survey.new_parent,
         crate_name,
         qualifiers: &qualifiers,
-        repoint: moving.reexport == Reexport::None,
+        repoint: moving.reexport.repoints_callers(),
         region: ("", 0..0),
         moved_files: &moved,
     };
@@ -205,12 +209,9 @@ fn leave_behind(
 ) {
     let survey = moving.survey;
     let qualifier = written_from_the_root(&survey.new_parent.path);
-    let facade = facade::lines(
-        moving.reexport,
-        &qualifier,
-        &moving.request.parent,
-        &[(moving.request.name.clone(), landing.written.clone())],
-    );
+    let module = [(moving.request.name.clone(), landing.written.clone())];
+    let items = outside::facade_items(moving.reexport, &module, moving.outside);
+    let facade = facade::lines(moving.reexport, &qualifier, &moving.request.parent, &items);
     edits
         .entry(survey.old_parent.file.clone())
         .or_default()

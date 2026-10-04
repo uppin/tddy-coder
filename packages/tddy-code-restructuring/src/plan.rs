@@ -339,9 +339,22 @@ pub enum Reexport {
     /// reaches. A *named* re-export of a less visible item is `E0365`, which the tiers avoid; naming
     /// an item nothing outside reaches would force it public for no caller.
     Named,
+    /// Only for `move_item` and `reparent_module`: every caller in the crate that holds the moved
+    /// code is re-pointed to the new path, as [`Reexport::None`] does, and a facade is left at the
+    /// old path for exactly the items something in *another* package reaches, as
+    /// [`Reexport::Named`] writes it. Nothing outside reaching an item leaves it no facade, and a
+    /// caller outside the crate is never edited — the public path it depends on keeps resolving.
+    Outside,
     /// Nothing, which is what an extraction did before this field existed. A path-reached item with a
     /// reference elsewhere is then refused rather than stranded.
     None,
+}
+
+impl Reexport {
+    /// Whether the callers in the moved code's own crate are re-pointed to the new path.
+    pub(crate) fn repoints_callers(self) -> bool {
+        matches!(self, Reexport::None | Reexport::Outside)
+    }
 }
 
 /// An operation's stable identity inside its plan.

@@ -331,7 +331,8 @@ pub fn facade_line(
             ))
         }
         // A glob facade is grouped per destination by `facade_lines_for_plan`, which the writers call.
-        Reexport::Glob | Reexport::None => None,
+        // `outside` is refused for a cross-crate move when the plan is read.
+        Reexport::Glob | Reexport::None | Reexport::Outside => None,
     }
 }
 

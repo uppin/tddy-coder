@@ -21,6 +21,7 @@ mod visibility;
 
 use serde_json::Value;
 
+use super::item_move::outside::Reach;
 use super::item_move::sites::Site;
 use super::{failure, uri_of, RustBackend};
 use crate::edit::{FileEdit, Resolution, WorkspaceEdit};
@@ -52,13 +53,16 @@ impl RustBackend {
             Reading::Clear(survey) => *survey,
         };
 
+        let reexport = op.reexport.unwrap_or(Reexport::None);
         let sites = self.callers_of_the_module(workspace, &request, &survey)?;
+        let reach = Reach::of(reexport, workspace.root, &request.named.package, sites)?;
         let assembled = assemble(&Reparenting {
             workspace,
             request: &request,
             survey: &survey,
-            sites: &sites,
-            reexport: op.reexport.unwrap_or(Reexport::None),
+            sites: &reach.sites,
+            outside: &reach.outside,
+            reexport,
         })?;
 
         let mut changes: Vec<FileEdit> = assembled

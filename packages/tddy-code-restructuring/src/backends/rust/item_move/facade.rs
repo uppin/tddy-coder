@@ -13,7 +13,8 @@ use crate::plan::Reexport;
 /// strand the callers it exists for.
 ///
 /// `glob` re-exports the whole destination, as the cross-crate move does; `named` lists only what
-/// moved, one line per visibility. `none` leaves nothing.
+/// moved, one line per visibility. `outside` writes those lines for the items its caller passes,
+/// which are the ones something outside the crate reaches. `none` leaves nothing.
 pub(in crate::backends::rust) fn lines(
     reexport: Reexport,
     qualifier: &str,
@@ -38,7 +39,7 @@ pub(in crate::backends::rust) fn lines(
                 &format!("use {qualifier}::*;"),
             )]
         }
-        Reexport::Named => {
+        Reexport::Named | Reexport::Outside => {
             let mut by_visibility: BTreeMap<String, Vec<&str>> = BTreeMap::new();
             for (name, scope) in items {
                 by_visibility

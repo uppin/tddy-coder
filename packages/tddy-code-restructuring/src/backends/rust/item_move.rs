@@ -14,6 +14,7 @@ pub(super) mod destination;
 pub(super) mod facade;
 mod imports;
 mod outline;
+pub(super) mod outside;
 pub(super) mod placement;
 pub(super) mod preflight;
 pub(super) mod rebase;
@@ -78,7 +79,9 @@ impl RustBackend {
             .iter()
             .map(|item| (item.name.as_str(), &item.position))
             .collect();
+        let reexport = op.reexport.unwrap_or(Reexport::None);
         let sites = self.sites_of(&uri, workspace, file, &source_text, &moved)?;
+        let reach = outside::Reach::of(reexport, workspace.root, &named.package, sites)?;
         let left = outline::left_behind(&symbols, &source_text, &run);
         let reached = self.reached_by_the_moved_code(&uri, &source_text, &left, &run)?;
 
@@ -91,8 +94,9 @@ impl RustBackend {
             run: &run,
             reached: &reached,
             destination: &destination,
-            sites: &sites,
-            reexport: op.reexport.unwrap_or(Reexport::None),
+            sites: &reach.sites,
+            outside: &reach.outside,
+            reexport,
         })?;
 
         let changes = assembled

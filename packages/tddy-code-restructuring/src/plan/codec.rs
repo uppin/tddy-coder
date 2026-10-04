@@ -388,6 +388,19 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         }
     }
 
+    // `outside` partitions the callers by crate and leaves a facade for the outside ones, which only
+    // the two same-crate moves know how to do: the others have no such partition to make.
+    if op.reexport == Some(Reexport::Outside)
+        && !matches!(op.op, RefactorKind::MoveItem | RefactorKind::ReparentModule)
+    {
+        return Err(malformed(format!(
+            "`reexport: outside` belongs to `move_item` and `reparent_module`, which re-point the \
+             callers in their own crate and leave a facade for the ones outside it; `{:?}` has no \
+             such split — use `glob`, `named` or `none`",
+            op.op
+        )));
+    }
+
     // A named facade cannot serve a *module* move, and refusing it beats emitting a tree that does
     // not compile. Callers of a moved module write `crate::<module>::Item`, so the facade has to put
     // something at `crate::<module>`; a `pub use <crate>::{Item, …};` puts the items at the crate
