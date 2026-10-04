@@ -1,7 +1,7 @@
 # Changeset: Accounts service and screen
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — implementation complete; one developer-decided item open (stub-provider daemon vault)
 **Type**: Feature
 **Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `master` (3/9 `feature/keyring/store`, #510, is merged)
 
@@ -209,12 +209,13 @@ this node does not claim otherwise.
 
 - [x] **PRD**: [PRD-2026-09-19-keyring-accounts.md](../../ft/web/1-WIP/PRD-2026-09-19-keyring-accounts.md)
 - [x] **Changeset**: this document
-- [ ] **Draft PR contract**: proto + surface + failing tests (wave 2, commit 2)
-- [ ] **Proto**: `accounts.proto` and its generated code
-- [ ] **Service**: `tddy-accounts` over `SessionVaults`, four distinct list outcomes
-- [ ] **Registration**: one entry in `runtime.rs`
-- [ ] **Web**: route, predicate, `AccountsAppPage`, nav entry, ladder rung
-- [ ] **Testing**: Rust service tests + Cypress component tests + `appRoutes` unit tests
+- [x] **Draft PR contract**: proto + surface + failing tests (wave 2, commit 2) — `3699ac88`
+- [x] **Proto**: `accounts.proto` and its generated code
+- [x] **Service**: `tddy-accounts` over `SessionVaults`, four distinct list outcomes
+- [x] **Registration**: one entry in `runtime.rs`
+- [x] **Web**: route, predicate, `AccountsAppPage`, nav entry, ladder rung
+- [x] **Testing**: Rust service tests + Cypress component tests + `appRoutes` unit tests
+- [ ] **Stub-provider daemon**: Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04).
 - [ ] **Package Documentation**: `tddy-accounts`, `tddy-web`
 - [ ] **Code Quality**: scoped clippy; CI green
 
@@ -260,14 +261,14 @@ this node does not claim otherwise.
 
 ## Implementation Milestones
 
-- [ ] **M1** — `accounts.proto` + generated code
-- [ ] **M2** — `tddy-accounts`: `ListAccounts` with the four outcomes distinct
-- [ ] **M3** — `SetAccountLabel`, `RemoveAccount`, and `session_token` refusal
-- [ ] **M4** — register the entry in `runtime.rs`
-- [ ] **M5** — route constant, predicate and their tests
-- [ ] **M6** — `AccountsAppPage`, the list, rename and remove
-- [ ] **M7** — nav entry + ladder rung
-- [ ] **M8** — Cypress component tests and a Storybook story
+- [x] **M1** — `accounts.proto` + generated code
+- [x] **M2** — `tddy-accounts`: `ListAccounts` with the four outcomes distinct
+- [x] **M3** — `SetAccountLabel`, `RemoveAccount`, and `session_token` refusal
+- [x] **M4** — register the entry in `runtime.rs`
+- [x] **M5** — route constant, predicate and their tests
+- [x] **M6** — `AccountsAppPage`, the list, rename and remove
+- [x] **M7** — nav entry + ladder rung
+- [x] **M8** — Cypress component tests and a Storybook story
 - [ ] **M9** — `tddy-accounts` and `tddy-web` documentation
 
 ## Testing Plan
@@ -346,20 +347,52 @@ is fixed by amending 2/9 during the stack's closing cascade.
 
 ## Acceptance Criteria
 
-- [ ] `ListAccounts` returns records grouped by provider with **no secret in any field**
-- [ ] Empty, uninitialized, locked and errored render as four distinct, explained states
-- [ ] `SetAccountLabel` leaves `account_id` stable, so 5/9's assignments survive a rename
-- [ ] `RemoveAccount` removes exactly one record, behind a confirmation
-- [ ] An invalid `session_token` is refused rather than served an empty list
-- [ ] `/accounts` is reachable from the nav menu and by direct URL
-- [ ] The screen is not capability-gated and adds no new reader of `capabilities`
-- [ ] `tddy-credentials` gains no dependency on `tddy-service`
+- [x] `ListAccounts` returns records grouped by provider with **no secret in any field**
+- [x] Empty, uninitialized, locked and errored render as four distinct, explained states
+- [x] `SetAccountLabel` leaves `account_id` stable, so 5/9's assignments survive a rename
+- [x] `RemoveAccount` removes exactly one record, behind a confirmation
+- [x] An invalid `session_token` is refused rather than served an empty list
+- [x] `/accounts` is reachable from the nav menu and by direct URL
+- [x] The screen is not capability-gated and adds no new reader of `capabilities`
+- [x] `tddy-credentials` gains no dependency on `tddy-service`
 
 ## TODO
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
 - [x] Publish the draft-PR contract — wave 2
-- [ ] M1–M9
+- [x] M1–M8 (M9, documentation, is the wrap)
+- [ ] Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04)
 - [ ] Package documentation for `tddy-accounts` and `tddy-web`
 - [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
+
+## Validation Results
+
+### /validate-changes — 2026-10-04 (`/pr-wrap` step 1)
+
+**Stack gate**: base `master` (3/9 merged); `origin/master..HEAD` is this PR's 7 commits only — no
+leak, no deletion of a parent-owned path.
+
+**Build**: `tddy-accounts`, `tddy-service`, `tddy-daemon` build clean (scoped run). Baseline
+`./test -p tddy-accounts -p tddy-service -p tddy-daemon`: **390 passed, 0 failed, 1 ignored**.
+
+**Stack boundary**: every Scope item implemented; nothing from `## Dependencies` implemented here
+(`tddy-credentials`, `tddy-daemon-auth`, `auth.proto` untouched); no dependent's behaviour; diff holds
+only this PR's files.
+
+**Risk summary**: Critical 0 · Warning 1 · Info 3
+
+- ⚠ WARNING `packages/tddy-accounts/src/vault_store.rs` `set_label` — `TODO(keyring)` lost-update
+  window: `get` then `put` are two vault operations, so a concurrent write to the same record (a link
+  flow refreshing its secret) between them is overwritten. Not fixable here: closing it needs a
+  read-modify-write on `SessionVault`, which is `tddy-credentials`' (3/9, merged) surface. Deferred
+  to a `docs/dev/todo/` entry, and the marker points at it.
+- ℹ INFO `service.rs` — renaming an account that is not linked maps to `AccountsError::Unavailable`
+  → `Status::internal`; `NotFound` would describe it better. Left as is: it widens the port enum that
+  #515 (8/9) also implements against, so it belongs with that node or a follow-up.
+- ℹ INFO `AccountsAppPage.tsx` — an absent session token is sent as `""`, which the daemon refuses as
+  `Unauthenticated`; a refusal, not a fallback. No change.
+- ℹ INFO **Stub-provider daemon** — on a daemon whose GitHub provider is a stub (demo),
+  `credential_vaults` exists but auth reports vault state NONE, so the passphrase prompt never shows
+  while `/accounts` says "no vault yet". **Developer decision 2026-10-04**: the stub-provider tests
+  pre-configure an open vault for the stub user — tracked as the open Scope item above.
