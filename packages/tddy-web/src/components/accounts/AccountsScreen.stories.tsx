@@ -39,6 +39,10 @@ export const Empty: Story = {
   args: { outcome: { kind: "listed", providers: [] } },
 };
 
+export const Uninitialized: Story = {
+  args: { outcome: { kind: "uninitialized" } },
+};
+
 export const Locked: Story = {
   args: { outcome: { kind: "locked" } },
 };

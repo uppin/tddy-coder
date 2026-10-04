@@ -18,9 +18,11 @@ export const accountsScreenPage = {
   subject: (provider: string, accountId: string) =>
     byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-subject`),
 
-  /** Shown when the vault opened and holds nothing — distinct from both states below. */
+  /** Shown when the vault is open and holds nothing — distinct from every state below. */
   emptyNotice: () => byTestId("accounts-empty"),
-  /** Shown when this session's key no longer unwraps the vault. Re-linking is the recovery. */
+  /** Shown when no vault exists yet. Choosing a passphrase creates one. */
+  uninitializedNotice: () => byTestId("accounts-uninitialized"),
+  /** Shown when a vault exists and is not unlocked on this daemon. Its passphrase opens it. */
   lockedNotice: () => byTestId("accounts-locked"),
   /** Shown when the read itself failed, carrying the daemon's reason verbatim. */
   errorNotice: () => byTestId("accounts-error"),

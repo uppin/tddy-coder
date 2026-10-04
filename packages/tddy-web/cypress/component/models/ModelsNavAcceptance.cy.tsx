@@ -75,6 +75,7 @@ describe("ModelsNavAcceptance — Models & Agents in the navigation menu", () =>
         "Projects",
         "Models & Agents",
         "Hosts",
+        "Accounts",
         "VMs",
         "LiveKit",
         "RPC Playground",

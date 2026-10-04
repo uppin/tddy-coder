@@ -2,7 +2,7 @@
  * Accounts screen — every credential a daemon holds, grouped by provider.
  *
  * Presentational: it renders what it is given, matching the `HostsScreen` / `HostsAppPage` split.
- * `AccountsAppPage` owns the `ListAccounts` call and the three outcomes it can come back with.
+ * `AccountsAppPage` owns the `ListAccounts` call and the four outcomes it can come back with.
  *
  * **No row ever carries a secret.** `accounts.proto` has no field to put one in; `hasSecret` is the
  * single bit that tells a linked account from a stale row.
@@ -29,12 +29,15 @@ export interface ProviderGroup {
 }
 
 /**
- * What the daemon came back with. The three are held apart deliberately: an opened-and-empty vault,
- * a vault whose key no longer unwraps, and a read that failed are different facts, and rendering
- * any two of them the same way would tell a person to re-link accounts they already have.
+ * What the daemon came back with. The four are held apart deliberately: an open-and-empty vault, no
+ * vault yet, a vault that exists but is not unlocked on this daemon, and a read that failed are
+ * different facts with different remedies — choose a passphrase, enter the passphrase, fix the
+ * daemon. Rendering any two of them the same way would tell a person to re-link accounts they
+ * already have.
  */
 export type AccountsOutcome =
   | { kind: "listed"; providers: ProviderGroup[] }
+  | { kind: "uninitialized" }
   | { kind: "locked" }
   | { kind: "error"; reason: string };
 
@@ -54,14 +57,26 @@ function renderOutcome(
   onRemove: AccountsScreenProps["onRemove"],
 ) {
   switch (outcome.kind) {
+    case "uninitialized":
+      return (
+        <div data-testid="accounts-uninitialized" className="text-sm space-y-1">
+          <p className="font-medium">You have no credential vault on this daemon yet.</p>
+          <p className="text-muted-foreground">
+            Linked accounts are kept in a vault sealed under a passphrase you choose. Choose one to
+            create it: the dashboard asks for it in a prompt over every screen.
+          </p>
+          <PromptWhereabouts />
+        </div>
+      );
     case "locked":
       return (
         <div data-testid="accounts-locked" className="text-sm space-y-1">
-          <p className="font-medium">This daemon's credential store is locked.</p>
+          <p className="font-medium">Your credential vault is locked on this daemon.</p>
           <p className="text-muted-foreground">
-            It was sealed under a different sign-in, so your current session cannot open it. Nothing
-            has been deleted, but the accounts it holds cannot be read — re-link them to recover.
+            Unlock it with your passphrase to see your accounts; nothing in it is lost. The dashboard
+            asks for the passphrase in a prompt over every screen.
           </p>
+          <PromptWhereabouts />
         </div>
       );
     case "error":
@@ -100,6 +115,19 @@ function renderOutcome(
         </div>
       );
   }
+}
+
+/**
+ * The passphrase is asked for by the app-wide `CredentialVaultPrompt`, which opens by itself while
+ * the vault is locked or not created — this screen points at it rather than asking a second time.
+ * Its "Not now" hides it until the page next loads, so that is the way back to it.
+ */
+function PromptWhereabouts() {
+  return (
+    <p className="text-muted-foreground">
+      If you closed that prompt with “Not now”, reload the page to see it again.
+    </p>
+  );
 }
 
 interface AccountRowViewProps {

@@ -11,6 +11,7 @@ import { ConnectError } from "@connectrpc/connect";
 import {
   AccountsService,
   type AccountSummary,
+  type ListAccountsResponse,
   type ProviderAccounts,
 } from "../../gen/accounts_pb";
 import { useAuthContext } from "../../hooks/authProvider";
@@ -38,6 +39,13 @@ function groupsFromRpc(providers: ProviderAccounts[]): ProviderGroup[] {
     provider: group.provider,
     accounts: group.accounts.map(rowFromRpc),
   }));
+}
+
+/** A listing is one of three answers; the fourth outcome, an error, arrives as a rejection. */
+function outcomeFromRpc(res: ListAccountsResponse): AccountsOutcome {
+  if (res.vaultUninitialized) return { kind: "uninitialized" };
+  if (res.vaultLocked) return { kind: "locked" };
+  return { kind: "listed", providers: groupsFromRpc(res.providers) };
 }
 
 /** The daemon's reason, verbatim — without the transport's `[code]` prefix. */
@@ -77,11 +85,7 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       .listAccounts({ sessionToken: sessionToken ?? "" })
       .then((res) => {
         if (!current) return;
-        setOutcome(
-          res.vaultLocked
-            ? { kind: "locked" }
-            : { kind: "listed", providers: groupsFromRpc(res.providers) },
-        );
+        setOutcome(outcomeFromRpc(res));
       })
       .catch((e: unknown) => {
         if (!current) return;

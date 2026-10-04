@@ -299,6 +299,7 @@ it("keeps the LiveKit entry on a connection with no presence", () => {
       "Projects",
       "Models & Agents",
       "Hosts",
+      "Accounts",
       "VMs",
       "LiveKit",
       "RPC Playground",
