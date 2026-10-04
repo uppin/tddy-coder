@@ -18,6 +18,7 @@ use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::svc_resolve_listed_worktree::session_dir_lookup;
 use super::svc_resolve_tddy_tools_path::svc_host_builders::first_admission_token;
+use super::svc_resolve_tddy_tools_path::svc_host_builders::presenter_observer_spawn::PresenterObserverDeps;
 use super::svc_spawn_split_agent;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
@@ -140,6 +141,28 @@ impl DaemonSessionHost {
             rpc_activity: self.rpc_activity.clone(),
             config: self.config.clone(),
         }
+    }
+
+    /// The fields the presenter observer reads, shared with this host (the sink and the bus are
+    /// the same handles).
+    pub(crate) fn presenter_observer_deps(&self) -> PresenterObserverDeps {
+        PresenterObserverDeps {
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            presenter_event_sink: self.presenter_event_sink.clone(),
+            session_notification_bus: self.session_notification_bus.clone(),
+        }
+    }
+
+    /// Start the presenter observer for a freshly spawned workflow session (see
+    /// [`PresenterObserverDeps::maybe_spawn_presenter_observer`]), over this host's sinks.
+    pub(crate) fn maybe_spawn_presenter_observer(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        grpc_port: u16,
+    ) {
+        self.presenter_observer_deps()
+            .maybe_spawn_presenter_observer(os_user, session_id, grpc_port);
     }
 
     /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in
