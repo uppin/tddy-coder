@@ -85,7 +85,7 @@ first and this node's methods called it through the launch handle meanwhile.
 - **No crate moves.** Nothing leaves `tddy-session-lifecycle`, and no module is re-exported from
   another crate. Moving is node 17's (`#carve 21`), and only with the `tddy-tools restructure` engine: a refusal
   means stop and ask; hand edits after a move are build corrections only, with a todo per new cause.
-- **No behaviour change.** The node holds the baseline on its own: 562 passed, the same 22 failures by
+- **No behaviour change.** The node holds the baseline on its own: 575 passed, the same 22 failures by
   name, 1 ignored (see "Baseline").
 - **Public `tddy_session_lifecycle::…` paths stay reachable.** No consumer crate is edited
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`). The exception is a
@@ -118,7 +118,24 @@ Implementing one here collides with the PR that owns it.
 | **16d** `#carve` 19, lifecycle-ports-launch-spawns (`feature/carve/lifecycle-ports-launch-spawns`) | `launch_ports`: `LaunchState` (7 fields), the owned launch handle (with the roster handle and `AttachmentState`), `trait LaunchHost` = {`sandbox_rpc_handler`, `pr_stack`} and its host impl; T9 and the jail/CLI-spawn half of T1 converted (`start_sandboxed_claude_cli_session`, `start_sandboxed_cursor_cli_session`, `resume_sandboxed_claude_cli_session`, `start_claude_cli_session`, `prepare_managed_workflow`, the stack links); `impl StackParentHost` on the handle | `cli_branch_starts` and `resume_claude_cli_session` call those functions on the handle directly (no longer via the host); this node adds fields and handles to `LaunchState` / the handle | add or re-sign a `LaunchHost` method; convert or re-shape a T9 or jail/CLI-spawn function; merge the three sandboxed launches |
 | **16c** `#carve` 18, lifecycle-ports-split | `SplitState`, the split handle, `trait SplitHost: AgentHostCallbacks` and its host impl; `resume_split_wiring`, `provision_workspace_tool_sandbox`, `start_sandboxed_codebase_session`, `start_split_claude_cli_session`, `delete_paired_codebase_session`, `attached_initial_prompt` as T4 functions | `start_session_core`, `resume_claude_cli_session`, `resume_session_at_session_coordinate` and `delete_session_at_session_coordinate` call T4 through the split handle; the `SplitHost` impl's two launch re-entries re-point to this node's functions | change the `SplitHost` trait or a T4 function |
 | **16b** `#carve` 17, lifecycle-ports-agents | the roster handle and the T3 functions (`agent_def_for_spawn`, `seeded_roster_records`, `unwind_seeded_roster`, `seed_session_agent_roster`, `start_hosted_agent_clone`, `ensure_session_room`, `tear_down_every_agent_clone`); `DaemonSeedCloneClaimant` on the roster handle | the start path and the handlers call T3 through the roster handle | change the roster handle or `AgentHostCallbacks` |
-| **16a** `#carve` 16, lifecycle-ports (#531) | `AttachmentState` (T8), `PresenterObserverDeps` (T10), `SessionStdioEndpoint` in T1 | `tool_session_spawn` calls T8 and T10 through them | convert T8 or T10 |
+| **16a** `#carve` 16, lifecycle-ports (#531) | `AttachmentState` (T8), `PresenterObserverDeps` (T10), `SessionStdioEndpoint` in T1 (**not done**, see Carried from 16a) | `tool_session_spawn` calls T8 and T10 through them | convert T8 or T10 |
+
+## Carried from 16a (2026-10-04)
+
+16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3 and deferred four items until the
+engine can do them (the developer's decision, 2026-10-04; never by hand): **M0.1** (the `peer_session_answer`
+module), **M0.6** (the `seeded_clone_guard.rs` split), **M0.4** (re-parenting the four mixed parent/child files, D8,
+which also needs the developer's consent) and the T4 half of M0.2. See [`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md)
+and [`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md).
+This node's text below was written before that. Where it says one of these is "from 16a" or "in 16a", it is not:
+
+- `SessionStdioEndpoint` was **not** moved to T1 (M0.6). It is still in `seeded_clone_guard.rs`.
+- The four mixed parent/child files were **not** re-parented (M0.4), so "the four re-parented in 16a" below does not hold.
+- `peer_session_answer` does not exist (M0.1); the list of modules 16a-16e created below should not include it.
+
+**Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
+#573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
+failures by name, 1 ignored**.
 
 ## Draft PR contract
 
@@ -189,7 +206,7 @@ T1c.
   and the `SplitHost` impl's `delete_session` to the launch handle
 - [ ] **M8.3 sweep**: `grep -rn 'impl DaemonSessionHost'` lists only wiring files; every remaining
   method there is a builder, an accessor, a port impl or a delegator a consumer or test calls
-- [ ] **Baseline** after each of M7b and M8: 562 / 22 / 1, the same 22 by name; `tddy-session-agents`
+- [ ] **Baseline** after each of M7b and M8: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
 - [ ] **Acceptance checks** A1–A9 over every topic
@@ -209,7 +226,7 @@ Everything but the start/resume half of T1 and T1c is converted. `AgentHostCallb
 
 About **20.3k–20.4k** production lines: the 20,041 of `#carve` 15's close plus ~300 of state, traits,
 impls and handle plumbing across 16a–16e, measured at wrap. No module outside wiring names
-`DaemonSessionHost`. The topic files keep their paths, except the four re-parented in 16a and the
+`DaemonSessionHost`. The topic files keep their paths, except the four that 16a was to re-parent (**deferred**) and the
 modules 16a–16e created (`peer_session_answer`, `daemon_urls`, `session_notification_publishing`,
 `agent_host_callbacks`, `split_ports`, `launch_ports`, and the extracted T4 and T1 modules).
 
@@ -322,7 +339,7 @@ Recorded on 16d's tip, and the acceptance criterion after M7b and after M8:
   --skip sandboxed_bash_pty_action_streams_output
 ```
 
-Expected: **562 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit`
 passes when re-run alone, so it is not a regression.
 
@@ -454,7 +471,7 @@ T7, T10, T11 and the leaves. Wiring files are the only ones excluded.
 | A5 | No file in any topic clones the host. Hand-offs clone the topic's owned handle | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in those files is empty |
 | A6 | The three callback traits are each defined once, in their topic's ports module, and implemented once, on `DaemonSessionHost`, in the wiring ports file: `AgentHostCallbacks` (16b), `SplitHost: AgentHostCallbacks` (16c) and `LaunchHost` = {`sandbox_rpc_handler`, `pr_stack`} (16d), each with only its approved methods and unchanged by this node | `grep -rn 'trait AgentHostCallbacks\|trait SplitHost\|trait LaunchHost'` gives one hit each; `grep -rn 'impl .*\(AgentHostCallbacks\|SplitHost\|LaunchHost\) for DaemonSessionHost'` gives one hit each, all in wiring; `git diff <16d tip> -- <the three ports files' trait blocks>` is empty |
 | A7 | The public API is unchanged: no consumer edit, and every facade still resolves | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty, and `cargo check --all-targets` is clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` (`tddy-desktop` on CI: it embeds the web bundle) |
-| A8 | Behaviour: the baseline | 562 passed, the same 22 by name, 1 ignored, after M7b and after M8; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
+| A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after M7b and after M8; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
 | A9 | No `impl DaemonSessionHost` block outside wiring | `grep -rln 'impl DaemonSessionHost\|impl .* for DaemonSessionHost' packages/tddy-session-lifecycle/src` lists only wiring files (the "stays" set: `connection_service.rs`, `handler_state.rs`, `svc_host_builders*`, the `svc_*_ports` and adapter files, the wiring ports file, `svc_resolve_os_user.rs`'s wiring part, `local_exec_tool_dispatch.rs`, the `agent_roster` wiring file, `daemon_rpc_handler.rs`, `svc_shut_down_children.rs`) |
 
 ## Decisions & trade-offs
@@ -535,7 +552,7 @@ Tasks executed at wrap:
 - [ ] A5: no host clone in any topic module; the four launch hand-offs clone the launch handle (grep empty)
 - [ ] A6: the three callback traits defined once and implemented once on the host in wiring, approved methods only
 - [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 562 / 22 / 1, the same 22 by name, after M7b and after M8; `restructure verify` accounted
+- [ ] A8: baseline 575 / 22 / 1, the same 22 by name, after M7b and after M8; `restructure verify` accounted
 - [ ] A9: no `impl DaemonSessionHost` outside wiring files
 
 **Documentation**
