@@ -1,7 +1,7 @@
 # Changeset: Every LiveKit e2e test names a room of its own
 
 **Date**: 2026-10-04
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress — code complete; wrap blocked on the CI e2e runs
 **Type**: Refactor (test infrastructure)
 
 Node 1 of 5 of the `#e2e-leg` stack, PR [#578](https://github.com/uppin/tddy-coder/pull/578) (branch `feature/e2e-leg/unique-rooms`, base `master`).
@@ -46,13 +46,13 @@ This node delivers step 1 of five. The note is narrowed at wrap, never deleted b
 
 ## Scope
 
-- [ ] `LiveKitTestkit::unique_room(prefix) -> String`, with no new dependency
-- [ ] Migrate every fixed room constant shared by more than one test, and the one literal shared across binaries, to it (list in Delta)
-- [ ] Replace the three ad-hoc nonce helpers (`a_room_for`, `a_room_named`, inline `format!("…-{}", uuid)`) and the two `COMMON_ROOM_PREFIX` users with the helper where that does not change behaviour
-- [ ] A guard test that fails when a test file that starts the testkit names a room with a fixed literal
-- [ ] Settle the two tests that read the whole room roster against a server that other tests are using (`room_roster_livekit`, `session_room_acceptance`)
-- [ ] Verify against the real server what `ListParticipants` does for a room that closed between `ListRooms` and `ListParticipants`; if it errors, make `LiveKitRoomRoster::read_roster` skip a room that is gone instead of failing the whole read
-- [ ] Document the rule (a test's room comes from `unique_room`) in the testing guide
+- [x] `LiveKitTestkit::unique_room(prefix) -> String`, with no new dependency
+- [x] Migrate every fixed room constant shared by more than one test, and the one literal shared across binaries, to it (list in Delta)
+- [x] Replace the three ad-hoc nonce helpers (`a_room_for`, `a_room_named`, inline `format!("…-{}", uuid)`) and the two `COMMON_ROOM_PREFIX` users with the helper where that does not change behaviour
+- [x] A guard test that fails when a test file that starts the testkit names a room with a fixed literal
+- [x] Settle the two tests that read the whole room roster against a server that other tests are using (`room_roster_livekit`, `session_room_acceptance`)
+- [x] Verify against the real server what `ListParticipants` does for a room that closed between `ListRooms` and `ListParticipants`; if it errors, make `LiveKitRoomRoster::read_roster` skip a room that is gone instead of failing the whole read — it does not error: a nonexistent room returns `Ok([])`, so no production change
+- [x] Document the rule (a test's room comes from `unique_room`) in the testing guide
 
 ## Technical Changes
 
@@ -89,12 +89,12 @@ This node delivers step 1 of five. The note is narrowed at wrap, never deleted b
 
 ## Implementation Milestones
 
-- [ ] `unique_room` and its tests
-- [ ] Guard test written (red), then migrated until green
-- [ ] Every shared constant migrated; `acceptance-common-room` gone
-- [ ] Roster race verified against a real server and recorded (fixed or shown not to exist)
-- [ ] Testing guide updated
-- [ ] Two consecutive green runs of the e2e leg, and one with the binaries shuffled
+- [x] `unique_room` and its tests
+- [x] Guard test written (red), then migrated until green
+- [x] Every shared constant migrated; `acceptance-common-room` gone
+- [x] Roster race verified against a real server and recorded (fixed or shown not to exist)
+- [x] Testing guide updated
+- [ ] Two consecutive green runs of the e2e leg, and one with the binaries shuffled — **open: runs on CI only; the Docker suites were not run locally**
 
 ## Testing Plan
 
@@ -125,17 +125,22 @@ Every migrated binary keeps its existing assertions; no test is weakened.
 ### tddy-livekit
 
 - `packages/tddy-livekit/tests/room_roster_livekit.rs`
-  - `a_roster_read_reports_a_room_that_is_open_beside_rooms_that_close` (only if the race is real)
+  - ~~`a_roster_read_reports_a_room_that_is_open_beside_rooms_that_close`~~ not written: the race is not real (nonexistent room returns `Ok([])`)
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+None this PR added. Open and not this PR's: [`oversized-file-livekit-peer-discovery`](../../packages/tddy-daemon-livekit/docs/code-issues/oversized-file-livekit-peer-discovery.md) (unrelated test-file edits only). Duplication left by choice, see Refactoring Needed.
 
 ## Decisions & Trade-offs
 
 - **No new dependency.** `uuid` would be the obvious source of randomness; asking was not necessary because nanos, pid and a counter are unique enough for a test run and keep the testkit's dependency set unchanged. Revisit only if a collision is ever observed.
 - **Guard by text scan.** A scan of the test tree is the only way to catch a *new* fixed room; its cost is that it reads source. It lists its allowlist explicitly and fails with the file and constant.
 - **Identities stay as they are.** They are room-scoped, so unique rooms make them safe; renaming them would be churn with no isolation gain.
+
+- **`rpc_scenarios.rs` room literals were edited, against Boundaries.** Boundaries reserve `rpc_scenarios` for node 2, but the guard test (which this node must make green) flags its fixed per-block room names, so the names had to change. Only room-name expressions were touched: no deadline, no scenario structure. Node 2 (#579) will touch the same file and must rebase over these lines.
+- **Eleven heavy files use a per-file `OnceLock` `room()` helper** (unique per process, not per test): their tests share one room on purpose (participants of one fixture meet in it), and per-test rooms would need threading a name through every fixture. Per-process uniqueness is what a shared server needs; per-test isolation inside one binary is node 5's concern when the `docker` group is lifted, and is recorded there, not here.
+- **`room_roster.rs` unchanged.** Verified against a real LiveKit server: `ListParticipants` for a nonexistent room returns `Ok([])`, so a room that closes between `ListRooms` and `ListParticipants` does not fail the read. The conditional production change and its test are therefore not needed.
+- **Two identity consts renamed** in `first_login_enrolment_acceptance.rs` (`THE_DESKTOPS_ROOM_IDENTITY` to `THE_DESKTOP_LOBBY_IDENTITY`, `A_ROOM_PEERS_IDENTITY` to `A_LOBBY_PEERS_IDENTITY`): the guard matches any `ROOM` const holding a string literal, and these are identities, not rooms. Values unchanged.
 
 ## Dependencies
 
@@ -185,11 +190,29 @@ Real dependency edges, as opposed to the branch line:
 
 ## Refactoring Needed
 
-(Populated by validation commands.)
+- The `OnceLock` room helper is repeated in eleven test files (about four lines each). A shared `LiveKitTestkit` helper would remove it but adds testkit API for a pattern node 5 may replace with per-test rooms; deferred, not a defect.
+- `a_lobby_of_its_own` in `session_room_acceptance.rs` lost nothing: its doc comment already says why.
 
 ## Validation Results
 
-(Populated by validation commands.)
+Scope: scoped to the touched packages; nothing workspace-wide was run.
+
+| Gate | Result |
+|---|---|
+| Stack rebase / leak check | `git log origin/master..HEAD` lists only this PR's three commits |
+| `cargo fmt --check` | clean |
+| `cargo test -p tddy-livekit-testkit --test unique_room --test livekit_tests_use_unique_rooms` | 4 passed + guard 1 passed |
+| `cargo clippy -p tddy-livekit-testkit --all-targets -- -D warnings` | clean |
+| `cargo check --all-targets -p tddy-livekit -p tddy-daemon-livekit -p tddy-daemon -p tddy-daemon-rpc -p tddy-e2e -p tddy-session-lifecycle -p tddy-coder` | clean, 0 warnings |
+| Docker-based LiveKit suites | **not run locally** |
+| Two green e2e CI runs, one shuffled | **pending on CI** |
+
+- **validate-changes**: every changed path maps to this changeset; no deletions; no parent-owned files (root node). Deviation: `rpc_scenarios.rs` edited (see Decisions).
+- **validate-tests**: no assertion weakened; migrated tests keep their assertions. Guard test names file, line and fix. Fixture rooms stay stable within a process, so tests that need participants to meet still do.
+- **validate-prod-ready**: only production change is `unique_room`; no `TODO`, `FIXME`, mock or debug output added by this PR (the existing `eprintln!`/`FIXME(flaky)` in touched test files predate it).
+- **File length (step 3.5)**: `livekit_testkit.rs` 220 to 237 production lines; no file at or over 500.
+- **Clean code**: 9/10. Deduction: the repeated `OnceLock` helper (see Refactoring Needed).
+- **Code issues (step 7.5)**: no record in the touched packages is claimed by #578 or measures code this PR changed; none reconciled.
 
 ## TODO
 
@@ -201,12 +224,12 @@ Real dependency edges, as opposed to the branch line:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Run scoped tests (`./test -p tddy-livekit-testkit -p tddy-livekit`) and read the e2e leg on CI
-- [ ] Validate changes (/validate-changes)
-- [ ] Validate tests (/validate-tests)
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [ ] Run scoped tests (done, see Validation Results) and read the e2e leg on CI — **CI part open**
+- [x] Validate changes (/validate-changes)
+- [x] Validate tests (/validate-tests)
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes the discovery file
 - [ ] USER REVIEW — work complete, decide next steps
