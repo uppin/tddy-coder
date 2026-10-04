@@ -181,6 +181,18 @@ impl LiveKitTestkit {
         Self::wait_for_api_url_async(&url).await
     }
 
+    /// A room name no other test will use: `<prefix>-<hex nanos>-<pid>-<counter>`.
+    ///
+    /// Every test that talks to a LiveKit server names its room with this, so two tests can never
+    /// share a room whether they run in one process, in two, or against one shared server
+    /// (`LIVEKIT_TESTKIT_WS_URL`). The prefix is the room's purpose, so a room left behind by an
+    /// aborted test can be attributed.
+    pub fn unique_room(prefix: &str) -> String {
+        // TODO(unique-rooms): implement
+        let _ = prefix;
+        todo!("LiveKitTestkit::unique_room")
+    }
+
     /// Get the WebSocket URL for connecting to the LiveKit server.
     pub fn get_ws_url(&self) -> String {
         self.ws_url.clone()

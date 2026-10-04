@@ -4,7 +4,9 @@
 **Status**: 🚧 In Progress
 **Type**: Refactor (test infrastructure)
 
-Node 1 of 5 of the `#e2e-leg` stack (branch `feature/e2e-leg/unique-rooms`, base `master`).
+Node 1 of 5 of the `#e2e-leg` stack, PR [#578](https://github.com/uppin/tddy-coder/pull/578) (branch `feature/e2e-leg/unique-rooms`, base `master`).
+
+**Contract state (commit 2):** `unique_room` is published with a `todo!()` body; the four helper tests fail on it, and the guard test fails listing the **42** fixed room names currently in the tree. The acceptance-test review gate was not held separately for this node (the developer asked for the whole stack to be prepared without stopping); review the test list above before `/green`.
 
 ## Initial Discovery
 
@@ -195,10 +197,10 @@ Real dependency edges, as opposed to the branch line:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (none: test infrastructure, no product area; see the stack's PRD for node 2)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests (`./test -p tddy-livekit-testkit -p tddy-livekit`) and read the e2e leg on CI
