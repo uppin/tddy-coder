@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 
 use super::super::{failure, is_identifier};
 use super::destination::{find_module, package_of, Lookup, Module, Package};
+use super::written_in;
 use crate::crate_move::source_scan::items_of_module;
 use crate::plan::{Anchor, ItemPath, RefactorOp};
 use crate::registry::Workspace;
@@ -78,12 +79,12 @@ pub(in crate::backends::rust) fn anchored(op: &RefactorOp) -> Option<(Vec<String
 /// Every finding rather than the first, because a plan is checked to be fixed in one pass.
 pub(super) fn findings(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Vec<String>> {
     let named = named_by(workspace, op, "move_item")?;
-    let Some((source, names)) = anchored(op) else {
-        return Ok(vec![
-            "`move_item` anchors by item (`items`, or a single `item`): a range or a symbol names \
-             no module-level item to move"
-                .to_string(),
-        ]);
+    // A deep check hands over the plan with its item anchors already lowered to the lines they
+    // cover, the same operation `apply` runs; those lines are read as `move_items` reads them. A
+    // `range` or `symbol` anchor never reaches here from a plan, because the codec refuses it.
+    let (source, names) = match anchored(op) {
+        Some(read) => read,
+        None => written_in(workspace, op, &workspace.read(op.anchor.file())?)?,
     };
     Ok(obstacles(workspace, &named, &source, &names)?.0)
 }

@@ -1639,4 +1639,28 @@ mod tests {
             });
         assert_eq!(refusal, Err(true));
     }
+
+    #[test]
+    fn rejects_a_move_item_anchored_by_range_or_symbol() {
+        let refusals: Vec<String> = [
+            r#"{"kind":"range","file":"src/a.rs","start":{"line":1,"col":1},"end":{"line":2,"col":1}}"#,
+            r#"{"kind":"symbol","file":"src/a.rs","path":"f"}"#,
+        ]
+        .iter()
+        .map(|anchor| {
+            let line = format!(r#"{{"op":"move_item","anchor":{anchor},"to":"app::b"}}"#);
+            match Plan::parse(&plan_with(&line)) {
+                Err(RestructureError::MalformedPlan(reason)) => reason,
+                other => format!("not refused as malformed: {other:?}"),
+            }
+        })
+        .collect();
+
+        assert!(
+            refusals
+                .iter()
+                .all(|reason| reason.contains("names no module-level item to move")),
+            "{refusals:?}"
+        );
+    }
 }
