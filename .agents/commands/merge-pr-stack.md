@@ -572,10 +572,10 @@ report-and-stop unless the fix needs a human decision.
 |---|---|---|
 | `Rust lint` | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings` | formatting (mechanical — `cargo fmt`), or a genuine clippy finding. Do not `#[allow]` past one without saying why |
 | `Rust build` | `cargo build --workspace --bins --examples --locked` | a stale `Cargo.lock`; an example or bin that only the workspace build compiles |
-| `Rust tests` | `cargo nextest run --workspace --profile ci --locked` | change-caused failures; a test shelling out to a workspace binary that is not in the `rust-fixture-bins` artifact ("not built") |
+| `Rust tests` | `cargo nextest run --workspace --profile ci --locked`, minus the e2e set in `.config/rust-e2e.filterset` | change-caused failures; a test shelling out to a workspace binary that is not in the `rust-fixture-bins` artifact ("not built") |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit + `tddy-web`/`tddy-livekit-web` Cypress component | a stale `bun.lock` under `--frozen-lockfile`; a component spec |
 
-`VM boot control` (`.github/workflows/vm-tests.yml`) also runs but is **not required** — deliberately,
+`Rust e2e tests` runs the e2e set — tests needing a real LiveKit server or a real supervisor / index-daemon / daemon / coder process — and is required only if branch protection says so; read its result like `Rust tests`. `VM boot control` (`.github/workflows/vm-tests.yml`) also runs but is **not required** — deliberately,
 because a QEMU flake would block every merge. Report a red one; do not treat it as a gate.
 
 **A red check is work, not a stop.** Pull the failing test names with `--failures`, reproduce
