@@ -396,3 +396,41 @@ this commit for the same reason 4/9 reverted it: the file belongs in 2/9's diff.
   refusal that `project_storage::set_project_accounts` also enforces (handler for the status code,
   storage as the invariant). It mirrors `set_project_default_branch_at_project_coordinate`.
 - ℹ️ `daemon-livekit` forwarder is compile-checked only; its test suite was not run locally.
+
+### From /validate-tests
+
+**Run** 2026-10-04 · 31 new tests analysed (7 resolver, 9 storage, 7 daemon-rpc acceptance, 8 Cypress
+component) · critical 0 · warnings 3.
+
+- No assertion-free tests, no `#[ignore]` / `.skip` / `.only`, no sleeps or `cy.wait`, no
+  description–body mismatches; every name states a behaviour. The two `cy.get` calls are stub aliases
+  (`@setProjectAccounts`), not test-id selectors.
+- ⚠️ **Missing planned coverage — peer forwarding.** The Testing Plan lists "the call is forwarded to
+  peer hosts owning the same `project_id`"; no test exercises the `Forward` route of
+  `set_project_accounts_at_project_coordinate` or `forward_set_project_accounts_via_livekit`. The
+  `tddy-daemon-livekit` suite was not run either. Needs a peer harness, so left open rather than faked.
+- ⚠️ **Vacuous by construction** (already named above): `a_project_nobody_assigned_an_account_to_is_listed_as_unassigned`
+  and `holds no assignment row for a provider the vault has no account at` assert an absence.
+- ⚠️ `set_project_accounts_acceptance.rs` reads `$USER` for the passwd-backed projects path — an
+  environment dependency inherited from its sibling `set_project_default_branch_acceptance.rs`.
+
+### From /validate-prod-ready
+
+**Run** 2026-10-04 · 15 production files · status ✅ Ready · blockers 0 · warnings 0.
+
+No mock/fake code, dev fallbacks, `TODO`/`FIXME`/`HACK` markers, `dbg!`/`println!`/`console.*`, or
+unreachable code in the added production lines — the two `TODO(#keyring 5/9)` stubs the draft contract
+published are gone. The `Status::unimplemented("test stub")` lines in `tddy-projects/src/lib.rs` sit
+inside its `#[cfg(test)]` module. `./dev cargo clippy -p tddy-projects -p tddy-accounts -p tddy-daemon-rpc
+-p tddy-daemon-livekit --all-targets -- -D warnings` exits 0.
+
+### File length gate (`/pr-wrap` step 3.5)
+
+| File | Production lines | Verdict |
+|---|---|---|
+| `tddy-daemon-rpc/src/project/coordinate_handlers.rs` | 528 → **650** (+122) | 🔴 grown by this PR; **deferred with the developer's explicit consent**. No dependent touches it. Backlog entry: [`2026-10-04-keyring-assignments-grew-project-coordinate-handlers.md`](../todo/2026-10-04-keyring-assignments-grew-project-coordinate-handlers.md); record `oversized-file-project-coordinate-handlers.md` updated (regressed, 650) |
+| `tddy-daemon-livekit/src/livekit_peer_discovery.rs` | 1,636 → **1,658** (+22) | 🔴 grown by this PR; **stack stop** — #513 (6/9) also edits it. Record `oversized-file-livekit-peer-discovery.md` updated (regressed, 1,658); split stays deferred until `#keyring` lands |
+| `tddy-rust-typescript-tests/gen/project_pb.ts` | 396 → 505 | gate false positive — committed generated output (`scripts/generated-code.sh check` is current); never decomposed |
+
+This node **creates** the first backlog entry above and claims none; it is not a `✅ RESOLVED HERE`.
+
