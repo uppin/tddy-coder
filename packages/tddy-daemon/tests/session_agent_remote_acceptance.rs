@@ -1491,8 +1491,18 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
     fleet.await_clone_ready(&explorer).await;
     fleet.await_clone_ready(&linter).await;
 
-    // When — daemon C leaves the room
+    // When — daemon C leaves the room: the server drops both of its participants, its RPC one and
+    // the one that announces it, so A's roster sees it go. Aborting the RPC task alone would leave
+    // C announced and listed as active, and the next call would sit out the forward deadline.
     fleet.peer(DAEMON_C).run.abort();
+    for identity in [format!("daemon-{DAEMON_C}"), DAEMON_C.to_string()] {
+        fleet
+            ._livekit
+            .remove_participant(ROOM, &identity)
+            .await
+            .expect("the server removes daemon C's participant");
+    }
+    fleet.await_peers_discovered(1).await;
 
     // Then — B's agent still answers
     let conversation = fleet
@@ -1527,6 +1537,9 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
         }))
         .await
         .expect_err("an agent on a departed daemon must fail");
+    // Refused up front because the daemon is no longer in the room — not after sitting out the
+    // forward deadline, which is `DeadlineExceeded` and a different (silent-peer) case.
+    assert_eq!(status.code(), Code::Unavailable, "got {status:?}");
     assert!(
         status.message().contains(DAEMON_C),
         "the failure must name the daemon that went away, was: {}",

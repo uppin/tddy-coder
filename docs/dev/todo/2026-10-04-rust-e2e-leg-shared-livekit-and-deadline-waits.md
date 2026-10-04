@@ -101,30 +101,39 @@ cannot be owned by a test (`ContainerAsync` drop) — it is owned by whatever ru
 the same JUnit script before and after. Do it in two steps — shared server first with the group still
 serial (proves isolation and lifecycle), then lift the group (proves the parallelism).
 
-### 2. The deadline waits (~110s of 472s, 4 tests)
+### 2. The deadline waits (~110s of 472s, 4 tests; one fixed)
 
 **Verified.**
 
-- `fails_only_the_agents_of_a_daemon_that_goes_away` (34.9s) and
-  `a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadline` (31.2s) both end by waiting
-  out `PEER_FORWARD_TIMEOUT` = **30s** (`tddy-daemon-kernel/src/peer_forwarding.rs:93`). That is real time over a
-  real network, so there is no clock to pause.
-- The seam is half there: `forward_to_peer_within(…, deadline)` takes the deadline, and `forward_to_peer`
-  is a one-line wrapper over it with the constant. But ~10 call sites use the wrapper
+- `a_forwarded_rpc_to_a_peer_that_stopped_answering_fails_within_its_deadline` (31.2s) waits out
+  `PEER_FORWARD_TIMEOUT` = **30s** (`tddy-daemon-kernel/src/peer_forwarding.rs:93`) **on purpose** — a peer
+  that is present but silent is exactly the case the deadline exists for. That is real time over a real
+  network, so there is no clock to pause.
+- ~~`fails_only_the_agents_of_a_daemon_that_goes_away` (34.9s) waits out the same deadline.~~ **Fixed
+  (2026-10-04, local, not yet in CI):** it never made the daemon leave. `run.abort()` stops only the
+  peer's RPC task; each peer has **two** participants in the room (`daemon-<id>`, which serves RPC, and
+  `<id>`, which announces it with metadata), the aborted one stays `ACTIVE` on the server for 12s and
+  more, and the announcing one is untouched. So A kept C in its roster and the call sat out the 30s
+  forward deadline (`DeadlineExceeded`, "the peer is in the common room but its RPC participant did not
+  answer"). The test now has the server remove both participants (new
+  `LiveKitTestkit::remove_participant`), waits for A's roster to drop C, and gets the
+  `Unavailable … has left the common room … the rest of the roster is unaffected` refusal the test
+  already promised, from `refuse_departed_daemon`. It now asserts that code, so it cannot slip back to the
+  deadline path unnoticed. **Measured locally against Docker: 40.5s → 16.7s** (10.2s of it is the fleet's
+  setup, ~6s the two evictions). Same technique applies to any test that "kills" a daemon with
+  `abort()` and then waits: look for it.
+- The seam for test 1 above is half there: `forward_to_peer_within(…, deadline)` takes the deadline, and
+  `forward_to_peer` is a one-line wrapper over it with the constant. But ~10 call sites use the wrapper
   (`tddy-daemon-livekit/src/livekit_peer_discovery.rs`, `peer_routing.rs`, `tddy-host-service/src/service.rs`),
   and `forward_server_stream_to_peer` uses the constant directly, twice.
-- Two ways to close it — pick one **deliberately**:
-  - **(a) Make the deadline a real daemon setting** (`peer_forward_timeout_seconds`, default 30) threaded to
-    those call sites; the tests set 2s. This is production configuration with a production default, not a
-    test branch. Keep the guard that `PEER_FORWARD_STREAM_IDLE_TIMEOUT` and
-    `PASS_LONG_ENOUGH_TO_BE_SERVICE` constrain each other (a test in `session_agent_roster_acceptance.rs`
-    pins it), and update the comment in the deadline test that says its outer 60s is "longer than the 30s
-    deadline".
-  - **(b) Fail faster for a peer known to be gone.** The first test's peer has *left the room*; waiting 30s
-    to learn that is arguably a product defect, and `svc_start_hosted_agent_clone.rs:124` already says
-    "waiting out `PEER_FORWARD_TIMEOUT` reaches the same answer thirty seconds [later]". Check whether
-    `peer_client` can see the participant is absent and answer `Unavailable` at once. This changes what
-    the second test (a peer that is **present but silent**) proves, so it still needs (a).
+- To shorten the one remaining deadline test, **make the deadline a real daemon setting**
+  (`peer_forward_timeout_seconds`, default 30) threaded to those call sites; the test sets 2s. This is
+  production configuration with a production default, not a test branch. Keep the guard that
+  `PEER_FORWARD_STREAM_IDLE_TIMEOUT` and `PASS_LONG_ENOUGH_TO_BE_SERVICE` constrain each other (a test in
+  `session_agent_roster_acceptance.rs` pins it), and update the comment in the deadline test that says its
+  outer 60s is "longer than the 30s deadline". (An earlier version of this note also proposed failing fast
+  for a peer known to be gone; that already exists — `refuse_departed_daemon` — and was never reached
+  because of the test above.)
 - `rpc_scenarios` (30.8s) is **one test** that runs every scenario in sequence, with a `sleep(2s)` and
   10–20s inner timeouts. Each scenario already takes a `room_name` parameter. Split it into one test per
   scenario: the scenarios then run in parallel once (1) lands, and a failure names the scenario.

@@ -186,6 +186,21 @@ impl LiveKitTestkit {
         self.ws_url.clone()
     }
 
+    /// Evict `identity` from `room`, as the server does when it loses a participant: the participant
+    /// leaves the room at once and everyone still in it is told.
+    ///
+    /// Dropping or aborting a client task is not that. A client that vanishes without a clean leave
+    /// stays listed as `ACTIVE` until the server's own timeout expires (more than 12s on this server
+    /// image), so a test that wants "the daemon is gone" must ask the server to remove it — and a
+    /// daemon has more than one participant in the room, so every identity it joined with.
+    pub async fn remove_participant(&self, room: &str, identity: &str) -> Result<()> {
+        let http_url = format!("http://{}", self.ws_url.trim_start_matches("ws://"));
+        RoomClient::with_api_key(&http_url, DEV_API_KEY, DEV_API_SECRET)
+            .remove_participant(room, identity)
+            .await
+            .map_err(|e| anyhow::anyhow!("remove participant {identity} from {room}: {e}"))
+    }
+
     /// Generate an access token for a participant to join a room.
     pub fn generate_token(&self, room: &str, identity: &str) -> Result<String> {
         let token = AccessToken::with_api_key(DEV_API_KEY, DEV_API_SECRET)
