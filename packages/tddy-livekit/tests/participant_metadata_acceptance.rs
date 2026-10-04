@@ -175,7 +175,7 @@ async fn livekit_participant_metadata_includes_project_count() -> Result<()> {
     // When the server participant connects and a client observes its metadata
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
-    let room_name = "acceptance-owned-project-count";
+    let room_name = &LiveKitTestkit::unique_room("acceptance-owned-project-count");
 
     let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
     let server = LiveKitParticipant::connect(

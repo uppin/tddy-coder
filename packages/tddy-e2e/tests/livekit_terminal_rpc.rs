@@ -74,7 +74,7 @@ mod livekit_tests {
         // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
-        let room_name = "terminal-rpc-receive-test";
+        let room_name = &LiveKitTestkit::unique_room("terminal-rpc-receive-test");
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
@@ -203,7 +203,7 @@ mod livekit_tests {
         // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
-        let room_name = "terminal-rpc-keyboard-test";
+        let room_name = &LiveKitTestkit::unique_room("terminal-rpc-keyboard-test");
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
@@ -367,7 +367,7 @@ mod livekit_tests {
 
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
-        let room_name = "livekit-large-echo-char-by-char";
+        let room_name = &LiveKitTestkit::unique_room("livekit-large-echo-char-by-char");
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
@@ -496,7 +496,7 @@ mod livekit_tests {
         // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
-        let room_name = "ghostty-virtual-terminal-e2e";
+        let room_name = &LiveKitTestkit::unique_room("ghostty-virtual-terminal-e2e");
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;

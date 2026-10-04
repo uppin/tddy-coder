@@ -44,7 +44,10 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_worktree_service::remote_git_service::{ProjectsDirResolver, RemoteGitServiceImpl};
 
-const ROOM: &str = "agent-roster-common-room";
+fn room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("agent-roster-common-room"))
+}
 const DAEMON_B: &str = "agent-roster-daemon-b";
 const DAEMON_C: &str = "agent-roster-daemon-c";
 const LK_API_KEY: &str = "devkey";
@@ -279,7 +282,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         );
 
         let token = livekit
-            .generate_token(ROOM, &format!("daemon-{instance_id}"))
+            .generate_token(room(), &format!("daemon-{instance_id}"))
             .expect("LiveKit token for peer daemon");
         // Every coordinate a peer answers a *forwarded* call on, not `the pre-unbundle monolithic RPC coordinate`
         // alone: `#unbundle` node 7 moved the roster and conversation RPCs onto
@@ -435,7 +438,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
     let rpc_identity_a =
         tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
     let rpc_token_a = livekit
-        .generate_token(ROOM, &rpc_identity_a)
+        .generate_token(room(), &rpc_identity_a)
         .expect("A RPC participant token");
     let rpc_participant_a = LiveKitParticipant::connect(
         &ws_url,
@@ -554,6 +557,7 @@ fn write_daemon_yaml(
     } else {
         "/bin/true"
     };
+    let room = room();
     std::fs::write(
         &path,
         format!(
@@ -572,7 +576,7 @@ livekit:
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}
-  common_room: {ROOM}
+  common_room: {room}
 "#
         ),
     )
@@ -1498,7 +1502,7 @@ async fn fails_only_the_agents_of_a_daemon_that_goes_away() {
     for identity in [format!("daemon-{DAEMON_C}"), DAEMON_C.to_string()] {
         fleet
             ._livekit
-            .remove_participant(ROOM, &identity)
+            .remove_participant(room(), &identity)
             .await
             .expect("the server removes daemon C's participant");
     }

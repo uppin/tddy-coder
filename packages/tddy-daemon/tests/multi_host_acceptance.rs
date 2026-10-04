@@ -22,7 +22,10 @@ use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::{test_service, TEST_TOKEN};
 use tddy_testing_commons::a_session_metadata;
 
-const REMOTE_ACCEPTANCE_ROOM: &str = "acceptance-common-room";
+fn remote_acceptance_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("acceptance-common-room"))
+}
 const REMOTE_PEER_INSTANCE_ID: &str = "acceptance-daemon-b";
 const REMOTE_LK_API_KEY: &str = "devkey";
 const REMOTE_LK_API_SECRET: &str = "secret";
@@ -71,6 +74,7 @@ fn write_livekit_daemon_yaml(
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
     let true_path = true_bin();
+    let room = remote_acceptance_room();
     let yaml = format!(
         r#"
 {id_block}users:
@@ -84,7 +88,7 @@ livekit:
   url: {ws_url}
   api_key: {REMOTE_LK_API_KEY}
   api_secret: {REMOTE_LK_API_SECRET}
-  common_room: {REMOTE_ACCEPTANCE_ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -317,7 +321,7 @@ async fn start_session_remote_daemon_instance_id_routes_to_peer() {
     // Daemon B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
     let token_b = livekit
         .generate_token(
-            REMOTE_ACCEPTANCE_ROOM,
+            remote_acceptance_room(),
             &rpc_identity(REMOTE_PEER_INSTANCE_ID),
         )
         .expect("LiveKit token for peer daemon");

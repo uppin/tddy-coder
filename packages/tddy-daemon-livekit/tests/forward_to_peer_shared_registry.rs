@@ -21,7 +21,10 @@ use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_service::proto::test::{EchoRequest, EchoResponse};
 use tddy_service::{EchoServiceImpl, EchoServiceServer};
 
-const COMMON_ROOM: &str = "forward-shared-registry";
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("forward-shared-registry"))
+}
 const PEER_INSTANCE_ID: &str = "shared-registry-peer";
 const LOCAL_IDENTITY: &str = "shared-registry-local";
 const PARTICIPANT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -66,7 +69,7 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
 
     let peer = LiveKitParticipant::connect(
         &url,
-        &livekit.generate_token(COMMON_ROOM, &rpc_identity(PEER_INSTANCE_ID))?,
+        &livekit.generate_token(common_room(), &rpc_identity(PEER_INSTANCE_ID))?,
         EchoServiceServer::new(EchoServiceImpl),
         RoomOptions::default(),
         None,
@@ -77,7 +80,7 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
 
     let (room, mut events) = Room::connect(
         &url,
-        &livekit.generate_token(COMMON_ROOM, LOCAL_IDENTITY)?,
+        &livekit.generate_token(common_room(), LOCAL_IDENTITY)?,
         RoomOptions::default(),
     )
     .await

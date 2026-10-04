@@ -18,7 +18,10 @@ use serial_test::serial;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_livekit_testkit::LiveKitTestkit;
 
-const COMMON_ROOM: &str = "repro-metadata-handshake-room";
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("repro-metadata-handshake-room"))
+}
 const DAEMON_IDENTITY: &str = "repro-metadata-handshake-daemon";
 const PREJOIN_IDENTITY: &str = "repro-prejoin-participant";
 const LIVEKIT_API_KEY: &str = "devkey";
@@ -27,6 +30,7 @@ const LIVEKIT_API_SECRET: &str = "secret";
 fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    let room = common_room();
     let yaml = format!(
         r#"
 users:
@@ -41,7 +45,7 @@ livekit:
   url: {ws_url}
   api_key: {LIVEKIT_API_KEY}
   api_secret: {LIVEKIT_API_SECRET}
-  common_room: {COMMON_ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -100,7 +104,7 @@ async fn common_room_room_slot_stays_populated_after_metadata_publish_with_peer_
         .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
     let url = livekit.get_ws_url();
     let pre_token = livekit
-        .generate_token(COMMON_ROOM, PREJOIN_IDENTITY)
+        .generate_token(common_room(), PREJOIN_IDENTITY)
         .expect("token for pre-join participant");
     let (_pre_room, _pre_ev) = Room::connect(&url, &pre_token, RoomOptions::default())
         .await

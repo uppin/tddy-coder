@@ -59,7 +59,7 @@ mod livekit_tests {
         // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
-        let room_name = "terminal-two-clients-test";
+        let room_name = &LiveKitTestkit::unique_room("terminal-two-clients-test");
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         const CLIENT1_IDENTITY: &str = "client1";
@@ -179,7 +179,7 @@ mod livekit_tests {
         // Given
         let livekit = LiveKitTestkit::start().await?;
         let url = livekit.get_ws_url();
-        let room_name = "daemon-stream-test";
+        let room_name = &LiveKitTestkit::unique_room("daemon-stream-test");
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
         let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;

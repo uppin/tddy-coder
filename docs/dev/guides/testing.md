@@ -212,6 +212,16 @@ let result = risky_operation().expect("should succeed");
 assert!(result.is_some());
 ```
 
+### Test Rooms Come From `unique_room`
+
+A test that talks to a LiveKit server names its room with `LiveKitTestkit::unique_room("<purpose>")`
+(`<purpose>-<hex nanos>-<pid>-<counter>`), never a fixed literal. A fixed room is private only while
+each test owns its own server; with a shared server (`LIVEKIT_TESTKIT_WS_URL`) or tests running side
+by side, two tests on one name interfere. Keep the purpose as the prefix so a leaked room can be
+attributed, and build the name once per test when its participants must meet in it. Identities are
+room-scoped and stay as they are. The guard test `livekit_tests_use_unique_rooms` in
+`tddy-livekit-testkit` fails and names the file and line of any fixed room it finds.
+
 ## Test Composition
 
 1. Each test has a primary purpose or subject.

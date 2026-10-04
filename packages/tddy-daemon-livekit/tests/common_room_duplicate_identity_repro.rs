@@ -15,7 +15,10 @@ use serial_test::serial;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_livekit_testkit::LiveKitTestkit;
 
-const COMMON_ROOM: &str = "repro-dup-common-room";
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("repro-dup-common-room"))
+}
 const SHARED_IDENTITY: &str = "repro-shared-daemon-identity";
 const LIVEKIT_API_KEY: &str = "devkey";
 const LIVEKIT_API_SECRET: &str = "secret";
@@ -23,6 +26,7 @@ const LIVEKIT_API_SECRET: &str = "secret";
 fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    let room = common_room();
     let yaml = format!(
         r#"
 users:
@@ -37,7 +41,7 @@ livekit:
   url: {ws_url}
   api_key: {LIVEKIT_API_KEY}
   api_secret: {LIVEKIT_API_SECRET}
-  common_room: {COMMON_ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -123,7 +127,7 @@ async fn common_room_room_slot_recovers_after_duplicate_identity_client_leaves()
     // When
     let url = livekit.get_ws_url();
     let token = livekit
-        .generate_token(COMMON_ROOM, SHARED_IDENTITY)
+        .generate_token(common_room(), SHARED_IDENTITY)
         .expect("token for duplicate participant");
     let (dup_room, _dup_ev) = Room::connect(&url, &token, RoomOptions::default())
         .await

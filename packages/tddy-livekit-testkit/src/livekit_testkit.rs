@@ -7,7 +7,8 @@
 use anyhow::Result;
 use livekit_api::access_token::{AccessToken, VideoGrants};
 use livekit_api::services::room::RoomClient;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use testcontainers::core::wait::{HttpWaitStrategy, WaitFor};
 use testcontainers::core::IntoContainerPort;
 use testcontainers::runners::AsyncRunner;
@@ -188,9 +189,13 @@ impl LiveKitTestkit {
     /// (`LIVEKIT_TESTKIT_WS_URL`). The prefix is the room's purpose, so a room left behind by an
     /// aborted test can be attributed.
     pub fn unique_room(prefix: &str) -> String {
-        // TODO(unique-rooms): implement
-        let _ = prefix;
-        todo!("LiveKitTestkit::unique_room")
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|since_epoch| since_epoch.as_nanos())
+            .unwrap_or_default();
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{prefix}-{nanos:x}-{}-{counter}", std::process::id())
     }
 
     /// Get the WebSocket URL for connecting to the LiveKit server.

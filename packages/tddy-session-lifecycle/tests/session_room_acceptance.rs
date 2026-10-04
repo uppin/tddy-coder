@@ -52,16 +52,12 @@ use tddy_testing_commons::wait::eventually_awaiting;
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// The stem of each fixture's lobby name. Every daemon here has a lobby, so it is configured exactly
-/// as in production — the session room is an addition to it, not a replacement.
-const COMMON_ROOM_PREFIX: &str = "session-room-lobby";
-
 /// A lobby no other fixture shares. The LiveKit server is shared — with the other tests in this
 /// suite and with any other checkout running it against the same testkit container — and several
 /// tests here assert who is *in* the lobby, so a fixed name reads another run's leftover
 /// participants as this daemon's.
 fn a_lobby_of_its_own() -> String {
-    format!("{COMMON_ROOM_PREFIX}-{}", uuid::Uuid::new_v4())
+    tddy_livekit_testkit::LiveKitTestkit::unique_room("session-room-lobby")
 }
 const INSTANCE_ID: &str = "session-room-facilitating-host";
 const LK_API_KEY: &str = "devkey";

@@ -37,7 +37,10 @@ use tddy_session_lifecycle::test_util::{wait_until_peer_discovered, TEST_TOKEN};
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-const ROOM: &str = "attach-start-forwarding-room";
+fn room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("attach-start-forwarding-room"))
+}
 const PEER_INSTANCE_ID: &str = "attach-start-peer-daemon";
 const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
@@ -71,6 +74,7 @@ fn write_livekit_daemon_yaml(
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
     let true_path = true_bin();
+    let room = room();
     let yaml = format!(
         r#"
 {id_block}users:
@@ -84,7 +88,7 @@ livekit:
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}
-  common_room: {ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -190,7 +194,7 @@ async fn two_daemons() -> TwoDaemons {
 
     // B's RPC participant: `daemon-{instance_id}`, the identity a forward must address.
     let token_b = livekit
-        .generate_token(ROOM, &rpc_identity(PEER_INSTANCE_ID))
+        .generate_token(room(), &rpc_identity(PEER_INSTANCE_ID))
         .expect("LiveKit token for peer");
     // Both coordinates, because a forward is addressed at the service that *declares* the method:
     // `StartSession` is still `the pre-unbundle monolithic RPC coordinate`'s, while the staging and host-document
