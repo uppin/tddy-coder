@@ -6,7 +6,7 @@
  * and error handling.
  */
 import React from "react";
-import { create, fromBinary, toBinary } from "@bufbuild/protobuf";
+import { create, fromBinary } from "@bufbuild/protobuf";
 import { createClient } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { SessionService, StartSessionRequestSchema, StartSessionResponseSchema } from "../../src/gen/session_pb";
@@ -16,6 +16,8 @@ import { SessionFilesService } from "../../src/gen/session_files_pb";
 import { WorktreeService } from "../../src/gen/worktree_pb";
 import { CreateSessionPane } from "../../src/components/sessions/CreateSessionPane";
 import {
+  START_SESSION_STREAM_ROUTE,
+  aStartSessionStreamBody,
   interceptListProjectBranches,
   interceptStartSession,
 } from "../support/rpc/connectionRpcs";
@@ -26,7 +28,7 @@ import {
   listSessions,
   listTools,
 } from "../support/rpc/responses";
-import { toArrayBuffer, decodeProtoRequestBody } from "../support/rpc/protoRpc";
+import { toArrayBuffer, decodeConnectStreamRequestBody } from "../support/rpc/protoRpc";
 import { TEST_IDS, byTestId } from "../support/testIds";
 
 /** Model catalog the daemon advertises for the baseline agent (mirrors the curated Claude set). */
@@ -314,8 +316,8 @@ describe("CreateSessionPane — submit behaviour", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
       req.continue();
     });
 
@@ -350,8 +352,8 @@ describe("CreateSessionPane — submit behaviour", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
       req.continue();
     });
 
@@ -389,11 +391,9 @@ describe("CreateSessionPane — submit behaviour", () => {
     // Delay the response long enough for the assertion to run before it settles.
     // flushSync() in handleSubmit guarantees submitting=true is rendered synchronously
     // on click, so the button is disabled the entire time the request is pending.
-    const responseBody = toArrayBuffer(
-      toBinary(StartSessionResponseSchema, create(StartSessionResponseSchema, { sessionId: "in-flight-check" })),
-    );
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
-      req.reply({ delay: 3000, statusCode: 200, headers: { "Content-Type": "application/proto" }, body: responseBody });
+    const responseBody = aStartSessionStreamBody(create(StartSessionResponseSchema, { sessionId: "in-flight-check" }));
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
+      req.reply({ delay: 3000, statusCode: 200, headers: { "Content-Type": "application/connect+proto" }, body: responseBody });
     }).as("startSessionSlow");
 
     mountCreateSessionPane();
@@ -421,7 +421,7 @@ describe("CreateSessionPane — submit behaviour", () => {
 
   it("shows an error message when startSession fails and keeps the form open", () => {
     interceptBaseline();
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
       req.reply({ statusCode: 500, body: "daemon error" });
     }).as("startSessionFail");
 
@@ -511,8 +511,8 @@ describe("CreateSessionPane — recipe dropdown", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
       req.continue();
     });
 
@@ -595,8 +595,8 @@ describe("CreateSessionPane — stack parent picker", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
       req.continue();
     });
 
@@ -623,8 +623,8 @@ describe("CreateSessionPane — stack parent picker", () => {
     interceptListProjectBranches();
 
     const capturedReqs: StartSessionRequest[] = [];
-    cy.intercept("POST", "**/rpc/session.SessionService/StartSession", (req) => {
-      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeProtoRequestBody(req.body)));
+    cy.intercept("POST", START_SESSION_STREAM_ROUTE, (req) => {
+      capturedReqs.push(fromBinary(StartSessionRequestSchema, decodeConnectStreamRequestBody(req.body)));
       req.continue();
     });
 
