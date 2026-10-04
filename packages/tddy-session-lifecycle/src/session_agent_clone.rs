@@ -27,5 +27,8 @@ pub fn clone_worktree_path(
     sessions_base: &Path,
     codebase_session_id: &str,
 ) -> Result<PathBuf, Status> {
-    crate::workspace_session::resolve_worktree_root_for_session(sessions_base, codebase_session_id)
+    crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+        sessions_base,
+        codebase_session_id,
+    )
 }

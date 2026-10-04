@@ -164,7 +164,8 @@ impl DaemonSessionHost {
         session_id: &str,
         session_token: &str,
     ) -> Result<Option<crate::split_session::SplitAgentWiring>, Status> {
-        let Some((codebase_daemon, codebase_session)) = crate::split_session::split_pairing(meta)
+        let Some((codebase_daemon, codebase_session)) =
+            crate::connection_service::peer_session_answer::split_pairing(meta)
         else {
             return Ok(None);
         };

@@ -317,11 +317,10 @@ mod split_start;
 pub use split_start::*;
 
 mod svc_resolve_os_user;
+pub use crate::connection_service::peer_session_answer::resolve_exec_tool_worktree;
 /// Caller identity, shared with `tddy-daemon-rpc`'s exec-tool and PR-stack families, which must
 /// authenticate a caller exactly as the host does.
-pub use svc_resolve_os_user::{
-    authorize_exec_tool_caller, resolve_exec_tool_worktree, resolve_os_user,
-};
+pub use svc_resolve_os_user::{authorize_exec_tool_caller, resolve_os_user};
 
 /// How a sandboxed `workspace` session's jail is specified, and rebuilt when it dies mid-call.
 mod jail_relaunch;
@@ -545,4 +544,4 @@ mod conversation_worktree_jail_route_unit_tests;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
-mod peer_session_answer;
+pub(crate) mod peer_session_answer;

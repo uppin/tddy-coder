@@ -20,8 +20,6 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::{
 };
 use tddy_rpc::Status;
 
-use crate::workspace_session;
-
 /// What `session_id`'s jail is built over: the session's own directory, and the checkout that is
 /// the only part of this host inside it.
 ///
@@ -36,10 +34,11 @@ pub(crate) fn workspace_sandbox_spec(
     Ok(WorkspaceSandboxSpec {
         session_id: session_id.to_string(),
         session_dir: unified_session_dir_path(sessions_base, session_id),
-        worktree_path: workspace_session::resolve_worktree_root_for_session(
-            sessions_base,
-            session_id,
-        )?,
+        worktree_path:
+            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+                sessions_base,
+                session_id,
+            )?,
     })
 }
 

@@ -6,7 +6,6 @@ use std::{path::Path, sync::Arc};
 
 use crate::{
     connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-    workspace_session,
 };
 
 use crate::user_sessions_path::projects_path_for_user;
@@ -68,10 +67,11 @@ impl DaemonSessionHost {
             .map_err(|e| {
                 Status::failed_precondition(format!("this daemon cannot hold an agent clone: {e}"))
             })?;
-        let worktree_path = workspace_session::resolve_worktree_root_for_session(
-            sessions_base,
-            codebase_session_id,
-        )?;
+        let worktree_path =
+            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+                sessions_base,
+                codebase_session_id,
+            )?;
         // The repository the checkout was cut from, which is where its WIP ref is fetched from.
         let projects_dir = projects_path_for_user(
             &self

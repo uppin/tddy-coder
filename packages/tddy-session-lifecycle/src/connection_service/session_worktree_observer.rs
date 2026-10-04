@@ -29,8 +29,10 @@ impl DaemonSessionHost {
         let Some(observer) = self.worktree_observer.as_ref() else {
             return;
         };
-        match crate::workspace_session::resolve_worktree_root_for_session(sessions_base, session_id)
-        {
+        match crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+            sessions_base,
+            session_id,
+        ) {
             Ok(worktree) => observer.worktree_ready(session_id, &worktree),
             Err(status) => log::warn!(
                 "session {session_id}: its worktree could not be announced: {}",

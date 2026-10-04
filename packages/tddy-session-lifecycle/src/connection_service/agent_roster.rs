@@ -225,7 +225,7 @@ pub(crate) fn refuse_unenforceable_withdrawal(
 /// ([`tddy_core::paired_agent`]), so only the half that has an agent qualifies.
 pub(crate) fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -> bool {
     meta.sandbox == Some(true)
-        || crate::split_session::split_pairing(meta).is_some()
+        || crate::connection_service::peer_session_answer::split_pairing(meta).is_some()
         || tddy_core::paired_agent(meta).is_some()
 }
 

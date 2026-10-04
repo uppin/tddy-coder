@@ -71,22 +71,6 @@ pub fn split_agent_participant_identity(session_id: &str) -> String {
     format!("{SPLIT_AGENT_IDENTITY_PREFIX}{session_id}")
 }
 
-/// The codebase daemon and the workspace session on it that a session is paired with, or `None`
-/// when the session is co-located.
-///
-/// The pairing is the *pair* — a recorded daemon with no session id names a host but nothing on it
-/// to resume, re-wire or delete, so half a pairing is read as none rather than acted on. Every
-/// caller needs both, so the check lives here instead of at each of them.
-pub fn split_pairing(meta: &tddy_core::SessionMetadata) -> Option<(&str, &str)> {
-    fn non_blank(field: &Option<String>) -> Option<&str> {
-        field.as_deref().map(str::trim).filter(|s| !s.is_empty())
-    }
-    Some((
-        non_blank(&meta.codebase_daemon_instance_id)?,
-        non_blank(&meta.codebase_session_id)?,
-    ))
-}
-
 // The mirror of `split_pairing`, read on the `workspace` half, lives in `tddy_core` beside the
 // `tddy_core::SessionMetadata` fields it reads — `tddy_core::paired_agent`, which both callers
 // (`connection_service::agent_roster`, `tddy_session_files::context_files`) name directly. It
