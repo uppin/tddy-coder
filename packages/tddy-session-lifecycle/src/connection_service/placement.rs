@@ -112,7 +112,7 @@ pub fn classify_placement(request: &PlacementRequest) -> Result<CodebasePlacemen
 
 /// Classify a start request's codebase placement, refusing a split that cannot be honoured.
 ///
-/// Mirrors [`crate::livekit_peer_discovery::classify_peer_route`]: a pure decision with every
+/// Mirrors [`tddy_daemon_livekit::livekit_peer_discovery::classify_peer_route`]: a pure decision with every
 /// precondition named in its error, so an operator learns *which* one failed rather than that the
 /// request was bad. An empty or self-matching id is co-located — the pre-existing behaviour, which
 /// this must never change.

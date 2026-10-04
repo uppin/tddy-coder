@@ -13,9 +13,8 @@ use tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink;
 use tddy_service::gen::presenter_observer_client::PresenterObserverClient;
 use tddy_service::gen::ObserveRequest;
 
-use crate::session_notifications::{
-    notification_for_presenter_event, SessionNotificationPublishing,
-};
+use crate::session_notifications::notification_for_presenter_event;
+use crate::session_notifications::session_notification_publishing::SessionNotificationPublishing;
 
 const OBSERVER_CONNECT_MAX_ATTEMPTS: u32 = 90;
 const OBSERVER_RETRY_DELAY_MS: u64 = 100;

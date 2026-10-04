@@ -1,4 +1,4 @@
-use super::DaemonSessionHost;
+use super::super::DaemonSessionHost;
 
 use super::super::SplitStartFailure;
 

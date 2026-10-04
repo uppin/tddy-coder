@@ -9,21 +9,31 @@ use tddy_service::proto::session_files::ReadHostDocumentRequest;
 
 use crate::session_file_upload::contained_canonical_dir;
 
-use crate::livekit_peer_discovery::PeerRoute;
+use tddy_daemon_livekit::livekit_peer_discovery::PeerRoute;
 
 use crate::session_file_upload::validate_segment;
 
 use tddy_rpc::Status;
 
-use super::AttachmentProgressReporter;
+use tddy_session_files::attachment_progress::AttachmentProgressReporter;
 
 use tddy_service::proto::session::StagedAttachmentRef;
 
 use std::path::Path;
 
-use super::DaemonSessionHost;
+/// What materializing a request's attachments reads of the host that serves it: the config
+/// (`max_attachment_bytes`, the local instance id), the data root and staging base directories
+/// documents and staged files are read from, and how an addressed request is routed to a peer.
+///
+/// Lent by the host for the length of one call (`attachment_state` in `handler_state.rs`).
+pub(crate) struct AttachmentState<'a> {
+    pub(crate) config: &'a tddy_daemon_kernel::config::DaemonConfig,
+    pub(crate) tddy_data_dir: &'a Path,
+    pub(crate) staging_base_dir: &'a Path,
+    pub(crate) peer_routing: &'a tddy_daemon_livekit::peer_routing::PeerRouting,
+}
 
-impl DaemonSessionHost {
+impl AttachmentState<'_> {
     /// Copies one staged file into the session's attachments.
     ///
     /// The browser stages to whichever daemon it is connected to and may then start the session on
@@ -46,7 +56,10 @@ impl DaemonSessionHost {
         let safe_staging = validate_segment(&staged.staging_id)?;
         let safe_name = validate_segment(&staged.file_name)?;
 
-        match self.classify_daemon_route(&staged.daemon_instance_id)? {
+        match self
+            .peer_routing
+            .classify_daemon_route(&staged.daemon_instance_id)?
+        {
             PeerRoute::Local => Self::copy_local_staged_attachment(
                 staging_root,
                 session_dir,
@@ -95,7 +108,7 @@ impl DaemonSessionHost {
             ));
         }
 
-        crate::session_attachments::copy_attachment_into_session(
+        tddy_session_files::session_attachments::copy_attachment_into_session(
             session_dir,
             &staged_path,
             basename,
@@ -116,7 +129,7 @@ impl DaemonSessionHost {
     /// bytes staged on the host the browser is connected to, session started on another — it is the
     /// *only* thing between accepting the request and reporting the first byte of work. Reporting
     /// per frame is therefore what keeps a relayed `StreamStartSession` producing inside
-    /// [`crate::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`], and what makes the row's
+    /// [`tddy_daemon_livekit::livekit_peer_discovery::PEER_FORWARD_STREAM_IDLE_TIMEOUT`], and what makes the row's
     /// progress bar advance instead of sitting at 0% for the whole transfer.
     pub(crate) async fn fetch_peer_staged_attachment(
         &self,
@@ -127,7 +140,9 @@ impl DaemonSessionHost {
         basename: &str,
         progress: &AttachmentProgressReporter<'_>,
     ) -> Result<(), Status> {
-        let slot = self.common_room_slot("StreamReadHostDocument")?;
+        let slot = self
+            .peer_routing
+            .common_room_slot("StreamReadHostDocument")?;
         let read_req = ReadHostDocumentRequest {
             session_token: session_token.to_string(),
             daemon_instance_id: peer_instance_id.to_string(),
@@ -162,7 +177,11 @@ impl DaemonSessionHost {
             progress.report(data.len() as u64, frame.total_byte_size);
         }
 
-        crate::session_attachments::write_attachment_bytes(session_dir, basename, &data)?;
+        tddy_session_files::session_attachments::write_attachment_bytes(
+            session_dir,
+            basename,
+            &data,
+        )?;
         Ok(())
     }
 
@@ -182,27 +201,27 @@ impl DaemonSessionHost {
         let bytes = if ref_daemon.is_empty() || ref_daemon == local_instance_id {
             crate::host_documents::read_host_document_bytes(
                 os_user,
-                &self.tddy_data_dir,
-                &self.staging_base_dir,
+                self.tddy_data_dir,
+                self.staging_base_dir,
                 scope,
                 &host_doc.session_id,
                 &host_doc.project_id,
                 &host_doc.relative_path,
             )?
         } else {
-            let route = self.classify_daemon_route(ref_daemon)?;
+            let route = self.peer_routing.classify_daemon_route(ref_daemon)?;
             match route {
                 PeerRoute::Local => crate::host_documents::read_host_document_bytes(
                     os_user,
-                    &self.tddy_data_dir,
-                    &self.staging_base_dir,
+                    self.tddy_data_dir,
+                    self.staging_base_dir,
                     scope,
                     &host_doc.session_id,
                     &host_doc.project_id,
                     &host_doc.relative_path,
                 )?,
                 PeerRoute::Forward { peer_instance_id } => {
-                    let slot = self.common_room_slot("ReadHostDocument")?;
+                    let slot = self.peer_routing.common_room_slot("ReadHostDocument")?;
                     let read_req = ReadHostDocumentRequest {
                         session_token: session_token.to_string(),
                         daemon_instance_id: ref_daemon.to_string(),
@@ -237,7 +256,11 @@ impl DaemonSessionHost {
             )));
         }
 
-        crate::session_attachments::write_attachment_bytes(session_dir, basename, &bytes.data)?;
+        tddy_session_files::session_attachments::write_attachment_bytes(
+            session_dir,
+            basename,
+            &bytes.data,
+        )?;
         Ok(())
     }
 }

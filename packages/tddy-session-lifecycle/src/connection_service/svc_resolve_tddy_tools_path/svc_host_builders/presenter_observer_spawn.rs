@@ -1,8 +1,17 @@
-use super::DaemonSessionHost;
-
 use std::sync::Arc;
 
-impl DaemonSessionHost {
+/// What the presenter observer reads of the host that starts it: the data root a session's
+/// sessions base is resolved from, the injected presenter-event sink and the notification bus.
+#[derive(Clone)]
+pub(crate) struct PresenterObserverDeps {
+    pub(crate) tddy_data_dir: std::path::PathBuf,
+    pub(crate) presenter_event_sink:
+        Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
+    pub(crate) session_notification_bus:
+        Option<Arc<crate::session_notifications::SessionNotificationBus>>,
+}
+
+impl PresenterObserverDeps {
     /// Start the presenter observer for a freshly spawned workflow session: the injected
     /// presenter-event sink (Telegram's surface) when this daemon has one, and — when it has a bus
     /// and can resolve `os_user`'s sessions directory to read the session's label from — the
@@ -18,12 +27,12 @@ impl DaemonSessionHost {
         grpc_port: u16,
     ) {
         let publishing = self.session_notification_bus.as_ref().and_then(|bus| {
-                    match crate::user_sessions_path::sessions_base_for_user(
+                    match tddy_session_activity::user_sessions_path::sessions_base_for_user(
                         os_user,
                         Some(&self.tddy_data_dir),
                     ) {
                         Some(sessions_base) => {
-                            Some(crate::session_notifications::SessionNotificationPublishing {
+                            Some(crate::session_notifications::session_notification_publishing::SessionNotificationPublishing {
                                 bus: Arc::clone(bus),
                                 sessions_base,
                                 os_user: os_user.to_string(),

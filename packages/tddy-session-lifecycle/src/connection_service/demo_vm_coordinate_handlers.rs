@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use super::activity_hub;
-use super::DaemonSessionHost;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::demo_vm::{
@@ -11,22 +10,24 @@ use tddy_service::proto::demo_vm::{
     StartDemoVmResponse, StopDemoVmRequest, StopDemoVmResponse,
 };
 
-impl DaemonSessionHost {
+impl activity_hub::DemoVmState {
     pub(crate) async fn start_demo_vm_at_coordinate(
         &self,
         request: Request<StartDemoVmRequest>,
     ) -> Result<Response<StartDemoVmResponse>, Status> {
         let req = request.into_inner();
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let os_user = &self
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_session_activity::user_sessions_path::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -148,7 +149,7 @@ impl DaemonSessionHost {
         request: Request<StopDemoVmRequest>,
     ) -> Result<Response<StopDemoVmResponse>, Status> {
         let req = request.into_inner();
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let _os_user = &self
@@ -197,7 +198,7 @@ impl DaemonSessionHost {
         request: Request<GetDemoVmStatusRequest>,
     ) -> Result<Response<GetDemoVmStatusResponse>, Status> {
         let req = request.into_inner();
-        self.record_rpc_activity();
+        self.rpc_activity.record();
         let github_user = (self.user_resolver)(&req.session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let _os_user = &self

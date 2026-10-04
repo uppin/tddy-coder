@@ -390,7 +390,7 @@ fn spawn_project_clone(
     handle
 }
 
-mod session_dir_lookup;
+pub(in crate::connection_service) mod session_dir_lookup;
 
 mod session_room_opening;
 

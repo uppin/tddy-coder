@@ -277,6 +277,29 @@ mod child_spawn_handler;
 #[cfg(test)]
 mod stack_child_spawn_tests;
 
+/// The deadline a split session's own context read is bounded by.
+///
+/// In-crate rather than under `tests/` because [`DaemonSessionHost::split_context_from_codebase_host`]
+/// is `pub(crate)`: the behaviour worth pinning is what *this* path does with a checkout that
+/// stalls, and an integration test could only reach it by starting a whole split session against a
+/// peer.
+///
+/// Co-located deliberately: when the codebase is on this host, the read is this daemon's own
+/// filesystem work, and a filesystem can genuinely stall (a network mount, a device that stopped
+/// answering). Unbounded, the split start waits for exactly as long as the stall lasts, with
+/// nothing for the caller to retry and nothing for an operator to raise.
+///
+/// **How a read is made to stall here.** The read runs on the runtime's blocking pool, so this
+/// gives the runtime exactly one blocking thread and hands it a read that does not return until the
+/// assertion has been made — the same technique as
+/// `tddy-session-files/tests/context_read_deadline_acceptance.rs`, and for the same reason: a slow
+/// filesystem or a `sleep` would be a wall-clock race that passes or fails with the load on the
+/// machine.
+///
+/// PRD: docs/ft/daemon/agent-context-sync.md.
+#[cfg(test)]
+mod split_context_from_codebase_host_tests;
+
 mod conversation_spawn;
 pub(crate) use conversation_spawn::*;
 

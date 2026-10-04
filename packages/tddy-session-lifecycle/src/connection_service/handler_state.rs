@@ -6,19 +6,28 @@
 //! client, common room, registry, token store, idle tracker, task registry and jails the host does
 //! rather than to copies of them.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use livekit::prelude::Room;
 use tddy_model_registry::ModelRegistryStore;
+use tddy_rpc::Status;
 use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
+use super::svc_materialize_staged_attachment::AttachmentState;
+use super::svc_resolve_listed_worktree::session_dir_lookup;
+use super::svc_resolve_tddy_tools_path::svc_host_builders::first_admission_token;
+use super::svc_resolve_tddy_tools_path::svc_host_builders::presenter_observer_spawn::PresenterObserverDeps;
+use super::svc_spawn_split_agent;
+use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
 use crate::multi_host::EligibleDaemonSource;
 use crate::peer_routing::PeerRouting;
 use crate::relay_idle::RpcActivity;
+use tddy_service::proto::session::SessionAttachment;
 
 impl DaemonSessionHost {
     /// The daemon's configuration.
@@ -95,6 +104,89 @@ impl DaemonSessionHost {
             Arc::clone(&self.jail_relaunch),
             Arc::clone(&self.hosted_agent_clones),
         )
+    }
+
+    /// The first admit for an agent clone's owning daemon (see
+    /// [`first_admission_token::mint_first_admission_token`]), over this host's config and
+    /// admission registry.
+    pub(crate) fn mint_first_admission_token(
+        &self,
+        session_id: &str,
+        owning_daemon_instance_id: &str,
+    ) -> Option<(String, String, String, u64)> {
+        first_admission_token::mint_first_admission_token(
+            &self.config,
+            &self.session_admissions,
+            session_id,
+            owning_daemon_instance_id,
+        )
+    }
+
+    /// Where a session this daemon serves keeps its `.session.yaml` (see
+    /// [`session_dir_lookup::session_dir_for`]), under this host's data dir.
+    pub(crate) fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
+        session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
+    }
+
+    /// How long to wait for the codebase daemon's answer to a split session's forwarded start (see
+    /// [`svc_spawn_split_agent::split_forward_deadline`]), under this host's config.
+    pub fn split_forward_deadline(&self) -> Duration {
+        svc_spawn_split_agent::split_forward_deadline(&self.config)
+    }
+
+    /// The fields the demo-VM RPCs read, shared with this host (the VM table and idle tracker are
+    /// the same handles) so a service built from them acts on the host's own VMs.
+    pub(crate) fn demo_vm_service_state(&self) -> super::activity_hub::DemoVmState {
+        super::activity_hub::DemoVmState {
+            demo_vm_state: Arc::clone(&self.demo_vm_state),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            user_resolver: Arc::clone(&self.user_resolver),
+            rpc_activity: self.rpc_activity.clone(),
+            config: self.config.clone(),
+        }
+    }
+
+    /// The fields the presenter observer reads, shared with this host (the sink and the bus are
+    /// the same handles).
+    pub(crate) fn presenter_observer_deps(&self) -> PresenterObserverDeps {
+        PresenterObserverDeps {
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            presenter_event_sink: self.presenter_event_sink.clone(),
+            session_notification_bus: self.session_notification_bus.clone(),
+        }
+    }
+
+    /// Start the presenter observer for a freshly spawned workflow session (see
+    /// [`PresenterObserverDeps::maybe_spawn_presenter_observer`]), over this host's sinks.
+    pub(crate) fn maybe_spawn_presenter_observer(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        grpc_port: u16,
+    ) {
+        self.presenter_observer_deps()
+            .maybe_spawn_presenter_observer(os_user, session_id, grpc_port);
+    }
+
+    /// The fields attachment materialization reads, lent to it for the length of one call.
+    pub(crate) fn attachment_state(&self) -> AttachmentState<'_> {
+        AttachmentState {
+            config: &self.config,
+            tddy_data_dir: &self.tddy_data_dir,
+            staging_base_dir: &self.staging_base_dir,
+            peer_routing: &self.peer_routing,
+        }
+    }
+
+    /// Pre-creates `session_dir` when needed and materializes the request's attachments before
+    /// spawn (see [`AttachmentState::prepare_session_attachments`]), over this host's state.
+    pub(crate) async fn prepare_session_attachments(
+        &self,
+        ctx: &AttachmentMaterialization<'_>,
+    ) -> Result<Vec<SessionAttachment>, Status> {
+        self.attachment_state()
+            .prepare_session_attachments(ctx)
+            .await
     }
 
     /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in
