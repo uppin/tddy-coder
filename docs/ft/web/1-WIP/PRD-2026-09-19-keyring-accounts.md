@@ -1,7 +1,7 @@
 # PRD: Accounts — the screen and service over the credential store
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress
+**Status**: ✅ Complete
 **Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `master` (3/9 `feature/keyring/store`, #510, is merged)
 
 ## Affected Features
@@ -149,16 +149,16 @@ dependency costs: 14 dependents, 6 of them paying for something they never use.
 
 ## Acceptance Criteria
 
-- [ ] `ListAccounts` returns the vault's records grouped by provider, **with no secret in any field**
-- [ ] An empty vault, no vault yet, a locked vault and an error render as four distinct, explained
+- [x] `ListAccounts` returns the vault's records grouped by provider, **with no secret in any field**
+- [x] An empty vault, no vault yet, a locked vault and an error render as four distinct, explained
   states
-- [ ] `SetAccountLabel` changes only the label; `account_id` is unchanged and assignments survive
-- [ ] `RemoveAccount` removes exactly one record, behind a confirmation
-- [ ] An unauthenticated or invalid `session_token` is refused, not served an empty list
-- [ ] `/accounts` is reachable from the nav menu and by direct URL
-- [ ] The screen is **not** capability-gated and adds no new reader of `capabilities`
-- [ ] Cypress component tests cover the four list states and both actions
-- [ ] No new `tddy-service` dependency is added to `tddy-credentials`
+- [x] `SetAccountLabel` changes only the label; `account_id` is unchanged and assignments survive
+- [x] `RemoveAccount` removes exactly one record, behind a confirmation
+- [x] An unauthenticated or invalid `session_token` is refused, not served an empty list
+- [x] `/accounts` is reachable from the nav menu and by direct URL
+- [x] The screen is **not** capability-gated and adds no new reader of `capabilities`
+- [x] Cypress component tests cover the four list states and both actions
+- [x] No new `tddy-service` dependency is added to `tddy-credentials`
 
 ## References
 

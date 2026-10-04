@@ -1,7 +1,7 @@
 # Changeset: Accounts service and screen
 
 **Date**: 2026-09-19
-**Status**: 🚧 In Progress — implementation complete; one developer-decided item open (stub-provider daemon vault)
+**Status**: ✅ Complete
 **Type**: Feature
 **Stack**: `#keyring` 4/9 · branch `feature/keyring/accounts` · base `master` (3/9 `feature/keyring/store`, #510, is merged)
 
@@ -220,8 +220,8 @@ this node does not claim otherwise.
 - [x] **Web**: route, predicate, `AccountsAppPage`, nav entry, ladder rung
 - [x] **Testing**: Rust service tests + Cypress component tests + `appRoutes` unit tests
 - [x] **Stub-provider daemon**: Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04).
-- [ ] **Package Documentation**: `tddy-accounts`, `tddy-web`
-- [ ] **Code Quality**: scoped clippy; CI green
+- [x] **Package Documentation**: `tddy-accounts`, `tddy-web` — written by this changeset's wrap
+- [x] **Code Quality**: scoped clippy clean (`d66d182b`; the final tree's run is `/pr-wrap` step 6). CI green is read after the push (step 8), not claimed here. Clean-code score D — three long JSX components, split deferred with the developer's consent to `2026-10-04-keyring-accounts-screen-long-components.md`
 
 ## Technical Changes
 
@@ -273,7 +273,7 @@ this node does not claim otherwise.
 - [x] **M6** — `AccountsAppPage`, the list, rename and remove
 - [x] **M7** — nav entry + ladder rung
 - [x] **M8** — Cypress component tests and a Storybook story
-- [ ] **M9** — `tddy-accounts` and `tddy-web` documentation
+- [x] **M9** — `tddy-accounts` and `tddy-web` documentation (the wrap)
 
 ## Testing Plan
 
@@ -369,8 +369,8 @@ is fixed by amending 2/9 during the stack's closing cascade.
 - [x] Publish the draft-PR contract — wave 2
 - [x] M1–M8 (M9, documentation, is the wrap)
 - [x] Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04)
-- [ ] Package documentation for `tddy-accounts` and `tddy-web`
-- [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
+- [x] Package documentation for `tddy-accounts` and `tddy-web`
+- [x] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
 
 ## Validation Results
 
@@ -395,8 +395,7 @@ only this PR's files.
   to a `docs/dev/todo/` entry, and the marker points at it.
 - ℹ INFO `service.rs` — renaming an account that is not linked maps to `AccountsError::Unavailable`
   → `Status::internal`; `NotFound` would describe it better. **Resolved 2026-10-04 by developer
-  decision**: `AccountsError::NotFound` → `Status::not_found`, added here after all. Left as is: it widens the port enum that
-  #515 (8/9) also implements against, so it belongs with that node or a follow-up.
+  decision**: `AccountsError::NotFound` → `Status::not_found`, added here after all. (`a6161729`).
 - ℹ INFO `AccountsAppPage.tsx` — an absent session token is sent as `""`, which the daemon refuses as
   `Unauthenticated`; a refusal, not a fallback. No change.
 - ℹ INFO **Stub-provider daemon** — on a daemon whose GitHub provider is a stub (demo),
@@ -477,4 +476,21 @@ path in the diff. No new finding.
 
 Whole-workspace health is CI's (`scripts/ci-status.sh`), not claimed from these runs.
 
-**Wrap (step 7) not run**: the stub-provider daemon vault item is open by developer decision.
+Step 7 was held while the stub-provider daemon vault item was open; it closed in `93c60daf`.
+
+### Final validation — 2026-10-04 (`/pr-wrap` step 5, diff only)
+
+Branch current with `origin/master`; `origin/master..HEAD` is this PR's 17 commits only. No deleted
+or renamed path in `origin/master...HEAD`; no `tddy-credentials`, `tddy-daemon-auth`, `tddy-github`,
+`auth.proto` or `auth_pb.ts` path in it. Changes since step 4, all within this node's scope:
+
+- `93c60daf` 🆕 — `DaemonRuntime::credential_vaults()`, a read-only accessor over the one
+  `SessionVaults` the auth and accounts services share, and
+  `tddy-daemon/tests/accounts_stub_daemon_acceptance.rs` (closes the stub-provider Scope item);
+- `a6161729` 🆕 — `AccountsError::NotFound` → `Status::not_found` for renaming an unlinked account;
+- `1a4f22e4` — the new suite registered in `test_placement.rs`'s `BELONGS_HERE`;
+- `2dfcb4d7` — the consented deferrals: `runtime.rs` 1,677 → 1,700 and `build.rs` 709 → 723 added to
+  `2026-09-24-keyring-store-deferred-oversized-file-splits.md`; the three long components in
+  `2026-10-04-keyring-accounts-screen-long-components.md`.
+
+Every Scope item, milestone and acceptance criterion is ticked. No new finding.
