@@ -140,7 +140,7 @@ fn obstacles(
     }
 
     let text = workspace.read(&module.file)?;
-    let taken = names_declared_in(&text[module.scope.clone()]);
+    let taken = taken_by_something_else(&text[module.scope.clone()], &module.path, source, names);
     let clashes = names
         .iter()
         .filter(|name| taken.contains(name.as_str()))
@@ -153,6 +153,51 @@ fn obstacles(
         })
         .collect();
     Ok((clashes, Some(Destination::existing(module))))
+}
+
+/// The names the destination module binds, leaving out a name it binds only by importing the very
+/// item that is moving: that import is not a second declaration, and the move's own re-pointing
+/// removes it.
+fn taken_by_something_else(
+    module_text: &str,
+    destination: &[String],
+    source: &[String],
+    names: &[String],
+) -> BTreeSet<String> {
+    let items = items_of_module(module_text);
+    let mut taken = names_declared_in(module_text);
+    for name in names {
+        let declared_here =
+            items.defined.contains(name) || items.children.iter().any(|child| &child.name == name);
+        let moved_path: Vec<String> = source.iter().cloned().chain([name.clone()]).collect();
+        let only_imports_the_moved = items
+            .uses
+            .iter()
+            .filter(|leaf| leaf.bound_name() == Some(name.as_str()))
+            .all(|leaf| resolved_from(&leaf.segments, destination).as_ref() == Some(&moved_path));
+        if !declared_here && only_imports_the_moved {
+            taken.remove(name);
+        }
+    }
+    taken
+}
+
+/// The path below the crate root that `segments`, written in a `use` of the module at `at`, names.
+fn resolved_from(segments: &[String], at: &[String]) -> Option<Vec<String>> {
+    let mut path = match segments.first().map(String::as_str) {
+        Some("crate") => Vec::new(),
+        _ => at.to_vec(),
+    };
+    for segment in segments {
+        match segment.as_str() {
+            "crate" | "self" => {}
+            "super" => {
+                path.pop()?;
+            }
+            name => path.push(name.to_string()),
+        }
+    }
+    Some(path)
 }
 
 /// The finding for a destination whose path stops existing at segment `at` of the module path.
@@ -187,4 +232,48 @@ pub(in crate::backends::rust) fn names_declared_in(module_text: &str) -> BTreeSe
             .filter_map(|leaf| leaf.bound_name().map(str::to_string)),
     );
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(text: &str) -> Vec<String> {
+        text.split("::")
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn reads_a_super_import_against_the_module_it_is_written_in() {
+        assert_eq!(
+            resolved_from(&path("super::guard::Route"), &path("svc::exec")),
+            Some(path("svc::guard::Route"))
+        );
+    }
+
+    #[test]
+    fn leaves_out_the_name_a_destination_binds_only_by_importing_the_moved_item() {
+        let taken = taken_by_something_else(
+            "use crate::pairing::answer;\n",
+            &path("answers"),
+            &path("pairing"),
+            &["answer".to_string()],
+        );
+
+        assert!(taken.is_empty());
+    }
+
+    #[test]
+    fn keeps_the_name_a_destination_binds_by_importing_something_else() {
+        let taken = taken_by_something_else(
+            "use crate::other::answer;\n",
+            &path("answers"),
+            &path("pairing"),
+            &["answer".to_string()],
+        );
+
+        assert!(taken.contains("answer"));
+    }
 }
