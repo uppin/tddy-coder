@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use super::super::seam_refusal;
+use super::bindings;
 use super::destination::{Module, Package};
 use super::facade;
 use super::imports::{self, Source};
@@ -318,10 +319,14 @@ fn moved_text(
     landing: &Landing,
     edits: &mut BTreeMap<String, Vec<Edit>>,
 ) -> Result<String> {
+    let imported = |module: &[String], name: &str| {
+        bindings::import_target(moving.workspace, moving.package, module, name)
+    };
     let modules = Modules {
         from: moving.source,
         to: &moving.destination.path,
         travelling: None,
+        imports: Some(&imported),
     };
     let source_edits = edits.entry(moving.source_file.to_string()).or_default();
     source_edits.extend(rebase::edits(

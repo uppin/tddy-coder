@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use super::super::item_move::assemble::written_from_the_root;
+use super::super::item_move::bindings;
 use super::super::item_move::facade;
 use super::super::item_move::outside;
 use super::super::item_move::placement::vacated;
@@ -174,10 +175,19 @@ fn rebase_the_moved_files(
             [old.as_slice(), &file.below].concat(),
             [new.as_slice(), &file.below].concat(),
         );
+        let imported = |module: &[String], name: &str| {
+            bindings::import_target(
+                moving.workspace,
+                &moving.request.named.package,
+                module,
+                name,
+            )
+        };
         let modules = Modules {
             from: &from,
             to: &to,
             travelling: Some(&old),
+            imports: Some(&imported),
         };
         edits
             .entry(file.from.clone())

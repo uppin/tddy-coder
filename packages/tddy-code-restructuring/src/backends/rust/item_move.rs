@@ -13,6 +13,7 @@
 //! move declares a new, empty module of that name in it first ([`creation`]).
 
 pub(super) mod assemble;
+pub(super) mod bindings;
 mod creation;
 pub(super) mod destination;
 pub(super) mod facade;

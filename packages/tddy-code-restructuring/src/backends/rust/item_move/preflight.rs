@@ -232,7 +232,7 @@ fn reexports(
 }
 
 /// The path below the crate root that `segments`, written in a `use` of the module at `at`, names.
-fn resolved_from(segments: &[String], at: &[String]) -> Option<Vec<String>> {
+pub(super) fn resolved_from(segments: &[String], at: &[String]) -> Option<Vec<String>> {
     let mut path = match segments.first().map(String::as_str) {
         Some("crate") => Vec::new(),
         _ => at.to_vec(),

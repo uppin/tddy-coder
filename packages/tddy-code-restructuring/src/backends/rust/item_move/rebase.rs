@@ -21,7 +21,15 @@ pub(in crate::backends::rust) struct Modules<'a> {
     /// A module that moves whole with the code, when it does: a relative path that reaches into it
     /// still reaches the same place, and the visibilities written in the code keep their meaning.
     pub(in crate::backends::rust) travelling: Option<&'a [String]>,
+    /// Where a name a module imports really lives: the module and the name, and the path below the
+    /// crate root the import brings in. `super::Name` is respelled through it when the module the
+    /// path named only imports `Name`, which nothing outside that module may name.
+    pub(in crate::backends::rust) imports: Option<&'a Imports<'a>>,
 }
+
+/// The lookup behind [`Modules::imports`].
+pub(in crate::backends::rust) type Imports<'a> =
+    dyn Fn(&[String], &str) -> Option<Vec<String>> + 'a;
 
 /// The edits over `region` of `text` that keep every relative path and visibility meaning what it
 /// meant. `claimed` are spans another edit owns — an item's own visibility — and are left alone.
@@ -138,7 +146,14 @@ fn path_edit(
     }
 
     let written = &masked[at..cursor];
-    let respelled = relative_to(&arrives_at, &to);
+    let through = modules
+        .imports
+        .and_then(|imports| imports(&arrives_at, &named))
+        .and_then(|target| {
+            let (last, module) = target.split_last()?;
+            (*last == named).then(|| module.to_vec())
+        });
+    let respelled = relative_to(through.as_ref().unwrap_or(&arrives_at), &to);
     (respelled != written).then(|| Edit::replace(at..cursor, respelled))
 }
 
@@ -195,6 +210,7 @@ mod tests {
                 from: &from,
                 to: &to,
                 travelling: None,
+                imports: None,
             },
             &BTreeSet::new(),
             &[],
@@ -238,5 +254,31 @@ mod tests {
         let text = "// super::helper()\nfn f() {}";
 
         assert_eq!(rebased(text, "pairing", "answers"), text);
+    }
+
+    #[test]
+    fn follows_an_import_of_the_module_a_super_path_names() {
+        let (from, to) = (module("host::worker"), module("split::worker"));
+        let imported = |at: &[String], name: &str| {
+            (at == module("host").as_slice() && name == "Config").then(|| module("types::Config"))
+        };
+        let text = "use super::Config;\n";
+        let found = edits(
+            text,
+            0..text.len(),
+            &Modules {
+                from: &from,
+                to: &to,
+                travelling: None,
+                imports: Some(&imported),
+            },
+            &BTreeSet::new(),
+            &[],
+        );
+
+        assert_eq!(
+            applied(text, &found).unwrap(),
+            "use super::super::types::Config;\n"
+        );
     }
 }
