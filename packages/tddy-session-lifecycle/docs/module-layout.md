@@ -7,10 +7,13 @@ the test suites are [test-suites.md](test-suites.md).
 
 ## Sizes, and how they are counted
 
-109 non-test `src/*.rs` files hold about **19,600 production lines**. **No file is at or over 500
-production lines**: the largest is `connection_service/svc_start_sandboxed_claude_cli_session.rs`,
-at 493. Five production functions are over 150 lines, each with a recorded reason
-([`docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md`](../../../docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md)).
+115 non-test `src/*.rs` files hold about **20,800 production lines**. One file is over 500
+production lines, `cursor_cli_spawn.rs` (532); the next largest are
+`connection_service/svc_start_sandboxed_claude_cli_session.rs` (494), `connection_service.rs` (484)
+and `connection_service/svc_start_session_core.rs` (480). Six production functions are over 150
+lines, each with a recorded reason: five in
+[`docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md`](../../../docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md),
+and `handle_rpc` in [`code-issues/`](code-issues/).
 
 A **production line** is a line outside every `#[cfg(test)]` item (a `mod`, a `use`, an inline test
 block), with test-only files excluded: those declared behind `#[cfg(test)] mod x;`, and
@@ -22,7 +25,7 @@ applies the rule is in the change history,
 
 ## `connection_service`: the RPC host
 
-`connection_service.rs` (433 production lines) holds `DaemonSessionHost`, its `mod` declarations,
+`connection_service.rs` (484 production lines) holds `DaemonSessionHost`, its `mod` declarations,
 and the `pub use` lines that keep the crate's public paths stable. Everything else is a child
 module. Each `svc_*` file is an `impl DaemonSessionHost` block for one step or family, so every child
 reads the host's private fields directly and needs `pub(super)` at most. A child's own children use
@@ -43,6 +46,8 @@ of the host calls.
 | `roster_replacement.rs` | `roster_replacement_pairs` (public): the one source of what a session's roster withdraws, used by every sandboxed spawn and relaunch |
 | `claude_cli_spawn.rs` | `spawn_claude_cli_session_inner`, the non-sandboxed Claude CLI spawn, with its steps in `claude_cli_spawn/claude_cli_spawn_steps.rs` (`ClaudeCliWorktreeCut`, `ManagedClaudeCliLaunch`, `ClaudeCliProcess`) |
 | `session_worktree_observer.rs` | the `SessionWorktreeObserver` port, `DaemonSessionHost::with_worktree_observer` and `announce_worktree_ready` |
+| `hooks_and_urls/daemon_urls.rs` | `advertise_daemon_url`, `local_daemon_hook_url`, `claude_hook_daemon_url` and their `DEFAULT_WEB_PORT`: where a hook command reaches this daemon and the URL it advertises to peers, each a function of the `DaemonConfig`. `hooks_and_urls.rs` re-exports it (`pub(crate)` module), and `cursor_cli_spawn/chat.rs` names it as `connection_service::daemon_urls` |
+| `split_context_from_codebase_host_tests.rs` | the test of the split agent's context read against a stalled checkout. It builds a `DaemonSessionHost`, so it is a `#[cfg(test)]` sibling declared in `connection_service.rs`, not an inline block of `svc_split_context_from_codebase_host.rs` |
 
 The attachment progress sink and reporter, `AttachmentMaterialization` and the cleanup are
 `tddy_session_files::attachment_progress`, brought into the host's scope by
@@ -124,8 +129,9 @@ LiveKit forwarding clients, and those crates deliberately do not grow a transpor
 `svc_resolve_tddy_tools_path.rs` (51 lines) holds `resolve_tddy_tools_path`. The host constructor
 `DaemonSessionHost::new` and every `with_*` / `set_*` builder are in
 `svc_resolve_tddy_tools_path/svc_host_builders.rs`, with three children:
-`presenter_observer_spawn.rs` (`maybe_spawn_presenter_observer`), `rpc_activity.rs`
-(`record_rpc_activity`) and `first_admission_token.rs` (`mint_first_admission_token`). The builders'
+`presenter_observer_spawn.rs` (`PresenterObserverDeps` and its `maybe_spawn_presenter_observer`),
+`rpc_activity.rs` (`record_rpc_activity`) and `first_admission_token.rs` (the free function
+`mint_first_admission_token`). The builders'
 file also holds the "sandbox RPC bridge not installed" refusal a sandboxed start meets when the
 runtime never called `install_sandbox_rpc_bridge`.
 
@@ -136,10 +142,49 @@ These sit under the file they were cut from, not yet under their topic's parent
 
 | Module | Holds |
 |---|---|
-| `svc_resolve_os_user/session_attachment_materialization.rs` | `prepare_session_attachments`, `materialize_session_attachments` |
+| `svc_resolve_os_user/os_user_resolution.rs` | the free function `resolve_os_user(config, user_resolver, session_token)`, re-exported by `svc_resolve_os_user.rs` as `connection_service::resolve_os_user` |
+| `svc_resolve_os_user/session_attachment_materialization.rs` | `impl AttachmentState`: `prepare_session_attachments`, `materialize_session_attachments` |
 | `svc_resolve_os_user/local_exec_tool_dispatch.rs` | `run_exec_tool_locally` |
-| `svc_resolve_listed_worktree/session_dir_lookup.rs` | `session_dir_for` |
+| `svc_resolve_listed_worktree/session_dir_lookup.rs` | the free function `session_dir_for(tddy_data_dir, session_id)` |
 | `svc_resolve_listed_worktree/session_room_opening.rs` | `ensure_session_room` |
+
+## Per-topic state, and the topics that name no host
+
+Four topics, and the leaves beside them, run without `DaemonSessionHost`. Each reads the host fields
+its bodies need through a value the host builds in `connection_service/handler_state.rs`, or takes
+those fields as parameters:
+
+| Topic | What its bodies take | Defined in | Built by `DaemonSessionHost::…` |
+|---|---|---|---|
+| Demo VM | `DemoVmState`: `demo_vm_state` (the per-session VM table, shared with the host), `tddy_data_dir`, `user_resolver`, `rpc_activity` (shared) and `config` (a clone) | `activity_hub.rs`, which also holds `DemoVmHandle`. `impl DemoVmState` in `demo_vm_coordinate_handlers.rs` (start, stop and status at a coordinate) | `demo_vm_service_state()`. `DemoVmServiceImpl` holds the state; its constructor `DemoVmServiceImpl::new(Arc<DaemonSessionHost>)` is public and takes the host, so it stays in `svc_demo_vm_ports.rs` beside `demo_vm_entry` |
+| Presenter observer | `PresenterObserverDeps`: `tddy_data_dir`, `presenter_event_sink` and `session_notification_bus` (both shared) | `svc_host_builders/presenter_observer_spawn.rs`, with `maybe_spawn_presenter_observer`. `presenter_observer_task.rs` and `presenter_intent_client.rs` take plain arguments | `presenter_observer_deps()`; `maybe_spawn_presenter_observer` stays a host method that delegates |
+| Attachments | `AttachmentState<'a>`, borrowed for one call: `config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`. No hand-off to a task needs an owned form | `svc_materialize_staged_attachment.rs`, with the staged-file and host-document materializers. `session_attachment_materialization.rs` has `prepare_session_attachments` and `materialize_session_attachments` | `attachment_state()`; `prepare_session_attachments` stays a host method that delegates |
+| Admission token and OS user | no state value: free functions of the two or three fields they read | `mint_first_admission_token(config, session_admissions, session_id, owning_daemon_instance_id)` in `first_admission_token.rs`; `resolve_os_user(config, user_resolver, session_token)` in `os_user_resolution.rs` | `mint_first_admission_token` (`handler_state.rs`) and `resolve_os_user` (`svc_resolve_os_user.rs`), both delegators |
+
+Two more host methods are free functions of the fields they read, and stay as host methods that
+delegate (`handler_state.rs`) because other host methods or a lifecycle test call them:
+`split_forward_deadline(config)` (in `svc_spawn_split_agent.rs`) and `session_dir_for(tddy_data_dir,
+session_id)` (`session_dir_lookup.rs`).
+
+`session_notifications.rs` is a facade: it re-exports `tddy_session_activity::session_notifications`
+and the `pub(crate)` module `session_notification_publishing` (`SessionNotificationPublishing`,
+`resolve_session_label`: the publish context built on a session's display label, which is read
+through `session_list_enrichment`). Call sites keep naming `crate::session_notifications::X`.
+
+**No `DaemonSessionHost` in these files:** `activity_hub.rs`, `demo_vm_coordinate_handlers.rs`,
+`presenter_observer_spawn.rs`, `presenter_observer_task.rs`, `presenter_intent_client.rs`,
+`first_admission_token.rs`, `os_user_resolution.rs`, `svc_materialize_staged_attachment.rs`,
+`session_attachment_materialization.rs`, `session_dir_lookup.rs`, `session_notifications.rs`,
+`session_notification_publishing.rs`, and the leaves `placement.rs`, `remote_git_pack_execution.rs`,
+`agent_list_mapping.rs` and `hooks_and_urls/daemon_urls.rs`. The leaves and the state-taking topics
+name foundations and receivers by their defining crate (`tddy_daemon_kernel::config::DaemonConfig`,
+`tddy_daemon_livekit::peer_routing::PeerRouting`), not through a lifecycle facade.
+
+Two files carry the host by necessity: `svc_demo_vm_ports.rs` (the public
+`DemoVmServiceImpl::new` and `demo_vm_entry`, which are wiring) and `handler_state.rs` (the
+builders and delegators above). Every topic not in this section (agent clones and roster, split
+sessions, the CLI and sandboxed starts and resumes, stack spawns and the session-coordinate
+handlers) is still `impl DaemonSessionHost` code.
 
 ## Shared helpers: `connection_service/service_util.rs`
 
@@ -206,7 +251,10 @@ delegations, so every public method keeps its path; what they call lives in the 
 
 Where a moved body reads host fields, it takes `tddy_session_agents::AgentRosterState<'a>`, a view
 of the ten roster fields borrowed for one call, which `DaemonSessionHost::agent_roster_state()`
-(`handler_state.rs`) builds. It is the first per-topic state view; there is no callback trait yet.
+(`handler_state.rs`) builds. The demo VM, the presenter observer and attachment materialization take
+the same kind of view (see [Per-topic state](#per-topic-state-and-the-topics-that-name-no-host)). No
+callback trait exists: the topics that need a host capability beyond a field (agents, split, launch)
+are still host methods.
 
 ## Definitions this crate takes from below
 
@@ -229,19 +277,20 @@ The crate declares no topics. This grouping comes from module docs and function 
 | 2 | RPC host core: `DaemonSessionHost`, the `session.SessionService` handlers and adapter, the RPC-families port, shared helpers | `connection_service.rs`, `session_coordinate_handlers`, `daemon_rpc_handler`, `service_util`, `svc_host_builders`, `rpc_families`, `handler_state` |
 | 3 | Agent clones, roster and multi-agent rooms | `agent_roster`, `roster_replacement`, `svc_provision_agent_clone`, `svc_start_hosted_agent_clone`, `svc_ensure_session_room_for_agents`, `seeded_clone_guard`; the host-free parts are in `tddy-session-agents` |
 | 4 | Split and sandboxed-codebase sessions | `split_session`, `split_start`, `svc_spawn_split_agent`, `svc_split_context_from_codebase_host`, `svc_start_sandboxed_codebase_session` |
-| 5 | Session catalog: list with enrichment, read, delete, notifications, workspace sessions | `session_notifications` (the half defining `SessionNotificationPublishing`), `workspace_session`; listing, reading and deletion are in `tddy-session-activity` |
+| 5 | Session catalog: list with enrichment, read, delete, notifications, workspace sessions | `session_notifications` (a facade) and `session_notification_publishing` (`SessionNotificationPublishing`), `workspace_session`; listing, reading and deletion are in `tddy-session-activity` |
 | 6 | Terminals, PTY runtime, and the tasks and actions RPCs | `cli_session_manager`, `terminal_session_adapter`, `svc_terminal_ports`; the PTY runtime is in `tddy-terminal-rpc`, the tasks and actions services in `tddy-daemon-sandbox` |
-| 7 | Routing, peers, OS user, room admission, local token, relay idle | `svc_resolve_os_user` (the host's routing delegations, `resolve_os_user`, `resolve_exec_tool_worktree`); routing and admission are in `tddy-daemon-livekit`, the local token and relay idle in `tddy-daemon-kernel` |
+| 7 | Routing, peers, OS user, room admission, local token, relay idle | `svc_resolve_os_user` (the host's routing delegations, `resolve_exec_tool_worktree`), `os_user_resolution`, `first_admission_token`; routing and admission are in `tddy-daemon-livekit`, the local token and relay idle in `tddy-daemon-kernel` |
 | 8 | Attachments and session files | `svc_materialize_staged_attachment`, `svc_resolve_os_user/session_attachment_materialization`, `svc_session_files_ports`; the progress types are in `tddy-session-files` |
 | 9 | Stacked, child and conversation spawns, and PR-stack links | `stack_parent`, `stack_seed_validation`, `stack_child_spawn`, `child_spawn_handler`, `conversation_spawn*`, `svc_pr_status_for_caller` |
-| 10 | Activity ports and presenter observation | `svc_activity_ports`, `activity_hub`, `presenter_observer_task`, `presenter_intent_client` |
-| 11 | Demo VM | `demo_vm_coordinate_handlers`, `svc_demo_vm_ports` |
+| 10 | Activity ports and presenter observation | `svc_activity_ports`, `presenter_observer_spawn`, `presenter_observer_task`, `presenter_intent_client` |
+| 11 | Demo VM | `activity_hub` (`DemoVmState`, `DemoVmHandle`), `demo_vm_coordinate_handlers`, `svc_demo_vm_ports` |
 
-What is left of each topic here is `impl DaemonSessionHost` code: an inherent `impl` of this crate's
-type cannot leave it (`E0116`), and most of it calls other host methods or hands `self.clone()` to a
-task. Converting those methods in place into functions over per-topic state and callback ports, and
-then moving each converted topic to its receiver, is the rest of the `#carve` stack:
-[#531](https://github.com/uppin/tddy-coder/pull/531) (demo VM, presenter, admission and attachments),
+What is left of each topic here, apart from the demo VM, the presenter observer, attachments and
+admission (see [Per-topic state](#per-topic-state-and-the-topics-that-name-no-host)), is `impl
+DaemonSessionHost` code: an inherent `impl` of this crate's type cannot leave it (`E0116`), and most
+of it calls other host methods or hands `self.clone()` to a task. Converting those methods in place
+into functions over per-topic state and callback ports, and then moving each converted topic to its
+receiver, is the rest of the `#carve` stack:
 [#532](https://github.com/uppin/tddy-coder/pull/532) (agent clones and roster),
 [#533](https://github.com/uppin/tddy-coder/pull/533) (split sessions),
 [#534](https://github.com/uppin/tddy-coder/pull/534) (stack spawns and the jail and CLI launches),
@@ -257,7 +306,8 @@ wiring crate).
 - **Out of the crate.** The private fields are the obstacle. Each topic's `impl` block reaches into
   one struct, so moving it to another crate first needs a per-topic state or port struct, the
   pattern `connection_service/handler_state.rs` sets (`agent_roster_state()` is the one built for a
-  receiver).
+  receiver; `demo_vm_service_state()`, `presenter_observer_deps()` and `attachment_state()` are the
+  ones built for topics that stay in this crate for now).
 - **Reverse dependencies.** `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` depend on
   this crate. `tddy-model-registry`, `tddy-tool-engine` and `tddy-worktree-service` use it only as a
   dev-dependency.

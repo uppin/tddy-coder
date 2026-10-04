@@ -191,7 +191,9 @@ also re-exported at the crate root. `family_proto_bridge::wire_same` and
 
 ## The presenter observer
 
-When a workflow session starts, `DaemonSessionHost::maybe_spawn_presenter_observer` calls
+When a workflow session starts, `DaemonSessionHost::maybe_spawn_presenter_observer` builds
+`PresenterObserverDeps` (the data root and the two sinks below) and calls its
+`maybe_spawn_presenter_observer`, which calls
 `presenter_observer_task::spawn_presenter_observer_task`, which connects to the child's
 `PresenterObserver` gRPC stream (90 attempts, 100 ms apart) and hands each event to **two
 independent sinks**:
