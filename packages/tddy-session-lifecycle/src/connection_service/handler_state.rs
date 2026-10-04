@@ -6,14 +6,19 @@
 //! client, common room, registry, token store, idle tracker, task registry and jails the host does
 //! rather than to copies of them.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use livekit::prelude::Room;
 use tddy_model_registry::ModelRegistryStore;
+use tddy_rpc::Status;
 use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
+use super::svc_resolve_listed_worktree::session_dir_lookup;
+use super::svc_resolve_tddy_tools_path::svc_host_builders::first_admission_token;
+use super::svc_spawn_split_agent;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
 use crate::multi_host::EligibleDaemonSource;
@@ -95,6 +100,34 @@ impl DaemonSessionHost {
             Arc::clone(&self.jail_relaunch),
             Arc::clone(&self.hosted_agent_clones),
         )
+    }
+
+    /// The first admit for an agent clone's owning daemon (see
+    /// [`first_admission_token::mint_first_admission_token`]), over this host's config and
+    /// admission registry.
+    pub(crate) fn mint_first_admission_token(
+        &self,
+        session_id: &str,
+        owning_daemon_instance_id: &str,
+    ) -> Option<(String, String, String, u64)> {
+        first_admission_token::mint_first_admission_token(
+            &self.config,
+            &self.session_admissions,
+            session_id,
+            owning_daemon_instance_id,
+        )
+    }
+
+    /// Where a session this daemon serves keeps its `.session.yaml` (see
+    /// [`session_dir_lookup::session_dir_for`]), under this host's data dir.
+    pub(crate) fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
+        session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
+    }
+
+    /// How long to wait for the codebase daemon's answer to a split session's forwarded start (see
+    /// [`svc_spawn_split_agent::split_forward_deadline`]), under this host's config.
+    pub fn split_forward_deadline(&self) -> Duration {
+        svc_spawn_split_agent::split_forward_deadline(&self.config)
     }
 
     /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in

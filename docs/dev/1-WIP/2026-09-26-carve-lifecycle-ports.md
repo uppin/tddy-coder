@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s host methods become receiver-shaped functions over per-topic state and callback ports, in place — the master plan, and its first node: the leaf topics (T7, T8, T10, T11) and the port-free cuts
 
 **Date**: 2026-09-26
-**Status**: 📋 Planned. D15 decided (2026-09-26): this plan is cut into five linear conversion nodes (16a–16e) plus one move node (17). Awaiting the developer's review of the remaining open decisions (see "Decisions & trade-offs")
+**Status**: 📋 Planned. D15 decided (2026-09-26): this plan is cut into five linear conversion nodes (16a–16e) plus one move node (17). Awaiting the developer's review of the remaining open decisions (see "Decisions & trade-offs"). **Re-scoped 2026-10-04:** M0.1 and M0.6 are CUT from 16a, and M0.4 (D8) is deferred; see "Scope". **The baseline moved to 575 / 22 / 1** (the base moved: master landed lifecycle work after #526's squash, #571, #573 and others, with new passing tests such as `start_phase_acceptance`; the 22 failures are unchanged by name)
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 16/21, branch `feature/carve/lifecycle-ports` (#531), on top of `#carve` 15 (#526, `feature/carve/lifecycle-split`). **This node is 16a**: it carries the whole stack's master plan (outline, final design, decisions) and delivers M0–M3 only
 
@@ -99,9 +99,9 @@ The work deferred into these parts:
 ## Responsibility
 
 This node (16a) owns M0–M3:
-- **M0**: record the baseline; cut the six wrong-way cross-topic edges that need no port (M0.1–M0.3);
-  re-parent the four mixed parent/child files (M0.4, D8); relocate the host-constructing inline test
-  (M0.5, D9); split `seeded_clone_guard.rs` (M0.6).
+- **M0**: record the baseline; cut the six wrong-way cross-topic edges that need no port (M0.2–M0.3; **M0.1 is cut**);
+  re-parent the four mixed parent/child files (M0.4, D8: **deferred by the developer**); relocate the
+  host-constructing inline test (M0.5, D9). **M0.6 (`seeded_clone_guard.rs` split) is cut.**
 - **M1–M3**: convert T11, T10, T7 and T8 in place into functions over their state value
   (`DemoVmState`, `PresenterObserverDeps`, the admission-token function's two fields,
   `AttachmentState`). None of them needs a callback trait.
@@ -120,7 +120,7 @@ This node (16a) owns M0–M3:
   another crate. node 17 does that, and only with the `tddy-tools restructure` engine: a refusal
   means stop and ask; hand edits after a move are build corrections only, each new cause filed as a
   todo.
-- **No behaviour change.** The node holds the baseline on its own: 562 passed, the same 22 failures by
+- **No behaviour change.** The node holds the baseline on its own: 575 passed, the same 22 failures by
   name, 1 ignored (see "Baseline").
 - **Public `tddy_session_lifecycle::…` paths stay reachable.** No consumer crate is edited
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`). The exception is a
@@ -133,7 +133,7 @@ This node (16a) owns M0–M3:
   jail and CLI-spawn half of T1 (16d), the start/resume half of T1 and T1c (16e). Their host methods
   stay host methods here. `AgentHostCallbacks`, `SplitHost` and `LaunchHost` are **not defined** here.
 - **`PeerRouted*`, the port adapters, the terminal adapter and bridge stay** in lifecycle as wiring.
-- **The engine is used where it can do the extraction** (`extract_module` for M0.1, M0.2 and the
+- **The engine is used where it can do the extraction** (`extract_module` for M0.2 and the
   `session_notification_publishing` split). Hand conversion is allowed, because this node **is** the
   restructure. It is still restricted:
   - it may re-point a field read (`self.x` → `state.x`) or a host call (`self.m(…)` →
@@ -151,7 +151,7 @@ Implementing one here collides with the PR that owns it.
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| `15` lifecycle-split (#526, `feature/carve/lifecycle-split`) | the leaf moves (1a, 2a, 2b, T5a+T5b, host-free T7/T8/T3 parts); `tddy_session_agents::AgentRosterState<'a>` and lifecycle's `agent_roster_state()` builder; the 11 T3 functions in `tddy-session-agents` (`clone_readiness`, `agent_clone_lookup`, `spawn_agent_def`, `hosted_clone_start`, …); the eight engine fixes; the baseline 562 / 22 / 1 | converts T7, T8, T10 and T11 on top of that layout, and cuts the M0 edges around it. (T3's use of `AgentRosterState` and the 11 functions is 16b's) | re-run or undo any #526 move, move anything across a crate, or change #526's engine fixes |
+| `15` lifecycle-split (#526, `feature/carve/lifecycle-split`) | the leaf moves (1a, 2a, 2b, T5a+T5b, host-free T7/T8/T3 parts); `tddy_session_agents::AgentRosterState<'a>` and lifecycle's `agent_roster_state()` builder; the 11 T3 functions in `tddy-session-agents` (`clone_readiness`, `agent_clone_lookup`, `spawn_agent_def`, `hosted_clone_start`, …); the eight engine fixes; the baseline 575 / 22 / 1 | converts T7, T8, T10 and T11 on top of that layout, and cuts the M0 edges around it. (T3's use of `AgentRosterState` and the 11 functions is 16b's) | re-run or undo any #526 move, move anything across a crate, or change #526's engine fixes |
 | `14` destructure (#524, merged) | every file < 500, no function > 150 except the five filed, DRY #2–#13 | converts the functions #524 laid out | split, deduplicate or re-measure; the #524 todos stay theirs |
 
 ## Draft PR contract
@@ -169,9 +169,9 @@ the 2026-09-25 "no shape tests" decision (D11).
 
 **Wave:** after #526.
 **Greenable independently:** **no.** It converts the tree #526 leaves, and its baseline is #526's
-562 / 22 / 1. It can go green only once #526 is green and this branch is rebased onto it.
+575 / 22 / 1. It can go green only once #526 is green and this branch is rebased onto it.
 **Concurrent with:** nothing.
-**Blocks:** 16b (T3 calls 16a's admission-token function and the M0.1 T3 group), and through it every
+**Blocks:** 16b (T3 calls 16a's admission-token function; **16b must re-plan around M0.1's cut**: the T3 group `peer_session_answer` does not exist, so the three T3 → T4/WS edges and `resolve_exec_tool_worktree` are 16b's to cut), and through it every
 later node: 16c, 16d, 16e, then node 17.
 
 Real dependency edges: `#526 → 16a → 16b → 16c → 16d → 16e → node 17`. Within the plan, 16d's T9
@@ -240,20 +240,29 @@ This node (16a) is M0–M3. M4–M8 are the successor nodes' scope (see "Milesto
   need no port. The other four in "Cross-topic call matrix" (`start_session_core` and
   `delete_session_…` behind `SplitHost`, `attached_initial_prompt` and `PairedAgentSession` by
   placement) are cut in 16c:
-  - [ ] M0.1 move the free predicates `peer_has_no_such_session` and `split_pairing`, and the free
-    functions `resolve_worktree_root_for_session` and `resolve_exec_tool_worktree`, into a T3 module,
-    `peer_session_answer` (`extract_module`, in lifecycle). The facades that name them keep resolving;
-  - [ ] M0.2 group the daemon-URL trio (`advertise_daemon_url`, `local_daemon_hook_url`,
-    `claude_hook_daemon_url`) into a `daemon_urls` module. Group `write_claude_hooks_settings` and
-    `resolve_start_session_claude_binary` with T4. `cursor_cli_spawn/chat.rs`'s import re-points to
-    `daemon_urls`;
-  - [ ] M0.3 turn `split_forward_deadline`, `session_dir_for` and `mint_first_admission_token` into
+  - [-] M0.1 **CUT from 16a (2026-10-04).** It asked for the free predicates `peer_has_no_such_session`
+    and `split_pairing`, and the free functions `resolve_worktree_root_for_session` and
+    `resolve_exec_tool_worktree`, to be gathered into one T3 module, `peer_session_answer`, with
+    `extract_module`. They live in four files, and `extract_module` takes a contiguous run of items of
+    **one** file and writes the module as that file's child; no operation moves an item between
+    modules of one crate. Hand moves are not allowed here. The gap is filed as
+    [`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md).
+    **16b consumes this group and must re-plan** (a same-crate move operation, or a developer-approved
+    hand move). Until then the three T3 → T4/WS edges below stay;
+  - [x] M0.2 (**engine part only**) group the daemon-URL trio (`advertise_daemon_url`,
+    `local_daemon_hook_url`, `claude_hook_daemon_url`) and their `DEFAULT_WEB_PORT` const into a
+    `daemon_urls` module (`extract_module`, `hooks_and_urls/daemon_urls.rs`, glob facade).
+    `cursor_cli_spawn/chat.rs`'s import re-points to `daemon_urls`; the module is `pub(crate)` for it.
+    **Not done:** grouping `write_claude_hooks_settings` and `resolve_start_session_claude_binary`
+    "with T4": the two are not contiguous and have no module to join yet; they move with T4 in 16c;
+  - [x] M0.3 turn `split_forward_deadline`, `session_dir_for` and `mint_first_admission_token` into
     free functions of the fields they read. The host methods stay as delegators, in a wiring file;
-  - [ ] M0.4 re-parent the four mixed parent/child files (**consent needed, D8**);
-  - [ ] M0.5 move `svc_split_context_from_codebase_host.rs`'s host-constructing inline test out to a
+  - [-] M0.4 re-parent the four mixed parent/child files (**D8: deferred by the developer; not done in 16a**);
+  - [x] M0.5 move `svc_split_context_from_codebase_host.rs`'s host-constructing inline test out to a
     `connection_service/split_context_from_codebase_host_tests.rs` sibling that stays in lifecycle (D9);
-  - [ ] M0.6 split `seeded_clone_guard.rs`: move `SessionStdioEndpoint` to T1 and `ExecToolRoute` beside
-    `LocalExecTools`.
+  - [-] M0.6 **CUT from 16a (2026-10-04).** Splitting `seeded_clone_guard.rs` (`SessionStdioEndpoint` to
+    T1, `ExecToolRoute` beside `LocalExecTools`) moves types between files, the same missing
+    same-crate move operation as M0.1 (see the todo above). 16b/16d re-plan it with M0.1.
 - [ ] **M1: T11 demo VM**: `DemoVmState` {`demo_vm_state`, `tddy_data_dir`, `user_resolver`,
   `rpc_activity`, `config`}. `DemoVmServiceImpl` holds it instead of `Arc<DaemonSessionHost>`;
   `demo_vm_entry` (wiring) builds it
@@ -266,7 +275,7 @@ This node (16a) is M0–M3. M4–M8 are the successor nodes' scope (see "Milesto
   {`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`} for the two attachment files
 - [ ] **Leaves** (`placement`, `remote_git_pack_execution`, `agent_list_mapping`, `daemon_urls`): no
   conversion. Imports re-pointed to their defining crates only (A4)
-- [ ] **Baseline** after every milestone: 562 / 22 / 1, the same 22 by name. clippy and fmt clean on
+- [ ] **Baseline** after every milestone: 575 / 22 / 1, the same 22 by name. clippy and fmt clean on
   lifecycle. `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`,
   `tddy-daemon` and `tddy-telegram-control`
 - [ ] **Acceptance checks** A1–A8 for 16a's topics pass (see "Acceptance graph — after this node")
@@ -925,8 +934,7 @@ Every receiver's topological position is below lifecycle, and within the receive
 
 After 16a there are no crate moves. This is **lifecycle's module layout after 16a**:
 - the four leaf topics converted (T7, T8, T10, T11), each over its state, none with a callback;
-- the host-free leaves and the three modules M0 creates (`peer_session_answer`, `daemon_urls`,
-  `session_notification_publishing`);
+- the host-free leaves and the two modules M0 and M2 create (`daemon_urls`, `session_notification_publishing`; `peer_session_answer` is cut, M0.1);
 - the topics **not converted yet**, still host methods, shown as one box each;
 - the edges that must not exist.
 
@@ -958,7 +966,7 @@ graph TD
     end
 
     subgraph TODO["not converted yet - host methods"]
-      t3["T3 agents - 16b - now owns peer_session_answer"]
+      t3["T3 agents - 16b"]
       t4["T4, service_util, workspace_session - 16c"]
       cli["CLI PTY runtime - imports in 16c"]
       t1["T1, T9, T1c launch - 16d and 16e"]
@@ -1010,13 +1018,13 @@ for every row, but by default each is a grep (D11).
 |---|---|---|
 | A1 | No 16a topic file names `DaemonSessionHost`, as a type, an `impl` or a method call. The M0.3 delegators live in a wiring file | `grep -n 'DaemonSessionHost' <16a topic files> \| grep -v '^\S*:\s*//'` is empty (for `svc_demo_vm_ports.rs`, outside `demo_vm_entry`) |
 | A2 | No 16a topic file names a wiring module: `connection_service`'s own items, `svc_*_ports`, `handler_state`, `svc_host_builders`, `rpc_families`, `PeerRouted*`, `DaemonRpcHandler`, or `test_util` outside `#[cfg(test)]` | a grep of each 16a topic file for `super::(super::)?(DaemonRpcHandler\|PeerRouted\|handler_state\|svc_host_builders\|…)`, `crate::rpc_families` and `crate::test_util` outside test modules; empty |
-| A3 | No upward edge from a converted topic: T7, T8, T10, T11 and the leaves ↛ any other topic (T10 → `session_notification_publishing` is allowed). **Plus the six M0 cuts:** no T3 file names `split_start::peer_has_no_such_session`, `split_session::split_pairing`, `workspace_session::resolve_worktree_root_for_session` or `hooks_and_urls::advertise_daemon_url`; no T4 file names a `hooks_and_urls` item | a scripted grep: for each 16a topic file, collect `crate::…`, `super::…` and `crate::connection_service::…` module targets, map each to its topic by the inventory, and fail on any pair outside the allowed DAG; plus the six named greps, each empty. Optionally `cargo modules dependencies --lib -p tddy-session-lifecycle` |
-| A3b | The four re-parented children (D8) have no parent from another topic, and the D9 test is out | `grep -n 'mod split_claude_cli_start' svc_materialize_staged_attachment.rs`, `grep -n 'mod session_attachment_materialization' svc_resolve_os_user.rs`, `grep -n 'mod jail_env_builders' svc_turn_end_reporter.rs`, `grep -n 'mod svc_host_builders' svc_resolve_tddy_tools_path.rs` are empty; `grep -n 'DaemonSessionHost' svc_split_context_from_codebase_host.rs` has no hit inside a `#[cfg(test)]` module |
+| A3 | No upward edge from a converted topic: T7, T8, T10, T11 and the leaves ↛ any other topic (T10 → `session_notification_publishing` is allowed). **Plus the M0 cuts that landed (M0.1 and M0.4 are not in 16a):** no T3 file names `hooks_and_urls::advertise_daemon_url` (it is now `daemon_urls::advertise_daemon_url`). The cut of `split_start::peer_has_no_such_session`, `split_session::split_pairing` and `workspace_session::resolve_worktree_root_for_session` from T3 (M0.1) and of the `hooks_and_urls` helpers from T4 (the grouping of `write_claude_hooks_settings` / `resolve_start_session_claude_binary`) are **not** 16a's | a scripted grep: for each 16a topic file, collect `crate::…`, `super::…` and `crate::connection_service::…` module targets, map each to its topic by the inventory, and fail on any pair outside the allowed DAG; plus the named grep, empty. Optionally `cargo modules dependencies --lib -p tddy-session-lifecycle` |
+| A3b | **Re-scoped:** M0.4 (the four re-parented children, D8) is deferred by the developer, so only the D9 half is checked in 16a: the test is out. (The four `mod` greps below stay open for the node that re-parents.) The four re-parented children (D8) have no parent from another topic, and the D9 test is out | `grep -n 'mod split_claude_cli_start' svc_materialize_staged_attachment.rs`, `grep -n 'mod session_attachment_materialization' svc_resolve_os_user.rs`, `grep -n 'mod jail_env_builders' svc_turn_end_reporter.rs`, `grep -n 'mod svc_host_builders' svc_resolve_tddy_tools_path.rs` are empty; `grep -n 'DaemonSessionHost' svc_split_context_from_codebase_host.rs` has no hit inside a `#[cfg(test)]` module |
 | A4 | 16a topic files name foundations and receivers **by their defining crate**, never through a lifecycle facade | `grep -nE 'crate::(config\|relay_idle\|livekit_peer_discovery\|session_room\|peer_routing\|session_admission_service\|context_files\|context_sync\|session_attachments\|session_reader\|session_deletion\|user_sessions_path\|session_agent_[a-z]+\|project_storage\|branch_intent\|pty_runtime\|host_session_service)\b' <16a topic files>` is empty |
 | A5 | No 16a topic file clones the host | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in 16a topic files is empty |
 | A6 | No callback trait exists yet, and the 16a states carry none: T7, T8, T10 and T11 take a state only (no `AdmissionState`, D6) | `grep -rn 'trait AgentHostCallbacks\|trait SplitHost\|trait LaunchHost' packages/tddy-session-lifecycle/src packages/tddy-session-agents/src` is empty; `grep -rn 'struct AdmissionState'` is empty |
 | A7 | The public API is unchanged: no consumer edit, every facade still resolves, and `tddy-session-agents` is untouched | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop packages/tddy-session-agents` is empty, and `cargo check --all-targets` is clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` (`tddy-desktop` on CI: it embeds the web bundle) |
-| A8 | Behaviour: the baseline | 562 passed, the same 22 by name, 1 ignored, after M0, M1, M2 and M3. `restructure verify --against <base>` accounted |
+| A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after M0, M1, M2 and M3. `restructure verify --against <base>` accounted |
 
 ### Conversion end state (after 16e)
 
@@ -1129,7 +1137,7 @@ topic file sets are the per-file inventory's groups.
 | A5 | No topic module clones the host: no `self.clone()` or `Arc::clone(self)` whose value is a `DaemonSessionHost`. Hand-offs clone the topic's owned handle | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in topic files is empty |
 | A6 | Callback traits hold only approved methods. Each trait is defined once, in its topic module, and implemented once, on `DaemonSessionHost`, in a wiring file | `grep -rn 'trait AgentHostCallbacks\|trait SplitHost\|trait LaunchHost'` gives one hit each. The method lists match "State structs and callback traits" as decided. `grep -rn 'impl .*\(AgentHostCallbacks\|SplitHost\|LaunchHost\) for DaemonSessionHost'` gives one hit each, all in wiring |
 | A7 | The public API is unchanged: no consumer edit, and every facade still resolves | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty, and `cargo check --all-targets` is clean on the first three plus lifecycle and `tddy-session-agents` |
-| A8 | Behaviour: the baseline | 562 passed, the same 22 by name, 1 ignored, after every milestone. `restructure verify --against <base>` accounted |
+| A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after every milestone. `restructure verify --against <base>` accounted |
 
 ## Planned: node 17 acceptance graph
 
@@ -1212,8 +1220,7 @@ Host methods called from outside the crate:
 states and the delegators, all still inside lifecycle. It is measured at wrap. The layout is the 16a
 acceptance graph above. The topic files keep their paths, except the four re-parented with consent
 (D8) and the new modules M0 and M2 create:
-- `peer_session_answer`, T3's group for `peer_has_no_such_session`, `split_pairing`,
-  `resolve_worktree_root_for_session` and `resolve_exec_tool_worktree`;
+- (`peer_session_answer`, T3's group for four free items, is **cut from 16a**, M0.1;)
 - `daemon_urls`;
 - `session_notification_publishing`;
 - `connection_service/split_context_from_codebase_host_tests.rs` (D9).
@@ -1248,7 +1255,7 @@ Leaves first, one topic per milestone. **The PR cut is decided (D15, 2026-09-26)
 
 | Milestone | Topic | Lines converted or touched | Depends on | Node |
 |---|---|---:|---|---|
-| M0 | baseline, the six port-free cuts, re-parenting, test relocation, `seeded_clone_guard` split | ~300 | — | **16a** |
+| M0 | baseline, the port-free cuts (M0.2, M0.3; M0.1 and M0.6 cut, M0.4 deferred), test relocation | ~300 | — | **16a** |
 | M1 | T11 demo VM | 321 | M0 | **16a** |
 | M2 | T10 presenter + `session_notifications` split | 361 | M0 | **16a** |
 | M3 | T7 + T8 | 428 | M0 | **16a** |
@@ -1327,7 +1334,7 @@ Recorded before M0, and the acceptance criterion after every milestone:
   --skip sandboxed_bash_pty_action_streams_output
 ```
 
-Expected: **562 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. (Was 562 on #526's base; the base moved when master landed lifecycle work after #526's squash, #571, #573 and others, which added passing tests.) The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit`
 passes when re-run alone, so it is not a regression.
 
@@ -1481,7 +1488,7 @@ with the recommendation.
 | D2 `AgentHostCallbacks` + `session_room_roster` | 16b | 16b |
 | D3 `SplitHost` / `LaunchHost` beyond the plan, `DaemonSeedCloneClaimant`, `StackParentHost` | 16b (claimant), 16c (`SplitHost`), 16d (`LaunchHost`, `StackParentHost`) | 16b, 16c, 16d, 16e |
 | D4 `tddy-cli-sessions` | 17 (a crate); 16c only treats CLI as its own topic | 16c (informational), 17 |
-| D5 `service_util`, `workspace_session` → split | 16a (its T3 half, M0.1), 16c (placement) | 16a, 16c, 17 |
+| D5 `service_util`, `workspace_session` → split | 16c (placement); its T3 half (M0.1) was cut from 16a and moves to 16b | 16a, 16c, 17 |
 | D6 no `AdmissionState` | 16a | 16a |
 | D7 `LocalExecTools` | 16b (callback set), 17 (move) | 16b, 17 |
 | D8 re-parent four files | 16a | 16a |
@@ -1535,7 +1542,7 @@ Tasks executed at wrap:
 - [ ] A5: no host clone in a 16a topic file (grep empty)
 - [ ] A6: no callback trait and no `AdmissionState` exist yet (greps empty)
 - [ ] A7: no consumer edit and `tddy-session-agents` untouched (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 562 / 22 / 1, the same 22 by name, after M0, M1, M2 and M3; `restructure verify` accounted
+- [ ] A8: baseline 575 / 22 / 1, the same 22 by name, after M0, M1, M2 and M3; `restructure verify` accounted
 
 **Documentation**
 - [ ] `packages/tddy-session-lifecycle/docs/module-layout.md`: the 16a topic modules, the three new modules and the four re-parented files (via the changeset workflow)

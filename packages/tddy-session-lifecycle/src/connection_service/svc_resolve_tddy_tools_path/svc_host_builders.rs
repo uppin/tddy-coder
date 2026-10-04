@@ -372,7 +372,7 @@ impl DaemonSessionHost {
     }
 }
 
-mod first_admission_token;
+pub(in crate::connection_service) mod first_admission_token;
 
 mod rpc_activity;
 

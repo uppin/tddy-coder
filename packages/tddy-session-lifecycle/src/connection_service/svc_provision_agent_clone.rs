@@ -13,7 +13,7 @@ use super::peer_has_no_such_session;
 use tddy_service::proto::session::DeleteSessionRequest;
 
 use crate::{
-    connection_service::{hooks_and_urls, seed_codebase},
+    connection_service::{daemon_urls, seed_codebase},
     livekit_peer_discovery::local_instance_id_for_config,
 };
 
@@ -78,7 +78,7 @@ impl DaemonSessionHost {
             agent_clone: Some(tddy_service::proto::session::AgentClonePlacement {
                 session_id: session_id.to_string(),
                 facilitating_daemon_instance_id: local_instance_id_for_config(&self.config),
-                facilitating_daemon_url: hooks_and_urls::advertise_daemon_url(&self.config),
+                facilitating_daemon_url: daemon_urls::advertise_daemon_url(&self.config),
                 first_admission_token,
                 first_admission_url,
                 first_admission_room,
