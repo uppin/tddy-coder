@@ -22,8 +22,6 @@ use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
 
-/// The common room's name before each run's own suffix — see [`Fleet::start`].
-const COMMON_ROOM_PREFIX: &str = "forwarded-rpc-stamp";
 const PEER_INSTANCE_ID: &str = "stamp-receiving-peer";
 const FORWARDER_IDENTITY: &str = "stamp-forwarding-daemon";
 /// 10 s, over the integration ceiling: a join reaches the other participant through a LiveKit
@@ -88,7 +86,7 @@ impl Fleet {
             .expect("LiveKit testkit (Docker or LIVEKIT_TESTKIT_WS_URL)");
         let url = livekit.get_ws_url();
         let peer_identity = daemon_rpc_identity(PEER_INSTANCE_ID);
-        let common_room = format!("{COMMON_ROOM_PREFIX}-{}", uuid::Uuid::new_v4());
+        let common_room = LiveKitTestkit::unique_room("forwarded-rpc-stamp");
 
         let peer = LiveKitParticipant::connect(
             &url,

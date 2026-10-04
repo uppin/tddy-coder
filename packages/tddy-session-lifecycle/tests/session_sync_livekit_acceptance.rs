@@ -59,7 +59,10 @@ const INSTANCE_ID: &str = "session-sync-e2e-host";
 /// The lobby this daemon serves `remote_git.RemoteGitService` in — `MintLiveKitToken` grants the
 /// common room and only the common room, which is why the git transport meets the daemon here and
 /// the syncer meets it in the session room.
-const COMMON_ROOM: &str = "session-sync-e2e-lobby";
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("session-sync-e2e-lobby"))
+}
 
 const LK_API_KEY: &str = "devkey";
 
@@ -575,6 +578,7 @@ fn a_project_at(repo: &Path) -> ProjectData {
 
 /// The `daemon.yaml` of a daemon that runs agents, hosts their rooms and serves its projects.
 fn a_daemon_yaml(ws_url: &str, agent_binary: &Path, auth_storage: &Path) -> String {
+    let room = common_room();
     format!(
         "daemon_instance_id: {INSTANCE_ID}\n\
          users:\n  - github_user: \"{GITHUB_USER}\"\n    os_user: \"{}\"\n\
@@ -584,7 +588,7 @@ fn a_daemon_yaml(ws_url: &str, agent_binary: &Path, auth_storage: &Path) -> Stri
          session_room:\n  poll_interval_ms: {POLL_INTERVAL_MS}\n\
          livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
          api_secret: {LK_API_SECRET}\n  \
-         common_room: {COMMON_ROOM}\n",
+         common_room: {room}\n",
         serving_os_user(),
         auth_storage.display(),
         agent_binary.display(),
@@ -623,7 +627,7 @@ async fn a_git_remote_in_the_lobby(
         Arc::new(config.clone()),
     ));
     let token = testkit
-        .generate_token(COMMON_ROOM, &format!("daemon-{INSTANCE_ID}"))
+        .generate_token(common_room(), &format!("daemon-{INSTANCE_ID}"))
         .expect("a LiveKit token for the daemon's lobby participant");
     let participant =
         LiveKitParticipant::connect(ws_url, &token, service, RoomOptions::default(), None, None)

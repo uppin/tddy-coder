@@ -164,7 +164,7 @@ async fn acp_session_over_real_livekit_handshakes_and_streams_agent_output() -> 
     // (a) A LiveKit room via the testkit (reuses LIVEKIT_TESTKIT_WS_URL or starts a container).
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
-    let room_name = "acp-session-scenarios";
+    let room_name = &LiveKitTestkit::unique_room("acp-session-scenarios");
     let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
     let client_token = livekit.generate_token(room_name, CLIENT_IDENTITY)?;
 

@@ -51,8 +51,8 @@ const THE_OPERATORS_CODE: &str = "operator-code";
 const SOMEBODY_ELSE: &str = "a-stranger";
 const SOMEBODY_ELSES_CODE: &str = "stranger-code";
 /// The identity the desktop's roster is served under in the test room.
-const THE_DESKTOPS_ROOM_IDENTITY: &str = "daemon-first-login-desktop";
-const A_ROOM_PEERS_IDENTITY: &str = "web-a-room-peer";
+const THE_DESKTOP_LOBBY_IDENTITY: &str = "daemon-first-login-desktop";
+const A_LOBBY_PEERS_IDENTITY: &str = "web-a-room-peer";
 /// 20 s, over the integration ceiling: the roster is served through a LiveKit server in a Docker
 /// container, and joining its room then completing an RPC over it is seconds on a loaded CI runner.
 const SERVING_TIMEOUT: Duration = Duration::from_secs(20);
@@ -417,7 +417,7 @@ async fn a_room_peer_of(deployment: &Deployment) -> RoomPeer {
 
     let desktop = LiveKitParticipant::connect(
         &url,
-        &token_for(THE_DESKTOPS_ROOM_IDENTITY),
+        &token_for(THE_DESKTOP_LOBBY_IDENTITY),
         MultiRpcService::new(cloned(&deployment.roster)),
         RoomOptions::default(),
         None,
@@ -429,16 +429,16 @@ async fn a_room_peer_of(deployment: &Deployment) -> RoomPeer {
 
     let (room, mut events) = Room::connect(
         &url,
-        &token_for(A_ROOM_PEERS_IDENTITY),
+        &token_for(A_LOBBY_PEERS_IDENTITY),
         RoomOptions::default(),
     )
     .await
     .expect("the peer joins the room");
-    sees_participant(&room, &mut events, THE_DESKTOPS_ROOM_IDENTITY).await;
+    sees_participant(&room, &mut events, THE_DESKTOP_LOBBY_IDENTITY).await;
     let room = Arc::new(room);
     let client = RpcClient::new_shared(
         Arc::clone(&room),
-        THE_DESKTOPS_ROOM_IDENTITY.to_string(),
+        THE_DESKTOP_LOBBY_IDENTITY.to_string(),
         room.subscribe(),
     );
     RoomPeer {

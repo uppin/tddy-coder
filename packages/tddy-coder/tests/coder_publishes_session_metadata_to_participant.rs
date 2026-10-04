@@ -79,7 +79,7 @@ async fn coder_publishes_session_metadata_to_participant() -> Result<()> {
     // Given — a LiveKit server and a session participant with a metadata watch channel
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
-    let room_name = "coder-session-participant-metadata";
+    let room_name = &LiveKitTestkit::unique_room("coder-session-participant-metadata");
 
     let tool_calls_dir = tempfile::tempdir()?;
     let (metadata_tx, metadata_rx) = tokio::sync::watch::channel(String::new());

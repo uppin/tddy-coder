@@ -40,7 +40,10 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// The lobby, so the daemon under test is configured exactly as in production: the session room is
 /// an addition to it, not a replacement.
-const COMMON_ROOM: &str = "session-room-lobby";
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("session-room-lobby"))
+}
 const INSTANCE_ID: &str = "session-room-facilitating-host";
 const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
@@ -142,9 +145,10 @@ fn register_project(projects_dir: &Path, repo_path: &Path) {
 
 /// The `livekit:` block a daemon needs to host session rooms.
 fn livekit_yaml_block(ws_url: &str) -> String {
+    let room = common_room();
     format!(
         "livekit:\n  enabled: true\n  url: {ws_url}\n  api_key: {LK_API_KEY}\n  \
-         api_secret: {LK_API_SECRET}\n  common_room: {COMMON_ROOM}\n"
+         api_secret: {LK_API_SECRET}\n  common_room: {room}\n"
     )
 }
 

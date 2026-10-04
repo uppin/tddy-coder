@@ -86,7 +86,7 @@ async fn coder_serves_connection_service_from_participant() -> Result<()> {
     // Given — a LiveKit server
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
-    let room_name = "coder-session-participant-rpc";
+    let room_name = &LiveKitTestkit::unique_room("coder-session-participant-rpc");
 
     let tool_calls_dir = tempfile::tempdir()?;
     let (_metadata_tx, metadata_rx) = tokio::sync::watch::channel(String::new());
@@ -215,7 +215,7 @@ async fn coder_session_participant_executes_a_real_read_against_its_worktree() -
     // Given — a LiveKit server and a tempdir worktree with a pre-written file
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
-    let room_name = "coder-session-participant-real-tool";
+    let room_name = &LiveKitTestkit::unique_room("coder-session-participant-real-tool");
 
     let worktree = tempfile::tempdir()?;
     let worktree_root = worktree.path().to_path_buf();

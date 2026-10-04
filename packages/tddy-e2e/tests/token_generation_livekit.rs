@@ -25,7 +25,6 @@ mod livekit_tests {
     use tddy_service::{EchoServiceImpl, EchoServiceServer};
 
     const SERVER_IDENTITY: &str = "token-gen-server";
-    const ROOM_NAME: &str = "token-generation-test";
     const DEV_API_KEY: &str = "devkey";
     const DEV_API_SECRET: &str = "secret";
 
@@ -34,12 +33,13 @@ mod livekit_tests {
     async fn server_connects_via_token_generator() -> Result<()> {
         // Given
         let livekit = LiveKitTestkit::start().await?;
+        let room_name = LiveKitTestkit::unique_room("token-generation-test");
         let url = livekit.get_ws_url();
 
         let token_generator = TokenGenerator::new(
             DEV_API_KEY.to_string(),
             DEV_API_SECRET.to_string(),
-            ROOM_NAME.to_string(),
+            room_name.to_string(),
             SERVER_IDENTITY.to_string(),
             Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
         );
@@ -63,7 +63,7 @@ mod livekit_tests {
             }
         });
 
-        let client_token = livekit.generate_token(ROOM_NAME, "client")?;
+        let client_token = livekit.generate_token(&room_name, "client")?;
         let (client_room, mut client_events) =
             Room::connect(&url, &client_token, RoomOptions::default())
                 .await

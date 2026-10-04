@@ -48,22 +48,20 @@ Reproduce: `gh run download <run> --name junit-rust-e2e`; the root `<testsuites 
 **Isolation — a hard precondition, do it before sharing anything.** On a shared server two tests that
 use the same room name, or the same identity in the same room, interfere. What the code looks like today:
 
-- ~22 fixed room-name constants, several **shared between binaries**: `"tddy-lobby"` in
-  `cross_crate_session_token_acceptance`, `token_service_acceptance` and `session_tool_livekit_dispatch`;
-  `"acceptance-common-room"` in `livekit_peer_daemons_acceptance` and `multi_host_acceptance`. Others are
-  per-binary constants (`"agent-roster-common-room"`, `"attach-cross-host-room"`, …), which collide across
-  **tests inside one binary** as soon as those run in parallel.
-- Two binaries already do the right thing and are the pattern to copy: `forwarded_rpc_is_stamped_by_the_receiver`
-  (`COMMON_ROOM_PREFIX`) and `session_room_acceptance` (`COMMON_ROOM_PREFIX`) build a name from a prefix.
-- Add one testkit helper — e.g. `LiveKitTestkit::unique_room(prefix)` returning `prefix-<short random>` —
-  and migrate every constant to it. Tokens are minted per room (`generate_token(room, identity)`), so the
-  API key/secret (`devkey`/`secret`) can stay shared.
-- **Tests that read server-global state need individual treatment** (they would see every other test's
-  rooms): `stream_livekit_rooms_rpc`, `room_roster_livekit`, `room_roster_deadline`,
-  `session_room_acceptance`, `local_token_uds`, and the roster code they exercise
-  (`tddy-livekit/src/room_roster.rs`, `tddy-daemon-livekit/src/livekit_rooms_stream.rs`,
-  `tddy-session-agents/src/session_room_participants.rs`). Each either filters by its own unique prefix or
-  stays on a dedicated server. Decide per test; do not assume the filter exists.
+- **Done in `#e2e-leg` 1/5 ([#578](https://github.com/uppin/tddy-coder/pull/578)):** every test that
+  starts the testkit names its room with `LiveKitTestkit::unique_room(prefix)`, and a guard test
+  (`livekit_tests_use_unique_rooms`) fails on a new fixed room. Two corrections to what this entry first
+  said: `"tddy-lobby"` is **not** a shared-server collision (`cross_crate_session_token_acceptance`,
+  `token_service_acceptance` and `session_tool_livekit_dispatch` never start the testkit; it is a config
+  value there), and the one real cross-binary collision was `"acceptance-common-room"`
+  (`livekit_peer_daemons_acceptance`, `multi_host_acceptance`). Eleven heavy files build their room once
+  per process (a `OnceLock`), so it is unique per binary run, not per test.
+- **Server-global reads, settled.** Of the five tests this entry first named, only `room_roster_livekit`
+  and `session_room_acceptance` touch a real server (both find their own room by its unique name);
+  `stream_livekit_rooms_rpc`, `room_roster_deadline` and `local_token_uds` never start the testkit.
+  Verified against a real server: `ListParticipants` on a room that does not exist returns `Ok([])`, so
+  `LiveKitRoomRoster::read_roster` needed no change for a room that closes between `ListRooms` and
+  `ListParticipants`.
 - Leaked rooms (a test that aborts) are harmless once names are unique: LiveKit `--dev` closes an empty
   room after its empty timeout. Verify that figure for the pinned image rather than trusting this line.
 
@@ -248,9 +246,9 @@ The e2e leg's **run phase** well under 472s with **no loss of coverage** — com
 `Rust e2e tests` count on the base run — and **no hang path**: kill the server mid-run on purpose and see
 the leg fail in minutes with a named test, not time out at the job limit. Concretely, in this order:
 
-1. Unique-room helper in the testkit; migrate the constants; settle the room-enumerating tests. Land with
-   the `docker` group still serial. **Gate:** two consecutive runs green, and a run with the binaries
-   shuffled (`--test-threads` / nextest `--partition`) green.
+1. ~~Unique-room helper in the testkit; migrate the constants; settle the room-enumerating tests.~~ Code
+   landed in #578 with the `docker` group still serial. **Gate still open:** two consecutive runs green,
+   and a run with the binaries shuffled (`--test-threads` / nextest `--partition`) green — read off CI.
 2. CI start/stop steps and the pinned image; `slow-timeout` for the leg. **Gate:** the kill-the-server drill.
 3. Lift the `docker` group for the LiveKit binaries. **Gate:** measured run time and a flake count over
    several runs.

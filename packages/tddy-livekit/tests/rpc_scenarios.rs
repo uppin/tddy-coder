@@ -414,7 +414,8 @@ async fn rpc_scenarios() -> Result<()> {
     // Unary RPC scenarios
     // -----------------------------------------------------------------------
     {
-        let harness = TestHarness::start(&livekit, "unary-scenarios").await?;
+        let harness =
+            TestHarness::start(&livekit, &LiveKitTestkit::unique_room("unary-scenarios")).await?;
 
         // --- Echo returns the same message ---
         {
@@ -562,7 +563,8 @@ async fn rpc_scenarios() -> Result<()> {
     // Server Streaming RPC scenarios
     // -----------------------------------------------------------------------
     {
-        let harness = TestHarness::start(&livekit, "stream-scenarios").await?;
+        let harness =
+            TestHarness::start(&livekit, &LiveKitTestkit::unique_room("stream-scenarios")).await?;
 
         // --- Returns three messages with correct content ---
         {
@@ -663,7 +665,11 @@ async fn rpc_scenarios() -> Result<()> {
     // Client Streaming RPC scenarios
     // -----------------------------------------------------------------------
     {
-        let harness = TestHarness::start(&livekit, "client-stream-scenarios").await?;
+        let harness = TestHarness::start(
+            &livekit,
+            &LiveKitTestkit::unique_room("client-stream-scenarios"),
+        )
+        .await?;
 
         {
             log::debug!("scenario: client stream concatenates messages");
@@ -696,7 +702,11 @@ async fn rpc_scenarios() -> Result<()> {
     // Bidirectional Streaming RPC scenarios
     // -----------------------------------------------------------------------
     {
-        let harness = TestHarness::start(&livekit, "bidi-stream-scenarios").await?;
+        let harness = TestHarness::start(
+            &livekit,
+            &LiveKitTestkit::unique_room("bidi-stream-scenarios"),
+        )
+        .await?;
 
         {
             log::debug!("scenario: bidi stream echoes each message");
@@ -742,7 +752,11 @@ async fn rpc_scenarios() -> Result<()> {
     // not wait for end_of_stream. Client sends msg1, receives echo, sends msg2, receives echo.
     // -----------------------------------------------------------------------
     {
-        let harness = TestHarness::start(&livekit, "realtime-stream-scenarios").await?;
+        let harness = TestHarness::start(
+            &livekit,
+            &LiveKitTestkit::unique_room("realtime-stream-scenarios"),
+        )
+        .await?;
 
         {
             log::debug!("scenario: real-time bidi stream - send one, receive echo, send next");
@@ -815,7 +829,11 @@ async fn rpc_scenarios() -> Result<()> {
     // Response isolation: only requesting participant receives stream responses
     // -----------------------------------------------------------------------
     {
-        let harness = ThreeParticipantHarness::start(&livekit, "response-isolation").await?;
+        let harness = ThreeParticipantHarness::start(
+            &livekit,
+            &LiveKitTestkit::unique_room("response-isolation"),
+        )
+        .await?;
 
         log::debug!("scenario: only requesting participant receives server stream responses");
         let request = EchoRequest {
@@ -860,7 +878,11 @@ async fn rpc_scenarios() -> Result<()> {
     // Stateful bidi: verify single handler per session (reproduces session bug)
     // -----------------------------------------------------------------------
     {
-        let harness = CountingHarness::start(&livekit, "stateful-bidi-scenarios").await?;
+        let harness = CountingHarness::start(
+            &livekit,
+            &LiveKitTestkit::unique_room("stateful-bidi-scenarios"),
+        )
+        .await?;
 
         // Send 3 messages via real-time bidi stream. With correct session management,
         // one handler processes all 3 with incrementing seq. With the bug (new handler per
@@ -930,7 +952,9 @@ async fn rpc_scenarios() -> Result<()> {
     // (regression: per-packet tokio::spawn could complete input_tx.send out of arrival order).
     // -----------------------------------------------------------------------
     {
-        let harness = CountingHarness::start(&livekit, "bidi-input-order").await?;
+        let harness =
+            CountingHarness::start(&livekit, &LiveKitTestkit::unique_room("bidi-input-order"))
+                .await?;
 
         {
             log::debug!("scenario: bidi stream preserves message order under rapid send");
@@ -988,7 +1012,11 @@ async fn rpc_scenarios() -> Result<()> {
     // Loopback tunnel: bidi StreamBytes dials session-host TCP (Codex OAuth path)
     // -----------------------------------------------------------------------
     {
-        let harness = LoopbackTunnelHarness::start(&livekit, "loopback-tunnel-scenarios").await?;
+        let harness = LoopbackTunnelHarness::start(
+            &livekit,
+            &LiveKitTestkit::unique_room("loopback-tunnel-scenarios"),
+        )
+        .await?;
 
         log::debug!("scenario: loopback tunnel ping/pong over LiveKit bidi RPC");
         let first = TunnelChunk {
@@ -1051,7 +1079,7 @@ async fn rpc_scenarios() -> Result<()> {
     // which is fixed per user. Opening a second browser tab joins with the same
     // identity, causing LiveKit to disconnect the first tab's presence connection.
     {
-        let room_name = "duplicate-identity";
+        let room_name = &LiveKitTestkit::unique_room("duplicate-identity");
         let url = livekit.get_ws_url();
 
         let server_token = livekit.generate_token(room_name, SERVER_IDENTITY)?;
@@ -1125,7 +1153,7 @@ async fn bidi_stream_survives_delay_without_app_reconnect() -> Result<()> {
     // When sending a message, waiting 2 seconds, then sending another message
     let livekit = LiveKitTestkit::start().await?;
     let url = livekit.get_ws_url();
-    let room_name = "bidi-token-refresh";
+    let room_name = &LiveKitTestkit::unique_room("bidi-token-refresh");
 
     let handler_count = Arc::new(AtomicUsize::new(0));
     let handler_count_clone = handler_count.clone();

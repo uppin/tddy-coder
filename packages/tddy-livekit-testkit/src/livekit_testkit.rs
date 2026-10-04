@@ -7,7 +7,8 @@
 use anyhow::Result;
 use livekit_api::access_token::{AccessToken, VideoGrants};
 use livekit_api::services::room::RoomClient;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use testcontainers::core::wait::{HttpWaitStrategy, WaitFor};
 use testcontainers::core::IntoContainerPort;
 use testcontainers::runners::AsyncRunner;
@@ -179,6 +180,22 @@ impl LiveKitTestkit {
     async fn wait_for_api(host_port: u16) -> Result<()> {
         let url = format!("http://127.0.0.1:{}", host_port);
         Self::wait_for_api_url_async(&url).await
+    }
+
+    /// A room name no other test will use: `<prefix>-<hex nanos>-<pid>-<counter>`.
+    ///
+    /// Every test that talks to a LiveKit server names its room with this, so two tests can never
+    /// share a room whether they run in one process, in two, or against one shared server
+    /// (`LIVEKIT_TESTKIT_WS_URL`). The prefix is the room's purpose, so a room left behind by an
+    /// aborted test can be attributed.
+    pub fn unique_room(prefix: &str) -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|since_epoch| since_epoch.as_nanos())
+            .unwrap_or_default();
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{prefix}-{nanos:x}-{}-{counter}", std::process::id())
     }
 
     /// Get the WebSocket URL for connecting to the LiveKit server.

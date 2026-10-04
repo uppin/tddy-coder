@@ -27,7 +27,6 @@ mod livekit_tests {
 
     const SERVER_IDENTITY: &str = "token-server";
     const CLIENT_IDENTITY: &str = "token-client";
-    const ROOM_NAME: &str = "token-service-test";
     const DEV_API_KEY: &str = "devkey";
     const DEV_API_SECRET: &str = "secret";
 
@@ -55,10 +54,11 @@ mod livekit_tests {
     async fn token_service_generate_returns_valid_jwt() -> Result<()> {
         // Given
         let livekit = LiveKitTestkit::start().await?;
+        let room_name = LiveKitTestkit::unique_room("token-service-test");
         let url = livekit.get_ws_url();
 
-        let server_token = livekit.generate_token(ROOM_NAME, SERVER_IDENTITY)?;
-        let client_token = livekit.generate_token(ROOM_NAME, CLIENT_IDENTITY)?;
+        let server_token = livekit.generate_token(&room_name, SERVER_IDENTITY)?;
+        let client_token = livekit.generate_token(&room_name, CLIENT_IDENTITY)?;
 
         let token_service = TokenServiceImpl::unauthenticated(DevTokenProvider);
         let token_server = TokenServiceServer::new(token_service);
@@ -100,7 +100,7 @@ mod livekit_tests {
 
         // When — client calls GenerateToken RPC for a new participant
         let request = GenerateTokenRequest {
-            room: ROOM_NAME.to_string(),
+            room: room_name.to_string(),
             identity: "web-new-participant".to_string(),
             session_token: String::new(),
         };

@@ -22,7 +22,10 @@ use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::Request;
 use tddy_service::proto::host::{EligibleDaemonEntry, HostService, ListEligibleDaemonsRequest};
 
-const COMMON_ROOM: &str = "acceptance-common-room";
+fn common_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("acceptance-common-room"))
+}
 const PEER_INSTANCE_ID: &str = "acceptance-daemon-b";
 const LIVEKIT_API_KEY: &str = "devkey";
 const LIVEKIT_API_SECRET: &str = "secret";
@@ -32,6 +35,7 @@ type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 fn write_livekit_config(ws_url: &str) -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
+    let room = common_room();
     let yaml = format!(
         r#"
 users:
@@ -45,7 +49,7 @@ livekit:
   url: {ws_url}
   api_key: {LIVEKIT_API_KEY}
   api_secret: {LIVEKIT_API_SECRET}
-  common_room: {COMMON_ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -123,7 +127,7 @@ async fn list_eligible(svc: &HostServiceImpl) -> Vec<EligibleDaemonEntry> {
 async fn join_second_daemon_participant(livekit: &LiveKitTestkit) -> Room {
     let url = livekit.get_ws_url();
     let token = livekit
-        .generate_token(COMMON_ROOM, PEER_INSTANCE_ID)
+        .generate_token(common_room(), PEER_INSTANCE_ID)
         .expect("generate LiveKit token for peer daemon");
     let (room, _events) = Room::connect(&url, &token, RoomOptions::default())
         .await
@@ -165,7 +169,7 @@ async fn list_eligible_daemons_includes_discovered_peer_when_second_daemon_in_co
     assert!(
         peer.is_some(),
         "expected peer {PEER_INSTANCE_ID} in eligible list after second daemon joined common_room {:?}; got {:?}",
-        COMMON_ROOM,
+        common_room(),
         daemons
             .iter()
             .map(|d| (d.instance_id.clone(), d.is_local))

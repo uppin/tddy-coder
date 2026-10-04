@@ -26,7 +26,10 @@ use tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::relay_idle::IdleTimeoutTracker;
 
-const RELAY_ROOM: &str = "relay-e2e-common-room";
+fn relay_room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("relay-e2e-common-room"))
+}
 const RELAY_PEER_ID: &str = "relay-e2e-remote-peer";
 const LK_API_KEY: &str = "devkey";
 const LK_API_SECRET: &str = "secret";
@@ -62,6 +65,7 @@ fn write_daemon_yaml(ws_url: &str, instance_id: Option<&str>) -> (tempfile::Temp
     let id_block = instance_id
         .map(|id| format!("daemon_instance_id: {id}\n"))
         .unwrap_or_default();
+    let room = relay_room();
     let yaml = format!(
         r#"
 {id_block}users:
@@ -72,7 +76,7 @@ livekit:
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}
-  common_room: {RELAY_ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -221,7 +225,7 @@ async fn relay_forwards_list_exec_tools_to_remote_peer() {
 
     // B's RPC participant: `daemon-{instance_id}`, the identity A's forward addresses.
     let token_b = livekit
-        .generate_token(RELAY_ROOM, &rpc_identity(RELAY_PEER_ID))
+        .generate_token(relay_room(), &rpc_identity(RELAY_PEER_ID))
         .expect("LiveKit token for remote peer B");
     let peer_run = tddy_session_lifecycle::test_util::serve_daemon_rpc_participant(
         &ws_url, &token_b, &service_b,

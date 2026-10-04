@@ -130,7 +130,11 @@ async fn echo_via(client: &RpcClient, message: &str) -> Result<String> {
 async fn caller_reaches_both_peers_over_one_connection() -> Result<()> {
     // Given — one caller connected to two RPC peers over a single room
     let livekit = LiveKitTestkit::start().await?;
-    let caller = CallerWithTwoPeers::start(&livekit, "one-caller-two-peers").await?;
+    let caller = CallerWithTwoPeers::start(
+        &livekit,
+        &LiveKitTestkit::unique_room("one-caller-two-peers"),
+    )
+    .await?;
 
     // When — the caller invokes each peer
     let from_b = echo_via(&caller.to_b, "hello-b").await?;
@@ -148,10 +152,11 @@ async fn two_clients_to_the_same_peer_never_cross_responses() -> Result<()> {
     // Given — one caller with TWO RpcClients bound to the SAME peer over one room (mirrors
     // `forward_to_peer` building a fresh client per call to the same daemon peer)
     let livekit = LiveKitTestkit::start().await?;
-    connect_echo_peer(&livekit, "same-peer-two-clients", B_IDENTITY).await?;
+    let room_name = LiveKitTestkit::unique_room("same-peer-two-clients");
+    connect_echo_peer(&livekit, &room_name, B_IDENTITY).await?;
     let (caller_room, mut caller_events) = Room::connect(
         &livekit.get_ws_url(),
-        &livekit.generate_token("same-peer-two-clients", A_IDENTITY)?,
+        &livekit.generate_token(&room_name, A_IDENTITY)?,
         RoomOptions::default(),
     )
     .await
@@ -176,7 +181,11 @@ async fn two_clients_to_the_same_peer_never_cross_responses() -> Result<()> {
 async fn concurrent_traffic_to_two_peers_never_crosses_responses() -> Result<()> {
     // Given — one caller connected to two RPC peers over a single room
     let livekit = LiveKitTestkit::start().await?;
-    let caller = CallerWithTwoPeers::start(&livekit, "two-peers-concurrent").await?;
+    let caller = CallerWithTwoPeers::start(
+        &livekit,
+        &LiveKitTestkit::unique_room("two-peers-concurrent"),
+    )
+    .await?;
 
     // When — 40 calls fan out concurrently across both peers, each tagged with its target
     let mut calls = Vec::new();

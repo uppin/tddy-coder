@@ -47,7 +47,10 @@ use tddy_session_lifecycle::test_util::{self, wait_until_peer_discovered, TEST_T
 type SessionsBaseResolver = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-const ROOM: &str = "attach-cross-host-room";
+fn room() -> &'static str {
+    static ROOM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    ROOM.get_or_init(|| LiveKitTestkit::unique_room("attach-cross-host-room"))
+}
 /// Local daemon A — the host the browser is connected to and stages its bytes on.
 const LOCAL_INSTANCE_ID: &str = "attach-cross-host-local";
 /// Peer daemon B — the host a session may be started on instead.
@@ -79,6 +82,7 @@ fn write_livekit_daemon_yaml(
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.yaml");
     let true_path = true_bin();
+    let room = room();
     let yaml = format!(
         r#"
 daemon_instance_id: {daemon_instance_id}
@@ -93,7 +97,7 @@ livekit:
   url: {ws_url}
   api_key: {LK_API_KEY}
   api_secret: {LK_API_SECRET}
-  common_room: {ROOM}
+  common_room: {room}
 "#
     );
     std::fs::write(&path, yaml).unwrap();
@@ -212,7 +216,7 @@ async fn serve_rpc_participant(
     service: Arc<DaemonSessionHost>,
 ) -> tokio::task::JoinHandle<()> {
     let token = livekit
-        .generate_token(ROOM, &rpc_identity(instance_id))
+        .generate_token(room(), &rpc_identity(instance_id))
         .expect("LiveKit token for a daemon's RPC participant");
     test_util::serve_daemon_rpc_participant(ws_url, &token, &service).await
 }
