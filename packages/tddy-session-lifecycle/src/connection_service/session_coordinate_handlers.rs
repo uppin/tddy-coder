@@ -400,7 +400,9 @@ impl DaemonSessionHost {
             // directly would let it overtake a phase's end. Dropping the sink closes the channel
             // that task drains.
             drop(sink);
-            let _ = forwarding.await;
+            if let Err(err) = forwarding.await {
+                log::warn!("StreamStartSession: the start's progress forwarding task ended abnormally: {err}");
+            }
             let event = match started {
                 Ok(response) => match super::family_proto_bridge::wire_same(&response.into_inner())
                 {

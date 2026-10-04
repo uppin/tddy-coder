@@ -399,7 +399,9 @@ async fn until_the_latest_progress_is(
     progress: &SessionIndexProgress,
     expected: CodeIndexProgress,
 ) {
-    let mut watching = progress.watch(THE_SESSION);
+    let mut watching = progress.follow(THE_SESSION).expect(
+        "a warm records its first progress before it returns, so the session is followable",
+    );
     tokio::time::timeout(
         AN_EVENT_IS_DUE_WITHIN,
         watching.wait_for(|latest| latest.as_ref() == Some(&expected)),

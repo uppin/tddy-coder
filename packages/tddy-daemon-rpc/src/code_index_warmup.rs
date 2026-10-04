@@ -56,15 +56,9 @@ impl SessionIndexProgress {
             .and_then(|sender| sender.borrow().clone())
     }
 
-    /// Follows `session_id`'s progress from its latest value on; `None` until something records one.
-    #[must_use]
-    pub fn watch(&self, session_id: &str) -> watch::Receiver<Option<CodeIndexProgress>> {
-        self.sender_for(session_id).subscribe()
-    }
-
     /// Follows `session_id`'s progress from its latest value on, or `None` when nothing has warmed
-    /// it. Unlike [`Self::watch`] it never creates an entry, so following an id nothing warmed
-    /// (or one the caller does not own) leaves no trace.
+    /// it. It never creates an entry, so following an id nothing warmed (or one the caller does
+    /// not own) leaves no trace.
     #[must_use]
     pub fn follow(&self, session_id: &str) -> Option<watch::Receiver<Option<CodeIndexProgress>>> {
         self.sessions
