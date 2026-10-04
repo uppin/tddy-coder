@@ -392,8 +392,6 @@ fn spawn_project_clone(
 
 pub(in crate::connection_service) mod session_dir_lookup;
 
-mod session_room_opening;
-
 /// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
 /// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.
 ///

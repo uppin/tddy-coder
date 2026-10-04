@@ -1,3 +1,5 @@
+mod session_room_opening;
+
 use std::path::Path;
 
 use crate::{
