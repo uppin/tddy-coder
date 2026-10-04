@@ -114,11 +114,15 @@ A group that fails its gate ends the stream as `FailedPrecondition`.
 | `Definition` | unary | Where the symbol at a one-based line and byte column of a Rust file is defined |
 | `References` | unary | Every reference to that symbol, its declaration included |
 | `Hover` | unary | The language server's hover markdown for that symbol; unset when it has none |
+| `Symbols` | unary | The symbols of a Rust file, or, when the request carries a `query`, the root's symbols matching it |
+| `Diagnostics` | unary | What the language server reports wrong with one Rust file |
 
-The navigation calls answer in the service's own coordinates (one-based line, one-based byte column)
-and return each location relative to `workspace_root`, or as an absolute path marked `outside_root`
-when it lies in a dependency or the standard library. They serve Rust files only: any other file is
-refused with `InvalidArgument`, as is a path that is absolute or climbs out of the root.
+The navigation, symbol and diagnostic calls answer in the service's own coordinates (one-based line,
+one-based byte column) and return each location relative to `workspace_root`, or as an absolute path
+marked `outside_root` when it lies in a dependency or the standard library. They serve Rust files
+only: any file they are asked about that is not one is refused with `InvalidArgument`, as is a path
+that is absolute or climbs out of the root. A `Symbols` request with a `query` names no file, so none
+of that applies to it.
 
 The long operations stream for two reasons. Progress happens *while* a call is in flight and has
 nowhere else to go; and a stream is the only back-channel a handler gets, so **a send failing into a
@@ -218,6 +222,16 @@ forwards the pane's go-to-definition, references and hover requests to it, start
 one. The daemon authorises each request and answers `FailedPrecondition` when no `index_daemon:`
 section is configured; nothing falls back to another language server.
 
+Its second consumer is a session's own tools. When the daemon manages an index, an agent's
+`LspDefinition`, `LspReferences`, `LspHover`, `LspSymbols` and `LspDiagnostics` calls are answered by
+it, rooted at the session's own worktree — the one the host resolved from the session, never a path
+the jail supplies — so a session and the code pane ask the same index and no second language server
+is started for a Rust worktree. Tool names, argument schemas and results are those of
+[Reusable LSP](reusable-lsp.md)'s tools. Without an `index_daemon:` section the tools are answered by
+that executor; this is a choice of deployment, not a fallback within one — with an index configured,
+that executor is never asked. `ReadLints`, which reports a whole workspace, is refused through the
+index, because diagnostics are answered per file; the refusal points the agent at `LspDiagnostics`.
+
 A developer can equally start the same binary by hand with `run-index-daemon`, which is the only
 path that exists without a daemon installed.
 
@@ -226,6 +240,7 @@ path that exists without a daemon installed.
 - [Rust code restructuring](rust-code-restructuring.md) — the operations, the plan format, waiting
 - [Rust code analysis](rust-code-analysis.md) — coverage, CRAP, duplicate tests, the complexity cache
 - [Reusable LSP](reusable-lsp.md) — the registry both hosts share, and what a long-lived host needs
+- Package: [`packages/tddy-lsp-executor/docs/index-backed-executor.md`](../../../packages/tddy-lsp-executor/docs/index-backed-executor.md) — the executor that answers a session's `Lsp*` tools from this index
 - [RPC multi-transport](rpc-multi-transport.md) — the transport contract this service is served under
 - Package: [`packages/tddy-index-daemon/docs/code-index-service.md`](../../../packages/tddy-index-daemon/docs/code-index-service.md)
 
@@ -243,5 +258,11 @@ path that exists without a daemon installed.
   fingerprint check. A file deleted underneath the daemon does not make its item anchors stale, and
   `ListPlans` / `PlanStatus` see a hand edit only after the next `Check`, `Apply` or `Anchors`
   request has compared the tree.
+- **`ReadLints` is not served through the index.** A session's workspace-wide diagnostics call is
+  refused when the index answers its tools, because the service reports one file at a time. Backlog:
+  [`2026-10-04-read-lints-is-refused-through-the-warm-index.md`](../../dev/todo/2026-10-04-read-lints-is-refused-through-the-warm-index.md).
+- **A symlink inside a worktree that points outside it is followed.** The host's binding of a tool's
+  file and the service's own path check both refuse `..` and absolute paths by their text; neither
+  resolves symlinks.
 - **Warming several worktrees at once narrows the per-root benefit**, because the resident
   rust-analyzers compete for CPU.

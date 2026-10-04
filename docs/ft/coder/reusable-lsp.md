@@ -96,6 +96,16 @@ this seam: they appear only when a language server is available.
 16. `ReadLints` is upgraded to route to the LSP `diagnostics` path when a language
     server is available for the target, falling back to the existing stub otherwise.
 
+### Answered by a managed index
+
+17. When the daemon's configuration carries an `index_daemon:` section, the executor it registers for
+    the `Lsp*` tools asks the [warm code-intelligence daemon](warm-code-intelligence-daemon.md)
+    instead of starting this registry's own servers: the registry starts none for those calls and its
+    idle reaper has nothing to reap. Without the section the registry-backed executor answers, as
+    described above. With an index configured, `ReadLints` is refused rather than answered by a second
+    server that would disagree with the index. See
+    [`index-backed-executor.md`](../../../packages/tddy-lsp-executor/docs/index-backed-executor.md).
+
 ## Testing Plan
 
 **Test levels:** Unit (allow-list, mapping, trait registry, MCP catalog), Integration

@@ -32,7 +32,8 @@ code path rather than a second one.
 | `operations.rs` | `Warm`, `Workspaces`, `Check`, `Apply` — the streaming half, the event channel, the per-request progress sink. `Check` and `Apply` run the root's loaded plan; `Apply` loads one that is not loaded |
 | `queries.rs` | `Anchors`, `PlanStatus`, `Verify`, and the plan store's `LoadPlans`, `UnloadPlans`, `ListPlans` — the unary half. `PlanStatus` reads the loaded plan and, like `ListPlans`, lists its stale operations (`StaleOp { op, reason }`). `Verify` answers the three excused-statement counts (`repointed`, `visibility_normalised`, `cfg_test_gates`). `Anchors` returns the anchor a plan carries as `anchor_json` (`items` for named items, or the `item` anchor of the innermost item enclosing `AnchorsRequest.at`) beside its absolute span as `range`. It resolves on the warm server through `tddy_code_restructuring::runner::item_anchors` with a cancellation token that fires when the request is dropped, so an outline that stays empty does not outlive its caller. `cli.rs` carries `--at` into the request |
 | `apply.rs` | The host-driven apply loop over `runner::open_plan_run` (plan-scoped `StatePaths`, item-anchor resolution, the resume check) / `restore_ledger` / `commit_operation`, refreshing and flushing the plan after each operation (`runner::record_applied_op` also folds the operation into every other loaded plan), refusing a stale operation before anything is read or written (`runner::refuse_a_stale_pending_op`, `StaleOperation`, `FailedPrecondition`), bracketed by the library's compile gate (`refuse_a_broken_baseline` before anything is written, `refuse_a_broken_result` before the outcome event), and gating and rolling back transactional groups through `runner::group_gate` (`GroupRun`), so a group's `OperationApplied` events, each carrying `group`, are sent only once the group compiled |
-| `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, and the translation either side of it |
+| `navigation.rs` | `Definition`, `References`, `Hover` — one `LspClient` query each on the root's warm server, and the translation either side of it. Also the checks every file-taking query shares: `served_source` (the path is inside the root and a Rust source) and `synced_document` (the file's contents sent to the root's server, and its URI), plus the `wire_position` and `code_location` translations |
+| `symbols.rs` | `Symbols`, `Diagnostics` — the same shape as navigation, built on its shared checks and translations |
 | `analyze.rs` | `Coverage`, `Report`, `DuplicateTests`, `Complexity` |
 | `status.rs` | One exhaustive `match` per error type, mapping every variant to a gRPC status |
 | `activity.rs` | Composes what the daemon says about its own requests |
@@ -136,6 +137,24 @@ way back.
 
 **Freshness.** The file's current contents are sent to the server (`sync_document`) before each query,
 so the answer is about the text the caller read, not an older copy the server held.
+
+## Symbols and diagnostics
+
+`Symbols` and `Diagnostics` answer what an agent's `LspSymbols` and `LspDiagnostics` tools ask, from the
+same warm server and in the same coordinates as navigation.
+
+- **`Symbols{workspace_root, file, query}`** — without a `query`, the symbols of `file` through
+  `LspClient::symbols`; with one, the root's symbols whose names match it through
+  `LspClient::workspace_symbols`, and `file` is ignored. Each `CodeSymbol` carries `name`, `kind` (the LSP
+  `SymbolKind` code, passed through), a `CodeLocation` and the `container`, when there is one.
+- **`Diagnostics{workspace_root, file}`** — what the server reports wrong with `file` through
+  `LspClient::diagnostics`. Each `CodeDiagnostic` carries a one-based byte `SourceRange`, the LSP
+  `severity` code, the `message` and the `source` (for example `rustc`), when the server names one.
+
+A request naming a file is refused by the checks navigation applies, with the same statuses (the
+table above), and the file's current contents are sent to the server before the query. A `Symbols`
+request with a `query` names no file, so it is neither checked nor synced: it goes to the root's server
+as it is.
 
 ## Cancellation
 
