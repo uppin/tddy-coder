@@ -95,7 +95,7 @@ project-provisioning methods and `index_workspace_worktree`.
 - **No crate moves.** Nothing leaves `tddy-session-lifecycle`, and no module is re-exported from
   another crate. Moving is node 17's (`#carve 21`), and only with the `tddy-tools restructure` engine: a refusal
   means stop and ask; hand edits after a move are build corrections only, with a todo per new cause.
-- **No behaviour change.** The node holds the baseline on its own: 562 passed, the same 22 failures by
+- **No behaviour change.** The node holds the baseline on its own: 575 passed, the same 22 failures by
   name, 1 ignored (see "Baseline").
 - **Public `tddy_session_lifecycle::…` paths stay reachable.** No consumer crate is edited
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`). The exception is a
@@ -130,7 +130,24 @@ Implementing one here collides with the PR that owns it.
 |---|---|---|---|
 | **16c** `#carve` 18, lifecycle-ports-split (`feature/carve/lifecycle-ports-split`) | T4, `service_util` and `workspace_session` converted: `SplitState`, the split handle, `trait SplitHost: AgentHostCallbacks` and its host impl; `attached_initial_prompt` in T4; `resume_split_wiring` extracted into T4; the CLI files' imports re-pointed | `stack_seed_validation` calls `service_util::project_repo_root` directly; the CLI spawn files name the PTY runtime by its re-pointed paths | change `SplitHost`, the split handle, or any T4/SU/WS/CLI file |
 | **16b** `#carve` 17, lifecycle-ports-agents | T3 converted: the roster handle, `AgentHostCallbacks`, `DaemonSeedCloneClaimant` holding the roster handle; T3 functions `claim_co_located_seed_clones`, `seeded_roster_records`, `resolve_specialized_agent_defs` | the launch handle holds the roster handle; the jail starts and `warm_up_jail_agents` call T3 through it | change the roster handle, `AgentRosterState` or `AgentHostCallbacks`; add a `LaunchHost::seed_clone_claimant` |
-| **16a** `#carve` 16, lifecycle-ports (#531) | `AttachmentState` (T8); `jail_env_builders` re-parented off the T3 file; `SessionStdioEndpoint` moved to T1; `daemon_urls` with `local_daemon_hook_url` (imported by `cursor_cli_spawn/chat.rs`) | `StackChildSpawnHandler` calls `prepare_session_attachments` with `AttachmentState`; `jail_env_builders` is converted in place | re-parent a file, or convert T8 |
+| **16a** `#carve` 16, lifecycle-ports (#531) | `AttachmentState` (T8); `jail_env_builders` re-parented off the T3 file (**not done**, see Carried from 16a); `SessionStdioEndpoint` moved to T1 (**not done**); `daemon_urls` with `local_daemon_hook_url` (imported by `cursor_cli_spawn/chat.rs`) | `StackChildSpawnHandler` calls `prepare_session_attachments` with `AttachmentState`; `jail_env_builders` is converted in place | re-parent a file, or convert T8 |
+
+## Carried from 16a (2026-10-04)
+
+16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3 and deferred four items until the
+engine can do them (the developer's decision, 2026-10-04; never by hand): **M0.1** (the `peer_session_answer`
+module), **M0.6** (the `seeded_clone_guard.rs` split), **M0.4** (re-parenting the four mixed parent/child files, D8,
+which also needs the developer's consent) and the T4 half of M0.2. See [`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md)
+and [`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md).
+This node's text below was written before that. Where it says one of these is "from 16a" or "in 16a", it is not:
+
+- `jail_env_builders` was **not** re-parented off the T3 file (M0.4). It stays where it is; this node converts it in place.
+- `SessionStdioEndpoint` was **not** moved to T1 (M0.6). It is still in `seeded_clone_guard.rs`, beside `ExecToolRoute`.
+- `peer_session_answer` does not exist (M0.1).
+
+**Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
+#573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
+failures by name, 1 ignored**.
 
 ## Draft PR contract
 
@@ -205,7 +222,7 @@ M7a.
 - [ ] **M7a.4 callers**: 16e's host methods that call these (`cli_branch_starts`'s two sandboxed calls,
   `resume_claude_cli_session`'s sandboxed resume) build the handle from the host; delegators kept in
   wiring where a consumer or a test calls a converted method
-- [ ] **Baseline** after each of M6 and M7a: 562 / 22 / 1, the same 22 by name; `tddy-session-agents`
+- [ ] **Baseline** after each of M6 and M7a: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`. **Linux CI's
   sandboxed suites** green on the PR (`scripts/ci-status.sh --failures`)
@@ -265,7 +282,7 @@ test code).
 | `cs/svc_relaunch_sandboxed_runner.rs` | 213 | `relaunch_sandboxed_runner` (149) → LS | with T1 | 1 line under 150 |
 | `…/relaunch_jail_dirs.rs` | 73 | no change (free); imports | with T1 | — |
 | `…/relaunch_jail_steps.rs` | 229 | 5 methods → LS. LH `sandbox_rpc_handler` | with T1 | — |
-| `jail_env_builders.rs` (re-parented off the T3 file in 16a) | 71 | 3 methods → LS (`config`) | with T1 | — |
+| `jail_env_builders.rs` (re-parent off the T3 file **deferred**, see Carried from 16a) | 71 | 3 methods → LS (`config`) | with T1 | — |
 | `svc_split_context_from_codebase_host.rs` (T1 part) → a T1 module | 62 | `resume_sandboxed_claude_cli_session` → LS (`sandbox_manager`); it calls `relaunch_sandboxed_runner`. Extracted (M7a.2) | `extract_module` here | the file's T4 part is 16c's |
 | `cs/svc_start_claude_cli_session.rs` | 236 | 3 methods → LS. **3 × `self.clone()`**: `StackChildSpawnHandler`, `GrillMeConversationSpawnHandler` (`conversation_spawn_handler_for`, which the jails call) and the host-session socket (`spawn_host_session_socket`) each get the owned launch handle | with T1 | `self.clone()` to tasks (D1) |
 | `cs/svc_pr_status_for_caller.rs` (T1 part) | 104 | `managed_resume_goal`, `prepare_managed_workflow` (the jails and relaunch call it), `owned_branch_conflict` → LS | with T1 | — |
@@ -343,7 +360,7 @@ Recorded on 16c's tip, and the acceptance criterion after M6 and after M7a:
   --skip sandboxed_bash_pty_action_streams_output
 ```
 
-Expected: **562 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit`
 passes when re-run alone, so it is not a regression.
 
@@ -451,7 +468,7 @@ and its children) are excluded.
 | A5 | No file in 16a's topics, T3, T4/SU/WS, CLI, T9 or M7a clones the host. Hand-offs clone the topic's owned handle | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in those files is empty |
 | A6 | `LaunchHost` is defined once, in `launch_ports`, and implemented once, on `DaemonSessionHost`, in the wiring ports file, with exactly {`sandbox_rpc_handler`, `pr_stack`}. `impl StackParentHost` is on the launch handle, not on the host. `AgentHostCallbacks` and `SplitHost` are unchanged since 16c | `grep -rn 'trait LaunchHost'` gives one hit; `grep -rn 'impl .*LaunchHost for DaemonSessionHost'` one hit, in wiring; `grep -rn 'impl .*StackParentHost for DaemonSessionHost'` is empty; `git diff <16c tip> -- <agent_host_callbacks file> <split_ports file>` is empty |
 | A7 | The public API is unchanged: no consumer edit, and every facade still resolves | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty, and `cargo check --all-targets` is clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` (`tddy-desktop` on CI: it embeds the web bundle) |
-| A8 | Behaviour: the baseline | 562 passed, the same 22 by name, 1 ignored, after M6 and after M7a; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
+| A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after M6 and after M7a; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
 | A9 | The three sandboxed launches stay parallel, and the size lines hold | `svc_start_sandboxed_claude_cli_session.rs` < 500 lines; `relaunch_sandboxed_runner` ≤ 150; `start_sandboxed_claude_cli_session` ≤ 342 and `start_sandboxed_cursor_cli_session` ≤ 414 (the counter); Linux CI's sandboxed suites green on the PR (`scripts/ci-status.sh --failures`) |
 
 ## Decisions & trade-offs
@@ -546,7 +563,7 @@ Tasks executed at wrap:
 - [ ] A5: no host clone in a T9 or M7a file; the three hand-offs clone the launch handle (grep empty)
 - [ ] A6: `LaunchHost` = {`sandbox_rpc_handler`, `pr_stack`} defined once, implemented once on the host in wiring; `StackParentHost` implemented on the handle; `AgentHostCallbacks` and `SplitHost` unchanged
 - [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 562 / 22 / 1, the same 22 by name, after M6 and after M7a; `restructure verify` accounted
+- [ ] A8: baseline 575 / 22 / 1, the same 22 by name, after M6 and after M7a; `restructure verify` accounted
 - [ ] A9: the sandboxed launches' size lines hold, and Linux CI's sandboxed suites are green
 
 **Documentation**
