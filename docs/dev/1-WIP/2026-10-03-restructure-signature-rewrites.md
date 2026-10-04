@@ -183,7 +183,13 @@ Fixture: a one-crate `ledger` workspace — `pricing::label(count: u32) -> Strin
 
 ## Validation Results
 
-_(populated by validation commands)_
+### /validate-changes — 2026-10-04 (rebased onto `ddd0c0cd`, leak check clean: 3 own commits, no deletions)
+
+- **Responsibility delivered**: eight operations, `type`/`expr`/`order` validated with `syn`, per-operation field refusals in `plan/codec.rs`; no `TODO(signature-rewrites)` remains.
+- **Dependencies**: `transactional-groups` is merged and untouched by this diff. **Boundaries**: no caller fan-out, no group/gate/journal change, no caller-rewriting assist.
+- **Scoped gate** (`tddy-code-restructuring` only): `./test -p` — 44 test binaries, 0 failed, run before the last base rebase (the rebase conflict was `docs/ft/coder/1-OVERVIEW.md` only); `cargo check --all-targets` after it clean. Whole-workspace health is CI's.
+- **File length**: `backends/rust/signature_rewrites.rs` (new) is 502 production lines; `backends/rust.rs` grew about 168 lines on a 2,705-line record (`oversized-file-backends-rust.md`).
+
 
 ## TODO
 
@@ -195,11 +201,11 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
