@@ -1,39 +1,17 @@
-use super::entries;
-use crate::Result;
-
 use super::super::early_return::masked_to_code;
-
-use super::super::seam_refusal;
-
-use super::edits_of;
-
-use super::reordered;
-
-use crate::{backends::rust::signature::offset_at, plan::rust_syntax::permutation};
-
-use crate::plan::OrderKey;
-
-use super::replacing;
-
-use super::with_an_entry_at;
-
-use crate::plan::RefactorKind;
-
-use super::required;
-
-use crate::edit::TextEdit;
-
-use crate::edit::Range;
-
-use crate::plan::RefactorOp;
-
-use super::Span;
+use super::super::signature::offset_at;
+use super::super::{failure, seam_refusal, server_defect};
+use super::{edits_of, entries, reordered, replacing, required, with_an_entry_at, Span};
+use crate::edit::{Range, TextEdit};
+use crate::plan::rust_syntax::permutation;
+use crate::plan::{OrderKey, RefactorKind, RefactorOp};
+use crate::Result;
 
 /// The call expression `range` covers, with the arguments it passes.
 struct Call {
     /// The offset of the `(` opening the argument list.
-    pub(crate) open: usize,
-    pub(crate) arguments: Vec<Span>,
+    open: usize,
+    arguments: Vec<Span>,
 }
 
 /// The edits that rewrite the call `range` covers in `text` as `op` asks.
@@ -72,9 +50,7 @@ pub(in super::super) fn rewrite_call(
             let moved = permutation(&current, &op.order)?;
             Ok(reordered(text, arguments, &moved))
         }
-        other => Err(super::super::failure(format!(
-            "{other:?} does not edit a call"
-        ))),
+        other => Err(failure(format!("{other:?} does not edit a call"))),
     }?;
     Ok(edits_of(text, replacements))
 }
@@ -106,7 +82,7 @@ fn argument_position(position: &str, len: usize, limit: usize) -> Result<usize> 
             .ok()
             .and_then(|one_based| one_based.checked_sub(1))
             .ok_or_else(|| {
-                super::super::failure(format!(
+                failure(format!(
                     "`{number}` is not `first`, `last` or a one-based position"
                 ))
             })?,
@@ -121,14 +97,14 @@ fn argument_position(position: &str, len: usize, limit: usize) -> Result<usize> 
 
 /// The call `range` covers, refusing a range that is anything else.
 fn call_in(text: &str, range: Range) -> Result<Call> {
-    let bounds = offset_at(text, range.start).zip(offset_at(text, range.end));
-    let covered = bounds
+    let outside = || seam_refusal("the anchor's range lies outside its file");
+    let (start, end) = offset_at(text, range.start)
+        .zip(offset_at(text, range.end))
         .filter(|(from, to)| from <= to)
-        .and_then(|(from, to)| text.get(from..to))
-        .ok_or_else(|| seam_refusal("the anchor's range lies outside its file"))?;
-    let leading = covered.len() - covered.trim_start().len();
+        .ok_or_else(outside)?;
+    let covered = text.get(start..end).ok_or_else(outside)?;
     let call_text = covered.trim();
-    let from = bounds.map_or(0, |(from, _)| from) + leading;
+    let from = start + (covered.len() - covered.trim_start().len());
     let to = from + call_text.len();
 
     let not_a_call = || {
@@ -147,7 +123,7 @@ fn call_in(text: &str, range: Range) -> Result<Call> {
     let open = opening_of_the_last_group(code.as_bytes(), from, to).ok_or_else(not_a_call)?;
     let arguments = arguments_of(text, &code, open, to - 1);
     if arguments.len() != arity {
-        return Err(super::super::server_defect(format!(
+        return Err(server_defect(format!(
             "`{call_text}` passes {arity} argument(s), but {} were read from it",
             arguments.len()
         )));

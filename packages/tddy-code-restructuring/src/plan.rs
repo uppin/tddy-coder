@@ -817,6 +817,51 @@ mod tests {
         );
     }
 
+    /// A signature operation refused for what its fields say, each naming what is wrong.
+    #[test]
+    fn a_signature_operation_missing_or_misusing_a_field_is_refused_naming_it() {
+        // Given operations that each break one rule of the signature fields
+        let on_a_function = r#""anchor":{"kind":"symbol","file":"src/pricing.rs","path":"label"}"#;
+        let on_a_symbol_call =
+            r#""anchor":{"kind":"symbol","file":"src/checkout.rs","path":"basket"}"#;
+        let lines = [
+            // a `type` on an operation that cannot honour it
+            format!(r#"{{"op":"reorder_params",{on_a_function},"type":"u32","order":["a"]}}"#),
+            // a parameter change that names no parameter
+            format!(r#"{{"op":"change_param_type",{on_a_function},"type":"u32"}}"#),
+            // a position `add_param` does not know
+            format!(
+                r#"{{"op":"add_param",{on_a_function},"name":"unit","type":"u32","variant":"middle"}}"#
+            ),
+            // both a `type` and a `variant` on one return-type change
+            format!(
+                r#"{{"op":"change_return_type",{on_a_function},"type":"u32","variant":"unwrap"}}"#
+            ),
+            // a reorder with nothing to reorder to
+            format!(r#"{{"op":"reorder_params",{on_a_function}}}"#),
+            // a call-site operation anchored on a whole item
+            format!(
+                r#"{{"op":"change_call_arg",{on_a_symbol_call},"variant":"first","expr":"1"}}"#
+            ),
+        ];
+
+        // When each is parsed
+        let refusals = lines.map(|line| the_refusal_of(&line));
+
+        // Then each is refused naming what is wrong
+        assert_eq!(
+            refusals,
+            [
+                "plan is malformed: `type` names a Rust type, which only `change_param_type`, `add_param` and `change_return_type` honour — `ReorderParams` cannot",
+                "plan is malformed: `ChangeParamType` needs `name`",
+                "plan is malformed: `add_param`'s `variant` is `first`, `last` or `after:<parameter>`, and `middle` is none of them",
+                "plan is malformed: `change_return_type` needs exactly one of `type` and `variant`",
+                "plan is malformed: `ReorderParams` needs `order`",
+                "plan is malformed: `ChangeCallArg` is anchored on one call expression: an item anchor with a relative range over the call",
+            ]
+        );
+    }
+
     /// The JSON field is `type`; the Rust field is `type_`.
     #[test]
     fn reads_a_parameter_type_change_naming_its_parameter_and_type() {

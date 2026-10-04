@@ -10,11 +10,7 @@
 //! carry no delimiter, and writes only the span it changes, so the formatting around it survives.
 
 use super::signature::arrow_before;
-#[cfg(test)]
-use super::signature::offset_at;
 use crate::edit::{Position, Range, TextEdit};
-#[cfg(test)]
-use crate::plan::RefactorKind;
 use crate::Result;
 
 /// A half-open byte range of the text an operation reads.
@@ -169,8 +165,9 @@ pub(super) use call_site::rewrite_call;
 
 #[cfg(test)]
 mod tests {
+    use super::super::signature::offset_at;
     use super::*;
-    use crate::plan::{Anchor, RefactorOp};
+    use crate::plan::{Anchor, OrderKey, RefactorKind, RefactorOp};
     use pretty_assertions::assert_eq;
 
     fn at(line: u32, col: u32) -> Position {
@@ -293,10 +290,11 @@ mod tests {
         // When an argument is changed there
         let refusal = the_call_rewritten("basket\n", &rewriting);
 
-        // Then it is refused as not a call
-        assert_eq!(
-            refusal.map_err(|reason| reason.contains("is not a call expression")),
-            Err(true)
+        // Then it is refused as not a call, naming the text it was given
+        let reason = refusal.expect_err("a bare name is not a call");
+        assert!(
+            reason.contains("`basket` is not a call expression"),
+            "the refusal does not name the text as not a call:\n{reason}"
         );
     }
 
@@ -348,5 +346,61 @@ mod tests {
                 Ok("fn f(&self, a: u8, b: u16) {}\n".to_string()),
             ]
         );
+    }
+
+    /// `text` with the declaration whose name starts at (1, 4) rewritten as `op` asks.
+    fn the_declaration_rewritten(
+        text: &str,
+        op: &RefactorOp,
+    ) -> std::result::Result<String, String> {
+        declaration::rewrite_declaration(text, op, at(1, 4))
+            .map(|edits| applied(text, edits))
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn a_parameter_type_changes_and_the_others_stay() {
+        // Given a function with a `mut` parameter and a generic one
+        let text = "fn f(mut a: u8, b: Vec<(u8, u8)>) {}\n";
+        let retyping = |parameter: &str, new_type: &str| {
+            an_op(RefactorKind::ChangeParamType, |op| {
+                op.name = Some(parameter.to_string());
+                op.type_ = Some(new_type.to_string());
+            })
+        };
+
+        // When each is retyped, and one that is not a parameter is named
+        let results = [
+            the_declaration_rewritten(text, &retyping("a", "u64")),
+            the_declaration_rewritten(text, &retyping("b", "&[u8]")),
+            the_declaration_rewritten(text, &retyping("c", "u8")),
+        ];
+
+        // Then only the named parameter's type changes, and the stranger is refused
+        assert_eq!(
+            results,
+            [
+                Ok("fn f(mut a: u64, b: Vec<(u8, u8)>) {}\n".to_string()),
+                Ok("fn f(mut a: u8, b: &[u8]) {}\n".to_string()),
+                Err("this seam cannot be cut here: `c` is not a parameter of the function the anchor names".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn parameters_are_reordered_behind_a_receiver_that_stays_put() {
+        // Given a method with a receiver and two parameters
+        let text = "fn f(&self, a: u8, b: u16) {}\n";
+        let reordering = an_op(RefactorKind::ReorderParams, |op| {
+            op.order = ["b", "a"]
+                .map(|name| OrderKey::Name(name.to_string()))
+                .to_vec();
+        });
+
+        // When `b` moves first
+        let rewritten = the_declaration_rewritten(text, &reordering);
+
+        // Then the receiver is untouched and the two swap
+        assert_eq!(rewritten, Ok("fn f(&self, b: u16, a: u8) {}\n".to_string()));
     }
 }

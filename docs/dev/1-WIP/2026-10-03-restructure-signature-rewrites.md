@@ -190,8 +190,32 @@ File-length gate (`/pr-wrap` 3.5), engine-driven (`restructure apply`, `verify -
 
 ### From @validate-changes (Change Validation)
 ### From @validate-tests (Test Quality)
+
+All fixed (2026-10-04):
+
+- `src/plan.rs` — the per-operation field refusals in `plan/codec.rs` (a field the operation cannot honour, a missing `name`/`order`, an unknown `add_param` position, `type`+`variant` together, a call-site op off a call range) had no test: added `a_signature_operation_missing_or_misusing_a_field_is_refused_naming_it`.
+- `backends/rust/return_type.rs` — `return_type_assist` had no test: added three (`unwrap` picks by the current return type, an unknown variant, the wraps).
+- `backends/rust/signature_rewrites.rs` — `change_param_type` and `reorder_params` declaration edits had only live acceptance coverage: added a unit each. `a_range_that_is_not_one_call_is_refused` asserted `map_err(contains) == Err(true)`, which hides the message on failure: now asserts with the refusal in the failure text.
 ### From @prod-ready (Production Readiness)
+
+No mock code, dev fallback, TODO/FIXME, `todo!`, `#[allow]`, `println!`/`eprintln!`/`dbg!` or non-test `unwrap`/`expect` added by this diff. Fixed:
+
+- `signature_rewrites.rs` — `#[cfg(test)] use` lines in production scope (test-only imports) moved into the `tests` module.
+- `call_site.rs::call_in` — a `map_or(0, ..)` default stood in for an offset already proven present; the offsets are now taken once from the validated pair, no default.
+
+Left: `required()` re-checks a field `plan/codec.rs` already refuses when absent — defensive, returns an error, not a fallback.
 ### From @analyze-clean-code (Code Quality)
+
+Fixed:
+
+- `plan/codec.rs::refuse_a_signature_operation_it_cannot_honour` was ~100 lines at nesting 4: split into `refuse_a_field_the_operation_cannot_honour`, `refuse_a_missing_or_unknown_field` and `refuse_a_call_site_anchored_off_a_call`; messages unchanged (pinned by the new unit test).
+- `call_site.rs` `Call` carried `pub(crate)` fields on a private struct: now private. `return_type.rs`, `call_site.rs`, `declaration.rs` carried one-`use`-per-line blocks with blank lines (engine output): merged.
+
+Left, review items (not regressions of this change):
+
+- `backends/rust.rs` — 2,8xx lines; deferred with consent (see `## Restructuring`).
+- `plan.rs` — 1,497 lines (about 160 added, mostly tests); `plan/codec.rs` 553 lines (about 130 added, the validation). Not split here: out of this PR's scope; a split would move `RefactorKind`/`RefactorOp` consumers.
+- `declaration.rs::add_param` (~40 lines, nesting 4 in the `after:` arm) is at the acceptable edge; left.
 
 ## Validation Results
 
@@ -202,6 +226,10 @@ File-length gate (`/pr-wrap` 3.5), engine-driven (`restructure apply`, `verify -
 - **Scoped gate** (`tddy-code-restructuring` only): `./test -p` — 44 test binaries, 0 failed, run before the last base rebase (the rebase conflict was `docs/ft/coder/1-OVERVIEW.md` only); `cargo check --all-targets` after it clean. Whole-workspace health is CI's.
 - **File length**: `backends/rust/signature_rewrites.rs` (new) is 502 production lines; `backends/rust.rs` grew about 168 lines on a 2,705-line record (`oversized-file-backends-rust.md`).
 
+
+### /validate-tests, /validate-prod-ready, /analyze-clean-code — 2026-10-04
+
+Scoped to `tddy-code-restructuring`: `./test -p tddy-code-restructuring`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt` after the fixes above (results in the PR report).
 
 ## TODO
 
@@ -220,12 +248,12 @@ File-length gate (`/pr-wrap` 3.5), engine-driven (`restructure apply`, `verify -
 - [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-restructure-signature-rewrites-initial-discovery.md`

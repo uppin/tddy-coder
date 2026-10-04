@@ -1,50 +1,14 @@
-use super::entries;
-
-use super::super::signature::arrow_before;
-
-use super::inserting;
-
-use super::reordered;
-
-use crate::plan::rust_syntax::permutation;
-
-use crate::plan::OrderKey;
-
-use super::with_an_entry_at;
-
-use super::replacing;
-
-use super::super::signature::skip_whitespace;
-
-use super::separator_colon;
-
-use super::binding;
-
-use super::required;
-
-use super::Replacement;
-
-use super::Span;
-
-use super::edits_of;
-
-use crate::plan::RefactorKind;
-
-use super::super::seam_refusal;
-
-use super::super::signature::parameter_list;
-
-use super::super::signature::offset_at;
-
 use super::super::early_return::masked_to_code;
-
-use crate::edit::TextEdit;
-
+use super::super::signature::{arrow_before, offset_at, parameter_list, skip_whitespace};
+use super::super::{failure, seam_refusal};
+use super::{
+    binding, edits_of, entries, inserting, reordered, replacing, required, separator_colon,
+    with_an_entry_at, Replacement, Span,
+};
+use crate::edit::{Position, TextEdit};
+use crate::plan::rust_syntax::permutation;
+use crate::plan::{OrderKey, RefactorKind, RefactorOp};
 use crate::Result;
-
-use crate::edit::Position;
-
-use crate::plan::RefactorOp;
 
 /// The edits that rewrite the declaration of the function whose own name starts at `name_at` as
 /// `op` asks.
@@ -67,9 +31,7 @@ pub(in super::super) fn rewrite_declaration(
         RefactorKind::AddParam => add_param(&code, (open, &parameters), op),
         RefactorKind::ReorderParams => reorder_params(text, &code, &parameters, op),
         RefactorKind::ChangeReturnType => change_return_type(&code, close, op),
-        other => Err(super::super::failure(format!(
-            "{other:?} does not rewrite a declaration"
-        ))),
+        other => Err(failure(format!("{other:?} does not rewrite a declaration"))),
     }?;
     Ok(edits_of(text, replacements))
 }
