@@ -146,7 +146,18 @@ pub async fn moving_items(
     reexport: Option<&str>,
 ) -> Result<RunSummary, String> {
     let anchor = the_anchor_over(workspace, file, names).await;
+    a_run_of_its_own(workspace);
     applying_a_plan_of(workspace, &[a_move_item_op(&anchor, to, reexport)]).await
+}
+
+/// Forget the journal of an earlier plan. Every plan the harness writes is `earlier-plan.jsonl`, so
+/// a second move in one workspace would otherwise be read as the same run, and refused for it.
+fn a_run_of_its_own(workspace: &AFixtureWorkspace) {
+    match std::fs::remove_dir_all(workspace.path().join(".restructure")) {
+        Ok(()) => {}
+        Err(gone) if gone.kind() == std::io::ErrorKind::NotFound => {}
+        Err(other) => panic!("the earlier run's journal could not be removed: {other}"),
+    }
 }
 
 /// Apply a `reparent_module` of the module `name` that `parent_file` declares, under the module `to`.

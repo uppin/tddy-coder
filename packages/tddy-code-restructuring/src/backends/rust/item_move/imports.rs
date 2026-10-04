@@ -18,7 +18,7 @@ use std::ops::Range;
 
 use super::super::early_return::masked_to_code;
 use super::text::{depth_at, split_use, use_statements};
-use crate::crate_move::source_scan::items_of_module;
+use crate::crate_move::source_scan::{items_of_module, UseLeaf};
 
 /// The source module, as the code being moved sees it.
 pub(super) struct Source<'a> {
@@ -70,8 +70,17 @@ fn header_imports(source: &Source<'_>, taken: &BTreeSet<String>) -> Vec<String> 
         let rebased = rebased_tree(tree, source, &local);
         let statement = format!("use {rebased};");
         let leaves = items_of_module(&statement).uses;
-        let names: Vec<&str> = leaves.iter().filter_map(|leaf| leaf.bound_name()).collect();
-        if !names.is_empty() && names.iter().all(|name| taken.contains(*name)) {
+        let bound = |leaf: &UseLeaf| leaf.bound_name().is_some_and(|name| taken.contains(name));
+        if leaves.iter().any(bound) {
+            // A group the destination binds part of: what it does not bind, one `use` each, because
+            // writing the whole group again would bind the rest twice (`E0252`).
+            let attributes = attributes_above(source.text, span.start);
+            lines.extend(
+                leaves
+                    .iter()
+                    .filter(|leaf| !bound(leaf))
+                    .map(|leaf| format!("{attributes}use {};", spelled(leaf))),
+            );
             continue;
         }
         lines.push(format!(
@@ -80,6 +89,16 @@ fn header_imports(source: &Source<'_>, taken: &BTreeSet<String>) -> Vec<String> 
         ));
     }
     lines
+}
+
+/// A leaf of a `use` item, written as an item of its own.
+fn spelled(leaf: &UseLeaf) -> String {
+    let path = leaf.segments.join("::");
+    match (&leaf.alias, leaf.glob) {
+        (_, true) => format!("{path}::*"),
+        (Some(alias), false) => format!("{path} as {alias}"),
+        (None, false) => path,
+    }
 }
 
 /// The attribute lines written directly above the item at `at`, each ending in a newline.
@@ -193,6 +212,19 @@ mod tests {
         let taken = BTreeSet::from(["Write".to_string()]);
 
         assert!(needed(&source, &taken, &[]).is_empty());
+    }
+
+    #[test]
+    fn writes_only_what_the_destination_does_not_bind_of_a_group() {
+        let source = Source {
+            text: "use tddy_rpc::{Response, Status};\n",
+            scope: 0..34,
+            module: &module(&["pairing"]),
+            qualifier: "crate::pairing",
+        };
+        let taken = BTreeSet::from(["Status".to_string()]);
+
+        assert_eq!(needed(&source, &taken, &[]), ["use tddy_rpc::Response;"]);
     }
 
     #[test]

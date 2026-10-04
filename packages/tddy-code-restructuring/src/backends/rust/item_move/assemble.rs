@@ -9,7 +9,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use super::super::seam_refusal;
-use super::creation;
 use super::destination::{Module, Package};
 use super::facade;
 use super::imports::{self, Source};
@@ -17,6 +16,7 @@ use super::outline::{visibility_edit, Item, Run};
 use super::outside;
 use super::placement;
 use super::preflight::names_declared_in;
+use super::reach;
 use super::rebase::{self, Modules};
 use super::scope::Scope;
 use super::sites::{edits_for_file, module_of_file, Context, Qualifiers, Site};
@@ -63,7 +63,7 @@ pub(in crate::backends::rust) fn written_from_the_root(module: &[String]) -> Str
 }
 
 pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
-    let texts = original_texts(moving)?;
+    let mut texts = original_texts(moving)?;
     let region = line_start(moving.source_text, moving.run.first_line)
         ..line_end(moving.source_text, moving.run.last_line);
     let landing = visibilities(moving, &texts, &region)?;
@@ -73,7 +73,15 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         .entry(moving.source_file.to_string())
         .or_default()
         .extend(landing.kept_edits.clone());
-    repoint_callers(moving, &texts, &region, &mut edits)?;
+    let facade_names: BTreeSet<String> = if moving.reexport == Reexport::Outside {
+        outside::facade_items(moving.reexport, &landing.written, moving.outside)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
+    repoint_callers(moving, &texts, &region, &facade_names, &mut edits)?;
 
     let moved_names: BTreeSet<String> = moving
         .run
@@ -83,24 +91,16 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         .collect();
     let moved = moved_text(moving, &region, &moved_names, &landing, &mut edits)?;
     let mut notes = Vec::new();
-    let destination_edits = into_destination(moving, &texts, &moved_names, &moved, &mut notes)?;
-    edits
-        .entry(moving.destination.file.clone())
-        .or_default()
-        .extend(destination_edits);
+    let destination_edits = into_destination(moving, &mut texts, &moved_names, &moved, &mut notes)?;
+    for (path, edit) in destination_edits {
+        edits.entry(path).or_default().push(edit);
+    }
     edits
         .entry(moving.source_file.to_string())
         .or_default()
         .push(leave_behind(moving, &region, &landing));
-    if let Some((parent, name)) = moving.created {
-        let visibility = declared_visibility(moving, parent, &texts, &region, &landing);
-        let (at, written) =
-            creation::declaration(&texts[&parent.file], &parent.scope, &visibility, name);
-        edits
-            .entry(parent.file.clone())
-            .or_default()
-            .push(Edit::insert(at, written));
-    }
+    let facade = !moving.reexport.repoints_callers() || !facade_names.is_empty();
+    reach::reach_the_destination(moving, &mut texts, &region, facade, &mut edits)?;
 
     let mut files = BTreeMap::new();
     for (path, mut list) in edits {
@@ -119,33 +119,6 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         report: landing.report,
         notes,
     })
-}
-
-/// The visibility the created module is declared with: the narrowest that lets every caller the move
-/// re-points, and the facade it leaves behind, reach it.
-fn declared_visibility(
-    moving: &Moving<'_>,
-    parent: &Module,
-    texts: &BTreeMap<String, String>,
-    region: &Range<usize>,
-    landing: &Landing,
-) -> String {
-    let mut scope = Scope::Within(parent.path.clone());
-    let facade = outside::facade_items(moving.reexport, &landing.written, moving.outside);
-    if !moving.reexport.repoints_callers() || !facade.is_empty() {
-        scope = scope.widened_to(moving.source);
-    }
-    if moving.reexport.repoints_callers() {
-        for item in &moving.run.items {
-            scope = match users_of(moving, texts, region, &item.name) {
-                Some(users) => users
-                    .iter()
-                    .fold(scope, |scope, user| scope.widened_to(user)),
-                None => Scope::Public,
-            };
-        }
-    }
-    scope.spelled_in(&parent.path)
 }
 
 fn original_texts(moving: &Moving<'_>) -> Result<BTreeMap<String, String>> {
@@ -274,7 +247,7 @@ fn visibilities(
 
 /// The modules that name the item from outside the lines that move, or `None` when a file outside
 /// the crate does, which only a `pub` item can have.
-fn users_of(
+pub(super) fn users_of(
     moving: &Moving<'_>,
     texts: &BTreeMap<String, String>,
     region: &Range<usize>,
@@ -300,6 +273,7 @@ fn repoint_callers(
     moving: &Moving<'_>,
     texts: &BTreeMap<String, String>,
     region: &Range<usize>,
+    facade_names: &BTreeSet<String>,
     edits: &mut BTreeMap<String, Vec<Edit>>,
 ) -> Result<()> {
     let to = &moving.destination.path;
@@ -318,6 +292,7 @@ fn repoint_callers(
         repoint: moving.reexport.repoints_callers(),
         region: (moving.source_file, region.clone()),
         moved_files: &[],
+        bound_by_the_facade: facade_names,
     };
     let files: BTreeSet<&String> = moving.sites.iter().map(|site| &site.path).collect();
     for path in files {
@@ -389,12 +364,12 @@ fn leave_behind(moving: &Moving<'_>, region: &Range<usize>, landing: &Landing) -
 /// The edits to the destination: the imports the moved code needs, then the moved text itself.
 fn into_destination(
     moving: &Moving<'_>,
-    texts: &BTreeMap<String, String>,
+    texts: &mut BTreeMap<String, String>,
     moved_names: &BTreeSet<String>,
     moved: &str,
     notes: &mut Vec<String>,
-) -> Result<Vec<Edit>> {
-    let text = &texts[&moving.destination.file];
+) -> Result<Vec<(String, Edit)>> {
+    let text = texts[&moving.destination.file].clone();
     let scope = moving.destination.scope.clone();
     let mut taken = names_declared_in(&text[scope.clone()]);
     taken.extend(moved_names.iter().cloned());
@@ -411,21 +386,39 @@ fn into_destination(
         qualifier: &written_from_the_root(moving.source),
     };
     let lines = imports::needed(&source, &taken, &kept);
+    let (lines, widenings) = reach::reachable_imports(moving, texts, moved, lines)?;
 
-    let mut edits = Vec::new();
+    let mut edits: Vec<(String, Edit)> = widenings;
+    let mut imports = None;
     if !lines.is_empty() {
         notes.push(format!(
             "imports: {} `use` item(s) copied from the source module for the moved code; the ones \
              it does not use are removed by the unused-import tidy at the end of a complete run",
             lines.len()
         ));
-        let (at, blank) = use_insertion(text, scope.clone());
+        let (at, blank) = use_insertion(&text, scope.clone());
         let mut block: String = lines.iter().map(|line| format!("{line}\n")).collect();
         if blank {
             block.push('\n');
         }
-        edits.push(Edit::insert(at, block));
+        imports = Some(Edit::insert(at, block));
     }
-    edits.push(placement::insertion(text, &scope, moved)?);
+    let landed = placement::insertion(&text, &scope, moved)?;
+    // Both land at one offset in a file with no items yet; as two edits their order would be the
+    // order of their text, which writes the imports below the items.
+    let file = moving.destination.file.clone();
+    match imports {
+        Some(imports) if imports.start == landed.start && imports.end == landed.end => {
+            edits.push((
+                file,
+                Edit::insert(landed.start, format!("{}{}", imports.text, landed.text)),
+            ))
+        }
+        Some(imports) => {
+            edits.push((file.clone(), imports));
+            edits.push((file, landed));
+        }
+        None => edits.push((file, landed)),
+    }
     Ok(edits)
 }

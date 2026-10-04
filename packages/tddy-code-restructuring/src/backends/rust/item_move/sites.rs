@@ -45,6 +45,10 @@ pub(in crate::backends::rust) struct Context<'a> {
     /// Files that move whole, with the module that owns them: a relative qualifier written in one
     /// is rebased with the file rather than re-pointed.
     pub(in crate::backends::rust) moved_files: &'a [String],
+    /// The moved names that a facade in the file the lines left binds at its top level. A bare use
+    /// of one there needs no import of its own: the facade already brings it into scope, and a
+    /// second binding of the name is `E0252`.
+    pub(in crate::backends::rust) bound_by_the_facade: &'a BTreeSet<String>,
 }
 
 impl Context<'_> {
@@ -156,6 +160,12 @@ pub(in crate::backends::rust) fn edits_for_file(
             continue;
         }
         let chain = enclosing_modules(text, site.offset);
+        if chain.is_empty()
+            && path == context.region.0
+            && context.bound_by_the_facade.contains(&site.name)
+        {
+            continue;
+        }
         let imported = covered
             .iter()
             .any(|(scope, name)| *name == site.name && chain.starts_with(scope));

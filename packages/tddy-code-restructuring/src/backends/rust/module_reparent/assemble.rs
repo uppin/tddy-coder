@@ -137,6 +137,7 @@ fn repoint_callers(
         repoint: moving.reexport.repoints_callers(),
         region: ("", 0..0),
         moved_files: &moved,
+        bound_by_the_facade: &BTreeSet::new(),
     };
     let files: BTreeSet<&String> = moving.sites.iter().map(|site| &site.path).collect();
     for path in files {

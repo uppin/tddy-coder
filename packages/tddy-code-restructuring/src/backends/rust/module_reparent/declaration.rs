@@ -16,15 +16,15 @@ use crate::Result;
 
 /// A module declaration of a parent module.
 #[derive(Debug, Clone)]
-pub(super) struct Declaration {
+pub(in crate::backends::rust) struct Declaration {
     /// The whole lines holding it: attributes and doc comments above, the `;` and its line end. For
     /// a module with a body, the lines up to the one it opens on.
     pub(super) lines: Range<usize>,
     /// The visibility as written, empty for private.
-    pub(super) visibility: String,
+    pub(in crate::backends::rust) visibility: String,
     /// From the visibility (or, with none, the keyword) up to the keyword: what a respelled
     /// visibility replaces.
-    pub(super) visibility_span: Range<usize>,
+    pub(in crate::backends::rust) visibility_span: Range<usize>,
     /// Whether the module has a body in braces rather than a file of its own.
     pub(super) inline: bool,
     /// Whether an attribute above it places its file with `#[path]`.
@@ -66,7 +66,11 @@ struct Keyword {
 ///
 /// `None` when the module declares no such child. Refused when it is declared on a line shared with
 /// other code, because moving whole lines would take that code along.
-pub(super) fn find(text: &str, scope: &Range<usize>, name: &str) -> Result<Option<Declaration>> {
+pub(in crate::backends::rust) fn find(
+    text: &str,
+    scope: &Range<usize>,
+    name: &str,
+) -> Result<Option<Declaration>> {
     let masked = masked_to_code(text);
     let Some(keyword) = keyword_of(&masked, scope, name) else {
         return Ok(None);
