@@ -10,6 +10,7 @@
 //! `order` is not syntax, but whether it is a permutation of what it reorders is decided here too,
 //! once the backend has read the declaration or the call it applies to.
 
+use super::malformed;
 use crate::plan::OrderKey;
 use crate::Result;
 
@@ -18,10 +19,11 @@ use crate::Result;
 /// Refuses anything `syn` does not parse as one whole [`syn::Type`] — two types, a type followed by
 /// anything else, or an expression.
 pub fn one_type(text: &str) -> Result<syn::Type> {
-    // TODO(signature-rewrites): implement — `syn::parse_str::<syn::Type>(text)`, refusing as
-    // malformed with "`type` must be exactly one Rust type, and `<text>` is not".
-    let _ = text;
-    todo!("TODO(signature-rewrites): parse `type` as exactly one Rust type")
+    syn::parse_str::<syn::Type>(text).map_err(|_| {
+        malformed(format!(
+            "`type` must be exactly one Rust type, and `{text}` is not"
+        ))
+    })
 }
 
 /// `text` as exactly one Rust expression carrying no statement, or a malformed-plan refusal
@@ -31,12 +33,32 @@ pub fn one_type(text: &str) -> Result<syn::Type> {
 /// but carries a statement anywhere inside it — a block, a closure body, an `if` arm — because a
 /// statement is code the engine should have produced, not an argument.
 pub fn one_expr(text: &str) -> Result<syn::Expr> {
-    // TODO(signature-rewrites): implement — `syn::parse_str::<syn::Expr>(text)`, refusing as
-    // malformed with "`expr` must be exactly one Rust expression, and `<text>` is not"; then walk it
-    // with `syn::visit::Visit` and refuse any `Stmt` with "`expr` may carry no statement, and
-    // `<text>` carries one".
-    let _ = text;
-    todo!("TODO(signature-rewrites): parse `expr` as exactly one Rust expression")
+    let expr = syn::parse_str::<syn::Expr>(text).map_err(|_| {
+        malformed(format!(
+            "`expr` must be exactly one Rust expression, and `{text}` is not"
+        ))
+    })?;
+
+    let mut statements = Statements::default();
+    syn::visit::Visit::visit_expr(&mut statements, &expr);
+    if statements.found {
+        return Err(malformed(format!(
+            "`expr` may carry no statement, and `{text}` carries one"
+        )));
+    }
+    Ok(expr)
+}
+
+/// Whether the expression visited carries a [`syn::Stmt`] anywhere inside it.
+#[derive(Default)]
+struct Statements {
+    found: bool,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for Statements {
+    fn visit_stmt(&mut self, _: &'ast syn::Stmt) {
+        self.found = true;
+    }
 }
 
 /// Where each entry of `current` goes under `order`: the index into `current` of each new position.
@@ -44,11 +66,25 @@ pub fn one_expr(text: &str) -> Result<syn::Expr> {
 /// `order` must name every entry of `current` exactly once. A missing one or a repeated one is
 /// refused naming it — reordering is never allowed to drop or duplicate a parameter or an argument.
 pub fn permutation(current: &[OrderKey], order: &[OrderKey]) -> Result<Vec<usize>> {
-    // TODO(signature-rewrites): implement — refuse an entry of `order` that is not in `current`
-    // ("`order` names <key>, which is not there"), one named twice ("`order` names <key> twice") and
-    // one of `current` it leaves out ("`order` must name every entry once: <key> is missing").
-    let _ = (current, order);
-    todo!("TODO(signature-rewrites): check `order` is a permutation of what it reorders")
+    let mut taken = vec![false; current.len()];
+    let mut moved = Vec::with_capacity(order.len());
+    for key in order {
+        let index = current
+            .iter()
+            .position(|known| known == key)
+            .ok_or_else(|| malformed(format!("`order` names {key}, which is not there")))?;
+        if std::mem::replace(&mut taken[index], true) {
+            return Err(malformed(format!("`order` names {key} twice")));
+        }
+        moved.push(index);
+    }
+    if let Some(missing) = taken.iter().position(|taken| !taken) {
+        return Err(malformed(format!(
+            "`order` must name every entry once: {} is missing",
+            current[missing]
+        )));
+    }
+    Ok(moved)
 }
 
 #[cfg(test)]

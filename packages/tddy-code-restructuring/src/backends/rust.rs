@@ -10,7 +10,9 @@
 
 use crate::backends::lsp_bridge::LspClientBridge;
 use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
-use crate::edit::{FileEdit, Position, Range, Resolution, VisibilityChange, WorkspaceEdit};
+use crate::edit::{
+    FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
+};
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
@@ -39,6 +41,7 @@ mod readiness;
 mod relative_visibility;
 mod selection;
 mod signature;
+mod signature_rewrites;
 
 pub use chatter::ServerChatter;
 
@@ -361,20 +364,14 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
     }
 }
 
-/// The assists behind `change_return_type`'s `variant`, any of which may be the one offered.
+/// The assist behind `change_return_type`'s `variant`, for a function returning `returned`.
 ///
-/// One operation, several assists: which one rust-analyzer offers depends on what the declaration
-/// returns now (`unwrap` is `Unwrap Option return type` or `Unwrap Result return type`), so this is
-/// keyed by the variant rather than the kind, and is not one of [`assist_for`]'s arms. All of them
-/// rewrite the declaration and the function's own returns, in its own file; callers are left to the
-/// group's gate.
-///
-/// TODO(signature-rewrites): unverified — check the titles and kinds against the bundled
-/// rust-analyzer (the assist ids are `wrap_return_type` and `unwrap_return_type`, renamed in 2024
-/// from `wrap_return_type_in_result`/`_option`), and use it from `resolve_opening`'s
-/// `change_return_type` arm.
-#[allow(dead_code)]
-fn return_type_assists(variant: &str) -> Option<&'static [Assist]> {
+/// One operation, several assists: `unwrap` is `Unwrap Option return type` or `Unwrap Result return
+/// type` depending on what the declaration returns now, so this is keyed by the variant and the
+/// current return type rather than the kind, and is not one of [`assist_for`]'s arms. Each rewrites
+/// the declaration and the function's own returns, in its own file; callers are left to the group's
+/// gate. The titles are the bundled rust-analyzer's own (`wrap_return_type`, `unwrap_return_type`).
+fn return_type_assist(variant: &str, returned: Option<&str>) -> Result<Assist> {
     const fn rewriting_the_return_type(title: &'static str) -> Assist {
         Assist {
             title,
@@ -386,17 +383,26 @@ fn return_type_assists(variant: &str) -> Option<&'static [Assist]> {
             relocates_items: false,
         }
     }
-    const WRAP_RESULT: [Assist; 1] = [rewriting_the_return_type("wrap return type in result")];
-    const WRAP_OPTION: [Assist; 1] = [rewriting_the_return_type("wrap return type in option")];
-    const UNWRAP: [Assist; 2] = [
-        rewriting_the_return_type("unwrap result return type"),
-        rewriting_the_return_type("unwrap option return type"),
-    ];
+    let wrapper = || {
+        let returned = returned?;
+        match syn::parse_str::<syn::Type>(returned).ok()? {
+            syn::Type::Path(path) => Some(path.path.segments.last()?.ident.to_string()),
+            _ => None,
+        }
+    };
     match variant {
-        "wrap_result" => Some(&WRAP_RESULT),
-        "wrap_option" => Some(&WRAP_OPTION),
-        "unwrap" => Some(&UNWRAP),
-        _ => None,
+        "wrap_result" => Ok(rewriting_the_return_type("wrap return type in result")),
+        "wrap_option" => Ok(rewriting_the_return_type("wrap return type in option")),
+        "unwrap" => match wrapper().as_deref() {
+            Some("Result") => Ok(rewriting_the_return_type("unwrap result return type")),
+            Some("Option") => Ok(rewriting_the_return_type("unwrap option return type")),
+            _ => Err(seam_refusal(
+                "`unwrap` needs a function returning a `Result` or an `Option`",
+            )),
+        },
+        other => Err(failure(format!(
+            "`{other}` is not a `change_return_type` variant"
+        ))),
     }
 }
 
@@ -938,6 +944,17 @@ impl RustBackend {
     ) -> Result<Value> {
         let assist = assist_for(kind)
             .ok_or_else(|| failure(format!("no rust-analyzer assist maps to {kind:?}")))?;
+        self.offered_assist(uri, range, assist, probe)
+    }
+
+    /// The code action `assist` names, once the server offers it at `range`.
+    fn offered_assist(
+        &mut self,
+        uri: &str,
+        range: Range,
+        assist: Assist,
+        probe: Position,
+    ) -> Result<Value> {
         let wanted = assist.title;
         let target = if assist.at_caret {
             Range {
@@ -1205,28 +1222,31 @@ impl RustBackend {
             )?));
         }
 
-        // TODO(signature-rewrites): implement, each from the server's own answers and never a text
-        // search —
-        // - `change_param_type` / `add_param` / `reorder_params` / `change_return_type` with `type`:
-        //   find the declaration through `documentSymbol` at the anchor, and rewrite only its
-        //   parameter list or `-> …` with the overlay + `minimal_edits` pattern `rename_symbol`
-        //   uses; `reorder_params` checks `order` with `plan::rust_syntax::permutation`;
-        // - `change_return_type` with `variant`: the assist `return_type_assists` names, offered
-        //   with the caret on the return type;
-        // - the four call-site ops: refuse a range that is not exactly one call expression ("… is
-        //   not a call expression"), then edit that call's argument list alone.
-        if matches!(
-            op.op,
-            RefactorKind::ChangeParamType
-                | RefactorKind::AddParam
-                | RefactorKind::ReorderParams
-                | RefactorKind::ChangeReturnType
-        ) || op.op.edits_a_call_site()
-        {
-            return Err(failure(format!(
-                "TODO(signature-rewrites): {:?} is not implemented yet",
-                op.op
-            )));
+        // The signature and call-site operations are edits this backend writes to the one
+        // declaration or call the anchor names, so they are answered by reading the text — before a
+        // server exists, like the refusals above.
+        if let Some(edits) = Self::rewrite_signature(op, &original)? {
+            return Ok(Resolution::of(WorkspaceEdit {
+                changes: vec![FileEdit::Change {
+                    path: relative,
+                    edits,
+                }],
+            }));
+        }
+
+        // `change_return_type` with a `variant` is the one signature operation rust-analyzer has an
+        // assist for: it rewrites the declaration and the function's own returns, in its own file.
+        if op.op == RefactorKind::ChangeReturnType {
+            self.start(workspace.root)?;
+            self.did_open(&uri, &original)?;
+            self.ensure_indexed(&uri)?;
+            let edits = self.wrap_or_unwrap_return_type(&uri, &original, op)?;
+            return Ok(Resolution::of(WorkspaceEdit {
+                changes: vec![FileEdit::Change {
+                    path: relative,
+                    edits,
+                }],
+            }));
         }
 
         self.start(workspace.root)?;
@@ -1910,6 +1930,80 @@ impl RustBackend {
             )));
         }
         Ok(WorkspaceEdit { changes })
+    }
+
+    /// The text of `original` after the signature or call-site operation `op`, or `None` when `op`
+    /// is not one of those that is a text edit.
+    fn rewrite_signature(op: &RefactorOp, original: &str) -> Result<Option<Vec<TextEdit>>> {
+        let rewrites_a_declaration = matches!(
+            op.op,
+            RefactorKind::ChangeParamType | RefactorKind::AddParam | RefactorKind::ReorderParams
+        ) || (op.op == RefactorKind::ChangeReturnType
+            && op.type_.is_some());
+        if !rewrites_a_declaration && !op.op.edits_a_call_site() {
+            return Ok(None);
+        }
+
+        let Anchor::Range { start, end, .. } = &op.anchor else {
+            return Err(unlowered_item_anchor(&op.anchor, &format!("{:?}", op.op)));
+        };
+        if rewrites_a_declaration {
+            signature_rewrites::rewrite_declaration(original, op, *start).map(Some)
+        } else {
+            let range = Range {
+                start: *start,
+                end: *end,
+            };
+            signature_rewrites::rewrite_call(original, op, range).map(Some)
+        }
+    }
+
+    /// The edits of rust-analyzer's `wrap_result`, `wrap_option` or `unwrap` assist, asked for with
+    /// the caret on the return type of the function the anchor names.
+    ///
+    /// The server's own edits are reported as they came, not as a line diff of the document they
+    /// produce: a later operation of the same plan anchors on this function's name, on the line the
+    /// assist rewrites.
+    fn wrap_or_unwrap_return_type(
+        &mut self,
+        uri: &str,
+        original: &str,
+        op: &RefactorOp,
+    ) -> Result<Vec<TextEdit>> {
+        let variant = op
+            .variant
+            .as_deref()
+            .ok_or_else(|| failure("`change_return_type` needs `type` or `variant`"))?;
+        let name = self.anchor_range(uri, op)?.start;
+        let returned = signature_rewrites::returned_type(original, name);
+        let assist = return_type_assist(variant, returned.as_deref())?;
+        let caret = signature::return_type_position(original, name).ok_or_else(|| {
+            seam_refusal("the function the anchor names declares no return type to rewrite")
+        })?;
+        let range = Range {
+            start: caret,
+            end: caret,
+        };
+
+        (self.progress)(&format!("assist: {variant} the return type"));
+        let action = self.offered_assist(uri, range, assist, caret)?;
+        let resolved = self.request_settled("codeAction/resolve", action)?;
+        Ok(edits_for(&resolved, uri)?
+            .into_iter()
+            .map(|edit| TextEdit {
+                range: Range {
+                    start: Position {
+                        line: edit.start.line as u32 + 1,
+                        col: edit.start.character as u32 + 1,
+                    },
+                    end: Position {
+                        line: edit.end.line as u32 + 1,
+                        col: edit.end.character as u32 + 1,
+                    },
+                },
+                new_text: edit.new_text,
+            })
+            .collect())
     }
 
     /// The range an operation's anchor names.

@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::Anchor;
+
 use super::Reexport;
 
 use super::RefactorKind;
@@ -429,13 +431,123 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         super::rust_syntax::one_expr(expr)?;
     }
 
-    // TODO(signature-rewrites): implement — refuse, as malformed and before any server is spawned:
-    // a `change_param_type` with no `name` or no `type`; an `add_param` with no `name`, `type` or
-    // position `variant`; a `reorder_params` / `reorder_call_args` with an empty `order`; a
-    // `change_return_type` with both or neither of `type` and `variant` (or a `variant` other than
-    // `wrap_result` / `wrap_option` / `unwrap`); a call-site op whose anchor is not an item anchor
-    // with a relative range; an `add_call_arg` / `change_call_arg` with no `expr`; and `type`,
-    // `expr` or `order` on an operation that cannot honour it.
+    refuse_a_signature_operation_it_cannot_honour(&op)?;
 
     Ok(op)
+}
+
+/// The refusals specific to the signature and call-site operations, and to the fields only they
+/// carry: a field an operation cannot honour is refused rather than ignored, and a field it needs
+/// is refused when absent, before any server is spawned.
+fn refuse_a_signature_operation_it_cannot_honour(op: &RefactorOp) -> Result<()> {
+    use RefactorKind::*;
+
+    let kind = op.op;
+    let takes_type = matches!(kind, ChangeParamType | AddParam | ChangeReturnType);
+    let takes_expr = matches!(kind, AddCallArg | ChangeCallArg);
+    let takes_order = matches!(kind, ReorderParams | ReorderCallArgs);
+
+    if op.type_.is_some() && !takes_type {
+        return Err(malformed(format!(
+            "`type` names a Rust type, which only `change_param_type`, `add_param` and \
+             `change_return_type` honour — `{kind:?}` cannot"
+        )));
+    }
+    if op.expr.is_some() && !takes_expr {
+        return Err(malformed(format!(
+            "`expr` names a call argument, which only `add_call_arg` and `change_call_arg` \
+             honour — `{kind:?}` cannot"
+        )));
+    }
+    if !op.order.is_empty() && !takes_order {
+        return Err(malformed(format!(
+            "`order` names a new order, which only `reorder_params` and `reorder_call_args` \
+             honour — `{kind:?}` cannot"
+        )));
+    }
+
+    let needs = |what: &str, present: bool| -> Result<()> {
+        if present {
+            Ok(())
+        } else {
+            Err(malformed(format!("`{kind:?}` needs `{what}`")))
+        }
+    };
+    let position = op.variant.as_deref();
+    match kind {
+        ChangeParamType => {
+            needs("name", op.name.is_some())?;
+            needs("type", op.type_.is_some())?;
+        }
+        AddParam => {
+            needs("name", op.name.is_some())?;
+            needs("type", op.type_.is_some())?;
+            needs("variant", position.is_some())?;
+            if let Some(variant) = position.filter(|variant| !a_parameter_position(variant)) {
+                return Err(malformed(format!(
+                    "`add_param`'s `variant` is `first`, `last` or `after:<parameter>`, and \
+                     `{variant}` is none of them"
+                )));
+            }
+        }
+        ReorderParams | ReorderCallArgs => needs("order", !op.order.is_empty())?,
+        ChangeReturnType => match (op.type_.is_some(), position) {
+            (true, None) => {}
+            (false, Some("wrap_result" | "wrap_option" | "unwrap")) => {}
+            (false, Some(variant)) => {
+                return Err(malformed(format!(
+                    "`change_return_type`'s `variant` is `wrap_result`, `wrap_option` or \
+                     `unwrap`, and `{variant}` is none of them"
+                )))
+            }
+            _ => {
+                return Err(malformed(
+                    "`change_return_type` needs exactly one of `type` and `variant`",
+                ))
+            }
+        },
+        AddCallArg | RemoveCallArg | ChangeCallArg => {
+            needs("variant", position.is_some())?;
+            if let Some(variant) = position.filter(|variant| !an_argument_position(variant)) {
+                return Err(malformed(format!(
+                    "`{kind:?}`'s `variant` is `first`, `last` or a one-based position, and \
+                     `{variant}` is none of them"
+                )));
+            }
+            if takes_expr {
+                needs("expr", op.expr.is_some())?;
+            }
+        }
+        _ => {}
+    }
+
+    if kind.edits_a_call_site()
+        && !matches!(
+            op.anchor,
+            Anchor::Item {
+                start: Some(_),
+                end: Some(_),
+                ..
+            }
+        )
+    {
+        return Err(malformed(format!(
+            "`{kind:?}` is anchored on one call expression: an item anchor with a relative range \
+             over the call"
+        )));
+    }
+    Ok(())
+}
+
+/// `first`, `last` or `after:<parameter>` — where `add_param` puts the parameter.
+fn a_parameter_position(variant: &str) -> bool {
+    matches!(variant, "first" | "last")
+        || variant
+            .strip_prefix("after:")
+            .is_some_and(|name| !name.is_empty())
+}
+
+/// `first`, `last` or a one-based position — which argument a call-site operation addresses.
+fn an_argument_position(variant: &str) -> bool {
+    matches!(variant, "first" | "last") || variant.parse::<u32>().is_ok_and(|index| index >= 1)
 }
