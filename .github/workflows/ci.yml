@@ -116,8 +116,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ${{ matrix.e2e && 'test-e2e' || 'test' }}
-          save-if: ${{ github.ref == 'refs/heads/master' }}
+          # One cache for both legs: they build the same `--workspace` test targets, so the e2e leg
+          # restores what the other leg saved. Only that leg saves it — two writers on one key would
+          # race, and the second would fail to reserve it.
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/master' && !matrix.e2e }}
 
       # nextest builds the test targets itself. What it cannot produce is a
       # binary belonging to another workspace package, which suites like

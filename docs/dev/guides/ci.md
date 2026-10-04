@@ -57,8 +57,8 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 
 They are the two legs of one matrix job in `ci.yml`, so the setup — fixture binaries, nix, caches,
 the JUnit report — exists once. A failing leg does not cancel the other, and each reports its own
-count and uploads its own JUnit XML (`junit-rust`, `junit-rust-e2e`). Their cargo caches are
-separate (`test`, `test-e2e`).
+count and uploads its own JUnit XML (`junit-rust`, `junit-rust-e2e`). They share one cargo cache
+(`test`): both build the same workspace test targets, and only `Rust tests` saves it.
 
 **The set is written once, in [`.config/rust-e2e.filterset`](../../../.config/rust-e2e.filterset).** The
 `e2e` leg runs that nextest filterset and the other leg runs its complement, both with `-E`, which

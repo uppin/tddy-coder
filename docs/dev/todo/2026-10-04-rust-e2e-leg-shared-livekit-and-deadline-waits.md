@@ -143,11 +143,14 @@ serial (proves isolation and lifecycle), then lift the group (proves the paralle
 
 ### 3. The compile is paid twice (~1,525s, 76% of the leg)
 
-**Verified:** both test legs reported `rust-cache: No cache found.`; they compile the same `--workspace`
-test targets independently, from scratch. `master` holds caches for `rust-lint`, `rust-build`, `rust-vm`
-and arm64 but **none for the test job**, and the repo's Actions cache is **9.4 of 10 GB**.
-**Not verified:** *why* master never saves a test cache (size pressure and a failing save step are the two
-candidates; the master log I read was inconclusive). Find that out first — it changes everything below.
+**Verified, and corrected after the first CI runs:** on the first runs of this PR both legs reported
+`rust-cache: No cache found.`, because master had not yet saved a `rust-test` cache. It has since (1.6 GB,
+`v0-rust-test-Linux-x64-…`, created 09:05Z), and the unit leg then **restored it in full and compiled in
+~13 minutes instead of ~26**. The e2e leg still compiled cold (~21 minutes), because it used its own cache
+key (`test-e2e`) that no run had ever saved. It now shares the `test` key (restore only; `Rust tests` is
+the one writer). **Not verified:** the e2e leg's compile time after that change — read it off the next run.
+The repo's Actions cache was at **9.4 of 10 GB**: master's own `rust-test` entry is part of that, so watch for
+evictions rather than assuming the cache stays warm.
 
 - Restricting by *package* (`-p`, `--exclude`) is too coarse: the e2e binaries sit in packages that also
   hold unit tests. **Restricting by test *target* is possible — see 3a.** (An earlier version of this note
