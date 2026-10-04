@@ -215,7 +215,7 @@ this node does not claim otherwise.
 - [x] **Registration**: one entry in `runtime.rs`
 - [x] **Web**: route, predicate, `AccountsAppPage`, nav entry, ladder rung
 - [x] **Testing**: Rust service tests + Cypress component tests + `appRoutes` unit tests
-- [ ] **Stub-provider daemon**: Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04).
+- [x] **Stub-provider daemon**: Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04).
 - [ ] **Package Documentation**: `tddy-accounts`, `tddy-web`
 - [ ] **Code Quality**: scoped clippy; CI green
 
@@ -293,6 +293,7 @@ returns rather than by a hand-written fixture.
 - An invalid or absent `session_token` is refused — **not** served an empty list.
 - `SetAccountLabel` changes only the label; `account_id` and the secret are untouched.
 - `RemoveAccount` removes exactly one record and leaves the rest openable.
+- Stub-provider daemon (`tddy-daemon/tests/accounts_stub_daemon_acceptance.rs`): test code opens the stub user's vault in the running daemon's own `SessionVaults`, read through the new `DaemonRuntime::credential_vaults()` accessor, with a test-only interactor (`the_vault_of(user).holding(record).opened()`). `ListAccounts` over the real roster then lists the account with `has_secret` and no secret on the wire, and a daemon with no vault answers `vault_uninitialized`.
 
 ### Web tests
 
@@ -362,7 +363,7 @@ is fixed by amending 2/9 during the stack's closing cascade.
 - [x] Create changeset
 - [x] Publish the draft-PR contract — wave 2
 - [x] M1–M8 (M9, documentation, is the wrap)
-- [ ] Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04)
+- [x] Stub-provider daemon tests pre-configure an open vault for the stub user, so /accounts renders a real list (developer decision 2026-10-04)
 - [ ] Package documentation for `tddy-accounts` and `tddy-web`
 - [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
 

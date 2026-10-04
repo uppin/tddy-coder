@@ -168,12 +168,22 @@ pub struct DaemonRuntime {
     pub index_daemon: Option<crate::index_daemon::IndexDaemonRegistry>,
     /// Everything this runtime needs running but has not started: see [`RuntimeTasks`].
     pub tasks: RuntimeTasks,
+    /// The credential vaults the auth and accounts services share, when `auth_storage` is set.
+    /// Private, read through [`DaemonRuntime::credential_vaults`].
+    credential_vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>,
 }
 
 impl DaemonRuntime {
     /// The names of the services this runtime hosts, in registration order.
     pub fn service_names(&self) -> Vec<&str> {
         self.entries.iter().map(|entry| entry.name).collect()
+    }
+
+    /// The very vaults this runtime's services hold open — one handle, not a second instance over
+    /// the same directory, whose in-memory open state would be its own. `None` without
+    /// `auth_storage`, where nothing keeps a credential.
+    pub fn credential_vaults(&self) -> Option<&Arc<tddy_daemon_auth::SessionVaults>> {
+        self.credential_vaults.as_ref()
     }
 
     /// The child processes this daemon spawned, as a handle a signal task can own.
@@ -1567,6 +1577,7 @@ pub async fn build(
         relay_shutdown,
         index_daemon: index_daemon_registry,
         tasks,
+        credential_vaults: auth_result.credential_vaults,
     })
 }
 

@@ -144,3 +144,5 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 # `UnixListener`.
 tddy-index-daemon = { path = "../tddy-index-daemon" }
 tokio-stream = { version = "0.1", features = ["net"] }
+# The stub-daemon accounts suite builds the records it seals into the runtime's own vaults.
+tddy-credentials = { path = "../tddy-credentials" }
