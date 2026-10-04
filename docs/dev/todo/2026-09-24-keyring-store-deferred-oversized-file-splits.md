@@ -25,6 +25,15 @@
   put an unrelated move of hundreds of lines in a credential-store diff, and `config.rs` and
   `runtime.rs` are touched again by #511–#513.
 
+**Grown again by `#keyring` 4/9 (#511), deferred with consent on 2026-10-04.** Measured over
+`origin/master..HEAD` at #511's wrap. Both files had already crossed 500 lines before #511, and other
+open PRs touch both:
+
+| File | Production lines (`origin/master` → #511) | What #511 added |
+|---|---|---|
+| `packages/tddy-daemon/src/runtime.rs` | 1,677 → 1,700 | the `accounts.AccountsService` registration over `credential_vaults`, and a read-only `DaemonRuntime::credential_vaults()` accessor that the stub-daemon accounts acceptance test reaches the vaults through |
+| `packages/tddy-service/build.rs` | 709 → 723 | `accounts.proto`'s codegen entry |
+
 The sixth file the gate flagged, `packages/tddy-github/src/auth_service.rs`, was split in #510
 itself (621 → 379 production lines, `auth_service/vault.rs` 290) with the developer's approval; so
 was `packages/tddy-web/src/hooks/useAuth.ts` (520 → 413 lines, `authSession.ts` 124).
