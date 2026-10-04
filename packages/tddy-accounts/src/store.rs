@@ -10,8 +10,9 @@ use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 
 /// Why the store could not answer.
 ///
-/// The five outcomes a screen must be able to tell apart are an open-and-empty store (`Ok(vec![])`)
-/// and these four. Collapsing any pair of them would present a recoverable, explainable state as a
+/// The five outcomes a listing must be able to tell apart are an open-and-empty store
+/// (`Ok(vec![])`) and the four refusals other than [`AccountsError::NotFound`], which only a rename
+/// can meet. Collapsing any pair of them would present a recoverable, explainable state as a
 /// normal one — see the `#keyring` 4/9 PRD on why `vault_locked` and `vault_uninitialized` are
 /// fields and not errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,13 @@ pub enum AccountsError {
     /// No vault exists for this subject yet. Choosing a passphrase creates one; until then there is
     /// nothing to list, and that is not the same as an empty vault.
     Uninitialized,
+    /// The vault is open and holds no record for this provider and account, so there is nothing to
+    /// rename. The caller's view is stale — the account was removed, or was never linked — and that
+    /// is the caller's to hear, not a failure of the store.
+    NotFound {
+        provider: ProviderId,
+        account: AccountId,
+    },
     /// I/O, corruption, or anything else that is neither of the above. Carries the reason **meant
     /// for the person** — which is not always the underlying error's text: an I/O failure names
     /// server-side paths, so it arrives here as a fixed, path-free sentence and its full detail is
@@ -43,7 +51,8 @@ pub trait AccountStore: Send + Sync {
     fn list(&self, session_token: &str) -> Result<Vec<CredentialRecord>, AccountsError>;
 
     /// Rename one record. Returns the record as it now stands, with `account` unchanged — a rename
-    /// that moved the identity would silently break `#keyring` 5/9's project assignments.
+    /// that moved the identity would silently break `#keyring` 5/9's project assignments. A record
+    /// that is not there is [`AccountsError::NotFound`].
     fn set_label(
         &self,
         session_token: &str,

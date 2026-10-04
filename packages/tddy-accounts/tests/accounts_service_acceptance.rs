@@ -111,7 +111,10 @@ impl AccountStore for AnInMemoryAccountStore {
                 let found = records
                     .iter_mut()
                     .find(|record| &record.provider == provider && &record.account == account)
-                    .ok_or(AccountsError::Unavailable("no such account".to_string()))?;
+                    .ok_or_else(|| AccountsError::NotFound {
+                        provider: provider.clone(),
+                        account: account.clone(),
+                    })?;
                 found.label = label.to_string();
                 Ok(found.clone())
             },
@@ -483,6 +486,25 @@ async fn renaming_an_account_changes_its_label_and_leaves_its_identity_alone() {
             "ada".to_string(),
             "Ada — personal".to_string()
         ))
+    );
+}
+
+#[tokio::test]
+async fn renaming_an_account_that_is_not_linked_is_refused_as_not_found_naming_it() {
+    // Given a vault that holds Ada's GitHub account and nothing else
+    let store = an_account_store().holding(a_credential("github", "ada", "Ada at work"));
+
+    // When a rename names an account that is not linked
+    let renamed = rename_in(store, "github", "a-ghost", "Nobody").await;
+
+    // Then it is refused as not found, and the message names the provider and the account
+    assert_eq!(
+        renamed.map(|_| ()).map_err(|status| (
+            status.code,
+            status.message.contains("github"),
+            status.message.contains("a-ghost")
+        )),
+        Err((Code::NotFound, true, true))
     );
 }
 

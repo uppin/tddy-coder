@@ -145,6 +145,9 @@ fn status_for(refusal: AccountsError) -> Status {
             "no credential vault exists for you on this daemon yet; \
              choosing a passphrase creates one",
         ),
+        AccountsError::NotFound { provider, account } => Status::not_found(format!(
+            "no {provider} account {account} is linked, so there is nothing to rename"
+        )),
         AccountsError::Unavailable(reason) => Status::internal(reason),
     }
 }

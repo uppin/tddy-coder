@@ -148,7 +148,8 @@ So this node owns one more symbol than the plan listed — a **port trait** in
 `packages/tddy-accounts/src/store.rs`:
 
 ```rust
-pub enum AccountsError { NoSuchSession, Locked, Uninitialized, Unavailable(String) }
+pub enum AccountsError { NoSuchSession, Locked, Uninitialized,
+                          NotFound { provider: ProviderId, account: AccountId }, Unavailable(String) }
 
 pub trait AccountStore: Send + Sync {
     fn list(&self, session_token: &str) -> Result<Vec<CredentialRecord>, AccountsError>;
@@ -174,7 +175,10 @@ Three things about it are deliberate:
   remedy — the passphrase), `Unavailable` becomes an RPC error carrying
   the reason meant for the person (an I/O failure's text names server-side paths, so the client gets
   a fixed path-free sentence and the daemon log gets the full error with its subject), `NoSuchSession` becomes a refusal — and an `Ok(vec![])` becomes an empty list. Five
-  inputs, five distinguishable responses, which is what the acceptance tests assert.
+  inputs, five distinguishable responses, which is what the acceptance tests assert. A rename of an
+  account that is not linked is `NotFound`, which becomes `Status::not_found` naming the provider
+  and the account (developer decision 2026-10-04; it was `Unavailable` → `Internal`). A removal of
+  one is still not an error.
 
 ## Green wave
 
@@ -292,6 +296,7 @@ returns rather than by a hand-written fixture.
 - An empty vault, no vault yet, a locked vault and an I/O error produce four distinct responses.
 - An invalid or absent `session_token` is refused — **not** served an empty list.
 - `SetAccountLabel` changes only the label; `account_id` and the secret are untouched.
+- `SetAccountLabel` on an account that is not linked is refused as `NotFound`, naming the provider and the account.
 - `RemoveAccount` removes exactly one record and leaves the rest openable.
 - Stub-provider daemon (`tddy-daemon/tests/accounts_stub_daemon_acceptance.rs`): test code opens the stub user's vault in the running daemon's own `SessionVaults`, read through the new `DaemonRuntime::credential_vaults()` accessor, with a test-only interactor (`the_vault_of(user).holding(record).opened()`). `ListAccounts` over the real roster then lists the account with `has_secret` and no secret on the wire, and a daemon with no vault answers `vault_uninitialized`.
 
@@ -389,7 +394,8 @@ only this PR's files.
   read-modify-write on `SessionVault`, which is `tddy-credentials`' (3/9, merged) surface. Deferred
   to a `docs/dev/todo/` entry, and the marker points at it.
 - ℹ INFO `service.rs` — renaming an account that is not linked maps to `AccountsError::Unavailable`
-  → `Status::internal`; `NotFound` would describe it better. Left as is: it widens the port enum that
+  → `Status::internal`; `NotFound` would describe it better. **Resolved 2026-10-04 by developer
+  decision**: `AccountsError::NotFound` → `Status::not_found`, added here after all. Left as is: it widens the port enum that
   #515 (8/9) also implements against, so it belongs with that node or a follow-up.
 - ℹ INFO `AccountsAppPage.tsx` — an absent session token is sent as `""`, which the daemon refuses as
   `Unauthenticated`; a refusal, not a fallback. No change.

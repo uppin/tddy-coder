@@ -88,10 +88,9 @@ impl AccountStore for SessionVaultAccountStore {
         let mut record = vault
             .get(provider, account)
             .map_err(|error| refusal_of(&subject, error))?
-            .ok_or_else(|| {
-                AccountsError::Unavailable(format!(
-                    "no {provider} account {account} is linked, so there is nothing to rename"
-                ))
+            .ok_or_else(|| AccountsError::NotFound {
+                provider: provider.clone(),
+                account: account.clone(),
             })?;
         record.label = label.to_string();
         vault
@@ -338,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn renaming_an_account_that_is_not_linked_is_refused() {
+    fn renaming_an_account_that_is_not_linked_is_refused_as_not_found() {
         // Given
         let (_dir, _vault, store) = ada_unlocked_her_vault_holding(vec![]);
 
@@ -352,8 +351,11 @@ mod tests {
 
         // Then
         assert_eq!(
-            renamed.map_err(|refusal| matches!(refusal, AccountsError::Unavailable(_))),
-            Err(true)
+            renamed,
+            Err(AccountsError::NotFound {
+                provider: ProviderId::new("github"),
+                account: AccountId::new("nobody"),
+            })
         );
     }
 
