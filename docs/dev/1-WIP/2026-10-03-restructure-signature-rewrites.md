@@ -174,6 +174,18 @@ Fixture: a one-crate `ledger` workspace — `pricing::label(count: u32) -> Strin
   test pairs it with a `type` change in the same group — the composition groups exist for.
 
 
+## Restructuring
+
+File-length gate (`/pr-wrap` 3.5), engine-driven (`restructure apply`, `verify --against HEAD` accounts for every statement):
+
+| File | Production lines before | After |
+|---|---|---|
+| `backends/rust/signature_rewrites.rs` (new) | 502 | 170, with children `signature_rewrites/declaration.rs` (~223) and `call_site.rs` (~199) |
+| `backends/rust/return_type.rs` (new) | in `rust.rs` | 49 |
+| `backends/rust.rs` | 2,706 (base) | 2,831 |
+
+**Deferred, with the developer's consent:** the 125 lines still added to `rust.rs` — the impl members `rewrite_signature`, `wrap_or_unwrap_return_type`, `offered_assist` and two resolve branches. The engine refused: `rust-analyzer` cannot put a `mod` inside an `impl` body. Tracked by `oversized-file-backends-rust.md` and the impl-member seam in `docs/dev/todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md` § 1 (not claimed here, so it stays). The five unit tests stay in `signature_rewrites.rs`: `extract_module` would nest a moved module inside `tests`.
+
 ## Refactoring Needed
 
 ### From @validate-changes (Change Validation)
