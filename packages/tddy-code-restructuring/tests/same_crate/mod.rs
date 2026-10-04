@@ -84,6 +84,42 @@ pub fn a_move_item_op(anchor: &Anchor, to: &str, reexport: Option<&str>) -> Refa
     serde_json::from_value(op).expect("a `move_item` operation parses")
 }
 
+/// A `move_item` operation that **creates** its destination: `parent` is the module the new module
+/// is declared in, `name` is the new module's name.
+pub fn a_move_item_into_a_new_module_op(
+    anchor: &Anchor,
+    parent: &str,
+    name: &str,
+    reexport: Option<&str>,
+) -> RefactorOp {
+    let mut op = serde_json::json!({
+        "op": "move_item", "anchor": anchor, "to": parent, "name": name,
+    });
+    if let Some(reexport) = reexport {
+        op["reexport"] = serde_json::json!(reexport);
+    }
+    serde_json::from_value(op).expect("a `move_item` operation parses")
+}
+
+/// Apply a `move_item` of `names` out of `file` into a **new** module `name` under `parent`.
+pub async fn moving_items_into_a_new_module(
+    workspace: &AFixtureWorkspace,
+    file: &str,
+    names: &[&str],
+    parent: &str,
+    name: &str,
+    reexport: Option<&str>,
+) -> Result<RunSummary, String> {
+    let anchor = the_anchor_over(workspace, file, names).await;
+    applying_a_plan_of(
+        workspace,
+        &[a_move_item_into_a_new_module_op(
+            &anchor, parent, name, reexport,
+        )],
+    )
+    .await
+}
+
 /// A `reparent_module` operation over `anchor` (the module's `mod` declaration in its old parent),
 /// into the module `to`, with the given `reexport`.
 pub fn a_reparent_module_op(anchor: &Anchor, to: &str, reexport: Option<&str>) -> RefactorOp {
