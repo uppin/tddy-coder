@@ -4,7 +4,9 @@
 **Status**: 🚧 In Progress
 **Type**: Feature (CI infrastructure)
 
-Node 4 of 5 of the `#e2e-leg` stack (branch `feature/e2e-leg/shared-livekit-ci`, PR base `feature/e2e-leg/compile-timings`). It consumes node 1's isolation.
+Node 4 of 5 of the `#e2e-leg` stack, PR [#581](https://github.com/uppin/tddy-coder/pull/581) (branch `feature/e2e-leg/shared-livekit-ci`, PR base `feature/e2e-leg/compile-timings`). It consumes node 1's isolation.
+
+**Contract state (commit 2):** `scripts/livekit-ci-server.sh` is a skeleton that prints `TODO(shared-livekit-ci)` and exits 1; all six tests in `scripts/livekit-ci-server.test.ts` fail on it (verified, 6 of 6; run with `./dev bun test ./scripts/livekit-ci-server.test.ts`). The script tests put stub `docker` and `curl` on `PATH`; the readiness wait is bounded by `LIVEKIT_CI_READY_TIMEOUT_SECS`, which the script must honour. The acceptance-test review gate was not held separately (the developer asked for the whole stack to be prepared without stopping).
 
 ## Initial Discovery
 
@@ -179,10 +181,10 @@ Real dependency edges:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (none: CI infrastructure, no product area)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run the script tests and read the CI e2e leg (`scripts/ci-status.sh --watch`)
