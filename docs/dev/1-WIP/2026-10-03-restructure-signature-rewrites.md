@@ -183,6 +183,7 @@ File-length gate (`/pr-wrap` 3.5), engine-driven (`restructure apply`, `verify -
 | `backends/rust/signature_rewrites.rs` (new) | 502 | 170, with children `signature_rewrites/declaration.rs` (~223) and `call_site.rs` (~199) |
 | `backends/rust/return_type.rs` (new) | in `rust.rs` | 49 |
 | `backends/rust.rs` | 2,706 (base) | 2,831 |
+| `plan/codec.rs` | 563 | 437, with child `plan/codec/signature_fields.rs` (131) holding the signature-field refusals |
 
 **Deferred, with the developer's consent:** the 125 lines still added to `rust.rs` — the impl members `rewrite_signature`, `wrap_or_unwrap_return_type`, `offered_assist` and two resolve branches. The engine refused: `rust-analyzer` cannot put a `mod` inside an `impl` body. Tracked by `oversized-file-backends-rust.md` and the impl-member seam in `docs/dev/todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md` § 1 (not claimed here, so it stays). The five unit tests stay in `signature_rewrites.rs`: `extract_module` would nest a moved module inside `tests`.
 
@@ -214,7 +215,7 @@ Fixed:
 Left, review items (not regressions of this change):
 
 - `backends/rust.rs` — 2,8xx lines; deferred with consent (see `## Restructuring`).
-- `plan.rs` — 1,497 lines (about 160 added, mostly tests); `plan/codec.rs` 553 lines (about 130 added, the validation). Not split here: out of this PR's scope; a split would move `RefactorKind`/`RefactorOp` consumers.
+- `plan.rs` — 1,497 lines (about 160 added, mostly tests); `plan/codec.rs` 437 lines after the refusals moved to `codec/signature_fields.rs` (see `## Restructuring`).
 - `declaration.rs::add_param` (~40 lines, nesting 4 in the `after:` arm) is at the acceptable edge; left.
 
 ## Validation Results
