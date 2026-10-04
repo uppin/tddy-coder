@@ -10,7 +10,7 @@
  * The second thing pinned here is a negative: **no secret reaches the screen**. `accounts.proto`
  * has no field to carry one, so the assertion is over the rendered document.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-09-19-keyring-accounts.md
+ * Feature: docs/ft/web/accounts-screen.md
  */
 
 import { Code, ConnectError } from "@connectrpc/connect";
