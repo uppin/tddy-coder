@@ -4,7 +4,9 @@
 **Status**: 🚧 In Progress
 **Type**: Feature (CI observability)
 
-Node 3 of 5 of the `#e2e-leg` stack (branch `feature/e2e-leg/compile-timings`, PR base `feature/e2e-leg/deadline-and-scenarios`). It consumes nothing from nodes 1 or 2.
+Node 3 of 5 of the `#e2e-leg` stack, PR [#580](https://github.com/uppin/tddy-coder/pull/580) (branch `feature/e2e-leg/compile-timings`, PR base `feature/e2e-leg/deadline-and-scenarios`). It consumes nothing from nodes 1 or 2.
+
+**Contract state (commit 2):** `scripts/ci-e2e-timing.ts` publishes `perBinaryTimings`, `compileShare`, `verdict` and `SPLIT_WORTH_IT_PERCENT` with `throw` bodies; all five tests in `scripts/ci-e2e-timing.test.ts` fail on them (verified, 5 of 5; inline fixtures, no fixture files). Run with `./dev bun test ./scripts/ci-e2e-timing.test.ts` (bun needs the `./` to treat it as a path). The acceptance-test review gate was not held separately (the developer asked for the whole stack to be prepared without stopping).
 
 ## Initial Discovery
 
@@ -61,7 +63,7 @@ A `--timings` build compiles every test target (the 80-binary `tddy-daemon` case
 
 ### Delta
 
-- `scripts/ci-e2e-timing.ts`, `scripts/ci-e2e-timing.test.ts`, fixture JUnit and timings files under `scripts/fixtures/`.
+- `scripts/ci-e2e-timing.ts`, `scripts/ci-e2e-timing.test.ts`, inline fixtures (a JUnit document, and a timings report in the shape cargo writes: a `UNIT_DATA` array with `name`, `target`, `mode`, `duration`).
 - `.github/workflows/ci.yml`: summary step in the `rust-test` job (e2e leg), new `workflow_dispatch`-guarded job.
 - `docs/dev/guides/ci.md`: describe both.
 
@@ -158,13 +160,13 @@ Real dependency edges:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (none: CI infrastructure, no product area)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
-- [ ] Run the script tests (`./dev bun test scripts/ci-e2e-timing.test.ts`) and read the CI summary
+- [ ] Run the script tests (`./dev bun test ./scripts/ci-e2e-timing.test.ts`) and read the CI summary
 - [ ] Validate changes (/validate-changes)
 - [ ] Validate tests (/validate-tests)
 - [ ] Validate production readiness (/validate-prod-ready)
