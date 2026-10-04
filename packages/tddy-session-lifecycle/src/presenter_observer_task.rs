@@ -5,6 +5,8 @@
 //! [`PresenterObserver`]: tddy_service::gen::presenter_observer_client::PresenterObserverClient
 //! [`PresenterEventSink`]: tddy_daemon_kernel::presenter_observer::PresenterEventSink
 
+pub(crate) mod presenter_observer_spawn;
+
 use std::time::Duration;
 
 use tonic::transport::Endpoint;

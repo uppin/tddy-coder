@@ -18,13 +18,13 @@ use tddy_spawn::spawn_worker::SpawnClient;
 use super::svc_materialize_staged_attachment::AttachmentState;
 use super::svc_resolve_listed_worktree::session_dir_lookup;
 use super::svc_resolve_tddy_tools_path::svc_host_builders::first_admission_token;
-use super::svc_resolve_tddy_tools_path::svc_host_builders::presenter_observer_spawn::PresenterObserverDeps;
 use super::svc_spawn_split_agent;
 use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
 use crate::multi_host::EligibleDaemonSource;
 use crate::peer_routing::PeerRouting;
+use crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps;
 use crate::relay_idle::RpcActivity;
 use tddy_service::proto::session::SessionAttachment;
 

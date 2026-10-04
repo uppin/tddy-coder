@@ -375,5 +375,3 @@ impl DaemonSessionHost {
 pub(in crate::connection_service) mod first_admission_token;
 
 mod rpc_activity;
-
-pub(in crate::connection_service) mod presenter_observer_spawn;
