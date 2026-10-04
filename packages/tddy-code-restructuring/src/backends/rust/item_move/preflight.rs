@@ -1,0 +1,171 @@
+//! What the plan and the text of the tree already say about a move, before any server exists.
+//!
+//! A destination that is not there, a name it already declares and a destination that is the items'
+//! own module are lexical facts. Reading them here is what lets `check` report them without paying
+//! for an index, and what lets `apply` refuse a plan that cannot be honoured before it spawns one.
+
+use std::collections::BTreeSet;
+
+use super::super::{failure, is_identifier};
+use super::destination::{find_module, package_of, Lookup, Module, Package};
+use crate::crate_move::source_scan::items_of_module;
+use crate::plan::{Anchor, ItemPath, RefactorOp};
+use crate::registry::Workspace;
+use crate::Result;
+
+/// The destination a plan names: the package it is in, and the module path below the crate root.
+pub(super) struct Named {
+    pub(super) package: Package,
+    pub(super) to: String,
+    pub(super) module: Vec<String>,
+}
+
+/// `to` read against the package the anchor's file belongs to.
+///
+/// Refused when it is absent or names another crate: a move stays inside one crate, and the plan
+/// that wants more is a `move_module_to_crate`.
+pub(super) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Named> {
+    let to = op
+        .to
+        .as_deref()
+        .ok_or_else(|| failure("`move_item` needs `to`: the module the items move into"))?;
+    let package = package_of(workspace.root, op.anchor.file())?;
+    let mut pieces = to.split("::").map(str::trim);
+    let crate_name = pieces.next().unwrap_or_default();
+    if crate_name.replace('-', "_") != package.crate_name {
+        return Err(failure(format!(
+            "`{to}` is in `{crate_name}`, and the items are in `{}`: `move_item` stays inside one \
+             crate",
+            package.crate_name
+        )));
+    }
+    Ok(Named {
+        module: pieces.map(str::to_string).collect(),
+        package,
+        to: to.to_string(),
+    })
+}
+
+/// The module of the items an anchor names, below the crate root, and their names.
+///
+/// `None` for an anchor that does not name items by path.
+pub(super) fn anchored(op: &RefactorOp) -> Option<(Vec<String>, Vec<String>)> {
+    let paths: &[ItemPath] = match &op.anchor {
+        Anchor::Items { items, .. } => items,
+        Anchor::Item { item, .. } => std::slice::from_ref(item),
+        _ => return None,
+    };
+    let first = paths.first()?.pieces();
+    let module = first.get(1..first.len().saturating_sub(1))?;
+    let names = paths
+        .iter()
+        .filter_map(|path| path.pieces().last().copied())
+        .filter(|name| is_identifier(name))
+        .map(str::to_string)
+        .collect();
+    Some((
+        module.iter().map(|piece| piece.to_string()).collect(),
+        names,
+    ))
+}
+
+/// Everything the text says is wrong with moving the items an anchor names to `to`.
+///
+/// Every finding rather than the first, because a plan is checked to be fixed in one pass.
+pub(super) fn findings(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Vec<String>> {
+    let named = named_by(workspace, op)?;
+    let Some((source, names)) = anchored(op) else {
+        return Ok(vec![
+            "`move_item` anchors by item (`items`, or a single `item`): a range or a symbol names \
+             no module-level item to move"
+                .to_string(),
+        ]);
+    };
+    Ok(obstacles(workspace, &named, &source, &names)?.0)
+}
+
+/// The destination module, or the refusal for why the items cannot move into it.
+pub(super) fn destination_for(
+    workspace: &Workspace<'_>,
+    named: &Named,
+    source: &[String],
+    names: &[String],
+) -> Result<Module> {
+    match obstacles(workspace, named, source, names)? {
+        (found, _) if !found.is_empty() => Err(failure(found.join("; "))),
+        (_, Some(module)) => Ok(module),
+        (_, None) => Err(failure(format!("`{}` does not exist", named.to))),
+    }
+}
+
+/// The findings, and the destination when it exists.
+fn obstacles(
+    workspace: &Workspace<'_>,
+    named: &Named,
+    source: &[String],
+    names: &[String],
+) -> Result<(Vec<String>, Option<Module>)> {
+    let module = match find_module(workspace, &named.package, &named.module)? {
+        Lookup::Found(module) => module,
+        Lookup::Missing { at } => {
+            let parent = std::iter::once(named.package.crate_name.as_str())
+                .chain(named.module[..at].iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join("::");
+            return Ok((
+                vec![format!(
+                    "`{}` does not exist: `{parent}` declares no module `{}`. A move never \
+                     creates a module — make it first, with `extract_module`",
+                    named.to, named.module[at]
+                )],
+                None,
+            ));
+        }
+    };
+
+    if module.path == source {
+        let subject = if names.is_empty() {
+            "the items".to_string()
+        } else {
+            format!("`{}`", names.join("`, `"))
+        };
+        return Ok((
+            vec![format!(
+                "{subject} is already in `{}`: the destination is the module the items are \
+                 declared in",
+                named.to
+            )],
+            Some(module),
+        ));
+    }
+
+    let text = workspace.read(&module.file)?;
+    let taken = names_declared_in(&text[module.scope.clone()]);
+    let clashes = names
+        .iter()
+        .filter(|name| taken.contains(name.as_str()))
+        .map(|name| {
+            format!(
+                "`{name}` is already declared in `{}`, so moving a second one there would be \
+                 `E0428`",
+                named.to
+            )
+        })
+        .collect();
+    Ok((clashes, Some(module)))
+}
+
+/// The names a module's own text binds at its top level: what it defines, the modules it declares
+/// and what its `use` items bring into scope.
+pub(super) fn names_declared_in(module_text: &str) -> BTreeSet<String> {
+    let items = items_of_module(module_text);
+    let mut names: BTreeSet<String> = items.defined.into_iter().collect();
+    names.extend(items.children.into_iter().map(|child| child.name));
+    names.extend(
+        items
+            .uses
+            .iter()
+            .filter_map(|leaf| leaf.bound_name().map(str::to_string)),
+    );
+    names
+}

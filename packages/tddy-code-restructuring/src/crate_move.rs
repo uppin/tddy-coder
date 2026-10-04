@@ -283,7 +283,7 @@ mod header;
 
 mod reexports;
 
-mod source_scan;
+pub(crate) mod source_scan;
 
 mod survey;
 

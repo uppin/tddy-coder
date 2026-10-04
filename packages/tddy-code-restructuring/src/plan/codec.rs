@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::Anchor;
+
 use super::Reexport;
 
 use super::RefactorKind;
@@ -341,13 +343,33 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         ));
     }
 
-    if op.reexport.is_some() && op.op != RefactorKind::ExtractModule && !op.op.moves_across_crates()
+    if op.reexport.is_some()
+        && !matches!(op.op, RefactorKind::ExtractModule | RefactorKind::MoveItem)
+        && !op.op.moves_across_crates()
     {
         return Err(malformed(format!(
             "`reexport` asks for a facade where the moved items used to live, which only \
              `extract_module` and the cross-crate moves write — `{:?}` cannot honour one",
             op.op
         )));
+    }
+
+    // A move inside a crate names its destination module, and defaulting one would guess at the
+    // module — the one thing a plan of intents must never do on the author's behalf. Its anchor is
+    // the items it moves, by path: a range or a symbol names no module-level item.
+    if op.op == RefactorKind::MoveItem {
+        if op.to.is_none() {
+            return Err(malformed(
+                "`move_item` needs `to`: the module the items move into, rooted at the package \
+                 name like an item path",
+            ));
+        }
+        if !matches!(op.anchor, Anchor::Items { .. } | Anchor::Item { .. }) {
+            return Err(malformed(
+                "`move_item` anchors by item (`items`, or a single `item`): a range or a symbol \
+                 names no module-level item to move",
+            ));
+        }
     }
 
     // A named facade cannot serve a *module* move, and refusing it beats emitting a tree that does

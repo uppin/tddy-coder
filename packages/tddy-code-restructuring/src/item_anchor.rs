@@ -76,7 +76,7 @@ pub fn module_path_of(root: &Path, file: &str) -> Result<Vec<String>> {
 /// The directory (relative to `root`) and `[package] name` of the nearest package that holds `file`.
 ///
 /// A workspace manifest declares no package, so it is walked past rather than mistaken for one.
-fn owning_package(root: &Path, file: &str) -> Result<(PathBuf, String)> {
+pub(crate) fn owning_package(root: &Path, file: &str) -> Result<(PathBuf, String)> {
     let mut directory = Path::new(file).parent();
     while let Some(candidate) = directory {
         if let Ok(manifest) = std::fs::read_to_string(root.join(candidate).join("Cargo.toml")) {

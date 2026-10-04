@@ -102,10 +102,10 @@ and **unwrapped**; this change does not edit or wrap it. It needs its own pass.
 
 Commits are ordered engine, then docs, then lifecycle, so the diff can be read in that order (D9).
 
-- [ ] **E0 baseline**: `./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon` once; record
+- [x] **E0 baseline** (scoped to `tddy-code-restructuring`; see Validation Results): `./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon` once; record
   counts and the **names of every failing test** (live-rust-analyzer suites are `#[ignore]`d or grouped
   by `.config/nextest.toml`; list what ran).
-- [ ] **E1 `move_item`**: `RefactorKind::MoveItem`; codec rules; a destination-and-name preflight that
+- [x] **E1 `move_item`** (13 acceptance tests green; 4 more in `move_item_beyond_the_basics_acceptance.rs`): `RefactorKind::MoveItem`; codec rules; a destination-and-name preflight that
   needs no server; the authored move (extract item text by byte range, insert into the destination,
   restore the moved items' `use` needs, widen visibility minimally and report it, re-point callers from
   the server's reference set or leave a `reexport` facade); logic in `backends/rust/item_move/`.
@@ -244,7 +244,19 @@ Recommended answers are first; **D1, D2, D3, D7 need your review before `/green`
 
 ## Validation Results
 
-_(filled by `/validate-changes` and `/pr-wrap`)_
+Scoped to `tddy-code-restructuring` (`./dev cargo test --no-fail-fast -p tddy-code-restructuring -- --test-threads=1`);
+the whole-workspace answer is CI's.
+
+| Point | Passed | Failed | Failing tests |
+|---|---|---|---|
+| **E0 baseline** (`61bb5fda`, before any engine change) | 1004 | 26 | exactly the red tests: `move_item_acceptance` 13/13, `reparent_module_acceptance` 12/12, `anchors_package_relative_path::names_the_repo_root_path_when_given_one_relative_to_a_package`. No pre-existing failure; 1 ignored (doc test) |
+| **E1** (`move_item`) | 1062 | 13 | the 12 `reparent_module` tests and the anchors one: E2 and E3 are not started. `move_item_acceptance` 13/13 |
+
+E1 also: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean; `cargo check --all-targets`
+clean for `tddy-tools` and `tddy-index-daemon`; `cargo fmt --check` reports only the four files of the red
+commit (see [the todo](../todo/2026-10-04-restructure-red-tests-are-not-rustfmt-clean.md)).
+
+_(the rest is filled by `/validate-changes` and `/pr-wrap`)_
 
 ## TODO
 

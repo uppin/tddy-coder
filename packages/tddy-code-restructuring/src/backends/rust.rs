@@ -34,6 +34,7 @@ mod impl_seam;
 mod imports;
 mod inline_paths;
 mod introduced;
+mod item_move;
 mod item_path;
 mod nested_modules;
 mod prelude_shadow;
@@ -61,7 +62,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 20] = [
+const SUPPORTED: [RefactorKind; 21] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -72,6 +73,7 @@ const SUPPORTED: [RefactorKind; 20] = [
     RefactorKind::MoveModuleToCrate,
     RefactorKind::MoveClusterToCrate,
     RefactorKind::MoveTestBinaryToCrate,
+    RefactorKind::MoveItem,
     RefactorKind::RemoveUnusedParam,
     RefactorKind::ConvertTupleReturnToStruct,
     RefactorKind::ChangeParamType,
@@ -1004,6 +1006,9 @@ impl LanguageBackend for RustBackend {
     /// carried forward, so a seam colliding with an earlier seam's new module is caught as well as one
     /// colliding with a declaration that was always there.
     fn check(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<String>> {
+        if op.op == RefactorKind::MoveItem {
+            return item_move::findings(op, workspace);
+        }
         let Anchor::Range { start, end, .. } = &op.anchor else {
             return Ok(Vec::new());
         };
@@ -1151,6 +1156,12 @@ impl RustBackend {
         if op.op == RefactorKind::MoveModuleToCrate {
             (self.progress)("cross-crate move: surveying callers and building edits");
             return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
+        }
+
+        // Moves items between modules of one crate: authored here and informed by the server, like
+        // the cross-crate moves, and opens the document for itself.
+        if op.op == RefactorKind::MoveItem {
+            return self.move_items(op, workspace);
         }
 
         // The same operation over a set, and one edit rather than one per member: a

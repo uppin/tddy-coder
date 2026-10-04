@@ -217,6 +217,18 @@ pub enum RefactorKind {
     /// Takes `to`, the destination crate's directory. The destination's `[dev-dependencies]` gain
     /// what the moved test names, not its `[dependencies]`.
     MoveTestBinaryToCrate,
+    /// Moves a run of items into **another existing module of the same crate**, in any file.
+    ///
+    /// Not [`Self::moves_across_crates`]: nothing leaves the crate, so there is no manifest to edit
+    /// and no crate to depend on. Like the cross-crate moves it has no assist behind it (rust-analyzer
+    /// has no "move item to another module"), so it is engine-*informed*: every caller it re-points
+    /// comes from `textDocument/references`. Anchored by `items` (or a single `item`); `to` is the
+    /// destination module's path, rooted at the package name, and must already exist.
+    ///
+    /// `reexport: glob`/`named` leave a `pub use` where the items were and re-point no caller;
+    /// `none` (or absent) re-points every caller, which is the difference from `extract_module`,
+    /// where `none` refuses when another file reaches the items.
+    MoveItem,
     /// rust-analyzer `Remove unused parameter`: drops a parameter the body never reads, from the
     /// declaration and from every call site. Anchored on the function; `name` is the parameter.
     ///
@@ -1063,6 +1075,60 @@ mod tests {
 
         assert!(error.contains("ExtractMethod"), "{error}");
         assert!(error.contains("reexport"), "{error}");
+    }
+
+    const AN_ITEMS_ANCHOR: &str =
+        r#"{"kind":"items","file":"src/a.rs","items":["app::a::f"],"fingerprints":["sha256:f"]}"#;
+
+    #[test]
+    fn reads_a_move_item_with_the_facade_it_asks_for() {
+        let plan = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR},"to":"app::b","reexport":"glob"}}"#
+        )))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::MoveItem);
+        assert_eq!(plan.ops[0].reexport, Some(Reexport::Glob));
+        assert!(!plan.ops[0].op.moves_across_crates());
+    }
+
+    #[test]
+    fn refuses_a_move_item_that_names_no_destination() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR}}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("move_item") && error.contains("`to`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_move_item_anchored_by_range() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"move_item","anchor":{"kind":"range","file":"src/a.rs","start":{"line":1,"col":1},"end":{"line":9,"col":1}},"to":"app::b"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("anchors by item"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_move_item_that_asks_for_a_file_of_its_own() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR},"to":"app::b","to_file":true}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("to_file") && error.contains("MoveItem"),
+            "{error}"
+        );
     }
 
     #[test]
