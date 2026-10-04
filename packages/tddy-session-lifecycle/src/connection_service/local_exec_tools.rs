@@ -4,6 +4,8 @@
 //! Shared by the session host — a roster agent's own turn loop runs its tools through here — and by
 //! `tddy-daemon-rpc`'s exec-tool family, so the RPC and the agent loop take exactly one path.
 
+mod local_exec_tool_dispatch;
+
 use std::path::Path;
 use std::sync::Arc;
 

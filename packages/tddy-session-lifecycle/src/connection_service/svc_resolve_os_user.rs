@@ -129,8 +129,6 @@ impl DaemonSessionHost {
     }
 }
 
-mod local_exec_tool_dispatch;
-
 mod os_user_resolution;
 pub use os_user_resolution::*;
 
