@@ -1,3 +1,5 @@
+mod split_claude_cli_start;
+
 use tddy_core::session_lifecycle::validate_session_id_segment;
 
 use tddy_service::proto::session::SplitAgentPlacement;

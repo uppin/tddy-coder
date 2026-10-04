@@ -264,5 +264,3 @@ impl AttachmentState<'_> {
         Ok(())
     }
 }
-
-mod split_claude_cli_start;
