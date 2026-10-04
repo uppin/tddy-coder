@@ -33,6 +33,48 @@ pub fn an_app_holding(files: &[(&str, &str)]) -> AFixtureWorkspace {
     a_workspace_holding_files(&all)
 }
 
+/// A committed workspace of the `app` package, holding `app_files`, and a `consumer` package that
+/// depends on it, holding `consumer_files` (paths relative to each package root).
+///
+/// What a caller in *another crate* does when an item moves is the question a single package cannot
+/// ask, which is what this builder is for.
+pub fn an_app_with_a_consumer(
+    app_files: &[(&str, &str)],
+    consumer_files: &[(&str, &str)],
+) -> AFixtureWorkspace {
+    let mut all: Vec<(String, String)> = vec![
+        (
+            "Cargo.toml".into(),
+            "[workspace]\nresolver = \"2\"\nmembers = [\"app\", \"consumer\"]\n".into(),
+        ),
+        (
+            "app/Cargo.toml".into(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n".into(),
+        ),
+        (
+            "consumer/Cargo.toml".into(),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\napp = { path = \"../app\" }\n"
+                .into(),
+        ),
+    ];
+    all.extend(
+        app_files
+            .iter()
+            .map(|(path, text)| (format!("app/{path}"), (*text).to_string())),
+    );
+    all.extend(
+        consumer_files
+            .iter()
+            .map(|(path, text)| (format!("consumer/{path}"), (*text).to_string())),
+    );
+    let borrowed: Vec<(&str, &str)> = all
+        .iter()
+        .map(|(path, text)| (path.as_str(), text.as_str()))
+        .collect();
+    a_workspace_holding_files(&borrowed)
+}
+
 /// A `move_item` operation over `anchor`, into the module `to`, with the given `reexport`.
 pub fn a_move_item_op(anchor: &Anchor, to: &str, reexport: Option<&str>) -> RefactorOp {
     let mut op = serde_json::json!({ "op": "move_item", "anchor": anchor, "to": to });
