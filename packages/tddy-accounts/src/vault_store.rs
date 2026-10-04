@@ -383,7 +383,14 @@ mod tests {
 
     #[test]
     fn a_locked_vault_stays_locked() {
-        assert_eq!(refusal_of(ADA, VaultError::Locked), AccountsError::Locked);
+        // Given
+        let failure = VaultError::Locked;
+
+        // When
+        let refusal = refusal_of(ADA, failure);
+
+        // Then
+        assert_eq!(refusal, AccountsError::Locked);
     }
 
     #[test]
@@ -405,9 +412,14 @@ mod tests {
 
     #[test]
     fn a_failure_meant_for_the_person_keeps_its_reason() {
-        assert_eq!(
-            refusal_of(ADA, VaultError::TooManySetAside { kept: 5 }),
-            AccountsError::Unavailable(VaultError::TooManySetAside { kept: 5 }.to_string())
-        );
+        // Given
+        let failure = VaultError::TooManySetAside { kept: 5 };
+        let reason = failure.to_string();
+
+        // When
+        let refusal = refusal_of(ADA, failure);
+
+        // Then
+        assert_eq!(refusal, AccountsError::Unavailable(reason));
     }
 }

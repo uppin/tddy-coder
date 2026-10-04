@@ -80,7 +80,9 @@ describe("Accounts screen", () => {
 
     accountsScreenPage.row("cloudflare", "zoe").should("exist");
     accountsScreenPage.row("github", "ada").should("exist");
-    accountsScreenPage.group("cloudflare").find('[data-testid="accounts-row-github-ada"]').should("not.exist");
+    accountsScreenPage.group("cloudflare").within(() => {
+      accountsScreenPage.row("github", "ada").should("not.exist");
+    });
   });
 
   it("shows the provider's own identifier beside the label a person chose", () => {
@@ -162,6 +164,29 @@ describe("Accounts screen", () => {
       { provider: "github", accountId: "ada", label: "Ada — personal" },
     ]);
     accountsScreenPage.label("github", "ada").should("contain.text", "Ada — personal");
+  });
+
+  it("reports a failed rename beside the list, which stays", () => {
+    mountAccounts(
+      anInMemoryRpcBackend().implement(AccountsService, {
+        listAccounts: () => ({
+          providers: [{ provider: "github", accounts: [ADA] }],
+          vaultLocked: false,
+          vaultUninitialized: false,
+        }),
+        setAccountLabel: () => {
+          throw new ConnectError(
+            "the credential store could not be read or written on this daemon",
+            Code.Internal,
+          );
+        },
+      }),
+    );
+
+    accountsScreenPage.rename("github", "ada", "Ada — personal");
+
+    accountsScreenPage.actionError().should("contain.text", "could not be read or written");
+    accountsScreenPage.label("github", "ada").should("contain.text", "Ada at work");
   });
 
   it("removes an account through RemoveAccount once the removal is confirmed", () => {

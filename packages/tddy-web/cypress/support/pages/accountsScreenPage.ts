@@ -26,6 +26,8 @@ export const accountsScreenPage = {
   lockedNotice: () => byTestId("accounts-locked"),
   /** Shown when the read itself failed, carrying the daemon's reason verbatim. */
   errorNotice: () => byTestId("accounts-error"),
+  /** Shown beside the list when a rename or removal failed; the list stays. */
+  actionError: () => byTestId("accounts-action-error"),
 
   renameField: (provider: string, accountId: string) =>
     byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-rename-input`),
