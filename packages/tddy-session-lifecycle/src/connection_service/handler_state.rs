@@ -16,15 +16,18 @@ use tddy_rpc::Status;
 use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
+use super::svc_materialize_staged_attachment::AttachmentState;
 use super::svc_resolve_listed_worktree::session_dir_lookup;
 use super::svc_resolve_tddy_tools_path::svc_host_builders::first_admission_token;
 use super::svc_resolve_tddy_tools_path::svc_host_builders::presenter_observer_spawn::PresenterObserverDeps;
 use super::svc_spawn_split_agent;
+use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
 use crate::multi_host::EligibleDaemonSource;
 use crate::peer_routing::PeerRouting;
 use crate::relay_idle::RpcActivity;
+use tddy_service::proto::session::SessionAttachment;
 
 impl DaemonSessionHost {
     /// The daemon's configuration.
@@ -163,6 +166,27 @@ impl DaemonSessionHost {
     ) {
         self.presenter_observer_deps()
             .maybe_spawn_presenter_observer(os_user, session_id, grpc_port);
+    }
+
+    /// The fields attachment materialization reads, lent to it for the length of one call.
+    pub(crate) fn attachment_state(&self) -> AttachmentState<'_> {
+        AttachmentState {
+            config: &self.config,
+            tddy_data_dir: &self.tddy_data_dir,
+            staging_base_dir: &self.staging_base_dir,
+            peer_routing: &self.peer_routing,
+        }
+    }
+
+    /// Pre-creates `session_dir` when needed and materializes the request's attachments before
+    /// spawn (see [`AttachmentState::prepare_session_attachments`]), over this host's state.
+    pub(crate) async fn prepare_session_attachments(
+        &self,
+        ctx: &AttachmentMaterialization<'_>,
+    ) -> Result<Vec<SessionAttachment>, Status> {
+        self.attachment_state()
+            .prepare_session_attachments(ctx)
+            .await
     }
 
     /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in

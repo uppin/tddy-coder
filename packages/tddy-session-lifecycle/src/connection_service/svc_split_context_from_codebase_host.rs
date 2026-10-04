@@ -437,10 +437,10 @@ impl DaemonSessionHost {
 
 /// The bound one batch read is held to **as it arrives**.
 ///
-/// In-crate for the same reason the module above is: the drain is private to this path, and an
-/// integration test could only reach it by standing up a peer that lies about its own manifest —
-/// which is the one peer a real serving host never is. Fed a stream directly, the test can be that
-/// peer.
+/// In-crate for the same reason the test in `split_context_from_codebase_host_tests` is: the drain
+/// is private to this path, and an integration test could only reach it by standing up a peer that
+/// lies about its own manifest — which is the one peer a real serving host never is. Fed a stream
+/// directly, the test can be that peer.
 ///
 /// What is being pinned is not only the refusal but *when* it happens. A batch collected first and
 /// checked afterwards produces the same `Status` while having already held the whole overage on

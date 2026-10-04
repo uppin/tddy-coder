@@ -1,4 +1,4 @@
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 /// The web port a hook URL assumes when `listen.web_port` is unset. `startup` refuses to serve
 /// without that setting, so this only covers a config the daemon would not have started from — but

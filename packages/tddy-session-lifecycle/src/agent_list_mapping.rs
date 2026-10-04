@@ -2,7 +2,7 @@
 
 use tddy_service::proto::models::AssistantEntry;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 pub use tddy_discovery::agent_list_mapping::{
     agent_allowlist_rows as agent_allowlist_rows_from_configured, AgentAllowlistRow,
