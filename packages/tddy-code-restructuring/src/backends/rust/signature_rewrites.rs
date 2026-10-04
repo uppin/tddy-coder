@@ -9,12 +9,12 @@
 //! Everything here reads the *masked* code ([`masked_to_code`]), in which comments and literals can
 //! carry no delimiter, and writes only the span it changes, so the formatting around it survives.
 
-use super::early_return::masked_to_code;
-use super::seam_refusal;
-use super::signature::{arrow_before, offset_at, parameter_list, skip_whitespace};
+use super::signature::arrow_before;
+#[cfg(test)]
+use super::signature::offset_at;
 use crate::edit::{Position, Range, TextEdit};
-use crate::plan::rust_syntax::permutation;
-use crate::plan::{OrderKey, RefactorKind, RefactorOp};
+#[cfg(test)]
+use crate::plan::RefactorKind;
 use crate::Result;
 
 /// A half-open byte range of the text an operation reads.
@@ -75,181 +75,8 @@ fn edits_of(text: &str, replacements: Vec<Replacement>) -> Vec<TextEdit> {
         .collect()
 }
 
-/// The edits that rewrite the declaration of the function whose own name starts at `name_at` as
-/// `op` asks.
-///
-/// Only `change_param_type`, `add_param`, `reorder_params` and `change_return_type` with a `type`
-/// are rewrites of this kind; `change_return_type` with a `variant` is an assist's.
-pub(super) fn rewrite_declaration(
-    text: &str,
-    op: &RefactorOp,
-    name_at: Position,
-) -> Result<Vec<TextEdit>> {
-    let code = masked_to_code(text);
-    let (open, close) = offset_at(text, name_at)
-        .and_then(|name| parameter_list(&code, name))
-        .ok_or_else(|| seam_refusal("the anchor does not name a function with a parameter list"))?;
-    let parameters = parameters(&code, open, close);
-
-    let replacements = match op.op {
-        RefactorKind::ChangeParamType => change_param_type(&code, &parameters, op),
-        RefactorKind::AddParam => add_param(&code, (open, &parameters), op),
-        RefactorKind::ReorderParams => reorder_params(text, &code, &parameters, op),
-        RefactorKind::ChangeReturnType => change_return_type(&code, close, op),
-        other => Err(super::failure(format!(
-            "{other:?} does not rewrite a declaration"
-        ))),
-    }?;
-    Ok(edits_of(text, replacements))
-}
-
-/// The type the function whose own name starts at `name_at` returns, as written, or `None` when it
-/// declares none.
-pub(super) fn returned_type(text: &str, name_at: Position) -> Option<String> {
-    let code = masked_to_code(text);
-    let (_, close) = parameter_list(&code, offset_at(text, name_at)?)?;
-    let span = return_type_span(&code, close)?;
-    Some(span.of(text).to_string())
-}
-
-fn change_param_type(code: &str, parameters: &[Span], op: &RefactorOp) -> Result<Vec<Replacement>> {
-    let name = required(op.name.as_deref(), "name")?;
-    let new_type = required(op.type_.as_deref(), "type")?.trim();
-    let parameter = parameters
-        .iter()
-        .find(|parameter| binding(code, **parameter) == Some(name))
-        .ok_or_else(|| {
-            seam_refusal(format!(
-                "`{name}` is not a parameter of the function the anchor names"
-            ))
-        })?;
-    let colon = separator_colon(code, *parameter)
-        .ok_or_else(|| seam_refusal(format!("`{name}` declares no type to change")))?;
-    let from = skip_whitespace(code.as_bytes(), colon + 1);
-    Ok(replacing(
-        Span {
-            from,
-            to: parameter.to,
-        },
-        new_type,
-    ))
-}
-
-fn add_param(
-    code: &str,
-    (open, parameters): (usize, &[Span]),
-    op: &RefactorOp,
-) -> Result<Vec<Replacement>> {
-    let name = required(op.name.as_deref(), "name")?;
-    let new_type = required(op.type_.as_deref(), "type")?.trim();
-    let position = required(op.variant.as_deref(), "variant")?;
-
-    if parameters
-        .iter()
-        .any(|parameter| binding(code, *parameter) == Some(name))
-    {
-        return Err(seam_refusal(format!(
-            "`{name}` is already a parameter of the function the anchor names"
-        )));
-    }
-
-    // A receiver stays first: `first` means first after it.
-    let receivers = parameters
-        .iter()
-        .take_while(|parameter| binding(code, **parameter).is_none())
-        .count();
-    let index = match position {
-        "first" => receivers,
-        "last" => parameters.len(),
-        after => {
-            let after = after.strip_prefix("after:").unwrap_or(after);
-            parameters
-                .iter()
-                .position(|parameter| binding(code, *parameter) == Some(after))
-                .ok_or_else(|| {
-                    seam_refusal(format!(
-                        "`{after}` is not a parameter of the function the anchor names"
-                    ))
-                })?
-                + 1
-        }
-    };
-    Ok(with_an_entry_at(
-        open,
-        parameters,
-        index,
-        &format!("{name}: {new_type}"),
-    ))
-}
-
-fn reorder_params(
-    text: &str,
-    code: &str,
-    parameters: &[Span],
-    op: &RefactorOp,
-) -> Result<Vec<Replacement>> {
-    let named: Vec<(Span, String)> = parameters
-        .iter()
-        .filter_map(|parameter| Some((*parameter, binding(code, *parameter)?.to_string())))
-        .collect();
-    let current: Vec<OrderKey> = named
-        .iter()
-        .map(|(_, name)| OrderKey::Name(name.clone()))
-        .collect();
-    let moved = permutation(&current, &op.order)?;
-    let spans: Vec<Span> = named.iter().map(|(span, _)| *span).collect();
-    Ok(reordered(text, &spans, &moved))
-}
-
-fn change_return_type(code: &str, close: usize, op: &RefactorOp) -> Result<Vec<Replacement>> {
-    let new_type = required(op.type_.as_deref(), "type")?.trim();
-    Ok(match return_type_span(code, close) {
-        Some(declared) => replacing(declared, new_type),
-        None => inserting(close + 1, &format!(" -> {new_type}")),
-    })
-}
-
-/// The `T` of `-> T` after the parameter list closing at `close`, up to the body, a `where` clause
-/// or the `;` of a declaration without a body.
-fn return_type_span(code: &str, close: usize) -> Option<Span> {
-    let bytes = code.as_bytes();
-    let arrow = skip_whitespace(bytes, close + 1);
-    if !code[arrow..].starts_with("->") {
-        return None;
-    }
-    let from = skip_whitespace(bytes, arrow + "->".len());
-
-    let mut depth = 0usize;
-    let mut to = from;
-    while to < bytes.len() {
-        match bytes[to] {
-            b'(' | b'[' | b'<' => depth += 1,
-            b')' | b']' => depth = depth.saturating_sub(1),
-            b'>' if !arrow_before(bytes, to) => depth = depth.saturating_sub(1),
-            b'{' | b';' if depth == 0 => break,
-            b'w' if depth == 0 && begins_the_word(code, to, "where") => break,
-            _ => {}
-        }
-        to += 1;
-    }
-    let to = from + code[from..to].trim_end().len();
-    (to > from).then_some(Span { from, to })
-}
-
-fn begins_the_word(code: &str, at: usize, word: &str) -> bool {
-    let bytes = code.as_bytes();
-    let is_word_byte = |byte: &u8| byte.is_ascii_alphanumeric() || *byte == b'_';
-    code[at..].starts_with(word)
-        && !at
-            .checked_sub(1)
-            .is_some_and(|before| is_word_byte(&bytes[before]))
-        && !bytes.get(at + word.len()).is_some_and(is_word_byte)
-}
-
-/// The parameters between the parentheses at `open` and `close`, each trimmed of its whitespace.
-fn parameters(code: &str, open: usize, close: usize) -> Vec<Span> {
-    entries(code, open, close, true)
-}
+mod declaration;
+pub(super) use declaration::{returned_type, rewrite_declaration};
 
 /// The entries between the delimiters at `open` and `close`, split at the commas outside any
 /// brackets (and, for a parameter list, outside any generic arguments), each trimmed.
@@ -337,168 +164,8 @@ fn required<'a>(field: Option<&'a str>, name: &str) -> Result<&'a str> {
     field.ok_or_else(|| super::failure(format!("the operation needs `{name}`")))
 }
 
-/// The call expression `range` covers, with the arguments it passes.
-struct Call {
-    /// The offset of the `(` opening the argument list.
-    open: usize,
-    arguments: Vec<Span>,
-}
-
-/// The edits that rewrite the call `range` covers in `text` as `op` asks.
-///
-/// The range must be exactly one call expression — `callee(arguments)` or
-/// `receiver.method(arguments)` — and is refused otherwise, so an operation can never land on the
-/// arguments of a call nested somewhere inside it.
-pub(super) fn rewrite_call(text: &str, op: &RefactorOp, range: Range) -> Result<Vec<TextEdit>> {
-    let call = call_in(text, range)?;
-    let arguments = &call.arguments;
-    let position = required(op.variant.as_deref(), "variant");
-
-    let replacements = match op.op {
-        RefactorKind::AddCallArg => {
-            let index = argument_position(position?, arguments.len(), arguments.len() + 1)?;
-            let expr = required(op.expr.as_deref(), "expr")?.trim();
-            Ok(with_an_entry_at(call.open, arguments, index, expr))
-        }
-        RefactorKind::ChangeCallArg => {
-            let index = argument_position(position?, arguments.len(), arguments.len())?;
-            let expr = required(op.expr.as_deref(), "expr")?.trim();
-            Ok(replacing(arguments[index], expr))
-        }
-        RefactorKind::RemoveCallArg => {
-            let index = argument_position(position?, arguments.len(), arguments.len())?;
-            Ok(replacing(removal_span(arguments, index), ""))
-        }
-        RefactorKind::ReorderCallArgs => {
-            let current: Vec<OrderKey> = (1..=arguments.len() as u32)
-                .map(OrderKey::Position)
-                .collect();
-            let moved = permutation(&current, &op.order)?;
-            Ok(reordered(text, arguments, &moved))
-        }
-        other => Err(super::failure(format!("{other:?} does not edit a call"))),
-    }?;
-    Ok(edits_of(text, replacements))
-}
-
-/// What deleting `arguments[index]` removes: the argument and the comma that separated it from its
-/// neighbour, the one after it when there is one.
-fn removal_span(arguments: &[Span], index: usize) -> Span {
-    match (index.checked_sub(1), arguments.get(index + 1)) {
-        (_, Some(next)) => Span {
-            from: arguments[index].from,
-            to: next.from,
-        },
-        (Some(previous), None) => Span {
-            from: arguments[previous].to,
-            to: arguments[index].to,
-        },
-        (None, None) => arguments[index],
-    }
-}
-
-/// The zero-based index `first`, `last` or a one-based position names among `len` arguments, which
-/// may be up to `limit` for an operation that can also address the place after the last.
-fn argument_position(position: &str, len: usize, limit: usize) -> Result<usize> {
-    let index = match position {
-        "first" => 0,
-        "last" => limit.saturating_sub(1),
-        number => number
-            .parse::<usize>()
-            .ok()
-            .and_then(|one_based| one_based.checked_sub(1))
-            .ok_or_else(|| {
-                super::failure(format!(
-                    "`{number}` is not `first`, `last` or a one-based position"
-                ))
-            })?,
-    };
-    if index >= limit {
-        return Err(seam_refusal(format!(
-            "`{position}` is past the call's {len} argument(s)"
-        )));
-    }
-    Ok(index)
-}
-
-/// The call `range` covers, refusing a range that is anything else.
-fn call_in(text: &str, range: Range) -> Result<Call> {
-    let bounds = offset_at(text, range.start).zip(offset_at(text, range.end));
-    let covered = bounds
-        .filter(|(from, to)| from <= to)
-        .and_then(|(from, to)| text.get(from..to))
-        .ok_or_else(|| seam_refusal("the anchor's range lies outside its file"))?;
-    let leading = covered.len() - covered.trim_start().len();
-    let call_text = covered.trim();
-    let from = bounds.map_or(0, |(from, _)| from) + leading;
-    let to = from + call_text.len();
-
-    let not_a_call = || {
-        seam_refusal(format!(
-            "`{call_text}` is not a call expression — the range must cover exactly one call, \
-             `callee(arguments)` or `receiver.method(arguments)`"
-        ))
-    };
-    let arity = match syn::parse_str::<syn::Expr>(call_text) {
-        Ok(syn::Expr::Call(call)) => call.args.len(),
-        Ok(syn::Expr::MethodCall(call)) => call.args.len(),
-        _ => return Err(not_a_call()),
-    };
-
-    let code = masked_to_code(text);
-    let open = opening_of_the_last_group(code.as_bytes(), from, to).ok_or_else(not_a_call)?;
-    let arguments = arguments_of(text, &code, open, to - 1);
-    if arguments.len() != arity {
-        return Err(super::server_defect(format!(
-            "`{call_text}` passes {arity} argument(s), but {} were read from it",
-            arguments.len()
-        )));
-    }
-    Ok(Call { open, arguments })
-}
-
-/// The `(` that matches the `)` ending `bytes[from..to]`.
-fn opening_of_the_last_group(bytes: &[u8], from: usize, to: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for at in (from..to).rev() {
-        match bytes[at] {
-            b')' => depth += 1,
-            b'(' => {
-                depth = depth.checked_sub(1)?;
-                if depth == 0 {
-                    return Some(at);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// The arguments between the parentheses at `open` and `close`.
-///
-/// A comma outside any bracket is a separator unless it sits inside generic arguments
-/// (`f::<A, B>(x)`) or a closure's parameters (`|a, b| a`), neither of which is bracketed. Those
-/// are told apart the only reliable way: a piece that is not an expression by itself is joined to
-/// the next until the two are one.
-fn arguments_of(text: &str, code: &str, open: usize, close: usize) -> Vec<Span> {
-    let mut arguments = Vec::new();
-    let mut joined: Option<Span> = None;
-    for piece in entries(code, open, close, false) {
-        let candidate = Span {
-            from: joined.map_or(piece.from, |pending| pending.from),
-            to: piece.to,
-        };
-        if syn::parse_str::<syn::Expr>(candidate.of(text)).is_ok() {
-            arguments.push(candidate);
-            joined = None;
-        } else {
-            joined = Some(candidate);
-        }
-    }
-    // A piece still unfinished is not an argument; the caller notices the count is short.
-    arguments
-}
+mod call_site;
+pub(super) use call_site::rewrite_call;
 
 #[cfg(test)]
 mod tests {
@@ -550,7 +217,7 @@ mod tests {
     /// `text` with the call on its first line, wholly covered, rewritten as `op` asks.
     fn the_call_rewritten(text: &str, op: &RefactorOp) -> std::result::Result<String, String> {
         let end = text.lines().next().map_or(1, |line| line.len() as u32 + 1);
-        rewrite_call(
+        call_site::rewrite_call(
             text,
             op,
             Range {
@@ -642,8 +309,8 @@ mod tests {
         });
 
         // When its return type changes
-        let rewritten =
-            rewrite_declaration(text, &retyping, at(1, 4)).map(|edits| applied(text, edits));
+        let rewritten = declaration::rewrite_declaration(text, &retyping, at(1, 4))
+            .map(|edits| applied(text, edits));
 
         // Then only the `-> …` changes
         assert_eq!(
@@ -666,7 +333,7 @@ mod tests {
 
         // When it is added first, and after `a`
         let results = ["first", "after:a"]
-            .map(|position| rewrite_declaration(text, &adding(position), at(1, 4)))
+            .map(|position| declaration::rewrite_declaration(text, &adding(position), at(1, 4)))
             .map(|rewritten| {
                 rewritten
                     .map(|edits| applied(text, edits))
