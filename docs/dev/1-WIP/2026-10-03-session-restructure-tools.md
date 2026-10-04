@@ -144,10 +144,10 @@ dialled through an `IndexChannel` the way the daemon's registry dials the real o
 
 | Test | Pins | Status |
 |---|---|---|
-| `restructure_check_returns_findings_as_json` | `Check` rooted at the worktree with the relative plan; findings + outcome as the run object | ❌ fails — own stub (index never asked) |
-| `restructure_apply_returns_per_operation_outcomes` | `Apply` request; one outcome per `OperationApplied` with `op_id` | ❌ fails — own stub |
-| `restructure_apply_refuses_a_stale_operation_by_id` | applied ops kept, `outcome: null`, `refusal {class: failed_precondition, message, stale: [{op, reason}]}` via a follow-up `PlanStatus` | ❌ fails — own stub |
-| `a_plan_path_outside_the_session_worktree_is_refused` | `<path> is outside the session's worktree`, index never asked | ❌ fails — own stub; **also** needs session-lsp-tools' `bind_to_session_worktree` (a parent stub) |
+| `restructure_check_returns_findings_as_json` | `Check` rooted at the worktree with the relative plan; findings + outcome as the run object | ✅ passes |
+| `restructure_apply_returns_per_operation_outcomes` | `Apply` request; one outcome per `OperationApplied` with `op_id` | ✅ passes |
+| `restructure_apply_refuses_a_stale_operation_by_id` | applied ops kept, `outcome: null`, `refusal {class: failed_precondition, message, stale: [{op, reason}]}` via a follow-up `PlanStatus` | ✅ passes |
+| `a_plan_path_outside_the_session_worktree_is_refused` | `<path> is outside the session's worktree`, index never asked | ✅ passes — `bind_to_session_worktree` (session-lsp-tools) is real on the base |
 
 ### tddy-tools — `tests/mcp_tool_advertisement_audit.rs`
 
@@ -157,11 +157,9 @@ dialled through an `IndexChannel` the way the daemon's registry dials the real o
 
 ## Technical Debt & Production Readiness
 
-**Stubs (`TODO(session-restructure-tools)`):**
-
-- `IndexRestructureExecutor::execute` — answers `… is not served yet` for every tool.
-- `tddy-daemon/src/runtime.rs` — executor registration when `index_daemon:` is configured.
-- `jail_env_builders.rs` — the `TDDY_RESTRUCTURE_TOOLS` export.
+**Stubs:** none left. The executor body, the daemon registration (`runtime.rs`, beside the `Lsp*`
+registration, from the same `IndexChannel`) and the `TDDY_RESTRUCTURE_TOOLS` jail export
+(`restructure_tools_env`, set only when an executor is registered) are implemented.
 
 **Not written, and why:**
 
@@ -178,8 +176,8 @@ dialled through an `IndexChannel` the way the daemon's registry dials the real o
   executor to `tddy-lsp-executor`; no new crate edge was added.
 - **No dispatch test for the tool-engine arm** — it is wiring over a first-wins global; the
   executor is pinned directly instead, like the `Lsp*` index executor.
-- **No in-jail end-to-end test** — needs the daemon registration and gate, both stubs here.
-- `restructure_load` / `status` / `plans` / `anchors` have documented shapes but no acceptance test
+- **No test for the daemon registration or the jail env export** — both are wiring over the first-wins global, verified by compile and clippy only; no in-jail end-to-end test.
+- `restructure_load` / `status` / `plans` / `anchors` are implemented to their documented shapes but have no acceptance test
   (the PRD's criteria name check, apply, stale and binding only).
 
 ## Decisions & Trade-offs
@@ -195,7 +193,26 @@ _(populated during development)_
 
 ## Validation Results
 
-_(populated by validation commands)_
+### @validate-changes (2026-10-04, rebased onto `plan-dialog` b7fcc57b)
+
+- **Stack gate:** current on base; `origin/<base>..HEAD` is this PR's 4 commits only; diff is 21 files, all owned here.
+- **Responsibility delivered:** six tools, host execution with worktree-bound paths, structured JSON, daemon registration, jail gate. No `TODO(session-restructure-tools)` left.
+- **Boundaries / Dependencies:** no parent symbol re-implemented (binding, `IndexChannel`, RPCs, group/stale refusals consumed as-is); CLI, LSP tools, proto untouched.
+- **Scoped build/tests:** `cargo check --all-targets` clean on tddy-tools, tddy-tool-engine, tddy-lsp-executor, tddy-daemon, tddy-session-lifecycle; `tddy-lsp-executor` and `tddy-tool-engine` suites and `mcp_tool_advertisement_audit` pass.
+- **Warning:** `run_json` returns `Err` when the follow-up `PlanStatus` call fails, discarding the operations the run already applied. A refusal should keep them.
+- **Info:** the load/status/plans/anchors tools and the registration/env export have no test.
+- **Fixed in `/pr-wrap`:** the `PlanStatus` failure is now reported as `refusal.stale_error` beside the refusal (key present only on failure; documented in the module docs), keeping the applied operations. `execute` (115 lines) split into one method per tool. Eight tests added (load, plans, status, anchors, a failed stale lookup, a non-`failed_precondition` refusal, two outside-worktree refusals); the executor suite is 12 tests.
+- **Still untested:** the daemon registration and the jail env export (compile and clippy only); no in-jail end-to-end test, so the PRD's jail criterion is **not verified**.
+
+### File length gate (`/pr-wrap` 3.5)
+
+| File | Production lines | Outcome |
+|---|---|---|
+| `packages/tddy-daemon/src/runtime.rs` | 1,668 → 1,677 | 🔴 grew; split deferred under the stack rule (parents touch it); recorded in its code-issue record |
+| `packages/tddy-tool-engine/src/lib.rs` | 869 → 873 | 🔴 grew; split deferred with the developer's consent (2026-10-04); recorded in its code-issue record |
+
+Both are tracked by `docs/dev/todo/2026-10-04-session-restructure-tools-grew-two-oversized-files.md`.
+`restructure_via_index.rs` is 0 → ~450 production lines, under budget.
 
 ## TODO
 
@@ -207,12 +224,12 @@ _(populated by validation commands)_
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (developer asked for the red phase across the whole stack without per-node stops; reviewed with the stack summary)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run scoped tests (`./test -p <pkg>` per affected package); CI for the rest
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
 - [ ] Refactor test issues
@@ -221,6 +238,6 @@ _(populated by validation commands)_
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-03-session-restructure-tools-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

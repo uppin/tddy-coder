@@ -3,10 +3,10 @@
 **Location:** `packages/tddy-daemon/src/runtime.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate, independently on #498 and #518
-**Metrics:** **1,668 production lines** (2026-10-04, #571 HEAD, `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 1,650 on #570 at 2026-10-03; 1,636 on `master` before #570, 1,620 before #574; 1,619 before #510, 1,562 before #509, 1,513 before #508) · budget 500 · **~3.2× over** · residue function `build` is **880 lines** (879 before #510, 878 before #509)
-**Thresholds breached:** length 1668 > 500; `build` 880 > 60
+**Metrics:** **1,677 production lines** (2026-10-04, #573 HEAD; 1,668 on #571, `awk '/#\[cfg\(test\)\]/{exit} {n++} END{print n}'`; 1,650 on #570 at 2026-10-03; 1,636 on `master` before #570, 1,620 before #574; 1,619 before #510, 1,562 before #509, 1,513 before #508) · budget 500 · **~3.2× over** · residue function `build` is **880 lines** (879 before #510, 878 before #509)
+**Thresholds breached:** length 1677 > 500; `build` 880 > 60
 **Restructure:** required — three `extract_module --to_file` seams **plus** function splitting
-**Status:** Open — regressed 2026-10-04 (+18 from #571; **unclaimed**); regressed 2026-10-03 (+11 from #574, +14 from #570; earlier: 1,562 → 1,619 in #509, `#keyring` 2/9; 1,619 → 1,620 in #510, `#keyring` 3/9). Pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508, #509 and #510 grew it and deferred the split because dependents #510–#513 touch this file
+**Status:** Open — regressed 2026-10-04 (+9 from #573, +18 from #571; **unclaimed**); regressed 2026-10-03 (+11 from #574, +14 from #570; earlier: 1,562 → 1,619 in #509, `#keyring` 2/9; 1,619 → 1,620 in #510, `#keyring` 3/9). Pre-existing; #498, #518 and #494 grew it and deferred with explicit developer consent; #508, #509 and #510 grew it and deferred the split because dependents #510–#513 touch this file
 
 ## Measurement history
 
@@ -27,6 +27,8 @@
 
 | 2026-10-03 | 1,650 | 1,636 on `origin/master` (`51b8eb97`, after #574 and #566 merged) → 1,650 after #570 (`#live-plan` 11/15): inside `build`, the `Lsp*` executor is built, its idle-reaper registry taken, and `select_lsp_executor` registers the index-backed executor when `index_daemon:` is configured, the local one otherwise (replacing the one-line `tddy_lsp_executor::register`; the block moved below the `index_daemon` section whose registry it needs). Grown; the split is deferred with the developer's consent (`docs/dev/todo/2026-10-03-session-lsp-tools-grew-runtime-rs.md`) because #571 and #573 touch this file |
 | 2026-10-04 | 1,668 | 1,650 on #570 / base `c3567fde` → 1,668 after #571 (`#live-plan` 12/15): +18 lines. Grown; the split is deferred because dependent #572 and its parents touch this file (the stack rule: no split lands mid-stack). Not claimed by any PR |
+
+| 2026-10-04 | 1,677 | 1,668 on base `b7fcc57b` → 1,677 after #573 (`#live-plan` 14/15): +9 lines inside `build` — the `IndexRestructureExecutor` registration beside the `Lsp*` one, from the same `IndexChannel`, when `index_daemon:` is configured. Grown; the split is deferred because the stack's parents (#570–#572) touch this file (the stack rule: no split lands mid-stack). Not claimed by any PR |
 
 ## What the gate found
 

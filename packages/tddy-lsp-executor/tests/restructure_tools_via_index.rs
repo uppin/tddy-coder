@@ -77,9 +77,13 @@ impl ASessionWorktree {
 struct AFakeIndex {
     check_events: Vec<index::RestructureEvent>,
     apply_events: Vec<index::RestructureEvent>,
-    /// When set, the apply stream ends with this `FailedPrecondition` refusal instead of an outcome.
-    apply_refused_with: Option<String>,
+    /// When set, the apply stream ends with this refusal instead of an outcome.
+    apply_refused_with: Option<tddy_rpc::Status>,
     plan_status_answer: index::PlanStatusResponse,
+    /// When set, `PlanStatus` fails with this instead of answering.
+    plan_status_failure: Option<tddy_rpc::Status>,
+    plans_answer: index::PlansResponse,
+    anchors_answer: index::AnchorsResponse,
     asked: Arc<Mutex<Vec<AskedOfTheIndex>>>,
 }
 
@@ -89,6 +93,9 @@ enum AskedOfTheIndex {
     Check(index::CheckRequest),
     Apply(index::ApplyRequest),
     PlanStatus(index::PlanStatusRequest),
+    LoadPlans(index::LoadPlansRequest),
+    ListPlans(index::ListPlansRequest),
+    Anchors(index::AnchorsRequest),
 }
 
 fn a_fake_index() -> AFakeIndex {
@@ -106,8 +113,27 @@ impl AFakeIndex {
         self
     }
 
-    fn refusing_the_apply_with(mut self, refusal: &str) -> Self {
-        self.apply_refused_with = Some(refusal.to_string());
+    fn refusing_the_apply_with(self, refusal: &str) -> Self {
+        self.refusing_the_apply_as(tddy_rpc::Status::failed_precondition(refusal))
+    }
+
+    fn refusing_the_apply_as(mut self, refusal: tddy_rpc::Status) -> Self {
+        self.apply_refused_with = Some(refusal);
+        self
+    }
+
+    fn failing_plan_status_with(mut self, failure: tddy_rpc::Status) -> Self {
+        self.plan_status_failure = Some(failure);
+        self
+    }
+
+    fn answering_plans_with(mut self, answer: index::PlansResponse) -> Self {
+        self.plans_answer = answer;
+        self
+    }
+
+    fn answering_anchors_with(mut self, answer: index::AnchorsResponse) -> Self {
+        self.anchors_answer = answer;
         self
     }
 
@@ -170,9 +196,7 @@ impl CodeIndexService for AFakeIndex {
         self.record(AskedOfTheIndex::Apply(request.into_inner()));
         Ok(tddy_rpc::Response::new(a_stream_of(
             self.apply_events.clone(),
-            self.apply_refused_with
-                .as_deref()
-                .map(tddy_rpc::Status::failed_precondition),
+            self.apply_refused_with.clone(),
         )))
     }
 
@@ -181,6 +205,9 @@ impl CodeIndexService for AFakeIndex {
         request: tddy_rpc::Request<index::PlanStatusRequest>,
     ) -> Result<tddy_rpc::Response<index::PlanStatusResponse>, tddy_rpc::Status> {
         self.record(AskedOfTheIndex::PlanStatus(request.into_inner()));
+        if let Some(failure) = self.plan_status_failure.clone() {
+            return Err(failure);
+        }
         Ok(tddy_rpc::Response::new(self.plan_status_answer.clone()))
     }
 
@@ -193,16 +220,18 @@ impl CodeIndexService for AFakeIndex {
 
     async fn anchors(
         &self,
-        _request: tddy_rpc::Request<index::AnchorsRequest>,
+        request: tddy_rpc::Request<index::AnchorsRequest>,
     ) -> Result<tddy_rpc::Response<index::AnchorsResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.record(AskedOfTheIndex::Anchors(request.into_inner()));
+        Ok(tddy_rpc::Response::new(self.anchors_answer.clone()))
     }
 
     async fn load_plans(
         &self,
-        _request: tddy_rpc::Request<index::LoadPlansRequest>,
+        request: tddy_rpc::Request<index::LoadPlansRequest>,
     ) -> Result<tddy_rpc::Response<index::PlansResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.record(AskedOfTheIndex::LoadPlans(request.into_inner()));
+        Ok(tddy_rpc::Response::new(self.plans_answer.clone()))
     }
 
     async fn unload_plans(
@@ -214,9 +243,10 @@ impl CodeIndexService for AFakeIndex {
 
     async fn list_plans(
         &self,
-        _request: tddy_rpc::Request<index::ListPlansRequest>,
+        request: tddy_rpc::Request<index::ListPlansRequest>,
     ) -> Result<tddy_rpc::Response<index::PlansResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        self.record(AskedOfTheIndex::ListPlans(request.into_inner()));
+        Ok(tddy_rpc::Response::new(self.plans_answer.clone()))
     }
 
     async fn verify(
@@ -431,6 +461,37 @@ fn a_plan_status_holding_stale(op: &str, reason: &str) -> index::PlanStatusRespo
     }
 }
 
+/// A plan the index holds with `ops` operations, one of them stale.
+fn a_loaded_plan_holding_stale(plan: &str, ops: u32, stale_op: &str) -> index::LoadedPlan {
+    index::LoadedPlan {
+        plan: plan.to_string(),
+        ops,
+        dirty: true,
+        stale: vec![index::StaleOp {
+            op: stale_op.to_string(),
+            reason: "item changed".to_string(),
+        }],
+    }
+}
+
+/// The JSON the tools report for [`a_loaded_plan_holding_stale`].
+fn the_reported_plan_holding_stale(plan: &str, ops: u32, stale_op: &str) -> Value {
+    json!({
+        "plan": plan,
+        "ops": ops,
+        "dirty": true,
+        "stale": [{ "op": stale_op, "reason": "item changed" }],
+    })
+}
+
+fn a_range(from: (u32, u32), to: (u32, u32)) -> index::SourceRange {
+    let position = |(line, column)| Some(index::SourcePosition { line, column });
+    index::SourceRange {
+        start: position(from),
+        end: position(to),
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
@@ -601,6 +662,297 @@ async fn a_plan_path_outside_the_session_worktree_is_refused() {
     .await;
 
     // Then the host refuses it, naming the plan
+    assert_eq!(
+        answer,
+        Err(format!(
+            "{neighbours_plan} is outside the session's worktree"
+        ))
+    );
+    // And the index never heard of it
+    assert_eq!(fake.what_it_was_asked(), vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restructure_load_asks_the_index_for_worktree_relative_plans_and_returns_the_held_plans() {
+    // Given a session worktree, and a warm index that holds the plan once loaded, one operation stale
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_plans_with(index::PlansResponse {
+        plans: vec![a_loaded_plan_holding_stale(THE_PLAN, 2, "op-2")],
+    });
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+    let absolute_plan = worktree.root().join(THE_PLAN).display().to_string();
+
+    // When the agent loads the plan by its absolute path inside the worktree
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_load",
+        worktree.root(),
+        json!({ "plans": [absolute_plan] }),
+    )
+    .await;
+
+    // Then the index was asked to load it by its worktree-relative path, rooted at the worktree
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::LoadPlans(index::LoadPlansRequest {
+            workspace_root: worktree.root_string(),
+            plans: vec![THE_PLAN.to_string()],
+        })]
+    );
+    // And the agent gets the plans the index holds, with their stale operations
+    assert_eq!(
+        answer,
+        Ok(json!({ "plans": [the_reported_plan_holding_stale(THE_PLAN, 2, "op-2")] }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restructure_plans_asks_the_index_about_the_worktree_and_returns_the_held_plans() {
+    // Given a session worktree, and a warm index holding two plans
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_plans_with(index::PlansResponse {
+        plans: vec![
+            a_loaded_plan_holding_stale(THE_PLAN, 2, "op-1"),
+            a_loaded_plan_holding_stale("plans/other.jsonl", 5, "op-4"),
+        ],
+    });
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent lists the plans
+    let answer = the_agent_calls(&executor, "restructure_plans", worktree.root(), json!({})).await;
+
+    // Then the index was asked about the session's worktree
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::ListPlans(index::ListPlansRequest {
+            workspace_root: worktree.root_string(),
+        })]
+    );
+    // And the agent gets every held plan
+    assert_eq!(
+        answer,
+        Ok(json!({ "plans": [
+            the_reported_plan_holding_stale(THE_PLAN, 2, "op-1"),
+            the_reported_plan_holding_stale("plans/other.jsonl", 5, "op-4"),
+        ] }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restructure_status_asks_the_index_for_the_worktree_relative_plan_and_returns_its_counts() {
+    // Given a session worktree, and a warm index whose plan has one operation done, one stale
+    let worktree = a_session_worktree();
+    let fake = a_fake_index()
+        .answering_plan_status_with(a_plan_status_holding_stale("op-2", "item changed"));
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent asks for the plan's status by its worktree-relative path
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_status",
+        worktree.root(),
+        json!({ "plan": THE_PLAN }),
+    )
+    .await;
+
+    // Then the index was asked about that plan, rooted at the session's worktree
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::PlanStatus(index::PlanStatusRequest {
+            workspace_root: worktree.root_string(),
+            plan: THE_PLAN.to_string(),
+        })]
+    );
+    // And the agent gets the counts and the stale operations by id
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "completed": 1,
+            "in_flight": 0,
+            "pending": 1,
+            "failed": 0,
+            "stale": [{ "op": "op-2", "reason": "item changed" }],
+        }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restructure_anchors_asks_the_index_for_the_named_items_and_returns_their_anchor() {
+    // Given a session worktree, and a warm index that anchors `Circle` at a known range
+    let worktree = a_session_worktree();
+    let fake = a_fake_index().answering_anchors_with(index::AnchorsResponse {
+        range: Some(a_range((3, 1), (9, 2))),
+        anchor_json: r#""items":["Circle"]"#.to_string(),
+    });
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent anchors `Circle` in a file named by its worktree-relative path
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_anchors",
+        worktree.root(),
+        json!({ "file": "src/lib.rs", "items": ["Circle"] }),
+    )
+    .await;
+
+    // Then the index was asked for those items of that file, rooted at the session's worktree
+    assert_eq!(
+        fake.what_it_was_asked(),
+        vec![AskedOfTheIndex::Anchors(index::AnchorsRequest {
+            workspace_root: worktree.root_string(),
+            file: "src/lib.rs".to_string(),
+            items: vec!["Circle".to_string()],
+            at: None,
+        })]
+    );
+    // And the agent gets the range in the index's coordinates and the anchor fragment
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "range": {
+                "start": { "line": 3, "column": 1 },
+                "end": { "line": 9, "column": 2 },
+            },
+            "anchor_json": r#""items":["Circle"]"#,
+        }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_stale_lookup_is_reported_beside_the_refusal_and_keeps_the_applied_operations() {
+    // Given a warm index that applies the first operation, refuses the second as stale, and then
+    // cannot say which operations are stale
+    let worktree = a_session_worktree();
+    let fake = a_fake_index()
+        .applying_with(vec![an_applied_operation(0, "op-1")])
+        .refusing_the_apply_with(&the_stale_refusal_of("op-2"))
+        .failing_plan_status_with(tddy_rpc::Status::internal("the plan store is unreadable"));
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent applies the plan
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_apply",
+        worktree.root(),
+        json!({ "plan": THE_PLAN }),
+    )
+    .await;
+
+    // Then the agent still gets an answer: the applied operation, no outcome, and the refusal with
+    // no stale operations and the lookup's own message
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "plan": THE_PLAN,
+            "findings": [],
+            "operations": [the_reported_operation(0, "op-1")],
+            "notes": [],
+            "outcome": null,
+            "refusal": {
+                "class": "failed_precondition",
+                "message": the_stale_refusal_of("op-2"),
+                "stale": [],
+                "stale_error": "the plan store is unreadable",
+            },
+        }))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refusal_other_than_failed_precondition_names_its_class_and_does_not_look_for_stale_operations(
+) {
+    // Given a warm index that applies the first operation, then refuses the run as invalid
+    let worktree = a_session_worktree();
+    let fake = a_fake_index()
+        .applying_with(vec![an_applied_operation(0, "op-1")])
+        .refusing_the_apply_as(tddy_rpc::Status::invalid_argument("op-2 names no item"))
+        .answering_plan_status_with(a_plan_status_holding_stale("op-2", "item changed"));
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+
+    // When the agent applies the plan
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_apply",
+        worktree.root(),
+        json!({ "plan": THE_PLAN }),
+    )
+    .await;
+
+    // Then the agent gets the applied operation and a refusal of that class, with no stale
+    // operations and no lookup error
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "plan": THE_PLAN,
+            "findings": [],
+            "operations": [the_reported_operation(0, "op-1")],
+            "notes": [],
+            "outcome": null,
+            "refusal": {
+                "class": "invalid_argument",
+                "message": "op-2 names no item",
+                "stale": [],
+            },
+        }))
+    );
+    // And the index was only asked to apply, never for the plan's status
+    assert_eq!(
+        fake.what_it_was_asked()
+            .iter()
+            .filter(|asked| matches!(asked, AskedOfTheIndex::PlanStatus(_)))
+            .count(),
+        0
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_outside_the_session_worktree_is_refused_before_the_index_hears_of_it() {
+    // Given a session worktree, a neighbouring session's worktree, and a warm index
+    let worktree = a_session_worktree();
+    let neighbour = a_session_worktree();
+    let fake = a_fake_index();
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+    let neighbours_file = neighbour.root().join("src/lib.rs").display().to_string();
+
+    // When the agent anchors an item of the neighbour's file
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_anchors",
+        worktree.root(),
+        json!({ "file": neighbours_file, "items": ["Circle"] }),
+    )
+    .await;
+
+    // Then the host refuses it, naming the file
+    assert_eq!(
+        answer,
+        Err(format!(
+            "{neighbours_file} is outside the session's worktree"
+        ))
+    );
+    // And the index never heard of it
+    assert_eq!(fake.what_it_was_asked(), vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_outside_the_session_worktree_is_refused_when_loading_it() {
+    // Given a session worktree, a neighbouring session's worktree holding a plan, and a warm index
+    let worktree = a_session_worktree();
+    let neighbour = a_session_worktree();
+    let fake = a_fake_index();
+    let executor = the_registered_executor(an_index_serving(fake.clone()).await);
+    let neighbours_plan = neighbour.root().join(THE_PLAN).display().to_string();
+
+    // When the agent loads its own plan together with the neighbour's
+    let answer = the_agent_calls(
+        &executor,
+        "restructure_load",
+        worktree.root(),
+        json!({ "plans": [THE_PLAN, neighbours_plan] }),
+    )
+    .await;
+
+    // Then the host refuses the load, naming the neighbour's plan
     assert_eq!(
         answer,
         Err(format!(

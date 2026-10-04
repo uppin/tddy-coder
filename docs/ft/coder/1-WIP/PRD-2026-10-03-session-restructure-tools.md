@@ -26,7 +26,7 @@ against the daemon-managed warm index on the session's own worktree, with struct
 - The tool names join `IN_JAIL_RELAYABLE_EXEC_TOOLS`; the advertisement audit is updated.
 
 ## Acceptance Criteria
-- [ ] `restructure_check` on a plan in the worktree returns its findings as JSON.
-- [ ] `restructure_apply` applies through the warm index and returns per-op outcomes; a stale op is refused by id.
-- [ ] A plan path outside the session's worktree is refused host-side.
+- [x] `restructure_check` on a plan in the worktree returns its findings as JSON.
+- [x] `restructure_apply` applies through the warm index and returns per-op outcomes; a stale op is refused by id.
+- [x] A plan path outside the session's worktree is refused host-side.
 - [ ] From inside a jail the tools reach the host; without `index_daemon:` they are not advertised.

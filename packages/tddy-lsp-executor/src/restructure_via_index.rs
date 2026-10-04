@@ -44,6 +44,8 @@
 //! (`failed_precondition`, `invalid_argument`, …, the classes `tddy_index_daemon::status` assigns),
 //! and, for a `failed_precondition`, `stale` the plan's held stale operations as `PlanStatus`
 //! reports them (`[{ "op", "reason" }]`), so a stale operation is refused **by its id**.
+//! When that `PlanStatus` lookup itself fails, the refusal carries `stale_error` (the message) and an
+//! empty `stale` — the run's applied operations are never dropped for it.
 //!
 //! `restructure_load` and `restructure_plans` answer `{ "plans": [{ "plan", "ops", "dirty",
 //! "stale": [{ "op", "reason" }] }] }`; `restructure_status` answers `{ "completed", "in_flight",
@@ -269,32 +271,41 @@ impl IndexRestructureExecutor {
         }
     }
 
+    /// The plan's stale operations as the index reports them now.
+    async fn stale_of(&self, worktree: &Path, plan: &str) -> Result<Vec<Value>, String> {
+        let held = self
+            .client()
+            .await?
+            .plan_status(code_index::PlanStatusRequest {
+                workspace_root: worktree.display().to_string(),
+                plan: plan.to_string(),
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        Ok(stale_json(&held.stale))
+    }
+
     /// The run object the tool answers; for a `failed_precondition` refusal, with the plan's stale
     /// operations as the index reports them now.
     async fn run_json(&self, worktree: &Path, plan: &str, run: Run) -> Result<Value, String> {
         let refusal = match &run.refusal {
             None => Value::Null,
             Some(status) => {
-                let stale = if status.code() == tonic::Code::FailedPrecondition {
-                    let held = self
-                        .client()
-                        .await?
-                        .plan_status(code_index::PlanStatusRequest {
-                            workspace_root: worktree.display().to_string(),
-                            plan: plan.to_string(),
-                        })
-                        .await
-                        .map_err(message_of)?
-                        .into_inner();
-                    stale_json(&held.stale)
-                } else {
-                    Vec::new()
-                };
-                json!({
+                // A failed lookup is reported beside the refusal, never instead of it: what the run
+                // already did stays in the answer.
+                let mut refusal = json!({
                     "class": class_of(status.code()),
                     "message": status.message(),
-                    "stale": stale,
-                })
+                    "stale": Vec::<Value>::new(),
+                });
+                if status.code() == tonic::Code::FailedPrecondition {
+                    match self.stale_of(worktree, plan).await {
+                        Ok(stale) => refusal["stale"] = json!(stale),
+                        Err(err) => refusal["stale_error"] = json!(err),
+                    }
+                }
+                refusal
             }
         };
         Ok(json!({
@@ -308,6 +319,123 @@ impl IndexRestructureExecutor {
     }
 }
 
+/// One method per tool; `execute` only names which.
+impl IndexRestructureExecutor {
+    async fn load(&self, worktree: &Path, args: &Value) -> Result<Value, String> {
+        let plans = strings(args, "plans")?
+            .iter()
+            .map(|plan| bind_to_session_worktree(worktree, plan))
+            .collect::<Result<Vec<_>, _>>()?;
+        let answered = self
+            .client()
+            .await?
+            .load_plans(code_index::LoadPlansRequest {
+                workspace_root: worktree.display().to_string(),
+                plans,
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        Ok(plans_json(&answered))
+    }
+
+    async fn plans(&self, worktree: &Path) -> Result<Value, String> {
+        let answered = self
+            .client()
+            .await?
+            .list_plans(code_index::ListPlansRequest {
+                workspace_root: worktree.display().to_string(),
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        Ok(plans_json(&answered))
+    }
+
+    async fn check(&self, worktree: &Path, args: &Value) -> Result<Value, String> {
+        let plan = bind_to_session_worktree(worktree, required_str(args, "plan")?)?;
+        let events = self
+            .client()
+            .await?
+            .check(code_index::CheckRequest {
+                workspace_root: worktree.display().to_string(),
+                plan: plan.clone(),
+                deep: flag(args, "deep"),
+                file_budget: count(args, "file_budget")?.unwrap_or(0),
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        let run = Self::run(events).await?;
+        self.run_json(worktree, &plan, run).await
+    }
+
+    async fn apply(&self, worktree: &Path, args: &Value) -> Result<Value, String> {
+        let plan = bind_to_session_worktree(worktree, required_str(args, "plan")?)?;
+        let events = self
+            .client()
+            .await?
+            .apply(code_index::ApplyRequest {
+                workspace_root: worktree.display().to_string(),
+                plan: plan.clone(),
+                dry_run: flag(args, "dry_run"),
+                resume: flag(args, "resume"),
+                from: count(args, "from")?,
+                stop_after: count(args, "stop_after")?,
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        let run = Self::run(events).await?;
+        self.run_json(worktree, &plan, run).await
+    }
+
+    async fn status(&self, worktree: &Path, args: &Value) -> Result<Value, String> {
+        let plan = bind_to_session_worktree(worktree, required_str(args, "plan")?)?;
+        let status = self
+            .client()
+            .await?
+            .plan_status(code_index::PlanStatusRequest {
+                workspace_root: worktree.display().to_string(),
+                plan,
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        Ok(json!({
+            "completed": status.completed,
+            "in_flight": status.in_flight,
+            "pending": status.pending,
+            "failed": status.failed,
+            "stale": stale_json(&status.stale),
+        }))
+    }
+
+    async fn anchors(&self, worktree: &Path, args: &Value) -> Result<Value, String> {
+        let file = bind_to_session_worktree(worktree, required_str(args, "file")?)?;
+        let at = match args.get("at") {
+            None | Some(Value::Null) => None,
+            Some(range) => Some(range_of(range)?),
+        };
+        let answered = self
+            .client()
+            .await?
+            .anchors(code_index::AnchorsRequest {
+                workspace_root: worktree.display().to_string(),
+                file,
+                items: strings(args, "items")?,
+                at,
+            })
+            .await
+            .map_err(message_of)?
+            .into_inner();
+        Ok(json!({
+            "range": range_json(&answered.range),
+            "anchor_json": answered.anchor_json,
+        }))
+    }
+}
+
 #[async_trait::async_trait]
 impl RestructureExecutor for IndexRestructureExecutor {
     async fn execute(
@@ -316,114 +444,13 @@ impl RestructureExecutor for IndexRestructureExecutor {
         tool_name: &str,
         args: &Value,
     ) -> Result<Value, String> {
-        let workspace_root = worktree.display().to_string();
         match tool_name {
-            "restructure_load" => {
-                let plans = strings(args, "plans")?
-                    .iter()
-                    .map(|plan| bind_to_session_worktree(worktree, plan))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let answered = self
-                    .client()
-                    .await?
-                    .load_plans(code_index::LoadPlansRequest {
-                        workspace_root,
-                        plans,
-                    })
-                    .await
-                    .map_err(message_of)?
-                    .into_inner();
-                Ok(plans_json(&answered))
-            }
-            "restructure_plans" => {
-                let answered = self
-                    .client()
-                    .await?
-                    .list_plans(code_index::ListPlansRequest { workspace_root })
-                    .await
-                    .map_err(message_of)?
-                    .into_inner();
-                Ok(plans_json(&answered))
-            }
-            "restructure_check" => {
-                let plan = bind_to_session_worktree(worktree, required_str(args, "plan")?)?;
-                let events = self
-                    .client()
-                    .await?
-                    .check(code_index::CheckRequest {
-                        workspace_root,
-                        plan: plan.clone(),
-                        deep: flag(args, "deep"),
-                        file_budget: count(args, "file_budget")?.unwrap_or(0),
-                    })
-                    .await
-                    .map_err(message_of)?
-                    .into_inner();
-                let run = Self::run(events).await?;
-                self.run_json(worktree, &plan, run).await
-            }
-            "restructure_apply" => {
-                let plan = bind_to_session_worktree(worktree, required_str(args, "plan")?)?;
-                let events = self
-                    .client()
-                    .await?
-                    .apply(code_index::ApplyRequest {
-                        workspace_root,
-                        plan: plan.clone(),
-                        dry_run: flag(args, "dry_run"),
-                        resume: flag(args, "resume"),
-                        from: count(args, "from")?,
-                        stop_after: count(args, "stop_after")?,
-                    })
-                    .await
-                    .map_err(message_of)?
-                    .into_inner();
-                let run = Self::run(events).await?;
-                self.run_json(worktree, &plan, run).await
-            }
-            "restructure_status" => {
-                let plan = bind_to_session_worktree(worktree, required_str(args, "plan")?)?;
-                let status = self
-                    .client()
-                    .await?
-                    .plan_status(code_index::PlanStatusRequest {
-                        workspace_root,
-                        plan,
-                    })
-                    .await
-                    .map_err(message_of)?
-                    .into_inner();
-                Ok(json!({
-                    "completed": status.completed,
-                    "in_flight": status.in_flight,
-                    "pending": status.pending,
-                    "failed": status.failed,
-                    "stale": stale_json(&status.stale),
-                }))
-            }
-            "restructure_anchors" => {
-                let file = bind_to_session_worktree(worktree, required_str(args, "file")?)?;
-                let at = match args.get("at") {
-                    None | Some(Value::Null) => None,
-                    Some(range) => Some(range_of(range)?),
-                };
-                let answered = self
-                    .client()
-                    .await?
-                    .anchors(code_index::AnchorsRequest {
-                        workspace_root,
-                        file,
-                        items: strings(args, "items")?,
-                        at,
-                    })
-                    .await
-                    .map_err(message_of)?
-                    .into_inner();
-                Ok(json!({
-                    "range": range_json(&answered.range),
-                    "anchor_json": answered.anchor_json,
-                }))
-            }
+            "restructure_load" => self.load(worktree, args).await,
+            "restructure_plans" => self.plans(worktree).await,
+            "restructure_check" => self.check(worktree, args).await,
+            "restructure_apply" => self.apply(worktree, args).await,
+            "restructure_status" => self.status(worktree, args).await,
+            "restructure_anchors" => self.anchors(worktree, args).await,
             other => Err(format!("{other} is not a restructure tool")),
         }
     }
