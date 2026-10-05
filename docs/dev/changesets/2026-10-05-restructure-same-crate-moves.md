@@ -39,3 +39,19 @@ rows remain, for node 17) and `2026-10-03-live-plans-three-gaps-in-staleness-rep
 **Left open, with the developer's consent:** the 500-production-line budget. `backends/rust.rs` grew by 22
 lines (2,831 to 2,853, wiring only), and `plan.rs` (481 to 520), `plan/codec.rs` (437 to 514) and
 `item_anchor.rs` (463 to 517) crossed 500.
+
+## Verification (on the tree rebased onto master `f014ee78`, 2026-10-05)
+
+- `cargo check --all-targets` clean for `tddy-code-restructuring`, `tddy-tools`, `tddy-index-daemon`,
+  `tddy-session-lifecycle`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-lsp-executor`, `tddy-telegram-control`,
+  `tddy-desktop` and `tddy-session-agents`.
+- `tddy-code-restructuring`, `tddy-tools` and `tddy-index-daemon`, run together with `--no-fail-fast`:
+  **1694 passed, 0 failed, 12 ignored** across 125 test binaries. The 12 ignored are the production tests
+  that boot a real rust-analyzer (each of those the change added was run deliberately by hand and passed).
+- `tddy-session-lifecycle`: **575 passed, 22 failed, 1 ignored**, the 22 failing tests identical to the
+  baseline by name (the macOS-only sandbox and LiveKit suites), the same numbers as before the moves.
+- `cargo clippy -D warnings --all-targets` and `cargo fmt --check` clean on the six touched packages.
+- Three engine files crossed the 500-production-line budget (`item_anchor.rs` 463 to 517, `plan.rs` 481 to 520,
+  `plan/codec.rs` 437 to 514); the developer deferred the split (backlog entry
+  `2026-10-05-restructure-engine-files-past-the-500-line-budget`).
+

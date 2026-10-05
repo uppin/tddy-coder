@@ -1,2 +1,0 @@
-{"v":2,"files":{}}
-{"id":"op-1","op":"reparent_module","anchor":{"kind":"items","file":"packages/tddy-session-lifecycle/src/connection_service/svc_turn_end_reporter.rs","items":["tddy_session_lifecycle::connection_service::svc_turn_end_reporter::jail_env_builders"],"fingerprints":["sha256:e19c7c366b9d71f85e91c2b26de395f5eb7cc24b0ab9ee2fb9b7d09502b38b8a"]},"to":"tddy_session_lifecycle::connection_service::svc_start_sandboxed_claude_cli_session","reexport":"outside"}
