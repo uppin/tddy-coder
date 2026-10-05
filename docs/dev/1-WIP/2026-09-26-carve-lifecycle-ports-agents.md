@@ -541,7 +541,19 @@ either type needs a new dependency, stop and ask).
 
 ## Validation results
 
-(Empty. Filled during `/green`.)
+### Stage B1 (2026-10-05): the three T3 files whose methods need no `self.clone()` hand-off
+
+**Moved** from `impl DaemonSessionHost` to `impl AgentRoster` (Recipe B; header only, no body re-typed, no comment dropped):
+- `svc_provision_agent_clone.rs`: all 12 (`provision_agent_clone`, `delete_clone_on_peer`, `tear_down_agent_clone`, `tear_down_every_agent_clone`, `publish_roster_change`, `broadcast_roster`, `session_room_participant_identities`, `agent_clone_worktree_path`, `agent_clone_divergences`, `agent_clone_for`, `hosted_clone_for`, `run_hosted_clone_tool`);
+- `svc_turn_end_reporter.rs`: all 4 (`forward_cancel_agent_conversation`, `roster_record_for_agent_id`, `roster_record_for`, `remote_roster_record_for`);
+- `svc_resolve_listed_worktree.rs` (T3 part): 6 (`report_shadowed_agent_def`, `resolvable_agent_defs`, `agent_def_for_spawn`, `resolve_specialized_agent_defs`, `seeded_roster_records`, `roster_session_dir`); `ensure_project_available_for_start` stays a host method (T1).
+
+**Host calls that are not fields, and what each became** (resolution order 1, a free function or state read; none needed order 2 beyond `local_exec_tools`):
+`common_room_slot` / `eligible_instance_ids` -> `self.peer_routing.*`; `session_dir_for` -> `session_dir_lookup::session_dir_for(&self.tddy_data_dir, ..)`; `mint_first_admission_token` -> `first_admission_token::mint_first_admission_token(&self.config, &self.session_admissions, ..)`; `split_forward_deadline` -> `svc_spawn_split_agent::split_forward_deadline(&self.config)`; `agent_roster_state()` -> `self.state()`; `local_exec_tools()` -> `self.host.local_exec_tools()` (callback). Layering note: the T3 file now imports `svc_host_builders::first_admission_token` and `svc_spawn_split_agent` (wiring and T4 modules, the M0.4 re-parent being deferred); node 17's move must carry or re-point them (A4).
+
+**Delegators left on the host**, all in the wiring file `svc_agent_roster_delegators.rs`: `session_room_participant_identities`, `agent_clone_worktree_path`, `agent_clone_divergences`, `resolvable_agent_defs`, `agent_def_for_spawn`, `resolve_specialized_agent_defs`, `seeded_roster_records`. Every other caller (ensure_session_room, delete-session, the session-agents adapters, `svc_start_hosted_agent_clone`, `session_agent_ports`) calls `self.agent_roster().<m>(..)`. Removed as dead: host `mint_first_admission_token`, host `session_dir_for`.
+
+**Engine vs hand:** 0 engine operations, 22 methods by hand. The engine has no operation that retargets an `impl` (probe: `change_param_type` on `self` -> "`self` is not a parameter of the function the anchor names") or re-points a call's receiver; see the two 2026-10-05 todos on that. The one plan-shaped edit, splitting `svc_resolve_listed_worktree.rs`'s mixed impl, is also by hand.
 
 ## TODO
 
