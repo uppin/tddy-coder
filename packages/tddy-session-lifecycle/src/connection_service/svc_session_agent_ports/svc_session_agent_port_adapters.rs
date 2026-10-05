@@ -45,7 +45,10 @@ pub(crate) struct DefsResolvableFromThisDaemon {
 #[async_trait]
 impl AgentCatalog for DefsResolvableFromThisDaemon {
     async fn record_for(&self, agent_id: &str) -> Result<SessionAgentRecord, Status> {
-        self.connection.roster_record_for_agent_id(agent_id).await
+        self.connection
+            .agent_roster()
+            .roster_record_for_agent_id(agent_id)
+            .await
     }
 }
 
@@ -320,6 +323,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         conversation_id: &str,
     ) -> Result<(), Status> {
         self.connection
+            .agent_roster()
             .forward_cancel_agent_conversation(session_token, session_id, owner, conversation_id)
             .await
     }

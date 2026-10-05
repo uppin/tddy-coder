@@ -66,7 +66,7 @@ impl DaemonSessionHost {
 
     /// The host capabilities the nine handlers need, each read off this daemon.
     fn session_agent_ports(&self) -> SessionAgentPorts {
-        let for_dirs = self.clone();
+        let for_dirs = self.agent_roster();
         SessionAgentPorts {
             // `roster_session_dir` authenticates **before** it resolves, which is load-bearing
             // rather than tidy: attaching an agent owned by another daemon contacts that peer and

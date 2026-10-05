@@ -42,4 +42,40 @@ impl DaemonSessionHost {
             .agent_clone_divergences(session_id, agent_id)
             .await
     }
+
+    /// [`AgentRoster::resolvable_agent_defs`](super::agent_host_callbacks::AgentRoster::resolvable_agent_defs).
+    pub async fn resolvable_agent_defs(
+        &self,
+    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        self.agent_roster().resolvable_agent_defs().await
+    }
+
+    /// [`AgentRoster::agent_def_for_spawn`](super::agent_host_callbacks::AgentRoster::agent_def_for_spawn).
+    pub async fn agent_def_for_spawn(
+        &self,
+        agent: &str,
+        caller: &str,
+    ) -> Result<Option<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        self.agent_roster().agent_def_for_spawn(agent, caller).await
+    }
+
+    /// [`AgentRoster::resolve_specialized_agent_defs`](super::agent_host_callbacks::AgentRoster::resolve_specialized_agent_defs).
+    pub(crate) async fn resolve_specialized_agent_defs(
+        &self,
+        specialized_agents: &[String],
+    ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
+        self.agent_roster()
+            .resolve_specialized_agent_defs(specialized_agents)
+            .await
+    }
+
+    /// [`AgentRoster::seeded_roster_records`](super::agent_host_callbacks::AgentRoster::seeded_roster_records).
+    pub(crate) async fn seeded_roster_records(
+        &self,
+        specialized_agents: &[String],
+    ) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
+        self.agent_roster()
+            .seeded_roster_records(specialized_agents)
+            .await
+    }
 }

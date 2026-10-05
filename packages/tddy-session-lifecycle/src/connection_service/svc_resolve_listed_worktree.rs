@@ -11,6 +11,7 @@ use tddy_rpc::Status;
 
 use std::path::PathBuf;
 
+use super::agent_host_callbacks::AgentRoster;
 use super::DaemonSessionHost;
 
 impl DaemonSessionHost {
@@ -126,7 +127,9 @@ impl DaemonSessionHost {
             )),
         }
     }
+}
 
+impl AgentRoster {
     /// Report — once per `(agents dir, name)` per process — that a registry assistant is shadowing
     /// a `<tddyhome>/agents` def of the same name.
     ///
@@ -184,7 +187,7 @@ impl DaemonSessionHost {
         caller: &str,
     ) -> Result<Option<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
         let model_registry = &self.model_registry;
-        let state = self.agent_roster_state();
+        let state = self.state();
         spawn_agent_def::agent_def_for_spawn(agent, caller, model_registry, state).await
     }
 
@@ -245,8 +248,8 @@ impl DaemonSessionHost {
     /// An empty seed resolves to an empty roster, not an error.
     ///
     /// The records name no clone yet — `codebase_session_id` is filled in by
-    /// [`Self::seed_session_agent_roster`], which is the only place that knows which session they
-    /// are being recorded on.
+    /// [`DaemonSessionHost::seed_session_agent_roster`], which is the only place that knows which
+    /// session they are being recorded on.
     pub(crate) async fn seeded_roster_records(
         &self,
         specialized_agents: &[String],
@@ -278,7 +281,7 @@ impl DaemonSessionHost {
         self.config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        self.session_dir_for(session_id)
+        session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
     }
 
     // ── Remote agents: room admission, clones, tool split ────────────────────────────────────
@@ -407,7 +410,7 @@ pub async fn resolvable_agent_defs(
     for def in registry_agent_defs(model_registry).await? {
         match defs.iter_mut().find(|d| d.name == def.name) {
             Some(existing) => {
-                DaemonSessionHost::report_shadowed_agent_def(&agents_dir, &def.name);
+                AgentRoster::report_shadowed_agent_def(&agents_dir, &def.name);
                 *existing = def;
             }
             None => defs.push(def),

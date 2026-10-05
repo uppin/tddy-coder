@@ -6,7 +6,7 @@
 //! client, common room, registry, token store, idle tracker, task registry and jails the host does
 //! rather than to copies of them.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +17,6 @@ use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::agent_host_callbacks::AgentRoster;
 use super::svc_materialize_staged_attachment::AttachmentState;
-use super::svc_resolve_listed_worktree::session_dir_lookup;
 use super::svc_spawn_split_agent;
 use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
@@ -103,12 +102,6 @@ impl DaemonSessionHost {
             Arc::clone(&self.jail_relaunch),
             Arc::clone(&self.hosted_agent_clones),
         )
-    }
-
-    /// Where a session this daemon serves keeps its `.session.yaml` (see
-    /// [`session_dir_lookup::session_dir_for`]), under this host's data dir.
-    pub(crate) fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
-        session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
     }
 
     /// How long to wait for the codebase daemon's answer to a split session's forwarded start (see
