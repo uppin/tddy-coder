@@ -2,7 +2,7 @@
 
 **Category:** Known limitations (engine capability)
 **Source:** `reparent_module` (`packages/tddy-code-restructuring/src/backends/rust/module_reparent/`), changeset
-[`2026-10-04-restructure-same-crate-moves`](../1-WIP/2026-10-04-restructure-same-crate-moves.md), E2
+`2026-10-04-restructure-same-crate-moves` (wrapped into `packages/tddy-code-restructuring/docs/same-crate-moves.md`), E2
 
 Each is a refusal at `check`/`apply` time or a compile-gate failure; none is silent.
 

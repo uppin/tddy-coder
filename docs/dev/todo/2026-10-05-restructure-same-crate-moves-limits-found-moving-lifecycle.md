@@ -3,7 +3,7 @@
 **Category:** Known limitations (engine capability)
 **Source:** `packages/tddy-code-restructuring/src/backends/rust/item_move/{reach,bindings,creation}.rs`,
 `module_reparent/`; changeset
-[`2026-10-04-restructure-same-crate-moves`](../1-WIP/2026-10-04-restructure-same-crate-moves.md)
+`2026-10-04-restructure-same-crate-moves` (wrapped into `packages/tddy-code-restructuring/docs/same-crate-moves.md`)
 
 The lifecycle moves (M0.1, M0.2, M0.4, M0.6) found and fixed seven defects in the engine; these are the
 limits that remain, none of which that run hit.

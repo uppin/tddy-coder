@@ -2,7 +2,7 @@
 
 **Category:** Known limitation (engine quality)
 **Source:** `move_item` (`item_move/imports.rs`), changeset
-[`2026-10-04-restructure-same-crate-moves`](../1-WIP/2026-10-04-restructure-same-crate-moves.md), E1
+`2026-10-04-restructure-same-crate-moves` (wrapped into `packages/tddy-code-restructuring/docs/same-crate-moves.md`), E1
 
 ## What the engine does
 

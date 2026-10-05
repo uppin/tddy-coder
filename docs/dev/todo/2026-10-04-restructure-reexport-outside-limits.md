@@ -2,7 +2,7 @@
 
 **Category:** Known limitations (engine capability)
 **Source:** `packages/tddy-code-restructuring/src/backends/rust/item_move/outside.rs`, changeset
-[`2026-10-04-restructure-same-crate-moves`](../1-WIP/2026-10-04-restructure-same-crate-moves.md)
+`2026-10-04-restructure-same-crate-moves` (wrapped into `packages/tddy-code-restructuring/docs/same-crate-moves.md`)
 
 - **"Outside" means another target's reach, read from the default layout only.** A file of the same
   package outside `src/` (`tests/`, `examples/`, `benches/`), and `src/main.rs` / `src/bin/**` of a
