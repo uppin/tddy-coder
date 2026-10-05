@@ -45,7 +45,7 @@ therefore cargo directly, in the dev shell:
 cargo test -p tddy-session-lifecycle --no-fail-fast -- --test-threads=1
 ```
 
-On a macOS developer host this gives 58 targets (57 test binaries plus doctests), **562 passed,
+On a macOS developer host this gives 58 targets (57 test binaries plus doctests), **575 passed,
 22 failed, 1 ignored**. The 22 are environmental, not defects in the code they cover:
 
 | Suite | Red | Why |

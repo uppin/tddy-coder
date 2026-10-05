@@ -246,10 +246,10 @@ identifies a clone but does not authorize a claim about it.
 ## Roster and clone code the session host calls
 
 `tddy-session-lifecycle`'s `DaemonSessionHost` owns the roster's and the clones' state, and sits
-above this crate. The parts of its roster and clone methods that need no host method live here as
-free functions; each host method keeps its signature and path and delegates:
+above this crate. Its roster and clone methods are `impl AgentRoster`, an owned handle over that
+state. The parts that need no host capability live here as free functions, which those methods call:
 
-| Module | Function | The host method it serves |
+| Module | Function | The roster method it serves |
 |---|---|---|
 | `clone_readiness` | `refuse_unready_clone` | `refuse_unready_clone`: refuses a clone that has not reported ready |
 | `agent_clone_lookup` | `agent_clone_for` | `agent_clone_for`: the clone record an agent id names in a session |
@@ -264,20 +264,29 @@ free functions; each host method keeps its signature and path and delegates:
 | `agent_records` | `def_tool_names`, `roster_record`, `qualified_agent_id`, `started_agent_id` | already free functions, re-exported by lifecycle's `agent_roster` so `connection_service::{def_tool_names, qualified_agent_id}` resolve |
 | `exec_tool_caller` | `authorize_exec_tool_caller` | lifecycle's `resolve_exec_tool_worktree`, and `tddy-daemon-rpc`'s exec-tool handler through lifecycle's `connection_service` re-export. It authenticates the caller before the hosted-clone branch and names this daemon in both refusals |
 
-Where a function reads host fields, it takes `AgentRosterState<'a>` (`agent_roster_state`): the ten
-fields the roster, its clones and agent-def resolution read (`config`, `tddy_data_dir`,
-`user_resolver`, `peer_routing`, `room_roster`, `session_rooms`, `session_agent_rosters`,
-`session_agent_clones`, `hosted_agent_clones`, `roster_keepalive_interval`), each borrowed for one
-call rather than cloned. Every shared field is lent as the `Arc` the host holds, so code that hands a
-store to a task clones the same handle the host would. The host builds it with
-`DaemonSessionHost::agent_roster_state()`. There is no callback trait: nothing here calls back into
-the host.
+Where a function reads host fields, it takes `AgentRosterState<'a>` (`agent_roster_state`): the
+twelve fields the roster, its clones and agent-def resolution read, each borrowed for one call
+rather than cloned:
+
+| Field | What it is |
+|---|---|
+| `config`, `tddy_data_dir`, `user_resolver` | the daemon's configuration, its data root, and the map from a caller's session token to their GitHub login |
+| `peer_routing`, `room_roster` | how the host routes an addressed request to a peer daemon, and who the LiveKit server reports in each room |
+| `session_rooms` | the session rooms this daemon hosts |
+| `session_agent_rosters`, `session_agent_clones`, `hosted_agent_clones` | every session's agent roster, the clones peers hold for this daemon's sessions, and the clones this daemon holds for other daemons' sessions |
+| `roster_keepalive_interval` | how often a `StreamSessionAgents` subscription re-sends an unchanged roster |
+| `session_admissions` | the owning daemons this daemon, as the facilitating one, has admitted to its session rooms (read when a clone is torn down) |
+| `model_registry` | this daemon's model registry, when one is wired (read when an agent id resolves to a registry assistant) |
+
+Every shared field is lent as the `Arc` the host holds, so code that hands a store to a task clones
+the same handle the host would. Lifecycle's `AgentRoster::state()` builds it. There is no callback
+trait in this crate: nothing here calls back into the host.
 
 `agent_def_for_spawn` is why this crate depends on `tddy-model-registry`, and `start_hosted_agent_clone`
-why it depends on `tddy-projects`. The rest of the roster's host code — claiming, seeding,
-provisioning, tearing down and unwinding clones, and the roster records that call other host
-methods — is `DaemonSessionHost`'s, and is converted to a state view and an `AgentHostCallbacks`
-port by [#532](https://github.com/uppin/tddy-coder/pull/532) (`#carve` 17).
+why it depends on `tddy-projects`. The rest of the roster's code — claiming, seeding,
+provisioning, tearing down and unwinding clones, and the roster records — runs in lifecycle over
+`AgentRoster` and its `AgentHostCallbacks` port (the host's exec-tool, session-room and
+worktree-snapshot capabilities).
 
 ## The sandbox-IPC bridge
 
