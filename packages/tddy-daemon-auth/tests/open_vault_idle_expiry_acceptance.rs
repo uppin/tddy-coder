@@ -28,6 +28,7 @@ use support::{
 };
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, VaultState as Registry,
+    FIRST_VERSION,
 };
 use tddy_daemon_auth::github_pr_credentials::PrLookup;
 use tddy_daemon_auth::vault_lifetimes::{
@@ -317,5 +318,6 @@ fn a_github_record(token: &str) -> CredentialRecord {
         secret: SecretString::new(token),
         metadata: Default::default(),
         updated_at: 1,
+        version: FIRST_VERSION,
     }
 }
