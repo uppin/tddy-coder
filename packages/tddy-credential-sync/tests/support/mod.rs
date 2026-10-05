@@ -16,11 +16,17 @@ use std::sync::{Arc, Mutex};
 
 use tddy_credential_sync::{
     Ack, GroupSecret, IdentityVerifier, PeerAdvertisement, PeerId, PeerTransport, RecordKey,
-    RefusalReason, SignedAdvertisement, TransportError, WrappedRecords,
+    RefusalReason, SignedAdvertisement, TransportError, VaultTransportKey, WrappedRecords,
 };
 use tddy_credentials::{
-    AccountId, CredentialRecord, ProviderId, SecretString, Tombstone, VaultEntry, FIRST_VERSION,
+    AccountId, CredentialRecord, ProviderId, SecretBytes, SecretString, Tombstone, VaultEntry,
+    FIRST_VERSION,
 };
+
+/// Every test in this crate that needs a peer's transport key uses this one secret, so an
+/// advertised `transport_public_key` can be the real public half of a key a test can also hold —
+/// see [`an_advertisement_from`].
+const THE_FIXTURE_TRANSPORT_SECRET: [u8; 32] = [3u8; 32];
 
 /// The deployment's configured secret, held by every daemon that is meant to sync.
 pub fn the_group_secret() -> GroupSecret {
@@ -38,14 +44,25 @@ pub fn a_challenge() -> Vec<u8> {
 }
 
 /// An advertisement from `peer`, proving `secret` and naming `key_id` as its identity.
+///
+/// The advertised `transport_public_key` is the real public half of
+/// [`THE_FIXTURE_TRANSPORT_SECRET`] — the same secret [`VaultTransportKey::from_secret`] is given
+/// everywhere in this crate's tests — so a test that actually opens a payload against this
+/// advertisement (not just checks who it was addressed to) agrees with the key its own engine
+/// holds, rather than a key nothing derived from.
 pub fn an_advertisement_from(peer: &str, key_id: &str, secret: &GroupSecret) -> PeerAdvertisement {
     let challenge = a_challenge();
     let group_proof = secret.proof_for(&challenge);
+    let transport_public_key =
+        VaultTransportKey::from_secret(SecretBytes::new(THE_FIXTURE_TRANSPORT_SECRET))
+            .public_key()
+            .as_bytes()
+            .to_vec();
 
     PeerAdvertisement {
         peer: PeerId::new(peer),
         signing_key_id: key_id.to_string(),
-        transport_public_key: vec![7u8; 32],
+        transport_public_key,
         challenge,
         group_proof,
     }

@@ -132,6 +132,27 @@ fn a_deletion_propagates_to_the_peers_that_hold_the_account() {
 }
 
 #[test]
+fn a_deletion_at_the_same_version_the_peer_already_acknowledged_still_propagates() {
+    // Given a peer that has already acknowledged this account at its current version — a
+    // tombstone carries *the version it deletes*, not a new one, so this is the common case
+    let record = a_credential("github", "operator", "gho_the_token");
+    let group = a_room_with_an_authorised_peer_and_an_outsider(&record);
+    let mut engine = an_engine_over(group.clone());
+    engine
+        .publish(&[VaultEntry::Record(record.clone())], 1_758_240_100)
+        .unwrap();
+
+    // When the account is then deleted and the vault is published again
+    let tombstone = VaultEntry::Tombstone(a_tombstone_for(&record, 1_758_240_600));
+    engine.publish(&[tombstone], 1_758_240_600).unwrap();
+
+    // Then the deletion still goes out — a tombstone sharing its record's version number is not
+    // "nothing changed since the last acknowledgement", and treating it as such would be exactly
+    // the resurrection this stack exists to prevent
+    assert_eq!(group.deliveries().len(), 2);
+}
+
+#[test]
 fn publishing_an_unchanged_vault_a_second_time_delivers_nothing_further() {
     // Given a daemon that has already published its vault to an acknowledging peer
     let record = a_credential("github", "operator", "gho_the_token");

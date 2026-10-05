@@ -12105,12 +12105,19 @@ dependencies = [
 name = "tddy-credential-sync"
 version = "0.1.0"
 dependencies = [
+ "chacha20poly1305",
+ "hmac 0.13.0",
+ "poly1305",
  "pretty_assertions",
+ "rand 0.8.6",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "subtle",
  "tddy-credentials",
  "thiserror 2.0.18",
  "x25519-dalek 2.0.1",
+ "zeroize",
 ]
 
 [[package]]

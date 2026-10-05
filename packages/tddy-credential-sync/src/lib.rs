@@ -42,6 +42,7 @@
 //!   interesting property here is about what a peer failing exactly one check does *not* receive,
 //!   and a real LiveKit room cannot be made to fail one check at a time.
 
+mod crypto;
 pub mod engine;
 pub mod journal;
 pub mod transport;

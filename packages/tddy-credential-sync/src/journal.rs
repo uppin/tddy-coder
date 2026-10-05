@@ -83,8 +83,16 @@ impl SyncJournal {
     }
 
     /// Note where `record` now stands with `peer`, replacing the previous line for that pair.
-    pub fn note(&mut self, _peer: &PeerId, _record: &RecordKey, _status: SyncStatus, _at: u64) {
-        todo!("TODO(keyring 6/9): implement — replace this pair's line")
+    pub fn note(&mut self, peer: &PeerId, record: &RecordKey, status: SyncStatus, at: u64) {
+        self.entries.insert(
+            (peer.clone(), record.clone()),
+            JournalEntry {
+                peer: peer.clone(),
+                record: record.clone(),
+                status,
+                at,
+            },
+        );
     }
 
     /// Where `record` stands with `peer`, or `None` when this journal has never decided.
@@ -93,19 +101,25 @@ impl SyncJournal {
     /// [`SyncStatus::Pending`] — one means the engine has not looked, the other means it has and is
     /// waiting.
     #[must_use]
-    pub fn status(&self, _peer: &PeerId, _record: &RecordKey) -> Option<&SyncStatus> {
-        todo!("TODO(keyring 6/9): implement — look the pair up")
+    pub fn status(&self, peer: &PeerId, record: &RecordKey) -> Option<&SyncStatus> {
+        self.entries
+            .get(&(peer.clone(), record.clone()))
+            .map(|entry| &entry.status)
     }
 
     /// Every line, in `(peer, record)` order.
     #[must_use]
     pub fn entries(&self) -> Vec<&JournalEntry> {
-        todo!("TODO(keyring 6/9): implement — the stored order is already the answer")
+        self.entries.values().collect()
     }
 
     /// Every line about one record, across peers — what the Accounts screen renders per account.
     #[must_use]
-    pub fn for_record(&self, _record: &RecordKey) -> Vec<&JournalEntry> {
-        todo!("TODO(keyring 6/9): implement — filter by record, keep peer order")
+    pub fn for_record(&self, record: &RecordKey) -> Vec<&JournalEntry> {
+        self.entries
+            .iter()
+            .filter(|((_, key), _)| key == record)
+            .map(|(_, entry)| entry)
+            .collect()
     }
 }

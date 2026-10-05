@@ -5,8 +5,11 @@
 //! an in-memory fake can all do.
 
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 
 use tddy_credentials::{AccountId, ProviderId};
+
+use crate::crypto::hmac_sha256;
 
 /// Stable identity of a peer daemon, as its transport names it.
 ///
@@ -73,16 +76,17 @@ impl GroupSecret {
     /// The secret itself is never advertised: a peer proves it holds the same one, so an observer
     /// who captures an advertisement learns nothing it can configure a daemon with.
     #[must_use]
-    pub fn proof_for(&self, _challenge: &[u8]) -> Vec<u8> {
-        todo!("TODO(keyring 6/9): implement — HMAC the challenge under the group secret")
+    pub fn proof_for(&self, challenge: &[u8]) -> Vec<u8> {
+        hmac_sha256(self.0.as_bytes(), challenge).to_vec()
     }
 
     /// Whether `proof` is the one this secret would have produced for `challenge`.
     ///
     /// Compared in constant time; a byte-by-byte `==` over a MAC is a timing oracle for the secret.
     #[must_use]
-    pub fn verifies(&self, _challenge: &[u8], _proof: &[u8]) -> bool {
-        todo!("TODO(keyring 6/9): implement — recompute and compare in constant time")
+    pub fn verifies(&self, challenge: &[u8], proof: &[u8]) -> bool {
+        let expected = hmac_sha256(self.0.as_bytes(), challenge);
+        bool::from(expected.as_slice().ct_eq(proof))
     }
 }
 
