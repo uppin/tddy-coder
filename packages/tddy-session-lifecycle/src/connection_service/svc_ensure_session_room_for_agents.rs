@@ -16,7 +16,7 @@ use tddy_rpc::Status;
 use super::agent_host_callbacks::AgentRoster;
 use super::DaemonSessionHost;
 
-impl DaemonSessionHost {
+impl AgentRoster {
     /// [`Self::ensure_session_room`] for the attach path, so an owning daemon has something to be
     /// admitted to.
     ///
@@ -42,6 +42,7 @@ impl DaemonSessionHost {
             ))
         })?;
         let opened = self
+            .host
             .ensure_session_room(session_id, codebase.session_dir.as_path(), &worktree_root)
             .await?;
         opened_session_room::require_opened_session_room(session_id, opened)
@@ -90,7 +91,6 @@ impl DaemonSessionHost {
         let session_token = session_token.to_string();
         tokio::spawn(async move {
             if let Err(status) = service
-                .agent_roster()
                 .provision_agent_clone(
                     &session_id,
                     &codebase,
@@ -125,7 +125,6 @@ impl DaemonSessionHost {
                      deleting it on daemon {daemon_instance_id}"
                 );
                 service
-                    .agent_roster()
                     .delete_clone_on_peer(&daemon_instance_id, &clone_id, &session_token)
                     .await;
                 return;
@@ -134,7 +133,6 @@ impl DaemonSessionHost {
             // only heard about `rev` changes would show `provisioning` until an attach that may
             // never come.
             service
-                .agent_roster()
                 .publish_roster_change(&session_id, &codebase.session_dir)
                 .await;
         });
@@ -143,9 +141,7 @@ impl DaemonSessionHost {
             commissioned: true,
         })
     }
-}
 
-impl AgentRoster {
     /// Give back a clone this attach commissioned, because the attach did not complete.
     ///
     /// Only the call that *commissioned* the checkout may take it away: a second agent on the same
@@ -243,7 +239,9 @@ impl DaemonSessionHost {
         );
         Ok(())
     }
+}
 
+impl AgentRoster {
     /// Record a session's seeded roster, giving every agent that is not co-located with this
     /// daemon's worktree the clone it reads.
     ///
@@ -277,8 +275,7 @@ impl DaemonSessionHost {
             if let Err(status) =
                 agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, &record)
             {
-                self.agent_roster()
-                    .unwind_seeded_roster(session_id, codebase, session_token, seeded)
+                self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
                     .await;
                 return Err(status);
             }
@@ -299,8 +296,7 @@ impl DaemonSessionHost {
                         clone = Some(claimed);
                     }
                     Err(status) => {
-                        self.agent_roster()
-                            .unwind_seeded_roster(session_id, codebase, session_token, seeded)
+                        self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
                             .await;
                         return Err(status);
                     }
@@ -324,8 +320,7 @@ impl DaemonSessionHost {
                     roster.rev
                 ),
                 Err(status) => {
-                    self.agent_roster()
-                        .unwind_seeded_roster(session_id, codebase, session_token, seeded)
+                    self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
                         .await;
                     return Err(status);
                 }
@@ -355,11 +350,8 @@ impl DaemonSessionHost {
         let local_instance_id = local_instance_id_for_config(&self.config);
         // Built before the first claim so an early return releases what the loop got through: the
         // guard is the only thing that knows a peer was asked to build a checkout.
-        let mut guard = seeded_clone_guard::SeededCloneGuard::claiming(
-            self.agent_roster(),
-            session_id,
-            session_token,
-        );
+        let mut guard =
+            seeded_clone_guard::SeededCloneGuard::claiming(self.clone(), session_id, session_token);
         for record in records.iter_mut() {
             agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, record)?;
             if record.daemon_instance_id == local_instance_id {
@@ -382,9 +374,7 @@ impl DaemonSessionHost {
         }
         Ok(guard)
     }
-}
 
-impl AgentRoster {
     /// Take a partially seeded roster back out, so a failed start leaves no entry, no half-built
     /// clone and no room membership on any host.
     ///

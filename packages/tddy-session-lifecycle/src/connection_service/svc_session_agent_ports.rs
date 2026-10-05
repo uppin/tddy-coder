@@ -82,7 +82,7 @@ impl DaemonSessionHost {
             conversations: Arc::clone(&self.agent_conversations),
             admission: Arc::new(
                 svc_session_agent_port_adapters::ClonesClaimedOnOwningPeers {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
             catalog: Arc::new(

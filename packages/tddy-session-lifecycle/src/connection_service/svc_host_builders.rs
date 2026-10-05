@@ -201,7 +201,7 @@ impl DaemonSessionHost {
         &self,
     ) -> crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant {
         crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant {
-            service: self.clone(),
+            service: self.agent_roster(),
         }
     }
 

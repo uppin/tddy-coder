@@ -4,10 +4,11 @@
 //! every other caller take exactly one path.
 
 use std::path::Path;
-use std::sync::Arc;
 
-use tddy_daemon_livekit::session_room::{RemoteSnapshotSource, WorktreeSnapshot};
-use tddy_rpc::{MultiRpcService, Status};
+use tddy_daemon_livekit::session_room::{
+    OpenedSessionRoom, RemoteSnapshotSource, WorktreeSnapshot,
+};
+use tddy_rpc::Status;
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 
@@ -44,7 +45,12 @@ impl AgentHostCallbacks for DaemonSessionHost {
         DaemonSessionHost::local_exec_tools(self)
     }
 
-    fn session_room_roster(&self) -> Result<MultiRpcService, Status> {
-        DaemonSessionHost::session_room_roster(&Arc::new(self.clone()))
+    async fn ensure_session_room(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        worktree_root: &Path,
+    ) -> Result<Option<OpenedSessionRoom>, Status> {
+        DaemonSessionHost::ensure_session_room(self, session_id, session_dir, worktree_root).await
     }
 }

@@ -21,9 +21,9 @@ use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::peer_routing::PeerRouting;
 use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
-use tddy_daemon_livekit::session_room::{SessionRoomRegistry, WorktreeSnapshot};
+use tddy_daemon_livekit::session_room::{OpenedSessionRoom, SessionRoomRegistry, WorktreeSnapshot};
 use tddy_model_registry::ModelRegistryStore;
-use tddy_rpc::{MultiRpcService, Status};
+use tddy_rpc::Status;
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_session_agents::session_agent_clone::{HostedAgentClones, SessionAgentCloneStore};
@@ -61,12 +61,15 @@ pub(crate) trait AgentHostCallbacks: Send + Sync {
     /// Where this daemon runs an exec tool: its task registry, jails and hosted clones.
     fn local_exec_tools(&self) -> LocalExecTools;
 
-    /// Every coordinate a session room serves, for the room the agent topic opens.
-    // TODO(stage B2, blocked): drop this allowance once `ensure_session_room` is a handle method.
-    // It cannot be one yet: `SessionRoomRegistry::ensure_open` also wants a `SessionTerminalBridge`,
-    // which the host is (it holds `claude_cli_manager`), and the handle has no way to reach it.
-    #[allow(dead_code)]
-    fn session_room_roster(&self) -> Result<MultiRpcService, Status>;
+    /// Open the session's room over a checkout this daemon holds, unless it is open already (the
+    /// host's `ensure_session_room`: the room's roster and its terminal bridge are the host's to
+    /// supply). `Ok(None)` means this daemon has no LiveKit credentials and hosts no rooms.
+    async fn ensure_session_room(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+        worktree_root: &Path,
+    ) -> Result<Option<OpenedSessionRoom>, Status>;
 }
 
 /// The session host's roster fields, owned, plus its callbacks.

@@ -35,7 +35,6 @@ use tddy_core::SessionAgentRecord;
 use tddy_session_agents::ports::AgentCatalog;
 
 use super::super::agent_host_callbacks::AgentRoster;
-use super::super::DaemonSessionHost;
 
 /// The defs this daemon can resolve an agent id against — its own `<tddyhome>/agents` entries and
 /// its model registry's assistants, or a peer's own `ListSubagents` for an id naming that peer.
@@ -54,7 +53,7 @@ impl AgentCatalog for DefsResolvableFromThisDaemon {
 /// enforce the withdrawal the agent declares, and — for an agent a peer owns — the checkout on that
 /// peer the entry will name.
 pub(crate) struct ClonesClaimedOnOwningPeers {
-    pub(crate) connection: DaemonSessionHost,
+    pub(crate) roster: AgentRoster,
 }
 
 #[async_trait]
@@ -68,7 +67,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
     ) -> Result<AdmittedAgent, Status> {
         let codebase = seed_codebase::SeedCodebase::read(session_id, session_dir)?;
         agent_roster::refuse_unenforceable_withdrawal(session_id, &codebase, record)?;
-        if record.daemon_instance_id == local_instance_id_for_config(&self.connection.config) {
+        if record.daemon_instance_id == local_instance_id_for_config(&self.roster.config) {
             // A local agent works the session's real worktree: there is no clone to claim, and no
             // room to open that the session does not already have.
             return Ok(AdmittedAgent {
@@ -78,7 +77,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
             });
         }
         let clone = self
-            .connection
+            .roster
             .claim_agent_clone(
                 session_id,
                 &codebase,
@@ -97,8 +96,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
         let Some(codebase_session_id) = admitted.codebase_session_id.clone() else {
             return;
         };
-        self.connection
-            .agent_roster()
+        self.roster
             .unwind_agent_clone_claim(
                 session_id,
                 &admitted.daemon_instance_id,
@@ -118,8 +116,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
         codebase_session_id: &str,
         session_token: &str,
     ) -> Result<(), Status> {
-        self.connection
-            .agent_roster()
+        self.roster
             .tear_down_agent_clone(
                 session_id,
                 daemon_instance_id,

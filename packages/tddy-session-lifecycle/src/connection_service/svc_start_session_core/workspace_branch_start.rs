@@ -61,6 +61,7 @@ impl DaemonSessionHost {
         let session_dir = unified_session_dir_path(sessions_base, session_id);
         let codebase = seed_codebase::SeedCodebase::read(session_id, &session_dir)?;
         let seeded = self
+            .agent_roster()
             .seed_session_agent_roster(session_id, &codebase, &req.session_token, seed)
             .await?;
         Ok((started, codebase, seeded))
