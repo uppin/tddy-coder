@@ -448,6 +448,17 @@ updated with the new measurement. Two genuine new overages this PR caused —
 (477 → 581) — also deferred with the developer's consent rather than restructured mid-PR, recorded
 in `docs/dev/todo/2026-10-05-keyring-sync-oversized-files.md`.
 
+### Code quality (`/pr-wrap` step 4, `/analyze-clean-code`)
+
+Score C: two "must refactor" items, both in this PR's own new code —
+`SyncEngine::publish` (73 lines, nesting depth 5) and `credential_sync::build` (6 parameters).
+Deferred with the developer's consent rather than refactored on an already fully-green PR — `publish`
+is the exact function carrying the resend-dedup fix found during this same review, and refactoring
+it now risks reintroducing that bug. Recorded in
+`docs/dev/todo/2026-10-05-keyring-sync-complex-functions.md`. Test quality
+(`/validate-tests`) and production readiness (`/validate-prod-ready`) both clean: no anti-patterns,
+no mock/fake code outside tests, no unjustified fallbacks or debug output.
+
 ### Two defects found and fixed in review, each with its own regression test
 
 1. **`SyncEngine::publish`'s resend-dedup was keyed on `entry.version()`.** A `Tombstone` carries
