@@ -11,6 +11,8 @@
  * Parsers take file *contents*, so they need no cargo and no repository.
  */
 
+import { filterPredicate, filterReferences, parseFilterset } from "./nextest-filterset";
+
 /** Share of a leg's compile that the leg would skip, at or above which the split is worth doing. */
 export const SPLIT_WORTH_IT_PERCENT = 25;
 
@@ -68,7 +70,7 @@ interface TestUnit {
 
 /** Compile time split into e2e test targets, other test targets and the rest. */
 export function compileShare(timingsHtml: string, filterset: string): CompileShare {
-  const matches = parseFilterset(filterset);
+  const matches = filterPredicate(filterset);
   let e2eTestSeconds = 0;
   let otherTestSeconds = 0;
   let otherSeconds = 0;
@@ -85,7 +87,7 @@ export function compileShare(timingsHtml: string, filterset: string): CompileSha
     // A lib's unit tests run as their package; nextest names that binary by the package.
     const binary = /^\s*(?:test|bin) "([^"]+)"/.exec(unit.target)?.[1] ?? unit.name;
     testBinaries.add(binary);
-    if (matches({ pkg: unit.name, binary })) e2eTestSeconds += unit.duration;
+    if (matches({ package: unit.name, binary })) e2eTestSeconds += unit.duration;
     else otherTestSeconds += unit.duration;
   }
 
@@ -128,67 +130,9 @@ function readUnits(timingsHtml: string): ReportUnit[] {
   throw new Error("unterminated UNIT_DATA array in the timings report");
 }
 
-type Subject = { pkg: string; binary: string };
-
-/**
- * Evaluate a nextest filterset over a test target. Supports `or`, `and`, `not`, parentheses and the
- * `binary()`, `package()` and `kind(test)` predicates — everything `.config/rust-e2e.filterset`
- * uses. Anything else is an error: guessing would put a wrong number in the verdict.
- */
-function parseFilterset(filterset: string): (subject: Subject) => boolean {
-  const tokens = filterset.match(/\(|\)|[A-Za-z_]+\([^()]*\)|[A-Za-z_]+/g) ?? [];
-  let at = 0;
-  const peek = () => tokens[at];
-  const parseOr = (): ((s: Subject) => boolean) => {
-    let left = parseAnd();
-    while (peek() === "or") {
-      at++;
-      const [l, r] = [left, parseAnd()];
-      left = (s) => l(s) || r(s);
-    }
-    return left;
-  };
-  const parseAnd = (): ((s: Subject) => boolean) => {
-    let left = parseNot();
-    while (peek() === "and") {
-      at++;
-      const [l, r] = [left, parseNot()];
-      left = (s) => l(s) && r(s);
-    }
-    return left;
-  };
-  const parseNot = (): ((s: Subject) => boolean) => {
-    if (peek() === "not") {
-      at++;
-      const inner = parseNot();
-      return (s) => !inner(s);
-    }
-    return parseAtom();
-  };
-  const parseAtom = (): ((s: Subject) => boolean) => {
-    const token = tokens[at++];
-    if (token === "(") {
-      const inner = parseOr();
-      if (tokens[at++] !== ")") throw new Error("unbalanced parentheses in the filterset");
-      return inner;
-    }
-    const predicate = /^(\w+)\(([^()]*)\)$/.exec(token ?? "");
-    if (!predicate) throw new Error(`unexpected filterset token: ${token ?? "end of input"}`);
-    const [, name, arg] = predicate;
-    if (name === "binary") return (s) => s.binary === arg;
-    if (name === "package") return (s) => s.pkg === arg;
-    // Every unit in a `--no-run` report that reaches this check is a test target.
-    if (name === "kind" && arg === "test") return () => true;
-    throw new Error(`unsupported filterset predicate: ${token}`);
-  };
-  const matches = parseOr();
-  if (at < tokens.length) throw new Error(`unexpected filterset token: ${tokens[at]}`);
-  return matches;
-}
-
 /** Binaries a filterset names with `binary(...)`, in order of appearance. */
 function filtersetBinaries(filterset: string): string[] {
-  return [...filterset.matchAll(/\bbinary\(([^()]*)\)/g)].map((m) => m[1]);
+  return filterReferences(parseFilterset(filterset)).flatMap((ref) => (ref.kind === "binary" ? [ref.binary] : []));
 }
 
 /** `proceed` when the leg would skip at least {@link SPLIT_WORTH_IT_PERCENT}% of its compile. */

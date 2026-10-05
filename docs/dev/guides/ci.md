@@ -75,8 +75,11 @@ binaries, add its binary to the filterset, and — for a LiveKit one — to the 
 `ci` profile in `.config/nextest.toml`, which bounds a stuck test with `slow-timeout` (see
 [The shared LiveKit server](#the-shared-livekit-server)). The two lists carry the same LiveKit names on purpose; the
 override also covers `tddy-livekit`'s own suites. LiveKit tests run in parallel; none belongs in a
-serial test-group, and `scripts/nextest-docker-group.test.ts` fails if one is put back in a `docker`
-group.
+serial test-group (any group with `max-threads = 1`). The script test
+`scripts/nextest-serial-groups.test.ts` checks it — run it with
+`./dev bun test ./scripts/nextest-serial-groups.test.ts`: it fails if a binary that starts the
+LiveKit testkit is put in a serial group, or if a serial group's filter names a binary or package
+that does not exist.
 
 A LiveKit test names its room with `LiveKitTestkit::unique_room("<purpose>")`, never a fixed
 literal: on CI every LiveKit test runs in parallel against one shared server, so the room name is
@@ -375,7 +378,7 @@ that race; `./run-livekit-testkit-server` avoids it.)
 The `ci` profile retries up to twice with exponential backoff. Retried tests are reported as
 **flaky**, not silently passed, so the signal survives. Retries were added for the port race, so
 whether to keep, lower or remove them is decided from the flake rate measured over several parallel
-e2e runs — pending, tracked in the `parallel-livekit` changeset.
+e2e runs — pending measurement on CI.
 
 ## Caching and the 10 GB budget
 
