@@ -25,8 +25,7 @@ use support::{
     THE_PASSPHRASE,
 };
 use tddy_credentials::{
-    AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, VaultError,
-    FIRST_VERSION,
+    AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, VaultError, FIRST_VERSION,
 };
 use tddy_daemon_auth::vault_lifetimes::{
     credential_vaults_in, spawn_credential_sweep, sweep_period, VaultLifetimes,
