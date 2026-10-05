@@ -555,6 +555,23 @@ either type needs a new dependency, stop and ask).
 
 **Engine vs hand:** 0 engine operations, 22 methods by hand. The engine has no operation that retargets an `impl` (probe: `change_param_type` on `self` -> "`self` is not a parameter of the function the anchor names") or re-points a call's receiver; see the two 2026-10-05 todos on that. The one plan-shaped edit, splitting `svc_resolve_listed_worktree.rs`'s mixed impl, is also by hand.
 
+### Stage B2 (2026-10-05): partial — `svc_start_hosted_agent_clone`, the unwinds, the guard and four adapters; the claim chain is blocked
+
+**Moved** from `impl DaemonSessionHost` to `impl AgentRoster` (header and receiver paths only):
+- `svc_start_hosted_agent_clone.rs`: all 9 (`start_hosted_agent_clone`, `refuse_unready_clone`, `refuse_departed_daemon`, `forward_open_agent_conversation`, `open_local_agent_session`, `open_owned_agent_session`, `owned_agent_codebase_access`, `local_agent_codebase_access`, `note_agent_activity`). `local_agent_codebase_access` runs the tool through `service.host.run_exec_tool_locally` (the callback) and resolves the worktree through the free `peer_session_answer::resolve_exec_tool_worktree` over the handle's fields.
+- `svc_ensure_session_room_for_agents.rs`: `unwind_agent_clone_claim` and `unwind_seeded_roster` (2 of the 6).
+- `SeededCloneRelease.service` and `SeededCloneGuard::claiming` take the `AgentRoster`; the guard's `Drop` spawns over it.
+- Four session-agent port adapters (`DefsResolvableFromThisDaemon`, `TheSessionsOwnRoom`, `TurnLoopsThisDaemonCanOpen`, `ConversationsForwardedOverTheCommonRoom`) hold the handle; field renamed `connection` -> `roster` by the engine (`rename_symbol` on four item anchors, `check --deep` "no findings", applied 4 of 4, the two files' constructors followed). `ClonesClaimedOnOwningPeers` keeps the host: it calls `claim_agent_clone`.
+
+**Blocked, and why (layering stop, not worked around):** `ensure_session_room` (`svc_ensure_session_room_for_agents/session_room_opening.rs`, the plan's "session_room_opening") calls `SessionRoomRegistry::ensure_open(&hosting, roster, terminal)`, and `terminal: &dyn SessionTerminalBridge` is `self` — `impl SessionTerminalBridge for DaemonSessionHost` (`terminal_bridge_impl.rs`) serves the session's PTY through `self.claude_cli_manager` (CLI). The handle has no way to reach it, and it is a **fifth capability** beyond D2's four. That keeps `ensure_session_room` and, through it, `ensure_session_room_for_agents`, `claim_agent_clone`, `seed_session_agent_roster` and `claim_co_located_seed_clones` on the host; so `DaemonSeedCloneClaimant` keeps the host too (`TODO(stage B2, blocked)`). `ensure_session_room` is also called by `session_coordinate_handlers.rs:215` (T1/T9) — it would need a host delegator either way.
+Options for the developer: (a) a fifth callback `bridge_session_terminal(&self, session_id)` (or make `AgentHostCallbacks: SessionTerminalBridge`, a supertrait, so `self.host` coerces); (b) leave `ensure_session_room` on the host and give the handle one callback, `ensure_session_room(session_id, session_dir, worktree_root) -> Result<Option<OpenedSessionRoom>, Status>`, which replaces `session_room_roster` (so D2's count stays four) — the handle then never needs the roster or the bridge. (b) is smaller and keeps the terminal bridge out of the topic.
+
+**`AgentHostCallbacks` allowances:** the trait-level `#[allow(dead_code)]` is gone. `worktree_snapshot` keeps one, `TODO(#carve 18/21)` (caller: T4 `join_split_livekit_room`); `session_room_roster` keeps one, `TODO(stage B2, blocked)`.
+
+**Removed as dead:** host `eligible_instance_ids`, host `agent_roster_state` (and its import). **Tests touched:** `jail_relaunch_unit_tests.rs` and `workspace_sandbox_roster_dispatch_unit_tests.rs` each call `local_agent_codebase_access` on `self.service.agent_roster()` instead of the host (a test-only delegator would be dead code in the lib build). **`session_agent_clone::clone_worktree_path`:** nothing to re-point — a free function over `resolve_worktree_root_for_session`, unreferenced (its own header says so).
+
+**Engine vs hand:** 4 engine operations (the field renames); every `impl` retarget, receiver re-point and block split by hand — the two 2026-10-05 todos on that cover it, no new one. The warm index daemon did not die this run.
+
 ## TODO
 
 - [x] Create changeset: this document
