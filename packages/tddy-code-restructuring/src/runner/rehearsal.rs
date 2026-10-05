@@ -21,6 +21,9 @@ pub(super) struct Rehearsed {
     pub(super) survey: Option<Survey>,
     /// The refusal an apply would give, where it would give one.
     pub(super) refusal: Option<String>,
+    /// What the operation had to say beyond its edit, in the order it said it: for
+    /// `repoint_facade_imports`, one line per path it would rewrite.
+    pub(super) notes: Vec<String>,
 }
 
 impl Rehearsal {
@@ -41,6 +44,7 @@ impl Rehearsal {
                 return Ok(Rehearsed {
                     survey: None,
                     refusal: Some(refusal.to_string()),
+                    notes: Vec::new(),
                 })
             }
         };
@@ -62,11 +66,14 @@ impl Rehearsal {
                 Ok(Rehearsed {
                     survey,
                     refusal: None,
+                    // TODO(repoint-facade): forward `resolved.notes`, which `Rehearsal` drops today.
+                    notes: Vec::new(),
                 })
             }
             Err(refusal) => Ok(Rehearsed {
                 survey,
                 refusal: Some(refusal.to_string()),
+                notes: Vec::new(),
             }),
         }
     }

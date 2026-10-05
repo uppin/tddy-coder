@@ -3,7 +3,7 @@
 **Date**: 2026-10-05
 **Status**: 🚧 In Progress
 **Type**: Feature (new restructure operation; text edits and manifests read only)
-**Stack**: `#sharpen` 8/8, branch `feature/sharpen/repoint-facade`, wave 2. PR title:
+**Stack**: `#sharpen` 8/8, draft PR [#595](https://github.com/uppin/tddy-coder/pull/595), branch `feature/sharpen/repoint-facade`, wave 2. PR title:
 `feat(code-restructuring): repoint_facade_imports names paths by the crate that defines them (#sharpen 8/8)`.
 Base in the linear stack: `feature/sharpen/repoint-call` (K=7). **Real edges**: `tidy-engine-files` (K=1, file overlap and the new home of `RefactorKind`) and `move-fidelity` (K=2, the resolver's `pub(crate)` module visibility).
 `retarget-impl` (K=6) would become an edge only if decision F3 is taken as "copy attributes" (the `verify` carrier); it is not one under the recommendation.
@@ -270,6 +270,20 @@ Names read as behaviour specifications. Items 1-27 and 28-30 are **red on `maste
 31. `a_body_path_and_a_called_function_re_pointed_through_a_facade_are_accounted_for_and_counted_as_repointed` — **green today** (pass 4); pins it.
 32. `a_split_group_changes_nothing_verify_reads_and_a_renamed_item_is_still_reported` — green today; the second half is why the op refuses body renames.
 
+### Contract commit: what was published, and what the tests showed (wave 2)
+
+All F1-F11 were taken as **recommended**; nothing in the tests contradicts one.
+
+- **Published**: `RefactorKind::RepointFacadeImports` in `plan.rs` (`plan/refactor_kind.rs` does not exist on this base), `SUPPORTED` entry, `plan/codec/facade_imports_fields.rs` (`refuse_a_facade_repoint_it_cannot_honour`, **not implemented**: accepts everything, so test 1 fails), `backends/rust/repoint_facade.rs` with `findings` (empty, on purpose: a static finding makes `check_plan` skip `resolve`, which is where the refusal naming this node is reported) and `RustBackend::repoint_facade_imports` (refuses `UnsupportedOp` naming `repoint-facade`), `repoint_facade/{scope,rewrite,group,refusals}.rs` skeletons with the contract signatures (`scope::files_of`, `rewrite::{Rewrite, path_edits}`, `group::split_or_reprefix`, `refusals::unfinished`), `Rehearsed.notes` (field and printing in `check_entry_points.rs` are wired; **filling it from `Resolution.notes` is the TODO**, so existing deep checks print nothing new yet), registration of the live binary in both config files, and `harness::checking_the_plan_with` (an `adjust` hook, as `applying_the_plan_with` has).
+- **Not widened**: the `crate_move` visibility lines (`header`, `manifest_edits`, `text::{use_statements, split_use}`, `sites::members_of`) belong to green; the skeleton uses none of them.
+- **Correction, test 23**: plain `check` already reports `... anchors by item, which only a deep check can resolve ... run \`check --deep\`` for every item-anchored operation, so test 23 is a **green pin** of that generic finding (it names `RepointFacadeImports`), like 31-32.
+- **Correction, test 27**: a `move_item` deep check needs a live server, which the library-level file does not have. It is written over **two `repoint_facade_imports` operations** (notes of every operation, in operation order, no finding added). The `move_item` half ("notes already produced by other operations become visible") is not pinned by any test; green should add it to the live binary if wanted.
+- **Interpretation, test 2**: an `items` anchor on a `mod` declaration is lowered by the server to a `range` over that declaration, so the library tests anchor a module by that range (`facade_imports::a_repoint_of_the_module`); "a range anchor is refused" means a range that covers no `mod` declaration.
+- **Layout**: the module is `backends/rust/repoint_facade/` as this changeset names it (the node brief said `repoint_facade_imports/`).
+- **`verify` pins (31-32) were run and pass** as written: the re-point pass pairs the two body statements (`excused.repointed == 2`), a split group is invisible (a `use` is scaffolding), and a renamed item stays a lost and a gained statement. `is_structural`'s `impl ` handling is irrelevant here.
+- **Unit tests** (inline, fail for the missing implementation): `group.rs` (Rule P, Rule S, no kept member) and `rewrite.rs` (rewrite condition, undeclared crate, own paths).
+- **Fixture assumptions green must confirm**: the library tests assume the textual resolver follows `app` -> `mid` -> `kernel` (a path dependency chain), reports a body path as `crate::config::standard_limits` (no call parentheses), and returns `regcrate::Clock` for a `pub use` of a registry crate it cannot read.
+
 ## Technical Debt & Production Readiness
 
 (empty; populated during development)
@@ -327,10 +341,10 @@ Decisions taken by this plan: no `RefactorOp` field; the op starts no server; no
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-repoint-facade.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

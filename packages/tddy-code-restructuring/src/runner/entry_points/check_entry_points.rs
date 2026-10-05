@@ -298,6 +298,9 @@ pub fn check_plan(
                 (options.account)(&line);
             }
         }
+        for note in &rehearsed.notes {
+            (options.account)(&crate::console::note(note));
+        }
         if let Some(refusal) = rehearsed.refusal {
             findings.push(Finding {
                 operation: index,

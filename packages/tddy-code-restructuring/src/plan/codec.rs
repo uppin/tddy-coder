@@ -441,11 +441,13 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     canonical_paths::refuse_canonical_paths_outside_move_item(&op)?;
     retarget_fields::refuse_a_retarget_it_cannot_honour(&op)?;
     repoint_call_fields::refuse_a_repoint_it_cannot_honour(&op)?;
+    facade_imports_fields::refuse_a_facade_repoint_it_cannot_honour(&op)?;
 
     Ok(op)
 }
 
 mod canonical_paths;
+mod facade_imports_fields;
 mod file_hint;
 mod groups;
 mod headerless;
