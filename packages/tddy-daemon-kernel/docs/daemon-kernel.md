@@ -217,6 +217,22 @@ process-wide value would be shared by the several daemons the e2e tests run in o
 - The remote managed worktree's split-start forward uses
   `spawn_worker_request_timeout + peer_forward_timeout`, so a longer setting lengthens it too.
 
+## `keyring.group_secret` — which peers may hold this daemon's credentials
+
+`DaemonConfig.keyring: Option<KeyringConfig>` is `#keyring` 6/9's one setting:
+`KeyringConfig { group_secret: Option<String> }`. Absent means this daemon propagates credentials to
+**nobody** — not "to everyone in the common room". Room membership carries no attestation that a
+participant runs `tddy-daemon` (`docs/ft/daemon/livekit-peer-discovery.md` § *Trust model*), so
+handing out a person's GitHub credential to anything holding the room's LiveKit credentials is the
+property `tddy-credential-sync` exists to remove — and a daemon with no fleet (a desktop install,
+most of the time) is the common case for leaving this unset.
+
+The secret itself never travels: a peer proves it holds the same one by an HMAC over a fresh
+challenge (`GroupSecret::proof_for`/`verifies` in `tddy-credential-sync`), never the secret in the
+clear. It is one of two independent checks a peer must pass before it receives anything — the other
+is `#keyring` 1/9's Ed25519 signature — and this crate carries only the configuration value; the
+checks themselves live in `tddy-credential-sync`, which this crate does not depend on.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)

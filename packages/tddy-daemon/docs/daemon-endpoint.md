@@ -97,6 +97,40 @@ it. No `auth_storage` means none of this — no vaults, no accounts entry, `cred
 `tests/runtime_signing_identity_acceptance.rs` pins that the key `runtime::build` advertises is the
 key it signs with.
 
+## Credential sync
+
+`src/credential_sync.rs` is where `#keyring` 6/9's `tddy_credential_sync::SyncEngine` is actually
+assembled — the one crate both halves it needs may not depend on each other (`tddy-credential-sync`
+and `tddy-daemon-livekit`), so only the crate that depends on both can join them, the same reason
+`common_room_key_directory.rs` lives here. `runtime::build` constructs it inside the same
+`if let Some(vaults) = auth_result.credential_vaults.clone()` block that registers
+`accounts.AccountsService`, and only when a common room exists at all — regardless of whether
+`keyring.group_secret` is set, so a misconfigured deployment still gets a real, journaling engine
+that refuses every peer rather than none.
+
+What `credential_sync::build` assembles:
+
+- **The transport key** (`VaultTransportKey::load_or_generate`), persisted beside the signing key
+  under the same directory `signing_key_path` resolves.
+- **`KeyDirectoryIdentityVerifier`**, bridging `#keyring` 1/9's async `KeyDirectory` into
+  `tddy_credential_sync::IdentityVerifier`'s synchronous port with the same
+  `tokio::task::block_in_place` pattern `LiveKitPeerTransport::block_on` already uses.
+- **`SigningPeerTransport`**, wrapping `LiveKitPeerTransport`: it fills in the identity
+  `SyncEngine::publish`'s self-advertisement deliberately leaves blank (the engine holds no identity
+  of its own — `IdentityVerifier` is verify-only by design) and re-signs the corrected advertisement
+  with this daemon's key before it reaches the wire.
+- **`EngineSyncStatusSource`**, reading the engine's journal for
+  `AccountsServiceImpl::with_sync_status` — the Accounts screen's badge.
+- **`run_publish_watch`**, spawned alongside the daemon's other background loops
+  (`RuntimeTasks::spawn`), polling the common-room roster for a genuine new arrival and calling
+  `SyncEngine::publish` only then — never on a bare tick, so this stays "on join" rather than a
+  periodic sweep — gated on exactly one subject currently having an open vault (see
+  `tddy-credential-sync`'s own doc, § *Known limitations*, for why).
+
+See [`tddy-credential-sync`'s own doc](../../tddy-credential-sync/docs/credential-sync.md) for the
+engine itself — the two admission checks, the wire format, reconciliation and the journal — and
+[`livekit-service.md`](../../tddy-daemon-livekit/docs/livekit-service.md) for the transport adapter.
+
 ### First-login admission
 
 `first_login_enrolment(config, options)` decides whether this deployment may enrol its first GitHub

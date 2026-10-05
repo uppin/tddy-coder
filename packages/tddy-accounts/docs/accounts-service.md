@@ -21,11 +21,11 @@ was opened on, and nothing addresses it over the daemon's local Unix socket.
 
 ## No secret on the wire
 
-`AccountSummary { provider, account_id, label, subject, updated_at, has_secret }` has **no secret
-field**, and no method returns a credential. The rule is enforced by message shape rather than by
-discipline: there is nothing to fill. `has_secret` is the one bit a screen needs to tell a linked
-account from a stale row. `subject` is the record's `metadata["subject"]` — the provider's own
-identifier (a GitHub login), shown beside the label.
+`AccountSummary { provider, account_id, label, subject, updated_at, has_secret, sync_status }` has
+**no secret field**, and no method returns a credential. The rule is enforced by message shape
+rather than by discipline: there is nothing to fill. `has_secret` is the one bit a screen needs to
+tell a linked account from a stale row. `subject` is the record's `metadata["subject"]` — the
+provider's own identifier (a GitHub login), shown beside the label.
 
 `no_byte_of_a_listing_on_the_wire_is_a_secret` asserts this over the **encoded** response, not the
 struct, so a field added later that carried one would fail it.
@@ -114,6 +114,24 @@ The resolver lives here rather than in `tddy-projects` because answering `Unknow
 the vault. `tddy-projects` does not depend on `tddy-credentials`, so the credential store is not on
 the dependency path of every project consumer.
 
+## `SyncStatusSource` — `#keyring` 6/9's sync status, optional and additive
+
+`AccountSummary.sync_status` reports where this account stands with the peers this deployment
+propagates credentials to — the single worst status across every peer
+(`tddy_credential_sync::AccountSyncSummary`, mapped onto the wire's `SyncStatus` enum), not a
+per-peer breakdown. `SYNC_STATUS_UNSPECIFIED` is what every account reports when nothing is wired —
+no sync engine running on this daemon at all, which is the common case for a daemon with no
+`keyring.group_secret` configured.
+
+`AccountsServiceImpl::with_sync_status(Arc<dyn SyncStatusSource>)` wires it in; `::new` alone leaves
+it `None`, so every existing construction site (including `tddy-daemon`'s own) keeps reporting
+`UNSPECIFIED` unchanged. The port (`src/sync_status.rs`) is expressed over
+`tddy_credential_sync::AccountSyncSummary` rather than this crate re-deriving the aggregation —
+duplicating that severity ordering here would be a second place it could drift from the one in
+`tddy-credential-sync`. `tddy-daemon`'s `credential_sync` module is what actually implements the
+port, reading a live `SyncEngine`'s journal; see `tddy-credential-sync`'s own
+`docs/credential-sync.md` for the engine side.
+
 ## Registration
 
 `build_accounts_entry(service)` returns the `ServiceEntry` named `accounts.AccountsService`. The
@@ -123,6 +141,9 @@ show, and nothing stands in for one.
 
 ## Dependencies
 
-`tddy-credentials`, `tddy-service`, `tddy-rpc` — **not** `tddy-daemon-auth` and not LiveKit. The
-service lives in its own crate rather than in `tddy-credentials` so the store stays free of proto and
-RPC, and the crates that depend on the store do not pay for them.
+`tddy-credentials`, `tddy-credential-sync`, `tddy-service`, `tddy-rpc` — **not** `tddy-daemon-auth`
+and not LiveKit. The service lives in its own crate rather than in `tddy-credentials` so the store
+stays free of proto and RPC, and the crates that depend on the store do not pay for them.
+`tddy-credential-sync` is a lightweight addition — it depends on `tddy-credentials` alone, nothing
+LiveKit or daemon-auth shaped — reached only for `AccountSyncSummary`, the type
+`SyncStatusSource` is expressed over.

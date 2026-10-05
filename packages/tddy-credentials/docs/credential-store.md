@@ -5,9 +5,10 @@ today; a Cloudflare API key, a second GitHub account or a screen-sharing passwor
 sealed file per user. At rest the file holds ciphertext and wrapped keys; nothing in it opens it.
 What does is the user's **vault passphrase**, or the unlock key one of their browsers holds.
 
-It depends on neither `tddy-daemon-auth` nor `tddy-livekit`, and not on `tddy-core` either, so a
-later node can synchronise the file (`#keyring` 6/9) or store another provider's secret in it
-(`#keyring` 7/9) without reaching through auth or pulling in the workflow stack.
+It depends on neither `tddy-daemon-auth` nor `tddy-livekit`, and not on `tddy-core` either, so
+`tddy-credential-sync` can propagate the file's records between daemons without reaching through
+auth or pulling in the workflow stack, and a later node can store another provider's secret in it
+(`#keyring` 7/9) the same way.
 
 ## Why a passphrase, and not the login
 
@@ -24,13 +25,25 @@ record *in* the vault, never key material.
 |---|---|
 | `ProviderId` | which service — `github`, `cloudflare`, `screen-sharing`. A newtype, not an enum: adding a provider is data, not a breaking change |
 | `AccountId` | which account *at* that provider. Today the GitHub login; distinct from the vault's owner, so one user can hold several |
-| `CredentialRecord` | `{ provider, account, label, secret, metadata, updated_at }`. `label`, `metadata` **and** `secret` are one sealed unit |
+| `CredentialRecord` | `{ provider, account, label, secret, metadata, updated_at, version }`. `label`, `metadata` **and** `secret` are one sealed unit |
 | `SecretString` | the type of `secret`, and of a passphrase: prints `SecretString(<redacted>)`, is wiped on drop, has no `Serialize`/`Deserialize`, and is read through `expose()` |
+| `Tombstone` | `{ provider, account, version, deleted_at }` — what a removal leaves behind in place of the record it deleted, carrying the version it deleted rather than a new one |
+| `VaultEntry` | `Record(CredentialRecord) \| Tombstone(Tombstone)` — what one `(provider, account)` slot holds: a credential, or the fact that there is not one |
 
-`CredentialRecord` is not serialisable. It is sealed through a private mirror inside the vault, so
-no response builder can serialise one by accident. `SessionVault::{put, get, list, remove}` read and
-write records. `get` returns `None` only when no record is held; a record that will not
-authenticate is `VaultError::Crypto`, never `None`.
+Neither `CredentialRecord` nor `VaultEntry` is serialisable. Each is sealed through a private mirror
+inside the vault (`EntryToSeal`/`OpenedEntry`), so no response builder can serialise one by accident
+and no generic derive can reach the secret through the enum that wraps it either.
+
+`SessionVault::{put, get, list, remove, entries}` read and write slots. `get` and `list` return a
+record, or `None`/filtered-out, for a tombstoned slot exactly as for one never held — a caller acting
+on the person's behalf has nothing to act with either way. A record that will not authenticate is
+`VaultError::Crypto`, never `None`. `remove` does not empty the slot: it replaces it with a
+`Tombstone` carrying the version it removed — an emptied slot would be indistinguishable from one a
+peer daemon never had, so a peer that still holds the record would send it straight back and the
+person's removal would undo itself at the next sync (`#keyring` 6/9, below). `entries` is the one
+method that surfaces tombstones: it answers *"what has this vault decided about every slot"*, which
+is the question reconciliation between daemons asks, as opposed to `list`'s *"what credentials do I
+have"*.
 
 ## File and format
 
@@ -247,7 +260,8 @@ This is the trade-off, stated plainly.
   freshness.
 - **One process.** The write lock is process-wide, not a file lock; two processes writing one
   `auth_storage` can lose each other's updates, as the token store this replaced could. `#keyring`
-  6/9 (sync) has to decide this.
+  6/9's propagation between daemons is a different problem — it reconciles two *separate* vaults on
+  two separate disks, each still written by one process — and does not touch this limitation.
 
 What it does buy: a disk **without** a copy of `U` or the passphrase is ciphertext, including every
 backup of it; and a daemon at rest holds no key.
@@ -300,3 +314,11 @@ comment. They live here now.
    status says to unlock the credential vault. A **failed write** — `put` returns `Ok` only once the
    record is durably on disk — still fails the login. Only an `Io` failure, whose detail names
    server-side paths, is told to the client generically and logged in full.
+
+## Propagation between daemons
+
+A record on one daemon is reachable from another only once `tddy-credential-sync` has propagated
+it — see [`docs/credential-sync.md`](../../tddy-credential-sync/docs/credential-sync.md) for the two
+checks that gate who may hold it, the wire format, and the journal. This crate's own part of that is
+exactly what the record model above states: `version` and `Tombstone` are what makes a deletion
+something that can be sent, rather than an absence a peer's copy would resurrect.
