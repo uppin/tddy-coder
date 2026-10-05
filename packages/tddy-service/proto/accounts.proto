@@ -44,6 +44,26 @@ message AccountSummary {
   int64 updated_at = 5;
   // Whether a usable credential is present. One bit, not the secret.
   bool has_secret = 6;
+  // Where this account stands with the peers this deployment propagates credentials to
+  // (`#keyring` 6/9) — the single worst answer across every peer, not a per-peer breakdown.
+  // `SYNC_STATUS_UNSPECIFIED` means nothing has synced it yet: no peer is configured to receive
+  // credentials, or none has been admitted. That is not the same as every peer having
+  // acknowledged it, which is `SYNC_STATUS_SYNCED`.
+  SyncStatus sync_status = 7;
+}
+
+// One account's aggregate standing across every peer it has been offered to, worst first: a
+// refusal means this deployment is misconfigured and nobody will fix it without being told; a
+// conflict means two edits raced; undeliverable is the network, and often clears on its own;
+// pending is ordinary mid-flight state; synced is every peer that has been told having
+// acknowledged.
+enum SyncStatus {
+  SYNC_STATUS_UNSPECIFIED = 0;
+  SYNC_STATUS_SYNCED = 1;
+  SYNC_STATUS_PENDING = 2;
+  SYNC_STATUS_UNDELIVERABLE = 3;
+  SYNC_STATUS_CONFLICT = 4;
+  SYNC_STATUS_REFUSED = 5;
 }
 
 // One provider's accounts.

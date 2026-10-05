@@ -122,4 +122,46 @@ impl SyncJournal {
             .map(|(_, entry)| entry)
             .collect()
     }
+
+    /// The single worst answer across every peer this record has been offered to — the one badge
+    /// an Accounts screen shows, not a per-peer breakdown.
+    ///
+    /// `None` when nothing has been attempted for this record at all: no peer is configured to
+    /// receive credentials, or none has been admitted yet. That is distinct from
+    /// [`AccountSyncSummary::Synced`], which means every peer that *was* told has acknowledged.
+    #[must_use]
+    pub fn account_summary(&self, record: &RecordKey) -> Option<AccountSyncSummary> {
+        self.for_record(record)
+            .iter()
+            .map(|entry| AccountSyncSummary::of(&entry.status))
+            .max()
+    }
+}
+
+/// One account's aggregate standing across every peer it has been offered to.
+///
+/// Ordered worst first by [`Ord`] so [`SyncJournal::account_summary`] can take a plain `max()`: a
+/// refusal means this deployment is misconfigured and nobody will fix it without being told; a
+/// conflict means two edits raced and a person may want to know which won; undeliverable is the
+/// network and often clears on its own; pending is ordinary mid-flight state; synced is every peer
+/// that has been told having acknowledged — the quiet, correct outcome, and so the least severe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AccountSyncSummary {
+    Synced,
+    Pending,
+    Undeliverable,
+    Conflict,
+    Refused,
+}
+
+impl AccountSyncSummary {
+    fn of(status: &SyncStatus) -> Self {
+        match status {
+            SyncStatus::Refused(_) => Self::Refused,
+            SyncStatus::Conflict => Self::Conflict,
+            SyncStatus::Undeliverable => Self::Undeliverable,
+            SyncStatus::Pending | SyncStatus::Sent => Self::Pending,
+            SyncStatus::Acknowledged => Self::Synced,
+        }
+    }
 }

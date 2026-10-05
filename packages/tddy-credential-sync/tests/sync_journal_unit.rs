@@ -8,7 +8,9 @@ mod support;
 
 use pretty_assertions::assert_eq;
 use support::*;
-use tddy_credential_sync::{JournalEntry, PeerId, RefusalReason, SyncJournal, SyncStatus};
+use tddy_credential_sync::{
+    AccountSyncSummary, JournalEntry, PeerId, RefusalReason, SyncJournal, SyncStatus,
+};
 
 fn the_github_slot() -> tddy_credential_sync::RecordKey {
     the_slot_of(&a_credential("github", "operator", "gho_the_token"))
@@ -125,6 +127,140 @@ fn the_journal_reports_one_accounts_standing_with_every_peer() {
             },
         ]
     );
+}
+
+#[test]
+fn a_record_nothing_has_been_attempted_for_has_no_aggregate_summary() {
+    // Given a journal that has never decided anything about this record
+    let journal = SyncJournal::new();
+
+    // When the Accounts screen's one badge for it is computed
+    let summary = journal.account_summary(&the_github_slot());
+
+    // Then there is nothing to show — distinct from every peer agreeing
+    assert_eq!(summary, None);
+}
+
+#[test]
+fn a_record_acknowledged_by_every_peer_it_reached_is_summarised_as_synced() {
+    // Given one account acknowledged by both peers it was offered to
+    let mut journal = SyncJournal::new();
+    journal.note(
+        &PeerId::new("peer-a"),
+        &the_github_slot(),
+        SyncStatus::Acknowledged,
+        1_758_240_100,
+    );
+    journal.note(
+        &PeerId::new("peer-b"),
+        &the_github_slot(),
+        SyncStatus::Acknowledged,
+        1_758_240_100,
+    );
+
+    // When its badge is computed
+    let summary = journal.account_summary(&the_github_slot());
+
+    // Then it reads as synced
+    assert_eq!(summary, Some(AccountSyncSummary::Synced));
+}
+
+#[test]
+fn a_record_refused_by_one_peer_is_summarised_as_refused_even_though_another_acknowledged() {
+    // Given one account a peer refused and another peer acknowledged
+    let mut journal = SyncJournal::new();
+    journal.note(
+        &PeerId::new("peer-a"),
+        &the_github_slot(),
+        SyncStatus::Acknowledged,
+        1_758_240_100,
+    );
+    journal.note(
+        &PeerId::new("peer-b"),
+        &the_github_slot(),
+        SyncStatus::Refused(RefusalReason::GroupSecretMismatch),
+        1_758_240_100,
+    );
+
+    // When its badge is computed
+    let summary = journal.account_summary(&the_github_slot());
+
+    // Then the refusal wins — a misconfiguration nobody has been told about outranks the peer
+    // that is working correctly
+    assert_eq!(summary, Some(AccountSyncSummary::Refused));
+}
+
+#[test]
+fn a_record_in_conflict_with_one_peer_is_summarised_as_conflict_over_a_merely_pending_one() {
+    // Given one account still pending with one peer and in conflict with another
+    let mut journal = SyncJournal::new();
+    journal.note(
+        &PeerId::new("peer-a"),
+        &the_github_slot(),
+        SyncStatus::Pending,
+        1_758_240_100,
+    );
+    journal.note(
+        &PeerId::new("peer-b"),
+        &the_github_slot(),
+        SyncStatus::Conflict,
+        1_758_240_100,
+    );
+
+    // When its badge is computed
+    let summary = journal.account_summary(&the_github_slot());
+
+    // Then the conflict wins — a person may want to know which edit survived
+    assert_eq!(summary, Some(AccountSyncSummary::Conflict));
+}
+
+#[test]
+fn a_record_undeliverable_to_one_peer_is_summarised_as_undeliverable_over_a_merely_pending_one() {
+    // Given one account still pending with one peer and undeliverable to another
+    let mut journal = SyncJournal::new();
+    journal.note(
+        &PeerId::new("peer-a"),
+        &the_github_slot(),
+        SyncStatus::Pending,
+        1_758_240_100,
+    );
+    journal.note(
+        &PeerId::new("peer-b"),
+        &the_github_slot(),
+        SyncStatus::Undeliverable,
+        1_758_240_100,
+    );
+
+    // When its badge is computed
+    let summary = journal.account_summary(&the_github_slot());
+
+    // Then undeliverable wins over an ordinary pending — the network is worth a person's notice
+    // before mid-flight state is
+    assert_eq!(summary, Some(AccountSyncSummary::Undeliverable));
+}
+
+#[test]
+fn an_account_only_this_peer_group_entirely_unrelated_to_has_no_bearing_on_its_summary() {
+    // Given two different accounts with different standings
+    let mut journal = SyncJournal::new();
+    journal.note(
+        &PeerId::new("peer-a"),
+        &the_github_slot(),
+        SyncStatus::Acknowledged,
+        1_758_240_100,
+    );
+    journal.note(
+        &PeerId::new("peer-a"),
+        &the_cloudflare_slot(),
+        SyncStatus::Refused(RefusalReason::SignatureInvalid),
+        1_758_240_100,
+    );
+
+    // When the first account's badge is computed
+    let summary = journal.account_summary(&the_github_slot());
+
+    // Then the other account's refusal does not leak into it
+    assert_eq!(summary, Some(AccountSyncSummary::Synced));
 }
 
 #[test]

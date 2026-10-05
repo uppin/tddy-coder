@@ -49,7 +49,7 @@ pub mod transport;
 pub mod transport_key;
 
 pub use engine::{IdentityVerifier, ReceiveOutcome, Reconciliation, SyncEngine, SyncError};
-pub use journal::{JournalEntry, RefusalReason, SyncJournal, SyncStatus};
+pub use journal::{AccountSyncSummary, JournalEntry, RefusalReason, SyncJournal, SyncStatus};
 pub use transport::{
     Ack, GroupSecret, PeerAdvertisement, PeerId, PeerTransport, RecordKey, SignedAdvertisement,
     TransportError, WrappedRecords,
