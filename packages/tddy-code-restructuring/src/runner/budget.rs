@@ -167,6 +167,7 @@ mod tests {
                     expr: None,
                     order: Vec::new(),
                     canonical_paths: false,
+                    to_type: None,
                 })
                 .collect(),
         }

@@ -99,6 +99,8 @@ package(tddy-code-restructuring) and (
     or binary(extract_variable_acceptance)
     or binary(unlinked_file_acceptance)
     or binary(move_fidelity_acceptance)
+    or binary(retarget_impl_acceptance)
+    or binary(retarget_impl_delegator_acceptance)
 )
 """
 test-group = "rust-analyzer"

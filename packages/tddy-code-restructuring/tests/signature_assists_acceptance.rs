@@ -98,6 +98,7 @@ fn a_signature_op(kind: RefactorKind, item: &str, item_text: &str, name: &str) -
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 

@@ -276,3 +276,50 @@ pub fn assert_docs_resolve(fixture: &AFixtureWorkspace) {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+/// Every `impl` block of `text`, as `(self type, member names)` in source order.
+pub fn the_impl_blocks_of(text: &str) -> Vec<(String, Vec<String>)> {
+    let file = syn::parse_file(text).expect("the file parses");
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Impl(block) => Some(block),
+            _ => None,
+        })
+        .map(|block| {
+            let syn::Type::Path(self_type) = &*block.self_ty else {
+                panic!("an impl of a path type");
+            };
+            let names = block
+                .items
+                .iter()
+                .map(|member| match member {
+                    syn::ImplItem::Fn(function) => function.sig.ident.to_string(),
+                    syn::ImplItem::Const(constant) => constant.ident.to_string(),
+                    _ => panic!("a member this fixture does not use"),
+                })
+                .collect();
+            let name = self_type
+                .path
+                .segments
+                .last()
+                .expect("a segment")
+                .ident
+                .to_string();
+            (name, names)
+        })
+        .collect()
+}
+
+/// The blocks a test expects, as `(self type, "member names separated by spaces")`.
+pub fn blocks(expected: &[(&str, &str)]) -> Vec<(String, Vec<String>)> {
+    expected
+        .iter()
+        .map(|(name, members)| {
+            (
+                (*name).to_string(),
+                members.split_whitespace().map(str::to_string).collect(),
+            )
+        })
+        .collect()
+}

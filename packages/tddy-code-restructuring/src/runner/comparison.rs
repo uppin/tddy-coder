@@ -27,7 +27,8 @@ pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison
 
     let before = sources_at(root, &against, &options.spawns)?;
     let after = sources_now(root, &options.spawns)?;
-    Ok(crate::verify::compare(&before, &after))
+    let declared = crate::verify::Declared::from_texts(&options.retargets).map_err(usage)?;
+    Ok(crate::verify::compare_with(&before, &after, &declared))
 }
 
 fn sources_at(

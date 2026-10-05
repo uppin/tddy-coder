@@ -188,6 +188,7 @@ fn an_extraction_of_the_function_body() -> RefactorOp {
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 

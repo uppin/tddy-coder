@@ -83,6 +83,9 @@ pub use statements::statements;
 mod tokens;
 pub use tokens::token_difference;
 
+mod retarget;
+pub use retarget::{Declared, Retarget};
+
 /// Last resort for what the exact and 1:1 passes left: when the leftover lost statements and the
 /// leftover gained ones carry the same token multiset, they differ only in layout and qualifiers.
 fn reflow_pass(missing: Vec<String>, added: Vec<String>) -> Paired {
@@ -150,6 +153,18 @@ fn re_point_key(statement: &str) -> String {
 /// Anything else — a changed argument, another call target, a statement with no counterpart — stays
 /// reported.
 pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> Comparison {
+    compare_with(before, after, &Declared::default())
+}
+
+/// [`compare`], told of the `impl` retargets the author declared (`restructure verify --retarget`).
+///
+/// TODO(retarget-impl): the declaration is carried and not yet read; see [`retarget`]'s rules R1 and
+/// R2. Until they are written a declared retarget excuses nothing.
+pub fn compare_with(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    _declared: &Declared,
+) -> Comparison {
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
     let mut before_total = 0usize;
     let mut after_total = 0usize;

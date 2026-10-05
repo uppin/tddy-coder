@@ -5,7 +5,7 @@
 **Type**: Feature (a new restructure operation, and the `verify` teaching that must come with it)
 **Stack**: `#sharpen` 6/8, branch `feature/sharpen/retarget-impl`, wave 2. PR title:
 `feat(code-restructuring,tools,index-daemon): retarget_impl moves impl members to another type, and verify accounts for it (#sharpen 6/8)`.
-Base in the linear stack: `feature/sharpen/plan-header` (K=5). **Real edges**: from `feature/sharpen/tidy-engine-files` (K=1, file overlap and the new home of `RefactorKind`), and to `feature/sharpen/repoint-call` (K=7), which extends the `verify` declaration carrier this node builds.
+Draft PR: https://github.com/uppin/tddy-coder/pull/593. Base in the linear stack: `feature/sharpen/plan-header` (K=5). **Real edges**: from `feature/sharpen/tidy-engine-files` (K=1, file overlap and the new home of `RefactorKind`), and to `feature/sharpen/repoint-call` (K=7), which extends the `verify` declaration carrier this node builds.
 
 ## Initial Discovery
 
@@ -309,7 +309,7 @@ The declaration travels as `RestructureVerifyArgs.retarget: Vec<String>` -> `Opt
 
 ## Implementation milestones
 
-- [ ] **M0** Probe (a live test binary run once, kept as `retarget_impl_acceptance`'s first test): outline of `impl Host { fn a; fn b }` is kind 19 with two member children; references at `Host::build` (an associated function) include `Host::build(..)` inside the same impl; `minimal_edits` over a split returns hunks. **If a premise fails, stop and amend this changeset**
+- [x] **M0** Probe (a live test binary run once, kept as `retarget_impl_acceptance`'s first test): outline of `impl Host { fn a; fn b }` is kind 19 with two member children; references at `Host::build` (an associated function) include `Host::build(..)` inside the same impl; `minimal_edits` over a split returns hunks. **All three premises held, see "M0 probe results" below** (run 2026-10-05 against the live rust-analyzer)
 - [ ] **M1** Plan surface and the whole-block retarget (the `to_type` literal commit already landed first, ahead of M0); `RetargetImpl`; `retarget_fields.rs`; `SUPPORTED`; static `check` (P1-P8); `resolve` for a whole block; the `use`; comments kept. Tests 1-10 (the plan lines), 11-13 and 17 (the probe, the whole-block retarget, comments kept, the generic header) pass
 - [ ] **M2** The block split, the path re-points, S1-S6: tests 14-16 and 18-23 (splits, re-points, the field refusal, the clash, the caller left behind) pass
 - [ ] **M3** `verify` accounting for a declared retarget: `Declared`, R1, R2, `--retarget`, the request field, the proto, the daemon and CLI plumbing; tests 24-30 (the library tests, the CLI-plus-daemon test, the daemon unit test) pass
@@ -352,7 +352,9 @@ tens of seconds per test (`SKILL.md:105`), so the **parse-time and static refusa
 
 ## Acceptance tests
 
-Names read as behaviour specifications. Each is **red on `master` today**; the reason is given. Fixture: one committed package `app` built with `same_crate::an_app_holding`, `lib.rs` = `pub mod host;\npub mod roster;\n`; `roster.rs` declares `pub struct Roster { pub(crate) n: u32 }`; `host.rs` declares `pub struct Host { pub(crate) n: u32 }` and an `impl Host` of the members each test names.
+Names read as behaviour specifications. Each is **red on `master` today**; the reason is given. **Contract commit, what each test does today** (the "fails today" lines below are relative to `master`; the published surface makes some of them pass, as the wave-2 contract requires: the codec, the flag and the field exist). **Red on this branch:** 8 (P7), 9 (P8), 12-23 (live; refused as unimplemented), 24, 26, 27a, 34, 35 (library), 29 (CLI + daemon). **Green on this branch, by design:** 1-7 (the published codec), 10, 11 (a probe of the server, not of the operation), 25 and the guards in 27/28 (they pin what `verify` must keep reporting), 30 (the carrier). **Differences from the list below:** tests 24-26 use a re-pointed call and a `where` header, not `impl Host {` -> `impl Roster {` (see "Findings the tests surfaced"); test 20 anchors on `<Host>#1` and `<Host>#2` because the anchors command refuses members of different blocks; tests 12-23 spell members as full item paths; test 11's third premise is a unit test beside `retarget_impl.rs`; test 30 keeps its name from the plan body (`verify_carries_the_tree_the_ref_and_the_retargets_it_is_told_of`).
+
+Fixture: one committed package `app` built with `same_crate::an_app_holding`, `lib.rs` = `pub mod host;\npub mod roster;\n`; `roster.rs` declares `pub struct Roster { pub(crate) n: u32 }`; `host.rs` declares `pub struct Host { pub(crate) n: u32 }` and an `impl Host` of the members each test names.
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/tests/retarget_impl_plan_lines.rs` (new; library level, no server)
 
@@ -434,6 +436,14 @@ Decisions already taken by the developer, from the stack brief (quoted):
 - **O7 — placing the new block in the new type's module.** **Not done here** (recommended): compose with `move_item` over `<New>`; the operation changes a type, not a file.
 - **O8 — whether the new `impl` block takes the original `impl`'s doc comments.** **First block only** (recommended): duplicating prose onto two blocks is a documentation change the plan did not ask for.
 
+Decisions taken in the contract commit (2026-10-05), each the changeset's recommendation:
+
+- **O1** — the declaration is `--retarget OLD=NEW` plus `VerifyRequest.retargets = 3` (recommended option (a)). Published: `RestructureVerifyArgs.retarget`, `Options.retargets`, the daemon CLI's `VerifyArgs.retarget`, `verify::Declared`/`Retarget` (`FromStr` reads `OLD=NEW`, two different bare identifiers) and `verify::compare_with`, which carries the declaration and does not read it yet.
+- **O2** — **not decided here**: the decision point is M3. The delegator's tests exist (31-35) and fail; the codec already accepts `variant: "leave_delegator"` with `expr` (so the live tests reach the engine and are refused for the missing implementation), and P9 (the pairing) is not enforced. If M4 is cut, delete `tests/retarget_impl_delegator_acceptance.rs`, its two registrations, test 34 and test 35, and narrow the delegator todo. The declaration of a delegator for test 35 is the retarget itself; a separate carrier (`VerifyRequest` field 4) is for M4 to add.
+- **O3** — `to_type` (recommended (a)).
+- **O4-O8** — taken as recommended; nothing in the published surface depends on them.
+- The unimplemented operation is refused with `UnsupportedOp` (backend text names node `retarget-impl`), not a `SeamRefused`/`MalformedPlan`, so no test that waits for an `S`- or `P`-class refusal can pass on the wrong refusal.
+
 Decisions taken by this plan (a reviewer can check them):
 
 - Edits are built as a whole new text and given to `seam_survey::minimal_edits`, as `move_item` does, so **no `Edit` type is widened**; only `use_insertion` and `scope_of` change visibility.
@@ -441,6 +451,20 @@ Decisions taken by this plan (a reviewer can check them):
 - References are requested at each moved member's name; no `definition` request exists or is added.
 - `verify` folds the retarget pairs into `repointed`: no response field.
 - A caller left behind is **documented as the compile gate's outcome** (test 23), not pre-checked.
+
+### M0 probe results (2026-10-05, live rust-analyzer, `probe_the_outline_the_references_and_the_hunks_of_a_split`)
+
+- **Outline.** `textDocument/documentSymbol` answers the hierarchical form. An `impl Host { .. }` is one item with **`kind` 19**, **`name` `"impl Host"`** (the type as written, generics presumably included: only the non-generic form was probed), `range` over the whole block (line of `impl` to its closing `}`, 0-based), `selectionRange` over the type name only. Its **children are its members**: a method with a receiver is **`kind` 6**, an associated function with none is **`kind` 12** (Function), each with its own `range` and a `detail` carrying the signature (`fn(&self) -> Host`). Mind that members of **kind 12** sit under an impl too: the member-level outline reader must not filter on kind 6. The name text of the impl is *not* needed (the header is read lexically, as decided).
+- **References.** `textDocument/references` at the name of an associated function (`build`) with `includeDeclaration: false` **does** return the call written `Host::build(self.n)` inside the same `impl`; the site's range covers the bare name `build`, so the `Host::` before it is the text before the site, exactly as the re-point rule reads it.
+- **Hunks.** `seam_survey::minimal_edits` over a split of a four-member block returns **four insertion-only hunks, two at each cut** (`}\n` then `impl Roster {\n`; `}\n` then `impl Host {\n`), never a hunk over a member. Pinned by the unit test `splitting_a_block_gives_insertions_at_the_two_cuts_and_leaves_every_member_alone` (a pure function of two texts, so a unit test beside the module rather than a live one).
+
+### Findings the tests surfaced (the green wave must read these)
+
+- **`verify` does not read `impl Host {` as a statement.** `is_structural` (`verify/statements.rs`) drops every line starting `impl ` with the others `use`, `mod` and bare braces, so the self type of a **non-generic header changing, and a block being split, are already invisible** to `verify` on `master`. The changeset's State A ("`impl Host {` -> `impl Roster {` pairs through none") and the whole of **R2 as written** (excusing two `impl` headers ending in `{`) rest on a premise that is false for that shape. What `verify` does read, and reports today: (1) **the `Host::` of a re-pointed path** (`Host::build(..)` -> `Roster::build(..)`): R1 is the rule that is needed; (2) a **generic or `where`-bearing header**: `impl<T> Host<T>` does *not* start with `impl ` (no space), and the lines of a `where` clause are statements, so a split repeats `impl<T> Host<T>`, `where` and `T: Copy,` once per added block. R2 must be rewritten to excuse **those** (the repeated header's own lines), not a `{`-terminated line. The tests are written to that truth: tests 24/25/26 use a re-pointed call and a `where` header, and the changeset's literal texts for 24-26 (`impl Host {` -> `impl Roster {`) were replaced because they pass on `master` without any declaration.
+- **`RefactorKind` still lives in `plan.rs`** on this branch: `plan/refactor_kind.rs` (`tidy-engine-files` D1) does not exist at `26c5e488`. The variant was added where the enum is; moving it is `tidy-engine-files`'s.
+- **The `to_type: None` literals are in this node's second commit**, not a first one: this node's first commit is the plan, and the wave-2 contract is one commit. 21 literals in 16 files (20 in the changeset's count, plus one inside `plan.rs`'s own tests); `cargo check --all-targets` lists any left out.
+- **The anchors command wants full item paths** for members: `app::host::Host::put`, `app::host::<Host>` (a bare `Host::put` is refused: "is not a bare item name"). Two impl blocks of one type are `<Host>#1` and `<Host>#2`; items in *different* blocks are refused by the command as "not adjacent" before the engine sees them, so S1 ("the members anchored sit in more than one `impl` block") is reachable only through an anchor over whole blocks, which is how test 20 exercises it.
+- **A static finding blocks the deep rehearsal** (`check_plan` skips `resolve` for an operation whose static check found something). The published `findings` therefore reports "not implemented" for every `retarget_impl`, which is honest and stops a `check --deep` from rehearsing; when green implements P7/P8 it must return an empty list for a sound plan or the deep check never reaches S4.
 
 ## Refactoring Needed
 
@@ -481,10 +505,10 @@ Decisions taken by this plan (a reviewer can check them):
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-retarget-impl.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning, eight nodes would conflict)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

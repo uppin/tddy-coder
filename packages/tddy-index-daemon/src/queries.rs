@@ -286,6 +286,7 @@ async fn comparison_against(
     let options = Options {
         command: Command::Verify,
         against: Some(request.against),
+        retargets: request.retargets,
         ..Options::default()
     };
 

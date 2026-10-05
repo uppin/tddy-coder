@@ -397,6 +397,103 @@ fn exits_non_zero_when_the_tree_no_longer_holds_against_the_ref() {
     );
 }
 
+/// `restructure verify --against HEAD` through the cold path, with `extra` flags: what it rendered
+/// and whether it exited zero.
+fn the_cli_verifying(workspace: &Path, extra: &[&str]) -> (Vec<String>, bool) {
+    let run = Command::new(the_index_daemon())
+        .args([
+            "restructure",
+            "verify",
+            "--workspace-root",
+            &workspace.to_string_lossy(),
+            "--against",
+            "HEAD",
+        ])
+        .args(extra)
+        .output()
+        .expect("the binary runs");
+    (rendered(&run.stderr), run.status.success())
+}
+
+/// The lines `tddy-tools` renders for a daemon's verify answer: the shared renderer over the answer's
+/// own counts.
+fn the_lines_of(answer: &tddy_index_daemon::proto::code_index::VerifyResponse) -> Vec<String> {
+    tddy_code_restructuring::console::comparison(&tddy_code_restructuring::verify::Comparison {
+        before: answer.before as usize,
+        after: answer.after as usize,
+        missing: answer.missing.clone(),
+        added: answer.added.clone(),
+        excused: tddy_code_restructuring::verify::Excused {
+            repointed: answer.repointed as usize,
+            visibility: answer.visibility_normalised as usize,
+            cfg_test_gates: answer.cfg_test_gates as usize,
+        },
+    })
+}
+
+/// A verify of `workspace` against `HEAD`, put to the served daemon at `port` with `retargets`.
+async fn the_daemon_verifying(
+    port: u16,
+    workspace: &Path,
+    retargets: &[&str],
+) -> tddy_index_daemon::proto::code_index::VerifyResponse {
+    a_grpc_client_on(port)
+        .await
+        .verify(tddy_index_daemon::proto::code_index::VerifyRequest {
+            workspace_root: workspace.to_string_lossy().to_string(),
+            against: "HEAD".to_string(),
+            retargets: retargets.iter().map(|text| (*text).to_string()).collect(),
+        })
+        .await
+        .expect("the daemon answers")
+        .into_inner()
+}
+
+#[tokio::test]
+async fn verify_carries_a_declared_retarget_through_the_cli_and_the_daemon_and_both_render_the_same_lines(
+) {
+    // Given a committed tree whose call through `Host` now reads through `Roster`, and the binary serving gRPC
+    let workspace = a_committed_workspace_holding("pub fn run() {\n    Host::build(1);\n}\n");
+    std::fs::write(
+        workspace.path().join("src/lib.rs"),
+        "pub fn run() {\n    Roster::build(1);\n}\n",
+    )
+    .expect("re-point the call");
+    let port = a_free_port();
+    let mut serving = Command::new(the_index_daemon())
+        .args(["--grpc", &format!("127.0.0.1:{port}")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary starts");
+    assert!(
+        a_tcp_connection_is_accepted_on(port, A_RUN_SHOULD_FINISH_WITHIN),
+        "the gRPC listener never accepted a client"
+    );
+
+    // When it is verified through each, once told of the retarget and once not
+    let declared = ["--retarget", "Host=Roster"];
+    let (cli_declared, cli_declared_holds) = the_cli_verifying(workspace.path(), &declared);
+    let (cli_undeclared, cli_undeclared_holds) = the_cli_verifying(workspace.path(), &[]);
+    let daemon_declared = the_daemon_verifying(port, workspace.path(), &["Host=Roster"]).await;
+    let daemon_undeclared = the_daemon_verifying(port, workspace.path(), &[]).await;
+    let _ = serving.kill();
+    let _ = serving.wait();
+
+    // Then both hold, and print the same lines, when told; and both report the call when not
+    assert_eq!(
+        (cli_declared_holds, daemon_declared.holds),
+        (true, true),
+        "a declared retarget was not accounted for: {cli_declared:?}"
+    );
+    assert_eq!(cli_declared, the_lines_of(&daemon_declared));
+    assert_eq!(
+        (cli_undeclared_holds, daemon_undeclared.holds),
+        (false, false)
+    );
+    assert_eq!(cli_undeclared, the_lines_of(&daemon_undeclared));
+}
+
 #[test]
 fn refuses_an_anchors_run_that_names_no_items_for_the_anchor_to_cover() {
     // Given a workspace and an `--items` list that names nothing at all
