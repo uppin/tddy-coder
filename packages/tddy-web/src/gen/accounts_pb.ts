@@ -2,15 +2,15 @@
 // @generated from file accounts.proto (package accounts, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file accounts.proto.
  */
 export const file_accounts: GenFile = /*@__PURE__*/
-  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMifgoOQWNjb3VudFN1bW1hcnkSEAoIcHJvdmlkZXIYASABKAkSEgoKYWNjb3VudF9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIPCgdzdWJqZWN0GAQgASgJEhIKCnVwZGF0ZWRfYXQYBSABKAMSEgoKaGFzX3NlY3JldBgGIAEoCCJQChBQcm92aWRlckFjY291bnRzEhAKCHByb3ZpZGVyGAEgASgJEioKCGFjY291bnRzGAIgAygLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiLAoTTGlzdEFjY291bnRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJIngKFExpc3RBY2NvdW50c1Jlc3BvbnNlEi0KCXByb3ZpZGVycxgBIAMoCzIaLmFjY291bnRzLlByb3ZpZGVyQWNjb3VudHMSFAoMdmF1bHRfbG9ja2VkGAIgASgIEhsKE3ZhdWx0X3VuaW5pdGlhbGl6ZWQYAyABKAgiZAoWU2V0QWNjb3VudExhYmVsUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhAKCHByb3ZpZGVyGAIgASgJEhIKCmFjY291bnRfaWQYAyABKAkSDQoFbGFiZWwYBCABKAkiRAoXU2V0QWNjb3VudExhYmVsUmVzcG9uc2USKQoHYWNjb3VudBgBIAEoCzIYLmFjY291bnRzLkFjY291bnRTdW1tYXJ5IlMKFFJlbW92ZUFjY291bnRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCSJGChVSZW1vdmVBY2NvdW50UmVzcG9uc2USLQoJcHJvdmlkZXJzGAEgAygLMhouYWNjb3VudHMuUHJvdmlkZXJBY2NvdW50czKKAgoPQWNjb3VudHNTZXJ2aWNlEk0KDExpc3RBY2NvdW50cxIdLmFjY291bnRzLkxpc3RBY2NvdW50c1JlcXVlc3QaHi5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXNwb25zZRJWCg9TZXRBY2NvdW50TGFiZWwSIC5hY2NvdW50cy5TZXRBY2NvdW50TGFiZWxSZXF1ZXN0GiEuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVzcG9uc2USUAoNUmVtb3ZlQWNjb3VudBIeLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXF1ZXN0Gh8uYWNjb3VudHMuUmVtb3ZlQWNjb3VudFJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("Cg5hY2NvdW50cy5wcm90bxIIYWNjb3VudHMiqQEKDkFjY291bnRTdW1tYXJ5EhAKCHByb3ZpZGVyGAEgASgJEhIKCmFjY291bnRfaWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDwoHc3ViamVjdBgEIAEoCRISCgp1cGRhdGVkX2F0GAUgASgDEhIKCmhhc19zZWNyZXQYBiABKAgSKQoLc3luY19zdGF0dXMYByABKA4yFC5hY2NvdW50cy5TeW5jU3RhdHVzIlAKEFByb3ZpZGVyQWNjb3VudHMSEAoIcHJvdmlkZXIYASABKAkSKgoIYWNjb3VudHMYAiADKAsyGC5hY2NvdW50cy5BY2NvdW50U3VtbWFyeSIsChNMaXN0QWNjb3VudHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkieAoUTGlzdEFjY291bnRzUmVzcG9uc2USLQoJcHJvdmlkZXJzGAEgAygLMhouYWNjb3VudHMuUHJvdmlkZXJBY2NvdW50cxIUCgx2YXVsdF9sb2NrZWQYAiABKAgSGwoTdmF1bHRfdW5pbml0aWFsaXplZBgDIAEoCCJkChZTZXRBY2NvdW50TGFiZWxSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEAoIcHJvdmlkZXIYAiABKAkSEgoKYWNjb3VudF9pZBgDIAEoCRINCgVsYWJlbBgEIAEoCSJEChdTZXRBY2NvdW50TGFiZWxSZXNwb25zZRIpCgdhY2NvdW50GAEgASgLMhguYWNjb3VudHMuQWNjb3VudFN1bW1hcnkiUwoUUmVtb3ZlQWNjb3VudFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIQCghwcm92aWRlchgCIAEoCRISCgphY2NvdW50X2lkGAMgASgJIkYKFVJlbW92ZUFjY291bnRSZXNwb25zZRItCglwcm92aWRlcnMYASADKAsyGi5hY2NvdW50cy5Qcm92aWRlckFjY291bnRzKqwBCgpTeW5jU3RhdHVzEhsKF1NZTkNfU1RBVFVTX1VOU1BFQ0lGSUVEEAASFgoSU1lOQ19TVEFUVVNfU1lOQ0VEEAESFwoTU1lOQ19TVEFUVVNfUEVORElORxACEh0KGVNZTkNfU1RBVFVTX1VOREVMSVZFUkFCTEUQAxIYChRTWU5DX1NUQVRVU19DT05GTElDVBAEEhcKE1NZTkNfU1RBVFVTX1JFRlVTRUQQBTKKAgoPQWNjb3VudHNTZXJ2aWNlEk0KDExpc3RBY2NvdW50cxIdLmFjY291bnRzLkxpc3RBY2NvdW50c1JlcXVlc3QaHi5hY2NvdW50cy5MaXN0QWNjb3VudHNSZXNwb25zZRJWCg9TZXRBY2NvdW50TGFiZWwSIC5hY2NvdW50cy5TZXRBY2NvdW50TGFiZWxSZXF1ZXN0GiEuYWNjb3VudHMuU2V0QWNjb3VudExhYmVsUmVzcG9uc2USUAoNUmVtb3ZlQWNjb3VudBIeLmFjY291bnRzLlJlbW92ZUFjY291bnRSZXF1ZXN0Gh8uYWNjb3VudHMuUmVtb3ZlQWNjb3VudFJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * One linked account, as a person sees it.
@@ -68,6 +68,17 @@ export type AccountSummary = Message<"accounts.AccountSummary"> & {
    * @generated from field: bool has_secret = 6;
    */
   hasSecret: boolean;
+
+  /**
+   * Where this account stands with the peers this deployment propagates credentials to
+   * (`#keyring` 6/9) — the single worst answer across every peer, not a per-peer breakdown.
+   * `SYNC_STATUS_UNSPECIFIED` means nothing has synced it yet: no peer is configured to receive
+   * credentials, or none has been admitted. That is not the same as every peer having
+   * acknowledged it, which is `SYNC_STATUS_SYNCED`.
+   *
+   * @generated from field: accounts.SyncStatus sync_status = 7;
+   */
+  syncStatus: SyncStatus;
 };
 
 /**
@@ -265,6 +276,53 @@ export type RemoveAccountResponse = Message<"accounts.RemoveAccountResponse"> & 
  */
 export const RemoveAccountResponseSchema: GenMessage<RemoveAccountResponse> = /*@__PURE__*/
   messageDesc(file_accounts, 7);
+
+/**
+ * One account's aggregate standing across every peer it has been offered to, worst first: a
+ * refusal means this deployment is misconfigured and nobody will fix it without being told; a
+ * conflict means two edits raced; undeliverable is the network, and often clears on its own;
+ * pending is ordinary mid-flight state; synced is every peer that has been told having
+ * acknowledged.
+ *
+ * @generated from enum accounts.SyncStatus
+ */
+export enum SyncStatus {
+  /**
+   * @generated from enum value: SYNC_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: SYNC_STATUS_SYNCED = 1;
+   */
+  SYNCED = 1,
+
+  /**
+   * @generated from enum value: SYNC_STATUS_PENDING = 2;
+   */
+  PENDING = 2,
+
+  /**
+   * @generated from enum value: SYNC_STATUS_UNDELIVERABLE = 3;
+   */
+  UNDELIVERABLE = 3,
+
+  /**
+   * @generated from enum value: SYNC_STATUS_CONFLICT = 4;
+   */
+  CONFLICT = 4,
+
+  /**
+   * @generated from enum value: SYNC_STATUS_REFUSED = 5;
+   */
+  REFUSED = 5,
+}
+
+/**
+ * Describes the enum accounts.SyncStatus.
+ */
+export const SyncStatusSchema: GenEnum<SyncStatus> = /*@__PURE__*/
+  enumDesc(file_accounts, 0);
 
 /**
  * @generated from service accounts.AccountsService
