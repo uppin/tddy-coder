@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s agent topic (T3) runs over `AgentRosterState` and an `AgentHostCallbacks` port, in place
 
 **Date**: 2026-09-26
-**Status**: 🚧 Implemented; lifecycle baseline re-run and /validate-changes pending
+**Status**: ✅ Implemented and validated; documentation wrap pending
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 17/21, branch `feature/carve/lifecycle-ports-agents`, on top of `#carve` 16
 (`feature/carve/lifecycle-ports`, #531). Plan label **16b** (M4)
@@ -207,13 +207,13 @@ on it once node 17 lands T3 there.
   `session_agent_clone::clone_worktree_path`; keep the delegators listed in Responsibility, in wiring
 - [x] **M4.6 imports**: every T3 file names foundations by their defining crate (A4); the free T3 files
   (`agent_roster` T3 part, `seed_codebase`, `roster_replacement`, `peer_session_answer`) get imports only. Done for every converted file whose path went through a facade; the T1-only names in the mixed import of `svc_resolve_listed_worktree.rs` wait for 16e
-- [ ] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents` 72
-  passed. clippy and fmt clean on lifecycle and `tddy-session-agents`. `cargo check --all-targets`
+- [x] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents` 75
+  passed (the plan said 72). clippy and fmt clean on lifecycle and `tddy-session-agents`. `cargo check --all-targets`
   clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`.
-  **Not done:** the lifecycle suite is not yet re-run on this tree (the orchestrator runs it once). Run in B3: the scoped
-  check, clippy and fmt (green), and `tddy-session-agents` at 75 passed (see Validation results, stage B3)
+  The lifecycle suite ran twice, on `a4a58f17` and on `ba7600a9` (the final head): 575 passed, 22 failed, 1 ignored,
+  the failing set identical by name and equal to the plan's list (see Validation results, `/validate-changes`)
 - [x] **Acceptance checks** A1–A9 for 16a's topics plus T3: run literally in stage B3 and again after E6 (stage E6): A1 to A7 and A9 pass; A8 waits for the lifecycle baseline. The residual edges E1 to E6 are all closed
-- [~] `restructure verify --against <16a tip>`: accounted stage by stage (B3: `--against 1ad0b0f7`, "every statement
+- [x] `restructure verify --against <16a tip>`: accounted stage by stage (B3: `--against 1ad0b0f7`, "every statement
   accounted for"). Against `8c849211` (before the node's code) the tool reports 76 statements lost and 209 gained: the hand `impl`
   retargets and receiver re-points the engine has no operation for
 
@@ -705,15 +705,48 @@ By hand (a trait-method swap and two body re-points: no engine operation applies
 
 **Comment-line multiset** (every trimmed `//` line of every tracked `.rs` file of both crates, `fc3812bf` vs after): the lost lines are `/// Where this daemon runs an exec tool: ...` (the removed method's doc) and the linked form of `[`LocalExecTools::run_exec_tool_locally`]).`; gained are the doc lines of the two new methods and the de-linked form. Nothing else differs.
 
+### `/validate-changes` (2026-10-05, head `ba7600a9`)
+
+**Stack gate.** Stack branch (siblings #533-#536 open under `feature/carve/`; base `master`). `/pr-stack-rebase`: already current
+(0 commits behind `origin/master`). Leak check: `origin/master..HEAD` is 32 commits, every one tagged `#carve 17/21`; no parent
+commit. No file deleted; three renames, all engine moves (`first_admission_token`, `session_dir_lookup`, `session_room_opening`).
+
+**Stack boundary.** Responsibility delivered (Scope M4.1-M4.6 ticked, E1-E6 done). Nothing from `## Dependencies` re-implemented:
+`tddy-session-agents` changed by `agent_roster_state.rs` only (+6 lines, the two fields). Boundaries held: no crate move, no
+consumer edit (`git diff origin/master...HEAD -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control
+packages/tddy-desktop` empty), no `SplitHost` / `LaunchHost`.
+
+**Scan of the added lines (597 in `packages/`).** `unwrap()`: 0. `.expect(`: 0. `println!` / `eprintln!` / `dbg!`: 0. `unsafe`: 0.
+`todo!` / `unimplemented!`: 0. `#[allow(dead_code)]`: 1, on `AgentHostCallbacks::worktree_snapshot`, with `TODO(#carve 18/21)` naming its
+future caller. FIXME/TODO added: the same TODO, plus one pre-existing `FIXME(session-worktree-sync)` moved intact with its method.
+Tests: two files changed, one call-site line each (`.agent_roster().local_agent_codebase_access(`); no assertion touched.
+
+**Behaviour preservation.** Handles are snapshots of host fields at build time. The host's `with_*` builders consume `self` and
+return the host, so a handle built per call sees final values. The two long-lived holders (`seed_clone_claimant`, the session-agent
+port adapters) took a host clone at the same moment before, so their staleness is unchanged. Cost: each `agent_roster()` clones
+`DaemonConfig` and the host once (the D1 "built per call" price); nothing on a per-byte path.
+
+**Build and tests.** `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`,
+`tddy-telegram-control`; clippy `-D warnings` and `fmt --check` clean on lifecycle and `tddy-session-agents`. Lifecycle suite on
+`ba7600a9`: 575 passed, 22 failed, 1 ignored; the failing set is identical to the `a4a58f17` run and to the 22 names under
+"Baseline" (macOS-only sandbox and LiveKit suites). `tddy-session-agents`: 75 passed. CI on `ba7600a9`: Rust tests 8,473/8,473, Rust e2e
+380/380, Web tests 2,800/2,800, build, arm64 build, lint, generated code and the three VM checks pass (Linux runs the sandboxed
+suites that are red on macOS). Not compiled locally: `tddy-desktop` (CI's).
+
+**Findings.** Critical 0, Warning 0, Info 3. (1) `FIXME(session-worktree-sync)` still reads "See docs/dev/TODO.md", a file replaced by
+`docs/dev/todo/`; pre-existing, moved with its method, left as it was. (2) A1 and A5 are green only because wiring files are outside the
+converted set (the criterion says delegators live in wiring files); read the E6 section before relying on them. (3) The documentation
+items in the Final Checklist are the wrap's own output.
+
 ## TODO
 
 - [x] Create changeset: this document
 - [x] USER REVIEW: D1, D2, D3 (claimant), D7 (decided 2026-10-05; see "Decisions taken")
-- [ ] Rebase onto 16a once it is green
-- [ ] Record the baseline on 16a's tip
+- [x] Rebase onto 16a once it is green (#531 merged; this branch was rebased onto master, 0 behind at validation)
+- [x] Record the baseline on 16a's tip (575 / 22 / 1; the failing set is the 22 named under "Baseline")
 - [x] Implementation M4.1–M4.6 (stages A, B1, B2, B3)
 - [x] Developer's call on the residual edges E1 to E6: E1 to E5 done (Validation results, stage E1 to E5); E6 done (stage E6, the developer chose to narrow the callback)
-- [ ] `/validate-changes`
+- [x] `/validate-changes` (see Validation results; 0 critical, 0 warning)
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
 
@@ -729,7 +762,7 @@ Tasks executed at wrap:
 - [x] A5: no host clone in a T3 file (grep empty over the converted set without wiring files); the hand-offs clone the roster handle
 - [x] A6: `AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only (D2 as amended, five methods after E6); no `SplitHost` / `LaunchHost` yet
 - [x] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` (`tddy-desktop` not compiled here: CI's)
-- [ ] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted — **lifecycle suite not yet run**; `verify --against 1ad0b0f7` accounted
+- [x] A8: baseline 575 / 22 / 1, the same 22 by name (run on `ba7600a9`); `restructure verify` accounted stage by stage (the whole-node run lists the hand `impl` retargets and receiver re-points, which the engine has no operation for)
 - [x] A9: `AgentRosterState` has 12 fields and `tddy-session-agents` changed nowhere else; its tests at 75 passed (the plan said 72)
 
 **Documentation**
