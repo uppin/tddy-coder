@@ -149,13 +149,13 @@ describe("the hang-protection drill", () => {
 });
 
 describe("hang protection", () => {
-  test("the_docker_override_kills_a_stuck_test", () => {
+  test("the_livekit_override_kills_a_stuck_test", () => {
     const config = readFileSync(NEXTEST_CONFIG, "utf8");
 
     const overrides = config.split("[[profile.ci.overrides]]").slice(1);
-    const dockerOverride = overrides.find((block) => /test-group\s*=\s*"docker"/.test(block));
+    const livekitOverride = overrides.find((block) => /package\(tddy-livekit-testkit\)/.test(block));
 
-    expect(dockerOverride).toBeDefined();
-    expect(dockerOverride).toMatch(/slow-timeout\s*=\s*\{[^}]*terminate-after/);
+    expect(livekitOverride).toBeDefined();
+    expect(livekitOverride).toMatch(/slow-timeout\s*=\s*\{[^}]*terminate-after/);
   });
 });

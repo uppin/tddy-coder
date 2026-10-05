@@ -43,11 +43,11 @@ None of these is a LiveKit test, but they are the known concurrency-sensitive su
 
 ## Scope
 
-- [ ] Derive the exact set of binaries that start the LiveKit testkit (the `docker` override's membership was **not** re-derived in discovery) and remove each from the `docker` group; keep the group only for what genuinely needs serialising, if anything
+- [x] Derive the exact set of binaries that start the LiveKit testkit (the `docker` override's membership was **not** re-derived in discovery) and remove each from the `docker` group; keep the group only for what genuinely needs serialising, if anything — 35 binaries derived by `binariesStartingTheTestkit`; nothing else used the group, so `docker = { max-threads = 1 }` is removed
 - [ ] Measure before and after on the same JUnit script (node 3): run time, per-binary time, flake count over several runs
 - [ ] Decide on `retries` for the e2e leg with the measured flake rate: keep, lower, or remove (retries hide flakes as "flaky", and their reason — the port race — is gone)
 - [ ] Fix, in its own package, any test shown to depend on running alone
-- [ ] Update the CI guide (the "docker group" and "Flaky tests" sections)
+- [x] Update the CI guide (the "docker group" and "Flaky tests" sections)
 
 ## Technical Changes
 
@@ -68,8 +68,8 @@ None of these is a LiveKit test, but they are the known concurrency-sensitive su
 
 ## Implementation Milestones
 
-- [ ] Set of LiveKit-testkit binaries derived and compared with the group
-- [ ] Group lifted for them; run green
+- [x] Set of LiveKit-testkit binaries derived and compared with the group
+- [ ] Group lifted for them; run green — lifted in config; CI run pending
 - [ ] Before/after numbers recorded in this changeset
 - [ ] Several runs for the flake count; any dependent test fixed or isolated
 - [ ] `retries` decision recorded
@@ -103,7 +103,13 @@ No test is removed or skipped to gain speed.
 
 ## Technical Debt & Production Readiness
 
-(Populated during development.)
+- **Derivation (done).** `binariesStartingTheTestkit` finds 35 binaries whose source calls `LiveKitTestkit::start` (the testkit's only constructor; scanned in each auto-discovered test target and the `tests/<mod>/` modules it declares). Every one of them was serialised by the old group (wholesale `package(tddy-livekit)` / `package(tddy-livekit-testkit)`, qualified pairs, and the unqualified `binary(...)` tail), so the group missed nothing. Seven of its qualified `package(tddy-daemon) and binary(...)` pairs named binaries that no longer live in `tddy-daemon` (`common_room_duplicate_identity_repro`, `common_room_set_metadata_handshake_repro`, `forward_to_peer_shared_registry`, `livekit_peer_daemons_acceptance`, `session_room_livekit_acceptance` moved to `tddy-daemon-livekit`; `remote_git_livekit_acceptance` to `tddy-worktree-service`; `session_room_acceptance` to `tddy-session-lifecycle`); the unqualified tail is what still matched them.
+- **Stale pairs remain in the override's filter.** The filter now scopes only node 4's `slow-timeout`, which this PR does not own, so the seven dead qualified pairs were left in place. Pruning them (or rewriting the filter as `package(...) and binary(...)` with the right owners) is a follow-up; the unqualified entries keep coverage correct meanwhile.
+- **`every_binary_the_serial_docker_group_names_exists_in_the_package_it_names` is vacuous after the lift.** With no `docker` override, the group is empty and the test passes on an empty list. It bites again only if a `docker` group is reintroduced.
+- **Node 4's hang-guard test re-pointed here.** `scripts/livekit-ci-server.test.ts` found the LiveKit override by `test-group = "docker"`, which this node removes. With the developer's consent it now finds the override by `package(tddy-livekit-testkit)` in its filter and is renamed `the_livekit_override_kills_a_stuck_test`; the assertion (the override carries `slow-timeout` with `terminate-after`) is unchanged.
+- **CI measurement pending.** Before/after run time of the `Rust e2e tests` run phase (baseline 472 s) and per-binary times from node 3's JUnit table, over several consecutive runs, with the flake count.
+- **`retries` decision pending.** Left at `count = 2` with `TODO(parallel-livekit): decide retries from measured flake rate` in `.config/nextest.toml`; its original reason (the per-container port race) is gone on CI. Keep, lower or remove once the flake count above is in.
+- **Overlap with `scripts/ci-e2e-timing.ts`.** `nextest-docker-group.ts` carries its own filterset parser (an AST, where node 3's evaluates to a predicate). Node 3's script is out of this PR's boundary, so the two were not merged; a shared filterset module is a refactor candidate.
 
 ## Decisions & Trade-offs
 
@@ -166,7 +172,7 @@ Real dependency edges:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (drift helper; config lift; CI numbers and `retries` still open)
 - [ ] Update documentation with progress
 - [ ] Read the CI e2e leg over several runs (`scripts/ci-status.sh --watch`, `--failures`)
 - [ ] Validate changes (/validate-changes)
