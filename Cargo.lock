@@ -12176,6 +12176,7 @@ dependencies = [
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
+ "tddy-credential-sync",
  "tddy-credentials",
  "tddy-daemon-auth",
  "tddy-daemon-kernel",

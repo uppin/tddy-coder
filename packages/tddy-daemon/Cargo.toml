@@ -97,6 +97,12 @@ tddy-worktree-service = { path = "../tddy-worktree-service" }
 tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 # The accounts service over the credential vaults auth opens: `runtime.rs` registers its entry.
 tddy-accounts = { path = "../tddy-accounts" }
+# `#keyring` 6/9's sync engine: `runtime.rs` constructs it and wires its transport and identity
+# verifier over the common room, when one is configured.
+tddy-credential-sync = { path = "../tddy-credential-sync" }
+# `ProviderId`/`AccountId` for the `SyncStatusSource` adapter `runtime.rs` builds over the sync
+# engine's journal, and `VaultState` for the single-open-vault gate `#keyring` 6/9 ships with.
+tddy-credentials = { path = "../tddy-credentials" }
 # The moved auth subsystem: `runtime.rs` calls `build_auth_entries`, and the daemon re-exports the
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
@@ -144,5 +150,3 @@ tddy-sandbox = { path = "../tddy-sandbox" }
 # `UnixListener`.
 tddy-index-daemon = { path = "../tddy-index-daemon" }
 tokio-stream = { version = "0.1", features = ["net"] }
-# The stub-daemon accounts suite builds the records it seals into the runtime's own vaults.
-tddy-credentials = { path = "../tddy-credentials" }

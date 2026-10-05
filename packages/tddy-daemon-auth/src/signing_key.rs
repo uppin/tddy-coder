@@ -25,7 +25,7 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use ed25519_dalek::pkcs8::spki::der::pem::LineEnding;
 use ed25519_dalek::pkcs8::{DecodePrivateKey, EncodePrivateKey};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_github::session_token_v2::{
     spki_der, KeyId, SessionClaims, SessionTokenAuthority, SessionTokenError, SessionTokenSigner,
@@ -138,6 +138,14 @@ impl DaemonSigningKey {
     /// A signer over this key. Cheap; the key is copied, not shared.
     pub fn signer(&self) -> SessionTokenSigner {
         SessionTokenSigner::new(self.signing_key.clone())
+    }
+
+    /// Sign arbitrary bytes with this daemon's identity key.
+    ///
+    /// For attestations that are not session tokens — `#keyring` 6/9's peer advertisements, today —
+    /// where the caller defines its own signed envelope rather than [`SessionTokenSigner`]'s.
+    pub fn sign(&self, message: &[u8]) -> Vec<u8> {
+        self.signing_key.sign(message).to_bytes().to_vec()
     }
 
     fn from_signing_key(signing_key: SigningKey) -> Self {
@@ -559,6 +567,27 @@ mod tests {
         // Then the id the token names is the id the daemon publishes — otherwise a peer resolves
         // a key that cannot verify what it was fetched for
         assert_eq!(SessionTokenVerifier::key_id_of(&token), Ok(daemon.key_id()));
+    }
+
+    #[test]
+    fn signs_arbitrary_bytes_that_verify_under_its_own_public_key() {
+        // Given a daemon's identity
+        let home = a_data_directory();
+        let daemon = DaemonSigningKey::load_or_generate(&the_key_path(&home))
+            .expect("a daemon generates a keypair");
+        let message = b"a peer advertisement this daemon attests to";
+
+        // When it signs a message that is not a session token
+        let signature = daemon.sign(message);
+
+        // Then the signature verifies under the public half it publishes
+        let signature: [u8; 64] = signature
+            .try_into()
+            .expect("an ed25519 signature is 64 bytes");
+        assert!(daemon
+            .verifying_key()
+            .verify_strict(message, &ed25519_dalek::Signature::from_bytes(&signature))
+            .is_ok());
     }
 
     #[test]

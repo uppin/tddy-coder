@@ -3,6 +3,7 @@
 pub mod agent_tool_socket;
 pub mod common_room_key_directory;
 pub mod config;
+pub mod credential_sync;
 pub mod daemon_config_service;
 pub mod daemon_settings;
 /// Lazy spawn, supervision, restart and idle stop of the `tddy-index-daemon` process this daemon
