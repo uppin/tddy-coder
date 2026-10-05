@@ -552,4 +552,5 @@ mod conversation_worktree_jail_route_unit_tests;
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
 pub(crate) mod peer_session_answer;
+mod svc_agent_roster_wiring;
 mod svc_host_builders;
