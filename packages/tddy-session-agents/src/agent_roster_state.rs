@@ -14,7 +14,9 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
 use tddy_daemon_livekit::peer_routing::PeerRouting;
+use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
 use tddy_daemon_livekit::session_room::SessionRoomRegistry;
+use tddy_model_registry::ModelRegistryStore;
 
 use crate::session_agent_clone::{HostedAgentClones, SessionAgentCloneStore};
 use crate::session_agent_roster::SessionAgentRosterStore;
@@ -42,4 +44,8 @@ pub struct AgentRosterState<'a> {
     pub hosted_agent_clones: &'a Arc<HostedAgentClones>,
     /// How often a `StreamSessionAgents` subscription re-sends an unchanged roster.
     pub roster_keepalive_interval: Duration,
+    /// The owning daemons this daemon, as the facilitating one, has admitted to its session rooms.
+    pub session_admissions: &'a Arc<SessionAdmissionRegistry>,
+    /// This daemon's model registry — the assistants an agent id may resolve to — when one is wired.
+    pub model_registry: &'a Option<Arc<ModelRegistryStore>>,
 }

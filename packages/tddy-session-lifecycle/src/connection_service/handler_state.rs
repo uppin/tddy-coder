@@ -15,6 +15,7 @@ use tddy_rpc::Status;
 use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
+use super::agent_host_callbacks::AgentRoster;
 use super::svc_materialize_staged_attachment::AttachmentState;
 use super::svc_resolve_listed_worktree::session_dir_lookup;
 use super::svc_spawn_split_agent;
@@ -202,6 +203,33 @@ impl DaemonSessionHost {
             session_agent_clones: &self.session_agent_clones,
             hosted_agent_clones: &self.hosted_agent_clones,
             roster_keepalive_interval: self.roster_keepalive_interval,
+            session_admissions: &self.session_admissions,
+            model_registry: &self.model_registry,
+        }
+    }
+
+    /// The same fields, owned, plus this host's callbacks: the handle the agent topic's methods
+    /// live on, for the places a borrowed state cannot go (a task, a `'static` closure).
+    ///
+    /// Built per call. The callbacks are a clone of this host, whose every mutable field is behind
+    /// an `Arc`.
+    // TODO(stage B): drop this once the agent topic's methods move onto the handle.
+    #[allow(dead_code)]
+    pub(crate) fn agent_roster(&self) -> AgentRoster {
+        AgentRoster {
+            config: self.config.clone(),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            user_resolver: self.user_resolver.clone(),
+            peer_routing: self.peer_routing.clone(),
+            room_roster: Arc::clone(&self.room_roster),
+            session_rooms: Arc::clone(&self.session_rooms),
+            session_agent_rosters: Arc::clone(&self.session_agent_rosters),
+            session_agent_clones: Arc::clone(&self.session_agent_clones),
+            hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
+            roster_keepalive_interval: self.roster_keepalive_interval,
+            session_admissions: Arc::clone(&self.session_admissions),
+            model_registry: self.model_registry.clone(),
+            host: Arc::new(self.clone()),
         }
     }
 }

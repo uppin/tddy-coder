@@ -231,6 +231,10 @@ mod svc_start_claude_cli_session;
 mod hooks_and_urls;
 pub use hooks_and_urls::*;
 
+mod agent_host_callbacks;
+
+mod svc_agent_host_ports;
+
 mod agent_roster;
 pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
