@@ -16,7 +16,6 @@ use crate::connection_service::daemon_urls;
 use crate::connection_service::seed_codebase;
 use crate::connection_service::svc_host_builders::first_admission_token;
 use crate::connection_service::svc_resolve_listed_worktree::session_dir_lookup;
-use crate::connection_service::svc_spawn_split_agent;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_service::proto::session::StartSessionRequest;
@@ -103,7 +102,7 @@ impl AgentRoster {
                 &slot,
                 daemon_instance_id,
                 &request,
-                svc_spawn_split_agent::split_forward_deadline(&self.config),
+                crate::connection_service::agent_roster::split_forward_deadline(&self.config),
             )
             .await?;
         let created = answered.session_id.trim();

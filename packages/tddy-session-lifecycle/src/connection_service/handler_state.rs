@@ -16,7 +16,6 @@ use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::agent_host_callbacks::AgentRoster;
 use super::svc_materialize_staged_attachment::AttachmentState;
-use super::svc_spawn_split_agent;
 use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
@@ -106,7 +105,7 @@ impl DaemonSessionHost {
     /// How long to wait for the codebase daemon's answer to a split session's forwarded start (see
     /// [`svc_spawn_split_agent::split_forward_deadline`]), under this host's config.
     pub fn split_forward_deadline(&self) -> Duration {
-        svc_spawn_split_agent::split_forward_deadline(&self.config)
+        crate::connection_service::agent_roster::split_forward_deadline(&self.config)
     }
 
     /// The fields the demo-VM RPCs read, shared with this host (the VM table and idle tracker are

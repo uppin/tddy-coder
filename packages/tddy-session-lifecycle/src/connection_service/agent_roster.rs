@@ -8,6 +8,7 @@ use tddy_rpc::Status;
 
 use crate::connection_service::seed_codebase;
 
+use std::time::Duration;
 use tddy_session_agents::agent_records;
 pub use tddy_session_agents::agent_records::*;
 
@@ -165,4 +166,23 @@ pub(crate) fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -
 /// picked. An id naming a peer is refused by resolution instead.
 pub(crate) fn roster_agent_ids(agents: &[tddy_core::SessionAgentRecord]) -> Vec<String> {
     agents.iter().map(|a| a.agent_id.clone()).collect()
+}
+
+/// How long to wait for the codebase daemon's answer to a split session's forwarded start.
+///
+/// Not the ordinary forward deadline (`peer_forward_timeout_secs`): the peer serves this call by
+/// resolving the project — cloning it if it does not have it yet — and cutting a worktree, work it
+/// bounds by its own `spawn_worker_request_timeout` (5 minutes by default). Giving up after that
+/// would mean erroring while the peer is still building, which is the state that used to strand a
+/// worktree. This daemon can only assume the peer's budget matches its own, so it waits that budget
+/// out plus one ordinary forward deadline of round-trip headroom. A peer configured with a *larger*
+/// budget still times out here — the teardown at the call site is what keeps that from becoming
+/// an orphan.
+///
+/// The cost is that a peer whose RPC participant is gone surfaces after this wait rather than
+/// after the forward deadline. Accepted: the placement check already required the peer to be
+/// visible in the common room moments earlier, so that is the rarer failure, and the alternative
+/// trades a rare slow error for a routine orphaned worktree.
+pub fn split_forward_deadline(config: &crate::config::DaemonConfig) -> Duration {
+    config.spawn_worker_request_timeout() + config.peer_forward_timeout()
 }
