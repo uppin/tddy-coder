@@ -6,22 +6,19 @@
 //! client, common room, registry, token store, idle tracker, task registry and jails the host does
 //! rather than to copies of them.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_model_registry::ModelRegistryStore;
 use tddy_rpc::Status;
-use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
+use super::agent_host_callbacks::AgentRoster;
 use super::svc_materialize_staged_attachment::AttachmentState;
-use super::svc_resolve_listed_worktree::session_dir_lookup;
-use super::svc_spawn_split_agent;
 use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
-use crate::connection_service::svc_host_builders::first_admission_token;
 use crate::multi_host::EligibleDaemonSource;
 use crate::peer_routing::PeerRouting;
 use crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps;
@@ -105,32 +102,10 @@ impl DaemonSessionHost {
         )
     }
 
-    /// The first admit for an agent clone's owning daemon (see
-    /// [`first_admission_token::mint_first_admission_token`]), over this host's config and
-    /// admission registry.
-    pub(crate) fn mint_first_admission_token(
-        &self,
-        session_id: &str,
-        owning_daemon_instance_id: &str,
-    ) -> Option<(String, String, String, u64)> {
-        first_admission_token::mint_first_admission_token(
-            &self.config,
-            &self.session_admissions,
-            session_id,
-            owning_daemon_instance_id,
-        )
-    }
-
-    /// Where a session this daemon serves keeps its `.session.yaml` (see
-    /// [`session_dir_lookup::session_dir_for`]), under this host's data dir.
-    pub(crate) fn session_dir_for(&self, session_id: &str) -> Result<PathBuf, Status> {
-        session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
-    }
-
     /// How long to wait for the codebase daemon's answer to a split session's forwarded start (see
-    /// [`svc_spawn_split_agent::split_forward_deadline`]), under this host's config.
+    /// [`super::agent_roster::split_forward_deadline`]), under this host's config.
     pub fn split_forward_deadline(&self) -> Duration {
-        svc_spawn_split_agent::split_forward_deadline(&self.config)
+        crate::connection_service::agent_roster::split_forward_deadline(&self.config)
     }
 
     /// The fields the demo-VM RPCs read, shared with this host (the VM table and idle tracker are
@@ -188,20 +163,26 @@ impl DaemonSessionHost {
             .await
     }
 
-    /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in
-    /// `tddy-session-agents` that works them for the length of one call.
-    pub(crate) fn agent_roster_state(&self) -> AgentRosterState<'_> {
-        AgentRosterState {
-            config: &self.config,
-            tddy_data_dir: &self.tddy_data_dir,
-            user_resolver: &self.user_resolver,
-            peer_routing: &self.peer_routing,
-            room_roster: &self.room_roster,
-            session_rooms: &self.session_rooms,
-            session_agent_rosters: &self.session_agent_rosters,
-            session_agent_clones: &self.session_agent_clones,
-            hosted_agent_clones: &self.hosted_agent_clones,
+    /// The same fields, owned, plus this host's callbacks: the handle the agent topic's methods
+    /// live on, for the places a borrowed state cannot go (a task, a `'static` closure).
+    ///
+    /// Built per call. The callbacks are a clone of this host, whose every mutable field is behind
+    /// an `Arc`.
+    pub(crate) fn agent_roster(&self) -> AgentRoster {
+        AgentRoster {
+            config: self.config.clone(),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            user_resolver: self.user_resolver.clone(),
+            peer_routing: self.peer_routing.clone(),
+            room_roster: Arc::clone(&self.room_roster),
+            session_rooms: Arc::clone(&self.session_rooms),
+            session_agent_rosters: Arc::clone(&self.session_agent_rosters),
+            session_agent_clones: Arc::clone(&self.session_agent_clones),
+            hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
             roster_keepalive_interval: self.roster_keepalive_interval,
+            session_admissions: Arc::clone(&self.session_admissions),
+            model_registry: self.model_registry.clone(),
+            host: Arc::new(self.clone()),
         }
     }
 }

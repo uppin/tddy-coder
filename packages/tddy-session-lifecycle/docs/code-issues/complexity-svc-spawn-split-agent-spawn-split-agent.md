@@ -17,6 +17,7 @@
 | 2026-09-23 | 254 | 5 | 9 | 251 on `origin/master` (`4e260d7f`, after #520; grown since the first row by other merges) → 254 after #508 (`#keyring` 1/9): `split_remote_tool_env` takes this daemon's `SessionTokens` and a `SplitSpawnTarget` literal instead of four loose arguments, and the room poller's minter is built from `SessionTokens` instead of `livekit.api_secret`. Nesting and signature unchanged |
 | 2026-09-24 | 110 | — | 9 | #524: plan `05` (4 extract-methods, the teardown out), DRY #4 (`attached_initial_prompt`) and plan `20` (the tool wiring and the process spawn): 254 → 110 by the plan's count. The signature is untouched, so still 9 parameters; nesting not re-derived |
 | 2026-10-05 | 112 | — | 9 | touched by the same-crate moves and **unchanged by them**: `write_claude_hooks_settings` and `resolve_start_session_claude_binary` are named through `service_util`. 112 at `origin/master` and at HEAD by fn line to closing brace (the 110 above is #524's plan count of the same function). Parameters unchanged |
+| 2026-10-05 | 112 | — | 9 | touched by #532 (`#carve` 17/21) and **unchanged by it**: the file lost `split_forward_deadline` to `agent_roster.rs` (21 lines); the function is 112 lines at `origin/master` and at HEAD (fn line to closing brace), now at `:57`. Parameters unchanged |
 
 ## What grew it
 

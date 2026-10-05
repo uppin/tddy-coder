@@ -55,8 +55,10 @@ impl AttachmentState<'_> {
             }
         }
 
-        let staging_root =
-            crate::session_attachment_staging::staging_root_for(ctx.os_user, self.staging_base_dir);
+        let staging_root = tddy_session_files::session_attachment_staging::staging_root_for(
+            ctx.os_user,
+            self.staging_base_dir,
+        );
         let mut written: Vec<SessionAttachment> = Vec::new();
         let attachment_count = ctx.attachments.len() as u32;
 

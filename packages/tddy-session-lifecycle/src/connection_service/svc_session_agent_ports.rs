@@ -66,7 +66,7 @@ impl DaemonSessionHost {
 
     /// The host capabilities the nine handlers need, each read off this daemon.
     fn session_agent_ports(&self) -> SessionAgentPorts {
-        let for_dirs = self.clone();
+        let for_dirs = self.agent_roster();
         SessionAgentPorts {
             // `roster_session_dir` authenticates **before** it resolves, which is load-bearing
             // rather than tidy: attaching an agent owned by another daemon contacts that peer and
@@ -82,25 +82,25 @@ impl DaemonSessionHost {
             conversations: Arc::clone(&self.agent_conversations),
             admission: Arc::new(
                 svc_session_agent_port_adapters::ClonesClaimedOnOwningPeers {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
             catalog: Arc::new(
                 svc_session_agent_port_adapters::DefsResolvableFromThisDaemon {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
             broadcast: Arc::new(svc_session_agent_port_adapters::TheSessionsOwnRoom {
-                connection: self.clone(),
+                roster: self.agent_roster(),
             }),
             sessions: Arc::new(
                 svc_session_agent_port_adapters::TurnLoopsThisDaemonCanOpen {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
             peers: Arc::new(
                 svc_session_agent_port_adapters::ConversationsForwardedOverTheCommonRoom {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
         }

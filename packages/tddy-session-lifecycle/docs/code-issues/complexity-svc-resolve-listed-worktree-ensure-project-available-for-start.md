@@ -18,6 +18,7 @@
 | 2026-09-24 | 99 | — | — | — | #524 plan `20`: the blocking-pool clone task → `spawn_project_clone` (158 → 99). The placement `match` and its early return stay; nesting not re-derived |
 | 2026-09-26 | 99 | — | — | — | touched by #526 (`#carve` 15/21) and **unchanged by it**: its file gained the `agent_def_for_spawn` delegation to `tddy_session_agents::spawn_agent_def`; this function is identical at `2688227f` and `22787218` (fn line to closing brace), still at `:30` |
 | 2026-10-05 | 99 | — | — | — | touched by the same-crate moves and **unchanged by them**: its file lost the `mod session_room_opening;` line when that module was re-parented under `svc_ensure_session_room_for_agents`; this function is identical at `origin/master` and HEAD (fn line to closing brace), still at `:30` |
+| 2026-10-05 | 99 | — | — | — | touched by #532 (`#carve` 17/21) and **unchanged by it**: the file's agent-def functions became `impl AgentRoster` and `session_dir_lookup` left its `mod` list; this function is 99 lines at `origin/master` and at HEAD (fn line to closing brace), now at `:31` |
 
 ## What the tool found
 

@@ -1,11 +1,7 @@
-mod session_room_opening;
-
 use std::path::Path;
 
-use crate::{
-    connection_service::{agent_roster, seed_codebase, seeded_clone_guard},
-    livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::{agent_roster, seed_codebase, seeded_clone_guard};
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -13,9 +9,10 @@ use uuid::Uuid;
 
 use tddy_rpc::Status;
 
+use super::agent_host_callbacks::AgentRoster;
 use super::DaemonSessionHost;
 
-impl DaemonSessionHost {
+impl AgentRoster {
     /// [`Self::ensure_session_room`] for the attach path, so an owning daemon has something to be
     /// admitted to.
     ///
@@ -41,6 +38,7 @@ impl DaemonSessionHost {
             ))
         })?;
         let opened = self
+            .host
             .ensure_session_room(session_id, codebase.session_dir.as_path(), &worktree_root)
             .await?;
         opened_session_room::require_opened_session_room(session_id, opened)
@@ -167,7 +165,9 @@ impl DaemonSessionHost {
         )
         .await;
     }
+}
 
+impl DaemonSessionHost {
     /// Build the semantic index for a `workspace` session's worktree.
     ///
     /// The index indexes a worktree, and the worktree that counts is this daemon's: for the codebase
@@ -235,7 +235,9 @@ impl DaemonSessionHost {
         );
         Ok(())
     }
+}
 
+impl AgentRoster {
     /// Record a session's seeded roster, giving every agent that is not co-located with this
     /// daemon's worktree the clone it reads.
     ///

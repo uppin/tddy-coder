@@ -12,8 +12,7 @@ use tddy_spawn::spawn_worker;
 use tddy_task::TaskRegistry;
 
 use crate::{
-    connection_service::{agent_roster, ROSTER_KEEPALIVE_INTERVAL},
-    multi_host::EligibleDaemonSource,
+    connection_service::ROSTER_KEEPALIVE_INTERVAL, multi_host::EligibleDaemonSource,
     CliSessionManager,
 };
 
@@ -198,9 +197,11 @@ impl DaemonSessionHost {
     }
 
     /// This daemon as the claimant of the clones a session's peer-owned agents read.
-    pub(crate) fn seed_clone_claimant(&self) -> agent_roster::DaemonSeedCloneClaimant {
-        agent_roster::DaemonSeedCloneClaimant {
-            service: self.clone(),
+    pub(crate) fn seed_clone_claimant(
+        &self,
+    ) -> crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant {
+        crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant {
+            service: self.agent_roster(),
         }
     }
 
@@ -371,7 +372,5 @@ impl DaemonSessionHost {
         )
     }
 }
-
-pub(in crate::connection_service) mod first_admission_token;
 
 mod rpc_activity;

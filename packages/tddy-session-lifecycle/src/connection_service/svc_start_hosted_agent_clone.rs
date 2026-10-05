@@ -4,15 +4,14 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use std::{path::Path, sync::Arc};
 
-use crate::{
-    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::{agent_roster, peer_session_answer};
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
-use crate::user_sessions_path::projects_path_for_user;
+use tddy_daemon_kernel::user_paths::projects_path_for_user;
 
 use tddy_rpc::Status;
 
-use super::DaemonSessionHost;
+use super::agent_host_callbacks::AgentRoster;
 
 /// The system prompt one conversation opens under: the caller's override where it sent one, the
 /// def's own where it did not.
@@ -35,7 +34,7 @@ fn conversation_system_prompt(
         .or_else(|| def_prompt.clone()))
 }
 
-impl DaemonSessionHost {
+impl AgentRoster {
     /// Turn a freshly created `workspace` checkout into a live mirror of the facilitating daemon's
     /// session.
     ///
@@ -84,7 +83,7 @@ impl DaemonSessionHost {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-        let state = self.agent_roster_state();
+        let state = self.state();
         hosted_clone_start::start_hosted_agent_clone(
             placement,
             codebase_session_id,
@@ -127,7 +126,7 @@ impl DaemonSessionHost {
         &self,
         daemon_instance_id: &str,
     ) -> Result<(), Status> {
-        let eligible = self.eligible_instance_ids();
+        let eligible = self.peer_routing.eligible_instance_ids();
         departed_daemon::refuse_departed_daemon(daemon_instance_id, eligible)
     }
 
@@ -141,7 +140,9 @@ impl DaemonSessionHost {
         owner: &str,
         conversation_id: &str,
     ) -> Result<(), Status> {
-        let slot = self.common_room_slot("OpenAgentConversation")?;
+        let slot = self
+            .peer_routing
+            .common_room_slot("OpenAgentConversation")?;
         conversation_open_forward::forward_open_agent_conversation(
             req,
             owner,
@@ -204,7 +205,7 @@ impl DaemonSessionHost {
     pub(crate) async fn open_owned_agent_session(
         &self,
         agent_id: &str,
-        clone: &Arc<crate::session_agent_clone::HostedClone>,
+        clone: &Arc<tddy_session_agents::session_agent_clone::HostedClone>,
         system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
         let id = tddy_core::AgentId::parse(agent_id)
@@ -246,7 +247,7 @@ impl DaemonSessionHost {
     /// access would be one YAML field away from writing anywhere this daemon can.
     pub(crate) fn owned_agent_codebase_access(
         &self,
-        clone: &Arc<crate::session_agent_clone::HostedClone>,
+        clone: &Arc<tddy_session_agents::session_agent_clone::HostedClone>,
     ) -> tddy_discovery::subagent::CodebaseAccess {
         let service = self.clone();
         let clone = Arc::clone(clone);
@@ -296,8 +297,8 @@ impl DaemonSessionHost {
                     &session_id,
                     &session_dir,
                     &agent_id,
-                    crate::session_agent_status::ManagedAgentState::ExecutingTool,
-                    crate::session_agent_status::tool_call_summary(&tool_name, &args),
+                    tddy_session_agents::session_agent_status::ManagedAgentState::ExecutingTool,
+                    tddy_session_agents::session_agent_status::tool_call_summary(&tool_name, &args),
                 );
                 let request = ExecuteToolRequest {
                     session_token,
@@ -307,9 +308,15 @@ impl DaemonSessionHost {
                     args_json: args.to_string(),
                     conversation_id: String::new(),
                 };
-                let answer = match service.resolve_exec_tool_worktree(&request) {
+                let answer = match peer_session_answer::resolve_exec_tool_worktree(
+                    &service.config,
+                    &service.user_resolver,
+                    &service.tddy_data_dir,
+                    &request,
+                ) {
                     Ok((sessions_base, worktree_root)) => agent_roster::dispatch_envelope(
                         service
+                            .host
                             .run_exec_tool_locally(&request, &sessions_base, &worktree_root)
                             .await,
                     ),
@@ -324,7 +331,7 @@ impl DaemonSessionHost {
                     &session_id,
                     &session_dir,
                     &agent_id,
-                    crate::session_agent_status::ManagedAgentState::Prompting,
+                    tddy_session_agents::session_agent_status::ManagedAgentState::Prompting,
                     format!("{} finished", request.tool_name),
                 );
                 answer
@@ -342,7 +349,7 @@ impl DaemonSessionHost {
         session_id: &str,
         session_dir: &Path,
         agent_id: &str,
-        state: crate::session_agent_status::ManagedAgentState,
+        state: tddy_session_agents::session_agent_status::ManagedAgentState,
         summary: impl AsRef<str>,
     ) {
         tddy_session_agents::note_agent_activity(

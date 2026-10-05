@@ -279,7 +279,7 @@ async fn a_sandboxed_workspace_session_served_by(
 impl SeededWorkspace {
     /// The path the 2026-09-26 incident took: a roster agent this daemon serves locally.
     fn agent_codebase_access(&self) -> tddy_discovery::subagent::CodebaseAccess {
-        self.service.local_agent_codebase_access(
+        self.service.agent_roster().local_agent_codebase_access(
             &self.session_id,
             &self.session_dir,
             AGENT_ID,

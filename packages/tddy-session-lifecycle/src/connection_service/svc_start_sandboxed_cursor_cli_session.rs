@@ -156,6 +156,7 @@ impl DaemonSessionHost {
         // is launched. Where an agent runs decides how the session is split across hosts, never
         // whether it can be seeded — the same placements the split start takes, this one takes.
         let seeded_clones = self
+            .agent_roster()
             .claim_co_located_seed_clones(
                 session_id,
                 &seed_codebase::SeedCodebase::of_a_starting_session(

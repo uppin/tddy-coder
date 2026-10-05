@@ -61,6 +61,7 @@ impl DaemonSessionHost {
         let session_dir = unified_session_dir_path(sessions_base, session_id);
         let codebase = seed_codebase::SeedCodebase::read(session_id, &session_dir)?;
         let seeded = self
+            .agent_roster()
             .seed_session_agent_roster(session_id, &codebase, &req.session_token, seed)
             .await?;
         Ok((started, codebase, seeded))
@@ -75,7 +76,8 @@ impl DaemonSessionHost {
         codebase: super::super::SeedCodebase,
         seeded: Vec<super::super::SeededAgent>,
     ) {
-        self.unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)
+        self.agent_roster()
+            .unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)
             .await;
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         if let Err(e) = session_deletion::delete_session_directory(
@@ -109,14 +111,15 @@ impl DaemonSessionHost {
             timeout,
         )
         .await?;
-        self.start_hosted_agent_clone(
-            &placement,
-            &sessions_base,
-            &session_id,
-            req.project_id.trim(),
-            &req.session_token,
-        )
-        .await?;
+        self.agent_roster()
+            .start_hosted_agent_clone(
+                &placement,
+                &sessions_base,
+                &session_id,
+                req.project_id.trim(),
+                &req.session_token,
+            )
+            .await?;
         Ok(started)
     }
 }

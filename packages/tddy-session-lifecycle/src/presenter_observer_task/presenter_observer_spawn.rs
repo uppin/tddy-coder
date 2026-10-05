@@ -8,7 +8,7 @@ pub(crate) struct PresenterObserverDeps {
     pub(crate) presenter_event_sink:
         Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
     pub(crate) session_notification_bus:
-        Option<Arc<crate::session_notifications::SessionNotificationBus>>,
+        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
 }
 
 impl PresenterObserverDeps {

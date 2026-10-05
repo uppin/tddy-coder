@@ -1,6 +1,6 @@
-use super::SeededCloneGuard;
+use super::seeded_clone_guard::SeededCloneGuard;
 
-use super::session_enforces_a_withdrawal;
+use super::agent_roster::session_enforces_a_withdrawal;
 
 use tddy_rpc::Status;
 

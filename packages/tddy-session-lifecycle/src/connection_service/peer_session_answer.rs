@@ -4,10 +4,10 @@ pub(crate) fn peer_has_no_such_session(status: &Status) -> bool {
         tddy_rpc::Code::FailedPrecondition | tddy_rpc::Code::NotFound
     )
 }
-use crate::config::DaemonConfig;
-use crate::workspace_session::resolve_worktree_root_in_session_dir;
+
 use std::path::{Path, PathBuf};
 use tddy_core::session_lifecycle::validate_session_id_segment;
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_rpc::Status;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
@@ -60,7 +60,7 @@ pub fn resolve_exec_tool_worktree(
     }
 
     let sessions_base =
-        crate::user_sessions_path::sessions_base_for_user(os_user, Some(tddy_data_dir))
+        tddy_daemon_kernel::user_paths::sessions_base_for_user(os_user, Some(tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
     let worktree_root =
         crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
@@ -68,4 +68,14 @@ pub fn resolve_exec_tool_worktree(
             &req.session_id,
         )?;
     Ok((sessions_base, worktree_root))
+}
+
+/// The worktree root the `.session.yaml` in `session_dir` records.
+pub(crate) fn resolve_worktree_root_in_session_dir(session_dir: &Path) -> Result<PathBuf, Status> {
+    let meta = tddy_core::read_session_metadata(session_dir)
+        .map_err(|_| Status::failed_precondition("session not found or .session.yaml missing"))?;
+    meta.repo_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| Status::failed_precondition("session .session.yaml has no repo_path"))
 }

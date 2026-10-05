@@ -9,11 +9,11 @@ use tddy_service::proto::types::HostDocumentScope;
 
 use tddy_service::proto::session_files::ReadHostDocumentRequest;
 
-use crate::session_file_upload::contained_canonical_dir;
+use tddy_session_files::session_file_upload::contained_canonical_dir;
 
 use tddy_daemon_livekit::livekit_peer_discovery::PeerRoute;
 
-use crate::session_file_upload::validate_segment;
+use tddy_session_files::session_file_upload::validate_segment;
 
 use tddy_rpc::Status;
 
@@ -102,8 +102,11 @@ impl AttachmentState<'_> {
         }
         // The writer only marks a staged file complete on its final chunk; refuse an
         // in-progress or aborted upload so the agent never sees truncated bytes.
-        if !crate::session_attachment_staging::staged_complete_marker(&canonical_dir, safe_name)
-            .exists()
+        if !tddy_session_files::session_attachment_staging::staged_complete_marker(
+            &canonical_dir,
+            safe_name,
+        )
+        .exists()
         {
             return Err(Status::failed_precondition(
                 "staged attachment upload is not complete",
@@ -201,7 +204,7 @@ impl AttachmentState<'_> {
         let ref_daemon = host_doc.daemon_instance_id.trim();
 
         let bytes = if ref_daemon.is_empty() || ref_daemon == local_instance_id {
-            crate::host_documents::read_host_document_bytes(
+            tddy_session_files::host_documents::read_host_document_bytes(
                 os_user,
                 self.tddy_data_dir,
                 self.staging_base_dir,
@@ -213,7 +216,7 @@ impl AttachmentState<'_> {
         } else {
             let route = self.peer_routing.classify_daemon_route(ref_daemon)?;
             match route {
-                PeerRoute::Local => crate::host_documents::read_host_document_bytes(
+                PeerRoute::Local => tddy_session_files::host_documents::read_host_document_bytes(
                     os_user,
                     self.tddy_data_dir,
                     self.staging_base_dir,
@@ -239,7 +242,7 @@ impl AttachmentState<'_> {
                             &read_req,
                         )
                         .await?;
-                    crate::host_documents::HostDocumentBytes {
+                    tddy_session_files::host_documents::HostDocumentBytes {
                         data: resp.data,
                         byte_size: resp.byte_size,
                     }
@@ -251,10 +254,10 @@ impl AttachmentState<'_> {
         // read, but a forwarded response is trusted bytes from a peer — re-check the cap on
         // the session host before writing, so a buggy/older peer cannot push an oversized
         // blob into the session's attachments.
-        if bytes.data.len() > crate::host_documents::MAX_HOST_DOCUMENT_BYTES {
+        if bytes.data.len() > tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES {
             return Err(Status::invalid_argument(format!(
                 "host document exceeds maximum size of {} bytes",
-                crate::host_documents::MAX_HOST_DOCUMENT_BYTES
+                tddy_session_files::host_documents::MAX_HOST_DOCUMENT_BYTES
             )));
         }
 

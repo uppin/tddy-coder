@@ -5,12 +5,13 @@ use crate::{
 };
 use tddy_spawn::{spawn_worker, spawner};
 
-use crate::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
 use std::path::PathBuf;
 
+use super::agent_host_callbacks::AgentRoster;
 use super::DaemonSessionHost;
 
 impl DaemonSessionHost {
@@ -126,7 +127,9 @@ impl DaemonSessionHost {
             )),
         }
     }
+}
 
+impl AgentRoster {
     /// Report — once per `(agents dir, name)` per process — that a registry assistant is shadowing
     /// a `<tddyhome>/agents` def of the same name.
     ///
@@ -184,7 +187,7 @@ impl DaemonSessionHost {
         caller: &str,
     ) -> Result<Option<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
         let model_registry = &self.model_registry;
-        let state = self.agent_roster_state();
+        let state = self.state();
         spawn_agent_def::agent_def_for_spawn(agent, caller, model_registry, state).await
     }
 
@@ -278,7 +281,7 @@ impl DaemonSessionHost {
         self.config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        self.session_dir_for(session_id)
+        session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)
     }
 
     // ── Remote agents: room admission, clones, tool split ────────────────────────────────────
@@ -286,6 +289,7 @@ impl DaemonSessionHost {
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
 }
 
+use crate::connection_service::session_dir_lookup;
 use tddy_session_agents::spawn_agent_def;
 
 /// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
@@ -390,8 +394,6 @@ fn spawn_project_clone(
     handle
 }
 
-pub(in crate::connection_service) mod session_dir_lookup;
-
 /// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
 /// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.
 ///
@@ -407,7 +409,7 @@ pub async fn resolvable_agent_defs(
     for def in registry_agent_defs(model_registry).await? {
         match defs.iter_mut().find(|d| d.name == def.name) {
             Some(existing) => {
-                DaemonSessionHost::report_shadowed_agent_def(&agents_dir, &def.name);
+                AgentRoster::report_shadowed_agent_def(&agents_dir, &def.name);
                 *existing = def;
             }
             None => defs.push(def),

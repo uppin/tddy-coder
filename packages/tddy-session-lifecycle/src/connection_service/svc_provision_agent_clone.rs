@@ -12,18 +12,19 @@ use crate::connection_service::peer_session_answer::peer_has_no_such_session;
 
 use tddy_service::proto::session::DeleteSessionRequest;
 
-use crate::{
-    connection_service::{daemon_urls, seed_codebase},
-    livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::daemon_urls;
+use crate::connection_service::first_admission_token;
+use crate::connection_service::seed_codebase;
+use crate::connection_service::session_dir_lookup;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_service::proto::session::StartSessionRequest;
 
 use tddy_rpc::Status;
 
-use super::DaemonSessionHost;
+use super::agent_host_callbacks::AgentRoster;
 
-impl DaemonSessionHost {
+impl AgentRoster {
     /// Ask `daemon_instance_id` for the checkout this session's agents on it will read.
     ///
     /// The same `workspace`-session primitive a split placement uses, and for the same reasons: the
@@ -46,7 +47,10 @@ impl DaemonSessionHost {
         codebase_session_id: &str,
         session_token: &str,
     ) -> Result<(), Status> {
-        let slot = self.common_room_slot("AttachSessionAgent")?.clone();
+        let slot = self
+            .peer_routing
+            .common_room_slot("AttachSessionAgent")?
+            .clone();
         // The room-admission handshake (PRD § "What attach does" step 3): the facilitating daemon
         // records the owning daemon in the per-session admission registry and mints the scoped,
         // short-TTL token it forwards along with the StartSession. The owning daemon joins
@@ -54,7 +58,12 @@ impl DaemonSessionHost {
         // against `session_admission.SessionAdmissionService/AdmitOwningDaemon` before it expires.
         // `None` (LiveKit not configured) falls back to the owning daemon self-minting — a recorded
         // deviation, never a silent one.
-        let first_admission = self.mint_first_admission_token(session_id, daemon_instance_id);
+        let first_admission = first_admission_token::mint_first_admission_token(
+            &self.config,
+            &self.session_admissions,
+            session_id,
+            daemon_instance_id,
+        );
         let (first_admission_token, first_admission_url, first_admission_room, _ttl) =
             match first_admission {
                 Some((token, url, room, ttl)) => (token, url, room, ttl),
@@ -93,7 +102,7 @@ impl DaemonSessionHost {
                 &slot,
                 daemon_instance_id,
                 &request,
-                self.split_forward_deadline(),
+                crate::connection_service::agent_roster::split_forward_deadline(&self.config),
             )
             .await?;
         let created = answered.session_id.trim();
@@ -129,7 +138,7 @@ impl DaemonSessionHost {
         codebase_session_id: &str,
         session_token: &str,
     ) {
-        let Ok(slot) = self.common_room_slot("AttachSessionAgent") else {
+        let Ok(slot) = self.peer_routing.common_room_slot("AttachSessionAgent") else {
             log::error!(
                 "could not reach the common room to delete workspace session \
                  {codebase_session_id} on daemon {daemon_instance_id}; its checkout is orphaned there"
@@ -179,7 +188,7 @@ impl DaemonSessionHost {
         codebase_session_id: &str,
         session_token: &str,
     ) -> Result<(), Status> {
-        let slot = self.common_room_slot("DetachSessionAgent")?;
+        let slot = self.peer_routing.common_room_slot("DetachSessionAgent")?;
         // Being *configured* for a common room is not being in one, and the two failures are
         // indistinguishable from their status codes alone: a forward attempted with no room fails
         // locally with `failed_precondition`, exactly as a peer that does not have the session does.
@@ -345,9 +354,9 @@ impl DaemonSessionHost {
         &self,
         session_id: &str,
         agent_id: &str,
-    ) -> Result<crate::session_agent_clone::AgentClone, Status> {
-        let session_dir = self.session_dir_for(session_id)?;
-        let state = self.agent_roster_state();
+    ) -> Result<tddy_session_agents::session_agent_clone::AgentClone, Status> {
+        let session_dir = session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)?;
+        let state = self.state();
         agent_clone_lookup::agent_clone_for(session_id, agent_id, session_dir, state)
     }
 
@@ -356,8 +365,8 @@ impl DaemonSessionHost {
     pub(crate) fn hosted_clone_for(
         &self,
         session_id: &str,
-    ) -> Option<Arc<crate::session_agent_clone::HostedClone>> {
-        self.local_exec_tools().hosted_clone_for(session_id)
+    ) -> Option<Arc<tddy_session_agents::session_agent_clone::HostedClone>> {
+        self.host.hosted_clone_for(session_id)
     }
 
     /// [`LocalExecTools::run_hosted_clone_tool`](super::LocalExecTools::run_hosted_clone_tool) —
@@ -365,11 +374,9 @@ impl DaemonSessionHost {
     pub(crate) async fn run_hosted_clone_tool(
         &self,
         req: &ExecuteToolRequest,
-        clone: &crate::session_agent_clone::HostedClone,
+        clone: &tddy_session_agents::session_agent_clone::HostedClone,
     ) -> ExecuteToolResponse {
-        self.local_exec_tools()
-            .run_hosted_clone_tool(req, clone)
-            .await
+        self.host.run_hosted_clone_tool(req, clone).await
     }
 }
 

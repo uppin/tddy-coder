@@ -4,15 +4,14 @@ use prost::Message as _;
 
 use tddy_service::proto::catalog::{ListSubagentsRequest, ListSubagentsResponse};
 
-use crate::{
-    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::agent_roster;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
-use super::DaemonSessionHost;
+use super::agent_host_callbacks::AgentRoster;
 
-impl DaemonSessionHost {
+impl AgentRoster {
     /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
     pub(crate) async fn forward_cancel_agent_conversation(
         &self,
@@ -21,7 +20,9 @@ impl DaemonSessionHost {
         daemon_instance_id: &str,
         conversation_id: &str,
     ) -> Result<(), Status> {
-        let slot = self.common_room_slot("CancelAgentConversation")?;
+        let slot = self
+            .peer_routing
+            .common_room_slot("CancelAgentConversation")?;
         conversation_cancel_forward::forward_cancel_agent_conversation(
             session_token,
             session_id,
@@ -90,6 +91,7 @@ impl DaemonSessionHost {
     ) -> Result<tddy_core::SessionAgentRecord, Status> {
         let owning_daemon = id.daemon_instance_id.as_str();
         if !self
+            .peer_routing
             .eligible_instance_ids()
             .iter()
             .any(|candidate| candidate == owning_daemon)
@@ -100,7 +102,7 @@ impl DaemonSessionHost {
             )));
         }
 
-        let slot = self.common_room_slot("AttachSessionAgent")?;
+        let slot = self.peer_routing.common_room_slot("AttachSessionAgent")?;
         let answered = slot
             .forward_to_peer(
                 owning_daemon,

@@ -85,3 +85,8 @@ checked with `--all-targets`.
 Partly resolved. The `reparent_module` operation exists and the six in-crate rows are done. Remaining: the
 three rows above (node 17), the `cli_spawn/` regrouping and `ManagedWorkflow`, which no plan has been
 written for.
+
+**Update, `#carve` 17/21 (PR #532) stage E1 to E5.** Two of the three rows moved: `session_dir_lookup.rs` and
+`first_admission_token.rs` are now direct children of `connection_service` (`reparent_module`, developer's
+consent), so `svc_provision_agent_clone.rs` no longer reaches them through a mixed or wiring parent. They still
+go to their receiver crates in node 17; only `svc_host_builders/rpc_activity.rs` remains under its old parent.
