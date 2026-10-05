@@ -28,7 +28,7 @@
 # above sees exactly one assignment.
 #
 # Environment variables:
-#   TDDY_INDEX_RUNTIME_DIR  — where the socket, pid file and log live (default: $TMPDIR, else /tmp;
+#   TDDY_INDEX_RUNTIME_DIR  — where the socket, pid file, log and log history live (default: $TMPDIR, else /tmp;
 #                             a `nix develop` TMPDIR is not used, see durable_tmpdir).
 #                             Deliberately not inside the checkout: an AF_UNIX path is limited to
 #                             ~104 bytes and a worktree path plus a subdirectory already exceeds it.
@@ -73,6 +73,9 @@ TAG="$(printf '%s' "$ROOT_DIR" | cksum | awk '{print $1}')"
 SOCKET="${RUNTIME_DIR}/tddy-index-${TAG}.sock"
 PID_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.pid"
 LOG_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.log"
+# Every earlier run's log, oldest first. The live log is this run's alone (see the launch below).
+HISTORY_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.history.log"
+HISTORY_MAX_BYTES=$((10 * 1024 * 1024))
 
 # A prebuilt daemon, when the caller names one: a release build, or a copy taken outside `target/` so
 # the rebuilds of an ongoing change cannot replace the binary a long carve is running against. Named
@@ -125,12 +128,34 @@ running_pid() {
   printf '%s' "$pid"
 }
 
+# Append the log of the run that is about to be replaced to the history file, under a header naming
+# when that log was last written and which pid it belonged to. The live log is truncated right after
+# (readiness reads it), so this is what keeps a daemon's last words — a panic, a rust-analyzer
+# crash, the line before it went quiet — after the restart that follows its death.
+#
+# Capped: past HISTORY_MAX_BYTES the history becomes `<history>.1` (one generation, replacing the
+# last), so a checkout that restarts its daemon for months cannot fill the temporary directory.
+archive_previous_log() {
+  [[ -s "$LOG_FILE" ]] || return 0
+  if [[ -f "$HISTORY_FILE" ]] && (($(wc -c <"$HISTORY_FILE") > HISTORY_MAX_BYTES)); then
+    mv -f "$HISTORY_FILE" "${HISTORY_FILE}.1"
+  fi
+  local old_pid
+  old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  {
+    printf '=== previous run: pid %s, log last written %s ===\n' \
+      "${old_pid:-unknown}" "$(date -r "$LOG_FILE" '+%Y-%m-%d %H:%M:%S %z')"
+    cat "$LOG_FILE"
+    printf '=== end of previous run ===\n'
+  } >>"$HISTORY_FILE"
+}
+
 # The one line stdout carries, plus the narration a developer needs around it.
 announce() {
   local pid="$1"
   narrate ""
   narrate "index daemon pid ${pid}, serving code_index.CodeIndexService on ${SOCKET}"
-  narrate "log:  ${LOG_FILE}"
+  narrate "log:  ${LOG_FILE}   (earlier runs: ${HISTORY_FILE})"
   narrate "stop: ./run-index-daemon --stop   (or: kill ${pid})"
   narrate ""
   narrate "To run against it:"
@@ -323,6 +348,12 @@ narrate "Starting index daemon on ${SOCKET}, in a session of its own"
 # not in the background job's own `2>` — that runs whenever the job gets scheduled, and a readiness
 # loop that ticks first reads the previous daemon's `listening on` and announces a daemon that has
 # not started, with no pid file behind it.
+#
+# What the truncation must not cost is the *previous* run's log: it is the only record of why a
+# daemon that announced `listening on …` was gone minutes later, and the restart that follows a death
+# is exactly what used to destroy it. So the old log is appended to a history file first — see
+# archive_previous_log — and the live log still starts empty.
+archive_previous_log
 rm -f "$PID_FILE"
 : >"$LOG_FILE"
 # The temporary directories are the one part of the dev shell's environment not taken: `nix develop`

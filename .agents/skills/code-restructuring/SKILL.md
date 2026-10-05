@@ -171,6 +171,12 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
   With `TDDY_INDEX_SOCKET` unset the CLI spawns its own rust-analyzer exactly as before. A set but
   unreachable socket is an error, not a silent fall back to the cold path.
 
+  **A daemon that died:** read its log *before* restarting, or after — a start no longer destroys it.
+  The live log (`tddy-index-<tag>.log`, path printed on start) is the current run's alone, because
+  readiness is read from it; the script first appends the previous run's log to
+  `tddy-index-<tag>.history.log` (one header per run: its pid and when its log was last written; capped
+  at 10 MiB, then kept as `.history.log.1`). Both sit in `TDDY_INDEX_RUNTIME_DIR`.
+
 ## References
 
 - [`references/plan-schema.md`](references/plan-schema.md)
