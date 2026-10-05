@@ -108,7 +108,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 20] = [
+    const ENDPOINT: [&str; 21] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -152,6 +152,13 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // from reaching auth by its own `dependency_boundary_unit`, so only the crate that
         // depends on both can join them.
         "common_room_key_directory.rs",
+        // `#keyring` 6/9's sync engine, assembled over this daemon's own signing key, LiveKit
+        // transport and key directory. Wiring by the same criterion as
+        // `common_room_key_directory.rs` just above — no RPC method, no session state, built only
+        // by `runtime.rs` — and it can live nowhere else: `tddy-credential-sync` and
+        // `tddy-daemon-livekit` may not depend on each other, so only the crate that depends on
+        // both can join them.
+        "credential_sync.rs",
     ];
 
     let mut files = Vec::new();

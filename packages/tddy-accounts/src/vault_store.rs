@@ -145,7 +145,7 @@ mod tests {
     use std::path::Path;
 
     use pretty_assertions::assert_eq;
-    use tddy_credentials::{CredentialStore, SecretString};
+    use tddy_credentials::{CredentialStore, SecretString, FIRST_VERSION};
 
     use super::*;
 
@@ -161,6 +161,7 @@ mod tests {
             secret: SecretString::new(format!("shhh-{account}")),
             metadata: BTreeMap::new(),
             updated_at: 1_726_700_000,
+            version: FIRST_VERSION,
         }
     }
 

@@ -29,7 +29,9 @@ Membership in the configured LiveKit room (same project credentials and **`commo
 
 **Key ids are content-addressed.** When several participants advertise one key id, the verifier keeps the one whose key hashes to it, so a re-advertised id cannot shadow the genuine key; and a key once learned is remembered across a reconnect (an id names exactly one key, forever), so peers' tokens keep verifying while the roster is momentarily empty. An advertisement whose key does not hash to the id it is advertised under is refused, never cached.
 
-**Revocation costs a restart.** A learned key is never evicted for the life of the verifying daemon. A peer that leaves the room, a host an operator removes, or a key known to be compromised keeps having **newly minted** tokens accepted by every daemon that once learned its key, until each of those daemons restarts. There is no expiry on learned keys and no revocation list; both are candidates for a later `#keyring` node.
+**Revocation costs a restart.** A learned key is never evicted for the life of the verifying daemon. A peer that leaves the room, a host an operator removes, or a key known to be compromised keeps having **newly minted** tokens accepted by every daemon that once learned its key, until each of those daemons restarts. There is no expiry on learned keys and no revocation list.
+
+**This trust model is unchanged for everything above.** [Journaled credential propagation](credential-sync.md) adds a second, independent gate for credentials specifically — a configured group secret, required alongside this section's signature check — because handing out a person's GitHub credential to anything holding the room's LiveKit credentials is not acceptable the way forwarding a session start is. `ListEligibleDaemons` and `StartSession` forwarding read exactly the trust model stated here, with no retrofit.
 
 ## Eligible daemon rows
 

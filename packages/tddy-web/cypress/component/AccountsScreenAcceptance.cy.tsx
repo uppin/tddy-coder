@@ -16,7 +16,7 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { AccountsAppPage } from "../../src/components/accounts/AccountsAppPage";
-import { AccountsService, type AccountSummary } from "../../src/gen/accounts_pb";
+import { AccountsService, SyncStatus, type AccountSummary } from "../../src/gen/accounts_pb";
 import { mountWithRpc } from "../support/rpc/inMemory";
 import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { accountsScreenPage } from "../support/pages/accountsScreenPage";
@@ -31,6 +31,7 @@ function anAccount(overrides: Partial<AccountSummary>): AccountSummary {
     subject: "ada-lovelace",
     updatedAt: UPDATED_AT,
     hasSecret: true,
+    syncStatus: SyncStatus.UNSPECIFIED,
     ...overrides,
   } as AccountSummary;
 }
@@ -89,6 +90,36 @@ describe("Accounts screen", () => {
     mountAccounts(aBackendListing([{ provider: "github", accounts: [ADA] }]));
 
     accountsScreenPage.subject("github", "ada").should("contain.text", "ada-lovelace");
+  });
+
+  it("shows no sync badge when nothing has synced the account yet", () => {
+    mountAccounts(
+      aBackendListing([
+        { provider: "github", accounts: [anAccount({ syncStatus: SyncStatus.UNSPECIFIED })] },
+      ]),
+    );
+
+    accountsScreenPage.syncStatusBadge("github", "ada").should("not.exist");
+  });
+
+  it("shows a refused badge when a peer refused the account", () => {
+    mountAccounts(
+      aBackendListing([
+        { provider: "github", accounts: [anAccount({ syncStatus: SyncStatus.REFUSED })] },
+      ]),
+    );
+
+    accountsScreenPage.syncStatusBadge("github", "ada").should("contain.text", "Refused");
+  });
+
+  it("shows a synced badge when every peer offered the account has acknowledged it", () => {
+    mountAccounts(
+      aBackendListing([
+        { provider: "github", accounts: [anAccount({ syncStatus: SyncStatus.SYNCED })] },
+      ]),
+    );
+
+    accountsScreenPage.syncStatusBadge("github", "ada").should("contain.text", "Synced");
   });
 
   it("says a vault that opened and holds nothing is empty", () => {

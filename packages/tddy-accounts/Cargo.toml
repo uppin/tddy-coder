@@ -9,6 +9,7 @@ name = "tddy_accounts"
 path = "src/lib.rs"
 
 [dependencies]
+tddy-credential-sync = { path = "../tddy-credential-sync" }
 tddy-credentials = { path = "../tddy-credentials" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }

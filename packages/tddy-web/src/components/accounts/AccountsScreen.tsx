@@ -11,6 +11,14 @@
 import { useState } from "react";
 import { Button } from "../ui/button";
 
+/**
+ * `#keyring` 6/9's aggregate sync standing for one account, worst peer first. `null` means
+ * nothing has synced the account yet — no peer configured to receive credentials, or none
+ * admitted — and renders no badge at all, which is the common case for a daemon with no
+ * `keyring.group_secret` configured.
+ */
+export type AccountSyncStatus = "synced" | "pending" | "undeliverable" | "conflict" | "refused";
+
 export interface AccountRow {
   /** Stable within its provider, and what `#keyring` 5/9 assigns to a project. Never renamed. */
   accountId: string;
@@ -21,6 +29,8 @@ export interface AccountRow {
   updatedAtUnixSeconds: bigint;
   /** Whether a usable credential is present. One bit, not the secret. */
   hasSecret: boolean;
+  /** See [`AccountSyncStatus`]. */
+  syncStatus: AccountSyncStatus | null;
 }
 
 export interface ProviderGroup {
@@ -154,6 +164,7 @@ function AccountRowView({ provider, account, onRename, onRemove }: AccountRowVie
       {account.hasSecret ? null : (
         <span className="text-amber-700 text-xs">no credential stored</span>
       )}
+      <SyncStatusBadge rowId={rowId} status={account.syncStatus} />
       <form
         className="flex items-center gap-2"
         onSubmit={(event) => {
@@ -201,5 +212,28 @@ function AccountRowView({ provider, account, onRename, onRemove }: AccountRowVie
         </Button>
       )}
     </li>
+  );
+}
+
+/** Text and color per [`AccountSyncStatus`] — worst (`refused`) reads the most alarming. */
+const SYNC_STATUS_PRESENTATION: Record<AccountSyncStatus, { label: string; className: string }> = {
+  synced: { label: "Synced", className: "text-emerald-700" },
+  pending: { label: "Pending", className: "text-muted-foreground" },
+  undeliverable: { label: "Undeliverable", className: "text-amber-700" },
+  conflict: { label: "Conflict", className: "text-amber-700" },
+  refused: { label: "Refused", className: "text-destructive" },
+};
+
+/**
+ * `#keyring` 6/9's aggregate sync badge. Renders nothing at all for `null` — a daemon with no
+ * `keyring.group_secret` configured, the common case — rather than an empty or zero-value badge.
+ */
+function SyncStatusBadge({ rowId, status }: { rowId: string; status: AccountSyncStatus | null }) {
+  if (status === null) return null;
+  const { label, className } = SYNC_STATUS_PRESENTATION[status];
+  return (
+    <span data-testid={`${rowId}-sync-status`} className={`text-xs ${className}`}>
+      {label}
+    </span>
   );
 }

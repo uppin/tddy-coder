@@ -1,0 +1,38 @@
+[package]
+name = "tddy-credential-sync"
+version = "0.1.0"
+edition = "2021"
+description = "Which peers may hold a credential, what crosses the wire, and how both sides know where they stand"
+
+[lib]
+name = "tddy_credential_sync"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# The records and the vault format this engine reconciles. The **only** tddy dependency, and
+# deliberately so: an engine that could reach `tddy-daemon-livekit` would be written against LiveKit
+# and would repeat the misplaced dependency `heavy-dependency-livekit-peer-forwarding` records.
+tddy-credentials = { path = "../tddy-credentials" }
+# `VaultTransportKey`'s X25519 agreement — the companion of the `ed25519-dalek` already approved
+# for `#keyring` 1/9. CLAUDE.md § ASK: approved for this node's green phase.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+# `GroupSecret::proof_for` (HMAC over the challenge) and the HKDF that turns an X25519 agreement
+# into a sealing key. Already `tddy-credentials`' choice, at the same versions, for the same
+# `zeroize`-on-drop reason — not a new external dependency to the workspace, only to this crate.
+hmac = { version = "0.13", features = ["zeroize"] }
+sha2 = { version = "0.11", features = ["zeroize"] }
+# The AEAD a `WrappedRecords` payload is sealed with. Already `tddy-credentials`' cipher, at the
+# same version, for the vault's own records.
+chacha20poly1305 = "0.10"
+# Constant-time comparison for `GroupSecret::verifies`, and the AEAD's own one-time key. Already in
+# the tree beneath `tddy-credentials`, at the same versions.
+subtle = "2.6"
+poly1305 = { version = "0.8", features = ["zeroize"] }
+zeroize = "1.9"
+rand = "0.8"
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

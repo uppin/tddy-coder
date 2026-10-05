@@ -453,7 +453,7 @@ impl SessionVaults {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::record::{AccountId, ProviderId};
+    use crate::record::{AccountId, ProviderId, FIRST_VERSION};
     use crate::vault::MAX_SET_ASIDE_VAULTS;
 
     const THE_OPERATOR: &str = "operator";
@@ -475,6 +475,7 @@ mod tests {
             secret: SecretString::new(token),
             metadata: Default::default(),
             updated_at: 1,
+            version: FIRST_VERSION,
         }
     }
 

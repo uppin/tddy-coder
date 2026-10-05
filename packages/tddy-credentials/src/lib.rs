@@ -40,7 +40,7 @@ pub mod secret;
 pub mod sessions;
 pub mod vault;
 
-pub use record::{AccountId, CredentialRecord, ProviderId};
+pub use record::{AccountId, CredentialRecord, ProviderId, Tombstone, VaultEntry, FIRST_VERSION};
 pub use secret::{SecretBytes, SecretString};
 pub use sessions::{
     Clock, Reset, Retained, SessionVaults, VaultState, PENDING_LOGIN_LIFETIME, ROTATION_GRACE,

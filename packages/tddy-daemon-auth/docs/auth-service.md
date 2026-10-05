@@ -228,6 +228,15 @@ every restart and end every live session.
 The key id is derived from the public key (`KeyId::of`), so `DaemonSigningKey::signer()` needs no
 second argument and cannot be handed a mismatched id.
 
+**`DaemonSigningKey::sign(message: &[u8]) -> Vec<u8>`** signs arbitrary bytes with the same identity
+key, for an attestation that is not a session token and defines its own signed envelope —
+`#keyring` 6/9's peer advertisements, today. `signer()`'s `SessionTokenSigner` stays the one path for
+session tokens themselves; `sign` is the escape hatch for everything else this daemon's identity
+needs to attest to.
+
+**`DaemonSigningKey::verifying_key()`** returns the public half directly, for a caller that already
+has the keypair in hand and does not need to go through `KeyDirectory` to check its own signature.
+
 **`KeyDirectory`** is the port through which a daemon resolves a *peer's* key:
 `async fn public_key_for(&KeyId) -> Result<Option<VerifyingKey>>`. It resolves and does nothing
 else — how a daemon's own key reaches its peers is the transport's business, and on a LiveKit fleet

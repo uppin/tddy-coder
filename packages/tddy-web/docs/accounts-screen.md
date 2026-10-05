@@ -46,15 +46,28 @@ that reloading the page brings it back after "Not now".
 
 A row is addressed by `provider` **and** `accountId` (`accounts-row-<provider>-<accountId>`): an
 account id is unique only within its provider. Each row shows the label (`…-label`), the subject
-(`…-subject`), "no credential stored" when `hasSecret` is false, a rename form (`…-rename-input`,
+(`…-subject`), "no credential stored" when `hasSecret` is false, `#keyring` 6/9's sync-status badge
+(`…-sync-status`, `SyncStatusBadge`) when the account has one, a rename form (`…-rename-input`,
 `…-rename-submit`) and a remove button (`…-remove`) whose first press only asks; the confirmation
 (`…-remove-confirm`) sends `RemoveAccount`, and Cancel sends nothing.
+
+### The sync-status badge
+
+`AccountRow.syncStatus: AccountSyncStatus | null` — `"synced"`,
+`"pending"`, `"undeliverable"`, `"conflict"`, `"refused"`, or `null` for `SYNC_STATUS_UNSPECIFIED`
+(nothing has synced the account yet, the common case for a daemon with no `keyring.group_secret`
+configured). `null` renders no badge at all — not an empty or zero-value one. `syncStatusFromRpc`
+(`AccountsAppPage.tsx`) maps the wire enum; `SyncStatusBadge` (`AccountsScreen.tsx`), extracted as
+its own small component rather than inlined into `AccountRowView`, renders the five visible states.
+See [credential sync](../../tddy-credential-sync/docs/credential-sync.md) for what the five answers
+mean and [accounts service](../../tddy-accounts/docs/accounts-service.md) for the port that supplies
+it.
 
 ## Tests
 
 | Spec | Pins |
 |---|---|
-| `cypress/component/AccountsScreenAcceptance.cy.tsx` (page object `cypress/support/pages/accountsScreenPage.ts`) | grouping by provider; the subject beside the label; empty, uninitialized, locked and errored as four distinct notices; rename through `SetAccountLabel` with the identity unchanged; a failed rename reported beside the list; removal only after confirmation |
+| `cypress/component/AccountsScreenAcceptance.cy.tsx` (page object `cypress/support/pages/accountsScreenPage.ts`) | grouping by provider; the subject beside the label; empty, uninitialized, locked and errored as four distinct notices; rename through `SetAccountLabel` with the identity unchanged; a failed rename reported beside the list; removal only after confirmation; no sync badge for `UNSPECIFIED`, a `Refused` badge, a `Synced` badge |
 | `src/routing/appRoutes.test.ts` § accounts route | `/accounts` matches; `/accounts-archive` and `/accounts/github` do not |
 | `ModelsNavAcceptance.cy.tsx`, `PresenceCapabilityGatingAcceptance.cy.tsx` | the menu's order, with **Accounts** after **Hosts** |
 

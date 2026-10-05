@@ -10,7 +10,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SecretString, SessionVaults, UnlockKey, VaultError,
-    VaultState, MAX_PASSPHRASE_CHARS, MIN_PASSPHRASE_CHARS,
+    VaultState, FIRST_VERSION, MAX_PASSPHRASE_CHARS, MIN_PASSPHRASE_CHARS,
 };
 use tddy_rpc::{Code, Status};
 use tddy_service::proto::auth::{
@@ -398,6 +398,7 @@ fn github_record(user: &GitHubUser, access_token: &str) -> Result<CredentialReco
         ]
         .into(),
         updated_at,
+        version: FIRST_VERSION,
     })
 }
 

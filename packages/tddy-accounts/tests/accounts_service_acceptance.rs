@@ -9,12 +9,15 @@ use std::sync::{Arc, Mutex};
 
 use pretty_assertions::assert_eq;
 use prost::Message;
-use tddy_accounts::{build_accounts_entry, AccountStore, AccountsError, AccountsServiceImpl};
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
+use tddy_accounts::{
+    build_accounts_entry, AccountStore, AccountsError, AccountsServiceImpl, SyncStatusSource,
+};
+use tddy_credential_sync::AccountSyncSummary;
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 use tddy_rpc::{Code, Request, Status};
 use tddy_service::proto::accounts::{
     AccountsService, ListAccountsRequest, ListAccountsResponse, RemoveAccountRequest,
-    RemoveAccountResponse, SetAccountLabelRequest, SetAccountLabelResponse,
+    RemoveAccountResponse, SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
 };
 
 const ADAS_SESSION: &str = "session-token-for-ada";
@@ -35,6 +38,7 @@ fn a_credential(provider: &str, account: &str, label: &str) -> CredentialRecord 
         secret: SecretString::new(format!("shhh-{provider}-{account}")),
         metadata,
         updated_at: 1_726_700_000,
+        version: FIRST_VERSION,
     }
 }
 
@@ -141,6 +145,34 @@ impl AccountStore for AnInMemoryAccountStore {
     }
 }
 
+/// A `#keyring` 6/9 sync standing, fixed per `(provider, account)` — enough to pin the RPC
+/// mapping without a real `SyncJournal` or `SyncEngine`.
+struct AFakeSyncStatusSource {
+    statuses: BTreeMap<(String, String), AccountSyncSummary>,
+}
+
+fn a_sync_status_source() -> AFakeSyncStatusSource {
+    AFakeSyncStatusSource {
+        statuses: BTreeMap::new(),
+    }
+}
+
+impl AFakeSyncStatusSource {
+    fn reporting(mut self, provider: &str, account: &str, status: AccountSyncSummary) -> Self {
+        self.statuses
+            .insert((provider.to_string(), account.to_string()), status);
+        self
+    }
+}
+
+impl SyncStatusSource for AFakeSyncStatusSource {
+    fn status_for(&self, provider: &ProviderId, account: &AccountId) -> Option<AccountSyncSummary> {
+        self.statuses
+            .get(&(provider.as_str().to_string(), account.as_str().to_string()))
+            .copied()
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Asking the service
 
@@ -148,11 +180,25 @@ fn a_service(store: AnInMemoryAccountStore) -> AccountsServiceImpl<AnInMemoryAcc
     AccountsServiceImpl::new(Arc::new(store))
 }
 
+fn a_service_with_sync_status(
+    store: AnInMemoryAccountStore,
+    source: AFakeSyncStatusSource,
+) -> AccountsServiceImpl<AnInMemoryAccountStore> {
+    AccountsServiceImpl::new(Arc::new(store)).with_sync_status(Arc::new(source))
+}
+
 async fn listing_from(
     store: AnInMemoryAccountStore,
     session_token: &str,
 ) -> Result<ListAccountsResponse, Status> {
-    a_service(store)
+    listing_from_service(a_service(store), session_token).await
+}
+
+async fn listing_from_service(
+    service: AccountsServiceImpl<AnInMemoryAccountStore>,
+    session_token: &str,
+) -> Result<ListAccountsResponse, Status> {
+    service
         .list_accounts(Request::direct(ListAccountsRequest {
             session_token: session_token.to_string(),
         }))
@@ -532,6 +578,53 @@ async fn removing_an_account_leaves_every_other_one_in_place() {
             ("github".to_string(), vec!["ada".to_string()]),
         ])
     );
+}
+
+/// The `sync_status` of the one account a listing's first (and only) provider group holds.
+fn sole_sync_status_of(response: &ListAccountsResponse) -> SyncStatus {
+    SyncStatus::try_from(response.providers[0].accounts[0].sync_status)
+        .expect("a valid SyncStatus enum value")
+}
+
+#[tokio::test]
+async fn an_account_with_no_sync_status_source_wired_reports_unspecified() {
+    // Given — no `.with_sync_status(..)` call at all, which is every existing call site today
+    let store = an_account_store().holding(a_credential("github", "ada", "Ada at work"));
+
+    // When
+    let listing = listing_from(store, ADAS_SESSION).await.unwrap();
+
+    // Then
+    assert_eq!(sole_sync_status_of(&listing), SyncStatus::Unspecified);
+}
+
+#[tokio::test]
+async fn an_account_a_wired_source_reports_refused_shows_refused_in_listaccounts() {
+    // Given
+    let store = an_account_store().holding(a_credential("github", "ada", "Ada at work"));
+    let sync_status =
+        a_sync_status_source().reporting("github", "ada", AccountSyncSummary::Refused);
+    let service = a_service_with_sync_status(store, sync_status);
+
+    // When
+    let listing = listing_from_service(service, ADAS_SESSION).await.unwrap();
+
+    // Then
+    assert_eq!(sole_sync_status_of(&listing), SyncStatus::Refused);
+}
+
+#[tokio::test]
+async fn a_wired_sources_synced_status_maps_to_the_synced_wire_value() {
+    // Given — pins the mapping is exhaustive across the whole severity range, not just refused
+    let store = an_account_store().holding(a_credential("github", "ada", "Ada at work"));
+    let sync_status = a_sync_status_source().reporting("github", "ada", AccountSyncSummary::Synced);
+    let service = a_service_with_sync_status(store, sync_status);
+
+    // When
+    let listing = listing_from_service(service, ADAS_SESSION).await.unwrap();
+
+    // Then
+    assert_eq!(sole_sync_status_of(&listing), SyncStatus::Synced);
 }
 
 #[test]

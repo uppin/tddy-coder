@@ -12,13 +12,13 @@ use std::sync::Arc;
 
 use pretty_assertions::assert_eq;
 use prost::Message;
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 use tddy_daemon::config::DaemonConfig;
 use tddy_daemon::runtime::{self, RuntimeOptions};
 use tddy_daemon_auth::SessionVaults;
 use tddy_rpc::{MultiRpcService, RequestMetadata, RequestTransport, RpcBridge, RpcMessage, Status};
 use tddy_service::proto::accounts::{
-    AccountSummary, ListAccountsRequest, ListAccountsResponse, ProviderAccounts,
+    AccountSummary, ListAccountsRequest, ListAccountsResponse, ProviderAccounts, SyncStatus,
 };
 use tddy_service::proto::auth::{
     ExchangeCodeRequest, ExchangeCodeResponse, GetAuthUrlRequest, GetAuthUrlResponse,
@@ -62,6 +62,7 @@ async fn a_stub_users_pre_opened_vault_is_listed_without_its_secret() {
                     subject: THE_STUB_USER.to_string(),
                     updated_at: A_RECORD_WRITTEN_AT as i64,
                     has_secret: true,
+                    sync_status: SyncStatus::Unspecified as i32,
                 }],
             }],
             vault_locked: false,
@@ -238,6 +239,7 @@ fn a_github_record_for(login: &str) -> CredentialRecord {
         secret: SecretString::new(A_KNOWN_SECRET),
         metadata: BTreeMap::from([("subject".to_string(), login.to_string())]),
         updated_at: A_RECORD_WRITTEN_AT,
+        version: FIRST_VERSION,
     }
 }
 

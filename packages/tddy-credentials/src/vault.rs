@@ -68,7 +68,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use crate::kdf::{hkdf_expand, keyed_name, to_hex};
-use crate::record::{AccountId, CredentialRecord, ProviderId};
+use crate::record::{AccountId, CredentialRecord, ProviderId, Tombstone, VaultEntry};
 use crate::secret::{SecretBytes, SecretString};
 use crypto::{
     check_verifier, open, passphrase_kek, random_bytes, random_key, record_aad, seal,
@@ -270,7 +270,7 @@ impl SessionVault {
     pub fn put(&self, record: CredentialRecord) -> Result<(), VaultError> {
         let _serialised = serialised();
         let mut file = self.load()?;
-        let sealed = self.seal_record(&record)?;
+        let sealed = self.seal_entry(&VaultEntry::Record(record))?;
         file.records.retain(|existing| existing.id != sealed.id);
         file.records.push(sealed);
         write_vault_file(&self.path, &file)
@@ -278,9 +278,11 @@ impl SessionVault {
 
     /// The record held for this provider and account, or `None` when none is.
     ///
-    /// `None` is "no credential", which a caller reports as *unavailable* rather than as an empty
-    /// result. A record that exists and will not authenticate is [`VaultError::Crypto`], never
-    /// `None` — silently treating corruption as absence is the fallback this store must not have.
+    /// `None` is "no credential" — which includes a tombstoned slot, reported to a caller acting on
+    /// the person's behalf exactly as "never held" is, since both mean there is nothing to act
+    /// with — and is distinct from a record that exists and will not authenticate,
+    /// [`VaultError::Crypto`]. Silently treating corruption as absence is the fallback this store
+    /// must not have.
     pub fn get(
         &self,
         provider: &ProviderId,
@@ -288,41 +290,82 @@ impl SessionVault {
     ) -> Result<Option<CredentialRecord>, VaultError> {
         let file = self.load()?;
         let id = self.record_id(provider, account);
-        file.records
+        let entry = file
+            .records
             .iter()
             .find(|sealed| sealed.id == id)
-            .map(|sealed| self.open_record(sealed))
-            .transpose()
+            .map(|sealed| self.open_entry(sealed))
+            .transpose()?;
+        Ok(entry.and_then(|entry| entry.record().cloned()))
     }
 
     /// Every record, or every record of one provider, ordered by provider then account.
     ///
     /// Returns whole records, secrets included, because the only caller is the daemon acting for
     /// the signed-in user. What an Accounts screen may see is decided where the RPC is built
-    /// (`#keyring` 4/9), not here.
+    /// (`#keyring` 4/9), not here. A tombstoned slot is not a record, so it is filtered out here
+    /// exactly as an unheld slot would be — [`Self::entries`] is where a deletion is visible.
     pub fn list(&self, provider: Option<&ProviderId>) -> Result<Vec<CredentialRecord>, VaultError> {
         let file = self.load()?;
         let mut records = file
             .records
             .iter()
-            .map(|sealed| self.open_record(sealed))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|sealed| self.open_entry(sealed))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|entry| entry.record().cloned())
+            .collect::<Vec<_>>();
         records.retain(|record| provider.is_none_or(|wanted| &record.provider == wanted));
         records.sort_by(|a, b| (&a.provider, &a.account).cmp(&(&b.provider, &b.account)));
         Ok(records)
     }
 
-    /// Forget the record for this provider and account. Removing one that is not held is `Ok`.
+    /// Forget the record for this provider and account. Removing one that is not held — including a
+    /// slot already tombstoned — is `Ok` and changes nothing.
+    ///
+    /// The slot is not emptied — it is replaced by a [`VaultEntry::Tombstone`] carrying the version
+    /// that was removed. An emptied slot is indistinguishable from one this daemon never held, so a
+    /// peer that still has the record would send it straight back and the person's removal would
+    /// undo itself at the next sync (`#keyring` 6/9).
     pub fn remove(&self, provider: &ProviderId, account: &AccountId) -> Result<(), VaultError> {
         let _serialised = serialised();
         let mut file = self.load()?;
         let id = self.record_id(provider, account);
-        let before = file.records.len();
-        file.records.retain(|sealed| sealed.id != id);
-        if file.records.len() == before {
+        let Some(sealed) = file.records.iter().find(|sealed| sealed.id == id) else {
             return Ok(());
-        }
+        };
+        let version = match self.open_entry(sealed)? {
+            // Already a deletion: nothing further to forget.
+            VaultEntry::Tombstone(_) => return Ok(()),
+            VaultEntry::Record(record) => record.version,
+        };
+        let tombstone = VaultEntry::Tombstone(Tombstone {
+            provider: provider.clone(),
+            account: account.clone(),
+            version,
+            deleted_at: now_unix_seconds()?,
+        });
+        let sealed_tombstone = self.seal_entry(&tombstone)?;
+        file.records.retain(|sealed| sealed.id != id);
+        file.records.push(sealed_tombstone);
         write_vault_file(&self.path, &file)
+    }
+
+    /// Every slot, deletions included, in the store's own `(provider, account)` order.
+    ///
+    /// Distinct from [`list`](Self::list), and the distinction is the whole reason this exists:
+    /// `list` answers *"what credentials do I have"* and a caller acting on the person's behalf
+    /// must never see a deletion there. Reconciliation asks the other question — *"what has this
+    /// vault decided about each slot"* — and a deletion is one of the answers.
+    pub fn entries(&self) -> Result<Vec<VaultEntry>, VaultError> {
+        let file = self.load()?;
+        let mut entries = file
+            .records
+            .iter()
+            .map(|sealed| self.open_entry(sealed))
+            .collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by(|a, b| (a.provider(), a.account()).cmp(&(b.provider(), b.account())));
+        Ok(entries)
     }
 
     /// Re-read the file and prove this session's data key still opens it.
@@ -362,10 +405,10 @@ impl SessionVault {
         )
     }
 
-    fn seal_record(&self, record: &CredentialRecord) -> Result<SealedRecord, VaultError> {
-        let id = self.record_id(&record.provider, &record.account);
+    fn seal_entry(&self, entry: &VaultEntry) -> Result<SealedRecord, VaultError> {
+        let id = self.record_id(entry.provider(), entry.account());
         let plaintext = Zeroizing::new(
-            serde_json::to_vec(&RecordToSeal::from(record)).map_err(|_| VaultError::Crypto)?,
+            serde_json::to_vec(&EntryToSeal::from(entry)).map_err(|_| VaultError::Crypto)?,
         );
         let sealed = seal(&self.data_key, &plaintext, &record_aad(&id))?;
         Ok(SealedRecord {
@@ -375,71 +418,132 @@ impl SessionVault {
         })
     }
 
-    fn open_record(&self, sealed: &SealedRecord) -> Result<CredentialRecord, VaultError> {
+    fn open_entry(&self, sealed: &SealedRecord) -> Result<VaultEntry, VaultError> {
         let plaintext = Zeroizing::new(open(
             &self.data_key,
             &sealed.nonce,
             &sealed.ciphertext,
             &record_aad(&sealed.id),
         )?);
-        let record = serde_json::from_slice::<OpenedRecord>(&plaintext);
-        let record = CredentialRecord::from(record.map_err(|_| VaultError::Crypto)?);
+        let opened = serde_json::from_slice::<OpenedEntry>(&plaintext);
+        let entry = VaultEntry::from(opened.map_err(|_| VaultError::Crypto)?);
         // The identity inside the seal must name the slot it was found in.
-        let expected = self.record_id(&record.provider, &record.account);
+        let expected = self.record_id(entry.provider(), entry.account());
         if bool::from(expected.as_bytes().ct_eq(sealed.id.as_bytes())) {
-            Ok(record)
+            Ok(entry)
         } else {
             Err(VaultError::Crypto)
         }
     }
 }
 
-/// What is sealed for a record: [`CredentialRecord`]'s fields, borrowed, so serialising one makes no
-/// copy of the secret. The record type itself is not `Serialize` — this mirror is the only path from
-/// a record to bytes, and it ends inside the AEAD.
-#[derive(Serialize)]
-struct RecordToSeal<'a> {
-    provider: &'a ProviderId,
-    account: &'a AccountId,
-    label: &'a str,
-    secret: &'a str,
-    metadata: &'a BTreeMap<String, String>,
-    updated_at: u64,
+/// Seconds since the Unix epoch, for a tombstone's `deleted_at` — the only clock [`SessionVault`]
+/// reads itself; every other timestamp in this crate is supplied by the caller.
+fn now_unix_seconds() -> Result<u64, VaultError> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|e| VaultError::Io(format!("the clock reads before the Unix epoch: {e}")))
 }
 
-impl<'a> From<&'a CredentialRecord> for RecordToSeal<'a> {
-    fn from(record: &'a CredentialRecord) -> Self {
-        Self {
-            provider: &record.provider,
-            account: &record.account,
-            label: &record.label,
-            secret: record.secret.expose(),
-            metadata: &record.metadata,
-            updated_at: record.updated_at,
+/// What is sealed for a slot: a [`CredentialRecord`]'s fields or a [`Tombstone`]'s, borrowed, so
+/// serialising one makes no copy of the secret. Neither source type is `Serialize` — this mirror is
+/// the only path from an entry to bytes, and it ends inside the AEAD. Tagged so a tombstone and a
+/// record can never be confused on the way back out.
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum EntryToSeal<'a> {
+    Record {
+        provider: &'a ProviderId,
+        account: &'a AccountId,
+        label: &'a str,
+        secret: &'a str,
+        metadata: &'a BTreeMap<String, String>,
+        updated_at: u64,
+        version: u64,
+    },
+    Tombstone {
+        provider: &'a ProviderId,
+        account: &'a AccountId,
+        version: u64,
+        deleted_at: u64,
+    },
+}
+
+impl<'a> From<&'a VaultEntry> for EntryToSeal<'a> {
+    fn from(entry: &'a VaultEntry) -> Self {
+        match entry {
+            VaultEntry::Record(record) => Self::Record {
+                provider: &record.provider,
+                account: &record.account,
+                label: &record.label,
+                secret: record.secret.expose(),
+                metadata: &record.metadata,
+                updated_at: record.updated_at,
+                version: record.version,
+            },
+            VaultEntry::Tombstone(tombstone) => Self::Tombstone {
+                provider: &tombstone.provider,
+                account: &tombstone.account,
+                version: tombstone.version,
+                deleted_at: tombstone.deleted_at,
+            },
         }
     }
 }
 
-/// What an opened seal parses into; its secret moves straight into a [`SecretString`].
+/// What an opened seal parses into; a record's secret moves straight into a [`SecretString`].
 #[derive(Deserialize)]
-struct OpenedRecord {
-    provider: ProviderId,
-    account: AccountId,
-    label: String,
-    secret: String,
-    metadata: BTreeMap<String, String>,
-    updated_at: u64,
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum OpenedEntry {
+    Record {
+        provider: ProviderId,
+        account: AccountId,
+        label: String,
+        secret: String,
+        metadata: BTreeMap<String, String>,
+        updated_at: u64,
+        version: u64,
+    },
+    Tombstone {
+        provider: ProviderId,
+        account: AccountId,
+        version: u64,
+        deleted_at: u64,
+    },
 }
 
-impl From<OpenedRecord> for CredentialRecord {
-    fn from(opened: OpenedRecord) -> Self {
-        Self {
-            provider: opened.provider,
-            account: opened.account,
-            label: opened.label,
-            secret: SecretString::new(opened.secret),
-            metadata: opened.metadata,
-            updated_at: opened.updated_at,
+impl From<OpenedEntry> for VaultEntry {
+    fn from(opened: OpenedEntry) -> Self {
+        match opened {
+            OpenedEntry::Record {
+                provider,
+                account,
+                label,
+                secret,
+                metadata,
+                updated_at,
+                version,
+            } => Self::Record(CredentialRecord {
+                provider,
+                account,
+                label,
+                secret: SecretString::new(secret),
+                metadata,
+                updated_at,
+                version,
+            }),
+            OpenedEntry::Tombstone {
+                provider,
+                account,
+                version,
+                deleted_at,
+            } => Self::Tombstone(Tombstone {
+                provider,
+                account,
+                version,
+                deleted_at,
+            }),
         }
     }
 }
@@ -478,6 +582,7 @@ fn create_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::record::FIRST_VERSION;
 
     const THE_OPERATOR: &str = "operator";
     const THE_PASSPHRASE: &str = "correct horse battery staple";
@@ -494,6 +599,7 @@ mod tests {
             secret: SecretString::new(format!("gho_{account}")),
             metadata: Default::default(),
             updated_at: 1,
+            version: FIRST_VERSION,
         }
     }
 

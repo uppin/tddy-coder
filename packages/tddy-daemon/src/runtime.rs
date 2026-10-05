@@ -249,6 +249,18 @@ pub struct RuntimeTasks {
         tokio::sync::oneshot::Sender<()>,
     )>,
     telegram_inbound: Option<TelegramInbound>,
+    /// `#keyring` 6/9's peer-join watch, when a common room and an open-vault population exist to
+    /// sync over. See `credential_sync::run_publish_watch`.
+    credential_sync_publish_watch: Option<CredentialSyncPublishWatch>,
+}
+
+/// What `#keyring` 6/9's peer-join watch needs to run, assembled in [`build`] and started by
+/// [`RuntimeTasks::spawn`] like every other background loop here.
+struct CredentialSyncPublishWatch {
+    registry: Arc<tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry>,
+    vaults: Arc<tddy_daemon_auth::SessionVaults>,
+    config: DaemonConfig,
+    engine: Arc<std::sync::Mutex<tddy_credential_sync::SyncEngine>>,
 }
 
 /// The OAuth loopback TCP proxy, which follows the common room across a reconnect rather than
@@ -459,6 +471,15 @@ impl RuntimeTasks {
                     }
                 }
             }));
+        }
+
+        if let Some(watch) = self.credential_sync_publish_watch {
+            handles.push(tokio::spawn(crate::credential_sync::run_publish_watch(
+                watch.registry,
+                watch.vaults,
+                watch.config,
+                watch.engine,
+            )));
         }
 
         if let Some(inbound) = self.telegram_inbound {
@@ -690,7 +711,8 @@ pub async fn build(
     });
     // This daemon's signing identity, loaded — or generated on first boot — only when it has
     // someone to authenticate: with no `github:` block nothing here signs or verifies a token.
-    let signing_key = match &auth_config.github {
+    // `mut`: `#keyring` 6/9's sync engine below takes ownership of it with `.take()`, the last use.
+    let mut signing_key = match &auth_config.github {
         Some(_) => Some(tddy_daemon_auth::load_signing_key(&auth_config)?),
         None => None,
     };
@@ -794,6 +816,16 @@ pub async fn build(
     // registry and room slot it was built with.
     let mut peer_discovery: Option<PeerDiscoveryHandles> = None;
 
+    // The same registry and room slot, captured for `#keyring` 6/9's sync engine — which needs a
+    // room to sync over regardless of whether `keyring.group_secret` is set (see
+    // `credential_sync`'s module doc). `None` whenever `peer_discovery` is, since there is nothing
+    // to sync over without a common room.
+    type CredentialSyncRoom = (
+        Arc<tddy_daemon_livekit::livekit_peer_discovery::CommonRoomPeerRegistry>,
+        Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
+    );
+    let mut credential_sync_room: Option<CredentialSyncRoom> = None;
+
     // The index daemon this runtime manages, so the host can stop it. Assembled below, inside the
     // branch that has the task registry to run it on.
     let mut index_daemon_registry: Option<crate::index_daemon::IndexDaemonRegistry> = None;
@@ -815,6 +847,7 @@ pub async fn build(
         index_daemon: None,
         relay_idle_monitor,
         telegram_inbound: telegram.inbound,
+        credential_sync_publish_watch: None,
     };
 
     if let (Some(user_resolver), Some(session_tokens), Some(advertised_signing_key)) = (
@@ -855,6 +888,7 @@ pub async fn build(
                     config: config_arc.clone(),
                     room_slot: room_slot.clone(),
                 });
+                credential_sync_room = Some((registry.clone(), room_slot.clone()));
                 Some(tddy_daemon_livekit::livekit_peer_discovery::LiveKitDiscoveryHandles {
                         eligible_daemon_source: Arc::new(
                             tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
@@ -1518,11 +1552,58 @@ pub async fn build(
         // token resolves to the GitHub login, which is the vault's subject. Not registered without
         // `auth_storage`: there is no vault to show, and nothing stands in for one.
         if let Some(vaults) = auth_result.credential_vaults.clone() {
-            rpc_entries.push(tddy_accounts::build_accounts_entry(
-                tddy_accounts::AccountsServiceImpl::new(Arc::new(
-                    tddy_accounts::SessionVaultAccountStore::new(vaults, accounts_user_resolver),
-                )),
+            let mut accounts_service = tddy_accounts::AccountsServiceImpl::new(Arc::new(
+                tddy_accounts::SessionVaultAccountStore::new(
+                    Arc::clone(&vaults),
+                    accounts_user_resolver,
+                ),
             ));
+
+            // `#keyring` 6/9's sync engine: journaled credential propagation to this daemon's
+            // admitted peers, over the same common room as every other LiveKit-dependent service
+            // above. Only when a room exists at all — regardless of whether `keyring.group_secret`
+            // is set, see `credential_sync`'s module doc — so a daemon with LiveKit switched off
+            // constructs no engine, and a misconfigured one still gets a real, journaling engine
+            // rather than none.
+            if let Some((registry, room_slot)) = credential_sync_room {
+                let local_instance_id =
+                    tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config);
+                let common_room = tddy_daemon_kernel::peer_forwarding::CommonRoom::from_config(
+                    room_slot.clone(),
+                    &config,
+                );
+                let daemon_signing_key = Arc::new(signing_key.take().expect(
+                    "signing_key is set whenever session_tokens is set (both come from the \
+                     same `Some(key)` branch above)",
+                ));
+                match crate::credential_sync::build(
+                    &config,
+                    daemon_signing_key,
+                    Arc::clone(&registry),
+                    room_slot,
+                    common_room,
+                    &local_instance_id,
+                ) {
+                    Ok(wiring) => {
+                        accounts_service =
+                            accounts_service.with_sync_status(wiring.sync_status_source);
+                        tasks.credential_sync_publish_watch = Some(CredentialSyncPublishWatch {
+                            registry,
+                            vaults: Arc::clone(&vaults),
+                            config: config.clone(),
+                            engine: wiring.engine,
+                        });
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            target: "tddy_daemon::credential_sync",
+                            "could not assemble #keyring 6/9's sync engine: {e:#}"
+                        );
+                    }
+                }
+            }
+
+            rpc_entries.push(tddy_accounts::build_accounts_entry(accounts_service));
         }
     }
 

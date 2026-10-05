@@ -15,6 +15,7 @@ stream.
 | `livekit_service` | `LiveKitServiceImpl` and `build_livekit_entry` — **authored here**, because family T needs a service to be served by once it leaves `ConnectionServiceImpl` |
 | `peer_routing` | `PeerRouting`: this daemon's routing identity, the eligible peers (`set_eligible_daemon_source`, `eligible_instance_ids`), the route an addressed request takes (`classify_daemon_route`, `classify_addressed_daemon_route`, `stream_served_by_peer`) and the `CommonRoom` handle (room slot plus the peer-forward deadline) a forward travels through; `PeerRouting::new` builds it from its `DaemonConfig`. Shared, not copied, by the session host and the RPC families above it, so a session RPC and an exec-tool RPC addressed at one daemon agree on who owns the call |
 | `session_admission_service` | the room-admission handshake: `SessionAdmissionRegistry`, the short-TTL admission token (`ADMISSION_TOKEN_TTL`, `ADMISSION_RENEW_MARGIN`) and `SessionAdmissionServiceImpl`, whose `AdmitOwningDaemon` re-mints a token only for a daemon the registry still holds, so a revoked daemon stays out of the room |
+| `livekit_peer_transport` | `LiveKitPeerTransport`: `tddy-credential-sync`'s `PeerTransport` over the common room, for `#keyring` 6/9's credential propagation — see below |
 
 `peer_routing` and `session_admission_service` hold no session-host state. `tddy-session-lifecycle`
 re-exports both by name (`pub use tddy_daemon_livekit::{peer_routing, session_admission_service};`),
@@ -118,6 +119,32 @@ reads an advertisement only from an identity outside `NON_DAEMON_IDENTITY_PREFIX
 that predicate allows, so a key is only ever read from an identity a daemon minted for itself. The
 rule lives in `tddy-service`, the lowest crate both the mint and this crate reach, so the two sides
 cannot drift.
+
+## `LiveKitPeerTransport`: credential sync rides its own channel
+
+`#keyring` 6/9's `tddy-credential-sync` defines `PeerTransport`, a port for advertising a daemon and
+delivering sealed credential payloads to one peer; `LiveKitPeerTransport` implements it over this
+crate's common room. See `docs/credential-sync.md` in `tddy-credential-sync` for the engine side —
+the two admission checks, the wire format, reconciliation and the journal. This crate's part is
+narrow and deliberately does not touch anything above:
+
+- **Rides participant *attributes*, not `metadata`.** `metadata` is `livekit_peer_discovery`'s own
+  single-writer channel (`DaemonAdvertisement`, republished on its eventual-consistency loop);
+  writing a second thing into it would make this adapter a second writer racing the first.
+  Attributes are untouched by everything else in this crate, so `advertise`/`peers` are additive.
+- **Delivery rides the existing `forward_to_peer` RPC mechanism** (`peer_routing`'s `CommonRoom`),
+  under its own service name (`CredentialSync`), the same data-channel path `ListProjects` and
+  `StartSession` forwarding already use.
+- **Bridges `PeerTransport`'s synchronous methods to LiveKit's async SDK** with
+  `tokio::task::block_in_place` + `Handle::current().block_on` — needed on a multi-threaded runtime,
+  which is every deployment this adapter ships in.
+- **Does not change `ListEligibleDaemons` or `StartSession` forwarding**, or the trust model either
+  keeps. Credentials get a second, independent gate; forwarding does not get a retrofit of it.
+
+`tddy-daemon`'s `credential_sync` module constructs the real engine around this transport — its
+identity verifier, its persisted transport key, and the peer-join trigger that calls `publish`. See
+`tddy-credential-sync`'s own doc, § *Known limitations*, for what is not wired yet (the receiving
+side's RPC registration, a trigger on vault change rather than only on join).
 
 ## Four edges had to be cut
 
