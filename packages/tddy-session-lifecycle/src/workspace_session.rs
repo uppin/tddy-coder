@@ -263,16 +263,7 @@ pub async fn start_agent_clone_session(
     }))
 }
 
-/// Resolve the worktree root for a session by reading `.session.yaml`.
-pub fn resolve_worktree_root_for_session(
-    sessions_base: &Path,
-    session_id: &str,
-) -> Result<PathBuf, Status> {
-    resolve_worktree_root_in_session_dir(&tddy_core::session_lifecycle::unified_session_dir_path(
-        sessions_base,
-        session_id,
-    ))
-}
+pub use crate::connection_service::peer_session_answer::resolve_worktree_root_for_session;
 
 /// The worktree root the `.session.yaml` in `session_dir` records.
 pub(crate) fn resolve_worktree_root_in_session_dir(session_dir: &Path) -> Result<PathBuf, Status> {

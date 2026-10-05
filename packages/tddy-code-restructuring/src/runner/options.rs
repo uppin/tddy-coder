@@ -46,6 +46,8 @@ pub enum Command {
     Unload,
     /// List the plans the index daemon holds — a daemon-only command.
     Plans,
+    /// Load a root's crate graph into the index daemon — a daemon-only command.
+    Warm,
 }
 
 /// What a restructuring run was asked for, and where its live account goes.

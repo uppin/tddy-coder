@@ -6,9 +6,16 @@
 # run-livekit-testkit-server established: narration on stderr, one machine-readable line on stdout.
 #
 # Usage:
-#   ./run-index-daemon              # start or reuse, then print the export line
+#   ./run-index-daemon              # start or reuse, warm this checkout, then print the export line
+#   ./run-index-daemon --no-warm    # start or reuse, but leave the crate graph unloaded
 #   ./run-index-daemon --status     # report what is running; start nothing
 #   ./run-index-daemon --stop       # stop this checkout's daemon
+#
+# Warming: once the daemon answers, `tddy-tools restructure warm` loads this checkout's crate graph
+# into it, and the script returns when the graph is queryable. Without it the first real request
+# pays for the load — more than five minutes on this workspace, silently. `--no-warm` skips it. A
+# warm that fails is reported on stderr and changes nothing else: the daemon is running, so the
+# export line is still printed and the exit code is the one the start earned.
 #
 # Output (stdout, one line, nothing else):
 #   export TDDY_INDEX_SOCKET=/path/to/tddy-index-<tag>.sock
@@ -28,7 +35,8 @@
 #   TDDY_INDEX_DAEMON_BIN   — run this prebuilt daemon instead of building target/debug's: a release
 #                             build, or a copy outside `target/`, so rebuilding the checkout does not
 #                             replace the binary a long restructure is using. Nothing is built when
-#                             it is set, and a path that is not executable is an error.
+#                             it is set, and a path that is not executable is an error. The warm
+#                             uses the `tddy-tools` beside it, which is then not built either.
 #   TDDY_INDEX_LOG          — RUST_LOG for the daemon (default: info). Readiness is read from the
 #                             daemon's own `listening on …` line, which it logs at info — a level
 #                             below that starts a daemon this script cannot confirm.
@@ -83,6 +91,30 @@ READY_TICK_SECONDS=0.2
 
 narrate() { echo "$@" >&2; }
 
+# The client that warms: the `tddy-tools` beside the daemon binary, the way a sibling binary is
+# resolved everywhere else in this repo. Built with the daemon when this script builds it, so the
+# two come from the same tree; with a prebuilt daemon it is whatever sits next to that one.
+TOOLS_BINARY="$(dirname "$BINARY")/tddy-tools"
+
+# Load this checkout's crate graph into the daemon, narrating on stderr.
+#
+# `restructure warm` writes its own answer to stdout, and this script's stdout is one line — the
+# `export` — so the client's stdout is sent to stderr with the rest of the narration. A failure
+# does not fail the script: the daemon is running and reachable whether or not its graph loaded,
+# and saying otherwise would send a caller to start a daemon that is already there.
+warm_checkout() {
+  if [[ ! -x "$TOOLS_BINARY" ]]; then
+    narrate "Not warming: ${TOOLS_BINARY} is not an executable file (build it: cargo build -p tddy-tools)."
+    return 0
+  fi
+  narrate "Warming ${ROOT_DIR}: loading its crate graph (minutes on a cold start; --no-warm skips this)"
+  if (cd "$ROOT_DIR" && TDDY_INDEX_SOCKET="$SOCKET" "$TOOLS_BINARY" restructure warm >&2); then
+    narrate "Warm: the first request will not pay for the crate graph"
+  else
+    narrate "The warm failed; the daemon is running, and its first request will load the graph itself."
+  fi
+}
+
 # The pid of the daemon this checkout started, if it is still running.
 running_pid() {
   [[ -f "$PID_FILE" ]] || return 1
@@ -131,6 +163,12 @@ stop_daemon() {
   exit 0
 }
 
+WARM=1
+if [[ "${1:-}" == "--no-warm" ]]; then
+  WARM=0
+  shift
+fi
+
 case "${1:-}" in
   --stop)
     stop_daemon
@@ -169,7 +207,7 @@ case "${1:-}" in
   "")
     ;;
   *)
-    narrate "run-index-daemon: unknown argument '$1'. Use --status, --stop, or no argument."
+    narrate "run-index-daemon: unknown argument '$1'. Use --no-warm, --status, --stop, or no argument."
     exit 2
     ;;
 esac
@@ -179,6 +217,7 @@ esac
 if pid="$(running_pid)"; then
   if [[ -S "$SOCKET" ]]; then
     narrate "Reusing index daemon pid ${pid}"
+    [[ "$WARM" == 1 ]] && warm_checkout
     announce "$pid"
     exit 0
   fi
@@ -206,8 +245,11 @@ if [[ -n "$PREBUILT_BINARY" ]]; then
   fi
   narrate "Using the prebuilt index daemon ${BINARY}; not building"
 else
-  narrate "Building tddy-index-daemon"
-  nix develop --profile ./.nix-profile -c cargo build -p tddy-index-daemon >&2
+  # The client is built with the daemon only when it will be used, so `--no-warm` costs what it did.
+  BUILD_PACKAGES=(-p tddy-index-daemon)
+  [[ "$WARM" == 1 ]] && BUILD_PACKAGES+=(-p tddy-tools)
+  narrate "Building: ${BUILD_PACKAGES[*]}"
+  nix develop --profile ./.nix-profile -c cargo build "${BUILD_PACKAGES[@]}" >&2
 
   if [[ ! -x "$BINARY" ]]; then
     narrate "run-index-daemon: ${BINARY} was not built"
@@ -308,6 +350,7 @@ for _ in $(seq 1 "$READY_TICKS"); do
       narrate "would have nothing to stop. Kill it by hand: pkill -f 'tddy-index-daemon .*${SOCKET}'"
       exit 1
     fi
+    [[ "$WARM" == 1 ]] && warm_checkout
     announce "$daemon_pid"
     exit 0
   fi

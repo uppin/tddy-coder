@@ -1,4 +1,4 @@
-use crate::connection_service::{seeded_clone_guard, stack_parent};
+use crate::connection_service::stack_parent;
 
 use super::GrillMeConversationSpawnHandler;
 
@@ -230,11 +230,23 @@ impl DaemonSessionHost {
             let task = tokio::spawn(endpoint.run());
             session_stdio.lock().await.insert(
                 sid.clone(),
-                seeded_clone_guard::SessionStdioEndpoint { client, task },
+                crate::connection_service::svc_start_claude_cli_session::SessionStdioEndpoint {
+                    client,
+                    task,
+                },
             );
             log::info!("spawn_host_session_socket({sid}): reverse endpoint connected + ready");
         });
         log::info!("spawn_host_session_socket({session_id}): listening at {path:?}");
         Some(path.to_string_lossy().into_owned())
     }
+}
+
+/// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
+/// read/dispatch loop running; dropping it (on session teardown) ends the loop.
+pub(crate) struct SessionStdioEndpoint {
+    #[allow(dead_code)]
+    pub(crate) client: Arc<tddy_stdio::StdioRpcClient>,
+    #[allow(dead_code)]
+    pub(crate) task: tokio::task::JoinHandle<()>,
 }

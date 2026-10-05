@@ -88,7 +88,8 @@ fn leaving(
                 facade_written = true;
                 Some(facade_lines_for_plan(&moved).join("\n"))
             }
-            Reexport::Named | Reexport::None => facade_line(
+            // `outside` is refused for a cross-crate move when the plan is read.
+            Reexport::Named | Reexport::None | Reexport::Outside => facade_line(
                 &member.destination,
                 member.reexport,
                 &survey.reached_from_outside,

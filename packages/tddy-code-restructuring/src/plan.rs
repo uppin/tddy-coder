@@ -217,6 +217,31 @@ pub enum RefactorKind {
     /// Takes `to`, the destination crate's directory. The destination's `[dev-dependencies]` gain
     /// what the moved test names, not its `[dependencies]`.
     MoveTestBinaryToCrate,
+    /// Moves a run of items into **another existing module of the same crate**, in any file.
+    ///
+    /// Not [`Self::moves_across_crates`]: nothing leaves the crate, so there is no manifest to edit
+    /// and no crate to depend on. Like the cross-crate moves it has no assist behind it (rust-analyzer
+    /// has no "move item to another module"), so it is engine-*informed*: every caller it re-points
+    /// comes from `textDocument/references`. Anchored by `items` (or a single `item`); `to` is the
+    /// destination module's path, rooted at the package name, and must already exist.
+    ///
+    /// `reexport: glob`/`named` leave a `pub use` where the items were and re-point no caller;
+    /// `none` (or absent) re-points every caller, which is the difference from `extract_module`,
+    /// where `none` refuses when another file reaches the items.
+    MoveItem,
+    /// Moves a module, with the directory of its children, under **another existing module of the
+    /// same crate**.
+    ///
+    /// Anchored by an `items` (or single `item`) anchor on the module's `mod` declaration in its old
+    /// parent; `to` is the new parent's module path, rooted at the package name, and must already
+    /// exist. The module's files are moved with `git mv`, the declaration travels with its visibility
+    /// and attributes, and every path that named the module is re-pointed from the server's reference
+    /// set. Not [`Self::moves_across_crates`], for the reason [`Self::MoveItem`] is not.
+    ///
+    /// `reexport: glob` leaves `pub use <new parent>::<module>;` in the old parent and re-points no
+    /// caller; `none` (or absent) re-points every caller. `named` is refused: a module has no
+    /// per-item facade, and `glob` is the word for the one a module needs.
+    ReparentModule,
     /// rust-analyzer `Remove unused parameter`: drops a parameter the body never reads, from the
     /// declaration and from every call site. Anchored on the function; `name` is the parameter.
     ///
@@ -314,9 +339,22 @@ pub enum Reexport {
     /// reaches. A *named* re-export of a less visible item is `E0365`, which the tiers avoid; naming
     /// an item nothing outside reaches would force it public for no caller.
     Named,
+    /// Only for `move_item` and `reparent_module`: every caller in the crate that holds the moved
+    /// code is re-pointed to the new path, as [`Reexport::None`] does, and a facade is left at the
+    /// old path for exactly the items something in *another* package reaches, as
+    /// [`Reexport::Named`] writes it. Nothing outside reaching an item leaves it no facade, and a
+    /// caller outside the crate is never edited — the public path it depends on keeps resolving.
+    Outside,
     /// Nothing, which is what an extraction did before this field existed. A path-reached item with a
     /// reference elsewhere is then refused rather than stranded.
     None,
+}
+
+impl Reexport {
+    /// Whether the callers in the moved code's own crate are re-pointed to the new path.
+    pub(crate) fn repoints_callers(self) -> bool {
+        matches!(self, Reexport::None | Reexport::Outside)
+    }
 }
 
 /// An operation's stable identity inside its plan.
@@ -346,7 +384,8 @@ pub struct RefactorOp {
     pub id: Option<OpId>,
     pub op: RefactorKind,
     pub anchor: Anchor,
-    /// New symbol name, for extractions and renames.
+    /// New symbol name, for extractions and renames. On a `move_item` it names a module the move
+    /// creates: `to` is then that module's parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Destination path, for moves.
@@ -1065,6 +1104,113 @@ mod tests {
         assert!(error.contains("reexport"), "{error}");
     }
 
+    const AN_ITEMS_ANCHOR: &str =
+        r#"{"kind":"items","file":"src/a.rs","items":["app::a::f"],"fingerprints":["sha256:f"]}"#;
+
+    #[test]
+    fn reads_a_move_item_with_the_facade_it_asks_for() {
+        let plan = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR},"to":"app::b","reexport":"glob"}}"#
+        )))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::MoveItem);
+        assert_eq!(plan.ops[0].reexport, Some(Reexport::Glob));
+        assert!(!plan.ops[0].op.moves_across_crates());
+    }
+
+    #[test]
+    fn refuses_a_move_item_that_names_no_destination() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR}}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("move_item") && error.contains("`to`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_move_item_anchored_by_range() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"move_item","anchor":{"kind":"range","file":"src/a.rs","start":{"line":1,"col":1},"end":{"line":9,"col":1}},"to":"app::b"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("anchors by item"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_move_item_that_asks_for_a_file_of_its_own() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR},"to":"app::b","to_file":true}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("to_file") && error.contains("MoveItem"),
+            "{error}"
+        );
+    }
+
+    const A_MOD_DECLARATION_ANCHOR: &str = r#"{"kind":"items","file":"src/host.rs","items":["app::host::attachments"],"fingerprints":["sha256:f"]}"#;
+
+    #[test]
+    fn reads_a_reparent_module_with_the_facade_it_asks_for() {
+        let plan = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"reparent_module","anchor":{A_MOD_DECLARATION_ANCHOR},"to":"app::split","reexport":"glob"}}"#
+        )))
+        .unwrap();
+
+        assert_eq!(plan.ops[0].op, RefactorKind::ReparentModule);
+        assert_eq!(plan.ops[0].reexport, Some(Reexport::Glob));
+        assert!(!plan.ops[0].op.moves_across_crates());
+    }
+
+    #[test]
+    fn refuses_a_reparent_module_that_names_no_new_parent() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"reparent_module","anchor":{A_MOD_DECLARATION_ANCHOR}}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("reparent_module") && error.contains("`to`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_reparent_module_anchored_by_range() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"reparent_module","anchor":{"kind":"range","file":"src/host.rs","start":{"line":1,"col":1},"end":{"line":1,"col":20}},"to":"app::split"}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("anchors by item"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_named_facade_for_a_module() {
+        let error = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"reparent_module","anchor":{A_MOD_DECLARATION_ANCHOR},"to":"app::split","reexport":"named"}}"#
+        )))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("reparent_module") && error.contains("glob"),
+            "{error}"
+        );
+    }
+
     #[test]
     fn refuses_a_reexport_the_vocabulary_does_not_define() {
         assert!(Plan::parse(&plan_with(
@@ -1493,5 +1639,41 @@ mod tests {
                 _ => false,
             });
         assert_eq!(refusal, Err(true));
+    }
+
+    #[test]
+    fn rejects_a_move_item_anchored_by_range_or_symbol() {
+        let refusals: Vec<String> = [
+            r#"{"kind":"range","file":"src/a.rs","start":{"line":1,"col":1},"end":{"line":2,"col":1}}"#,
+            r#"{"kind":"symbol","file":"src/a.rs","path":"f"}"#,
+        ]
+        .iter()
+        .map(|anchor| {
+            let line = format!(r#"{{"op":"move_item","anchor":{anchor},"to":"app::b"}}"#);
+            match Plan::parse(&plan_with(&line)) {
+                Err(RestructureError::MalformedPlan(reason)) => reason,
+                other => format!("not refused as malformed: {other:?}"),
+            }
+        })
+        .collect();
+
+        assert!(
+            refusals
+                .iter()
+                .all(|reason| reason.contains("names no module-level item to move")),
+            "{refusals:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_name_on_reparent_module_which_creates_no_module() {
+        let line = r#"{"op":"reparent_module","anchor":{"kind":"items","file":"src/a.rs","items":["app::a::m"],"fingerprints":["sha256:ab"]},"to":"app::b","name":"x"}"#;
+
+        let refusal = match Plan::parse(&plan_with(line)) {
+            Err(RestructureError::MalformedPlan(reason)) => reason,
+            other => format!("not refused as malformed: {other:?}"),
+        };
+
+        assert!(refusal.contains("creates no module"), "{refusal}");
     }
 }

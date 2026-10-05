@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::connection_service::seed_codebase;
 
 use super::DaemonSessionHost;
@@ -109,28 +107,4 @@ impl Drop for SeededCloneGuard {
             }
         });
     }
-}
-
-/// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
-/// read/dispatch loop running; dropping it (on session teardown) ends the loop.
-pub(crate) struct SessionStdioEndpoint {
-    #[allow(dead_code)]
-    pub(crate) client: Arc<tddy_stdio::StdioRpcClient>,
-    #[allow(dead_code)]
-    pub(crate) task: tokio::task::JoinHandle<()>,
-}
-
-/// Where one exec tool call of a session this daemon holds is run.
-pub(crate) enum ExecToolRoute {
-    /// The session's checkout on this host, through the tool engine — every session that did not
-    /// ask to be confined.
-    HostWorktree,
-    /// The session's own jail on this host: a sandboxed `workspace` session
-    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
-    Jail(Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandbox>),
-    /// Neither, and the call is answered with this as its error. A session recorded as sandboxed
-    /// whose jail this daemon does not hold is refused rather than served from the bare host: a
-    /// tool that ran unconfined on a session that asked to be confined is the one failure nobody
-    /// can see afterwards.
-    Refused(String),
 }

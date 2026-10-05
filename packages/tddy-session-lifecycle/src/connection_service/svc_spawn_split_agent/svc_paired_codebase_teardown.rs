@@ -10,7 +10,7 @@ use tddy_rpc::Status;
 
 use std::path::Path;
 
-use super::super::peer_has_no_such_session;
+use crate::connection_service::peer_session_answer::peer_has_no_such_session;
 
 use tddy_service::proto::session::DeleteSessionRequest;
 
@@ -86,7 +86,8 @@ impl DaemonSessionHost {
         let Ok(meta) = read_session_metadata(&session_dir) else {
             return Ok(());
         };
-        let Some((codebase_daemon, codebase_session)) = crate::split_session::split_pairing(&meta)
+        let Some((codebase_daemon, codebase_session)) =
+            crate::connection_service::peer_session_answer::split_pairing(&meta)
         else {
             return Ok(());
         };

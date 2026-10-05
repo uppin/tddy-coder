@@ -15,11 +15,13 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use tddy_code_restructuring::restructure_cli::{
     OpRef, RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
-    RestructureLoadArgs, RestructurePlanArgs, RestructureUnloadArgs, RestructureVerifyArgs,
+    RestructureLoadArgs, RestructurePlanArgs, RestructureSnapshotArgs, RestructureUnloadArgs,
+    RestructureVerifyArgs,
 };
 use tddy_index_daemon::proto::code_index::{
     AnchorsRequest, ApplyRequest, CheckRequest, ListPlansRequest, LoadPlansRequest,
-    PlanStatusRequest, SourcePosition, SourceRange, UnloadPlansRequest, VerifyRequest,
+    PlanStatusRequest, SnapshotRequest, SourcePosition, SourceRange, UnloadPlansRequest,
+    VerifyRequest, WarmRequest,
 };
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tonic::transport::Channel;
@@ -42,20 +44,21 @@ pub(crate) async fn run_restructure(args: RestructureArgs) -> Result<()> {
 
 /// Whether this process answers a command itself, whatever the environment names.
 ///
-/// `snapshot` re-hashes the files a plan's header names against the working tree. There is no seam
-/// to resolve and no index behind it — nothing a warm daemon holds that this process does not — so
-/// it runs here rather than dialling a socket to be told what `sha256` already knows. Routed before
-/// the dial rather than as an arm of [`restructure_at`], because a run that failed to reach a
-/// daemon it never needed would be a refusal invented by this function.
+/// `snapshot` re-hashes the files a plan's header names against the working tree. For a plan with
+/// no item anchors there is no seam to resolve and no index behind it — nothing a warm daemon holds
+/// that this process does not — so it runs here rather than dialling a socket to be told what
+/// `sha256` already knows. Routed before the dial rather than as an arm of [`restructure_at`],
+/// because a run that failed to reach a daemon it never needed would be a refusal invented by this
+/// function.
 ///
-/// A plan with item anchors is the exception to "no index behind it": its anchors are re-resolved
-/// through a language server, which this process starts for itself, cold, as an `apply` with no
-/// daemon does.
-// TODO(live-plans): a daemon holds that index warm; routing an item-anchored snapshot to it needs a
-// `Snapshot` RPC, which this change does not add. See docs/dev/todo/2026-10-03-live-plans-three-gaps-in-staleness-reporting-and-snapshot-routing.md.
+/// A plan with item anchors is the exception: its anchors are re-resolved through a language
+/// server, and the one a daemon holds is warm, so that snapshot is the daemon's `Snapshot` RPC
+/// rather than a cold server of this process's own.
 fn answered_without_an_index(command: &RestructureCommand) -> bool {
     match command {
-        RestructureCommand::Snapshot(_) => true,
+        RestructureCommand::Snapshot(snapshot) => {
+            !tddy_code_restructuring::item_anchor::plan_file_has_item_anchors(&snapshot.plan)
+        }
         RestructureCommand::Apply(_)
         | RestructureCommand::Status(_)
         | RestructureCommand::Check(_)
@@ -63,7 +66,8 @@ fn answered_without_an_index(command: &RestructureCommand) -> bool {
         | RestructureCommand::Verify(_)
         | RestructureCommand::Load(_)
         | RestructureCommand::Unload(_)
-        | RestructureCommand::Plans => false,
+        | RestructureCommand::Plans
+        | RestructureCommand::Warm => false,
     }
 }
 
@@ -103,19 +107,11 @@ async fn restructure_at(socket: &Path, args: RestructureArgs) -> Result<()> {
         RestructureCommand::Status(plan) => self::status(&mut client, root, plan).await,
         RestructureCommand::Anchors(anchors) => self::anchors(&mut client, root, anchors).await,
         RestructureCommand::Verify(verify) => self::verify(&mut client, root, verify).await,
-        // `answered_without_an_index` routes this away before the dial above, so a caller reaching
-        // here has asked this function directly. It still gets the answer, from the same place the
-        // routed path takes it: there is no `Snapshot` RPC to reach for, and inventing one would
-        // put a socket in front of a hash of a file this process can read.
-        RestructureCommand::Snapshot(snapshot) => {
-            tddy_code_restructuring::restructure_cli::run(RestructureArgs {
-                command: RestructureCommand::Snapshot(snapshot),
-            })
-            .await
-        }
+        RestructureCommand::Snapshot(snapshot) => self::snapshot(&mut client, root, snapshot).await,
         RestructureCommand::Load(load) => self::load(&mut client, root, load).await,
         RestructureCommand::Unload(unload) => self::unload(&mut client, root, unload).await,
         RestructureCommand::Plans => self::plans(&mut client, root).await,
+        RestructureCommand::Warm => self::warm(&mut client, root).await,
     }
 }
 
@@ -134,6 +130,52 @@ async fn client_at(socket: &Path) -> Result<CodeIndexServiceClient<Channel>> {
             )
         })?;
     Ok(CodeIndexServiceClient::new(channel))
+}
+
+/// Rewrite a plan's snapshot header on the daemon, which re-resolves its item anchors on its warm
+/// index. The plan is rendered under the name it was given here, as the in-process run does.
+async fn snapshot(
+    client: &mut CodeIndexServiceClient<Channel>,
+    workspace_root: String,
+    args: RestructureSnapshotArgs,
+) -> Result<()> {
+    let plan = named(&args.plan)?;
+    let response = client
+        .snapshot(SnapshotRequest {
+            workspace_root,
+            plan: plan.clone(),
+        })
+        .await
+        .map_err(refused)?
+        .into_inner();
+    index_console::snapshotted(&plan, &response);
+    Ok(())
+}
+
+/// Load the tree's crate graph into the daemon, narrating its progress until the root is queryable.
+///
+/// Ends only on the stream's `ready` message: a stream that closed without one is a daemon that
+/// stopped waiting, not a root that is warm, and reporting it as warm would send the next request
+/// to pay for the load this command was run to take off it.
+async fn warm(client: &mut CodeIndexServiceClient<Channel>, workspace_root: String) -> Result<()> {
+    let request = WarmRequest {
+        workspace_root: workspace_root.clone(),
+    };
+    let mut events = client.warm(request).await.map_err(refused)?.into_inner();
+    let mut rendered = Rendered::new(false);
+    let mut ready = false;
+    while let Some(progress) = events.message().await.map_err(refused)? {
+        rendered.indexing(&progress);
+        ready = progress.ready;
+    }
+    if !ready {
+        anyhow::bail!(
+            "the index daemon ended the warm of {workspace_root} without reporting its crate \
+             graph queryable"
+        );
+    }
+    index_console::warmed(&workspace_root);
+    Ok(())
 }
 
 /// Everything wrong with a plan, without writing anything.
@@ -386,6 +428,42 @@ mod tests {
 
         // Then it names three items, the generic one whole
         assert_eq!(request.items, vec!["One", "<Pair<A, B>>", "Two"]);
+    }
+
+    fn a_snapshot_of(plan_text: &str) -> (tempfile::TempDir, RestructureCommand) {
+        let directory = tempfile::tempdir().expect("a directory for the plan");
+        let plan = directory.path().join("plan.jsonl");
+        std::fs::write(&plan, plan_text).expect("write the plan");
+        let command = RestructureCommand::Snapshot(RestructureSnapshotArgs { plan });
+        (directory, command)
+    }
+
+    #[test]
+    fn a_snapshot_of_a_plan_with_item_anchors_is_answered_by_the_daemons_index() {
+        // Given a snapshot of a plan whose one operation is anchored by item
+        let (_plan, command) = a_snapshot_of(concat!(
+            "{\"v\":2,\"files\":{}}\n",
+            "{\"op\":\"rename_symbol\",\"anchor\":{\"kind\":\"item\",\"item\":\"t::big::Registry\",",
+            "\"file\":\"src/big.rs\",\"fingerprint\":\"sha256:0000\"},\"name\":\"HostRegistry\"}\n",
+        ));
+
+        // When it is asked whether this process answers it without an index
+        // Then it does not: re-resolving an item needs the language server the daemon holds warm
+        assert!(!answered_without_an_index(&command));
+    }
+
+    #[test]
+    fn a_snapshot_of_a_plan_with_no_item_anchors_is_answered_in_process() {
+        // Given a snapshot of a plan anchored by symbol
+        let (_plan, command) = a_snapshot_of(concat!(
+            "{\"v\":1,\"snapshot\":{}}\n",
+            "{\"op\":\"rename_symbol\",\"anchor\":{\"kind\":\"symbol\",\"file\":\"src/big.rs\",",
+            "\"path\":\"Registry\"},\"name\":\"HostRegistry\"}\n",
+        ));
+
+        // When it is asked whether this process answers it without an index
+        // Then it does: the header is a hash of files this process can read
+        assert!(answered_without_an_index(&command));
     }
 
     #[test]

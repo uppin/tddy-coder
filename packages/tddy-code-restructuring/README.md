@@ -15,6 +15,7 @@ Exposed via `tddy-tools restructure`:
 - `snapshot <plan.jsonl>` — rewrites the plan's header; for a plan of item anchors it also re-resolves them against the current tree
 - `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries; `--items` takes bare names, `krate::module::Alpha`, and `<Type>` / `<Type>#N` for an inherent `impl` block (`item_anchor::parse_item_list` is the one rule for every front end)
 - `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes
+- `warm` — loads the tree's crate graph into the index daemon (it needs the daemon)
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
 "Ready" means rust-analyzer has reported itself quiescent (or never sends the status at all) **and**
@@ -81,7 +82,12 @@ requests reads the tree on disk again after each one. See
 `extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`),
 `extract_module_to_file`, `extract_trait`, `inline_method`, `remove_unused_param` (`name`: the parameter),
 `convert_tuple_return_to_struct` (`name`: the new struct), `move_module_to_crate` (`to`,
-`reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`).
+`reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`), `move_item` (`to`,
+`name`, `reexport`) and `reparent_module` (`to`, `reexport`).
+
+`move_item` and `reparent_module` move items, and a module with its directory, **within one crate**, with
+`reexport: outside` leaving a facade only for what another package reaches; see
+[docs/same-crate-moves.md](docs/same-crate-moves.md).
 
 `remove_unused_param` and `convert_tuple_return_to_struct` rewrite every caller as well as the declaration,
 through rust-analyzer's own assists; see [docs/signature-assists.md](docs/signature-assists.md).
@@ -113,8 +119,9 @@ given.
 
 ## Where the code lives
 
-`src/` is organised by what a file decides, and no file goes over the 500 production-line budget
-except `backends/rust.rs` and `crate_move/test_binary.rs` (see their records in `docs/code-issues/`).
+`src/` is organised by what a file decides. Over the 500 production-line budget are `backends/rust.rs` and
+`crate_move/test_binary.rs` (records in `docs/code-issues/`) and `plan.rs`, `plan/codec.rs`,
+`item_anchor.rs` and `runner/tidy.rs` (the budget is deferred and has no record yet).
 
 | Area | Modules |
 |---|---|
@@ -123,7 +130,7 @@ except `backends/rust.rs` and `crate_move/test_binary.rs` (see their records in 
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
 | Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs` |
-| Rust backend | `backends/rust.rs`, and beside it `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
+| Rust backend | `backends/rust.rs`, and beside it `item_move/`, `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
 | Cross-crate moves | `crate_move/{moving,cluster,source_scan}.rs` with `moving/facade_writer.rs`, `cluster/stranded.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs` |
 
 Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream

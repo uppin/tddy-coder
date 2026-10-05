@@ -1,6 +1,6 @@
 # complexity: facade_lines
 
-**Location:** `packages/tddy-code-restructuring/src/backends/rust/facade.rs:150` — `facade_lines`
+**Location:** `packages/tddy-code-restructuring/src/backends/rust/facade.rs:151` — `facade_lines`
 **Moved:** 2026-10-03 by #539 (`#live-plan` 7/15) from `backends/rust.rs` into `backends/rust/facade.rs`, by an engine move; the function is unchanged
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -16,6 +16,7 @@
 |---|---|---|---|---|---|
 | 2026-09-18 | 47 | 5 | 5 | 1 | first detection |
 | 2026-09-24 | 47 | 5 | 5 | 1 | unchanged; #527 moved it from line 3978 to 3522 by taking code out of `rust.rs` above it, and did not touch the function |
+| 2026-10-05 | 54 | 5 | — | — | touched by the same-crate moves: `reexport: outside` is refused for an extraction, one match arm with a `return Err(…)` (fn line to closing brace: 51 at the merge base, 58 at HEAD, so +7; the record's own count 47 plus 7). Nesting is unchanged at 5 (brace depth 6 counting the function's own, at both). One match arm and one early exit are added; the branch and early-exit columns are the first detection's plus those, not re-derived by the original scan. The finding stands |
 
 ## What the tool found
 

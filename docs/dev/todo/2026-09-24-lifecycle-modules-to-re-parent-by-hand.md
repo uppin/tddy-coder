@@ -1,4 +1,4 @@
-# 2026-09-24 — `tddy-session-lifecycle` modules that sit under the wrong parent, and need a hand `git mv`
+# 2026-09-24 — `tddy-session-lifecycle` modules that sit under the wrong parent
 
 **Category:** Future enhancement
 **Source:** `#carve` 14/15, [#524](https://github.com/uppin/tddy-coder/pull/524), change history
@@ -7,56 +7,29 @@
 
 ## Why deferred
 
-**Needs developer consent, because of an engine gap.** `tddy-tools restructure`'s `extract_module`
-writes the new module as a child of the file it cuts from. It cannot put the code under a different
-parent, and `move_module_to_crate` moves between crates, not within one. So every move below is a
-`git mv`, plus `mod`/`use` edits, by hand. The developer's rule for the destructure (2026-09-24) was
-that no refusal is worked around with a hand move, so each waits for consent. The destructure
-already cut the code out, so each is now a whole-file move.
+**The engine gap is closed; what remains has other reasons.** `tddy-tools restructure` now has
+`reparent_module`, which moves a module's file and directory under another parent of the same crate, and
+`move_item`, which moves items between modules of one crate. The modules of plan `11` whose destination is
+a parent inside the crate were moved with them (`#carve` 16 follow-up). Three modules remain, because their
+destination is no longer a module of this crate, and the two regroupings below were never planned as moves.
 
-The next node, the wiring split ([#526](https://github.com/uppin/tddy-coder/pull/526)), moves
-topics out of the crate by directory. A module left under the wrong parent either travels with the
-wrong topic or has to be picked out by hand there.
+The wiring split ([#526](https://github.com/uppin/tddy-coder/pull/526)) moved topics out of the crate by
+directory. A module left under the wrong parent either travels with the wrong topic or has to be picked out
+by hand there; for the three below the answer is to move them straight to their receivers.
 
-## Plan `11`'s modules: cut out of the wrong file, still under it
+## Plan `11`'s modules that remain
 
 Plan `11` moved nine misplaced clusters into modules of their own (`02b3f7a8`), each as a child of
-the file it was found in:
+the file it was found in. Six of the nine now sit under their topic's parent; three do not:
 
 | Module (under `src/connection_service/`) | Holds | Belongs to |
 |---|---|---|
-| `svc_materialize_staged_attachment/split_claude_cli_start.rs` | `start_split_claude_cli_session` | split sessions (`split_session/`, `split_start.rs`) |
-| `svc_resolve_os_user/session_attachment_materialization.rs` | `prepare_session_attachments`, `materialize_session_attachments` | attachments (`attachment_progress.rs`, `svc_materialize_staged_attachment.rs`) |
-| `svc_resolve_os_user/local_exec_tool_dispatch.rs` | `run_exec_tool_locally` | exec tools (`local_exec_tools.rs`) |
-| `svc_resolve_listed_worktree/session_dir_lookup.rs` | `session_dir_for` | the session catalog |
-| `svc_resolve_listed_worktree/session_room_opening.rs` | `ensure_session_room` | rooms (`svc_ensure_session_room_for_agents.rs`) |
-| `svc_turn_end_reporter/jail_env_builders.rs` | `specialized_subagent_env`, `jail_daemon_identity_env`, `lsp_tools_env` | the sandboxed launch |
-| `svc_resolve_tddy_tools_path/svc_host_builders/presenter_observer_spawn.rs` | `maybe_spawn_presenter_observer` | activity (`svc_activity_ports.rs`, `presenter_observer_task.rs`) |
-| `svc_resolve_tddy_tools_path/svc_host_builders/rpc_activity.rs` | `record_rpc_activity` | routing (`relay_idle.rs`) |
-| `svc_resolve_tddy_tools_path/svc_host_builders/first_admission_token.rs` | `mint_first_admission_token` | room admission (`session_admission_service.rs`) |
+| `svc_resolve_listed_worktree/session_dir_lookup.rs` | `session_dir_for` | the session catalog (left the crate in #526: `tddy-session-activity`) |
+| `svc_host_builders/rpc_activity.rs` | `record_rpc_activity` | routing (`relay_idle`, in `tddy-daemon-kernel`) |
+| `svc_host_builders/first_admission_token.rs` | `mint_first_admission_token` | room admission (`session_admission_service`, in `tddy-daemon-livekit`) |
 
-`svc_host_builders.rs` itself sits under `svc_resolve_tddy_tools_path/` for the same reason (plan
-`07`): the host constructor and its `with_*` builders were cut from the file that held them, and
-that file is now 51 lines. `svc_host_builders.rs` belongs beside `connection_service.rs`'s struct.
-
-An example of the hand move, for one row:
-
-```text
-# before
-src/connection_service/svc_resolve_os_user.rs                    mod local_exec_tool_dispatch;
-src/connection_service/svc_resolve_os_user/local_exec_tool_dispatch.rs
-
-# after
-git mv src/connection_service/svc_resolve_os_user/local_exec_tool_dispatch.rs \
-       src/connection_service/local_exec_tools/local_exec_tool_dispatch.rs
-src/connection_service/local_exec_tools.rs                       mod local_exec_tool_dispatch;
-# plus the `use super::…` paths inside the moved file rebased one level
-```
-
-**Not contiguous, so left where it is:** `run_exec_tool_locally` moved, but its exec-tool siblings
-in `svc_resolve_os_user.rs` did not. `resolve_exec_tool_worktree` (lines 56 and 214) and
-`authorize_exec_tool_caller` (183) sit between the OS-user and peer-routing functions, so no one
-range held them. They go with this row's move.
+Each destination is a receiver crate, so none is a `reparent_module`: they go to their receivers in `#carve`
+17, with `move_module_to_crate`. `svc_host_builders.rs` itself now sits beside the struct it builds.
 
 ## `cli_spawn/`: the two non-sandboxed CLI spawns
 
@@ -99,16 +72,16 @@ launch holds. It sits in the host core's toolcall module, but belongs with agent
 
 ## What would close it
 
-The developer's consent for the moves above, done as one reviewed hand commit (a `git mv` per
-row, the `mod` lines, the rebased `use` paths), with the public `tddy_session_lifecycle::…` paths
-kept. Then `./test -p tddy-session-lifecycle` against the destructure's baseline (61 targets,
-622 / 22 / 1), and every crate that depends on lifecycle checked with `--all-targets`. Or an engine
-operation that moves a module under a different parent within one crate; none exists.
+`ManagedWorkflow` is one `move_item`. The `cli_spawn/` regrouping needs its parent first: a `move_item` that
+carries `name` creates an empty module, which `reparent_module` does not, and then one `reparent_module` per
+module moves in. The public `tddy_session_lifecycle::…` paths are kept (`reexport: outside` leaves a facade
+only for what another package reaches, and `cursor_cli_spawn` is a public module of the crate, so its path
+must be kept by a facade or by `glob`). The three modules in the table above move with `#carve` 17. Then
+`./test -p tddy-session-lifecycle` against the baseline by name, and every crate that depends on lifecycle
+checked with `--all-targets`.
 
-## Status 2026-10-04
+## Status
 
-`#carve` 16a ([#531](https://github.com/uppin/tddy-coder/pull/531)) did **not** re-parent the four mixed
-parent/child files (its M0.4 / D8): the developer deferred it, and no hand moves are allowed. The
-engine improvement that closes this is a **`reparent_module` operation**: move a module's file and
-directory under another parent in the same crate and rewrite the `mod` and `use` lines. It is still
-**blocking for node 17**, whose module moves take a parent's children along.
+Partly resolved. The `reparent_module` operation exists and the six in-crate rows are done. Remaining: the
+three rows above (node 17), the `cli_spawn/` regrouping and `ManagedWorkflow`, which no plan has been
+written for.

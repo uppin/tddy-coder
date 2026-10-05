@@ -3,7 +3,7 @@
 A warm rust-analyzer index, served as `code_index.CodeIndexService` over gRPC and stdio — or one
 operation run in process and then exit.
 
-Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Seventeen RPCs covering the
+Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Twenty RPCs covering the
 plan-driven restructuring operations (`tddy-code-restructuring`), the analysis operations
 (`tddy-code-analysis`) and code navigation (`Definition`, `References`, `Hover`), each request naming
 the `workspace_root` it acts on so one process serves several worktrees.
@@ -24,6 +24,9 @@ subcommand nor a transport is an error rather than a default.
   and when files change underneath it (`plan_upkeep.rs`, fed by `tree_changes.rs`) it re-resolves the
   loaded plans' item anchors in them. A stale operation is reported by `ListPlans` and `PlanStatus` (proto
   `StaleOp`) and refused by `Apply`; plans nobody loaded are never touched.
+- **Snapshot**: `Snapshot` rewrites a plan's snapshot header and, for a plan with item anchors,
+  re-resolves them on the root's warm index (a plan with none is hashed without a server);
+  `tddy-tools restructure snapshot` routes an item-anchored plan here when `TDDY_INDEX_SOCKET` is set.
 - **Transactional groups**: `Apply` gates each plan group at its end and rolls it back exactly when it
   does not compile; a group's `OperationApplied` events (field `group`) are sent only once it is kept.
 - **Navigation**: `Definition`, `References` and `Hover` answer from the root's warm rust-analyzer in
@@ -37,4 +40,6 @@ subcommand nor a transport is an error rather than a default.
   `export TDDY_INDEX_SOCKET=…`. It launches the daemon with the dev shell's **whole** environment
   (not only its `PATH`), because rust-analyzer builds every build script and proc macro in it, and
   with a temporary directory that outlives the shell that started it. `TDDY_INDEX_DAEMON_BIN` runs a
-  prebuilt daemon instead (nothing is built; a path that is not executable is an error)
+  prebuilt daemon instead (nothing is built; a path that is not executable is an error). The script also
+  **warms** its checkout once the daemon answers, by running `tddy-tools restructure warm` (the one beside
+  the daemon binary); `--no-warm` skips it

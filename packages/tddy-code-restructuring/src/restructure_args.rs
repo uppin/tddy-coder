@@ -39,6 +39,9 @@ pub enum RestructureCommand {
     Unload(RestructureUnloadArgs),
     /// List the plans the index daemon holds.
     Plans,
+    /// Load this tree's crate graph into the index daemon, so the first real request does not
+    /// pay for it.
+    Warm,
 }
 
 #[derive(Parser)]
@@ -255,6 +258,10 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
         },
         RestructureCommand::Plans => Options {
             command: Command::Plans,
+            ..Options::default()
+        },
+        RestructureCommand::Warm => Options {
+            command: Command::Warm,
             ..Options::default()
         },
     }

@@ -47,17 +47,6 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
 /// A plan that was already current says so rather than saying nothing: a silent no-op is
 /// indistinguishable from a subcommand that did not run, the reason [`NO_FINDINGS`] exists.
 pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
-    let mut lines = vec![if rewrite.rewritten {
-        format!(
-            "rewrote the snapshot header of {} over {} file(s)",
-            rewrite.plan, rewrite.paths
-        )
-    } else {
-        format!(
-            "{} already snapshots the working tree over {} file(s)",
-            rewrite.plan, rewrite.paths
-        )
-    }];
     let stale: Vec<(String, String)> = rewrite
         .stale
         .iter()
@@ -67,7 +56,26 @@ pub fn snapshot_rewrite(rewrite: &SnapshotRewrite) -> Vec<String> {
         .iter()
         .map(|(op, reason)| (op.as_str(), reason.as_str()))
         .collect();
-    lines.extend(stale_operations(&stale));
+    snapshot_lines(&rewrite.plan, rewrite.paths, rewrite.rewritten, &stale)
+}
+
+/// [`snapshot_rewrite`] from the parts a front end that did not run the snapshot holds: the plan as
+/// it named it, what the answer said, and each stale operation as an `(id, reason)` pair.
+///
+/// The one place the wording lives, so a snapshot served by the index daemon reads as one run
+/// in-process.
+pub fn snapshot_lines(
+    plan: &str,
+    paths: usize,
+    rewritten: bool,
+    stale: &[(&str, &str)],
+) -> Vec<String> {
+    let mut lines = vec![if rewritten {
+        format!("rewrote the snapshot header of {plan} over {paths} file(s)")
+    } else {
+        format!("{plan} already snapshots the working tree over {paths} file(s)")
+    }];
+    lines.extend(stale_operations(stale));
     lines
 }
 
@@ -520,6 +528,24 @@ mod tests {
             lines,
             ["rewrote the snapshot header of plan.jsonl over 3 file(s)"]
         );
+    }
+
+    #[test]
+    fn a_snapshot_rendered_from_its_parts_reads_as_the_rewrite_it_came_from() {
+        // Given a rewrite that found one operation stale
+        let rewrite = a_snapshot_rewrite(
+            false,
+            vec![crate::plan_store::OpStaleness {
+                op: crate::OpId("b1".to_string()),
+                reason: crate::plan_store::StaleReason::ItemChanged,
+            }],
+        );
+
+        // When a front end that only holds the answer's parts renders it
+        let from_parts = snapshot_lines("plan.jsonl", 3, false, &[("b1", "item changed")]);
+
+        // Then it reads exactly as the run that produced it does
+        assert_eq!(from_parts, snapshot_rewrite(&rewrite));
     }
 
     #[test]

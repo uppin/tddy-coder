@@ -78,6 +78,8 @@ pub fn dispatch(
         Command::Plans => Err(RestructureError::NeedsIndexDaemon {
             command: "plans".to_string(),
         }),
+        // What a warm leaves behind is a loaded graph in a process that outlives the request.
+        Command::Warm => Err(RestructureError::WarmNeedsIndexDaemon),
     }
 }
 

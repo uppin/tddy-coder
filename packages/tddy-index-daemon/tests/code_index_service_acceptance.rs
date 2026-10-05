@@ -20,9 +20,9 @@ use tddy_index_daemon::proto::code_index::{
     DiagnosticsResponse, DuplicateTestsRequest, Finding, FunctionComplexity, HoverRequest,
     HoverResponse, IndexProgress, ListPlansRequest, LoadPlansRequest, LoadedPlan,
     PlanStatusRequest, PlanStatusResponse, PlansResponse, ReferencesRequest, ReferencesResponse,
-    ReportRequest, ReportResponse, RestructureEvent, RunOutcome, SourcePosition, SourceRange,
-    SymbolsRequest, SymbolsResponse, UnloadPlansRequest, VerifyRequest, VerifyResponse,
-    WarmRequest, WorkspacesRequest, WorkspacesResponse,
+    ReportRequest, ReportResponse, RestructureEvent, RunOutcome, SnapshotRequest, SnapshotResponse,
+    SourcePosition, SourceRange, SymbolsRequest, SymbolsResponse, UnloadPlansRequest,
+    VerifyRequest, VerifyResponse, WarmRequest, WorkspacesRequest, WorkspacesResponse,
 };
 use tddy_index_daemon::{
     build_code_index_entry, CodeIndexPorts, CodeIndexServiceImpl, CODE_INDEX_SERVICE,
@@ -1649,4 +1649,122 @@ async fn diagnostics_refuses_a_file_that_climbs_out_of_the_root() {
         "the refusal should name the file, got: {}",
         refusal.message()
     );
+}
+
+// ─── Snapshot ──────────────────────────────────────────────────────────────────────────────
+
+/// A source whose `foo` sits on lines 11 to 13 — where the fake language server's outline puts it.
+fn a_source_with_foo_on_lines_eleven_to_thirteen(body: &str) -> String {
+    format!(
+        "{}pub fn foo() -> u32 {{\n    {body}\n}}\n",
+        "// filler\n".repeat(10)
+    )
+}
+
+/// What the registered coordinate answers to `Snapshot` of `plan` under `workspace`.
+async fn the_snapshot_answer(
+    entry: &tddy_rpc::ServiceEntry,
+    workspace: &tempfile::TempDir,
+    plan: &Path,
+) -> SnapshotResponse {
+    unary_at(
+        entry,
+        "Snapshot",
+        SnapshotRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plan: plan.to_string_lossy().to_string(),
+        },
+    )
+    .await
+    .expect("a plan that is there can be snapshotted")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_an_item_anchored_plan_and_reports_the_operation_whose_item_changed_as_stale() {
+    // Given a plan whose one operation is anchored to `foo` as it is now, taken from the anchor the
+    // service itself emits so its fingerprint is the one a resolution would compute
+    let workspace =
+        a_workspace_holding_a_package(&a_source_with_foo_on_lines_eleven_to_thirteen("1"));
+    let anchor = the_anchor_answer(&workspace, &["foo"], None)
+        .await
+        .anchor_json;
+    let plan = workspace.path().join("item-plan.jsonl");
+    std::fs::write(
+        &plan,
+        format!(
+            "{{\"v\":2,\"files\":{{}}}}\n{{\"op\":\"extract_module\",\"anchor\":{anchor},\"name\":\"grouped\"}}\n"
+        ),
+    )
+    .expect("write the plan");
+
+    // And `foo` edited since
+    std::fs::write(
+        workspace.path().join("src/lib.rs"),
+        a_source_with_foo_on_lines_eleven_to_thirteen("2"),
+    )
+    .expect("edit the source");
+
+    // When the plan is snapshotted through the registered coordinate
+    let answer = the_snapshot_answer(&a_host_over_fake_language_servers(), &workspace, &plan).await;
+
+    // Then the answer names the one operation as stale, and why
+    assert_eq!(
+        answer
+            .stale
+            .iter()
+            .map(|stale| stale.reason.as_str())
+            .collect::<Vec<_>>(),
+        ["item changed"]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshots_a_plan_with_no_item_anchors_without_waiting_for_a_language_server() {
+    // Given a plan anchored by symbol, whose header names a file with a hash the tree no longer has
+    let workspace = a_workspace_holding_a_package("pub fn foo() -> u32 {\n    1\n}\n");
+    let plan = workspace.path().join("symbol-plan.jsonl");
+    std::fs::write(
+        &plan,
+        format!(
+            "{{\"v\":1,\"snapshot\":{{\"src/lib.rs\":\"sha256:0000\"}}}}\n{}\n",
+            an_extraction_of("foo", "src/lib.rs")
+        ),
+    )
+    .expect("write the plan");
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is snapshotted
+    let answer = the_snapshot_answer(&entry, &workspace, &plan).await;
+
+    // Then its header was rewritten over the one file, nothing is stale, and no server was started
+    // for the root to do it
+    assert_eq!(
+        (answer.paths, answer.rewritten, answer.stale),
+        (1, true, vec![])
+    );
+    let held: WorkspacesResponse = unary_at(&entry, "Workspaces", WorkspacesRequest {})
+        .await
+        .expect("the roots held are listed");
+    assert_eq!(held.workspaces, vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_snapshot_a_plan_that_is_not_there() {
+    // Given a workspace with no plan in it
+    let workspace = a_workspace_holding("pub fn foo() {}\n");
+
+    // When a plan that is not there is snapshotted
+    let refusal = unary_at::<_, SnapshotResponse>(
+        &a_host_over_fake_language_servers(),
+        "Snapshot",
+        SnapshotRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plan: "missing.jsonl".to_string(),
+        },
+    )
+    .await
+    .expect_err("a plan that is not there is refused");
+
+    // Then it is a failed precondition naming the path, as for every other request about a plan
+    assert_eq!(refusal.code(), tddy_rpc::Code::FailedPrecondition);
 }

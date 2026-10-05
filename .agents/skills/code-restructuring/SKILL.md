@@ -7,7 +7,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 
 **You never write the moved or extracted code.** You write a plan of *intents*. `tddy-tools restructure` resolves each intent through rust-analyzer (via `tddy-lsp`).
 
-**v1 scope:** Rust only — seven operations, five subcommands. No TypeScript.
+**v1 scope:** Rust only — twenty-two operations, ten subcommands. No TypeScript.
 
 ## CLI
 
@@ -15,13 +15,14 @@ description: Restructure Rust code without writing moved code by hand — split 
 tddy-tools restructure apply  <plan.jsonl> [--dry-run] [--resume] [--from N|ID] [--stop-after N]
 tddy-tools restructure status <plan.jsonl>
 tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]   # LINES counts production lines (before `#[cfg(test)] mod`)
-tddy-tools restructure snapshot <plan.jsonl>
+tddy-tools restructure snapshot <plan.jsonl>          # item anchors: answered by the warm daemon when TDDY_INDEX_SOCKET is set
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
 tddy-tools restructure verify --against <git-ref>
 tddy-tools restructure load   <plan.jsonl>...        # needs the index daemon (TDDY_INDEX_SOCKET)
 tddy-tools restructure unload <plan.jsonl>... | --all
 tddy-tools restructure plans
+tddy-tools restructure warm                          # load this tree's crate graph into the index daemon; needs it
 ```
 
 `load` reads a plan into the daemon once, gives every operation an `id`, and keeps it current: `apply`
@@ -38,9 +39,13 @@ operation, and writes the plan back. `apply` loads a plan that is not loaded; `l
    [Testing cadence](#testing-cadence).
 2. **Targeting** — run [`analyze-code-issues`](analyze-code-issues/SKILL.md); put CRAP note in changeset.
 3. **Understand shape** — LSP outline, references, cohesion; write `docs/dev/1-WIP/{slug}-initial-discovery.md`.
+   Decide which operation each seam needs: items into a module of the same crate is `move_item`, a module
+   under another parent is `reparent_module`, a cut inside one file is `extract_module`; see
+   [Gathering a topic module](#gathering-a-topic-module).
 4. **Changeset** — `Type: Refactor` at `docs/dev/1-WIP/YYYY-MM-DD-<name>.md`; see `references/restructure-changeset.md`.
 5. **Anchor** — `restructure anchors <file.rs> --items A,B,C` emits an `items` anchor over whole
-   items, and `restructure anchors <file.rs> --at 188:9-198:11` emits an `item` anchor for the
+   items (over a module's `mod` declaration, for `reparent_module`: name the module and pass its old
+   parent's file), and `restructure anchors <file.rs> --at 188:9-198:11` emits an `item` anchor for the
    innermost item enclosing the lines you read, with a range relative to it. **Do not hand-write line
    numbers, and paste the emitted JSON as it is.** An item anchor names the item by its path and
    resolves through rust-analyzer's outline, so an edit anywhere *outside* that item leaves it correct;
@@ -52,7 +57,10 @@ operation, and writes the plan back. `apply` loads a plan that is not loaded; `l
    hash drift: `restructure snapshot plan.jsonl` rewrites the header from the working tree, and must
    be re-run after **every** edit to a snapshotted file. A v2 plan (`{"v":2,"files":…}`, item
    anchors) treats its per-file hashes as hints: drift is reported, never refused, so there is nothing
-   to re-run after an unrelated edit.
+   to re-run after an unrelated edit. `snapshot` of a plan **with item anchors** re-resolves them
+   through a language server: with `TDDY_INDEX_SOCKET` set it is asked of the warm daemon (its
+   `Snapshot` RPC), and without one it starts a cold rust-analyzer of its own. A plan with no item
+   anchors is answered in process either way.
 7. **Plan** — JSONL intents only; see `references/plan-schema.md`.
 8. **Prove seams** — `restructure check plan.jsonl --deep`. **`--deep` is the gate, not an option.**
    A plain `check` reads text; only `--deep` resolves each operation through the same path `apply`
@@ -65,6 +73,29 @@ operation, and writes the plan back. `apply` loads a plan that is not loaded; `l
    anything into a tree that already does not compile. An apply also **consumes its plan file**: it
    writes each operation's anchors back for the tree it left, so a plan that has been applied (or that
    failed part-way and was rolled back) is stale — regenerate it from `anchors` rather than re-running it.
+
+## Gathering a topic module
+
+A topic module gathered from items that live in several files, or from a module that sits under the
+wrong parent, is moves, not extractions: `extract_module` cannot re-point callers, so it leaves a
+facade only a hand edit can remove.
+
+1. **Create and fill in one step.** A `move_item` line that carries `name` makes `to` the **parent**,
+   declares a new empty module `name` in it and moves the first items in. Without `name`, `to` is an
+   existing module, and a missing one is refused, so a typo cannot grow a file.
+2. **Move the rest in** with further `move_item` lines whose `to` is the new module, each anchored in
+   its own file (one file per line; the plan may hold lines for several files).
+3. **Re-parent whole modules** with `reparent_module`: the module's file and directory move under the
+   new parent, with its `mod` declaration, and the paths that named it follow.
+4. **Choose `reexport` by who calls.** `none` re-points every caller; `outside` re-points the callers
+   inside the library crate and leaves a facade only for what another package, a `tests/`, `examples/`
+   or `benches/` file, or a `src/bin` of the same package reaches (use it for a crate with consumers);
+   `glob` and `named` leave a facade and re-point nothing (use them to keep every old path).
+5. **`check --deep` is still the gate**, for these operations as for every other: it resolves each
+   move through the same path `apply` uses and writes nothing. A refusal there is a defect in the plan
+   or in the engine, and a hand edit after an apply is neither: record it as a backlog entry or fix the
+   engine. The one thing a move does not do is widen a private field or method of a type it splits,
+   or the private items of a re-parented tree; the compile gate names those.
 
 ## Testing cadence
 
@@ -102,7 +133,8 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
 ## Rules
 
 - **No code in plans** — fields `text`, `code`, `content` are refused.
-- **No `create_file`** — files appear via assists only.
+- **No `create_file`** — a file appears only because an operation caused it: an assist, `to_file`,
+  `extract_module_to_file`, a cross-crate move, or a `move_item` that carries `name`.
 - **Unsupported ops are hard errors** — never skip silently.
 - **Order `extract_method`s bottom-up.** Several in one function compose only last-range-first, so
   no anchor has to be translated through another extraction; see `references/plan-schema.md`.
@@ -128,6 +160,13 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
   eval $(./run-index-daemon | grep '^export ')   # exports TDDY_INDEX_SOCKET
   tddy-tools restructure check plan.jsonl        # now costs the assist, not the index
   ```
+
+  `./run-index-daemon` **warms its checkout by default**: after the daemon answers it runs
+  `tddy-tools restructure warm` for the checkout root and returns when the crate graph is queryable
+  (more than five minutes on a cold start of this workspace), so the first request does not pay for it.
+  `--no-warm` (first argument) skips that. A warm that fails is reported on stderr and changes
+  nothing else. `tddy-tools restructure warm` does the same on its own, for a daemon started another way, and
+  is refused naming `./run-index-daemon` when `TDDY_INDEX_SOCKET` names none.
 
   With `TDDY_INDEX_SOCKET` unset the CLI spawns its own rust-analyzer exactly as before. A set but
   unreachable socket is an error, not a silent fall back to the cold path.

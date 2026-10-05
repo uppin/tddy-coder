@@ -139,7 +139,8 @@ pub(crate) fn facade_will_bind(
     kind: Reexport,
 ) -> bool {
     match kind {
-        Reexport::None => false,
+        // `outside` is refused for `extract_module` when the plan is read, so it never gets here.
+        Reexport::None | Reexport::Outside => false,
         Reexport::Glob => moved.iter().any(|item| item.name == name),
         Reexport::Named => moved
             .iter()
@@ -153,6 +154,13 @@ pub(crate) fn facade_lines(
     kind: Reexport,
 ) -> Result<Vec<String>> {
     Ok(match kind {
+        Reexport::Outside => {
+            return Err(super::failure(
+                "`reexport: outside` belongs to `move_item` and `reparent_module`; an extraction \
+                 leaves a `glob` or `named` facade"
+                    .to_string(),
+            ))
+        }
         Reexport::None => Vec::new(),
         // `pub use` only where something the module holds is actually `pub`. The assist rewrites
         // what it relocates to `pub(crate)`, so a seam of private items yields a `pub` glob that

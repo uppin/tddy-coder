@@ -282,18 +282,17 @@ fn needs_lsp_client(options: &Options) -> bool {
         Command::Status | Command::Verify | Command::Load | Command::Unload | Command::Plans => {
             false
         }
+        // The graph a warm loads is the daemon's to hold; this process has none to load it into.
+        Command::Warm => false,
     }
 }
 
-/// Whether the plan `options` names holds item anchors. A plan that cannot be read or parsed has
-/// none to resolve, and says why when the command reads it.
+/// Whether the plan `options` names holds item anchors.
 fn names_item_anchors(options: &Options) -> bool {
     options
         .plan()
         .ok()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|text| crate::Plan::parse(&text).ok())
-        .is_some_and(|plan| crate::item_anchor::has_item_anchors(&plan))
+        .is_some_and(|path| crate::item_anchor::plan_file_has_item_anchors(&path))
 }
 
 #[cfg(test)]
@@ -355,6 +354,7 @@ mod tests {
         assert!(!needs_lsp_client(&parse(&["check", "plan.jsonl"])));
         assert!(!needs_lsp_client(&parse(&["status", "plan.jsonl"])));
         assert!(!needs_lsp_client(&parse(&["verify", "--against", "HEAD"])));
+        assert!(!needs_lsp_client(&parse(&["warm"])));
     }
 
     /// The cold path's half of the same judgement the warm one makes in `verdict_on_outcome`.

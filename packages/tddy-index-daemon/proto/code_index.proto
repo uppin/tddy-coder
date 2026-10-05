@@ -29,6 +29,11 @@ service CodeIndexService {
   // Execute a plan against the working tree.
   rpc Apply(ApplyRequest) returns (stream RestructureEvent);
 
+  // Rewrite a plan's snapshot header to the working tree as it stands. A plan with item anchors has
+  // them re-resolved too, on this root's warm index, and an operation whose item changed or went is
+  // reported and left as written.
+  rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
+
   // A range anchor covering a named run of items, trivia included.
   rpc Anchors(AnchorsRequest) returns (AnchorsResponse);
 
@@ -176,6 +181,24 @@ message RunOutcome {
   uint32 total    = 2;
   // Set when the run stopped early because `stop_after` was reached rather than because it failed.
   bool   stopped_early = 3;
+}
+
+message SnapshotRequest {
+  string workspace_root = 1;
+  // Path to the JSONL plan, absolute or relative to `workspace_root`. Its header is rewritten in
+  // place.
+  string plan           = 2;
+}
+
+message SnapshotResponse {
+  // How many paths the plan's header names.
+  uint32 paths     = 1;
+  // Whether the header on disk differed from the working tree and was replaced. Stated rather than
+  // inferred from `paths`: a plan already current and one whose every hash moved name the same files.
+  bool   rewritten = 2;
+  // Operations of an item-anchored plan whose item has changed or gone, in plan order. Empty for a
+  // plan with no item anchors, which a snapshot does not look into.
+  repeated StaleOp stale = 3;
 }
 
 message AnchorsRequest {

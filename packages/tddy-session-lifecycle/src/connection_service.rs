@@ -132,7 +132,10 @@ pub struct DaemonSessionHost {
     /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
     session_stdio: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<String, seeded_clone_guard::SessionStdioEndpoint>,
+            std::collections::HashMap<
+                String,
+                crate::connection_service::svc_start_claude_cli_session::SessionStdioEndpoint,
+            >,
         >,
     >,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
@@ -317,11 +320,10 @@ mod split_start;
 pub use split_start::*;
 
 mod svc_resolve_os_user;
+pub use crate::connection_service::peer_session_answer::resolve_exec_tool_worktree;
 /// Caller identity, shared with `tddy-daemon-rpc`'s exec-tool and PR-stack families, which must
 /// authenticate a caller exactly as the host does.
-pub use svc_resolve_os_user::{
-    authorize_exec_tool_caller, resolve_exec_tool_worktree, resolve_os_user,
-};
+pub use svc_resolve_os_user::{authorize_exec_tool_caller, resolve_os_user};
 
 /// How a sandboxed `workspace` session's jail is specified, and rebuilt when it dies mid-call.
 mod jail_relaunch;
@@ -545,3 +547,5 @@ mod conversation_worktree_jail_route_unit_tests;
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
+pub(crate) mod peer_session_answer;
+mod svc_host_builders;

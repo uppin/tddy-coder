@@ -1,3 +1,5 @@
+mod split_claude_cli_start;
+
 use tddy_core::session_lifecycle::validate_session_id_segment;
 
 use tddy_service::proto::session::SplitAgentPlacement;
@@ -38,13 +40,6 @@ impl SplitStartFailure {
             Self::PeerAnswered
         }
     }
-}
-
-pub(crate) fn peer_has_no_such_session(status: &Status) -> bool {
-    matches!(
-        status.code,
-        tddy_rpc::Code::FailedPrecondition | tddy_rpc::Code::NotFound
-    )
 }
 
 /// Validate `StartSessionRequest.split_agent`: the agent session, on another daemon, that a

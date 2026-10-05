@@ -491,4 +491,5 @@ mod jail_worktree;
 
 mod jail_launch_steps;
 
+mod jail_env_builders;
 mod jail_session_files;

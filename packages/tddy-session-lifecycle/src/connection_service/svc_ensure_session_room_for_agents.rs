@@ -1,9 +1,10 @@
+mod session_room_opening;
+
 use std::path::Path;
 
 use crate::{
     connection_service::{agent_roster, seed_codebase, seeded_clone_guard},
     livekit_peer_discovery::local_instance_id_for_config,
-    workspace_session,
 };
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
@@ -188,7 +189,10 @@ impl DaemonSessionHost {
         session_id: &str,
     ) -> Result<(), Status> {
         let worktree_path =
-            workspace_session::resolve_worktree_root_for_session(sessions_base, session_id)?;
+            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+                sessions_base,
+                session_id,
+            )?;
         let session_dir = unified_session_dir_path(sessions_base, session_id);
         super::service_util::index_session_worktree(
             &self.tddy_data_dir,

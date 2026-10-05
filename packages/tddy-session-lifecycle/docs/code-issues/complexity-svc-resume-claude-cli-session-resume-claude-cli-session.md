@@ -14,6 +14,7 @@
 |---|---|---|---|
 | 2026-09-19 | 119 | 9 | 112 → 119 and **8 → 9 parameters** in PR #518 |
 | 2026-09-24 | 119 | 9 | re-measured for #524 (2026-09-24): unchanged, and not touched by it |
+| 2026-10-05 | 119 | 9 | touched by the same-crate moves and **unchanged by them**: `split_pairing` is named through `peer_session_answer`, one line re-pointed; 119 lines and 9 parameters at `origin/master` and at HEAD (fn line to closing brace) |
 
 ## What grew it
 

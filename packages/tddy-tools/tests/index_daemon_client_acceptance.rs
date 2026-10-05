@@ -480,3 +480,170 @@ fn the_warm_paths_narration_stamps_every_step_as_the_cold_paths_does() {
         narration(&cold)
     );
 }
+
+// ─── Snapshot routing, and warming a root ──────────────────────────────────────────────────
+
+/// A v2 plan whose one operation is anchored by an **item**, which is the only kind of plan whose
+/// snapshot needs a language server: the fingerprint is made up, because what is under test is
+/// where the run goes, not what it finds.
+fn an_item_anchored_plan_in(root: &Path) -> PathBuf {
+    let plan = root.join("item-plan.jsonl");
+    std::fs::write(
+        &plan,
+        concat!(
+            "{\"v\":2,\"files\":{}}\n",
+            "{\"op\":\"rename_symbol\",\"anchor\":{\"kind\":\"item\",\"item\":\"t::big::Registry\",",
+            "\"file\":\"src/big.rs\",\"fingerprint\":\"sha256:0000\"},\"name\":\"HostRegistry\"}\n",
+        ),
+    )
+    .expect("the plan");
+    plan
+}
+
+/// A one-crate cargo workspace small enough for a real rust-analyzer to index in seconds.
+fn a_tiny_cargo_workspace() -> tempfile::TempDir {
+    let workspace = tempfile::tempdir().expect("a temporary workspace");
+    std::fs::create_dir_all(workspace.path().join("src")).expect("src");
+    std::fs::write(
+        workspace.path().join("Cargo.toml"),
+        "[package]\nname = \"tiny\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .expect("a manifest");
+    std::fs::write(
+        workspace.path().join("src/lib.rs"),
+        "pub fn answer() -> u32 {\n    42\n}\n",
+    )
+    .expect("a source file");
+    workspace
+}
+
+/// A snapshot of an item-anchored plan has to re-resolve its anchors, which only a language server
+/// can do — so with a warm daemon holding one, the run goes there instead of paying a cold index of
+/// its own.
+///
+/// What is asserted is the route, not the answer: the narration names the daemon and never says it
+/// is acquiring a client of its own. That is deterministic whatever the daemon finds in a
+/// workspace that has no crate in it.
+#[test]
+fn routes_a_snapshot_of_an_item_anchored_plan_at_the_warm_daemon() {
+    // Given a plan anchored by item, a warm daemon, and no language server on this client's PATH
+    let workspace = a_workspace_of_a_long_module_and_a_short_one();
+    let plan = an_item_anchored_plan_in(workspace.path());
+    let daemon = a_warm_index_daemon();
+    let nowhere = tempfile::tempdir().expect("an empty PATH");
+    let mut run = a_restructure_run_in(workspace.path());
+    with_no_language_server_anywhere(&mut run, nowhere.path());
+
+    // When the plan is snapshotted with the socket variable naming the daemon
+    let output = run
+        .env("TDDY_INDEX_SOCKET", daemon.socket())
+        .args(["snapshot", plan.to_str().expect("the plan path")])
+        .output()
+        .expect("the run completes");
+
+    // Then it ran against the daemon, and never started a server of its own
+    let said = narration(&output);
+    assert!(
+        said.contains("running against the warm index daemon"),
+        "the snapshot did not go to the daemon; stderr was: {said}"
+    );
+    assert!(
+        !said.contains("acquiring shared rust-analyzer client"),
+        "the snapshot started a rust-analyzer of its own beside the warm one; stderr was: {said}"
+    );
+}
+
+/// A plan with no item anchors needs no server at all, so the route that is right for it is the
+/// one it already has: the hash of a file this process can read is not worth a socket.
+#[test]
+fn keeps_a_snapshot_of_a_plan_with_no_item_anchors_in_process() {
+    // Given a plan anchored by symbol, and a warm daemon
+    let workspace = a_workspace_of_a_long_module_and_a_short_one();
+    let plan = a_plan_naming_both_modules(workspace.path());
+    let daemon = a_warm_index_daemon();
+
+    // When it is snapshotted with the socket variable naming the daemon
+    let output = a_restructure_run_in(workspace.path())
+        .env("TDDY_INDEX_SOCKET", daemon.socket())
+        .args(["snapshot", plan.to_str().expect("the plan path")])
+        .output()
+        .expect("the run completes");
+
+    // Then it succeeds without ever naming the daemon
+    assert!(
+        output.status.success(),
+        "a snapshot of a plan with no item anchors failed; stderr was: {}",
+        narration(&output)
+    );
+    assert!(
+        !narration(&output).contains("running against the warm index daemon"),
+        "a plan that needs no server was sent to the daemon"
+    );
+}
+
+/// `warm` exists to load a root's crate graph into a daemon, so without a daemon it has nothing to
+/// do — and says how to get one, rather than starting a rust-analyzer in-process that would be
+/// thrown away when the command exits.
+#[test]
+fn refuses_to_warm_without_a_daemon_and_names_the_script_that_starts_one() {
+    // Given a workspace and no socket variable
+    let workspace = a_tiny_cargo_workspace();
+
+    // When `restructure warm` runs
+    let output = a_restructure_run_in(workspace.path())
+        .arg("warm")
+        .output()
+        .expect("the run completes");
+
+    // Then it refuses, naming the script
+    let said = format!("{}{}", console(&output).join("\n"), narration(&output));
+    assert!(
+        !output.status.success(),
+        "`warm` claimed success with no daemon to warm: {said}"
+    );
+    assert!(
+        said.contains("run-index-daemon"),
+        "the refusal did not name `./run-index-daemon`: {said}"
+    );
+}
+
+/// The claim the subcommand exists for, against a real rust-analyzer: after `warm`, the daemon holds
+/// the root, so the first real request does not pay for loading it.
+///
+/// A production test by `docs/dev/guides/testing.md`: it boots a real rust-analyzer. Run it
+/// deliberately:
+///
+/// ```bash
+/// ./dev cargo test -p tddy-tools --test index_daemon_client_acceptance -- --ignored --test-threads=1
+/// ```
+#[test]
+#[ignore = "boots a real rust-analyzer and loads a real crate graph; needs a toolchain"]
+fn leaves_the_root_warm_on_the_daemon_it_was_asked_to_warm() {
+    // Given a tiny cargo workspace and a daemon holding no roots
+    let workspace = a_tiny_cargo_workspace();
+    let daemon = a_warm_index_daemon();
+
+    // When `restructure warm` runs against it
+    let output = a_restructure_run_in(workspace.path())
+        .env("TDDY_INDEX_SOCKET", daemon.socket())
+        .arg("warm")
+        .output()
+        .expect("the run completes");
+
+    // Then it succeeds, and the daemon says it holds one warm workspace
+    assert!(
+        output.status.success(),
+        "`warm` failed; stderr was: {}",
+        narration(&output)
+    );
+    let ping = Command::new(the_index_daemon())
+        .arg("--ping")
+        .arg(daemon.socket())
+        .output()
+        .expect("the ping completes");
+    assert!(
+        String::from_utf8_lossy(&ping.stdout).contains("1 warm workspace(s)"),
+        "the daemon does not hold the root after `warm`: {}",
+        String::from_utf8_lossy(&ping.stdout)
+    );
+}

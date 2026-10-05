@@ -31,7 +31,8 @@ use tddy_code_restructuring::runner::{PlanProgress, RunSummary};
 use tddy_code_restructuring::verify::{Comparison, Excused};
 use tddy_index_daemon::proto::code_index::{
     restructure_event, AnchorsResponse, Finding, IndexProgress, OperationApplied,
-    PlanStatusResponse, PlansResponse, RestructureEvent, RunOutcome, VerifyResponse,
+    PlanStatusResponse, PlansResponse, RestructureEvent, RunOutcome, SnapshotResponse,
+    VerifyResponse,
 };
 
 /// One line of a run's answer, on the console this front end owns.
@@ -109,7 +110,7 @@ impl Rendered {
     /// who exported `TDDY_INDEX_SOCKET` must be given it too. The elapsed time is measured *here*,
     /// against this run's own clock, rather than carried on the event: it is how long this console
     /// has been waiting, which is the question a reader of it is asking.
-    fn indexing(&mut self, progress: &IndexProgress) {
+    pub(crate) fn indexing(&mut self, progress: &IndexProgress) {
         let now = Instant::now();
         let stamp = step_delta(self.narrated, now);
         self.narrated = Some(now);
@@ -196,6 +197,26 @@ pub(crate) fn plans(response: &PlansResponse) {
     for line in console::loaded_plans(&held) {
         say(&line);
     }
+}
+
+/// What a snapshot did to `plan`'s header, in the words the in-process run uses.
+pub(crate) fn snapshotted(plan: &str, response: &SnapshotResponse) {
+    let stale: Vec<(&str, &str)> = response
+        .stale
+        .iter()
+        .map(|found| (found.op.as_str(), found.reason.as_str()))
+        .collect();
+    for line in console::snapshot_lines(plan, response.paths as usize, response.rewritten, &stale) {
+        say(&line);
+    }
+}
+
+/// That a root's crate graph is loaded in the daemon, so the next request against it is not the one
+/// that pays for the load.
+pub(crate) fn warmed(workspace_root: &str) {
+    say(&format!(
+        "{workspace_root} is warm: its crate graph is loaded and queryable"
+    ));
 }
 
 /// How far a plan's journal got.

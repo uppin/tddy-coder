@@ -171,7 +171,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     let manager = Arc::clone(claude_cli_manager);
     let session_id_owned = session_id.to_string();
     let model_owned = model.to_string();
-    let binary_owned = hooks_and_urls::resolve_start_session_claude_binary(config);
+    let binary_owned =
+        crate::connection_service::service_util::resolve_start_session_claude_binary(config);
     let worktree_clone = worktree_path.clone();
 
     let initial_prompt_opt = tddy_daemon_kernel::trim_to_option(initial_prompt);

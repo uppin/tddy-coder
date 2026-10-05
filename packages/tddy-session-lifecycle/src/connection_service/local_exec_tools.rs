@@ -4,6 +4,8 @@
 //! Shared by the session host — a roster agent's own turn loop runs its tools through here — and by
 //! `tddy-daemon-rpc`'s exec-tool family, so the RPC and the agent loop take exactly one path.
 
+mod local_exec_tool_dispatch;
+
 use std::path::Path;
 use std::sync::Arc;
 
@@ -16,8 +18,8 @@ use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_subagent_worktree::{run_in_conversation, ConversationId, ConversationWorktrees};
 use tddy_task::TaskRegistry;
 
+use super::agent_roster;
 use super::jail_relaunch::{self, JailRelaunch};
-use super::{agent_roster, ExecToolRoute};
 use crate::session_agent_clone::{HostedAgentClones, HostedClone};
 use crate::tool_engine;
 
@@ -385,4 +387,19 @@ fn refused(reason: String) -> ExecuteToolResponse {
         job_id: String::new(),
         job_running: false,
     }
+}
+
+/// Where one exec tool call of a session this daemon holds is run.
+pub(crate) enum ExecToolRoute {
+    /// The session's checkout on this host, through the tool engine — every session that did not
+    /// ask to be confined.
+    HostWorktree,
+    /// The session's own jail on this host: a sandboxed `workspace` session
+    /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
+    Jail(Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandbox>),
+    /// Neither, and the call is answered with this as its error. A session recorded as sandboxed
+    /// whose jail this daemon does not hold is refused rather than served from the bare host: a
+    /// tool that ran unconfined on a session that asked to be confined is the one failure nobody
+    /// can see afterwards.
+    Refused(String),
 }

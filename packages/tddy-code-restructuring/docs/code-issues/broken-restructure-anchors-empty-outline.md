@@ -3,8 +3,8 @@
 **Category:** broken
 **Command:** `tddy-tools restructure anchors <file> --items …`
 **Measured:** `#carve` 5/11, against master tip `d5a157cc`
-**Claimed by:** [#537](https://github.com/uppin/tddy-coder/pull/537) — `#live-plan 1/7`
-**Status:** Open — partially fixed in #537 (2026-10-02)
+**Claimed by:** none. [#537](https://github.com/uppin/tddy-coder/pull/537) (`#live-plan 1/7`) merged on 2026-10-02 with part of the fix; nothing is in flight for the rest
+**Status:** Open — partially fixed in #537 (2026-10-02); the remainder is unowned
 **Lands after:** nothing — the stack's root
 **Remainder owned by:** unowned — needs a repo-scale cold and warm run of the command above; #537 does not finish it
 
@@ -68,6 +68,14 @@ On `#carve` 5/11 this removed the mechanical path for Phase A entirely; the four
   The fixtures answer `documentSymbol` immediately, so no test fails on the old `places_of` path; the
   cause (an empty outline while rust-analyzer is still loading) is inferred, not reproduced.
 - **Not addressed:** the cold path's `lsp server exited`.
+
+## Narrowed by the same-crate moves (2026-10-05)
+
+`restructure snapshot` of an item-anchored plan is now the daemon's `Snapshot` RPC when `TDDY_INDEX_SOCKET`
+is set, so that command no longer starts a cold rust-analyzer of its own: for `snapshot` only, the cold
+path's `lsp server exited` is out of reach when a daemon is configured. `anchors` is not routed any
+differently and its warm-path refusal and cold-path exit above are as they were; this record's
+`anchors` finding is neither narrowed nor re-measured by that change.
 
 ## What would close it
 

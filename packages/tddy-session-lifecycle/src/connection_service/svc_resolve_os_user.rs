@@ -1,15 +1,8 @@
-use crate::config::DaemonConfig;
-use tddy_daemon_kernel::SessionUserResolver;
-
-use crate::workspace_session;
-
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
 use std::path::Path;
-
-use tddy_core::session_lifecycle::validate_session_id_segment;
 
 use std::path::PathBuf;
 
@@ -136,39 +129,9 @@ impl DaemonSessionHost {
     }
 }
 
-mod local_exec_tool_dispatch;
-
-mod session_attachment_materialization;
-
 mod os_user_resolution;
 pub use os_user_resolution::*;
 
-use tddy_session_agents::exec_tool_caller;
 pub use tddy_session_agents::exec_tool_caller::authorize_exec_tool_caller;
 
-/// Resolve, on this daemon, the sessions base and the worktree an exec tool runs in — for a
-/// caller [`authorize_exec_tool_caller`] has already accepted.
-pub fn resolve_exec_tool_worktree(
-    config: &DaemonConfig,
-    user_resolver: &SessionUserResolver,
-    tddy_data_dir: &Path,
-    req: &ExecuteToolRequest,
-) -> Result<(PathBuf, PathBuf), Status> {
-    let os_user = &exec_tool_caller::authorize_exec_tool_caller(config, user_resolver, req)?;
-
-    validate_session_id_segment(&req.session_id)
-        .map_err(|e| Status::invalid_argument(e.message()))?;
-    // A conversation id becomes a directory and a branch name; one that could escape either is a
-    // routing failure, settled here so no tool of the call has run when it is refused.
-    if !req.conversation_id.is_empty() {
-        tddy_subagent_worktree::ConversationId::parse(&req.conversation_id)
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
-    }
-
-    let sessions_base =
-        crate::user_sessions_path::sessions_base_for_user(os_user, Some(tddy_data_dir))
-            .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-    let worktree_root =
-        workspace_session::resolve_worktree_root_for_session(&sessions_base, &req.session_id)?;
-    Ok((sessions_base, worktree_root))
-}
+pub use crate::connection_service::peer_session_answer::resolve_exec_tool_worktree;

@@ -117,6 +117,9 @@ fn the_daemon_outlives_the_shell_that_started_it() {
     // Given the script run in a process group of its own, which is what makes the teardown below
     // a teardown of *its* group and not of this test runner's
     let started = Command::new("./run-index-daemon")
+        // These are about the daemon's lifetime, not its index: warming this checkout would add
+        // minutes of crate-graph load to each of them.
+        .arg("--no-warm")
         .current_dir(&root)
         .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
@@ -161,6 +164,9 @@ fn status_refuses_a_socket_with_no_listener_behind_it() {
 
     // Given a daemon that was started and then stopped, which leaves the pid file's claim stale
     let announced = Command::new("./run-index-daemon")
+        // These are about the daemon's lifetime, not its index: warming this checkout would add
+        // minutes of crate-graph load to each of them.
+        .arg("--no-warm")
         .current_dir(&root)
         .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
@@ -232,6 +238,9 @@ fn the_daemon_runs_with_the_dev_shells_whole_environment() {
 
     // Given a daemon the script started
     let announced = Command::new("./run-index-daemon")
+        // These are about the daemon's lifetime, not its index: warming this checkout would add
+        // minutes of crate-graph load to each of them.
+        .arg("--no-warm")
         .current_dir(&root)
         .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
@@ -280,6 +289,9 @@ fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
 
     // Given a daemon that was started and stopped, leaving its `listening on` line in the log
     let first = Command::new("./run-index-daemon")
+        // These are about the daemon's lifetime, not its index: warming this checkout would add
+        // minutes of crate-graph load to each of them.
+        .arg("--no-warm")
         .current_dir(&root)
         .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
@@ -294,6 +306,9 @@ fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
 
     // When the script starts it again
     let second = Command::new("./run-index-daemon")
+        // These are about the daemon's lifetime, not its index: warming this checkout would add
+        // minutes of crate-graph load to each of them.
+        .arg("--no-warm")
         .current_dir(&root)
         .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
@@ -311,4 +326,121 @@ fn a_restart_announces_the_daemon_it_started_not_the_previous_ones_log() {
     );
     assert!(answering, "the announced daemon does not answer");
     assert!(!pid.is_empty(), "no pid was recorded for the daemon");
+}
+
+/// A directory holding this checkout's own daemon beside a stand-in `tddy-tools` that writes down
+/// how it was invoked and exits with `exit_code`.
+///
+/// What is under test is the script's warm step — what it runs, where, against which socket, and
+/// what it makes of the answer — not the client, which has its own suite. A stand-in keeps that
+/// deterministic: the real client would load this whole checkout's crate graph, for minutes.
+/// `TDDY_INDEX_DAEMON_BIN` pointing here is also how the script learns where its client is, since
+/// it uses the one beside the daemon.
+struct APrebuiltDaemonWithAStandInClient {
+    directory: tempfile::TempDir,
+}
+
+impl APrebuiltDaemonWithAStandInClient {
+    fn exiting_with(exit_code: i32) -> Self {
+        let directory = tempfile::tempdir().expect("a directory for the prebuilt binaries");
+        std::fs::copy(
+            the_index_daemon(),
+            directory.path().join("tddy-index-daemon"),
+        )
+        .expect("copy the daemon");
+        let client = directory.path().join("tddy-tools");
+        std::fs::write(
+            &client,
+            format!(
+                "#!/bin/sh\necho \"$* in $(pwd -P) socket=$TDDY_INDEX_SOCKET\" >> \"$0.invoked\"\nexit {exit_code}\n"
+            ),
+        )
+        .expect("write the stand-in client");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&client, std::fs::Permissions::from_mode(0o755))
+            .expect("make the stand-in client executable");
+        Self { directory }
+    }
+
+    fn daemon(&self) -> PathBuf {
+        self.directory.path().join("tddy-index-daemon")
+    }
+
+    /// What the stand-in client was invoked with, one line per invocation; empty if it never ran.
+    fn invocations(&self) -> String {
+        std::fs::read_to_string(self.directory.path().join("tddy-tools.invoked"))
+            .unwrap_or_default()
+    }
+}
+
+#[test]
+#[ignore = "runs the real script — nix develop, so minutes and a toolchain; needs the daemon built"]
+fn warms_the_checkout_on_the_daemon_it_started_and_still_exports_when_the_warm_fails() {
+    let root = repo_root();
+    let runtime = ASuiteRuntime::new();
+
+    // Given a prebuilt daemon beside a client whose warm fails
+    let prebuilt = APrebuiltDaemonWithAStandInClient::exiting_with(1);
+
+    // When the script starts the daemon
+    let started = Command::new("./run-index-daemon")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .env("TDDY_INDEX_DAEMON_BIN", prebuilt.daemon())
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the script");
+    let stdout = String::from_utf8_lossy(&started.stdout);
+    let stderr = String::from_utf8_lossy(&started.stderr);
+    let socket = exported_socket(&stdout);
+
+    // Then the client was asked to warm this checkout against that daemon's socket
+    let expected = format!(
+        "restructure warm in {} socket={}",
+        root.canonicalize().expect("the repo root").display(),
+        socket.display()
+    );
+    assert_eq!(prebuilt.invocations().trim(), expected);
+
+    // And the failed warm changed nothing the caller reads: the daemon is up, the one line on stdout
+    // is the export, and the script succeeded — with the failure said on stderr
+    assert!(started.status.success(), "the script failed: {stderr}");
+    assert_eq!(
+        stdout.lines().count(),
+        1,
+        "stdout was not one line: {stdout}"
+    );
+    assert!(ping_succeeds(&socket), "the daemon does not answer");
+    assert!(
+        stderr.contains("The warm failed"),
+        "the failed warm was not reported on stderr: {stderr}"
+    );
+}
+
+#[test]
+#[ignore = "runs the real script — nix develop, so minutes and a toolchain; needs the daemon built"]
+fn leaves_the_crate_graph_unloaded_when_told_not_to_warm() {
+    let root = repo_root();
+    let runtime = ASuiteRuntime::new();
+
+    // Given a prebuilt daemon beside a client that would record being run
+    let prebuilt = APrebuiltDaemonWithAStandInClient::exiting_with(0);
+
+    // When the script starts the daemon with `--no-warm`
+    let started = Command::new("./run-index-daemon")
+        .arg("--no-warm")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .env("TDDY_INDEX_DAEMON_BIN", prebuilt.daemon())
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the script");
+
+    // Then the daemon is up and the client never ran
+    assert!(
+        started.status.success(),
+        "the script failed: {}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    assert_eq!(prebuilt.invocations(), "", "`--no-warm` still warmed");
 }

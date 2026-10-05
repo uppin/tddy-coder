@@ -1,4 +1,5 @@
 use super::*;
+use crate::connection_service::service_util::resolve_start_session_claude_binary;
 
 fn a_config_with_claude_binary(binary_path: &str) -> crate::config::DaemonConfig {
     let yaml = format!(
