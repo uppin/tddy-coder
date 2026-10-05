@@ -26,8 +26,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use tddy_code_restructuring::spawn_record::JsonlSpawnRecord;
 use tddy_index_daemon::{CodeIndexPorts, CodeIndexServiceImpl};
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
+use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry, SpawnObserver};
 use tddy_task::TaskRegistry;
 
 use crate::cli::{IndexDaemonArgs, Lifetime};
@@ -60,6 +61,7 @@ async fn main() -> ExitCode {
     let args = IndexDaemonArgs::parse();
     let serving_over_stdio = args.stdio;
     let log_file = args.log_file.clone();
+    let spawn_record = args.spawn_record.clone();
 
     // Before `init_tddy_logger`, because `log::set_logger` succeeds only once: under `--stdio` fd 1
     // carries RPC frames, and a logger configured to write there would corrupt every frame after
@@ -81,6 +83,17 @@ async fn main() -> ExitCode {
         }
     }
 
+    let spawn_observer: Option<Arc<dyn SpawnObserver>> = match &spawn_record {
+        Some(path) => match JsonlSpawnRecord::open(path) {
+            Ok(record) => Some(Arc::new(record)),
+            Err(failure) => {
+                log::error!(target: MAIN, "--spawn-record: {failure}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => None,
+    };
+
     let lifetime = match cli::lifetime_of(args) {
         Ok(lifetime) => lifetime,
         Err(refusal) => {
@@ -97,7 +110,7 @@ async fn main() -> ExitCode {
         Lifetime::SingleShot(requested) => {
             // The task registry is the serving path's; a single-shot run holds the servers only
             // long enough to shut them down again.
-            let (_tasks, servers, service) = wired();
+            let (_tasks, servers, service) = wired(spawn_observer);
             let verdict = single_shot::run_once(service.as_ref(), requested).await;
             // A plan this run loaded or changed is written back before the process goes, as a
             // serving one does on shutdown: the run is over and nothing else will.
@@ -114,7 +127,7 @@ async fn main() -> ExitCode {
             }
         }
         Lifetime::Serve(transports) => {
-            let (tasks, servers, service) = wired();
+            let (tasks, servers, service) = wired(spawn_observer);
             match serve::serve(transports, service, servers, tasks).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(failure) => {
@@ -132,13 +145,19 @@ async fn main() -> ExitCode {
 /// One instance, whichever of the two lifetimes this is. Behind an `Arc` even for a single-shot
 /// run, because the serving path needs the same handle in more than one place and a second
 /// construction shape would be a second thing to keep in step.
-fn wired() -> (TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>) {
+fn wired(
+    spawn_observer: Option<Arc<dyn SpawnObserver>>,
+) -> (TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>) {
     let tasks = TaskRegistry::new();
-    let servers = LspRegistry::new(
+    let registry = LspRegistry::new(
         rust_analyzer_as_this_crate_needs_it(),
         tasks.clone(),
         A_SERVER_MAY_SIT_UNUSED_FOR,
     );
+    let servers = match spawn_observer {
+        Some(observer) => registry.with_spawn_observer(observer),
+        None => registry,
+    };
     let service = Arc::new(CodeIndexServiceImpl::new(CodeIndexPorts {
         servers: servers.clone(),
     }));

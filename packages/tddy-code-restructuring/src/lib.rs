@@ -20,6 +20,7 @@ pub mod registry;
 mod restructure_args;
 pub mod restructure_cli;
 pub mod runner;
+pub mod spawn_record;
 pub mod verify;
 
 pub use backends::rust::{client_capabilities, server_settings};

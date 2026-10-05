@@ -3,6 +3,7 @@
 **Date**: 2026-10-05
 **Status**: 🚧 In Progress
 **Type**: Feature (engine and daemon observability; no change to what a run does)
+**PR**: https://github.com/uppin/tddy-coder/pull/590 (draft)
 **Stack**: `#sharpen` 3/8, branch `feature/sharpen/spawn-record`, PR title
 `feat(code-restructuring,lsp,index-daemon): a record of every process a restructure run starts (#sharpen 3/8)`.
 Based on `feature/sharpen/move-fidelity` (K=2) only because `gh stack` is linear; **no behavioural edge**
@@ -26,17 +27,16 @@ symbol moves); todos are linked.
 | `packages/tddy-index-daemon/docs/code-issues/poisoned-warm-latch-on-interrupted-index.md` | ⚠ **During** | Its "If you are about to change this code" says a run's waiting behaviour is the design. This node changes **no wait**: it only observes processes. It also adds the one thing that record's incident lacked: when a daemon dies, a line saying how. No edit to the record. |
 | `packages/tddy-index-daemon/docs/code-issues/complexity-warm-narrate-until-loaded.md` | — | `warm.rs` is not touched. |
 | `packages/tddy-code-restructuring/docs/code-issues/dead-code-plan-filehint-modified.md`, `oversized-file-test-binary.md`, `complexity-rust-facade-lines.md`, `broken-restructure-anchors-empty-outline.md` | — | Not in this node's path. The last one's `Claimed by` value is `none` (#537 merged); no live claim exists, so there is no wait-or-proceed fork. |
-| `2026-10-05-restructure-no-record-of-what-an-apply-executes.md` — **exists only on `fix/index-daemon-log-history` (PR #586); not on master, so it cannot be linked** | ⚠ **During**, becomes ✅ only if all three items are closed | Items 1 (spawn log) and 2 (the daemon's own exit) are in Scope. **Item 3 (a per-operation line naming the op id) is not**: see Decisions, D6. The entry therefore stays open and is *narrowed* to item 3 at wrap — it is deleted only if item 3 is delivered by then. This entry exists only on `fix/index-daemon-log-history`; whichever of that PR and this node lands second edits it at wrap. |
+| [`2026-10-05-restructure-no-record-of-what-an-apply-executes.md`](../todo/2026-10-05-restructure-no-record-of-what-an-apply-executes.md) — on master since #586 merged | ⚠ **During**, becomes ✅ only if all three items are closed | Items 1 (spawn log) and 2 (the daemon's own exit) are in Scope. **Item 3 (a per-operation line naming the op id) is not**: see Decisions, D6. The entry therefore stays open and is *narrowed* to item 3 at wrap — it is deleted only if item 3 is delivered by then. |
 | [`2026-10-03-restructure-rust-backend-grows-with-every-live-plan-node.md`](../todo/2026-10-03-restructure-rust-backend-grows-with-every-live-plan-node.md) | ⚠ **During** | Same constraint as the first row: wiring only in `rust.rs`. |
 | [`2026-10-05-restructure-engine-files-past-the-500-line-budget.md`](../todo/2026-10-05-restructure-engine-files-past-the-500-line-budget.md) | — | `plan.rs`, `plan/codec.rs`, `item_anchor.rs` are not touched here. (Resolved by `tidy-engine-files`.) |
 
-**Merge order, not a stack edge.** Open PR #586 (`fix/index-daemon-log-history`, draft, base `master`)
-edits `run-index-daemon` (adds `archive_previous_log` and a `HISTORY_FILE`, ahead of the launch at line
-335 on master) and `.agents/skills/code-restructuring/SKILL.md` (a paragraph after the
-`TDDY_INDEX_SOCKET` bullet). This node edits both at the same places. **This node lands after #586**; it
-is rebased onto master once #586 has merged and does not depend on it for code. If #586 has not landed
-when this node greens, the two script/doc hunks wait (they are milestones M5 and M6) and the rest
-proceeds.
+**#586 has merged** (commit `e5a5b2d4`, in this branch's base). `run-index-daemon` now has
+`archive_previous_log` and `HISTORY_FILE` (`tddy-index-<tag>.history.log`, line 77 and 138-158), and the
+todo above is on master. This node edits `run-index-daemon` and
+`.agents/skills/code-restructuring/SKILL.md` at those places, and no longer waits on anything: M5 and M6
+are greenable with the rest. The history file is the text copy D2 describes (headers, rotated at 10 MiB
+by a shell function), which is why D2's recommendation stands: the spawn record is a sibling file.
 
 ## Affected Packages
 
@@ -123,7 +123,7 @@ half it names.
 | none | No ancestor in the stack is consumed. `tidy-engine-files` and `move-fidelity` sit below it on the line only because `gh stack` needs one. | — | edit `plan.rs`, `plan/codec.rs`, `item_anchor.rs`, `item_move/*` or `crate_move/*` |
 
 The real edge list for this node is **empty** (it consumes nothing from another node, and nothing consumes it).
-Open PR #586 is a **merge-order** fact (see Prerequisites), not a dependency.
+PR #586 has merged and is part of the base; it is a prerequisite already satisfied, not a dependency.
 
 ## Draft PR contract
 
@@ -177,10 +177,10 @@ pub fn redacted(program: &str, args: &[String]) -> Vec<String>;
 ## Green wave
 
 **Wave:** 1 of 2.
-**Greenable independently:** yes, **except** the two hunks that sit on #586's lines (`run-index-daemon`, `SKILL.md`): those wait for #586 to merge (merge order, not a stack edge).
+**Greenable independently:** yes, including the `run-index-daemon` and `SKILL.md` hunks, now that #586 has merged.
 **Concurrent with:** `feature/sharpen/tidy-engine-files`, `feature/sharpen/move-fidelity`, `feature/sharpen/apply-heartbeat`. No shared file with the first two; with `apply-heartbeat` the shared files are `backends/rust.rs` (a few wiring lines each; take the later one on rebase) and `runner/options.rs` (one field each); `tddy-lsp/tests/bin/fake_lsp.rs` is `apply-heartbeat`'s alone.
 **Blocks:** none.
-Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget-impl, repoint-call, repoint-facade`; `move-fidelity -> repoint-facade`; `retarget-impl -> repoint-call`. Nothing else is an edge: `spawn-record` and `apply-heartbeat` consume nothing and nothing consumes them (`spawn-record` lands after open draft PR #586, a merge-order fact, not a stack edge).
+Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget-impl, repoint-call, repoint-facade`; `move-fidelity -> repoint-facade`; `retarget-impl -> repoint-call`. Nothing else is an edge: `spawn-record` and `apply-heartbeat` consume nothing and nothing consumes them (#586 has merged, so `spawn-record` has no merge-order constraint either).
 
 ## Scope
 
@@ -190,7 +190,7 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 - [ ] **Structural guard**: a test that fails if `Command::new` appears in the engine's `src/` outside `spawn_record.rs` and `#[cfg(test)]`.
 - [ ] **CLI front end**: `restructure` installs a file sink (location: D1).
 - [ ] **Daemon**: `--spawn-record <path>`; the observer wired into the registry and into `Options` of check/apply.
-- [ ] **`run-index-daemon`** (after #586): records `cargo build`, the `nix develop … env -0` capture and the launch; launches the daemon as a child of a watcher shell that writes the daemon's exit line (status or signal); rotates the record at 10 MiB like the history file.
+- [ ] **`run-index-daemon`** (#586 is merged; the history file exists on the base): records `cargo build`, the `nix develop … env -0` capture and the launch; launches the daemon as a child of a watcher shell that writes the daemon's exit line (status or signal); rotates the record at 10 MiB like the history file.
 - [ ] **Docs**: README, `readiness-and-gates.md`, feature doc, `code-index-service.md`, `SKILL.md` — what is recorded, where, what is not.
 - [ ] **Limits stated**: rust-analyzer's own children invisible; `SIGKILL` of the daemon visible only through the watcher; a kill during the CLI's pre-state phase (if D1 = A″) leaves no file.
 - [ ] **Re-measure** `oversized-file-backends-rust.md` and append a history row.
@@ -200,7 +200,7 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 
 ### State A (current)
 
-Verified in the tree at `origin/master` `a77bca29` (read in `.worktrees/engine-fixes-plan`).
+Verified in the tree at `origin/master` `a77bca29` (read in `.worktrees/engine-fixes-plan`); re-checked after #586 merged: the script gained `archive_previous_log`/`HISTORY_FILE` and nothing that changes a site below.
 
 Every production process start, and what records it today (**nothing does**):
 
@@ -221,7 +221,7 @@ Every production process start, and what records it today (**nothing does**):
 `#[cfg(test)]` and are **not** production sites.)
 
 `journal.rs` records one `WorkspaceEdit` per operation and nothing about processes. The daemon logs
-through `log` to the file `run-index-daemon` points its stderr at; since #586 the previous run's log is
+through `log` to the file `run-index-daemon` points its stderr at; since #586 (merged) the previous run's log is
 kept in `tddy-index-<tag>.history.log`. `Options` carries three sinks (`progress`, `account`, `trace`) and
 defaults them all to "discard", the pattern this node follows.
 
@@ -317,7 +317,7 @@ cannot be a field of it.
   `O_APPEND`, one `write` per line, flushed; a second run appends (case 7).
 - [ ] **M4 — `tddy-lsp` and the daemon.** `spawn_observer_test` green; the daemon's acceptance test
   green; `--spawn-record` documented in `--help`.
-- [ ] **M5 — `run-index-daemon`** *(after #586 merged)*. Script-side records and the watcher; the two
+- [ ] **M5 — `run-index-daemon`** *(#586 merged; the history file is on the base)*. Script-side records and the watcher; the two
   `#[ignore]`d production tests pass on a machine with the dev shell (command in Testing plan).
 - [ ] **M6 — docs and records.** `SKILL.md`, feature doc section, README, `readiness-and-gates.md`,
   `code-index-service.md`; history row appended to `oversized-file-backends-rust.md`; todo narrowed.
@@ -469,7 +469,9 @@ Decisions already taken (quoted from the developer, 2026-10-05):
   redoes the history file; it lands after #586 (merge order).
 - 8-node decomposition approved.
 
-### D1 (OPEN): where does the cold CLI's record live?
+### D1 (taken: recommended option A″): where does the cold CLI's record live?
+
+**Taken at the surface commit: A″, as recommended.** The contract does not yet install a file sink in `restructure_cli.rs`; green does, and holds spawns before `.restructure/` exists in memory.
 
 The todo says "for a CLI run to a file beside the plan's journal". The code says that cannot be done
 without breaking a stated guarantee: the baseline `cargo check` runs **before** `.restructure/` exists,
@@ -487,7 +489,9 @@ the refusal says "Nothing was written", and
 tested promise, and the one gap it leaves is named. Choose A if you would rather the record cover the
 baseline check and accept a one-line wording change.
 
-### D2 (OPEN): the daemon's record — beside the history file or inside it?
+### D2 (taken: recommended, a sibling `.spawns.jsonl`): the daemon's record — beside the history file or inside it?
+
+**Taken: a sibling file**, re-checked against the merged #586 code (the history file is still headered text written by a shell function). The daemon's flag is `--spawn-record <PATH>`; the script chooses the path.
 
 PR #586's history file is a **text copy of the previous run's log, rewritten by a shell function** with
 `=== previous run … ===` headers and rotated at 10 MiB. A spawn record written by the daemon *while it
@@ -499,7 +503,9 @@ written by the daemon and the script, **never truncated by the launcher**, rotat
 10 MiB to `.spawns.jsonl.1` (the history file's rule). Alternative: write into `.history.log` — rejected
 for the interleaving above.
 
-### D3 (OPEN): which crate owns the seam trait?
+### D3 (taken: recommended, `tddy-lsp`): which crate owns the seam trait?
+
+**Taken: `tddy-lsp`** (`src/spawn_observer.rs`, re-exported from `lib.rs`). No new crate edge.
 
 `tddy-lsp` cannot depend on `tddy-code-restructuring` (the engine depends on `tddy-lsp`), and both must
 report. **Recommendation: the trait lives in `tddy-lsp`** (no new crate edge; `tddy-lsp` is edited
@@ -508,7 +514,9 @@ anyway for `server_body.rs`; blast radius = engine, daemon, `tddy-lsp-executor`)
 (`register_child_pid`); a more natural home, a wider rebuild ripple, and a core crate edited by an
 observability node.
 
-### D4 (OPEN): explicit recorder in `Options` vs a process-global
+### D4 (taken: recommended, explicit): explicit recorder in `Options` vs a process-global
+
+**Taken: explicit.** `Options.spawns` and `RustBackend::with_spawn_recorder` exist, defaulting to `SpawnRecorder::discard()`.
 
 **Recommendation: explicit** (`Options.spawns`, `RustBackend::with_spawn_recorder`), because this repo's
 own pattern for "where a run's side channel goes" is a sink on `Options` defaulting to `discard()`
@@ -522,7 +530,9 @@ A pid is the point of the record, and it exists only after `spawn()`. A process 
 "in flight" before it exists; a spawn that fails is recorded as a start-less end. The `start` line is the
 first thing written after `spawn()` returns, before the process is waited on.
 
-### D6 (OPEN): the per-operation line (todo item 3)
+### D6 (taken: recommended, left out): the per-operation line (todo item 3)
+
+**Taken: left out**; the todo stays open at item 3.
 
 The todo's third item — print the op id in the apply output so a log line can be joined to the journal
 record — is **not** in this node's scope in the brief. **Recommendation: leave it out** and keep it open
@@ -538,6 +548,22 @@ making the shell the parent that can read `$?`. `SIGKILL` of the daemon is then 
 inside the daemon could ever show. Cost: one more long-lived process per daemon (the watcher). Alternative
 (signal handlers inside the daemon only) records everything **except** `SIGKILL`, the very case the todo
 names — rejected.
+
+### Decisions taken in the surface commit (not in the plan above)
+
+- **`JsonlSpawnRecord::open` refuses.** It returns an error naming `TODO(spawn-record)`, so a front end given `--spawn-record` fails loudly (the daemon logs the error and exits non-zero) rather than believing it records. Consequence: the tests that use the file sink fail at `open` with that message, not by "found 0 lines". Tests that use a collecting observer fail by assertion (zero records). Green replaces `open` with the `O_APPEND` open and the observer methods with the line writes.
+- **`SpawnRecorder::output`/`spawn` run the command and tell nobody**, marked `TODO(spawn-record)`: the process behaves exactly as without a recorder. No production site calls the recorder yet, which is what `every_spawn_is_recorded` reports.
+- **`redacted` withholds every argument** until the policy is written, so nothing wired to it can leak one.
+- **`LspRegistry` holds the observer and exposes it (`spawn_observer()`)**; `LspServerBody` is not changed (its public fields are built literally by `tests/server_body_test.rs`, and adding one would edit that suite). Green decides how the body receives it; the contract's "`LspServerBody` carries an `Option<Arc<dyn SpawnObserver>>`" is therefore not yet true. The daemon can build the `Options.spawns` recorder from `servers.spawn_observer()`.
+- **`a_second_run_appends...` uses two recorders over one file running `git version`** rather than two full applies (same property, seconds instead of tens of seconds).
+- **`a_record_that_cannot_be_written_does_not_fail_the_run`** gets a sink whose file opens and then refuses every write: a named pipe whose reader has gone (`mkfifo`, unix only). A read-only path cannot do it, because `open` would simply fail before any run.
+- **The fake-server self-start is verified**: `RustBackend::new(<fake_lsp>, …)` with a settings file completes `initialize` (the question after it is answered "`level` is not an item the file defines"), so the `rust-analyzer`-purpose test needs no `#[ignore]`d fallback.
+- **`a_registry_without_an_observer_behaves_exactly_as_before`** is not a new test: it is the existing `registry_reuse_test` suite, cited as the plan says; run green at this commit (9 passed).
+- Net growth in `backends/rust.rs` is 11 lines (import, field with its `allow(dead_code)` attribute, a documented builder, two constructor lines). Green drops the attribute and should trim the builder's doc to hold the planned +8.
+
+### Failing at the surface commit
+
+Engine `spawn_record_acceptance` (10 of 10), `every_spawn_is_recorded` (1), unit `spawn_record::redact::tests::redacted_cases` (1), `tddy-lsp` `spawn_observer_test` (3 of 3), daemon `spawn_record_acceptance` (3 of 3), and the two `#[ignore]`d production tests (run once locally: both fail at "the script gave the daemon a spawn record"). `registry_reuse_test`, `server_body_test`, `apply_compile_gate_acceptance`, `apply_tidy_acceptance` and `library_returns_its_results` stay green.
 
 ### Honest limits (also in the docs)
 
@@ -592,10 +618,10 @@ names — rejected.
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-spawn-record.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (shared append-point; eight nodes would conflict, so planning does not edit it)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

@@ -444,3 +444,126 @@ fn leaves_the_crate_graph_unloaded_when_told_not_to_warm() {
     );
     assert_eq!(prebuilt.invocations(), "", "`--no-warm` still warmed");
 }
+
+/// The record the script and the daemon share, the only `*.spawns.jsonl` in `runtime`.
+fn the_spawn_record_in(runtime: &Path) -> PathBuf {
+    std::fs::read_dir(runtime)
+        .expect("read the runtime directory")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| path.to_string_lossy().ends_with(".spawns.jsonl"))
+        .expect("the script gave the daemon a spawn record in its runtime directory")
+}
+
+/// Every line of the record, parsed.
+fn the_lines_of(record: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(record)
+        .expect("read the spawn record")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a line of the record is JSON"))
+        .collect()
+}
+
+/// The `end` line of the daemon's own entry, once the watcher has written it, or `None` if it does
+/// not appear within `within`.
+fn the_daemons_end_within(record: &Path, within: std::time::Duration) -> Option<serde_json::Value> {
+    let deadline = std::time::Instant::now() + within;
+    loop {
+        let lines = the_lines_of(record);
+        let daemon_id = lines
+            .iter()
+            .find(|line| line["event"] == "start" && line["purpose"] == "index-daemon")
+            .map(|line| line["id"].clone());
+        let end = daemon_id.and_then(|id| {
+            lines
+                .into_iter()
+                .find(|line| line["event"] == "end" && line["id"] == id)
+        });
+        if end.is_some() || std::time::Instant::now() >= deadline {
+            return end;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// A daemon killed with `SIGKILL` can run no handler, so the only thing that can say how it died
+/// is the process that started it.
+#[test]
+#[ignore = "runs the real script — nix develop, so minutes and a toolchain; needs the daemon built"]
+fn a_daemon_killed_with_sigkill_leaves_an_exit_line_naming_the_signal() {
+    let root = repo_root();
+    let runtime = ASuiteRuntime::new();
+
+    // Given a daemon the script started
+    let prebuilt = APrebuiltDaemonWithAStandInClient::exiting_with(0);
+    let started = Command::new("./run-index-daemon")
+        .arg("--no-warm")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .env("TDDY_INDEX_DAEMON_BIN", prebuilt.daemon())
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the script");
+    assert!(
+        started.status.success(),
+        "the script did not start a daemon: {}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+
+    // When the daemon is killed with SIGKILL, by the pid the script recorded for it
+    let killed = Command::new("kill")
+        .args(["-9", &recorded_pid(runtime.path())])
+        .status()
+        .expect("run kill");
+    assert!(killed.success(), "the daemon could not be killed");
+
+    // Then within five seconds the record ends the daemon's entry with the signal that killed it
+    let end = the_daemons_end_within(
+        &the_spawn_record_in(runtime.path()),
+        std::time::Duration::from_secs(5),
+    )
+    .expect("no end line for the daemon within five seconds of its death");
+    assert_eq!(end["outcome"]["signal"], 9, "{end}");
+}
+
+#[test]
+#[ignore = "runs the real script — nix develop and a cargo build, so minutes and a toolchain"]
+fn an_orderly_stop_leaves_an_exit_line_with_status_zero_and_the_script_side_spawns_are_recorded() {
+    let root = repo_root();
+    let runtime = ASuiteRuntime::new();
+
+    // Given a daemon the script started, building it first since no prebuilt one is named
+    let started = Command::new("./run-index-daemon")
+        .arg("--no-warm")
+        .current_dir(&root)
+        .env("TDDY_INDEX_RUNTIME_DIR", runtime.path())
+        .env_remove("TDDY_INDEX_DAEMON_BIN")
+        .stdin(Stdio::null())
+        .output()
+        .expect("start the script");
+    assert!(
+        started.status.success(),
+        "the script did not start a daemon: {}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+
+    // When it is stopped in an orderly way
+    stop_the_daemon(&root, runtime.path());
+
+    // Then the record ends the daemon's entry with exit status zero
+    let record = the_spawn_record_in(runtime.path());
+    let end = the_daemons_end_within(&record, std::time::Duration::from_secs(5))
+        .expect("no end line for the daemon within five seconds of its stop");
+    assert_eq!(end["outcome"]["exit"], 0, "{end}");
+    // And the script-side spawns are in the record: the build, the dev-shell capture, the launch
+    let purposes: Vec<String> = the_lines_of(&record)
+        .iter()
+        .filter(|line| line["event"] == "start")
+        .map(|line| line["purpose"].as_str().unwrap_or_default().to_string())
+        .collect();
+    for expected in ["build-daemon", "capture-dev-shell-env", "index-daemon"] {
+        assert!(
+            purposes.iter().any(|purpose| purpose == expected),
+            "no `{expected}` start in {purposes:?}"
+        );
+    }
+}

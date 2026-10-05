@@ -20,17 +20,21 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tddy_code_restructuring::apply::{apply_workspace_edit, hash_file};
 use tddy_code_restructuring::backends::rust::{discard, ServerChatter};
 use tddy_code_restructuring::registry::{LanguageBackend, Workspace};
 use tddy_code_restructuring::runner;
+use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_code_restructuring::{
     client_capabilities, server_settings, Anchor, Overlay, Position, Reexport, RefactorKind,
     RefactorOp, WorkspaceEdit,
 };
-use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspKey, LspRegistry, NotificationEvent};
+use tddy_lsp::{
+    Language, LaunchSpec, LspAllowList, LspKey, LspRegistry, NotificationEvent, ProcessOutcome,
+    ProcessStart, ProcessToken, SpawnObserver,
+};
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -1468,6 +1472,26 @@ pub async fn moving_the_test_binary(
     Result<tddy_code_restructuring::runner::RunSummary, String>,
     Vec<String>,
 ) {
+    moving_the_test_binary_recording(
+        fixture,
+        dry_run,
+        SpawnRecorder::discard(),
+        CancellationToken::new(),
+    )
+    .await
+}
+
+/// [`moving_the_test_binary`] with the run's process record and its cancellation token in the
+/// caller's hands.
+pub async fn moving_the_test_binary_recording(
+    fixture: &AFixtureWorkspace,
+    dry_run: bool,
+    spawns: SpawnRecorder,
+    cancel: CancellationToken,
+) -> (
+    Result<tddy_code_restructuring::runner::RunSummary, String>,
+    Vec<String>,
+) {
     let root = fixture.path().to_path_buf();
     let digest = tddy_code_restructuring::apply::hash_file(&root.join(THE_TEST_BINARY))
         .expect("the test binary hashes");
@@ -1492,16 +1516,12 @@ pub async fn moving_the_test_binary(
         progress: Arc::new(move |line: &str| {
             keeper.lock().expect("lines").push(line.to_string());
         }),
+        spawns,
         ..tddy_code_restructuring::runner::Options::default()
     };
     let outcome = tokio::task::spawn_blocking(move || {
-        tddy_code_restructuring::runner::apply(
-            &root,
-            options,
-            Some(client),
-            CancellationToken::new(),
-        )
-        .map_err(|error| error.to_string())
+        tddy_code_restructuring::runner::apply(&root, options, Some(client), cancel)
+            .map_err(|error| error.to_string())
     })
     .await
     .expect("the blocking half of the apply joins");
@@ -1527,6 +1547,81 @@ async fn a_server_no_operation_asks(root: &Path) -> Arc<tddy_lsp::client::LspCli
         .await
         .expect("the fake language server starts");
     Arc::clone(&service.client)
+}
+
+/// A workspace whose `origin` crate has a build script that never finishes, so a `cargo check` of
+/// it blocks for as long as it is allowed to: the shape of the incident that made a run's
+/// processes worth recording.
+pub fn a_workspace_whose_origin_build_script_never_finishes() -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Needs nothing but itself.",
+        "",
+        "#[test]",
+        "fn doubles() {",
+        "    assert_eq!(1 + 1, 2);",
+        "}",
+    ])
+    .writing(
+        "crates/origin/build.rs",
+        "fn main() {\n    std::thread::sleep(std::time::Duration::from_secs(60));\n}\n",
+    )
+    .tracked_by_git()
+}
+
+/// A process that was started, with how it ended once it has.
+pub type KeptProcess = (ProcessStart, Option<ProcessOutcome>);
+
+/// A [`SpawnObserver`] that keeps what it is told, in the order it is told it.
+///
+/// A token is an index into what was kept, so a start and its end find each other again.
+#[derive(Clone, Default)]
+pub struct CollectedSpawns {
+    kept: Arc<std::sync::Mutex<Vec<KeptProcess>>>,
+}
+
+impl CollectedSpawns {
+    /// Every process started, each with how it ended, or `None` while it has not.
+    pub fn processes(&self) -> Vec<KeptProcess> {
+        self.kept.lock().expect("collected spawns").clone()
+    }
+
+    /// The recorder a run hands to its `Options`.
+    pub fn recorder(&self) -> SpawnRecorder {
+        SpawnRecorder::new(Arc::new(self.clone()))
+    }
+}
+
+impl SpawnObserver for CollectedSpawns {
+    fn started(&self, process: &ProcessStart) -> ProcessToken {
+        let mut kept = self.kept.lock().expect("collected spawns");
+        kept.push((process.clone(), None));
+        ProcessToken(kept.len() as u64 - 1)
+    }
+
+    fn ended(&self, token: ProcessToken, outcome: &ProcessOutcome) {
+        let mut kept = self.kept.lock().expect("collected spawns");
+        kept[token.0 as usize].1 = Some(outcome.clone());
+    }
+}
+
+/// Cancel `cancel` once `spawns` holds a process, or after `within` when none ever starts.
+///
+/// The deadline is what keeps a run that records nothing from waiting on a start that never
+/// comes: it is cancelled either way, and what the record then holds is the test's to judge.
+pub fn cancelling_once_a_process_has_started(
+    spawns: &CollectedSpawns,
+    cancel: &CancellationToken,
+    within: Duration,
+) -> std::thread::JoinHandle<()> {
+    let spawns = spawns.clone();
+    let cancel = cancel.clone();
+    std::thread::spawn(move || {
+        let deadline = Instant::now() + within;
+        while spawns.processes().is_empty() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        cancel.cancel();
+    })
 }
 
 /// A type whose `impl` a seam cuts in half, where a member **left behind** calls one that moves.

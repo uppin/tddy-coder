@@ -14,6 +14,7 @@ pub mod error;
 pub mod protocol;
 pub mod registry;
 pub mod server_body;
+pub mod spawn_observer;
 
 pub use allowlist::{language_for_target_type, Language, LaunchSpec, LspAllowList};
 pub use client::{
@@ -23,3 +24,4 @@ pub use client::{
 pub use error::LspError;
 pub use registry::{DocumentSource, LspKey, LspRegistry, LspService};
 pub use server_body::LspServerBody;
+pub use spawn_observer::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};

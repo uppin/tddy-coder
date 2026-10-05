@@ -16,6 +16,7 @@ use crate::edit::{
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
+use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -471,6 +472,8 @@ pub struct RustBackend {
     opened: Vec<String>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
+    #[allow(dead_code)] // TODO(spawn-record): `start` records the server through it
+    spawns: SpawnRecorder,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -521,6 +524,7 @@ impl RustBackend {
             claimed: Vec::new(),
             opened: Vec::new(),
             root: None,
+            spawns: SpawnRecorder::discard(),
         }
     }
 
@@ -546,6 +550,12 @@ impl RustBackend {
         if let Some(bridge) = &mut self.bridge {
             bridge.set_cancellation(cancel);
         }
+        self
+    }
+
+    /// Record the language server this backend starts itself, through `spawns`.
+    pub fn with_spawn_recorder(mut self, spawns: SpawnRecorder) -> Self {
+        self.spawns = spawns;
         self
     }
 
@@ -590,6 +600,7 @@ impl RustBackend {
             claimed: Vec::new(),
             opened: Vec::new(),
             root: None,
+            spawns: SpawnRecorder::discard(),
         }
     }
 

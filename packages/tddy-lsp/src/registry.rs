@@ -17,6 +17,7 @@ use crate::allowlist::{Language, LspAllowList};
 use crate::client::LspClient;
 use crate::error::LspError;
 use crate::server_body::LspServerBody;
+use crate::spawn_observer::SpawnObserver;
 
 /// How long to wait for a freshly-spawned server to complete its handshake.
 const SPAWN_TIMEOUT: Duration = Duration::from_secs(30);
@@ -61,6 +62,8 @@ pub struct LspRegistry {
     /// still start their servers concurrently.
     spawn_gates: Arc<Mutex<HashMap<LspKey, SpawnGate>>>,
     idle_timeout: Duration,
+    /// Told of every language server this registry starts and of how each one ended.
+    spawn_observer: Option<Arc<dyn SpawnObserver>>,
 }
 
 impl LspRegistry {
@@ -73,7 +76,22 @@ impl LspRegistry {
             services: Arc::new(Mutex::new(HashMap::new())),
             spawn_gates: Arc::new(Mutex::new(HashMap::new())),
             idle_timeout,
+            spawn_observer: None,
         }
+    }
+
+    /// Report every language server this registry starts, and how each ends, to `observer`.
+    ///
+    /// TODO(spawn-record): `LspServerBody` does not yet call it; until it does the registry only
+    /// holds the observer, for the host to hand on (see [`LspRegistry::spawn_observer`]).
+    pub fn with_spawn_observer(mut self, observer: Arc<dyn SpawnObserver>) -> Self {
+        self.spawn_observer = Some(observer);
+        self
+    }
+
+    /// The observer this registry reports to, if one was installed.
+    pub fn spawn_observer(&self) -> Option<&Arc<dyn SpawnObserver>> {
+        self.spawn_observer.as_ref()
     }
 
     /// Lazily get (or spawn) the server for `key`. Rejects disallowed languages before
