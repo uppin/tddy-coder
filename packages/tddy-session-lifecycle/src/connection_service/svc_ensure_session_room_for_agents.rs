@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 use tddy_rpc::Status;
 
+use super::agent_host_callbacks::AgentRoster;
 use super::DaemonSessionHost;
 
 impl DaemonSessionHost {
@@ -142,7 +143,9 @@ impl DaemonSessionHost {
             commissioned: true,
         })
     }
+}
 
+impl AgentRoster {
     /// Give back a clone this attach commissioned, because the attach did not complete.
     ///
     /// Only the call that *commissioned* the checkout may take it away: a second agent on the same
@@ -163,15 +166,16 @@ impl DaemonSessionHost {
         }
         self.session_agent_clones
             .forget(session_id, daemon_instance_id);
-        self.agent_roster()
-            .delete_clone_on_peer(
-                daemon_instance_id,
-                &claimed.codebase_session_id,
-                session_token,
-            )
-            .await;
+        self.delete_clone_on_peer(
+            daemon_instance_id,
+            &claimed.codebase_session_id,
+            session_token,
+        )
+        .await;
     }
+}
 
+impl DaemonSessionHost {
     /// Build the semantic index for a `workspace` session's worktree.
     ///
     /// The index indexes a worktree, and the worktree that counts is this daemon's: for the codebase
@@ -259,7 +263,7 @@ impl DaemonSessionHost {
     ///
     /// On success the artifacts are handed back rather than dropped: a start can still fail at a
     /// step *after* the seed, and only this list says what to take away. The caller owns them from
-    /// here — see [`Self::unwind_seeded_roster`].
+    /// here — see [`AgentRoster::unwind_seeded_roster`].
     pub(crate) async fn seed_session_agent_roster(
         &self,
         session_id: &str,
@@ -273,7 +277,8 @@ impl DaemonSessionHost {
             if let Err(status) =
                 agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, &record)
             {
-                self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
+                self.agent_roster()
+                    .unwind_seeded_roster(session_id, codebase, session_token, seeded)
                     .await;
                 return Err(status);
             }
@@ -294,7 +299,8 @@ impl DaemonSessionHost {
                         clone = Some(claimed);
                     }
                     Err(status) => {
-                        self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
+                        self.agent_roster()
+                            .unwind_seeded_roster(session_id, codebase, session_token, seeded)
                             .await;
                         return Err(status);
                     }
@@ -318,7 +324,8 @@ impl DaemonSessionHost {
                     roster.rev
                 ),
                 Err(status) => {
-                    self.unwind_seeded_roster(session_id, codebase, session_token, seeded)
+                    self.agent_roster()
+                        .unwind_seeded_roster(session_id, codebase, session_token, seeded)
                         .await;
                     return Err(status);
                 }
@@ -348,8 +355,11 @@ impl DaemonSessionHost {
         let local_instance_id = local_instance_id_for_config(&self.config);
         // Built before the first claim so an early return releases what the loop got through: the
         // guard is the only thing that knows a peer was asked to build a checkout.
-        let mut guard =
-            seeded_clone_guard::SeededCloneGuard::claiming(self.clone(), session_id, session_token);
+        let mut guard = seeded_clone_guard::SeededCloneGuard::claiming(
+            self.agent_roster(),
+            session_id,
+            session_token,
+        );
         for record in records.iter_mut() {
             agent_roster::refuse_unenforceable_withdrawal(session_id, codebase, record)?;
             if record.daemon_instance_id == local_instance_id {
@@ -372,7 +382,9 @@ impl DaemonSessionHost {
         }
         Ok(guard)
     }
+}
 
+impl AgentRoster {
     /// Take a partially seeded roster back out, so a failed start leaves no entry, no half-built
     /// clone and no room membership on any host.
     ///

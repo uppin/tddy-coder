@@ -287,13 +287,14 @@ impl DaemonSessionHost {
                         .index_workspace_worktree(&sessions_base, &session_id)
                         .await
                     {
-                        self.unwind_seeded_roster(
-                            &session_id,
-                            &codebase,
-                            &req.session_token,
-                            seeded,
-                        )
-                        .await;
+                        self.agent_roster()
+                            .unwind_seeded_roster(
+                                &session_id,
+                                &codebase,
+                                &req.session_token,
+                                seeded,
+                            )
+                            .await;
                         return Err(status);
                     }
                     progress.end_phase(StartStep::SemanticIndex);

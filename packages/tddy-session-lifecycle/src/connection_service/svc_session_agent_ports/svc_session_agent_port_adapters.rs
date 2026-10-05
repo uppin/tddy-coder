@@ -98,6 +98,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
             return;
         };
         self.connection
+            .agent_roster()
             .unwind_agent_clone_claim(
                 session_id,
                 &admitted.daemon_instance_id,

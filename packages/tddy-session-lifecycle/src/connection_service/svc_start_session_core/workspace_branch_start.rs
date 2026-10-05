@@ -75,7 +75,8 @@ impl DaemonSessionHost {
         codebase: super::super::SeedCodebase,
         seeded: Vec<super::super::SeededAgent>,
     ) {
-        self.unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)
+        self.agent_roster()
+            .unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)
             .await;
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
         if let Err(e) = session_deletion::delete_session_directory(
