@@ -289,6 +289,7 @@ impl AgentRoster {
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
 }
 
+use crate::connection_service::session_dir_lookup;
 use tddy_session_agents::spawn_agent_def;
 
 /// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
@@ -392,8 +393,6 @@ fn spawn_project_clone(
     });
     handle
 }
-
-pub(in crate::connection_service) mod session_dir_lookup;
 
 /// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
 /// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.

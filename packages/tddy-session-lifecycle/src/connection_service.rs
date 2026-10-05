@@ -555,5 +555,6 @@ mod first_admission_token;
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
 pub(crate) mod peer_session_answer;
+mod session_dir_lookup;
 mod svc_agent_roster_wiring;
 mod svc_host_builders;
