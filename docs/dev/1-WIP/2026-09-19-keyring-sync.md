@@ -192,18 +192,23 @@ what has not been analyzed.
 - [x] **PRD**: [PRD-2026-09-19-keyring-sync.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-sync.md)
 - [x] **Changeset**: this document
 - [x] **Draft PR contract**: port + engine surface + format change + failing tests (wave 2, commit 2)
-- [ ] **Format**: record version and tombstones in `tddy-credentials`
-- [ ] **Journal**: storage, statuses, read-back
-- [ ] **Authorisation**: group secret + Ed25519 signature, both required
-- [ ] **Transport key**: X25519, signed by the identity key, via `KeyDirectory`
-- [ ] **Wrapping**: per recipient out, re-seal in
-- [ ] **Reconciliation**: LWW + tombstones
-- [ ] **Adapter**: `LiveKitPeerTransport` and the join trigger
-- [ ] **UI**: per-account sync status
-- [ ] **Dependency approval**: `x25519-dalek` (CLAUDE.md § ASK)
-- [ ] **Testing**: unit + acceptance, scoped
-- [ ] **Package Documentation**: the six packages above
-- [ ] **Code Quality**: scoped clippy; CI green
+- [x] **Format**: record version and tombstones in `tddy-credentials`
+- [x] **Journal**: storage, statuses, read-back, plus `account_summary` aggregation for the UI
+- [x] **Authorisation**: group secret + Ed25519 signature, both required
+- [x] **Transport key**: X25519, signed by the identity key, via `KeyDirectory`
+- [x] **Wrapping**: per recipient out, re-seal in
+- [x] **Reconciliation**: LWW + tombstones
+- [x] **Adapter**: `LiveKitPeerTransport`, the identity verifier, and the join trigger — wired into
+      `runtime::build` for real. ⚠ join trigger only; no vault-change trigger yet (see
+      Acceptance Criteria) and no receiving-side RPC registration (see
+      `docs/dev/todo/2026-10-05-keyring-sync-single-subject-only.md`)
+- [x] **UI**: per-account sync status — an aggregate worst-status badge, not a per-peer breakdown
+      (deliberate scope decision, see Acceptance Criteria)
+- [x] **Dependency approval**: `x25519-dalek` (CLAUDE.md § ASK) — approved, added, resolves via the
+      local proxy
+- [x] **Testing**: unit + acceptance, scoped — see Validation Results
+- [ ] **Package Documentation**: the six packages above — not started; `/wrap-context-docs` to write
+- [x] **Code Quality**: scoped clippy; CI green
 
 ## Technical Changes
 
@@ -249,15 +254,15 @@ what has not been analyzed.
 
 ## Implementation Milestones
 
-- [ ] **M1** — record version and tombstones
-- [ ] **M2** — the journal: storage, statuses, read-back
-- [ ] **M3** — `keyring.group_secret` and the advertisement
-- [ ] **M4** — both checks, with the each-alone-insufficient tests
-- [ ] **M5** — X25519 transport key via `KeyDirectory` (after the dependency is approved)
-- [ ] **M6** — per-recipient wrapping and the receive-side re-seal
-- [ ] **M7** — LWW and tombstone reconciliation
-- [ ] **M8** — `LiveKitPeerTransport` and the join trigger
-- [ ] **M9** — sync status on the Accounts screen
+- [x] **M1** — record version and tombstones
+- [x] **M2** — the journal: storage, statuses, read-back
+- [x] **M3** — `keyring.group_secret` and the advertisement
+- [x] **M4** — both checks, with the each-alone-insufficient tests
+- [x] **M5** — X25519 transport key via `KeyDirectory` (after the dependency is approved)
+- [x] **M6** — per-recipient wrapping and the receive-side re-seal
+- [x] **M7** — LWW and tombstone reconciliation
+- [x] **M8** — `LiveKitPeerTransport` and the join trigger, wired into `runtime::build`
+- [x] **M9** — sync status on the Accounts screen (aggregate badge)
 - [ ] **M10** — documentation, including the trust-model boundary this node does and does not change
 
 ## Testing Plan
@@ -370,23 +375,121 @@ constructor anyway for `load_or_generate`.
 
 ## Acceptance Criteria
 
-- [ ] A peer failing **either** check receives nothing, and the journal records the refusal
-- [ ] Neither check alone admits a peer
-- [ ] The data key, the KEK and the login credential never leave the daemon
-- [ ] A recipient re-seals under its own vault key
-- [ ] The journal answers, per peer and record, what was sent, received, refused or conflicted
-- [ ] Concurrent edits converge deterministically by `updated_at` on both sides
-- [ ] **A deleted record does not resurrect**
-- [ ] Sync fires on join and on change; there is no poll
-- [ ] The Accounts screen shows per-account, per-peer status
-- [ ] `ListEligibleDaemons` and `StartSession` forwarding behave exactly as before
+- [x] A peer failing **either** check receives nothing, and the journal records the refusal
+- [x] Neither check alone admits a peer
+- [x] The data key, the KEK and the login credential never leave the daemon
+- [x] A recipient re-seals under its own vault key
+- [x] The journal answers, per peer and record, what was sent, received, refused or conflicted
+- [x] Concurrent edits converge deterministically by `updated_at` on both sides
+- [x] **A deleted record does not resurrect** — including the case found in review, where a
+      tombstone shares its record's version number (see Validation Results)
+- [ ] ⚠ Sync fires on join **and on change**; there is no poll. **Join only is implemented** —
+      `credential_sync::run_publish_watch` triggers `SyncEngine::publish` on a genuine peer arrival
+      (polling the roster to detect the event, never on a bare tick — see that module's doc comment
+      on why it is not `RoomEvent::ParticipantConnected` itself). No hook exists yet for "the vault
+      changed" (a credential added, edited or removed while already synced); adding one needs
+      `tddy-credentials`' `SessionVault` to notify something, which this node's boundary did not
+      cover and was not added without stopping to ask. Until it exists, a change to an already-synced
+      vault propagates only at the next peer join, not immediately.
+- [x] ⚠ The Accounts screen shows per-account, per-peer status — **delivered as a per-account
+      aggregate** (the single worst status across every peer), not a per-peer breakdown. Deliberate
+      scope decision made with the project owner (aggregate badge vs. full per-peer detail,
+      2026-10-05), trading literal per-peer visibility for a much smaller proto/UI surface; the
+      journal itself (`SyncJournal::for_record`) already has the per-peer detail if a later node
+      wants to surface it.
+- [x] `ListEligibleDaemons` and `StartSession` forwarding behave exactly as before
 
 ## TODO
 
 - [x] Create/update PRD documentation
 - [x] Create changeset
 - [x] Publish the draft-PR contract — wave 2
-- [ ] Ask for `x25519-dalek` (CLAUDE.md § ASK) before M5
-- [ ] M1–M10
-- [ ] Package documentation for the six packages
-- [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record
+- [x] Ask for `x25519-dalek` (CLAUDE.md § ASK) before M5 — approved
+- [x] M1–M9
+- [ ] M10 — package documentation for the six packages (`/wrap-context-docs`)
+- [ ] `/wrap-context-docs` — this node claims **no** backlog entry and **no** code-issue record, but
+      itself **added** `docs/dev/todo/2026-10-05-keyring-sync-single-subject-only.md` and
+      `docs/dev/todo/2026-10-05-keyring-sync-oversized-files.md` (see Validation Results), and
+      **updated the measurements** in `oversized-file-config.md` and `complexity-runtime-build.md` —
+      none of these are resolved here and all stay
+
+## Validation Results
+
+**2026-10-05**, `/validate-changes` against `HEAD` (`2e2606d8`), rebased onto current `origin/master`
+(leak-free: `origin/master..HEAD` is this PR's 10 commits only).
+
+### Build and test
+
+- `cargo check --all-targets` clean across every touched package
+  (`tddy-credential-sync`, `tddy-credentials`, `tddy-daemon-livekit`, `tddy-daemon-kernel`,
+  `tddy-accounts`, `tddy-github`, `tddy-daemon-auth`, `tddy-daemon`) — never `cargo build`, which
+  skips `#[cfg(test)]`/`tests/*.rs` and would have missed several of the findings below.
+- Scoped clippy (`-D warnings`) clean across the same set, including one `type_complexity` lint
+  found and fixed in `runtime.rs` (a type alias for the registry/room-slot tuple).
+- `cargo fmt --check` clean.
+- CI (`scripts/ci-status.sh`) green on the rebased head: `Rust lint`, `Rust build` (x86 + arm64),
+  `Rust tests` (8473 passed), `Rust e2e tests` (380 passed), `Web tests` (2800 passed),
+  `Generated code`, `Cloudinit + nix + tddy`, `Cloudinit VM boot`, `VM boot control`. Zero failures.
+- Two intermittent local failures, confirmed pre-existing/environmental and **not** regressions:
+  `tddy-daemon`'s `session_agent_remote_acceptance::restores_a_clone_that_diverged_and_says_so`
+  (file byte-identical to `origin/master`, unrelated subsystem) and repeated LiveKit-testkit Docker
+  container port-binding/startup-timeout races across several acceptance suites (address-already-
+  in-use, container startup timeout — different random ports each run).
+
+### File-length gate (`/pr-wrap` step 3.5)
+
+Four files at or over the 500-production-line budget. Two pre-existing, massively-oversized files
+this PR only grew slightly — `tddy-daemon-kernel/src/config.rs` (1,491 → 1,519,
+`docs/code-issues/oversized-file-config.md`) and `tddy-daemon/src/runtime.rs`'s `build` function
+(950 → 1,010 lines, `docs/code-issues/complexity-runtime-build.md`) — already named in this
+changeset's own Prerequisites and deferred with the developer's consent, 2026-10-05; both records
+updated with the new measurement. Two genuine new overages this PR caused —
+`tddy-credential-sync/src/engine.rs` (new file, 529 lines) and `tddy-credentials/src/vault.rs`
+(477 → 581) — also deferred with the developer's consent rather than restructured mid-PR, recorded
+in `docs/dev/todo/2026-10-05-keyring-sync-oversized-files.md`.
+
+### Two defects found and fixed in review, each with its own regression test
+
+1. **`SyncEngine::publish`'s resend-dedup was keyed on `entry.version()`.** A `Tombstone` carries
+   *the version it deletes*, by design — so a peer that had already acknowledged a record's current
+   version would never receive the tombstone that later deletes it, defeating "a deleted record does
+   not resurrect" for the single most common deletion case. Found by code review (not by a given
+   test), pinned with a new regression test
+   (`a_deletion_at_the_same_version_the_peer_already_acknowledged_still_propagates`), confirmed
+   failing, then fixed by keying on `written_at()` instead (always advances). All prior tests still
+   pass with the new key.
+2. **A test fixture, not the implementation, was wrong.** `tests/support/mod.rs::an_advertisement_from`
+   hardcoded an arbitrary `transport_public_key` unrelated to the fixed `VaultTransportKey` secret
+   every test actually uses, so the one test performing a genuine two-party X25519 round trip
+   (`a_received_record_is_handed_back_for_resealing_under_the_recipients_own_key`) failed with
+   `Undecryptable` — correctly, since the fixture's advertised key did not match the key material a
+   real peer would derive. Fixed the fixture to derive the real public half of the shared test
+   secret; did not touch the test itself, consistent with `tdd-implementer`'s own refusal to edit it.
+
+### Two gaps surfaced during this PR, deliberately not closed here
+
+Both are named in the Acceptance Criteria above and in
+`docs/dev/todo/2026-10-05-keyring-sync-single-subject-only.md`, which also records a second gap the
+single-subject investigation uncovered: `SessionVault::remove` cannot yet retain a peer's received
+tombstone with its original version/`deleted_at` (it only ever mints its own from its own clock), so
+last-writer-wins on a deletion is not yet fully round-trippable between two real daemons, and nothing
+registers the receiving-side RPC handler for `#keyring` 6/9's `CredentialSync/Send` either. All three
+are recorded together since closing one surfaces the need for the others.
+
+### Stack boundary
+
+- `## Dependencies`: nothing from 1/9, 3/9 or 4/9 was implemented here — all consumed as already-
+  merged, real surfaces (verified via the earlier `/pr-stack-rebase`, which also found and resolved a
+  significant base-architecture drift between this node's stale draft and 3/9's real, since-evolved
+  vault design; see that rebase's own record of the resolution).
+- `## Boundaries`: `ListEligibleDaemons`/`StartSession` forwarding untouched and pinned by an
+  acceptance test; no retrofit of a credentials-style gate onto them.
+- Diff contains only this PR's files (53 files, matching the Affected Packages list plus this
+  changeset's own docs).
+- No parent-owned file deleted.
+
+### Recommendation
+
+Implementation-complete for M1–M9 with the two acceptance-criteria caveats above stated rather than
+hidden. Remaining before wrap: M10 (package documentation, six packages) — `/wrap-context-docs`'s job,
+not done here.
