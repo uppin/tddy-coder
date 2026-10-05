@@ -7,7 +7,7 @@ the test suites are [test-suites.md](test-suites.md).
 
 ## Sizes, and how they are counted
 
-116 non-test `src/*.rs` files hold about **20,800 production lines**. One file is over 500
+120 non-test `src/*.rs` files hold about **21,100 production lines**. One file is over 500
 production lines, `cursor_cli_spawn.rs` (532); the next largest are
 `connection_service/svc_start_sandboxed_claude_cli_session.rs` (495), `connection_service.rs` (488)
 and `connection_service/svc_start_session_core.rs` (480). Six production functions are over 150

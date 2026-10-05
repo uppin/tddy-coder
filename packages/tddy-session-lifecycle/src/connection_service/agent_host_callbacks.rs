@@ -2,8 +2,8 @@
 //! handle that carries both.
 //!
 //! The agent roster, its clones and agent-def resolution read a fixed set of host fields
-//! ([`tddy_session_agents::AgentRosterState`] lends them for one call). Four capabilities are not
-//! fields, and three of them live in wiring above this topic: [`AgentHostCallbacks`] is how the
+//! ([`tddy_session_agents::AgentRosterState`] lends them for one call). Five capabilities are not
+//! fields, and all of them live in wiring above this topic: [`AgentHostCallbacks`] is how the
 //! topic reaches them without naming the host. [`AgentRoster`] is the same fields **owned**, plus
 //! those callbacks, for the places a borrow cannot go: a `tokio::spawn`, a `'static` closure, a
 //! guard that outlives the call.
