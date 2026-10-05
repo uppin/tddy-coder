@@ -27,8 +27,9 @@ pub use comparison::verify;
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{
     apply, apply_from_store, check, check_plan, dispatch, item_anchors, open_plan_run,
-    open_run_resolving_anchors, record_applied_op, refuse_a_stale_pending_op, registry_for, run,
-    snapshot, snapshot_resolving, stale_findings, status, status_of_plan, PlanRun,
+    open_run_resolving_anchors, record_applied_op, refuse_a_stale_pending_op, registry_for,
+    registry_for_waiting, run, snapshot, snapshot_resolving, stale_findings, status,
+    status_of_plan, PlanRun,
 };
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};

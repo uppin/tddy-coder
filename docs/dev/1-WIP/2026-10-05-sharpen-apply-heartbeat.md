@@ -5,6 +5,7 @@
 **Type**: Feature (diagnosability of a wait; **adds no deadline**)
 **Stack**: `#sharpen` 4/8, branch `feature/sharpen/apply-heartbeat`, PR title
 `feat(code-restructuring,lsp,index-daemon): a waiting run names its stage and the server it waits on (#sharpen 4/8)`.
+**PR**: [#591](https://github.com/uppin/tddy-coder/pull/591) (draft).
 Based on `feature/sharpen/spawn-record` (K=3) only because `gh stack` is linear; **no behavioural edge**
 to any other node.
 
@@ -523,6 +524,66 @@ differently, and `last` already carries two different things (the server's words
 a paragraph of explanation). All construction sites are in `rust.rs` (`:638`, `:2363`, `:2377`); every
 consumer matches with `..`.
 
+### Contract published (commit 2) — what exists, what refuses
+
+Honest about what is not yet real, all marked `TODO(apply-heartbeat)`:
+
+- **`fake_lsp` busy modes are implemented for real** (test-support code; the tests cannot exist without them).
+  Verified: `tddy-lsp/tests/fake_lsp_busy_modes_test.rs` passes with them and fails (3 of 3, by assertion) against
+  the old `fake_lsp.rs`.
+- `wait.rs`: `WAIT_HEARTBEAT`, `WaitStage` (all six stage texts are real), `WaitedOn`, `Beat`, `Waiting::{begin,
+  elapsed, beat_due}` and `heartbeat_line`. **`heartbeat_line` returns an empty string, `Waiting::beat_due` is
+  never due, `ServerChatter::quiet_for` returns zero, and `IndexingIncomplete.stage` is the constant
+  `waiting for the index`** — which is how every wait behaved before. Nothing calls any of it yet, so no wait
+  emits a line. `RustBackend.wait_heartbeat`, `Options.wait_heartbeat`, `CodeIndexPorts.wait_heartbeat` and
+  `WorkspaceIndex::with_wait_heartbeat` carry the cadence; the daemon's apply and anchors paths hand it to
+  `registry_for_waiting`; the other `registry_for` callers still delegate with `WAIT_HEARTBEAT` (unchanged).
+- `IndexingIncomplete.stage` is a field and the message already reads `… after {n}s while {stage} (last
+  progress: …)`; the three construction sites in `rust.rs` pass the constant until each wait names its own.
+- Not published, left to green: the daemon queue wait (D6), `exit_or_kill`'s beat (D5), `LspClientBridge::request`
+  slicing (D4), the five waits calling `Waiting`.
+
+### Red-phase findings that change how green is written
+
+1. **The beat must be checked inside `keep_waiting`'s 100 ms slices, not once per 2 s poll.** State B says "checked
+   at each poll (2 s)". With the 300 ms and 100 ms cadences the tests inject, that would give a beat every 2 s
+   at best. `keep_waiting` already sleeps in `CANCEL_CHECK` (100 ms) slices and looks at the token between them;
+   the heartbeat belongs beside that look, so the cadence floor is 100 ms and a 30 s cadence is at most 100 ms
+   late (not 2 s). Consequence for the tests: nothing here injects a cadence below 100 ms.
+2. **A server must already be busy when the first question is asked.** `--never-quiescent` therefore sends its
+   `serverStatus: false` and its build-script progress with the handshake, not after the narrator's 100 ms delay;
+   a delayed one let `ensure_indexed`'s first hover see no status, call the index ready, and finish the rename.
+   The bridged backend reads the client's retained status and backlog, so a notification sent before any
+   subscriber attached is still folded in. (The delay stays for `--loads-crate-graph`, whose narration is the
+   thing a subscriber is meant to watch.)
+3. **`--goes-busy-after-hovers N` announces the busy state as the hover after the Nth arrives, before answering
+   it** (the changeset said "after the Nth hover"). Sent right after the Nth answer, whether the client's drain
+   after that answer already held it was a race, so a test could not say whether the wait was in
+   `ensure_indexed` ("warming") or `await_answer` ("type inference"). With N = 1: hover 1 is answered by a ready
+   server (warm-up ends), hover 2 is answered by one that has said it is busy.
+4. **The rename is anchored by a range at `src/lib.rs:1`** (line 1, columns 8–11, the name `foo`), not by symbol:
+   `fake_lsp`'s `documentSymbol` always places `foo` at line 10, so a symbol anchor would name `:11` and the
+   changeset's `type inference at src/lib.rs:1` could not hold. The outline and symbol waits (`locate_symbol`,
+   `settled_outline`) are therefore covered by the `heartbeat_line` unit table only, as the coverage list says.
+5. Windows and cadences: test 1 waits for four beats (changeset: 1.6 s); the `unchanged for` test beats once a
+   second and asserts each step grows by one or two whole seconds (the figure is whole seconds); the no-deadline
+   guard beats every 100 ms for 2.5 s (changeset: 50 ms for 1.5 s, 25 beats — unreachable at a 100 ms floor, see
+   finding 1) and, being a guard, does not assert on beats.
+6. **Tests that already pass, by design:** `a_wait_has_no_deadline_however_many_beats_pass` and
+   `a_cancelled_wait_leaves_the_root_not_ready_and_the_next_warm_still_waits_for_the_graph` (guards), and the
+   unit test `a_wait_is_not_due_a_beat_before_the_heartbeat_has_passed`.
+7. Fallout of two new fields: `CodeIndexPorts` gained `wait_heartbeat`, so every struct literal of it was edited —
+   `tddy-index-daemon/src/main.rs` and five test files, **including the parent's
+   `tests/spawn_record_acceptance.rs`** (one added line, no behaviour); a `status.rs` unit-test literal and a
+   `rust.rs` unit-test pattern gained `stage` / `..`.
+
+### Decisions taken at the contract (the open ones, per their recommendations)
+
+- **D2** followed **a** (constant 30 s, injected `Duration`). **D4** followed **yes** (the in-flight request is narrated; test
+  `a_request_in_flight…` pins it). **D5** followed **include** (test `a_cargo_check…` pins it; still cuttable). **D6** followed
+  **include** (two daemon tests pin it). **D7** followed **not in this node** (no `warm` change; the guard test reads `Warm`
+  only to check it never claims ready).
+
 ### Honest limits (also in the docs)
 
 - The heartbeat **diagnoses, it does not cure**: a run stuck on a build script still waits until stopped.
@@ -575,10 +636,10 @@ consumer matches with `..`.
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-apply-heartbeat.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (shared append-point; eight nodes would conflict, so planning does not edit it)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

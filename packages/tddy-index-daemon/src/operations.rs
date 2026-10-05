@@ -106,6 +106,7 @@ pub(crate) async fn serve_check(
             // The same observer the language servers report to, so a check's `cargo`/`git` join
             // them in the one record the host named with `--spawn-record`.
             spawns: index.spawn_recorder(),
+            wait_heartbeat: index.wait_heartbeat(),
             ..Options::default()
         };
 
@@ -184,6 +185,7 @@ pub(crate) async fn serve_apply(
         // The same observer the language servers report to, so an apply's `git`/`cargo`/`rustfmt`
         // join them in the one record the host named with `--spawn-record`.
         spawns: index.spawn_recorder(),
+        wait_heartbeat: index.wait_heartbeat(),
         ..Options::default()
     };
     let (events, stream) = event_stream();

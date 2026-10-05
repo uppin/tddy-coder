@@ -23,6 +23,22 @@
 //!   `rootUri` the client initialized with rather than under `file:///workspace`, so a consumer
 //!   that maps locations back to paths relative to its root has a root to map them into. Same
 //!   files, same ranges; off unless asked for, so every other mode is byte-identical.
+//! - `--never-quiescent` — on `initialized`, report `experimental/serverStatus` with
+//!   `quiescent: false`, open a `$/progress` phase titled `Building compile-time-deps` and report
+//!   `build script num-bigint run` (no percentage) — and then say nothing, ever: no `end`, no
+//!   `quiescent: true`. Hover answers non-null, as a real server's does while it runs build scripts.
+//!   Wins over `--loads-crate-graph`. Lets a test wait on a server that never becomes ready.
+//! - `--goes-busy-after-hovers N` — behave like `--loads-crate-graph`, and once N hovers have been
+//!   answered, report `quiescent: false` and the same build-script progress, never ending: a tree
+//!   that changed after a ready index. The report is sent *as the next hover arrives, before it is
+//!   answered*, so that hover is already answered by a server that has said it is busy. Sent right
+//!   after the Nth answer instead, whether a client that hovers again at once had heard it by the
+//!   time it read that answer would be a race, and a consumer's test could not name which wait it
+//!   was in.
+//! - `--hover-never-answers` — receive `textDocument/hover` and send no response, as
+//!   `tddy/neverAnswers` does for its method. Every other request is answered.
+//!
+//! All three are off unless asked for, so every other mode is byte-identical to what it was.
 //!
 //! Two methods model failure modes a real rust-analyzer has and the fixed replies above do
 //! not: `textDocument/codeAction` answers with a JSON-RPC `ContentModified` error, and
@@ -68,7 +84,24 @@ fn main() {
         std::process::exit(0);
     }
     let hang = args.iter().any(|a| a == "--hang");
-    let loads_crate_graph = args.iter().any(|a| a == "--loads-crate-graph");
+    let never_quiescent = args.iter().any(|a| a == "--never-quiescent");
+    // `--never-quiescent` wins: a server that never finishes loading must not narrate a finished one.
+    let loads_crate_graph = !never_quiescent
+        && (args.iter().any(|a| a == "--loads-crate-graph")
+            || args.iter().any(|a| a == "--goes-busy-after-hovers"));
+    NEVER_QUIESCENT.store(never_quiescent, std::sync::atomic::Ordering::SeqCst);
+    HOVER_NEVER_ANSWERS.store(
+        args.iter().any(|a| a == "--hover-never-answers"),
+        std::sync::atomic::Ordering::SeqCst,
+    );
+    if let Some(after) = args
+        .iter()
+        .position(|a| a == "--goes-busy-after-hovers")
+        .and_then(|at| args.get(at + 1))
+        .and_then(|value| value.parse::<u32>().ok())
+    {
+        GOES_BUSY_AFTER_HOVERS.store(after, std::sync::atomic::Ordering::SeqCst);
+    }
     ANSWERS_IN_ITS_WORKSPACE.store(
         args.iter().any(|a| a == "--answers-in-its-workspace"),
         std::sync::atomic::Ordering::SeqCst,
@@ -101,6 +134,17 @@ fn main() {
 /// Set by `--answers-in-its-workspace`: locations are reported under the client's `rootUri`.
 static ANSWERS_IN_ITS_WORKSPACE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--never-quiescent`: the server reports itself busy and never reports itself ready.
+static NEVER_QUIESCENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--hover-never-answers`: `textDocument/hover` receives no response.
+static HOVER_NEVER_ANSWERS: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--goes-busy-after-hovers N`: the hover after which the server goes busy again. Zero
+/// means the mode is off (a server that went busy "after no hovers" is `--never-quiescent`).
+static GOES_BUSY_AFTER_HOVERS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// The `initialize` params as received, so `tddy/initializeParams` can replay them.
 static INITIALIZE_PARAMS: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
@@ -320,6 +364,43 @@ fn narrate_a_crate_graph_load() {
     });
 }
 
+/// Report the server busy on a build script, and never say it is done.
+///
+/// `quiescent: false` first, then a phase with a title and one report that carries no percentage —
+/// the shape of the `working: build script num-bigint run` a real rust-analyzer stays on while a
+/// build script runs. Nothing ends the phase and nothing reports quiescence afterwards.
+fn go_busy_on_a_build_script() {
+    const BUSY_TOKEN: &str = "fake-lsp-build-script";
+    send(&json!({
+        "jsonrpc": "2.0",
+        "method": "experimental/serverStatus",
+        "params": { "health": "ok", "quiescent": false }
+    }));
+    send(&json!({
+        "jsonrpc": "2.0",
+        "method": "$/progress",
+        "params": {
+            "token": BUSY_TOKEN,
+            "value": { "kind": "begin", "title": "Building compile-time-deps" },
+        }
+    }));
+    send(&json!({
+        "jsonrpc": "2.0",
+        "method": "$/progress",
+        "params": {
+            "token": BUSY_TOKEN,
+            "value": { "kind": "report", "message": "build script num-bigint run" },
+        }
+    }));
+}
+
+/// Whether `hovers_answered` hovers have been answered and `--goes-busy-after-hovers` names that
+/// many, so the hover now arriving is the first the server meets busy.
+fn the_server_goes_busy_before_this_hover(hovers_answered: u32) -> bool {
+    let after = GOES_BUSY_AFTER_HOVERS.load(std::sync::atomic::Ordering::SeqCst);
+    after != 0 && hovers_answered == after
+}
+
 fn flood_stderr() {
     let line = "fake_lsp: stderr flood\n".repeat(64);
     let stderr = std::io::stderr();
@@ -384,7 +465,12 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         // Replays what the client advertised at `initialize`.
         "tddy/initializeParams" => reply(id, remembered_initialize_params()),
         "initialized" => {
-            if loads_crate_graph {
+            if NEVER_QUIESCENT.load(std::sync::atomic::Ordering::SeqCst) {
+                // Straight away, with the handshake: a client that asks its first question has
+                // to find a server that has already said it is busy, or it would take the silence
+                // before the first status for a ready one.
+                go_busy_on_a_build_script();
+            } else if loads_crate_graph {
                 narrate_a_crate_graph_load();
             }
         }
@@ -421,7 +507,12 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         "textDocument/references" => reply(id, references_result()),
         "textDocument/hover" => {
             let served = COLD_HOVERS_SERVED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if served < cold_hovers {
+            if the_server_goes_busy_before_this_hover(served) {
+                go_busy_on_a_build_script();
+            }
+            if HOVER_NEVER_ANSWERS.load(std::sync::atomic::Ordering::SeqCst) {
+                // Sends nothing back: only the caller's own decision ends the wait.
+            } else if served < cold_hovers {
                 report_indexing_progress(served);
                 reply(id, Value::Null)
             } else {

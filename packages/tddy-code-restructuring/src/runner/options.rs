@@ -5,10 +5,11 @@
 //! clap half to `restructure_args` for the same reason — and because every entry point takes
 //! [`Options`] without caring how it was read.
 
-use crate::backends::rust::{discard, ProgressSink};
+use crate::backends::rust::{discard, ProgressSink, WAIT_HEARTBEAT};
 use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
 use std::path::PathBuf;
+use std::time::Duration;
 
 const USAGE: &str = "\
 usage:
@@ -107,6 +108,14 @@ pub struct Options {
     ///
     /// Silent by default, like the three above. A failure to write the record never fails the run.
     pub spawns: SpawnRecorder,
+    /// How often a wait that lasts says what it is waiting for, through [`Self::progress`].
+    ///
+    /// Not a budget: no wait ends at it, and a run still waits until the server is ready or its
+    /// caller stops it. A collaborator rather than a flag — a front end never sets it, and a test
+    /// shortens it so that it does not have to wait thirty seconds for a beat.
+    ///
+    /// TODO(apply-heartbeat): the waits of a run beat at this cadence; none does yet.
+    pub wait_heartbeat: Duration,
 }
 
 impl Default for Options {
@@ -130,6 +139,7 @@ impl Default for Options {
             account: discard(),
             trace: untraced,
             spawns: SpawnRecorder::discard(),
+            wait_heartbeat: WAIT_HEARTBEAT,
         }
     }
 }

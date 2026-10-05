@@ -55,6 +55,7 @@ fn a_host_over_real_rust_analyzers() -> tddy_rpc::ServiceEntry {
     );
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(900)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 

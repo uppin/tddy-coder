@@ -273,6 +273,20 @@ impl ServerChatter {
         ))
     }
 
+    /// How long the server has said nothing *new*, as of `now`: the time since it last reported a
+    /// different progress line, flipped its quiescence or changed its health.
+    ///
+    /// A repeat of the line it already said, and a notification the throttle suppressed with the
+    /// same text, are not news — which is what makes this the figure that separates a slow server
+    /// from a stuck one in a wait's heartbeat. Measured against the clock the caller supplies, like
+    /// [`Self::absorb_at`], so a test can say what time it is.
+    pub fn quiet_for(&self, now: Instant) -> std::time::Duration {
+        // TODO(apply-heartbeat): implement — record when the folded state last changed. Zero until
+        // then, which no heartbeat reads yet.
+        let _ = now;
+        std::time::Duration::ZERO
+    }
+
     /// The furthest percentage any phase has reported, and the phase it belonged to.
     ///
     /// Kept apart from the last line for the reason the field states: the server counts files
@@ -646,5 +660,75 @@ mod tests {
 
         // Then every one of them came back
         assert!(shown.iter().all(Option::is_some), "{shown:?}");
+    }
+
+    const A_WHILE: Duration = Duration::from_secs(5);
+    const LONGER: Duration = Duration::from_secs(10);
+
+    #[test]
+    fn has_been_quiet_since_the_first_progress_line_when_the_server_only_repeats_it() {
+        // Given a server that said one thing and then said it again
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&begin("t", "Building compile-time-deps"), t0);
+        chatter.progress_at(&report("t", Some("build script num-bigint run"), None), t0);
+        chatter.progress_at(
+            &report("t", Some("build script num-bigint run"), None),
+            t0 + A_WHILE,
+        );
+
+        // Then it has been quiet for as long as it has been saying the same thing
+        assert_eq!(chatter.quiet_for(t0 + LONGER), LONGER);
+    }
+
+    #[test]
+    fn stops_being_quiet_when_the_server_says_a_different_progress_line() {
+        // Given a server that said one thing and, five seconds later, another
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&report("t", Some("build script a run"), None), t0);
+        chatter.progress_at(&report("t", Some("build script b run"), None), t0 + A_WHILE);
+
+        // Then it has been quiet since the second
+        assert_eq!(chatter.quiet_for(t0 + LONGER), A_WHILE);
+    }
+
+    #[test]
+    fn stops_being_quiet_when_the_server_flips_its_quiescence() {
+        // Given a server that said it was busy and, five seconds later, that it was ready
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.absorb_at(&a_status(false), t0);
+        chatter.absorb_at(&a_status(true), t0 + A_WHILE);
+
+        // Then it has been quiet since the flip
+        assert_eq!(chatter.quiet_for(t0 + LONGER), A_WHILE);
+    }
+
+    #[test]
+    fn stops_being_quiet_when_the_server_changes_its_health() {
+        // Given a server that reported itself healthy and, five seconds later, degraded
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.absorb_at(&a_status_reporting("ok", None), t0);
+        chatter.absorb_at(
+            &a_status_reporting("warning", Some(BUILD_SCRIPTS_FAILED)),
+            t0 + A_WHILE,
+        );
+
+        // Then it has been quiet since the change
+        assert_eq!(chatter.quiet_for(t0 + LONGER), A_WHILE);
+    }
+
+    #[test]
+    fn stays_quiet_through_a_notification_the_throttle_suppressed_with_the_same_text() {
+        // Given a phase whose second report, a second after the first, repeats its text and is not
+        // shown
+        let (mut chatter, t0) = (ServerChatter::default(), Instant::now());
+        chatter.progress_at(&report("t", Some("build script num-bigint run"), None), t0);
+        let shown = chatter.progress_at(
+            &report("t", Some("build script num-bigint run"), None),
+            t0 + Duration::from_secs(1),
+        );
+
+        // Then nothing was shown, and it still has been quiet since the first
+        assert_eq!(shown, None);
+        assert_eq!(chatter.quiet_for(t0 + LONGER), LONGER);
     }
 }

@@ -30,6 +30,7 @@ fn a_host_over_fake_language_servers() -> tddy_rpc::ServiceEntry {
     );
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 

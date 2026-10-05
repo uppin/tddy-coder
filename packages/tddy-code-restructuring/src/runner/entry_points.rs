@@ -4,7 +4,7 @@
 //! Each returns its result and reports its running account into the sinks its caller installed;
 //! the `runner` module doc states why none of this prints.
 
-use crate::backends::rust::ProgressSink;
+use crate::backends::rust::{ProgressSink, WAIT_HEARTBEAT};
 use crate::backends::RustBackend;
 use crate::plan::RefactorKind;
 use crate::plan_store::{FlushPolicy, PlanStore};
@@ -114,8 +114,24 @@ pub fn registry_for(
     progress: ProgressSink,
     trace: fn(&str),
 ) -> BackendRegistry {
+    registry_for_waiting(client, cancel, progress, trace, WAIT_HEARTBEAT)
+}
+
+/// [`registry_for`] for a caller that owns the cadence at which a wait says what it is waiting for.
+///
+/// The cadence is not a budget: nothing ends a wait at it, and a run still waits until the server
+/// is ready or `cancel` fires. A host passes the one it was configured with and a test passes a
+/// short one, so neither waits [`WAIT_HEARTBEAT`] to see a beat.
+pub fn registry_for_waiting(
+    client: Arc<LspClient>,
+    cancel: CancellationToken,
+    progress: ProgressSink,
+    trace: fn(&str),
+    wait_heartbeat: Duration,
+) -> BackendRegistry {
     let mut registry = BackendRegistry::new();
-    let mut rust = RustBackend::from_lsp_client(client, Some(cancel), progress);
+    let mut rust = RustBackend::from_lsp_client(client, Some(cancel), progress)
+        .with_wait_heartbeat(wait_heartbeat);
     if wants_trace(std::env::var_os(TRACE_VARIABLE).as_deref()) {
         rust = rust.with_trace(trace);
     }

@@ -80,6 +80,7 @@ fn a_daemon_whose_log_is_captured() -> CodeIndexServiceImpl {
     );
     CodeIndexServiceImpl::new(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 

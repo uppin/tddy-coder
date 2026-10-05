@@ -45,8 +45,10 @@ mod relative_visibility;
 mod selection;
 mod signature;
 mod signature_rewrites;
+mod wait;
 
 pub use chatter::ServerChatter;
+pub use wait::WAIT_HEARTBEAT;
 
 use early_return::refuse_early_returns;
 
@@ -474,6 +476,9 @@ pub struct RustBackend {
     root: Option<PathBuf>,
     /// Where the language server this backend starts itself is recorded, when a run asks for it.
     spawns: SpawnRecorder,
+    /// How often a wait that lasts says what it is waiting for. Not a budget: nothing ends at it.
+    #[allow(dead_code)] // TODO(apply-heartbeat): the five polling waits beat at this cadence
+    wait_heartbeat: Duration,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -525,6 +530,7 @@ impl RustBackend {
             opened: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
+            wait_heartbeat: WAIT_HEARTBEAT,
         }
     }
 
@@ -565,6 +571,15 @@ impl RustBackend {
         self
     }
 
+    /// Say what a wait is waiting for every `every`, instead of every [`WAIT_HEARTBEAT`].
+    ///
+    /// The cadence is a collaborator a host or a test injects, not a budget: no wait ends at it, and
+    /// a run still waits until the server is ready or its caller stops it.
+    pub fn with_wait_heartbeat(mut self, every: Duration) -> Self {
+        self.wait_heartbeat = every;
+        self
+    }
+
     /// Attach to an already-initialized rust-analyzer session from `tddy-lsp`.
     ///
     /// No child process is spawned; [`LspClientBridge`] forwards requests through the shared
@@ -601,6 +616,7 @@ impl RustBackend {
             opened: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
+            wait_heartbeat: WAIT_HEARTBEAT,
         }
     }
 
@@ -651,6 +667,8 @@ impl RustBackend {
             seconds: waited.as_secs(),
             last: self.chatter.how_far(),
             environment: self.environment.clone(),
+            // TODO(apply-heartbeat): each wait names its own stage.
+            stage: wait::A_WAIT_THAT_NAMES_NO_STAGE.to_string(),
         }
     }
 
@@ -2384,12 +2402,16 @@ fn incomplete_assist_index(
                 }
             ),
             environment,
+            // TODO(apply-heartbeat): the assist wait names its own stage.
+            stage: wait::A_WAIT_THAT_NAMES_NO_STAGE.to_string(),
         };
     }
     RestructureError::IndexingIncomplete {
         seconds: waited.as_secs(),
         last,
         environment,
+        // TODO(apply-heartbeat): the assist wait names its own stage.
+        stage: wait::A_WAIT_THAT_NAMES_NO_STAGE.to_string(),
     }
 }
 
@@ -4397,6 +4419,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
                 seconds,
                 last,
                 environment,
+                ..
             } => {
                 assert_eq!(seconds, 45);
                 assert_eq!(last, "discovering sysroot");

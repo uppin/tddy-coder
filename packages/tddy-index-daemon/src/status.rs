@@ -299,6 +299,7 @@ mod tests {
             seconds: 46,
             last: "loading crate graph; furthest indexing 12%".to_string(),
             environment: "rust-analyzer".to_string(),
+            stage: "warming the crate index".to_string(),
         };
 
         // When each is classified

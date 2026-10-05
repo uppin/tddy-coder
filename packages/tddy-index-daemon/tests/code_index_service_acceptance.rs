@@ -44,6 +44,7 @@ fn a_host_over_fake_language_servers() -> tddy_rpc::ServiceEntry {
     );
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 
@@ -62,6 +63,7 @@ fn a_host_over_fake_language_servers_that_load_a_graph() -> tddy_rpc::ServiceEnt
     allow.allow(Language::Rust, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 
@@ -1312,6 +1314,7 @@ fn a_host_over_fake_language_servers_answering_in_their_workspace() -> tddy_rpc:
     allow.allow(Language::Rust, spec);
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 

@@ -178,8 +178,8 @@ pub enum RestructureError {
     /// waiting. Nothing else ends such a wait: there is no budget to raise, so the message names
     /// where the index got to instead of advising a number.
     #[error(
-        "rust-analyzer had not finished indexing after {seconds}s (last progress: {last}) and the \
-         wait was cancelled. Toolchain it resolved with: {environment}"
+        "rust-analyzer had not finished indexing after {seconds}s while {stage} (last progress: \
+         {last}) and the wait was cancelled. Toolchain it resolved with: {environment}"
     )]
     IndexingIncomplete {
         seconds: u64,
@@ -189,6 +189,12 @@ pub enum RestructureError {
         /// real binaries or to rustup proxies, and whether it was reaching the network — this
         /// is the line that separates them in a CI log.
         environment: String,
+        /// What the wait was waiting for when its caller stopped it — the sentence a heartbeat
+        /// names it by (`warming the crate index`, `type inference at src/lib.rs:1`).
+        ///
+        /// A field rather than prose folded into `last`: `last` is the server's words, and a front
+        /// end may want to render what the run was doing differently from what the server said.
+        stage: String,
     },
     /// The caller stopped waiting while a language-server request was in flight, so the request
     /// was abandoned — at the server too, which is told to stop computing an answer nobody will
