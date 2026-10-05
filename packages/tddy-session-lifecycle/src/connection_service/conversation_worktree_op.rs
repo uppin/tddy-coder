@@ -227,7 +227,9 @@ impl DaemonSessionHost {
             .op
             .ok_or_else(|| Status::invalid_argument("ConversationWorktree carries no operation"))?;
         let worktree_root =
-            crate::workspace_session::resolve_worktree_root_in_session_dir(&bound.session_dir)?;
+            crate::connection_service::peer_session_answer::resolve_worktree_root_in_session_dir(
+                &bound.session_dir,
+            )?;
         let result_json =
             run_conversation_worktree_op(&worktree_root, &req.session_id, &req.conversation_id, op)
                 .await?;

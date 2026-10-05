@@ -264,13 +264,3 @@ pub async fn start_agent_clone_session(
 }
 
 pub use crate::connection_service::peer_session_answer::resolve_worktree_root_for_session;
-
-/// The worktree root the `.session.yaml` in `session_dir` records.
-pub(crate) fn resolve_worktree_root_in_session_dir(session_dir: &Path) -> Result<PathBuf, Status> {
-    let meta = tddy_core::read_session_metadata(session_dir)
-        .map_err(|_| Status::failed_precondition("session not found or .session.yaml missing"))?;
-    meta.repo_path
-        .as_ref()
-        .map(PathBuf::from)
-        .ok_or_else(|| Status::failed_precondition("session .session.yaml has no repo_path"))
-}
