@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s agent topic (T3) runs over `AgentRosterState` and an `AgentHostCallbacks` port, in place
 
 **Date**: 2026-09-26
-**Status**: 📋 Planned. Awaiting the developer's review of D1, D2, D3 (claimant) and D7
+**Status**: 🚧 Implemented, pending lifecycle baseline and /validate-changes
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 17/21, branch `feature/carve/lifecycle-ports-agents`, on top of `#carve` 16
 (`feature/carve/lifecycle-ports`, #531). Plan label **16b** (M4)
@@ -121,24 +121,24 @@ Implementing one here collides with the PR that owns it.
 | **16a** `#carve` 16, lifecycle-ports (#531, `feature/carve/lifecycle-ports`) | M0: the free `mint_first_admission_token` over `config` and `session_admissions`, the free `split_forward_deadline` and `session_dir_for` (host methods kept as wiring delegators); the T3 module `peer_session_answer` holding `peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session`, `resolve_exec_tool_worktree`; `daemon_urls` with `advertise_daemon_url`; `svc_turn_end_reporter.rs` no longer parents `jail_env_builders` (re-parented); `ExecToolRoute` beside `LocalExecTools`. M3: T8's `AttachmentState` | T3 bodies call the three free functions, `peer_session_answer` and `daemon_urls` directly, and never through the host | re-do any M0 cut, re-parent a file, convert T7/T8/T10/T11, or touch `SessionStdioEndpoint` / `ExecToolRoute` |
 | `#carve` 15 lifecycle-split (#526) | `tddy_session_agents::AgentRosterState<'a>` (10 fields), lifecycle's `agent_roster_state()` builder, and the 11 T3 functions in `tddy-session-agents` | T3 bodies call the 11 functions with the (widened) state | move a function into `tddy-session-agents`, or change the 11 functions' signatures |
 
-## Carried from 16a (2026-10-04)
+## What 16a and #584 delivered (verified in the tree at stage B3, 2026-10-05)
 
 16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3 and **deferred four items to
-the engine** (the developer's decision, 2026-10-04: not done by hand, done after the engine improves). This
-node's plan below was written before that and assumes some of them. Where a row below says "from 16a", read
-it against this list.
+the engine** (the developer's decision, 2026-10-04). #584 (`cb50ab5c`, the engine's `move_item` and
+`reparent_module`) then did them in this tree. This node's plan below was written before either landed;
+where a row below disagrees with this table, this table is right.
 
-| 16a item | State after 16a | What it means for this node |
+| 16a item | State now | What it means for this node |
 |---|---|---|
-| **M0.1** the `peer_session_answer` T3 module (`peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session`, free `resolve_exec_tool_worktree`) | **Not delivered.** The four items stay in `connection_service/split_start.rs`, `split_session.rs`, `workspace_session.rs` and `connection_service/svc_resolve_os_user.rs`. The engine has no same-crate move across files: [`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md) | The rows that say `peer_session_answer` is "imports only" or that a T3 file calls the free `resolve_exec_tool_worktree` from there do not hold. T3 callers (`local_agent_codebase_access`) reach those items in their current files, which are other topics' or host-bound files (A2/A4). **Open, this node's call:** wait for the engine move, or re-point those T3 callers and file the edge. Do not move the four items by hand without the developer's consent |
-| **M0.6** the `seeded_clone_guard.rs` split (`SessionStdioEndpoint` to T1, `ExecToolRoute` beside `LocalExecTools`) | **Not delivered**, same engine gap | The `seeded_clone_guard` row ("`SessionStdioEndpoint` and `ExecToolRoute` left in 16a") is wrong: both are still in that file. D-row "`ExecToolRoute` moves to `tddy-session-agents` in node 17" depends on the split |
-| **M0.4** re-parent the four mixed parent/child files (D8) | **Deferred**: needs the developer's consent (D8) and an engine `reparent_module` operation ([`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md)) | Still blocking for node 17. `mint_first_admission_token` and `PresenterObserverDeps` consequently sit under wiring's `svc_host_builders`, reached from `handler_state.rs` through `pub(in crate::connection_service)` |
+| **M0.1** the `peer_session_answer` T3 module | **Delivered by #584.** `connection_service/peer_session_answer.rs` (71 lines) holds `peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session` and the free `resolve_exec_tool_worktree` over (`config`, `user_resolver`, `tddy_data_dir`, `req`). `workspace_session.rs:266` re-exports `resolve_worktree_root_for_session` from it | T3 callers reach all four there. **One upward edge is left:** `peer_session_answer.rs:8` imports `workspace_session::resolve_worktree_root_in_session_dir` (T3 to `workspace_session`, A3). `conversation_worktree_op.rs:230` names it too. See Open items, E4 |
+| **M0.6** the `seeded_clone_guard.rs` split | **Delivered by #584.** `SessionStdioEndpoint` is in `svc_start_claude_cli_session.rs:247` (T1); `ExecToolRoute` is in `local_exec_tools.rs:393`, beside `LocalExecTools`; `seeded_clone_guard.rs` (106 lines) holds the guard and its release | The `seeded_clone_guard` row of the inventory is corrected below. `ExecToolRoute` moves with `LocalExecTools` (D7), not with T3 |
+| **M0.4** re-parent the mixed parent/child files (D8) | **Delivered by #584 for seven modules**, each now under its own topic: `svc_host_builders` (under `connection_service`, no longer under `svc_resolve_tddy_tools_path`), `jail_env_builders` (under `svc_start_sandboxed_claude_cli_session`), `session_room_opening` (under `svc_ensure_session_room_for_agents`), `local_exec_tool_dispatch` (under `local_exec_tools`), `session_attachment_materialization` (under `svc_materialize_staged_attachment`), `split_claude_cli_start` (under `split_start`), `presenter_observer_spawn` (under `presenter_observer_task`). **Two parent/child edges that T3 reaches remain**, and the developer has not consented to re-parent either: `first_admission_token` (T7) under wiring's `svc_host_builders`, and `session_dir_lookup` (T3) under `svc_resolve_listed_worktree` (a T1/T3 mixed parent) | Still blocking for node 17. `svc_provision_agent_clone.rs` imports both. See Open items, E1 and E2 |
 | the "group `write_claude_hooks_settings` and `resolve_start_session_claude_binary` with T4" half of **M0.2** | Skipped (not contiguous); moves with T4 in 16c | None here |
 
-What 16a did deliver, and this node consumes: the free `mint_first_admission_token(config, session_admissions,
-session_id, owning_daemon_instance_id)` in `svc_resolve_tddy_tools_path/svc_host_builders/first_admission_token.rs`
-(with a `DaemonSessionHost` delegator in `handler_state.rs`), `daemon_urls` (`connection_service/hooks_and_urls/daemon_urls.rs`),
-and the free `split_forward_deadline` and `session_dir_for`.
+What 16a delivered, and this node consumes: the free `mint_first_admission_token(config, session_admissions,
+session_id, owning_daemon_instance_id)` in `connection_service/svc_host_builders/first_admission_token.rs`,
+`daemon_urls` (`connection_service/hooks_and_urls/daemon_urls.rs`), and the free `split_forward_deadline`
+(`svc_spawn_split_agent.rs:417`) and `session_dir_for` (`svc_resolve_listed_worktree/session_dir_lookup.rs`).
 
 **Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
 #573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
@@ -178,7 +178,7 @@ that touch T3.
 | [lifecycle files over the 400-line target](../todo/2026-09-24-lifecycle-files-over-the-400-line-target.md) | ⚠ **During** | Conversions add a few lines per file. No file may reach 500. `svc_provision_agent_clone.rs` (382) is the largest T3 file |
 | [restructure has no operation to read a method's fields through a state parameter](../todo/2026-09-25-restructure-has-no-operation-to-read-a-methods-fields-through-a-state-parameter.md) | ℹ **Answered** | This node does that edit by hand, as the restructure. The todo stays open as an engine capability |
 | [restructure has no signature operations](../todo/2026-09-24-restructure-has-no-signature-operations.md) | ⚠ **During** | Every conversion changes a signature (or, under Recipe B, an `impl` header) by hand. Each change is listed in the commit |
-| [move-to-crate reads an import reaching the destination as an edge](../todo/2026-09-25-restructure-move-to-crate-reads-an-import-reaching-the-destination-as-an-edge.md) | ⛔ **Blocking for node 17**; mitigated here | It blocked three T3 methods in #526's pilot. **Check A4** makes every T3 module import foundations and lower topics by their defining crate, so node 17's move does not present that shape |
+| [move-to-crate reads an import reaching the destination as an edge](../todo/2026-09-25-restructure-move-to-crate-reads-an-import-reaching-the-destination-as-an-edge.md) | ⛔ **Blocking for node 17**; mitigated here | It blocked three T3 methods in #526's pilot. **Check A4** makes every T3 module import foundations and lower topics by their defining crate, so node 17's move does not present that shape. Done in stage B3 (30 lines, by hand: [`2026-10-05-restructure-cannot-re-point-an-import-through-a-facade-to-its-defining-crate`](../todo/2026-10-05-restructure-cannot-re-point-an-import-through-a-facade-to-its-defining-crate.md)) |
 | [extract drops comments and writes clippy-failing signatures](../todo/2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md) | ⚠ **During** | Where the engine extracts, comments are restored and signatures reshaped. Hand conversion keeps every comment |
 | [apply leaves the lint gate red](../todo/2026-09-24-restructure-apply-leaves-the-lint-gate-red.md) | ⚠ **During** | clippy `-D warnings` and `fmt --check` on lifecycle and `tddy-session-agents` after the milestone |
 | [extract-method: a return before a unit-`if` tail](../todo/2026-09-25-restructure-extract-method-accepts-a-return-before-a-unit-if-tail.md), [function-local `use` left behind](../todo/2026-09-25-restructure-extract-method-leaves-a-function-local-use-behind.md), [extract-variable hoists a borrowed field by value](../todo/2026-09-25-restructure-extract-variable-hoists-a-borrowed-field-by-value.md), [extract-variable waits for ever on `&`](../todo/2026-09-25-restructure-extract-variable-waits-forever-on-a-range-opening-with-a-borrow.md) | ⚠ **During** | Known engine traps (the pilot hit the early-return one on `report_shadowed_agent_def`). Avoided or corrected; no new todo unless a new cause appears |
@@ -190,28 +190,33 @@ on it once node 17 lands T3 there.
 
 ## Scope
 
-- [ ] **M4.1 state and port**: add `session_admissions` and `model_registry` to `AgentRosterState`
+- [x] **M4.1 state and port**: add `session_admissions` and `model_registry` to `AgentRosterState`
   and its builder; define the owned roster handle (D1) and `AgentHostCallbacks` (approved three +
   `session_room_roster`, D2) in `connection_service/agent_host_callbacks.rs`; implement the trait on
-  `DaemonSessionHost` in the wiring ports file
-- [ ] **M4.2 wiring extract**: `extract_module` `agent_roster.rs`'s wiring part (44 lines:
+  `DaemonSessionHost` in the wiring ports file. Done in the end as four methods, `ensure_session_room` in place of `session_room_roster` (Decisions taken)
+- [x] **M4.2 wiring extract**: `extract_module` `agent_roster.rs`'s wiring part (44 lines:
   `impl RemoteSnapshotSource for DaemonSessionHost`, `DaemonSeedCloneClaimant`) into a wiring file;
-  `DaemonSeedCloneClaimant` holds the agents handle (D3)
-- [ ] **M4.3 convert** the T3 files in the inventory below: `svc_provision_agent_clone`,
+  `DaemonSeedCloneClaimant` holds the agents handle (D3). Done with the engine's `move_item`, into `svc_agent_roster_wiring.rs`
+- [x] **M4.3 convert** the T3 files in the inventory below: `svc_provision_agent_clone`,
   `svc_ensure_session_room_for_agents` (T3 part), `svc_start_hosted_agent_clone`,
   `svc_resolve_listed_worktree` (T3 part) with `session_dir_lookup` and `session_room_opening`,
-  `svc_turn_end_reporter`, `seeded_clone_guard` (`SeededCloneRelease.service` → the handle)
-- [ ] **M4.4 hand-offs**: the five `self.clone()` sites become handle clones
-- [ ] **M4.5 re-point** the session-agents adapters (`svc_session_agent_ports.rs`,
+  `svc_turn_end_reporter`, `seeded_clone_guard` (`SeededCloneRelease.service` → the handle). 37 methods now on `impl AgentRoster` (stages B1 and B2)
+- [x] **M4.4 hand-offs**: the five `self.clone()` sites become handle clones
+- [x] **M4.5 re-point** the session-agents adapters (`svc_session_agent_ports.rs`,
   `svc_peer_routed_session_agents.rs`, `svc_session_agent_port_adapters.rs`) and
   `session_agent_clone::clone_worktree_path`; keep the delegators listed in Responsibility, in wiring
-- [ ] **M4.6 imports**: every T3 file names foundations by their defining crate (A4); the free T3 files
-  (`agent_roster` T3 part, `seed_codebase`, `roster_replacement`, `peer_session_answer`) get imports only
+- [x] **M4.6 imports**: every T3 file names foundations by their defining crate (A4); the free T3 files
+  (`agent_roster` T3 part, `seed_codebase`, `roster_replacement`, `peer_session_answer`) get imports only. Done for every converted file whose path went through a facade; the T1-only names in the mixed import of `svc_resolve_listed_worktree.rs` wait for 16e
 - [ ] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents` 72
   passed. clippy and fmt clean on lifecycle and `tddy-session-agents`. `cargo check --all-targets`
-  clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] **Acceptance checks** A1–A8 for 16a's topics plus T3
-- [ ] `restructure verify --against <16a tip>`: every statement accounted for
+  clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`.
+  **Not done:** the lifecycle suite is not yet re-run on this tree (the orchestrator runs it once). Run in B3: the scoped
+  check, clippy and fmt (green), and `tddy-session-agents` at 75 passed (see Validation results, stage B3)
+- [~] **Acceptance checks** A1–A9 for 16a's topics plus T3: run literally in stage B3. A4, A6, A7, A9 pass; A1, A2, A3, A5 have
+  hits, each classified in Validation results; the real residual edges are Open items E1 to E6
+- [~] `restructure verify --against <16a tip>`: accounted stage by stage (B3: `--against 1ad0b0f7`, "every statement
+  accounted for"). Against `8c849211` (before the node's code) the tool reports 76 statements lost and 209 gained: the hand `impl`
+  retargets and receiver re-points the engine has no operation for
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -228,8 +233,18 @@ on it once node 17 lands T3 there.
 
 ### State B (after this node)
 
-About 20.2k production lines (+~100: the handle, the trait, its impl, the delegators). No T3 module
-names the host. The layout is the acceptance graph below.
+About 20.2k production lines (+~100: the handle, the trait, its impl, the delegators). The layout is the
+acceptance graph below. **As built (stage B3):**
+- `AgentRoster` (the owned handle, `agent_host_callbacks.rs`) carries 37 T3 methods across five files:
+  `svc_provision_agent_clone.rs` 12, `svc_start_hosted_agent_clone.rs` 9, `svc_ensure_session_room_for_agents.rs` 6,
+  `svc_resolve_listed_worktree.rs` 6, `svc_turn_end_reporter.rs` 4; plus `AgentRoster::state()`.
+- `AgentHostCallbacks` has four methods (`worktree_snapshot`, `run_exec_tool_locally`, `local_exec_tools`,
+  `ensure_session_room`), implemented once in `svc_agent_host_ports.rs`.
+- Wiring kept on the host: `ensure_session_room` (`svc_ensure_session_room_for_agents/session_room_opening.rs`, the
+  terminal-bridge wiring), seven delegators (`svc_agent_roster_delegators.rs`), `DaemonSeedCloneClaimant` and
+  `impl RemoteSnapshotSource` (`svc_agent_roster_wiring.rs`), `agent_roster()` (`handler_state.rs`) and
+  `seed_clone_claimant()` (`svc_host_builders.rs`).
+- Three T3 modules still name a wiring or higher module: Open items E1 to E6 (Validation results, stage B3).
 
 ### Per-file inventory: T3 → `tddy-session-agents` (2,054 lines)
 
@@ -248,30 +263,30 @@ test code).
 
 | File | Lines | This node | Node 17 | Blockers |
 |---|---:|---|---|---|
-| `cs/svc_provision_agent_clone.rs` | 382 | 12 methods → AR:<br>• `provision_agent_clone` → `peer_routing.common_room_slot`, `mint_first_admission_token` (free fn over `config` and `session_admissions`), `split_forward_deadline` (free) and `daemon_urls::advertise_daemon_url`;<br>• `delete_clone_on_peer` and `tear_down_agent_clone` use `peer_session_answer`;<br>• `hosted_clone_for` and `run_hosted_clone_tool` → **AHC `local_exec_tools`** ✅ | cluster → session-agents | #526's pilot import refusal (A4 mitigates) |
-| `cs/svc_ensure_session_room_for_agents.rs` (T3 part) | 366 | 6 methods → AR:<br>• `claim_agent_clone`: `self.clone()` into `tokio::spawn`;<br>• `claim_co_located_seed_clones`: `self.clone()` into `SeededCloneGuard`;<br>both become an owned-handle clone. The file's T4 part (`provision_workspace_tool_sandbox`, 27) and T1 part (`index_workspace_worktree`, 22) stay host methods: 16c and 16e | in the cluster | `self.clone()` (D1); mixed file |
+| `cs/svc_provision_agent_clone.rs` | 382 (393 now) | 12 methods → AR:<br>• `provision_agent_clone` → `peer_routing.common_room_slot`, `mint_first_admission_token` (free fn over `config` and `session_admissions`), `split_forward_deadline` (free) and `daemon_urls::advertise_daemon_url`;<br>• `delete_clone_on_peer` and `tear_down_agent_clone` use `peer_session_answer`;<br>• `hosted_clone_for` and `run_hosted_clone_tool` → **AHC `local_exec_tools`** ✅ | cluster → session-agents | #526's pilot import refusal (A4 done). **Three residual edges** to wiring and T4 modules: `svc_host_builders::first_admission_token`, `svc_resolve_listed_worktree::session_dir_lookup`, `svc_spawn_split_agent::split_forward_deadline` (Open items E1 to E3) |
+| `cs/svc_ensure_session_room_for_agents.rs` (T3 part) | 366 | 6 methods → AR:<br>• `claim_agent_clone`: `self.clone()` into `tokio::spawn`;<br>• `claim_co_located_seed_clones`: `self.clone()` into `SeededCloneGuard`;<br>both become an owned-handle clone; `ensure_session_room_for_agents` reaches the room through `AgentHostCallbacks::ensure_session_room`. The file's T4 part (`provision_workspace_tool_sandbox`, 27) and T1 part (`index_workspace_worktree`, 22) stay host methods: 16c and 16e | in the cluster | `self.clone()` (D1); mixed file |
 | `cs/svc_start_hosted_agent_clone.rs` | 334 | 9 methods → AR:<br>• `owned_`/`local_agent_codebase_access`: `'static` closures holding `self.clone()` → owned handle; they call **AHC `run_exec_tool_locally`** ✅ and `local_exec_tools` ✅, and `resolve_exec_tool_worktree` is the free fn over AR fields;<br>• the `start_hosted_agent_clone` head's `workspace_session` call → T3's own `resolve_worktree_root_for_session` | in the cluster | `self.clone()` (D1) |
 | `cs/svc_resolve_listed_worktree.rs` (T3 part) | 248 | `report_shadowed_agent_def`, `resolvable_agent_defs` (method and free fn), `agent_def_for_spawn`, `resolve_specialized_agent_defs`, `seeded_roster_records`, `roster_session_dir` → AR (+ `model_registry`). The T1 part (`ensure_project_available_for_start`, `spawn_project_clone`, 185) stays: 16e | in the cluster | the engine refused `report_shadowed_agent_def` (early return); hand conversion is fine here; mixed file |
-| `cs/svc_resolve_listed_worktree/session_dir_lookup.rs` | 23 | `session_dir_for` is already a free fn over `tddy_data_dir` (16a); the host method is a wiring delegator | in the cluster | — |
-| `cs/svc_resolve_listed_worktree/session_room_opening.rs` | 41 | `ensure_session_room` → AR (`config`, `session_rooms`), **AHC `session_room_roster`** (D2) for `Arc::new(self.clone()).session_room_roster()` | in the cluster | unapproved callback (D2) |
-| `cs/svc_turn_end_reporter.rs` | 158 | 4 methods → AR. `remote_roster_record_for` → `peer_routing.common_room_slot` and `.eligible_instance_ids` | in the cluster | — (its T1 child was re-parented in 16a) |
-| `cs/agent_roster.rs` (T3 part) | 198 | free functions: no change except imports. The wiring part (44) is extracted (M4.2) | in the cluster | — |
-| `cs/seeded_clone_guard.rs` | ~115 | `SeededCloneRelease.service: DaemonSessionHost` → the owned handle (`SessionStdioEndpoint` and `ExecToolRoute` left in 16a) | in the cluster | — |
-| `cs/seed_codebase.rs` | 98 | no change (`SeedCodebase`, `SeededAgentClones` trait) | in the cluster | — |
+| `cs/svc_resolve_listed_worktree/session_dir_lookup.rs` | 23 (18 now) | `session_dir_for` is already a free fn over `tddy_data_dir` (16a); the host method was removed as dead. **Child of `svc_resolve_listed_worktree.rs`, a T1/T3 mixed parent** (M0.4 not consented) | in the cluster | E2 |
+| `cs/svc_ensure_session_room_for_agents/session_room_opening.rs` (a submodule of `svc_ensure_session_room_for_agents`, re-parented by #584) | 41 | **Not converted, by decision (stage B2, option b).** It holds the host's `ensure_session_room` (room roster plus the host's `SessionTerminalBridge`), which stays a wiring method; T3 reaches it through **AHC `ensure_session_room`**. The whole file is wiring | stays in lifecycle; E5 | the file is wiring under a T3 parent: A1 and A5 hits (by design) |
+| `cs/svc_turn_end_reporter.rs` | 158 | 4 methods → AR. `remote_roster_record_for` → `peer_routing.common_room_slot` and `.eligible_instance_ids` | in the cluster | — (its T1 child `jail_env_builders` was re-parented under `svc_start_sandboxed_claude_cli_session` by #584) |
+| `cs/agent_roster.rs` (T3 part) | 198 (168 now) | free functions: no change except imports. The wiring part (44) is extracted (M4.2) into `svc_agent_roster_wiring.rs` | in the cluster | — |
+| `cs/seeded_clone_guard.rs` | ~115 (106 now) | `SeededCloneRelease.service: DaemonSessionHost` → the owned handle. `SessionStdioEndpoint` is in T1's `svc_start_claude_cli_session.rs` and `ExecToolRoute` beside `LocalExecTools` (M0.6, #584) | in the cluster | — |
+| `cs/seed_codebase.rs` | 98 | imports only (B3: its T3 siblings named by module path) | in the cluster | — |
 | `cs/roster_replacement.rs` | 24 | no change | in the cluster | — |
-| `peer_session_answer` (from 16a: `peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session`, `resolve_exec_tool_worktree`) | 46 | imports only | in the cluster | — |
+| `cs/peer_session_answer.rs` (#584: `peer_has_no_such_session`, `split_pairing`, `resolve_worktree_root_for_session`, `resolve_exec_tool_worktree`) | 46 (71 now) | imports only (A4 done) | in the cluster | upward edge to `workspace_session::resolve_worktree_root_in_session_dir` (E4) |
 
 Wiring touched (stays in lifecycle):
 
 | File | Lines | This node |
 |---|---:|---|
-| `cs/svc_session_agent_ports.rs` + `…/svc_peer_routed_session_agents.rs` + `…/svc_session_agent_port_adapters.rs` | 113 + 278 + 277 | the adapters' 15 T3 host calls (`claim_agent_clone`, `open_local_agent_session`, …) → re-pointed to the agents handle (or a delegator, D1) |
-| `cs/handler_state.rs` | 114 | `agent_roster_state()` fills the two new fields; gains the owned-handle builder |
-| `cs/agent_roster.rs` (wiring part) → its own wiring file | 44 | `impl RemoteSnapshotSource for DaemonSessionHost` (the AHC `worktree_snapshot` source); `DaemonSeedCloneClaimant` holds the agents handle |
+| `cs/svc_session_agent_ports.rs` + `cs/svc_session_agent_ports/svc_peer_routed_session_agents.rs` + `…/svc_session_agent_port_adapters.rs` | 113 + 307 + 319 | the adapters' T3 host calls (`claim_agent_clone`, `open_local_agent_session`, …) → re-pointed to the agents handle (five adapters hold it; field `connection` → `roster`) |
+| `cs/handler_state.rs` | 189 | `agent_roster()` builds the owned handle (`agent_roster_state()` was removed as dead); the two new fields come from it |
+| `cs/svc_agent_roster_wiring.rs` (the wiring part of `agent_roster.rs`) | 72 | `impl RemoteSnapshotSource for DaemonSessionHost` (the AHC `worktree_snapshot` source); `DaemonSeedCloneClaimant` holds the agents handle |
 | `cs/svc_resolve_os_user/local_exec_tool_dispatch.rs`, `cs/local_exec_tools.rs` | 25 + 231 | unchanged: the AHC `run_exec_tool_locally` and `local_exec_tools` sources (D7) |
-| `cs/svc_session_files_ports.rs` | 200 | unchanged: `session_room_roster`, the AHC `session_room_roster` source |
-| `session_agent_clone.rs` | 31 | `clone_worktree_path` re-points to T3's `resolve_worktree_root_for_session` |
-| the wiring ports file (new) | ~40 | `impl AgentHostCallbacks for DaemonSessionHost` |
+| `cs/svc_session_files_ports.rs` | 200 | unchanged: `session_room_roster` (a host method, no longer a callback) |
+| `session_agent_clone.rs` | 31 | nothing to re-point: `clone_worktree_path` already calls `peer_session_answer::resolve_worktree_root_for_session` and nothing calls it |
+| `cs/svc_agent_host_ports.rs` (new) + `cs/svc_agent_roster_delegators.rs` (new) | 56 + 81 | `impl AgentHostCallbacks for DaemonSessionHost`; the seven one-line delegators |
 
 ### `AgentRosterState` and `AgentHostCallbacks`
 
@@ -571,13 +586,66 @@ either type needs a new dependency, stop and ask).
 
 **Engine vs hand:** 4 engine operations (`rename_symbol` on four adapter fields, `check --deep` "no findings", "applied 4 of 4"). The fifth rename (`ClonesClaimedOnOwningPeers.connection`) was planned for the engine: `check --deep` answered "no findings", then `apply` did not return (10 min, then a 150 s retry) and was killed; renamed by hand — see `docs/dev/todo/2026-10-05-restructure-apply-did-not-return-after-a-clean-deep-check.md`. Every `impl` retarget and receiver re-point is by hand (the two earlier 2026-10-05 todos).
 
+### Stage B3 (2026-10-05): acceptance checks run literally, A4 imports, residual edges probed
+
+**Converted file set** (paths under `packages/tddy-session-lifecycle/src/`). T3, whole files: `connection_service/{agent_host_callbacks, agent_roster, peer_session_answer, roster_replacement, seed_codebase, seeded_clone_guard, svc_provision_agent_clone, svc_start_hosted_agent_clone, svc_turn_end_reporter}.rs`, `…/svc_ensure_session_room_for_agents/session_room_opening.rs`, `…/svc_resolve_listed_worktree/session_dir_lookup.rs`. T3, mixed files: `svc_ensure_session_room_for_agents.rs` (excluding lines 17 and 174-243: the T4 `provision_workspace_tool_sandbox` and T1 `index_workspace_worktree` impl and its `use super::DaemonSessionHost`) and `svc_resolve_listed_worktree.rs` (excluding lines 15, 17-131 and 293-403: T1's `ensure_project_available_for_start`, `ProjectClone`, `spawn_project_clone`). 16a's topics: `svc_host_builders/first_admission_token.rs` (T7); `svc_materialize_staged_attachment.rs` and its `session_attachment_materialization.rs` (T8); `presenter_observer_task.rs`, `presenter_observer_task/presenter_observer_spawn.rs`, `presenter_intent_client.rs`, `session_notifications.rs`, `session_notifications/session_notification_publishing.rs` (T10); `connection_service/{demo_vm_coordinate_handlers, activity_hub, svc_demo_vm_ports}.rs` (T11); the leaves `connection_service/placement.rs`, `agent_list_mapping.rs`, `connection_service/hooks_and_urls/daemon_urls.rs`, `remote_git_pack_execution.rs`.
+
+**The checks, as scripted in "Acceptance criteria"** (a shell loop of `grep -n` over that set, comment lines dropped, the excluded line ranges filtered out):
+
+| # | Command (shape) | Output | Verdict |
+|---|---|---|---|
+| A1 | `grep -n 'DaemonSessionHost' <files> \| grep -v '^[0-9]*:\s*//'` | `svc_ensure_session_room_for_agents/session_room_opening.rs:1: use super::super::DaemonSessionHost;` and `:9: impl DaemonSessionHost {`; `svc_demo_vm_ports.rs:13: use super::{activity_hub, DaemonSessionHost};`, `:22: pub fn new(host: Arc<DaemonSessionHost>) -> Self {`, `:53: impl DaemonSessionHost {` | **By design, both.** `session_room_opening.rs` holds the host's `ensure_session_room`, kept on the host by the developer's stage-B2 decision (b); the file is wiring under a T3 parent (E5). `svc_demo_vm_ports.rs` is T11's 53-line adapter plus 8 lines of wiring (`demo_vm_entry`, `DemoVmServiceImpl::new(host)`), which 16a's plan keeps as wiring; the converted part (`DemoVmState`) names no host |
+| A2 | `grep -nE 'super::\|crate::\|self::'` over the set, plus the grouped `use` blocks read in full | hits to a wiring module: `svc_provision_agent_clone.rs:17: use crate::connection_service::svc_host_builders::first_admission_token;` (E1); `agent_host_callbacks.rs:33: use super::LocalExecTools;` (E6); `seed_codebase.rs` named `super::SeededCloneGuard` and `super::session_enforces_a_withdrawal` through the `connection_service` root's glob re-exports (fixed in this stage, `953e8cb9`); the `DaemonSessionHost` hits of A1; none to `handler_state`, `svc_*_ports`, `rpc_families`, `PeerRouted*`, `DaemonRpcHandler`, `test_util` | **E1 and E6 are real; the A1 hits are by design.** The `seed_codebase.rs` pair was a facade path, now direct |
+| A3 | a script that lists every `crate::`, `super::`, `self::` module target of the set (comments and `#[cfg(test)]` tails dropped) and classifies it by the inventory | upward or wiring edges from T3: `svc_provision_agent_clone.rs:17` to `svc_host_builders` (wiring, E1); `:18` to `svc_resolve_listed_worktree::session_dir_lookup` (T3 child of a T1/T3 parent, E2); `:19` to `svc_spawn_split_agent` (T4, E3); `peer_session_answer.rs:8` to `workspace_session` (E4); `agent_host_callbacks.rs:33` to `LocalExecTools` (E6). Every other target is T3 to T3, T3 to a lower leaf (`daemon_urls`), or inside a T1/T4 range of a mixed file. 16a's topics: `presenter_observer_spawn.rs` to its parent `presenter_observer_task` and `session_notifications::session_notification_publishing` (T10 internal); `session_attachment_materialization.rs` to its parent's `AttachmentState` (T8 internal); `demo_vm_coordinate_handlers.rs` to `activity_hub` (T11 internal). No 16a topic names another topic | **Violations: E1 to E4 and E6, listed below with the engine plans.** `cargo modules` was not run (not installed here: unverified) |
+| A4 | `grep -nE 'crate::(config\|relay_idle\|livekit_peer_discovery\|session_room\|peer_routing\|session_admission_service\|context_files\|context_sync\|session_attachments\|session_reader\|session_deletion\|user_sessions_path\|session_agent_[a-z]+\|project_storage\|branch_intent\|pty_runtime\|host_session_service)\b'` | before the stage, 14 hits in 5 files: `peer_session_answer.rs:7,63`, `svc_provision_agent_clone.rs:359,370,379`, `svc_start_hosted_agent_clone.rs:12,210,252,302,303,336,354`, `session_room_opening.rs:3`, `svc_resolve_listed_worktree.rs:8`. After `125f1899`: **empty** | **Pass.** The regex is blind to a facade named inside a grouped `use crate::{…}` (four more, in `svc_provision_agent_clone.rs`, `svc_start_hosted_agent_clone.rs`, `svc_turn_end_reporter.rs`, `svc_ensure_session_room_for_agents.rs`) and to facades it does not list (`session_file_upload`, `session_attachment_staging`, `host_documents`, `session_list_enrichment`, `session_notifications`'s re-exports). All were fixed; a second scan over every `pub use tddy_…` name in `lib.rs` (grouped uses included) is empty except `svc_resolve_listed_worktree.rs:3-5`, whose `project_storage` and `repos_base_for_user` are T1's (16e) |
+| A5 | `grep -n 'Arc::new(self.clone())'` over the set | `session_room_opening.rs:36: || std::sync::Arc::new(self.clone()).session_room_roster(),` | **By design:** it is the host's `ensure_session_room`, which stays (E5). Every `self.clone()` left in a T3 method (`svc_start_hosted_agent_clone.rs:252,282`, `svc_ensure_session_room_for_agents.rs:84,352`) clones the `AgentRoster` handle |
+| A6 | `grep -rn 'trait AgentHostCallbacks'`; `grep -rn 'impl .*AgentHostCallbacks for DaemonSessionHost'`; `grep -rn 'trait SplitHost\|trait LaunchHost'` | `agent_host_callbacks.rs:39`; `svc_agent_host_ports.rs:19`; empty. The trait holds `worktree_snapshot`, `run_exec_tool_locally`, `local_exec_tools`, `ensure_session_room` | **Pass**, with D2 as amended (`ensure_session_room` in place of `session_room_roster`) |
+| A7 | `git diff --stat origin/master..HEAD -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` | empty. `cargo check --all-targets` clean (below). `tddy-desktop` is **not compiled** here: it embeds the web bundle, so it is CI's | **Pass** for the four compiled packages; `tddy-desktop` unverified |
+| A8 | the lifecycle baseline | **not run** (the orchestrator runs it once) | open |
+| A9 | `git diff --stat 8c849211..HEAD -- packages/tddy-session-agents`; fields of `AgentRosterState` | `agent_roster_state.rs \| 6 ++++++`; 12 `pub` fields (10, plus `session_admissions` and `model_registry`); `./dev ./test -p tddy-session-agents`: 47 + 3 + 25 = **75 passed** (the plan's 72 predates tests this stack added) | **Pass** |
+
+**A4: engine vs hand.** Hand: 12 files, 30 lines (`125f1899`). The engine has no operation that edits a path or re-points a `use` through a facade (read from the operation table in `plan-schema.md`; none was probed, since no operation names an import). New cause, filed: [`2026-10-05-restructure-cannot-re-point-an-import-through-a-facade-to-its-defining-crate`](../todo/2026-10-05-restructure-cannot-re-point-an-import-through-a-facade-to-its-defining-crate.md). Each path went to its defining crate or to the crate the facade re-exports from, the way `tddy-session-agents` already names them: `config` and `user_sessions_path` to `tddy_daemon_kernel::{config, user_paths}`; `livekit_peer_discovery` to `tddy_daemon_livekit`; `session_agent_clone`/`session_agent_status` to `tddy_session_agents`; the three `tddy_session_files` modules; `session_list_enrichment` and the two `session_notifications` items to `tddy_session_activity`. Own modules stayed (`connection_service::*`, `workspace_session`, `session_notifications::session_notification_publishing`, `session_agent_clone` as a module name where the facade is only its glob). Comments untouched; `cargo check --all-targets -p tddy-session-lifecycle` clean after the edit. One further hand edit, `dea39ed7`: `svc_provision_agent_clone.rs`'s grouped `use crate::connection_service::{…}` is split to one `use` per path, because the engine refuses to re-point a moved module named inside a nested group (already filed in [`2026-10-04-restructure-move-item-does-not-widen-fields-or-impl-members`](../todo/2026-10-04-restructure-move-item-does-not-widen-fields-or-impl-members.md)); without it E1 and E2 are refused (below).
+
+**Residual edges, probed with `restructure check <plan> --deep` only** (a warm index daemon; the check writes nothing and prints no list of touched files, so each blast radius below is read from a grep of the callers, not from the engine). Anchors are as `restructure anchors <file> --items <name>` emits them, fingerprints elided.
+
+| # | Edge | Proposed plan line | `--deep` verdict | Blast radius |
+|---|---|---|---|---|
+| E1 | `svc_provision_agent_clone.rs:17` to wiring's `svc_host_builders::first_admission_token` (M0.4, T7 child of a wiring parent) | `{"op":"reparent_module","anchor":<svc_host_builders.rs --items first_admission_token>,"to":"tddy_session_lifecycle::connection_service","reexport":"outside"}` | before the one-use-per-path edit: `this seam cannot be cut here: … names a moved item inside a nested group`. After: **`no findings`** | the module file moves to `connection_service/first_admission_token.rs`; its `mod` declaration leaves `svc_host_builders.rs:376`; one caller is re-pointed, `svc_provision_agent_clone.rs`. No other file names it; no facade needed (no outside caller) |
+| E2 | `svc_provision_agent_clone.rs:18` to `svc_resolve_listed_worktree::session_dir_lookup` (T3 child of the T1/T3 mixed parent) | `{"op":"reparent_module","anchor":<svc_resolve_listed_worktree.rs --items session_dir_lookup>,"to":"tddy_session_lifecycle::connection_service","reexport":"outside"}` | same refusal before, **`no findings`** after | the module file moves to `connection_service/session_dir_lookup.rs`; `mod` declaration leaves `svc_resolve_listed_worktree.rs:396`; callers re-pointed: `svc_provision_agent_clone.rs` and `svc_resolve_listed_worktree.rs:284` |
+| E3 | `svc_provision_agent_clone.rs:19` to T4's `svc_spawn_split_agent::split_forward_deadline` | `{"op":"move_item","anchor":<svc_spawn_split_agent.rs --items split_forward_deadline>,"to":"tddy_session_lifecycle::connection_service::agent_roster","reexport":"outside"}` (the destination is a choice: `agent_roster` is the T3 free-function module) | **`no findings`** | the function leaves `svc_spawn_split_agent.rs:417`; callers re-pointed: `svc_provision_agent_clone.rs:106` and `handler_state.rs:109` (the host's delegator). `handler_state.rs:107` carries a doc link to the old path, which the engine does not re-point (unverified: not applied); `tests/remote_managed_worktree_acceptance.rs` calls the host method, not the function, so it needs no facade |
+| E4 | `peer_session_answer.rs:8` to `workspace_session::resolve_worktree_root_in_session_dir` (T3 to `workspace_session`; not on the developer's list of three) | `{"op":"move_item","anchor":<workspace_session.rs --items resolve_worktree_root_in_session_dir>,"to":"tddy_session_lifecycle::connection_service::peer_session_answer","reexport":"outside"}` | **`no findings`** | the function leaves `workspace_session.rs:269`; callers re-pointed: `peer_session_answer.rs:37` and `conversation_worktree_op.rs:230`. `workspace_session.rs:266` (`pub use … peer_session_answer::resolve_worktree_root_for_session`) stays valid and the module cycle between the two files is gone |
+| E5 | the host's `ensure_session_room` sits in a file under a T3 parent (A1, A5 hits) | `{"op":"reparent_module","anchor":<svc_ensure_session_room_for_agents.rs --items session_room_opening>,"to":"tddy_session_lifecycle::connection_service::svc_agent_host_ports","reexport":"outside"}` | **`no findings`** | the file moves under `svc_agent_host_ports/`; `mod session_room_opening;` leaves `svc_ensure_session_room_for_agents.rs:1` and is declared in `svc_agent_host_ports.rs`; no caller names the module. This makes A1 and A5 literally empty |
+| E6 | `agent_host_callbacks.rs:33` names `LocalExecTools` (wiring) in `AgentHostCallbacks::local_exec_tools`, and its doc links `LocalExecTools::run_exec_tool_locally` | **no plan: a decision.** T3 calls two of its methods, `hosted_clone_for` and `run_hosted_clone_tool` (`svc_provision_agent_clone.rs:370,381`) | not probed | under D7 = A the trait cannot move into `tddy-session-agents` while it names a lifecycle type: either `LocalExecTools` moves with it (D7 = B, four new edges on `tddy-session-agents`) or the callback is narrowed to what T3 calls. Node 17's call; it is a blocker for moving the trait |
+
+Nothing was moved or re-parented: the five plans were only checked, and none is applied. E1 to E4 are the plans that would turn the A2 and A3 hits into passes; they need the developer's consent (M0.4 and a destination for E3).
+
+**Comment-line multiset** (every `//` line, trimmed, over the 34 `.rs` files `git diff --name-only 8c849211..HEAD -- '*.rs'` names; before `8c849211`, after the working tree): before 1444, after 1492. Lost 8, gained 56 (new module docs and the trait's docs). The eight, each justified: seven are the docs of three host methods removed as dead (`agent_roster_state`: two lines; `mint_first_admission_token`: three lines, "The first admit …", "[`first_admission_token::…`]), over this host's config and", "admission registry."; `session_dir_for`: two lines, "Where a session this daemon serves keeps its `.session.yaml` (see" and "[`session_dir_lookup::session_dir_for`]), under this host's data dir."); the eighth is `[`DaemonSessionHost::unwind_seeded_roster`] swallows: …`, retargeted to `[`AgentRoster::unwind_seeded_roster`]` (`seeded_clone_guard.rs:26`). Trailing `//` comments: 1 before, 1 after. The first scan lost 11 lines, not eight: three were two doc links that the stage-B1 and B2 retargets had changed without need (`seeded_roster_records`'s doc named `DaemonSessionHost::seed_session_agent_roster`, now on `AgentRoster`; `unwind_seeded_roster`'s caller doc named `AgentRoster::unwind_seeded_roster`). Both read `Self::…` again, as at `8c849211` (`03941096`). No unjustified loss remains.
+
+**Gates (scoped; none is workspace-wide):**
+
+```
+./dev cargo check --all-targets -p tddy-session-lifecycle -p tddy-session-agents -p tddy-daemon-rpc -p tddy-daemon -p tddy-telegram-control
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 20.50s        (no warnings)
+./dev cargo clippy -p tddy-session-lifecycle -p tddy-session-agents --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 17.86s        (no warnings)
+./dev cargo fmt --check                                                          (no output, exit 0)
+./dev ./test -p tddy-session-agents     (.verify-result.txt)  47 passed + 3 passed + 25 passed = 75 passed, 0 failed
+tddy-tools restructure verify --against 1ad0b0f7
+    355252 statements before, 355251 after
+    verify: 19 statement(s) re-pointed through a module qualifier, 78 cfg(test) gate line(s) excused
+    every statement accounted for
+```
+
+The lifecycle suite (A8) was **not run** in this stage.
+
 ## TODO
 
 - [x] Create changeset: this document
-- [ ] USER REVIEW: D1, D2, D3 (claimant), D7
+- [x] USER REVIEW: D1, D2, D3 (claimant), D7 (decided 2026-10-05; see "Decisions taken")
 - [ ] Rebase onto 16a once it is green
 - [ ] Record the baseline on 16a's tip
-- [ ] Implementation M4.1–M4.6
+- [x] Implementation M4.1–M4.6 (stages A, B1, B2, B3)
+- [ ] Developer's call on the residual edges E1 to E6 (Validation results, stage B3)
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
@@ -587,15 +655,15 @@ either type needs a new dependency, stop and ask).
 Tasks executed at wrap:
 
 **16b acceptance**
-- [ ] A1: no 16a-topic or T3 file names `DaemonSessionHost` (grep empty)
-- [ ] A2: no 16a-topic or T3 file names a wiring module (grep empty)
-- [ ] A3: T3 names no topic above it; 16a's topics still name no other topic (scripted grep; `cargo modules` if available)
-- [ ] A4: 16a-topic and T3 files name foundations by their defining crate (grep empty)
-- [ ] A5: no host clone in a T3 file; the five hand-offs clone the roster handle (grep empty)
-- [ ] A6: `AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only; no `SplitHost` / `LaunchHost` yet
-- [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted
-- [ ] A9: `AgentRosterState` has 12 fields and `tddy-session-agents` changed nowhere else; its tests at 72 passed
+- [ ] A1: no 16a-topic or T3 file names `DaemonSessionHost` (grep empty) — **not green**: 5 hits, all by design (the host's `ensure_session_room` file, T11's wiring half); empty after E5
+- [ ] A2: no 16a-topic or T3 file names a wiring module (grep empty) — **not green**: E1 (`svc_host_builders`), E6 (`LocalExecTools`)
+- [ ] A3: T3 names no topic above it; 16a's topics still name no other topic (scripted grep; `cargo modules` if available) — **not green**: E1 to E4 and E6; 16a's topics are clean; `cargo modules` not run
+- [x] A4: 16a-topic and T3 files name foundations by their defining crate (grep empty)
+- [ ] A5: no host clone in a T3 file; the five hand-offs clone the roster handle (grep empty) — **not green**: one hit, the host's `ensure_session_room` (by design; empty after E5). The hand-offs clone the handle
+- [x] A6: `AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only (D2 as amended); no `SplitHost` / `LaunchHost` yet
+- [x] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` (`tddy-desktop` not compiled here: CI's)
+- [ ] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted — **lifecycle suite not yet run**; `verify --against 1ad0b0f7` accounted
+- [x] A9: `AgentRosterState` has 12 fields and `tddy-session-agents` changed nowhere else; its tests at 75 passed (the plan said 72)
 
 **Documentation**
 - [ ] `packages/tddy-session-lifecycle/docs/module-layout.md`: the T3 ports module and the extracted wiring file (via the changeset workflow)
