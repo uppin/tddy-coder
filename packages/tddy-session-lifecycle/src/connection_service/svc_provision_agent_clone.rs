@@ -13,8 +13,8 @@ use crate::connection_service::peer_session_answer::peer_has_no_such_session;
 use tddy_service::proto::session::DeleteSessionRequest;
 
 use crate::connection_service::daemon_urls;
+use crate::connection_service::first_admission_token;
 use crate::connection_service::seed_codebase;
-use crate::connection_service::svc_host_builders::first_admission_token;
 use crate::connection_service::svc_resolve_listed_worktree::session_dir_lookup;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
