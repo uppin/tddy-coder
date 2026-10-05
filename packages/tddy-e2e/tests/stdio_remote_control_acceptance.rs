@@ -61,10 +61,15 @@ fn tddy_coder_stdio_command(tddy_data_dir: &std::path::Path) -> Command {
     command
 }
 
-/// Pick an ephemeral loopback TCP port for `--grpc`. Small window for another process to grab it
-/// between here and `tddy-coder` binding — accepted, same tradeoff existing daemon tests make.
-fn pick_free_loopback_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0")
+/// Pick an ephemeral TCP port for `--grpc`, probed on the wildcard address because that is what
+/// `tddy-coder --grpc` binds (`0.0.0.0:<port>`). A port free on `127.0.0.1` alone is not enough on
+/// Linux: one held on another local address — a LiveKit client's WebRTC TCP candidate listening on
+/// the runner's eth0 or docker0 address, say — leaves the loopback bind free but makes the wildcard
+/// bind fail with `EADDRINUSE`, and the child's gRPC thread dies into its redirected stderr while
+/// the test retries a connect that can never succeed. Small window for another process to grab the
+/// port between here and `tddy-coder` binding — accepted, same tradeoff existing daemon tests make.
+fn pick_free_port_for_grpc() -> u16 {
+    std::net::TcpListener::bind("0.0.0.0:0")
         .expect("bind ephemeral port")
         .local_addr()
         .expect("local addr")
@@ -145,7 +150,7 @@ async fn serves_grpc_and_stdio_concurrently_from_the_same_process() {
     let tddy_data_dir =
         std::env::temp_dir().join(format!("tddy-stdio-grpc-e2e-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tddy_data_dir).expect("create tddy data dir");
-    let grpc_port = pick_free_loopback_port();
+    let grpc_port = pick_free_port_for_grpc();
     let endpoint = spawn_child_endpoint(
         tddy_coder_stdio_and_grpc_command(&tddy_data_dir, grpc_port),
         NoCallbackService,
