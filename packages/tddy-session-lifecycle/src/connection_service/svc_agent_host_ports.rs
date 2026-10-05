@@ -6,6 +6,7 @@
 mod session_room_opening;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use tddy_daemon_livekit::session_room::{
     OpenedSessionRoom, RemoteSnapshotSource, WorktreeSnapshot,
@@ -13,9 +14,10 @@ use tddy_daemon_livekit::session_room::{
 use tddy_rpc::Status;
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_session_agents::session_agent_clone::HostedClone;
 
 use super::agent_host_callbacks::AgentHostCallbacks;
-use super::{DaemonSessionHost, LocalExecTools};
+use super::DaemonSessionHost;
 
 #[async_trait::async_trait]
 impl AgentHostCallbacks for DaemonSessionHost {
@@ -43,8 +45,18 @@ impl AgentHostCallbacks for DaemonSessionHost {
         DaemonSessionHost::run_exec_tool_locally(self, req, sessions_base, worktree_root).await
     }
 
-    fn local_exec_tools(&self) -> LocalExecTools {
-        DaemonSessionHost::local_exec_tools(self)
+    fn hosted_clone_for(&self, session_id: &str) -> Option<Arc<HostedClone>> {
+        self.local_exec_tools().hosted_clone_for(session_id)
+    }
+
+    async fn run_hosted_clone_tool(
+        &self,
+        req: &ExecuteToolRequest,
+        clone: &HostedClone,
+    ) -> ExecuteToolResponse {
+        self.local_exec_tools()
+            .run_hosted_clone_tool(req, clone)
+            .await
     }
 
     async fn ensure_session_room(

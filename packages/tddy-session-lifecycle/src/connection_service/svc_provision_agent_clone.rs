@@ -366,7 +366,7 @@ impl AgentRoster {
         &self,
         session_id: &str,
     ) -> Option<Arc<tddy_session_agents::session_agent_clone::HostedClone>> {
-        self.host.local_exec_tools().hosted_clone_for(session_id)
+        self.host.hosted_clone_for(session_id)
     }
 
     /// [`LocalExecTools::run_hosted_clone_tool`](super::LocalExecTools::run_hosted_clone_tool) —
@@ -376,10 +376,7 @@ impl AgentRoster {
         req: &ExecuteToolRequest,
         clone: &tddy_session_agents::session_agent_clone::HostedClone,
     ) -> ExecuteToolResponse {
-        self.host
-            .local_exec_tools()
-            .run_hosted_clone_tool(req, clone)
-            .await
+        self.host.run_hosted_clone_tool(req, clone).await
     }
 }
 

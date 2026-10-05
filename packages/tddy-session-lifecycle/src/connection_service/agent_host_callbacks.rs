@@ -26,11 +26,11 @@ use tddy_model_registry::ModelRegistryStore;
 use tddy_rpc::Status;
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_session_agents::session_agent_clone::{HostedAgentClones, SessionAgentCloneStore};
+use tddy_session_agents::session_agent_clone::{
+    HostedAgentClones, HostedClone, SessionAgentCloneStore,
+};
 use tddy_session_agents::session_agent_roster::SessionAgentRosterStore;
 use tddy_session_agents::AgentRosterState;
-
-use super::LocalExecTools;
 
 /// The capabilities of the session host the agent topic calls and does not own.
 ///
@@ -50,7 +50,7 @@ pub(crate) trait AgentHostCallbacks: Send + Sync {
     ) -> Result<WorktreeSnapshot, Status>;
 
     /// Run one exec tool on this daemon, through its task registry and jails (see
-    /// [`LocalExecTools::run_exec_tool_locally`]).
+    /// `LocalExecTools::run_exec_tool_locally`).
     async fn run_exec_tool_locally(
         &self,
         req: &ExecuteToolRequest,
@@ -58,8 +58,17 @@ pub(crate) trait AgentHostCallbacks: Send + Sync {
         worktree_root: &Path,
     ) -> ExecuteToolResponse;
 
-    /// Where this daemon runs an exec tool: its task registry, jails and hosted clones.
-    fn local_exec_tools(&self) -> LocalExecTools;
+    /// The clone this daemon hosts for `session_id`, when it holds one (see
+    /// `LocalExecTools::hosted_clone_for`).
+    fn hosted_clone_for(&self, session_id: &str) -> Option<Arc<HostedClone>>;
+
+    /// Serve one exec tool for a session whose checkout this daemon holds as an agent clone: the
+    /// read/write split (see `LocalExecTools::run_hosted_clone_tool`).
+    async fn run_hosted_clone_tool(
+        &self,
+        req: &ExecuteToolRequest,
+        clone: &HostedClone,
+    ) -> ExecuteToolResponse;
 
     /// Open the session's room over a checkout this daemon holds, unless it is open already (the
     /// host's `ensure_session_room`: the room's roster and its terminal bridge are the host's to
