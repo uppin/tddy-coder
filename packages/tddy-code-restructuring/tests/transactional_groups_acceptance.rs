@@ -102,6 +102,7 @@ fn moving_the_test_binary(group: Option<&str>) -> RefactorOp {
         type_: None,
         expr: None,
         order: Vec::new(),
+        canonical_paths: false,
     }
 }
 

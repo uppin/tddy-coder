@@ -88,6 +88,7 @@ fn a_move_of(module: &str) -> RefactorOp {
         type_: None,
         expr: None,
         order: Vec::new(),
+        canonical_paths: false,
     }
 }
 

@@ -3,7 +3,7 @@
 **Date**: 2026-10-05
 **Status**: 🚧 In Progress
 **Type**: Feature (engine output fidelity; three behaviours, one shared resolver made reachable)
-**Stack**: `#sharpen` 2/8, branch `feature/sharpen/move-fidelity`, on top of `feature/sharpen/tidy-engine-files` (1/8).
+**Stack**: `#sharpen` 2/8, branch `feature/sharpen/move-fidelity`, on top of `feature/sharpen/tidy-engine-files` (1/8). Draft PR: [#589](https://github.com/uppin/tddy-coder/pull/589).
 Title: `feat(code-restructuring): move_item re-points a caller's import and a facade path, and doc links follow the item (#sharpen 2/8)`
 
 ## Initial Discovery
@@ -173,10 +173,10 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 
 ## Scope
 
-- [ ] **M1 probe (B3)**: the answer recorded in the discovery file and under Decisions; B3's route chosen.
+- [x] **M1 probe (B3)**: run 2026-10-05; the answer is recorded under Decisions (P1): rust-analyzer returns no doc-link position, so B3 takes the text-pass route.
 - [ ] **B1**: module-qualified callers keep their qualifier and gain an import (in `sites.rs`).
-- [ ] **Field and literals (M0)**: `RefactorOp.canonical_paths` and `canonical_paths: false` on the 20 full struct literals in 15 files, `cargo check --all-targets`, first commit
-- [ ] **Resolver reachable**: `pub(crate) mod survey;` and `pub(crate) mod reexports;` (2 lines in `crate_move.rs`).
+- [x] **Field and literals (M0)**: `RefactorOp.canonical_paths` and `canonical_paths: false` on the 20 full struct literals in 15 files, `cargo check --all-targets`, first commit
+- [x] **Resolver reachable**: `pub(crate) mod survey;` and `pub(crate) mod reexports;` (2 lines in `crate_move.rs`).
 - [ ] **B2**: `canonical_paths` (a plan field, off by default) rewrites a facade path in the moved text to its defining path and reports every path rewritten or left.
 - [ ] **B3**: an intra-doc link to a moved item follows it, for `move_item` and `reparent_module` (route per the probe).
 - [ ] **Tests**: the acceptance tests below, red first; a new binary `move_fidelity_acceptance` registered in `.config/rust-e2e.filterset` and the `rust-analyzer` group of `.config/nextest.toml`.
@@ -235,8 +235,8 @@ Must-not edges (checklist at the gate): `reparent_module` does not call `canonic
 
 ## Implementation milestones
 
-- [ ] **M0 — the field and its literals (the first commit of code; mechanical, no behaviour).** `RefactorOp.canonical_paths: bool` in `plan.rs` and `canonical_paths: false` on every full struct literal: **20 in 15 files** (list them with `git grep -n 'order: Vec::new()' -- packages/tddy-code-restructuring`; `..base` forms need no edit). Check with `cargo check -p tddy-code-restructuring --all-targets` (a struct field breaks test targets that `cargo build -p` does not compile). No other change in this commit.
-- [ ] **M1 — the probe (B3).** Question: does rust-analyzer return intra-doc-link positions from `textDocument/references`?
+- [x] **M0 — the field and its literals (the first commit of code; mechanical, no behaviour).** `RefactorOp.canonical_paths: bool` in `plan.rs` and `canonical_paths: false` on every full struct literal: **20 in 15 files** (list them with `git grep -n 'order: Vec::new()' -- packages/tddy-code-restructuring`; `..base` forms need no edit). Check with `cargo check -p tddy-code-restructuring --all-targets` (a struct field breaks test targets that `cargo build -p` does not compile). No other change in this commit.
+- [x] **M1 — the probe (B3).** Done, see P1 under Decisions. Question: does rust-analyzer return intra-doc-link positions from `textDocument/references`?
   - **Run**: a scratch crate in a temp directory (not committed): `a.rs` `pub fn f() {}`; `b.rs` with `//! See [`crate::a::f`].` and, on `pub fn h()`, `/// [`crate::a::f`], [`a::f`] (with `use crate::a;`), [`f`] (with `use crate::a::f;`), [link text](crate::a::f).`. Start the same rust-analyzer the engine uses (record `rust-analyzer --version`), wait until quiescent as `performing_once_settled` does, send `textDocument/references` at the name `f` in `a.rs` with `includeDeclaration: false`, and read whether any returned location lies on `b.rs`'s doc lines. Do it through a throwaway `#[ignore]` test over `tddy_lsp::LspClient` (the style of `packages/tddy-lsp/tests/client_roundtrip_test.rs`) or by hand over raw LSP; also run the todo's own reproduction through `move_item` with `--dry-run` and read the edits it proposes for `b.rs`.
   - **Outcomes** (the brief's two, corrected by the code reading in the discovery: the mask does not hide a returned site from `requalified`):
 
@@ -348,6 +348,14 @@ Every name reads as a behaviour. Fixture: `an_app_holding` (`app`) unless stated
 - **D2 — the resolver is `survey_moved_file`, not `followed` alone.** `survey_moved_file` already resolves every path in a text through `followed` and returns spans (`site`); only the two `mod` lines are private. `followed` is widened too (the brief) but has no consumer here.
 - **D3 — B1 adds a `use` and leaves pruning to the tidy**, instead of rewriting the old `use` in place and scanning for other users of it. This differs from the brief's wording ("rewrite that `use` … keep the old `use` if it also serves unmoved items"): the tidy already removes unused imports on the compiler's evidence, a text scan for "also serves unmoved items" would duplicate the compiler badly, and it keeps `use`-statement editing (grouped, aliased, nested: all refused today) out of this node. Cost: a run stopped early (`--stop-after`) leaves the old `use` as a warning. Collision (the destination's last segment already taken): today's full path, with a note. **Please confirm D3**: the alternative is rewrite-in-place, about 40 more lines and the grouped-`use` problem `repoint-facade` owns.
 
+**Taken while publishing the surface (record, reversible):**
+- **P1 — the M1 probe answered (2026-10-05, rust-analyzer `2026-03-30`).** A scratch crate (`a.rs` `pub fn f() {}`; `b.rs` with `//! See [`crate::a::f`].`, `use crate::a; use crate::a::f;`, and on `pub fn h()` the doc line ``/// [`crate::a::f`], [`a::f`], [`f`], [link text](crate::a::f).`` plus three real calls `crate::a::f()`, `f()`, `a::f()`), driven over `tddy_lsp::LspClient::request_raw("textDocument/references", …, includeDeclaration: false)` at the name in `a.rs` after the index settled. It returned **four** locations, all in `b.rs`: line 4 (the `use`), lines 8-10 (the three calls) and **none on line 1 (`//!`) or line 6 (the doc line)**: not the qualified link, not the module-relative one, not the bare one, not the `(path)` one. Outcome row 2 of M1: no engine path can see a link, so B3 is **a text pass** (`item_move/doc_links.rs`), under O2. The live tests `a_doc_link_to_the_moved_item_follows_it` and `a_module_doc_link_follows_it` agree: the move applies and the link keeps the old path. The probe was a throwaway test and is not committed.
+- **P2 — `canonical_paths` on `move_item` is refused until B2 is implemented.** `defining_paths` and the pure `rewrite` it will call return `RestructureError::UnsupportedOp` naming this node, never an empty `Rewritten`. Consequence for the table under "Failing tests the first push carries": `leaves_a_path_through_a_module_the_crate_defines_alone` (listed there as a pin that is green today) fails today, on that refusal, because it asks for `canonical_paths`; it becomes the over-rewriting guard once B2 exists. The only pin that does not ask for the field, `keeps_a_facade_path_as_written_when_canonical_paths_is_off`, is green.
+- **P3 — a pure seam for the unit tests.** The four unit tests of `canonical_paths.rs` drive `rewrite(moved_text, &PathSurvey, claimed, own_crate) -> Result<Rewritten>` (private to `item_move`), because a `Moving` needs a workspace; `defining_paths` will survey the text and hand the survey to it. Not in the changeset's contract; green may fold it back if it prefers.
+- **P4 — the three `plan.rs` tests are green at publication.** The contract publishes the field and the codec rule, so `reads_canonical_paths_on_a_move_item`, `refuses_canonical_paths_on_extract_module` and `does_not_write_canonical_paths_when_it_is_off` pass; they guard the surface rather than specify missing behaviour.
+- **P5 — placement of the field.** `RefactorOp` still lives in `plan.rs` on this branch (`tidy-engine-files` moves `RefactorKind` only when it greens); the field sits there. `plan.rs` is 1,679 lines with its tests; the production part grew by 8 lines (past the 500 budget `tidy-engine-files` owns: its move carries the field).
+- **P6 — `moved_text` gains a `notes` parameter** (`assemble.rs`), so a pass that reports can reach the run's account. `notes` was declared after `moved_text`; it is now declared before it. No behaviour change.
+
 ### OPEN decisions
 
 - **O2 (OPEN) — B3 if the probe says rust-analyzer returns nothing: how big a text pass, and in this node?** The pass must find `[…]` link targets in `///` / `//!` lines (forms: ``[`P`]``, `[P]`, `[text](P)`, `[x]: P`; skip fenced blocks), resolve `P` against the file's module (`crate::`, `self::`, `super::`, and a bare or module-relative path through the file's `use`), compare with the moved item's old path, and respell. Options: (i) fully-qualified and `crate::`/`self::`/`super::` forms only, in this node (about 100 lines, one module, unit-tested as text); (ii) all forms including bare and relative; (iii) cut B3 into a follow-up node (the whole-work discovery's advice if a text pass is needed), which makes the stack nine nodes and the line linear anyway. **Recommendation: (i) here; (ii) and bare links stay a recorded limitation; (iii) only if the pass passes about 150 lines.**
@@ -387,10 +395,10 @@ Forward links only; a child never links back. `feature/sharpen/repoint-facade` c
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-move-fidelity.md`; the reference line in `docs/ft/coder/1-OVERVIEW.md` is added at wrap, not now: eight nodes would conflict on that shared file)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

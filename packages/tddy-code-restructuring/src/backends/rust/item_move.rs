@@ -14,6 +14,7 @@
 
 pub(super) mod assemble;
 pub(super) mod bindings;
+mod canonical_paths;
 mod creation;
 pub(super) mod destination;
 pub(super) mod facade;
@@ -104,6 +105,7 @@ impl RustBackend {
             sites: &reach.sites,
             outside: &reach.outside,
             reexport,
+            canonical_paths: op.canonical_paths,
         })?;
 
         let mut changes = Vec::new();

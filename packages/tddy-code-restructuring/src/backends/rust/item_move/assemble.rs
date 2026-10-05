@@ -10,6 +10,7 @@ use std::ops::Range;
 
 use super::super::seam_refusal;
 use super::bindings;
+use super::canonical_paths;
 use super::destination::{Module, Package};
 use super::facade;
 use super::imports::{self, Source};
@@ -46,6 +47,8 @@ pub(super) struct Moving<'a> {
     /// The moved names a facade is left for under `outside`.
     pub(super) outside: &'a BTreeSet<String>,
     pub(super) reexport: Reexport,
+    /// Spell a facade path in the moved text as its defining path (`canonical_paths` on the plan line).
+    pub(super) canonical_paths: bool,
 }
 
 /// The result of a move: the new text of each file it changes.
@@ -90,8 +93,15 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         .iter()
         .map(|item| item.name.clone())
         .collect();
-    let moved = moved_text(moving, &region, &moved_names, &landing, &mut edits)?;
     let mut notes = Vec::new();
+    let moved = moved_text(
+        moving,
+        &region,
+        &moved_names,
+        &landing,
+        &mut edits,
+        &mut notes,
+    )?;
     let destination_edits = into_destination(moving, &mut texts, &moved_names, &moved, &mut notes)?;
     for (path, edit) in destination_edits {
         edits.entry(path).or_default().push(edit);
@@ -318,6 +328,7 @@ fn moved_text(
     moved_names: &BTreeSet<String>,
     landing: &Landing,
     edits: &mut BTreeMap<String, Vec<Edit>>,
+    notes: &mut Vec<String>,
 ) -> Result<String> {
     let imported = |module: &[String], name: &str| {
         bindings::import_target(moving.workspace, moving.package, module, name)
@@ -345,7 +356,6 @@ fn moved_text(
     let (mut own, rest): (Vec<Edit>, Vec<Edit>) = source_edits.drain(..).partition(inside);
     *source_edits = rest;
     own.extend(landing.moved_edits.iter().cloned());
-
     let shifted: Vec<Edit> = own
         .into_iter()
         .map(|edit| {
@@ -355,6 +365,20 @@ fn moved_text(
             )
         })
         .collect();
+    let mut shifted = shifted;
+    if moving.canonical_paths {
+        // In the coordinates of the lines themselves, as the edits just above are.
+        let text = &moving.source_text[region.clone()];
+        let claimed: Vec<Range<usize>> = landing
+            .claimed
+            .iter()
+            .filter(|claim| claim.start >= region.start && claim.end <= region.end)
+            .map(|claim| claim.start - region.start..claim.end - region.start)
+            .collect();
+        let rewritten = canonical_paths::defining_paths(moving, text, &claimed)?;
+        shifted.extend(rewritten.edits);
+        notes.extend(rewritten.notes);
+    }
     applied(&moving.source_text[region.clone()], &shifted)
 }
 

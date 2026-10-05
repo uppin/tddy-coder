@@ -254,6 +254,13 @@ pub struct RefactorOp {
     /// one-based argument positions).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order: Vec<OrderKey>,
+    /// Spell a facade path in a moved item's text as the path that defines what it names, for
+    /// `move_item`: a `crate::config::Settings` that goes through `pub use kernel::config;` reads
+    /// `kernel::config::Settings`, so the module can later leave its crate. Off by default, so a
+    /// plan written before the field existed keeps its result byte for byte; only `move_item`
+    /// honours it and any other operation is refused rather than having it ignored.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub canonical_paths: bool,
 }
 
 /// One entry of an operation's `order`: a parameter's name, or an argument's one-based position.
@@ -969,6 +976,42 @@ mod tests {
             error.contains("to_file") && error.contains("MoveItem"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn reads_canonical_paths_on_a_move_item() {
+        let plan = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR},"to":"app::b","canonical_paths":true}}"#
+        )))
+        .unwrap();
+
+        assert!(plan.ops[0].canonical_paths);
+    }
+
+    #[test]
+    fn refuses_canonical_paths_on_extract_module() {
+        let error = Plan::parse(&plan_with(
+            r#"{"op":"extract_module","anchor":{"kind":"range","file":"src/a.rs","start":{"line":1,"col":1},"end":{"line":9,"col":1}},"name":"m","canonical_paths":true}"#,
+        ))
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("canonical_paths")
+                && error.contains("only `move_item` honours")
+                && error.contains("ExtractModule"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn does_not_write_canonical_paths_when_it_is_off() {
+        let plan = Plan::parse(&plan_with(&format!(
+            r#"{{"op":"move_item","anchor":{AN_ITEMS_ANCHOR},"to":"app::b"}}"#
+        )))
+        .unwrap();
+
+        assert!(!plan.to_jsonl().contains("canonical_paths"));
     }
 
     const A_MOD_DECLARATION_ANCHOR: &str = r#"{"kind":"items","file":"src/host.rs","items":["app::host::attachments"],"fingerprints":["sha256:f"]}"#;
