@@ -71,14 +71,20 @@ the presenter in memory, and stays in `Rust tests`; only its LiveKit tests and
 `stdio_remote_control_acceptance` (a real `tddy-coder`) are in the set.
 
 When you add a test that uses the LiveKit testkit, the restructuring harness or spawns one of those
-binaries, add its binary to the filterset, and — for a LiveKit one — to the `docker` test-group in `.config/nextest.toml`, which
-keeps those tests off each other's ports. The two lists carry the same LiveKit names on purpose; the
-group also covers `tddy-livekit`'s own suites.
+binaries, add its binary to the filterset, and — for a LiveKit one — to the LiveKit override of the
+`ci` profile in `.config/nextest.toml`, which bounds a stuck test with `slow-timeout` (see
+[The shared LiveKit server](#the-shared-livekit-server)). The two lists carry the same LiveKit names on purpose; the
+override also covers `tddy-livekit`'s own suites. LiveKit tests run in parallel; none belongs in a
+serial test-group (any group with `max-threads = 1`). The script test
+`scripts/nextest-serial-groups.test.ts` checks it — run it with
+`./dev bun test ./scripts/nextest-serial-groups.test.ts`: it fails if a binary that starts the
+LiveKit testkit is put in a serial group, or if a serial group's filter names a binary or package
+that does not exist.
 
 A LiveKit test names its room with `LiveKitTestkit::unique_room("<purpose>")`, never a fixed
-literal: the `docker` group is the only thing keeping two tests off each other's rooms, and it is
-not a name-level guarantee (under nextest each test is its own process, so `#[serial]` does nothing).
-Unique names are what make a server shared by the job, or tests running side by side, safe. The guard
+literal: on CI every LiveKit test runs in parallel against one shared server, so the room name is
+the only thing keeping two tests apart (under nextest each test is its own process, so `#[serial]`
+does nothing). Unique names are what make a server shared by the job, and tests running side by side, safe. The guard
 test `livekit_tests_use_unique_rooms` in `tddy-livekit-testkit` fails on a fixed room. See
 [testing.md](testing.md#test-rooms-come-from-unique_room).
 
@@ -346,7 +352,7 @@ The image is pinned in one file, `.config/livekit-server.image`, read by the scr
 a one-line edit.
 `./run-livekit-testkit-server --stop` removes the local reusable server.
 
-The `docker` override in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a
+The LiveKit override of the `ci` profile in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a
 LiveKit test stuck on a dead server is killed and named in minutes rather than at the job's limit.
 It is `60s × 3`: a green e2e run's slowest single test took 40 s and the next 20 s, so a test still
 running after three minutes is stuck, not slow. Re-size it from the per-binary table when the
@@ -361,17 +367,33 @@ with the stuck tests named, not run on to the job limit. Leave the input empty f
 
 ## Flaky tests
 
-The LiveKit testkit picks a free port by binding `:0` and releasing it, leaving a
-TOCTOU window before Docker claims it
-(`packages/tddy-livekit-testkit/src/livekit_testkit.rs:26`). Under parallel load
-another test can take the port first and the container fails to bind.
+The LiveKit tests used to run one at a time in a `docker` test-group, because each started its own
+container on a port found by binding `:0` and releasing it, and two tests could race for the same
+port. On CI that race is gone: the e2e leg runs every LiveKit test against one shared server, each
+in its own room, so the group was lifted and they run with nextest's default parallelism. Measured
+on the JUnit (`scripts/ci-e2e-timing.ts junit`): the leg's run phase went from 478 s to 344–355 s
+over three runs, the 168 LiveKit tests from a 328 s serial window to ~105 s, and the leg from 2.0×
+to 4.0× parallel on the runner's four vCPUs — CPU is now the limit, not the server. A test
+stuck on a dead server is still killed by the `slow-timeout` above, not left to the job limit. (A
+local run without `LIVEKIT_TESTKIT_WS_URL` still starts a container per test and can still lose
+that race; `./run-livekit-testkit-server` avoids it.)
 
-Two mitigations, both in `.config/nextest.toml`:
+The `ci` profile retries up to twice with exponential backoff. Retried tests are reported as
+**flaky**, not silently passed, so the signal survives. They were added for the port race, which is
+gone, and are kept for a different reason: the profile also runs the `Rust tests` leg, and the
+suite still has known load-sensitive tests (the concurrency entries in `docs/dev/todo/`, and the
+`FIXME(flaky)` in `session_agent_remote_acceptance`). With the LiveKit tests in parallel, three e2e
+runs (1140 test executions) needed no retry at all. Lower or remove them once those are fixed — a
+`flaky` line in a run's final status is the thing to read first.
 
-- Docker-backed tests run in a `docker` test group capped at one thread, which
-  narrows the window.
-- The `ci` profile retries up to twice with exponential backoff. Retried tests
-  are reported as **flaky**, not silently passed, so the signal survives.
+Parallel runs exposed two tests that had only ever passed because they ran alone, both fixed in their
+own packages: `session_agent_remote_acceptance` used one fixed session id, so concurrent fleets met in
+one `session-{id}` room under identical daemon identities and evicted each other; and
+`stdio_remote_control_acceptance` probed its gRPC port on `127.0.0.1` while `tddy-coder` binds
+`0.0.0.0`, which on Linux a LiveKit client's WebRTC TCP candidate on another address can already
+hold. **Anything a LiveKit test names on the shared server — a room, a session id that becomes a
+room — must be unique per process**, not just per test inside one process: `#[serial]` orders only
+the tests of one binary.
 
 ## Caching and the 10 GB budget
 

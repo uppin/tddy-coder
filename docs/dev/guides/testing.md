@@ -222,6 +222,12 @@ attributed, and build the name once per test when its participants must meet in 
 room-scoped and stay as they are. The guard test `livekit_tests_use_unique_rooms` in
 `tddy-livekit-testkit` fails and names the file and line of any fixed room it finds.
 
+The rule covers every name that **becomes** a room, not only the ones a test passes as one. A
+session id names its session room (`session-{id}`), so a fixture's session id comes from
+`unique_room` too: the guard reads room constants and cannot see that derivation. Unique per
+*process* is the bar — under nextest each test is its own process and the LiveKit binaries run side
+by side, while `#[serial]` and a `OnceLock` room only order or share within one process.
+
 ## Test Composition
 
 1. Each test has a primary purpose or subject.

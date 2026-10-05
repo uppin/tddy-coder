@@ -33,11 +33,12 @@ failure-output = "immediate-final"
 status-level = "fail"
 final-status-level = "flaky"
 
-# The LiveKit testkit finds a free port by binding :0 and releasing it, which
-# leaves a TOCTOU window before Docker claims the port
-# (packages/tddy-livekit-testkit/src/livekit_testkit.rs:26). Under load another
-# test can take it first, and the container fails with "address already in use".
-# A retry re-rolls the port. Retries are reported as "flaky", not hidden.
+# Retried tests are reported as "flaky", not hidden. Retries were added for a port race between
+# per-test LiveKit containers, which is gone: the e2e leg runs every LiveKit test against one shared
+# server (LIVEKIT_TESTKIT_WS_URL). They stay because this profile also runs the `Rust tests` leg and
+# the suite still has known load-sensitive tests (docs/dev/todo/, and the FIXME(flaky) in
+# session_agent_remote_acceptance). Measured with the LiveKit tests in parallel: three e2e runs,
+# 1140 test executions, 0 retries. Lower or remove them once those are fixed.
 retries = { backoff = "exponential", count = 2, delay = "5s", jitter = true }
 
 # Tests excluded from the PR gate, by reason:
@@ -74,11 +75,7 @@ not (
 [profile.ci.junit]
 path = "junit.xml"
 
-# Docker-backed tests contend for host ports. Holding them to one at a time
-# narrows the TOCTOU window that the retries above exist to paper over.
 [test-groups]
-docker = { max-threads = 1 }
-
 # The live-rust-analyzer acceptance suites. Indexing is the contended resource, not a port: two
 # servers loading a crate graph while a `cargo check` runs beside them is how a bounded indexing
 # budget expires on a runner that is otherwise fine. A binary earns its place here by spawning
@@ -105,16 +102,17 @@ package(tddy-code-restructuring) and (
 """
 test-group = "rust-analyzer"
 
+# The binaries that bring up (or join) a LiveKit server, for the `slow-timeout` below. They run in
+# parallel: each test joins the one shared server under a unique room, so there is no port race left
+# for a serial group to prevent. No LiveKit test belongs in any serial test-group (one with
+# `max-threads = 1`): the script test `scripts/nextest-serial-groups.test.ts` (run it with
+# `./dev bun test ./scripts/nextest-serial-groups.test.ts`) fails if a binary that starts
+# `tddy-livekit-testkit` is put in one, or if a serial group names a binary or package that does
+# not exist.
+#
 # The binaries listed by name alone at the end of the filter either moved out of the package named
 # in their entry when the daemon was carved up (so a qualified entry matches nothing) or were never
 # listed. `.config/rust-e2e.filterset` carries the same names.
-#
-# Every binary that brings up (or joins) a LiveKit server belongs here, not just the ones that have
-# been seen to flake. Two of them were listed and the other twenty-one leaned on `retries` instead —
-# which is a different mechanism for a different problem: a retry re-runs a test that lost a port
-# race, while this group stops the race from being run. A binary earns its place by using
-# `tddy-livekit-testkit`, so the list is derivable rather than a record of past failures; the
-# testkit's two own packages are covered wholesale.
 [[profile.ci.overrides]]
 filter = """
 (
@@ -162,7 +160,6 @@ filter = """
     or (package(tddy-daemon) and binary(first_login_enrolment_acceptance))
 )
 """
-test-group = "docker"
 # A test blocked on a LiveKit server that died stops being slow and starts being stuck; without this
 # it waits for the job's 150-minute limit. Terminated tests are reported by name.
 # Sized from a green e2e run's JUnit (run 37222869563, 820f86aa): the slowest single test took 39.8 s

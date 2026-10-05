@@ -7,8 +7,12 @@
 //! one host: every assertion is about *which host answered*, and a single-daemon fixture would
 //! answer every one of them from the wrong place while passing.
 //!
-//! `#[serial]` and the LiveKit testkit, following `multi_host_acceptance.rs` — these bind a shared
-//! room and a Docker-backed server, so they cannot interleave.
+//! `#[serial]` and the LiveKit testkit, following `multi_host_acceptance.rs`. `#[serial]` only
+//! orders the tests inside one process; under nextest each test is its own process, and they run
+//! concurrently against one shared LiveKit server. That is safe only because every LiveKit room a
+//! fleet uses is unique to it: the common room (`room()`) and the session room, named from the
+//! fleet's session id (`a_fleet_with_peers`). Daemon identities are fixed and repeat across
+//! processes, so a room name shared between fleets would let them evict each other.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -454,7 +458,13 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         let _ = rpc_participant_a.run().await;
     }));
 
-    let session_id = "1780828020298-remote-roster".to_string();
+    // Unique per fixture, like `room()`: the session id names a LiveKit room of its own
+    // (`session-{id}`), which both A and the owning daemon join under identities that are the same
+    // in every process (`daemon-{hostname}`, `daemon-agent-roster-daemon-b`). A fixed id put every
+    // concurrently running test's fleet in one session room on the shared server, where a later
+    // fleet's join evicted an earlier one's daemon and the clone's `ReportAgentCloneState` reached
+    // the other fleet's A — leaving this one's clone PROVISIONING forever.
+    let session_id = LiveKitTestkit::unique_room("1780828020298-remote-roster");
     let session_dir = unified_session_dir_path(sessions_a.path(), &session_id);
     std::fs::create_dir_all(&session_dir).expect("create session dir");
     tddy_core::write_session_metadata(
