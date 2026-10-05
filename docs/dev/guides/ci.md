@@ -370,15 +370,30 @@ with the stuck tests named, not run on to the job limit. Leave the input empty f
 The LiveKit tests used to run one at a time in a `docker` test-group, because each started its own
 container on a port found by binding `:0` and releasing it, and two tests could race for the same
 port. On CI that race is gone: the e2e leg runs every LiveKit test against one shared server, each
-in its own room, so the group was lifted and they run with nextest's default parallelism. A test
+in its own room, so the group was lifted and they run with nextest's default parallelism. Measured
+on the JUnit (`scripts/ci-e2e-timing.ts junit`): the leg's run phase went from 478 s to 344–355 s
+over three runs, the 168 LiveKit tests from a 328 s serial window to ~105 s, and the leg from 2.0×
+to 4.0× parallel on the runner's four vCPUs — CPU is now the limit, not the server. A test
 stuck on a dead server is still killed by the `slow-timeout` above, not left to the job limit. (A
 local run without `LIVEKIT_TESTKIT_WS_URL` still starts a container per test and can still lose
 that race; `./run-livekit-testkit-server` avoids it.)
 
 The `ci` profile retries up to twice with exponential backoff. Retried tests are reported as
-**flaky**, not silently passed, so the signal survives. Retries were added for the port race, so
-whether to keep, lower or remove them is decided from the flake rate measured over several parallel
-e2e runs — pending measurement on CI.
+**flaky**, not silently passed, so the signal survives. They were added for the port race, which is
+gone, and are kept for a different reason: the profile also runs the `Rust tests` leg, and the
+suite still has known load-sensitive tests (the concurrency entries in `docs/dev/todo/`, and the
+`FIXME(flaky)` in `session_agent_remote_acceptance`). With the LiveKit tests in parallel, three e2e
+runs (1140 test executions) needed no retry at all. Lower or remove them once those are fixed — a
+`flaky` line in a run's final status is the thing to read first.
+
+Parallel runs exposed two tests that had only ever passed because they ran alone, both fixed in their
+own packages: `session_agent_remote_acceptance` used one fixed session id, so concurrent fleets met in
+one `session-{id}` room under identical daemon identities and evicted each other; and
+`stdio_remote_control_acceptance` probed its gRPC port on `127.0.0.1` while `tddy-coder` binds
+`0.0.0.0`, which on Linux a LiveKit client's WebRTC TCP candidate on another address can already
+hold. **Anything a LiveKit test names on the shared server — a room, a session id that becomes a
+room — must be unique per process**, not just per test inside one process: `#[serial]` orders only
+the tests of one binary.
 
 ## Caching and the 10 GB budget
 

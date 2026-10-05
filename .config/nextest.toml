@@ -34,9 +34,11 @@ status-level = "fail"
 final-status-level = "flaky"
 
 # Retried tests are reported as "flaky", not hidden. Retries were added for a port race between
-# per-test LiveKit containers; the e2e leg now runs every LiveKit test against one shared server
-# (LIVEKIT_TESTKIT_WS_URL), so that reason is gone.
-# TODO(parallel-livekit): decide retries from measured flake rate
+# per-test LiveKit containers, which is gone: the e2e leg runs every LiveKit test against one shared
+# server (LIVEKIT_TESTKIT_WS_URL). They stay because this profile also runs the `Rust tests` leg and
+# the suite still has known load-sensitive tests (docs/dev/todo/, and the FIXME(flaky) in
+# session_agent_remote_acceptance). Measured with the LiveKit tests in parallel: three e2e runs,
+# 1140 test executions, 0 retries. Lower or remove them once those are fixed.
 retries = { backoff = "exponential", count = 2, delay = "5s", jitter = true }
 
 # Tests excluded from the PR gate, by reason:
