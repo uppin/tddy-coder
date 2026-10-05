@@ -265,6 +265,11 @@ pub struct RefactorOp {
     /// `app::roster::Roster`, with optional generic arguments (see [`rust_syntax::one_type`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub to_type: Option<String>,
+    /// The new callee, for `repoint_call`: one path or method chain (see
+    /// [`rust_syntax::one_callee`]); in the bulk form a `$receiver<hops>.<method>` template (see
+    /// [`rust_syntax::one_receiver_template`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callee: Option<String>,
 }
 
 /// One entry of an operation's `order`: a parameter's name, or an argument's one-based position.

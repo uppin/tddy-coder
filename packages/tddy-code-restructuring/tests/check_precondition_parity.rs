@@ -75,6 +75,7 @@ fn a_move_of(file: &str, path: &str) -> RefactorOp {
         order: Vec::new(),
         canonical_paths: false,
         to_type: None,
+        callee: None,
     }
 }
 

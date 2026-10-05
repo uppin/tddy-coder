@@ -197,6 +197,7 @@ mod tests {
             order: Vec::new(),
             canonical_paths: false,
             to_type: None,
+            callee: None,
         };
         fill(&mut op);
         op

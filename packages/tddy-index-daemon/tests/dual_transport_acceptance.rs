@@ -450,6 +450,7 @@ async fn the_daemon_verifying(
             workspace_root: workspace.to_string_lossy().to_string(),
             against: "HEAD".to_string(),
             retargets: retargets.iter().map(|text| (*text).to_string()).collect(),
+            repoints: Vec::new(),
         })
         .await
         .expect("the daemon answers")
@@ -492,6 +493,71 @@ async fn verify_carries_a_declared_retarget_through_the_cli_and_the_daemon_and_b
         (cli_declared_holds, daemon_declared.holds),
         (true, true),
         "a declared retarget was not accounted for: {cli_declared:?}"
+    );
+    assert_eq!(cli_declared, the_lines_of(&daemon_declared));
+    assert_eq!(
+        (cli_undeclared_holds, daemon_undeclared.holds),
+        (false, false)
+    );
+    assert_eq!(cli_undeclared, the_lines_of(&daemon_undeclared));
+}
+
+/// A verify of `workspace` against `HEAD`, put to the served daemon at `port` with `repoints`.
+async fn the_daemon_verifying_repoints(
+    port: u16,
+    workspace: &Path,
+    repoints: &[&str],
+) -> tddy_index_daemon::proto::code_index::VerifyResponse {
+    a_grpc_client_on(port)
+        .await
+        .verify(tddy_index_daemon::proto::code_index::VerifyRequest {
+            workspace_root: workspace.to_string_lossy().to_string(),
+            against: "HEAD".to_string(),
+            retargets: Vec::new(),
+            repoints: repoints.iter().map(|text| (*text).to_string()).collect(),
+        })
+        .await
+        .expect("the daemon answers")
+        .into_inner()
+}
+
+#[tokio::test]
+async fn verify_carries_a_declared_repoint_through_the_cli_and_the_daemon_and_both_render_the_same_lines(
+) {
+    // Given a committed tree whose call `h.slot(1)` now reads `h.peer.slot(1)`, and the binary serving gRPC
+    let workspace = a_committed_workspace_holding("pub fn run(h: &Host) {\n    h.slot(1);\n}\n");
+    std::fs::write(
+        workspace.path().join("src/lib.rs"),
+        "pub fn run(h: &Host) {\n    h.peer.slot(1);\n}\n",
+    )
+    .expect("re-point the call");
+    let port = a_free_port();
+    let mut serving = Command::new(the_index_daemon())
+        .args(["--grpc", &format!("127.0.0.1:{port}")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary starts");
+    assert!(
+        a_tcp_connection_is_accepted_on(port, A_RUN_SHOULD_FINISH_WITHIN),
+        "the gRPC listener never accepted a client"
+    );
+
+    // When it is verified through each, once told of the repoint and once not
+    let declared = ["--repoint", ".slot=.peer.slot"];
+    let (cli_declared, cli_declared_holds) = the_cli_verifying(workspace.path(), &declared);
+    let (cli_undeclared, cli_undeclared_holds) = the_cli_verifying(workspace.path(), &[]);
+    let daemon_declared =
+        the_daemon_verifying_repoints(port, workspace.path(), &[".slot=.peer.slot"]).await;
+    let daemon_undeclared = the_daemon_verifying_repoints(port, workspace.path(), &[]).await;
+    let _ = serving.kill();
+    let _ = serving.wait();
+
+    // Then both hold, and print the same lines, when told; and both report the call when not
+    assert_eq!(
+        (cli_declared_holds, daemon_declared.holds),
+        (true, true),
+        "a declared repoint was not accounted for: {cli_declared:?}"
     );
     assert_eq!(cli_declared, the_lines_of(&daemon_declared));
     assert_eq!(

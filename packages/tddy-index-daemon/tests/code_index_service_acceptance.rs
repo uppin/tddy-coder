@@ -814,6 +814,7 @@ async fn holds_a_tree_against_the_ref_it_was_committed_as() {
             workspace_root: workspace.path().to_string_lossy().to_string(),
             against: "HEAD".to_string(),
             retargets: Vec::new(),
+            repoints: Vec::new(),
         },
     )
     .await

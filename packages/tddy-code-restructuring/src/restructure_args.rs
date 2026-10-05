@@ -181,6 +181,10 @@ pub struct RestructureVerifyArgs {
     /// differences it causes are accounted for rather than reported.
     #[arg(long = "retarget", value_name = "OLD=NEW")]
     pub retarget: Vec<String>,
+    /// A call re-point the author made, `OLD=NEW` callee texts (repeatable, one per
+    /// `repoint_call`): the differences it causes are accounted for rather than reported.
+    #[arg(long = "repoint", value_name = "OLD=NEW")]
+    pub repoint: Vec<String>,
 }
 
 /// A struct of its own rather than a second use of [`RestructurePlanArgs`]: `--dry-run`,
@@ -243,6 +247,7 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             command: Command::Verify,
             against: Some(verify.against),
             retargets: verify.retarget,
+            repoints: verify.repoint,
             ..Options::default()
         },
         RestructureCommand::Snapshot(snapshot) => Options {

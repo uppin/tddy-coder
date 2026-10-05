@@ -61,6 +61,114 @@ impl<'ast> syn::visit::Visit<'ast> for Statements {
     }
 }
 
+/// `text` as one callee: a path (`a::b::f`, `<T as Tr>::f`) or a field access whose chain holds only
+/// paths, fields, tuple indexes, calls, method calls, `(…)`, `&`, `*`, `?`, `.await` and indexing,
+/// or a malformed-plan refusal naming the text.
+///
+/// The outer expression is never a call: the arguments stay with the call being re-pointed, so
+/// `f(x)` and `a.b()` are refused, and so is every statement-bearing or operator expression.
+pub fn one_callee(text: &str) -> Result<syn::Expr> {
+    let refused = |why: &str| {
+        malformed(format!(
+            "`callee` must be one path or field/method chain, `self.peer.f` or `a::b::f`, and \
+             `{text}` is not: {why}"
+        ))
+    };
+    let expr = syn::parse_str::<syn::Expr>(text)
+        .map_err(|_| refused("it does not parse as exactly one expression"))?;
+    if !matches!(expr, syn::Expr::Path(_) | syn::Expr::Field(_)) {
+        return Err(refused(
+            "the outer expression is a call or an operator, and the arguments stay with the call",
+        ));
+    }
+    let mut chain = Chain::default();
+    syn::visit::Visit::visit_expr(&mut chain, &expr);
+    match chain.refused {
+        Some(kind) => Err(refused(&format!("it holds {kind}"))),
+        None => Ok(expr),
+    }
+}
+
+/// What a callee's chain may not hold: a statement, or an expression that is not a chain element.
+#[derive(Default)]
+struct Chain {
+    refused: Option<&'static str>,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for Chain {
+    fn visit_stmt(&mut self, _: &'ast syn::Stmt) {
+        self.refused.get_or_insert("a statement");
+    }
+
+    fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+        use syn::Expr::*;
+        let kind = match expr {
+            Block(_) | Unsafe(_) | Const(_) | Async(_) | TryBlock(_) => Some("a block"),
+            Closure(_) => Some("a closure"),
+            If(_) | Match(_) | While(_) | Loop(_) | ForLoop(_) | Let(_) => Some("control flow"),
+            Macro(_) => Some("a macro"),
+            Binary(_) | Assign(_) | Range(_) | Cast(_) => Some("an operator expression"),
+            Return(_) | Break(_) | Continue(_) | Yield(_) => Some("a jump"),
+            Unary(unary) if !matches!(unary.op, syn::UnOp::Deref(_)) => Some("a unary operator"),
+            _ => None,
+        };
+        match kind {
+            Some(kind) => {
+                self.refused.get_or_insert(kind);
+            }
+            None => syn::visit::visit_expr(self, expr),
+        }
+    }
+}
+
+/// The hops a bulk `callee` template inserts after a receiver: `$receiver.peer.slot` for the method
+/// `slot` is `[".peer"]`, `$receiver.agent_roster().slot` is `[".agent_roster()"]`.
+///
+/// `$receiver` must occur once, as the leftmost segment, followed by at least one hop, and the last
+/// segment must be the method's own name: a rename is `rename_symbol`'s.
+pub fn one_receiver_template(text: &str, method: &str) -> Result<Vec<String>> {
+    const SENTINEL: &str = "__receiver__";
+    let refused = |why: &str| {
+        malformed(format!(
+            "`callee` of a bulk `repoint_call` is `$receiver<hops>.{method}`, and `{text}` is not: \
+             {why}"
+        ))
+    };
+    if text.matches("$receiver").count() != 1 || !text.starts_with("$receiver") {
+        return Err(refused(
+            "`$receiver` must occur once, as the leftmost segment",
+        ));
+    }
+    let rest = &text["$receiver".len()..];
+    let tail = format!(".{method}");
+    let hops_text = rest
+        .strip_suffix(&tail)
+        .filter(|hops| hops.starts_with('.'))
+        .ok_or_else(|| refused("it must add at least one hop and end in the method's own name"))?;
+    one_callee(&format!("{SENTINEL}{rest}")).map_err(|_| refused("it is not one chain"))?;
+    Ok(split_hops(hops_text))
+}
+
+/// `.a.b().c[0]` as `[".a", ".b()", ".c[0]"]`: the pieces between the dots outside any bracket.
+fn split_hops(hops: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut depth = 0usize;
+    let mut from = 0usize;
+    for (at, character) in hops.char_indices() {
+        match character {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '.' if depth == 0 && at > from => {
+                found.push(hops[from..at].trim().to_string());
+                from = at;
+            }
+            _ => {}
+        }
+    }
+    found.push(hops[from..].trim().to_string());
+    found
+}
+
 /// Where each entry of `current` goes under `order`: the index into `current` of each new position.
 ///
 /// `order` must name every entry of `current` exactly once. A missing one or a repeated one is

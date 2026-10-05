@@ -42,6 +42,7 @@ mod nested_modules;
 mod prelude_shadow;
 mod readiness;
 mod relative_visibility;
+mod repoint_call;
 mod retarget_impl;
 mod selection;
 mod signature;
@@ -70,7 +71,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 23] = [
+const SUPPORTED: [RefactorKind; 24] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -94,6 +95,7 @@ const SUPPORTED: [RefactorKind; 23] = [
     RefactorKind::ChangeCallArg,
     RefactorKind::ReorderCallArgs,
     RefactorKind::RetargetImpl,
+    RefactorKind::RepointCall,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1127,6 +1129,9 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::RetargetImpl {
             return retarget_impl::findings(op, workspace);
         }
+        if op.op == RefactorKind::RepointCall {
+            return repoint_call::findings(op, workspace);
+        }
         let Anchor::Range { start, end, .. } = &op.anchor else {
             return Ok(Vec::new());
         };
@@ -1292,6 +1297,12 @@ impl RustBackend {
         // server, and opens the document for itself.
         if op.op == RefactorKind::RetargetImpl {
             return self.retarget_impl(op, workspace);
+        }
+
+        // Re-points a call's callee, or the receiver of every call of a method: text edits authored
+        // here, answered before a server exists for the single form.
+        if op.op == RefactorKind::RepointCall {
+            return self.repoint_call(op, workspace);
         }
 
         // The same operation over a set, and one edit rather than one per member: a

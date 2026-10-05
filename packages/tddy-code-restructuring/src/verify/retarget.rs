@@ -26,6 +26,9 @@ use super::statements;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Declared {
     pub retargets: Vec<Retarget>,
+    /// The call re-points declared (`--repoint`, one per `repoint_call`): rule R-call, in
+    /// [`super::repoint`].
+    pub repoints: Vec<super::Repoint>,
 }
 
 /// One declared retarget: the members of `impl from` became members of `impl to`. Bare type
@@ -61,6 +64,21 @@ impl FromStr for Retarget {
 }
 
 impl Declared {
+    /// The declaration the texts of both kinds name, or the first that is not one: retargets as
+    /// `OLD=NEW` type names, repoints as `OLD=NEW` callee texts.
+    pub fn from_declarations<'a>(
+        retargets: impl IntoIterator<Item = &'a String>,
+        repoints: impl IntoIterator<Item = &'a String>,
+    ) -> Result<Declared, String> {
+        Ok(Declared {
+            repoints: repoints
+                .into_iter()
+                .map(|text| text.parse())
+                .collect::<Result<_, _>>()?,
+            ..Declared::from_texts(retargets)?
+        })
+    }
+
     /// The declaration the texts name, or the first that is not one.
     pub fn from_texts<'a>(texts: impl IntoIterator<Item = &'a String>) -> Result<Declared, String> {
         Ok(Declared {
@@ -68,6 +86,7 @@ impl Declared {
                 .into_iter()
                 .map(|text| text.parse())
                 .collect::<Result<_, _>>()?,
+            repoints: Vec::new(),
         })
     }
 }

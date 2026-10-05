@@ -3,7 +3,7 @@
 **Date**: 2026-10-05
 **Status**: 🚧 In Progress
 **Type**: Feature (new restructure operation; text edits only, no change to what existing operations do)
-**Stack**: `#sharpen` 7/8, branch `feature/sharpen/repoint-call`, wave 2. PR title:
+**Stack**: `#sharpen` 7/8, branch `feature/sharpen/repoint-call`, wave 2. Draft PR: https://github.com/uppin/tddy-coder/pull/594. PR title:
 `feat(code-restructuring): repoint_call re-points a call's callee or every receiver of a method (#sharpen 7/8)`.
 Base in the linear stack: `feature/sharpen/retarget-impl` (K=6). **Real edges**: `tidy-engine-files` (K=1, file overlap and the new home of `RefactorKind`) and
 `retarget-impl` (K=6, **surface**: the `restructure verify` declaration carrier this node extends).
@@ -209,7 +209,7 @@ A single form that also changed arguments (`self.dir_for(id)` -> `lookup::dir_fo
 
 ## Implementation milestones
 
-- [ ] **M0** the first commit of code, mechanical: `RefactorOp.callee` and `callee: None` on the 20 full struct literals in 15 files; `cargo check -p tddy-code-restructuring --all-targets` clean (not `cargo build -p`: it skips the test targets that hold most of them)
+- [x] **M0** (done in the contract commit; this node's first commit is the plan) the mechanical edit: `RefactorOp.callee` and `callee: None` on the 20 full struct literals in 15 files; `cargo check -p tddy-code-restructuring --all-targets` clean (not `cargo build -p`: it skips the test targets that hold most of them)
 - [ ] **M1** plan surface and codec: tests 1-12 pass (red first)
 - [ ] **M2** single form: `single.rs`, `findings`, resolve arm; unit tests and tests 13-16
 - [ ] **M3** bulk form: `sites.rs`, `receivers.rs`; tests 17-25
@@ -244,6 +244,8 @@ It would make the bulk test fast and prove nothing about what rust-analyzer repo
 ## Acceptance tests
 
 Names read as behaviour specifications. All are **red on `master`** (`unknown variant repoint_call` or a missing symbol unless stated).
+
+**Contract commit, what each test does today** (the lines below are relative to `master`; the published surface makes some pass, as the wave-2 contract requires: the field, the variant and the codec rules exist). **Red on this branch:** 10, 11 (static findings: `check` reports nothing for a `repoint_call` yet), 13-17 (inline: the pure functions refuse as unimplemented), 18-26 (live: refused as unimplemented, the refusal naming node `repoint-call`), 27 (`verify` does not read the declaration), 30 (CLI + daemon: the declaration is carried, nothing reads it). **Green on this branch, by design:** 1-9 (the published codec, `one_callee`, `one_receiver_template`), 12 (the existing "anchors by item" finding names the kind), 28 and 29 (guards: they pin what `verify` must keep reporting, and nothing is excused yet). **Differences from the list below:** test 19 re-points to `crate::lookup::slot` (a bare `lookup::slot` does not resolve from inside module `host`); test 7 reads "a single anchor without a range" as a single-form callee over a no-range anchor, which is the bulk form and so asks for a `$receiver` template; test 16 asserts the receiver text through a new crate-private `receivers::receiver_span`, because the contract's `insertions_for` returns only the offset after the receiver; tests 21-24 and 26 anchor with the `item` anchor the live tests build from the `anchors` command's `items` anchor (see Findings).
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/tests/repoint_call_plan_acceptance.rs` (new; library level, no server)
 
@@ -310,7 +312,25 @@ Taken by the developer (stack brief, quoted): "8-node decomposition approved (20
 - **O9 — composing with argument operations.** Whether the ledger translates the anchor of a second operation over a call an earlier operation edited inside its range is **unverified**; test 20 decides, and the doc states the working order.
 - **O10 — reach of the bulk form.** (a) **every package the server knows** — *recommended*, "every reference"; (b) the anchor's package only.
 
+Decisions taken in the contract commit (2026-10-05), each the changeset's recommendation unless said:
+
+- **O1-O4, O7, O8, O10** — as recommended: one field `callee`; the form read from the anchor shape plus `$receiver`; all non-call sites refused at once; hops inserted; no reference is a no-op with a note; the codec rules sit in the child module `plan/codec/repoint_call_fields.rs` (`plan/codec.rs` gained 3 lines and was already past 500 production lines, at 519, before this node: that is `tidy-engine-files`'s); the bulk form reaches every package the server knows.
+- **O5, O6** — as recommended: `--repoint OLD=NEW` through retarget-impl's carrier; no wire counter, the pairs count under `repointed`. Published: `RestructureVerifyArgs.repoint`, `Options.repoints`, the daemon CLI's `VerifyArgs.repoint`, `VerifyRequest.repoints = 4` (retarget-impl's is 3), `verify::Declared.repoints: Vec<Repoint>`, `Repoint { from, to }` (`FromStr` reads `OLD=NEW`: two different non-empty callee texts, split at the first `=`), and `Declared::from_declarations(retargets, repoints)`. retarget-impl's `Declared::from_texts` is untouched (it fills `repoints` with nothing); the runner calls `from_declarations`.
+- **O9** — unverified; test 20 decides. It adds the argument first and re-points second, both over the call as first written.
+- **The unimplemented operation** is refused with `UnsupportedOp` (backend text names node `repoint-call`), as retarget-impl does, so no test that waits for a `SeamRefused` or `MalformedPlan` can pass on the wrong refusal. **Unlike retarget-impl, the static `check` reports nothing** (`findings` returns an empty list): a published "not implemented" finding stops `check --deep` from rehearsing (`check_plan` skips `resolve` for an operation with a static finding), and test 26 needs the deep check to reach the engine. A plain check of an item-anchored `repoint_call` still says "anchors by item ... run `check --deep`" (the runner's own finding), and the deep rehearsal reports the unimplemented refusal. Cost: a plain check of a range-anchored one says nothing until green writes `findings` (tests 10, 11).
+- **Skeleton shape.** `RustBackend::repoint_call` already dispatches on the lowered range (width: the single form, `single::rewrite_callee`; zero width: the bulk form, `sites::repoint_receivers`), so both unfinished functions are reachable. `receivers::receiver_span(text, site) -> Result<Range<usize>>` is the unfinished walk and `receivers::insertions_for` is its one caller-to-be (`#[cfg_attr(not(test), allow(dead_code))]` until `sites` calls it, marked `TODO(repoint-call)`). The visibility widenings of `call_site` and `signature_rewrites` the Delta lists are **not** done: nothing in the skeleton needs them.
+
 Decisions taken by this plan: single form reuses `call_in`; the old callee may hold no call (silent argument loss otherwise); the same-statement-count wire shape; the form is read from the anchor.
+
+### Findings the tests surfaced (the green wave must read these)
+
+- **What `verify` really reports for a re-pointed receiver or callee.** For `let total = h.slot(1);` becoming `let total = h.peer.slot(1);` it reports that one statement lost and that one gained, plus a tokens line (`tokens lost: none; tokens gained: . x1, peer x1`); the `impl` header of a re-pointed method is invisible to it (`is_structural` drops `impl `-prefixed lines, as retarget-impl found). The changeset's R-call premise holds for a **field or method hop** (the re-point pass strips lowercase module qualifiers only, so no undeclared pass pairs them). It does **not** hold that a path re-point needs a declaration: `f(` becoming `m::f(` (and `crate::lookup::slot(`, test 19) is already excused by the re-point pass with no declaration, as `verify.rs`'s own test `excuses_a_call_re_pointed_through_a_module_qualifier` pins. What needs one is a hop on a receiver, a method chain, or a path qualified by a **type** (`Host::slot(` becoming `Roster::slot(`; the retarget carrier's R1 overlaps there). R-call must therefore never be required for a lowercase-module path, and tests 27-29 are written to hop shapes only.
+- **The pairing is per statement, not per call.** A statement holding two calls of the declared callee needs both rewritten for the pair to match; R-call must replace every occurrence in the lost statement, as the rule says, and compare to the gained one whole.
+- **The `anchors` command emits `items`, not `item`.** Over `app::host::Host::slot` it answers `{"kind":"items","items":[...],"fingerprints":[...]}`; the bulk form is an `item` anchor with no range (it lowers to the name; an `items` anchor lowers to the whole run). The live tests convert a run of one to the `item` anchor. A plan author does the same by hand, or green widens the codec to read a one-item `items` anchor as the bulk form and lower it to the name; the codec as published refuses `items` and `symbol` anchors ("anchors by item").
+- **A note's wording is not specified by the changeset.** Test 25 asserts the heard lines name the method and say `no call` and `comment`; green may choose the sentence, and must keep those three words or change the test with it.
+- **`RefactorKind` still lives in `plan.rs`** on this branch: `plan/refactor_kind.rs` (`tidy-engine-files` D1) does not exist at `9da4f554`. The variant was added where the enum is.
+- **The `callee: None` literals are in this node's second commit**, not a first one (this node's first commit is the plan): 21 literals in 16 files (the changeset counted 20 in 15; one is inside `plan.rs`'s own tests), found by `cargo check --all-targets`.
+- **Live-test status.** All nine live tests (18-26) were run (`timeout 900`, `--test-threads=1`, one run of 9 in 8.5 s) and each fails with `backend `Rust (node `repoint-call` has not implemented it yet, TODO(repoint-call))` does not support operation `RepointCall``, after the anchors lowered (so the item anchor with and without a relative range reaches `resolve`). Which of the two skeleton branches ran is not distinguishable until green; the zero-width lowering of the bulk anchor is therefore **unverified**.
 
 ## Refactoring Needed
 
@@ -346,10 +366,10 @@ Decisions taken by this plan: single form reuses `call_in`; the old callee may h
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-repoint-call.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

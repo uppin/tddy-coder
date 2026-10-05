@@ -99,6 +99,7 @@ fn a_signature_op(kind: RefactorKind, item: &str, item_text: &str, name: &str) -
         order: Vec::new(),
         canonical_paths: false,
         to_type: None,
+        callee: None,
     }
 }
 
