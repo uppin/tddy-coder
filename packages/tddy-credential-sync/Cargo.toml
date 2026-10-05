@@ -16,6 +16,9 @@ thiserror = "2"
 # deliberately so: an engine that could reach `tddy-daemon-livekit` would be written against LiveKit
 # and would repeat the misplaced dependency `heavy-dependency-livekit-peer-forwarding` records.
 tddy-credentials = { path = "../tddy-credentials" }
+# `VaultTransportKey`'s X25519 agreement — the companion of the `ed25519-dalek` already approved
+# for `#keyring` 1/9. CLAUDE.md § ASK: approved for this node's green phase.
+x25519-dalek = { version = "2", features = ["static_secrets"] }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
