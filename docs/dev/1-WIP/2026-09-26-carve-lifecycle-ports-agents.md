@@ -477,6 +477,14 @@ Settled by the developer (2026-09-26), carried here:
   approved. The seven further methods the pilot listed are not.
 - `PeerRouted*` stays.
 
+### Decisions taken (2026-10-05, the developer's go-ahead)
+
+- **D1 = Recipe B**: methods on the owned `AgentRoster` handle (`connection_service/agent_host_callbacks.rs`), fields named as the host's, built per call by `DaemonSessionHost::agent_roster()`; `state()` lends `AgentRosterState`.
+- **D2 approved**: `AgentHostCallbacks` = {`worktree_snapshot`, `run_exec_tool_locally`, `local_exec_tools`, `session_room_roster`}, implemented once on the host in `svc_agent_host_ports.rs`.
+- **D3**: `DaemonSeedCloneClaimant` holds the handle (stage A keeps the host, `TODO(stage B)`, because `claim_co_located_seed_clones` is not yet a handle method).
+- **D7 = A**: `LocalExecTools` stays in lifecycle, reached through the callbacks.
+- Stage A done: M4.1, and M4.2 (engine `move_item` into `svc_agent_roster_wiring.rs`).
+
 ### Open decisions this node needs
 
 - **D1: how the conversion is shaped, and the `self.clone()`-to-task hand-offs.** Twelve methods in
