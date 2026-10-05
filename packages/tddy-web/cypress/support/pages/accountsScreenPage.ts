@@ -17,6 +17,9 @@ export const accountsScreenPage = {
     byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-label`),
   subject: (provider: string, accountId: string) =>
     byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-subject`),
+  /** `#keyring` 6/9's aggregate sync standing. Absent entirely when nothing has synced it yet. */
+  syncStatusBadge: (provider: string, accountId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-sync-status`),
 
   /** Shown when the vault is open and holds nothing — distinct from every state below. */
   emptyNotice: () => byTestId("accounts-empty"),

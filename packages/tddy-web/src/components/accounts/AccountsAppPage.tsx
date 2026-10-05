@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
 import {
   AccountsService,
+  SyncStatus,
   type AccountSummary,
   type ListAccountsResponse,
   type ProviderAccounts,
@@ -20,9 +21,29 @@ import { AppShell } from "../shell/AppShell";
 import {
   AccountsScreen,
   type AccountRow,
+  type AccountSyncStatus,
   type AccountsOutcome,
   type ProviderGroup,
 } from "./AccountsScreen";
+
+/** `SYNC_STATUS_UNSPECIFIED` maps to `null` — nothing has synced the account yet. */
+function syncStatusFromRpc(status: SyncStatus): AccountSyncStatus | null {
+  switch (status) {
+    case SyncStatus.SYNCED:
+      return "synced";
+    case SyncStatus.PENDING:
+      return "pending";
+    case SyncStatus.UNDELIVERABLE:
+      return "undeliverable";
+    case SyncStatus.CONFLICT:
+      return "conflict";
+    case SyncStatus.REFUSED:
+      return "refused";
+    case SyncStatus.UNSPECIFIED:
+    default:
+      return null;
+  }
+}
 
 function rowFromRpc(account: AccountSummary): AccountRow {
   return {
@@ -31,6 +52,7 @@ function rowFromRpc(account: AccountSummary): AccountRow {
     subject: account.subject,
     updatedAtUnixSeconds: account.updatedAt,
     hasSecret: account.hasSecret,
+    syncStatus: syncStatusFromRpc(account.syncStatus),
   };
 }
 

@@ -11727,6 +11727,7 @@ dependencies = [
  "log",
  "pretty_assertions",
  "prost 0.13.5",
+ "tddy-credential-sync",
  "tddy-credentials",
  "tddy-rpc",
  "tddy-service",

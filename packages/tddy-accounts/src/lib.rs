@@ -14,9 +14,11 @@
 mod resolver;
 mod service;
 mod store;
+mod sync_status;
 mod vault_store;
 
 pub use resolver::{resolve_account, AccountResolution};
 pub use service::{build_accounts_entry, AccountsServiceImpl};
 pub use store::{AccountStore, AccountsError};
+pub use sync_status::SyncStatusSource;
 pub use vault_store::{SessionSubjectResolver, SessionVaultAccountStore};

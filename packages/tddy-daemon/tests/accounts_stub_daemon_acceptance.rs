@@ -18,7 +18,7 @@ use tddy_daemon::runtime::{self, RuntimeOptions};
 use tddy_daemon_auth::SessionVaults;
 use tddy_rpc::{MultiRpcService, RequestMetadata, RequestTransport, RpcBridge, RpcMessage, Status};
 use tddy_service::proto::accounts::{
-    AccountSummary, ListAccountsRequest, ListAccountsResponse, ProviderAccounts,
+    AccountSummary, ListAccountsRequest, ListAccountsResponse, ProviderAccounts, SyncStatus,
 };
 use tddy_service::proto::auth::{
     ExchangeCodeRequest, ExchangeCodeResponse, GetAuthUrlRequest, GetAuthUrlResponse,
@@ -62,6 +62,7 @@ async fn a_stub_users_pre_opened_vault_is_listed_without_its_secret() {
                     subject: THE_STUB_USER.to_string(),
                     updated_at: A_RECORD_WRITTEN_AT as i64,
                     has_secret: true,
+                    sync_status: SyncStatus::Unspecified as i32,
                 }],
             }],
             vault_locked: false,
