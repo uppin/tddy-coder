@@ -259,7 +259,7 @@ impl AgentRoster {
     ///
     /// On success the artifacts are handed back rather than dropped: a start can still fail at a
     /// step *after* the seed, and only this list says what to take away. The caller owns them from
-    /// here — see [`AgentRoster::unwind_seeded_roster`].
+    /// here — see [`Self::unwind_seeded_roster`].
     pub(crate) async fn seed_session_agent_roster(
         &self,
         session_id: &str,

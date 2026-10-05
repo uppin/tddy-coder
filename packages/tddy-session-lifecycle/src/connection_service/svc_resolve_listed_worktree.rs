@@ -248,8 +248,8 @@ impl AgentRoster {
     /// An empty seed resolves to an empty roster, not an error.
     ///
     /// The records name no clone yet — `codebase_session_id` is filled in by
-    /// [`DaemonSessionHost::seed_session_agent_roster`], which is the only place that knows which
-    /// session they are being recorded on.
+    /// [`Self::seed_session_agent_roster`], which is the only place that knows which session they
+    /// are being recorded on.
     pub(crate) async fn seeded_roster_records(
         &self,
         specialized_agents: &[String],
