@@ -35,7 +35,9 @@ use super::LocalExecTools;
 /// The capabilities of the session host the agent topic calls and does not own.
 ///
 /// Implemented once, on the host, in wiring (`svc_agent_host_ports`).
-// TODO(stage B): drop this once the agent topic's methods move onto the handle.
+// TODO(stage B2): drop this once `run_exec_tool_locally` (local_agent_codebase_access),
+// `session_room_roster` (ensure_session_room) and `worktree_snapshot` (join_split_livekit_room,
+// 16c) have a caller on the handle.
 #[allow(dead_code)]
 #[async_trait::async_trait]
 pub(crate) trait AgentHostCallbacks: Send + Sync {
