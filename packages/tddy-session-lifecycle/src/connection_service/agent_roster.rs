@@ -183,6 +183,6 @@ pub(crate) fn roster_agent_ids(agents: &[tddy_core::SessionAgentRecord]) -> Vec<
 /// after the forward deadline. Accepted: the placement check already required the peer to be
 /// visible in the common room moments earlier, so that is the rarer failure, and the alternative
 /// trades a rare slow error for a routine orphaned worktree.
-pub fn split_forward_deadline(config: &crate::config::DaemonConfig) -> Duration {
+pub fn split_forward_deadline(config: &tddy_daemon_kernel::config::DaemonConfig) -> Duration {
     config.spawn_worker_request_timeout() + config.peer_forward_timeout()
 }
