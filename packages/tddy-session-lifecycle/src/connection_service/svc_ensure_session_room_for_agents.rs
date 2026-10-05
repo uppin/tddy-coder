@@ -1,5 +1,3 @@
-mod session_room_opening;
-
 use std::path::Path;
 
 use crate::connection_service::{agent_roster, seed_codebase, seeded_clone_guard};

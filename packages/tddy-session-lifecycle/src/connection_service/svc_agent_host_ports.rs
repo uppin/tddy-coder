@@ -3,6 +3,8 @@
 //! Each method forwards to the host method or impl that already does the work, so the topic and
 //! every other caller take exactly one path.
 
+mod session_room_opening;
+
 use std::path::Path;
 
 use tddy_daemon_livekit::session_room::{
