@@ -35,14 +35,13 @@ use super::LocalExecTools;
 /// The capabilities of the session host the agent topic calls and does not own.
 ///
 /// Implemented once, on the host, in wiring (`svc_agent_host_ports`).
-// TODO(stage B2): drop this once `run_exec_tool_locally` (local_agent_codebase_access),
-// `session_room_roster` (ensure_session_room) and `worktree_snapshot` (join_split_livekit_room,
-// 16c) have a caller on the handle.
-#[allow(dead_code)]
 #[async_trait::async_trait]
 pub(crate) trait AgentHostCallbacks: Send + Sync {
     /// Measure a checkout that lives on a peer: the same answer a caller's own
     /// `GetWorktreeSnapshot` gets, peer routing and blocking-pool budget included.
+    // TODO(#carve 18/21): drop this allowance once `join_split_livekit_room` (T4, the split
+    // topic) calls it over the handle.
+    #[allow(dead_code)]
     async fn worktree_snapshot(
         &self,
         session_token: &str,
@@ -63,6 +62,10 @@ pub(crate) trait AgentHostCallbacks: Send + Sync {
     fn local_exec_tools(&self) -> LocalExecTools;
 
     /// Every coordinate a session room serves, for the room the agent topic opens.
+    // TODO(stage B2, blocked): drop this allowance once `ensure_session_room` is a handle method.
+    // It cannot be one yet: `SessionRoomRegistry::ensure_open` also wants a `SessionTerminalBridge`,
+    // which the host is (it holds `claude_cli_manager`), and the handle has no way to reach it.
+    #[allow(dead_code)]
     fn session_room_roster(&self) -> Result<MultiRpcService, Status>;
 }
 

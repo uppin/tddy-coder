@@ -9,8 +9,9 @@ use tddy_service::proto::session::GetWorktreeSnapshotRequest;
 /// A shallow clone of the service (every mutable field is behind an `Arc`) rather than the service
 /// itself, so the free spawn functions can be handed the one collaborator they need without naming
 /// the concrete daemon type in their signatures.
-// TODO(stage B): hold the `AgentRoster` handle instead of the host once `claim_co_located_seed_clones`
-// is a method of the handle; it is still a host method, so the claimant keeps the host until then.
+// TODO(stage B2, blocked): hold the `AgentRoster` handle instead of the host once
+// `claim_co_located_seed_clones` is a method of the handle; it is still a host method (it reaches
+// `ensure_session_room` through `claim_agent_clone`), so the claimant keeps the host until then.
 pub(crate) struct DaemonSeedCloneClaimant {
     pub(crate) service: DaemonSessionHost,
 }
