@@ -12,7 +12,6 @@ use std::time::Duration;
 
 use tddy_model_registry::ModelRegistryStore;
 use tddy_rpc::Status;
-use tddy_session_agents::AgentRosterState;
 use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::agent_host_callbacks::AgentRoster;
@@ -163,25 +162,6 @@ impl DaemonSessionHost {
         self.attachment_state()
             .prepare_session_attachments(ctx)
             .await
-    }
-
-    /// The fields the agent roster, its clones and agent-def resolution read, lent to the code in
-    /// `tddy-session-agents` that works them for the length of one call.
-    pub(crate) fn agent_roster_state(&self) -> AgentRosterState<'_> {
-        AgentRosterState {
-            config: &self.config,
-            tddy_data_dir: &self.tddy_data_dir,
-            user_resolver: &self.user_resolver,
-            peer_routing: &self.peer_routing,
-            room_roster: &self.room_roster,
-            session_rooms: &self.session_rooms,
-            session_agent_rosters: &self.session_agent_rosters,
-            session_agent_clones: &self.session_agent_clones,
-            hosted_agent_clones: &self.hosted_agent_clones,
-            roster_keepalive_interval: self.roster_keepalive_interval,
-            session_admissions: &self.session_admissions,
-            model_registry: &self.model_registry,
-        }
     }
 
     /// The same fields, owned, plus this host's callbacks: the handle the agent topic's methods

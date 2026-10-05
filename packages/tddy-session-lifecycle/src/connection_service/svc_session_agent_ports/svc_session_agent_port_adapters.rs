@@ -34,21 +34,19 @@ use tddy_core::SessionAgentRecord;
 
 use tddy_session_agents::ports::AgentCatalog;
 
+use super::super::agent_host_callbacks::AgentRoster;
 use super::super::DaemonSessionHost;
 
 /// The defs this daemon can resolve an agent id against — its own `<tddyhome>/agents` entries and
 /// its model registry's assistants, or a peer's own `ListSubagents` for an id naming that peer.
 pub(crate) struct DefsResolvableFromThisDaemon {
-    pub(crate) connection: DaemonSessionHost,
+    pub(crate) roster: AgentRoster,
 }
 
 #[async_trait]
 impl AgentCatalog for DefsResolvableFromThisDaemon {
     async fn record_for(&self, agent_id: &str) -> Result<SessionAgentRecord, Status> {
-        self.connection
-            .agent_roster()
-            .roster_record_for_agent_id(agent_id)
-            .await
+        self.roster.roster_record_for_agent_id(agent_id).await
     }
 }
 
@@ -133,7 +131,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
 
 /// The session room a roster snapshot is broadcast into, when this daemon hosts one.
 pub(crate) struct TheSessionsOwnRoom {
-    pub(crate) connection: DaemonSessionHost,
+    pub(crate) roster: AgentRoster,
 }
 
 #[async_trait]
@@ -143,26 +141,20 @@ impl RosterBroadcast for TheSessionsOwnRoom {
         session_id: &str,
         roster: &tddy_service::proto::session_agents_svc::SessionAgentRoster,
     ) {
-        self.connection
-            .agent_roster()
-            .broadcast_roster(session_id, roster)
-            .await;
+        self.roster.broadcast_roster(session_id, roster).await;
     }
 }
 
 /// The turn loops this daemon can open — one against a clone it holds for a peer's session, one
 /// against a session's own worktree — and the two refusals that decide whether it should.
 pub(crate) struct TurnLoopsThisDaemonCanOpen {
-    pub(crate) connection: DaemonSessionHost,
+    pub(crate) roster: AgentRoster,
 }
 
 #[async_trait]
 impl AgentSessions for TurnLoopsThisDaemonCanOpen {
     fn hosts_a_clone_for(&self, session_id: &str) -> bool {
-        self.connection
-            .agent_roster()
-            .hosted_clone_for(session_id)
-            .is_some()
+        self.roster.hosted_clone_for(session_id).is_some()
     }
 
     async fn open_owned(
@@ -171,10 +163,10 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         agent_id: &str,
         system_prompt: Option<&str>,
     ) -> Result<Option<Box<dyn SubagentSession>>, Status> {
-        let Some(clone) = self.connection.agent_roster().hosted_clone_for(session_id) else {
+        let Some(clone) = self.roster.hosted_clone_for(session_id) else {
             return Ok(None);
         };
-        self.connection
+        self.roster
             .open_owned_agent_session(agent_id, &clone, system_prompt)
             .await
             .map(Some)
@@ -188,7 +180,7 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         session_token: &str,
         system_prompt: Option<&str>,
     ) -> Result<Box<dyn SubagentSession>, Status> {
-        self.connection
+        self.roster
             .open_local_agent_session(
                 session_id,
                 session_dir,
@@ -204,13 +196,11 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         session_id: &str,
         record: &SessionAgentRecord,
     ) -> Result<(), Status> {
-        self.connection.refuse_unready_clone(session_id, record)
+        self.roster.refuse_unready_clone(session_id, record)
     }
 
     async fn refuse_departed_owner(&self, daemon_instance_id: &str) -> Result<(), Status> {
-        self.connection
-            .refuse_departed_daemon(daemon_instance_id)
-            .await
+        self.roster.refuse_departed_daemon(daemon_instance_id).await
     }
 }
 
@@ -220,7 +210,7 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
 /// Re-addressing is the point. A request still naming the daemon holding the roster would be routed
 /// back here on that axis, and the two daemons would hand the same turn to each other.
 pub(crate) struct ConversationsForwardedOverTheCommonRoom {
-    pub(crate) connection: DaemonSessionHost,
+    pub(crate) roster: AgentRoster,
 }
 
 #[async_trait]
@@ -231,7 +221,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         owner: &str,
         conversation_id: &str,
     ) -> Result<(), Status> {
-        self.connection
+        self.roster
             .forward_open_agent_conversation(
                 &tddy_service::proto::session_agents_svc::OpenAgentConversationRequest {
                     session_token: request.session_token.clone(),
@@ -257,7 +247,8 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
     ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>
     {
         let slot = self
-            .connection
+            .roster
+            .peer_routing
             .common_room_slot("PromptAgentConversation")?;
         // Re-addressed and otherwise forwarded whole: a field this daemon dropped on the way
         // through — the caller's turn budget, say — would have the owner run a turn nobody asked
@@ -292,7 +283,8 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
     ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<AgentConversationChunk, Status>>, Status>
     {
         let slot = self
-            .connection
+            .roster
+            .peer_routing
             .common_room_slot("ResumeAgentConversation")?;
         let forwarded = tddy_service::proto::session_agents_svc::ResumeAgentConversationRequest {
             daemon_instance_id: owner.to_string(),
@@ -322,8 +314,7 @@ impl AgentConversationPeers for ConversationsForwardedOverTheCommonRoom {
         owner: &str,
         conversation_id: &str,
     ) -> Result<(), Status> {
-        self.connection
-            .agent_roster()
+        self.roster
             .forward_cancel_agent_conversation(session_token, session_id, owner, conversation_id)
             .await
     }

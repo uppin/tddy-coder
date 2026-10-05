@@ -17,10 +17,6 @@ impl DaemonSessionHost {
         os_user_resolution::resolve_os_user(&self.config, &self.user_resolver, session_token)
     }
 
-    pub(crate) fn eligible_instance_ids(&self) -> Vec<String> {
-        self.peer_routing.eligible_instance_ids()
-    }
-
     /// [`PeerRouting::classify_daemon_route`](crate::peer_routing::PeerRouting::classify_daemon_route) against this host's roster.
     pub(crate) fn classify_daemon_route(
         &self,

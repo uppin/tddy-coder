@@ -109,14 +109,15 @@ impl DaemonSessionHost {
             timeout,
         )
         .await?;
-        self.start_hosted_agent_clone(
-            &placement,
-            &sessions_base,
-            &session_id,
-            req.project_id.trim(),
-            &req.session_token,
-        )
-        .await?;
+        self.agent_roster()
+            .start_hosted_agent_clone(
+                &placement,
+                &sessions_base,
+                &session_id,
+                req.project_id.trim(),
+                &req.session_token,
+            )
+            .await?;
         Ok(started)
     }
 }

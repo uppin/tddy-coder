@@ -87,20 +87,20 @@ impl DaemonSessionHost {
             ),
             catalog: Arc::new(
                 svc_session_agent_port_adapters::DefsResolvableFromThisDaemon {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
             broadcast: Arc::new(svc_session_agent_port_adapters::TheSessionsOwnRoom {
-                connection: self.clone(),
+                roster: self.agent_roster(),
             }),
             sessions: Arc::new(
                 svc_session_agent_port_adapters::TurnLoopsThisDaemonCanOpen {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
             peers: Arc::new(
                 svc_session_agent_port_adapters::ConversationsForwardedOverTheCommonRoom {
-                    connection: self.clone(),
+                    roster: self.agent_roster(),
                 },
             ),
         }

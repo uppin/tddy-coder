@@ -163,7 +163,7 @@ impl SeededWorkspace {
 
     /// How a roster agent this daemon serves locally reaches the session's files.
     fn agent_codebase_access(&self) -> tddy_discovery::subagent::CodebaseAccess {
-        self.service.local_agent_codebase_access(
+        self.service.agent_roster().local_agent_codebase_access(
             &self.session_id,
             &self.session_dir,
             AGENT_ID,
