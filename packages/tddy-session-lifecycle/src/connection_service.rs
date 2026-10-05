@@ -235,6 +235,8 @@ mod agent_host_callbacks;
 
 mod svc_agent_host_ports;
 
+mod svc_agent_roster_delegators;
+
 mod agent_roster;
 pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.

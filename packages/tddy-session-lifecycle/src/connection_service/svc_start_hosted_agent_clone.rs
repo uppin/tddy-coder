@@ -263,7 +263,10 @@ impl DaemonSessionHost {
                     conversation_id: String::new(),
                 };
                 agent_roster::dispatch_envelope(
-                    service.run_hosted_clone_tool(&request, &clone).await,
+                    service
+                        .agent_roster()
+                        .run_hosted_clone_tool(&request, &clone)
+                        .await,
                 )
             })
         })
@@ -347,7 +350,7 @@ impl DaemonSessionHost {
     ) {
         tddy_session_agents::note_agent_activity(
             &self.session_agent_rosters,
-            self.hosted_clone_for(session_id).is_some(),
+            self.agent_roster().hosted_clone_for(session_id).is_some(),
             session_id,
             session_dir,
             agent_id,

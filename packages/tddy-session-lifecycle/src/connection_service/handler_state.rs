@@ -22,7 +22,6 @@ use super::svc_spawn_split_agent;
 use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
-use crate::connection_service::svc_host_builders::first_admission_token;
 use crate::multi_host::EligibleDaemonSource;
 use crate::peer_routing::PeerRouting;
 use crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps;
@@ -103,22 +102,6 @@ impl DaemonSessionHost {
             Arc::clone(&self.workspace_sandbox_provisioner),
             Arc::clone(&self.jail_relaunch),
             Arc::clone(&self.hosted_agent_clones),
-        )
-    }
-
-    /// The first admit for an agent clone's owning daemon (see
-    /// [`first_admission_token::mint_first_admission_token`]), over this host's config and
-    /// admission registry.
-    pub(crate) fn mint_first_admission_token(
-        &self,
-        session_id: &str,
-        owning_daemon_instance_id: &str,
-    ) -> Option<(String, String, String, u64)> {
-        first_admission_token::mint_first_admission_token(
-            &self.config,
-            &self.session_admissions,
-            session_id,
-            owning_daemon_instance_id,
         )
     }
 
@@ -213,8 +196,6 @@ impl DaemonSessionHost {
     ///
     /// Built per call. The callbacks are a clone of this host, whose every mutable field is behind
     /// an `Arc`.
-    // TODO(stage B): drop this once the agent topic's methods move onto the handle.
-    #[allow(dead_code)]
     pub(crate) fn agent_roster(&self) -> AgentRoster {
         AgentRoster {
             config: self.config.clone(),

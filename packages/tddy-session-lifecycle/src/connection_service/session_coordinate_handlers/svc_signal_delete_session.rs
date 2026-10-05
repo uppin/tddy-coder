@@ -145,7 +145,8 @@ impl DaemonSessionHost {
         // the operator never looked at. Refused rather than continued if one cannot be reached, for
         // the same reason the paired workspace above is: a delete that succeeded here while a
         // checkout survived elsewhere is exactly the silent leak this is for.
-        self.tear_down_every_agent_clone(session_id, &req.session_token)
+        self.agent_roster()
+            .tear_down_every_agent_clone(session_id, &req.session_token)
             .await?;
         // Every admission this session minted is void with the session: a mirror that re-admits
         // after the delete must be refused, and `revoke_all_for_session` is the bulk revocation

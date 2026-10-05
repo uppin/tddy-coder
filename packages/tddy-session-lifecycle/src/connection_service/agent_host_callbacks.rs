@@ -68,8 +68,6 @@ pub(crate) trait AgentHostCallbacks: Send + Sync {
 ///
 /// Built per call by the host (`DaemonSessionHost::agent_roster`). Every shared field is the `Arc`
 /// the host holds, so a clone of this talks to the stores, rooms and peers the host does.
-// TODO(stage B): drop this once the agent topic's methods move onto the handle.
-#[allow(dead_code)]
 #[derive(Clone)]
 pub(crate) struct AgentRoster {
     pub(crate) config: DaemonConfig,
@@ -89,8 +87,6 @@ pub(crate) struct AgentRoster {
 }
 
 impl AgentRoster {
-    // TODO(stage B): drop this once the agent topic's methods move onto the handle.
-    #[allow(dead_code)]
     /// The fields as the borrowed view the functions in `tddy-session-agents` take.
     pub(crate) fn state(&self) -> AgentRosterState<'_> {
         AgentRosterState {

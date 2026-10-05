@@ -117,6 +117,7 @@ impl AgentAdmission for ClonesClaimedOnOwningPeers {
         session_token: &str,
     ) -> Result<(), Status> {
         self.connection
+            .agent_roster()
             .tear_down_agent_clone(
                 session_id,
                 daemon_instance_id,
@@ -139,7 +140,10 @@ impl RosterBroadcast for TheSessionsOwnRoom {
         session_id: &str,
         roster: &tddy_service::proto::session_agents_svc::SessionAgentRoster,
     ) {
-        self.connection.broadcast_roster(session_id, roster).await;
+        self.connection
+            .agent_roster()
+            .broadcast_roster(session_id, roster)
+            .await;
     }
 }
 
@@ -152,7 +156,10 @@ pub(crate) struct TurnLoopsThisDaemonCanOpen {
 #[async_trait]
 impl AgentSessions for TurnLoopsThisDaemonCanOpen {
     fn hosts_a_clone_for(&self, session_id: &str) -> bool {
-        self.connection.hosted_clone_for(session_id).is_some()
+        self.connection
+            .agent_roster()
+            .hosted_clone_for(session_id)
+            .is_some()
     }
 
     async fn open_owned(
@@ -161,7 +168,7 @@ impl AgentSessions for TurnLoopsThisDaemonCanOpen {
         agent_id: &str,
         system_prompt: Option<&str>,
     ) -> Result<Option<Box<dyn SubagentSession>>, Status> {
-        let Some(clone) = self.connection.hosted_clone_for(session_id) else {
+        let Some(clone) = self.connection.agent_roster().hosted_clone_for(session_id) else {
             return Ok(None);
         };
         self.connection

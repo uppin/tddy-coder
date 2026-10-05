@@ -89,6 +89,7 @@ impl DaemonSessionHost {
         let session_token = session_token.to_string();
         tokio::spawn(async move {
             if let Err(status) = service
+                .agent_roster()
                 .provision_agent_clone(
                     &session_id,
                     &codebase,
@@ -123,6 +124,7 @@ impl DaemonSessionHost {
                      deleting it on daemon {daemon_instance_id}"
                 );
                 service
+                    .agent_roster()
                     .delete_clone_on_peer(&daemon_instance_id, &clone_id, &session_token)
                     .await;
                 return;
@@ -131,6 +133,7 @@ impl DaemonSessionHost {
             // only heard about `rev` changes would show `provisioning` until an attach that may
             // never come.
             service
+                .agent_roster()
                 .publish_roster_change(&session_id, &codebase.session_dir)
                 .await;
         });
@@ -160,12 +163,13 @@ impl DaemonSessionHost {
         }
         self.session_agent_clones
             .forget(session_id, daemon_instance_id);
-        self.delete_clone_on_peer(
-            daemon_instance_id,
-            &claimed.codebase_session_id,
-            session_token,
-        )
-        .await;
+        self.agent_roster()
+            .delete_clone_on_peer(
+                daemon_instance_id,
+                &claimed.codebase_session_id,
+                session_token,
+            )
+            .await;
     }
 
     /// Build the semantic index for a `workspace` session's worktree.
