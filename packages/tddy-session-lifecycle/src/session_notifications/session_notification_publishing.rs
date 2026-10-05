@@ -36,15 +36,17 @@ pub fn resolve_session_label(sessions_base: &Path, session_id: &str) -> String {
     }
 
     let workflow_goal =
-        crate::session_list_enrichment::session_list_status_from_session_dir(&session_dir)
-            .map(|status| status.workflow_goal)
-            .unwrap_or_else(|e| {
-                log::debug!(
-                    target: "tddy_daemon::session_notifications",
-                    "resolve_session_label: could not enrich session {session_id}: {e}"
-                );
-                String::new()
-            });
+        tddy_session_activity::session_list_enrichment::session_list_status_from_session_dir(
+            &session_dir,
+        )
+        .map(|status| status.workflow_goal)
+        .unwrap_or_else(|e| {
+            log::debug!(
+                target: "tddy_daemon::session_notifications",
+                "resolve_session_label: could not enrich session {session_id}: {e}"
+            );
+            String::new()
+        });
 
     session_display_label(&repo_path, &workflow_goal, session_id)
 }

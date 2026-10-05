@@ -12,13 +12,11 @@ use crate::connection_service::peer_session_answer::peer_has_no_such_session;
 
 use tddy_service::proto::session::DeleteSessionRequest;
 
-use crate::{
-    connection_service::{
-        daemon_urls, seed_codebase, svc_host_builders::first_admission_token,
-        svc_resolve_listed_worktree::session_dir_lookup, svc_spawn_split_agent,
-    },
-    livekit_peer_discovery::local_instance_id_for_config,
+use crate::connection_service::{
+    daemon_urls, seed_codebase, svc_host_builders::first_admission_token,
+    svc_resolve_listed_worktree::session_dir_lookup, svc_spawn_split_agent,
 };
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_service::proto::session::StartSessionRequest;
 
@@ -356,7 +354,7 @@ impl AgentRoster {
         &self,
         session_id: &str,
         agent_id: &str,
-    ) -> Result<crate::session_agent_clone::AgentClone, Status> {
+    ) -> Result<tddy_session_agents::session_agent_clone::AgentClone, Status> {
         let session_dir = session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)?;
         let state = self.state();
         agent_clone_lookup::agent_clone_for(session_id, agent_id, session_dir, state)
@@ -367,7 +365,7 @@ impl AgentRoster {
     pub(crate) fn hosted_clone_for(
         &self,
         session_id: &str,
-    ) -> Option<Arc<crate::session_agent_clone::HostedClone>> {
+    ) -> Option<Arc<tddy_session_agents::session_agent_clone::HostedClone>> {
         self.host.local_exec_tools().hosted_clone_for(session_id)
     }
 
@@ -376,7 +374,7 @@ impl AgentRoster {
     pub(crate) async fn run_hosted_clone_tool(
         &self,
         req: &ExecuteToolRequest,
-        clone: &crate::session_agent_clone::HostedClone,
+        clone: &tddy_session_agents::session_agent_clone::HostedClone,
     ) -> ExecuteToolResponse {
         self.host
             .local_exec_tools()

@@ -4,12 +4,10 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use std::{path::Path, sync::Arc};
 
-use crate::{
-    connection_service::{agent_roster, peer_session_answer},
-    livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::{agent_roster, peer_session_answer};
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
-use crate::user_sessions_path::projects_path_for_user;
+use tddy_daemon_kernel::user_paths::projects_path_for_user;
 
 use tddy_rpc::Status;
 
@@ -207,7 +205,7 @@ impl AgentRoster {
     pub(crate) async fn open_owned_agent_session(
         &self,
         agent_id: &str,
-        clone: &Arc<crate::session_agent_clone::HostedClone>,
+        clone: &Arc<tddy_session_agents::session_agent_clone::HostedClone>,
         system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
         let id = tddy_core::AgentId::parse(agent_id)
@@ -249,7 +247,7 @@ impl AgentRoster {
     /// access would be one YAML field away from writing anywhere this daemon can.
     pub(crate) fn owned_agent_codebase_access(
         &self,
-        clone: &Arc<crate::session_agent_clone::HostedClone>,
+        clone: &Arc<tddy_session_agents::session_agent_clone::HostedClone>,
     ) -> tddy_discovery::subagent::CodebaseAccess {
         let service = self.clone();
         let clone = Arc::clone(clone);
@@ -299,8 +297,8 @@ impl AgentRoster {
                     &session_id,
                     &session_dir,
                     &agent_id,
-                    crate::session_agent_status::ManagedAgentState::ExecutingTool,
-                    crate::session_agent_status::tool_call_summary(&tool_name, &args),
+                    tddy_session_agents::session_agent_status::ManagedAgentState::ExecutingTool,
+                    tddy_session_agents::session_agent_status::tool_call_summary(&tool_name, &args),
                 );
                 let request = ExecuteToolRequest {
                     session_token,
@@ -333,7 +331,7 @@ impl AgentRoster {
                     &session_id,
                     &session_dir,
                     &agent_id,
-                    crate::session_agent_status::ManagedAgentState::Prompting,
+                    tddy_session_agents::session_agent_status::ManagedAgentState::Prompting,
                     format!("{} finished", request.tool_name),
                 );
                 answer
@@ -351,7 +349,7 @@ impl AgentRoster {
         session_id: &str,
         session_dir: &Path,
         agent_id: &str,
-        state: crate::session_agent_status::ManagedAgentState,
+        state: tddy_session_agents::session_agent_status::ManagedAgentState,
         summary: impl AsRef<str>,
     ) {
         tddy_session_agents::note_agent_activity(

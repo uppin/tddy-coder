@@ -5,7 +5,7 @@ use crate::{
 };
 use tddy_spawn::{spawn_worker, spawner};
 
-use crate::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 

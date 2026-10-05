@@ -4,9 +4,8 @@ use prost::Message as _;
 
 use tddy_service::proto::catalog::{ListSubagentsRequest, ListSubagentsResponse};
 
-use crate::{
-    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::agent_roster;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
