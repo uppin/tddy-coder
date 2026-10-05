@@ -13,4 +13,3 @@
   facade inside a moved module, so one outside caller of any item in the tree keeps the whole old path.
 - **The partition reads one manifest walk per distinct referring file** (`owning_package`), not the
   workspace package map; a workspace with thousands of referring files pays for it once per file.
-- **The user-facing docs (PRD, `plan-schema.md`) do not yet list `outside`**; that is the changeset's E4.
