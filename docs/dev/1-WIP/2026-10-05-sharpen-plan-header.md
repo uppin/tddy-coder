@@ -3,6 +3,7 @@
 **Date**: 2026-10-05
 **Status**: 🚧 In Progress
 **Type**: Feature (engine capability; no new operation, no new subcommand)
+**Draft PR**: https://github.com/uppin/tddy-coder/pull/592
 **Stack**: `#sharpen` 5/8, branch `feature/sharpen/plan-header`, wave 2. PR title:
 `feat(code-restructuring): restructure snapshot writes the header a plan is missing (#sharpen 5/8)`.
 Base in the linear stack: `feature/sharpen/apply-heartbeat` (K=4); the only **real** edge is to
@@ -119,6 +120,14 @@ the private helper names below are a proposal that green may reshape, and no tes
   "Acceptance tests". They are written against the post-`tidy-engine-files` tree.
 
 Nothing in this surface is consumed by another node.
+
+**Published with the contract commit** (as built on this branch, before `tidy-engine-files` lands): `plan/codec/headerless.rs` with
+`Plan::starts_with_an_operation` and `Plan::parse_headerless` implemented, `Plan::anchored_files` (added: the sorted, de-duplicated
+file set; `header_for_anchored_files` will use it), and `Plan::header_for_anchored_files` **refusing** with
+`TODO(plan-header): implement`. `snapshot` routes a headerless plan to a private `insert_a_header` splice (leading blanks kept,
+header inserted above the first operation) and `snapshot_resolving` uses `plan_file_has_item_anchors`. Wiring only: a headerless
+`snapshot` still refuses. The refusal text for the other readers (test 8, 12) is left to green (M3) so those tests fail for the
+missing behaviour. `codec.rs` is 517 production-ish lines on this branch (`tidy-engine-files` has not landed here); only one `mod` line was added.
 
 ## Green wave
 
@@ -310,6 +319,12 @@ Names read as behaviour specifications. Each is **red on `master` today** for th
 
 13. `snapshots_a_headerless_plan_without_waiting_for_a_language_server` — beside `snapshots_a_plan_with_no_item_anchors_without_waiting_for_a_language_server` (`:1722`): a headerless plan over a symbol anchor (the file's `an_extraction_of` helper) through the registered `Snapshot` coordinate: `(paths, rewritten, stale) == (1, true, vec![])` and `Workspaces` lists no root. *Fails today*: `FailedPrecondition`/`InvalidArgument` from the malformed plan.
 
+**Added beyond the list**: library test `names_a_file_once_when_two_operations_anchor_it` (the "two operations anchoring the same file (one key)"
+edge case the Coverage list names), so the library file holds ten tests and the node fourteen. Test 2 uses `move_cluster_to_crate` because
+`also` is refused on every other operation. **Recorded decisions**: O1 (recommended: v1 for a coordinate anchor, v2 otherwise), O2 (refuse naming
+the remedy), O3 (new child module), O4 (no `plan new`), O5 (no re-resolve) are followed as recommended; test 9 is the v1 variant.
+Test 9's final assertion (`snapshot mismatch` from a later `check`) is not yet reachable and is unverified until green writes the v1 header.
+
 (Thirteen tests: nine at library level, three CLI, one daemon. The CLI and daemon cases are thin routing pins.)
 
 ## Technical Debt & Production Readiness
@@ -389,10 +404,10 @@ Decisions taken by this plan (a reviewer can check them):
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-05-sharpen-plan-header.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning, eight nodes would conflict)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

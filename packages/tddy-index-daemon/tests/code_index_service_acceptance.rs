@@ -1752,6 +1752,32 @@ async fn snapshots_a_plan_with_no_item_anchors_without_waiting_for_a_language_se
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn snapshots_a_headerless_plan_without_waiting_for_a_language_server() {
+    // Given a plan of one symbol-anchored operation, with no header
+    let workspace = a_workspace_holding_a_package("pub fn foo() -> u32 {\n    1\n}\n");
+    let plan = workspace.path().join("headerless-plan.jsonl");
+    std::fs::write(
+        &plan,
+        format!("{}\n", an_extraction_of("foo", "src/lib.rs")),
+    )
+    .expect("write the plan");
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is snapshotted through the registered coordinate
+    let answer = the_snapshot_answer(&entry, &workspace, &plan).await;
+
+    // Then a header was written over the one file, nothing is stale, and no server was started
+    assert_eq!(
+        (answer.paths, answer.rewritten, answer.stale),
+        (1, true, vec![])
+    );
+    let held: WorkspacesResponse = unary_at(&entry, "Workspaces", WorkspacesRequest {})
+        .await
+        .expect("the roots held are listed");
+    assert_eq!(held.workspaces, vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn refuses_to_snapshot_a_plan_that_is_not_there() {
     // Given a workspace with no plan in it
     let workspace = a_workspace_holding("pub fn foo() {}\n");

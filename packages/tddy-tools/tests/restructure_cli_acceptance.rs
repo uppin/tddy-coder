@@ -130,3 +130,82 @@ fn restructure_load_without_a_daemon_is_refused_as_needing_one() {
         "the refusal did not name the daemon, got: {stderr}"
     );
 }
+
+/// A workspace holding `src/lib.rs`, and a plan of one item-anchored operation with no header.
+fn a_workspace_with_a_headerless_plan() -> (tempfile::TempDir, std::path::PathBuf, String) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    fs::create_dir_all(dir.path().join("src")).expect("src");
+    fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub fn foo() -> u32 {\n    1\n}\n",
+    )
+    .expect("source");
+    let operation = r#"{"op":"extract_module","anchor":{"kind":"items","file":"src/lib.rs","items":["demo::foo"],"fingerprints":["sha256:aa"]},"name":"grouped"}"#;
+    let plan = dir.path().join("plan.jsonl");
+    fs::write(&plan, format!("{operation}\n")).expect("plan");
+    (dir, plan, operation.to_string())
+}
+
+fn the_lines_of(plan: &std::path::Path) -> Vec<String> {
+    fs::read_to_string(plan)
+        .expect("read the plan")
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn restructure_snapshot_writes_the_header_a_plan_of_operations_lacks() {
+    // Given a headerless plan, and no index daemon named
+    let (dir, plan, operation) = a_workspace_with_a_headerless_plan();
+
+    // When it is snapshotted
+    let mut cmd = tddy_tools_bin();
+    cmd.env_remove("TDDY_INDEX_SOCKET");
+    cmd.current_dir(dir.path());
+    cmd.args(["restructure", "snapshot", plan.to_str().unwrap()]);
+    cmd.assert().success();
+
+    // Then line 1 is a header and the operation is as it was written
+    let lines = the_lines_of(&plan);
+    assert!(
+        lines[0].starts_with(r#"{"v":2,"files":{"src/lib.rs""#),
+        "{}",
+        lines[0]
+    );
+    assert_eq!(&lines[1..], [operation]);
+}
+
+#[test]
+fn restructure_snapshot_of_a_headerless_plan_does_not_dial_a_named_daemon() {
+    // Given a headerless plan, and an index daemon socket nothing listens on
+    let (dir, plan, _) = a_workspace_with_a_headerless_plan();
+    let nothing_listens_here = dir.path().join("no-daemon.sock");
+
+    // When it is snapshotted
+    let mut cmd = tddy_tools_bin();
+    cmd.env("TDDY_INDEX_SOCKET", &nothing_listens_here);
+    cmd.current_dir(dir.path());
+    cmd.args(["restructure", "snapshot", plan.to_str().unwrap()]);
+
+    // Then it succeeds, which a dial to that socket could not have, and the header is there
+    cmd.assert().success();
+    assert!(the_lines_of(&plan)[0].starts_with(r#"{"v":2"#));
+}
+
+#[test]
+fn restructure_check_of_a_headerless_plan_names_snapshot_as_the_remedy() {
+    // Given a headerless plan
+    let (dir, plan, _) = a_workspace_with_a_headerless_plan();
+
+    // When it is checked
+    let mut cmd = tddy_tools_bin();
+    cmd.env_remove("TDDY_INDEX_SOCKET");
+    cmd.current_dir(dir.path());
+    cmd.args(["restructure", "check", plan.to_str().unwrap()]);
+    let assert = cmd.assert().failure();
+
+    // Then the refusal names the command that writes the header
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(stderr.contains("restructure snapshot"), "{stderr}");
+}

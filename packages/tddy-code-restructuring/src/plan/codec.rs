@@ -434,6 +434,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 mod canonical_paths;
 mod file_hint;
 mod groups;
+mod headerless;
 mod signature_fields;
 
 /// The destination and the by-item anchor an operation within one crate cannot do without.
