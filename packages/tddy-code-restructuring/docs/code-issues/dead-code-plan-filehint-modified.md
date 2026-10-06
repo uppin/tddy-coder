@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-code-restructuring/src/plan.rs:133` — `FileHint::modified`
 **Category:** dead-code
 **Detected:** 2026-10-02 by the `/pr-wrap` validation of #537
-**Metrics:** 1 field · 1 write site (`hint_of`, `plan/codec.rs:219`) · 0 read sites outside tests
+**Metrics:** 1 field · 1 write site (`hint_of`, `plan/codec/file_hint.rs:8,13`) · 0 read sites outside tests
 **Restructure:** no — delete the field and its serialisation, or give it a reader
 **Status:** Open
 
@@ -15,6 +15,7 @@
 | 2026-10-03 | 0 | #539 (`#live-plan` 7/15) rewrites the field whenever it refreshes a plan's file hints, and still reads it nowhere: the drift report and the live-plan comparisons use `sha256` only. The field's doc comment says "never read; it is there for a person". `hint_of` moved to `plan/codec.rs` in the carve |
 | 2026-10-04 | 0 | #567 (`#live-plan` 15/15) added `type_`, `expr` and `order` to `RefactorOp` in `plan.rs`, which moved the field from line 127 to 133. Re-ran the `grep` below: still one write site (`hint_of`, `plan/codec.rs:217`), no read site outside tests. Unchanged |
 | 2026-10-05 | 0 | the same-crate moves added kinds to `plan.rs` and rules to `plan/codec.rs`; the field is still at `plan.rs:133`, and the write site, `hint_of`, is now at `plan/codec.rs:219` (it was `:217`). Re-ran the `grep` below: still one write site and no read site outside tests. Unchanged |
+| 2026-10-06 | 0 | `#sharpen` 1/8 (`feature/sharpen/tidy-engine-files`) moved `hint_of` into `plan/codec/file_hint.rs` behind the facade at `plan/codec.rs:213`; the write site is now `file_hint.rs:8,13`, the field still at `plan.rs:133`. Re-ran the `grep` below: still one write site and no read site outside tests. Unchanged |
 
 ## What the tool found
 

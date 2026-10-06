@@ -19,12 +19,12 @@ The scan followed `deferred-work/references/planning-cross-check.md`. Packages i
 claims `none`: #537 merged). No other package is edited; `tddy-tools`, `tddy-index-daemon` and `tddy-daemon-rpc`
 depend on this crate and are only compiled (see Testing plan).
 
-### ✅ RESOLVED HERE (conditional) — three files past the 500-line budget — [`2026-10-05-restructure-engine-files-past-the-500-line-budget.md`](../todo/2026-10-05-restructure-engine-files-past-the-500-line-budget.md)
+### ✅ RESOLVED HERE — three files past the 500-line budget — [`2026-10-05-restructure-engine-files-past-the-500-line-budget.md`](../todo/2026-10-05-restructure-engine-files-past-the-500-line-budget.md)
 
-Claimed **only if** the closing measurement (`restructure check <measuring plan> --budget 500`, milestone M5) reports
-`plan.rs`, `plan/codec.rs` and `item_anchor.rs` all at or under 500 production lines. The entry stays at ⚠ DURING
-until that line has been printed; if one file ends over, the entry is edited down to that file and its number, never
-deleted. `/wrap-context-docs` deletes the file only for the ✅ verdict.
+**Claimed 2026-10-06**: the closing measurement (`restructure check <measuring plan> --budget 500`, milestone M5) printed
+`budget: every file the plan names is within 500 production lines`, with `plan.rs` **333**, `plan/codec.rs` **455** and
+`item_anchor.rs` **458** production lines — all at or under 500. `/wrap-context-docs` deletes the todo file for this
+✅ verdict.
 
 ### ⚠ DURING — `FileHint.modified` is written and never read — `packages/tddy-code-restructuring/docs/code-issues/dead-code-plan-filehint-modified.md`
 
@@ -150,17 +150,17 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 
 ## Scope
 
-- [ ] **M0 baseline**: `./test -p tddy-code-restructuring` once; counts and failing names recorded under Validation results.
-- [ ] **Seam 1 — `item_anchor.rs`**: `owning_package`, `repo_root_hint`, `collect_package_files` into `item_anchor/package_lookup.rs`,
+- [x] **M0 baseline**: `./test -p tddy-code-restructuring` once; counts and failing names recorded under Validation results.
+- [x] **Seam 1 — `item_anchor.rs`**: `owning_package`, `repo_root_hint`, `collect_package_files` into `item_anchor/package_lookup.rs`,
   facade `pub(crate) use package_lookup::owning_package;`. Predicted 517 to about 457.
-- [ ] **Seam 2 — `plan/codec.rs`**: `hint_of` and `rfc3339` into `plan/codec/file_hint.rs` (facade `named`); `refuse_split_groups` into
+- [x] **Seam 2 — `plan/codec.rs`**: `hint_of` and `rfc3339` into `plan/codec/file_hint.rs` (facade `named`); `refuse_split_groups` into
   `plan/codec/groups.rs` (`none`). Predicted 514 to about 452.
-- [ ] **Seam 3 — `plan.rs`**: D1 (decided): `RefactorKind` and `impl RefactorKind` whole into `plan/refactor_kind.rs`, facade `pub use refactor_kind::RefactorKind;`.
+- [x] **Seam 3 — `plan.rs`**: D1 (decided): `RefactorKind` and `impl RefactorKind` whole into `plan/refactor_kind.rs`, facade `pub use refactor_kind::RefactorKind;`.
   Predicted 520 to about 333.
-- [ ] **Length gate**: `restructure check <measuring plan> --budget 500` prints `budget: every file the plan names is within 500 production lines` for the three files; the three numbers are recorded.
-- [ ] **Final gate**: `cargo fmt --check`; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`; `./test -p tddy-code-restructuring` (failing set equals the baseline's by name);
+- [x] **Length gate**: `restructure check <measuring plan> --budget 500` prints `budget: every file the plan names is within 500 production lines` for the three files; the three numbers are recorded.
+- [x] **Final gate**: `cargo fmt --check`; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`; `./test -p tddy-code-restructuring` (failing set equals the baseline's by name);
   the comment-line multiset; `restructure verify --against <base>` read for its report; `cargo check -p tddy-daemon-rpc -p tddy-index-daemon -p tddy-tools --all-targets`.
-- [ ] **Records**: the todo claimed (✅) or narrowed; the code-issue history row; wrap-time corrections listed (README, three docs).
+- [x] **Records**: the todo claimed (✅) or narrowed; the code-issue history row; wrap-time corrections listed (README, three docs).
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -202,7 +202,7 @@ Public paths are unchanged. Nothing outside the three files and their children d
 ### Delta (What's Changing)
 
 #### `tddy-code-restructuring`
-- **Architecture**: five new child modules (above). Each old path keeps a facade line.
+- **Architecture**: four new child modules (above). Each old path keeps a facade line.
 - **API**: none. `tddy_code_restructuring::{RefactorKind, Reexport, …}`, `item_anchor::owning_package` (`pub(crate)`) and `plan::hint_of` (`pub(crate)`) resolve as before.
 - **Implementation**: moved verbatim by byte range. The one text change inside moved bytes the engine may make is a visibility spelling it widens as far as a caller needs (reported in the apply's notes; each is listed in the commit message).
 - **Dependencies**: none.
@@ -234,29 +234,29 @@ against a warm index (`eval $(./run-index-daemon | grep '^export ')`; six to ten
 `--stop-after`, and committed one plan at a time (a failure then bisects to one move). `.restructure/` is cleared between plans.
 A refusal at any step stops the node and asks.
 
-- [ ] **M0 — baseline.** `./test -p tddy-code-restructuring` (every target runs, `--no-fail-fast`); write the pass count and every failing test name into Validation results. Warm the index.
-- [ ] **M1 — `item_anchor.rs`** (the smallest, one seam, the first use of the engine here).
+- [x] **M0 — baseline.** `./test -p tddy-code-restructuring` (every target runs, `--no-fail-fast`); write the pass count and every failing test name into Validation results. Warm the index.
+- [x] **M1 — `item_anchor.rs`** (the smallest, one seam, the first use of the engine here).
   - Anchor: `tddy-tools restructure anchors packages/tddy-code-restructuring/src/item_anchor.rs --items owning_package,repo_root_hint,collect_package_files`.
   - Plan (1 line): `move_item`, `to: "tddy_code_restructuring::item_anchor"`, `name: "package_lookup"`, `reexport: "named"`.
   - `check --deep` clean; apply; `cargo fmt`-clean as the apply leaves it; commit `refactor(code-restructuring): item_anchor package lookup into a child module (#sharpen 1/8)`.
   - Measure: `item_anchor.rs` at or under 500 (predicted about 457).
-- [ ] **M2 — `plan/codec.rs`** (two seams, one plan: D5 says when to split it).
+- [x] **M2 — `plan/codec.rs`** (two seams, one plan: D5 says when to split it).
   - Anchors: `--items hint_of,rfc3339` and `--items refuse_split_groups` (two `items` anchors, one file).
   - Plan (2 lines): `move_item` `to: "tddy_code_restructuring::plan::codec"`, `name: "file_hint"`, `reexport: "named"`; and `name: "groups"`, `reexport: "none"`.
   - Expect D4 (the `rfc3339` facade lint) here. Commit `refactor(code-restructuring): plan codec hints and group rule into child modules (#sharpen 1/8)`.
   - Measure: `plan/codec.rs` at or under 500 (predicted about 452).
-- [ ] **M3 — `plan.rs`** (D1, decided: `RefactorKind` whole).
+- [x] **M3 — `plan.rs`** (D1, decided: `RefactorKind` whole).
   - Anchor: `--items RefactorKind,<RefactorKind>` (the enum and its inherent `impl`, adjacent: only a blank line between them).
   - Plan (1 line): `move_item` `to: "tddy_code_restructuring::plan"`, `name: "refactor_kind"`, `reexport: "named"`.
   - **Probe first (P1):** `check --deep` must accept an `impl` block inside a `move_item` run; no test exercises that today (`impl_item_anchor_acceptance.rs` does it for `extract_module`). A refusal stops the node and asks: the alternatives D1 weighed (`Reexport` alone, or `Reexport` plus the predicates) or `extract_module` with the comment check each need the developer's word, because D1 was decided for the whole move.
   - Commit `refactor(code-restructuring): RefactorKind into plan/refactor_kind.rs (#sharpen 1/8)`.
   - Measure: `plan.rs` at or under 500 (predicted about 333).
-- [ ] **M4 — final gate** (once, after the last plan): `cargo fmt --check`; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`;
+- [x] **M4 — final gate** (once, after the last plan): `cargo fmt --check`; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`;
   `./test -p tddy-code-restructuring`; the comment-line multiset (C3); `restructure verify --against <base>` (read its report: it is not trusted for its exit code on an extract); dependents' `cargo check --all-targets` (C4).
   A failure is fixed forward in a new commit; the per-plan commits are how the move is found.
-- [ ] **M5 — length gate and must-not edges.** Write the throwaway measuring plan (below), run `check --budget 500`, record the three numbers; run the
+- [x] **M5 — length gate and must-not edges.** Write the throwaway measuring plan (below), run `check --budget 500`, record the three numbers; run the
   must-not-edge greps; tick C1-C6. Then claim or narrow the todo.
-- [ ] **M6 — records.** `dead-code-plan-filehint-modified.md` gets one history row (new location of `hint_of`); the todo is claimed (✅) or narrowed; the wrap-time corrections are listed under Technical debt:
+- [x] **M6 — records.** `dead-code-plan-filehint-modified.md` gets one history row (new location of `hint_of`); the todo is claimed (✅) or narrowed; the wrap-time corrections are listed under Technical debt:
   README lines 123-128, `item-anchors.md`, `signature-assists.md:13`, `signature-rewrites.md:14`, `same-crate-moves.md:62`; the PRD reference line for `docs/ft/coder/1-OVERVIEW.md` does not apply (no PRD).
 
 **The measuring plan** (not committed; the three applied plans are consumed, so a fresh one is written):
@@ -312,12 +312,12 @@ A test asserting `plan/refactor_kind.rs` exists would specify this node's layout
 No new test. The acceptance checks, each run literally at M4/M5 and ticked with its output:
 
 ### `tddy-code-restructuring` (existing suite, unchanged by name)
-- [ ] **C1 — the three files are within the budget**: `tddy-tools restructure check <measuring plan> --budget 500` prints `budget: every file the plan names is within 500 production lines` (instrument: `packages/tddy-code-restructuring/src/runner/budget.rs`). Fails today: it would print `budget: 3 of 3 file(s) over 500 production lines` with `plan.rs … 520 production lines, 20 over`, `item_anchor.rs … 517, 17 over`, `plan/codec.rs … 514, 14 over`.
-- [ ] **C2 — the suite is unchanged by name**: `./test -p tddy-code-restructuring` has the M0 failing set and pass count (`packages/tddy-code-restructuring/tests/*.rs`, `src/**` unit tests). Passes today (it is the baseline); the check is that it still does.
-- [ ] **C3 — no comment was lost**: for the three files plus their new children, the sorted multiset of lines matching `^\s*//` is equal before and after, with `git show <base>:<file> | grep -E '^\s*//' | sort | uniq -c` against the working tree's.
-- [ ] **C4 — nothing else changed, and the dependents still build**: `git diff --name-only <base>..HEAD -- packages` lists only the three source files, the five children and `docs/code-issues/dead-code-plan-filehint-modified.md`; `cargo check -p tddy-daemon-rpc -p tddy-index-daemon -p tddy-tools --all-targets` is clean (scoped; the workspace-wide run is CI's).
-- [ ] **C5 — the old paths resolve through facades only**: `grep -rn 'refactor_kind\|codec::file_hint\|codec::groups\|package_lookup' packages --include='*.rs'` returns the `mod`/`pub use` lines and the children themselves.
-- [ ] **C6 — `restructure verify --against <base>`** reports every statement accounted for (read the report; the exit code is not trusted for a move that leaves a facade).
+- [x] **C1 — the three files are within the budget**: `tddy-tools restructure check <measuring plan> --budget 500` prints `budget: every file the plan names is within 500 production lines` (instrument: `packages/tddy-code-restructuring/src/runner/budget.rs`). Fails today: it would print `budget: 3 of 3 file(s) over 500 production lines` with `plan.rs … 520 production lines, 20 over`, `item_anchor.rs … 517, 17 over`, `plan/codec.rs … 514, 14 over`. — ✓ 2026-10-06: prints exactly that line; measured `plan.rs` **333**, `plan/codec.rs` **455**, `item_anchor.rs` **458** production lines.
+- [x] **C2 — the suite is unchanged by name**: `./test -p tddy-code-restructuring` has the M0 failing set and pass count (`packages/tddy-code-restructuring/tests/*.rs`, `src/**` unit tests). Passes today (it is the baseline); the check is that it still does. — ✓ 2026-10-06: **1,136 passed, 0 failed** across **55** targets, exit 0 — the same pass count and the empty failing set as M0.
+- [x] **C3 — no comment was lost**: for the three files plus their new children, the sorted multiset of lines matching `^\s*//` is equal before and after, with `git show <base>:<file> | grep -E '^\s*//' | sort | uniq -c` against the working tree's. — ✓ 2026-10-06: **561** `//` lines before, all present after (nothing only-before); the after-tree has **564**, the three extra being the recorded `TODO(sharpen)` lint-correction markers (below), not lost comments.
+- [x] **C4 — nothing else changed, and the dependents still build**: `git diff --name-only <base>..HEAD -- packages` lists only the three source files, the four children and `docs/code-issues/dead-code-plan-filehint-modified.md`; `cargo check -p tddy-daemon-rpc -p tddy-index-daemon -p tddy-tools --all-targets` is clean (scoped; the workspace-wide run is CI's). — ✓ 2026-10-06: the diff names the three sources, four children and the code-issue record and nothing else under `packages/`; dependents check clean (1m14s).
+- [x] **C5 — the old paths resolve through facades only**: `grep -rn 'refactor_kind\|codec::file_hint\|codec::groups\|package_lookup' packages --include='*.rs'` returns the `mod`/`pub use` lines and the children themselves. — ✓ 2026-10-06: returns only `plan.rs:136,314` (facade + `mod`), `codec.rs:213,215,216` (facades + the `none` re-point), `item_anchor.rs:12,78` (facade + `mod`); no consumer file names a child.
+- [x] **C6 — `restructure verify --against <base>`** reports every statement accounted for (read the report; the exit code is not trusted for a move that leaves a facade). — ✓ 2026-10-06: `355256 statements before, 355259 after`; `tokens lost: none`; the three gained statements are the recorded `TODO(sharpen)` comment lines. The tool exits non-zero on any gain, so its exit code is not the verdict — the report is: **nothing lost**.
 
 ## Decisions & Trade-offs
 
@@ -351,7 +351,33 @@ No new test. The acceptance checks, each run literally at M4/M5 and ticked with 
 
 ## Technical Debt & Production Readiness
 
-(Empty; populated during development.)
+### Lint corrections after the apply (three `TODO(sharpen)` markers)
+
+`move_item` copies the source file's whole `use` header into each child, and the engine's end-of-run
+unused-import tidy is unreachable on a resumed run, so the copied-but-unused imports were pruned by hand
+in the same commits as the moves. Three `TODO(sharpen)` comment lines mark them, and each is a build/lint
+correction allowed by the Boundaries ("hand edits after an apply are build or lint corrections only"):
+
+- `plan/codec/file_hint.rs:1` and `plan/codec/groups.rs:1` — the unused copied-header imports;
+- `plan/codec.rs:212` — D4 fired: `rfc3339`'s only outside user is `plan.rs`'s test module, so its facade
+  line is gated `#[cfg(test)]` (option (i), the developer's word taken 2026-10-06).
+
+These are the three statements C6 reports as *gained* and the three lines by which C3's after-multiset
+exceeds the before-multiset. They are comments only; no code was added.
+
+### Wrap-time corrections (packages/*/docs — not editable here)
+
+Listed for `/wrap-context-docs`; `packages/*/docs/` is not edited directly (the code-issue record above is
+the one exception, and it is done):
+
+- `packages/tddy-code-restructuring/README.md:123-128` — the "Where the code lives" table and the
+  over-budget sentence; add the four children and correct `runner/tidy.rs` (36 production lines by the
+  budget rule, not over the line as the README's sentence implies).
+- `packages/tddy-code-restructuring/docs/item-anchors.md` — the `item_anchor.rs` row gains the
+  `package_lookup.rs` child.
+- `packages/tddy-code-restructuring/docs/signature-assists.md:13`,
+  `docs/signature-rewrites.md:14`, `docs/same-crate-moves.md:62` — each names `plan.rs` as the home of
+  `RefactorKind` and its predicates; stale now that `RefactorKind` lives in `plan/refactor_kind.rs`.
 
 ## Refactoring Needed
 
@@ -367,9 +393,45 @@ No new test. The acceptance checks, each run literally at M4/M5 and ticked with 
 
 ## Validation Results
 
-(Empty; populated by each validation command.)
+The node's own gates (M0, M4/M5) are recorded below; the `@validate-*` sections fill at their commands.
 
 ### Baseline (M0)
+
+`./test -p tddy-code-restructuring` (2026-10-06, `--no-fail-fast`, 55 test targets): **1,136 passed, 0 failed**.
+Failing set by name: **none** — the expected empty set. (One environment fix before the run: a stale, gitignored
+fixture repo from an earlier killed run at
+`packages/tddy-tool-engine/tests/fixtures/buildbox-root/home/dev/repo/.worktrees/sess` made the SSH-exec fixture's
+`git init` fail with a template-copy EEXIST; the directory was removed and recreated by the fixture script itself.)
+
+### Final gate and length gate (M4/M5)
+
+Run 2026-10-06 against base `d6b369b7` (the branch's merge base with `master`), scoped to the one package:
+
+| Check | Command | Result |
+|---|---|---|
+| Format | `./dev cargo fmt --check` | `FMT_OK` |
+| Lint | `./dev cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` | `CLIPPY_OK` |
+| Dependents | `./dev cargo check -p tddy-daemon-rpc -p tddy-index-daemon -p tddy-tools --all-targets` | clean, 1m14s |
+| C1 length | `tddy-tools restructure check .restructure/m5-measure.jsonl --budget 500` | `budget: every file the plan names is within 500 production lines` |
+| C2 suite | `./test -p tddy-code-restructuring` | 1,136 passed, 0 failed, 55 targets, exit 0 — same as M0 |
+| C3 comments | multiset of `^\s*//` before vs after | 561 before, all present; 564 after (3 recorded `TODO(sharpen)`) |
+| C4 file set | `git diff --name-only d6b369b7..HEAD -- packages` | three sources, four children, the code-issue record |
+| C5 facades | `grep -rn 'refactor_kind\|codec::file_hint\|codec::groups\|package_lookup' packages` | facade/`mod` lines only |
+| C6 verify | `tddy-tools restructure verify --against d6b369b7` | 355256 before, 355259 after; **tokens lost: none** |
+
+**Measured production lines** (the budget rule, `runner/budget.rs`): `plan.rs` **333** (from 520),
+`plan/codec.rs` **455** (from 514), `item_anchor.rs` **458** (from 517). All at or under 500, so the
+todo's ✅ verdict holds and its file is deleted at wrap.
+
+**Decisions that fired during the moves:**
+
+- **P1 passed** — `check --deep` accepted an `impl` block inside a `move_item` run (M3), so `RefactorKind`
+  moved whole (D1) with no fallback.
+- **D4 fired** — `rfc3339`'s facade line was unused outside `plan.rs`'s test module; option (i) taken
+  (`#[cfg(test)]` on that line), the developer's word 2026-10-06. See Technical debt.
+- **D5 did not fire** — one plan for `plan/codec.rs`'s two seams applied and compiled; no split needed.
+- **D6** — no headroom floor beyond 500; the three measured numbers are the record.
+
 ### Change Validation (@validate-changes)
 ### Test Validation (@validate-tests)
 ### Production Readiness (@prod-ready)
@@ -387,14 +449,14 @@ Forward links only; a child never links back. Branches that edit the files this 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation (none: mechanical restructure, no PRD)
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests (none: no new tests; acceptance is C1-C6)
-- [ ] Run acceptance tests (verify they fail) (C1 fails today by construction: 3 of 3 files over)
+- [x] Create failing acceptance tests (none: no new tests; acceptance is C1-C6)
+- [x] Run acceptance tests (verify they fail) (C1 fails today by construction: 3 of 3 files over)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests (none)
-- [ ] TDD Green — implement with quality code (M1-M3, by the engine)
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run all tests (`./test`) — verify 100% pass (scoped: `./test -p tddy-code-restructuring`; the whole workspace is CI's)
+- [x] TDD Red — write failing unit/integration tests (none)
+- [x] TDD Green — implement with quality code (M1-M3, by the engine)
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run all tests (`./test`) — verify 100% pass (scoped: `./test -p tddy-code-restructuring`; the whole workspace is CI's)
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -405,7 +467,7 @@ Forward links only; a child never links back. Branches that edit the files this 
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-05-sharpen-tidy-engine-files-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps
 
