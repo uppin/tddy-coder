@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-index-daemon/src/index.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-06 by the `/pr-wrap` file-length gate on #591 (`#sharpen` 4/8)
-**Metrics:** **508 production lines** (491 at the #591 merge base, `e2e69077`; the +17 is the
-`wait_heartbeat` field and its two accessors) · budget 500
+**Metrics:** **522 production lines** (491 at the pre-`#sharpen` merge base; the +31 is the
+`wait_heartbeat` field and its two accessors, plus the inherited `spawn_recorder`) · budget 500
 **Restructure:** required
 **Status:** Open — over budget, not yet split
 
@@ -13,6 +13,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-10-06 | 508 | first detection, on #591. 491 → 508 (+17): `WorkspaceIndex::wait_heartbeat`, `with_wait_heartbeat` and the `wait_heartbeat` field, carried so a run queued on a root can beat at the host's cadence. The logic of the heartbeat lives in `operations.rs` (`hold_saying_so`) and `tddy-code-restructuring`; only the field and its accessors are here. Split deferred (see below) |
+| 2026-10-06 | 522 | re-measure after #591 rebased onto `#sharpen` 3/8 (`spawn-record`, `a5735bd9`): 508 → 522 (+14), the `spawn_recorder` method the parent node added. #591's own +17 is unchanged; the total over the pre-`#sharpen` baseline is +31. Still over budget; the split stays deferred |
 
 ## What the gate found
 
