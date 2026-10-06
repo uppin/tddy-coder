@@ -9,6 +9,7 @@
 //! TODO(retarget-impl): the operation is published and not implemented. Until it is, `check` says
 //! so as a finding and `resolve` refuses naming the node, so nothing believes a retarget happened.
 
+mod preflight;
 mod unfinished;
 
 use super::RustBackend;
@@ -19,10 +20,10 @@ use crate::Result;
 
 /// What a static check finds wrong with a `retarget_impl`, from the plan and the text alone.
 ///
-/// TODO(retarget-impl): implement P7 (the new type is in another package) and P8 (its module
-/// declares no such type), which need no server.
-pub(super) fn findings(_op: &RefactorOp, _workspace: &Workspace<'_>) -> Result<Vec<String>> {
-    Ok(vec![unfinished::reason()])
+/// P7 (the new type is in another package) and P8 (its module declares no such type) need no
+/// server, so a plain `check` reports them without paying for an index.
+pub(super) fn findings(op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<String>> {
+    preflight::findings(op, workspace)
 }
 
 impl RustBackend {

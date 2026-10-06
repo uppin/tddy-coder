@@ -158,14 +158,16 @@ pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, Strin
 
 /// [`compare`], told of the `impl` retargets the author declared (`restructure verify --retarget`).
 ///
-/// TODO(retarget-impl): the declaration is carried and not yet read; see [`retarget`]'s rules R1 and
-/// R2. Until they are written a declared retarget excuses nothing.
+/// The declaration is read by [`retarget::account`], which pairs a renamed statement with its
+/// original and excuses the headers a split repeats. A retarget that was not declared is reported as
+/// it always was.
 pub fn compare_with(
     before: &BTreeMap<String, String>,
     after: &BTreeMap<String, String>,
-    _declared: &Declared,
+    declared: &Declared,
 ) -> Comparison {
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+    let mut before_statements: Vec<String> = Vec::new();
     let mut before_total = 0usize;
     let mut after_total = 0usize;
     let mut gates = 0usize;
@@ -175,7 +177,8 @@ pub fn compare_with(
         gates += excused;
         before_total += found.len();
         for statement in found {
-            *counts.entry(statement).or_default() += 1;
+            *counts.entry(statement.clone()).or_default() += 1;
+            before_statements.push(statement);
         }
     }
     for text in after.values() {
@@ -199,7 +202,8 @@ pub fn compare_with(
     }
 
     let widened = pair_by(missing, added, visibility_key);
-    let paired = pair_by(widened.missing, widened.added, re_point_key);
+    let accounted = retarget::account(widened.missing, widened.added, declared, &before_statements);
+    let paired = pair_by(accounted.missing, accounted.added, re_point_key);
     let reflowed = reflow_pass(paired.missing, paired.added);
 
     Comparison {
@@ -208,7 +212,7 @@ pub fn compare_with(
         missing: reflowed.missing,
         added: reflowed.added,
         excused: Excused {
-            repointed: paired.pairs + reflowed.pairs,
+            repointed: accounted.pairs + paired.pairs + reflowed.pairs,
             visibility: widened.pairs,
             cfg_test_gates: gates,
         },
