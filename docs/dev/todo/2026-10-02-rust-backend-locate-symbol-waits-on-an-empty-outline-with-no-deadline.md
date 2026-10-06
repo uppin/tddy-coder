@@ -19,3 +19,10 @@ change did not otherwise touch, and nothing reproduces a hang through it yet. Th
 `locate_symbol` through `settled_outline`, then run the symbol-operation acceptance suites.
 
 **Not blocking** anything in the `#live-plan` stack.
+
+**2026-10-06 (`#sharpen` 4/8, apply-heartbeat).** `locate_symbol` is now one of the five polling waits
+that beat a `still waiting …` line on the run's heartbeat, naming its stage (`locating <name> in
+<file>`) and the server's last words with how long they have been unchanged. The deadline question is
+answered **in the negative** (developer decision D1, "heartbeat, no deadline"): the wait is narrated, not
+bounded, so the defect stays recorded. The predicate fix this entry proposes — route `locate_symbol`
+through `settled_outline` — is still open.
