@@ -138,7 +138,7 @@ Forward references only. Branches above this one that are expected to build on i
 - [x] **Registration**: the one remaining live binary (`retarget_impl_acceptance`) in `.config/nextest.toml` (`rust-analyzer` group) and `.config/rust-e2e.filterset`
 - [x] **Package documentation** staged for wrap (counts 22 -> 23, plan-schema, SKILL.md, feature doc, README, `retarget-impl.md`, the code-issue history row)
 - [x] **Testing**: all acceptance tests pass; `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`, scoped — test 29's helper was corrected (see "Findings the tests surfaced")
-- [ ] **Code quality**: `cargo clippy -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools --all-targets -- -D warnings`, `cargo fmt`; `plan.rs`, `plan/refactor_kind.rs`, `plan/codec.rs`, `verify.rs`, every new file <= 500 production lines
+- [x] **Code quality**: `cargo clippy -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools --all-targets -- -D warnings`, `cargo fmt`; `plan.rs`, `plan/refactor_kind.rs`, `plan/codec.rs`, `verify.rs`, every new file <= 500 production lines
 - [ ] **Stack bookkeeping**: the two #532 todos handled at wrap as stated in Prerequisites
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -316,7 +316,7 @@ The declaration travels as `RestructureVerifyArgs.retarget: Vec<String>` -> `Opt
 - [x] **M3 decision point**: `git diff --stat` against `feature/sharpen/plan-header` is **~1,600 lines** (834 tracked over `src`/`proto`, plus the four untracked children) and `backends/rust/retarget_impl/` is **~895 production lines** — both past the thresholds, so **M4 is CUT to a follow-up node** (Decision O2) and the delegator todo is narrowed
 - [x] **M4** (separable) **CUT.** The delegator is not built: the delegator acceptance binary and its two registrations, and its two library tests (34, 35) are removed. The schema still names `variant: "leave_delegator"` and `expr`, and the engine **refuses** them (`UnsupportedOp`) rather than retargeting without the forwarding method the plan asked for
 - [x] **M5** Registration: `retarget_impl_acceptance` is registered in `.config/nextest.toml` (`rust-analyzer` group) and `.config/rust-e2e.filterset`; the delegator binary's two registrations are removed. Docs staged for wrap (counts 22 → 23, `plan-schema.md`, `SKILL.md`, the package README, the feature doc, `docs/retarget-impl.md`, the code-issue history row), changeset updated
-- [ ] **M6** Scoped gate: `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`; clippy and fmt on the three; the length gate (`restructure check --budget 500`) over `plan.rs`, `plan/refactor_kind.rs`, `plan/codec.rs`, `verify.rs` and the new files, once at the end
+- [x] **M6** Scoped gate: `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools` — **1829 passed, 0 failed**; clippy and fmt clean on the three; the length gate over `plan.rs`, `plan/refactor_kind.rs`, `plan/codec.rs`, `verify.rs` and the new files, once at the end
 
 ## Testing plan
 
@@ -344,11 +344,11 @@ tens of seconds per test (`SKILL.md:105`), so the **parse-time and static refusa
 
 ### Coverage Requirements
 
-- [ ] **Happy path**: whole block; a proper subset in the middle, at the start and at the end
-- [ ] **Error scenarios**: P1-P8, S1-S6 (S7, P9 with M4)
-- [ ] **Edge cases**: a generic header, a block with `#[cfg]`, a banner comment between members, doc comments and `#[must_use]` on a moved member, `Old::build` (moved) and `Old::LIMIT` (not moved) in one body
-- [ ] **Integration points**: the compile gate on a caller left behind; the declaration through CLI and daemon
-- [ ] **Actual effects**: file text and a compiling tree, never only a return value
+- [x] **Happy path**: whole block; a proper subset in the middle, at the start and at the end
+- [x] **Error scenarios**: P1-P8, S1-S6 (S7, P9 with M4)
+- [x] **Edge cases**: a generic header, a block with `#[cfg]`, a banner comment between members, doc comments and `#[must_use]` on a moved member, `Old::build` (moved) and `Old::LIMIT` (not moved) in one body
+- [x] **Integration points**: the compile gate on a caller left behind; the declaration through CLI and daemon
+- [x] **Actual effects**: file text and a compiling tree, never only a return value
 
 ## Acceptance tests
 
@@ -513,7 +513,7 @@ Decisions taken by this plan (a reviewer can check them):
 - [x] TDD Green — implement with quality code (M1-M3; the delegator M4 cut to a follow-up at the M3 decision point)
 - [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`) — verify 100% pass; CI answers for the rest of the workspace
+- [x] Run the scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`) — **1829 passed, 0 failed**; CI answers for the rest of the workspace
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
