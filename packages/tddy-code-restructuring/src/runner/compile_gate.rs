@@ -25,11 +25,12 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
 use crate::apply::touched_paths;
+use crate::backends::rust::{human_delta, ProgressSink};
 use crate::crate_move::declared_package_name;
 use crate::journal::Journal;
 use crate::spawn_record::{purpose, RecordedChild, SpawnRecorder};
@@ -63,7 +64,14 @@ pub fn refuse_a_broken_baseline(
         .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
     let packages = owning_packages(root, named)?;
 
-    match failing_check(root, &packages, &options.spawns, cancel)? {
+    match failing_check(
+        root,
+        &packages,
+        &options.spawns,
+        cancel,
+        &options.progress,
+        options.wait_heartbeat,
+    )? {
         None => Ok(()),
         Some((checked, errors)) => {
             Err(RestructureError::BaselineDoesNotCompile { checked, errors })
@@ -98,7 +106,14 @@ pub fn refuse_a_broken_result(
     let touched = completed_edit_paths(journal);
     let packages = owning_packages(root, touched.iter().cloned())?;
 
-    let checked = failing_check(root, &packages, &options.spawns, cancel);
+    let checked = failing_check(
+        root,
+        &packages,
+        &options.spawns,
+        cancel,
+        &options.progress,
+        options.wait_heartbeat,
+    );
     if matches!(checked, Err(RestructureError::CallerStopped)) {
         (options.progress)(&format!(
             "compile check cancelled: {applied} of {total} operation(s) are on disk and in the \
@@ -217,11 +232,13 @@ pub(super) fn failing_check(
     packages: &BTreeSet<String>,
     spawns: &SpawnRecorder,
     cancel: &CancellationToken,
+    progress: &ProgressSink,
+    wait_heartbeat: Duration,
 ) -> Result<Option<(String, String)>> {
     if packages.is_empty() {
         return Ok(None);
     }
-    let output = run_check(root, packages, "short", spawns, cancel)?;
+    let output = run_check(root, packages, "short", spawns, cancel, progress, wait_heartbeat)?;
     if output.succeeded {
         return Ok(None);
     }
@@ -242,13 +259,17 @@ pub(super) struct CheckOutput {
 /// killing it when `cancel` fires ([`RestructureError::CallerStopped`]).
 ///
 /// What the baseline, the result check and the tidy share: one way to spawn the compiler, drain
-/// its pipes and honour the run's cancellation.
+/// its pipes and honour the run's cancellation. `progress` and `wait_heartbeat` are how the wait
+/// for a check that does not finish — a build script that never returns — still says so, with the
+/// command and the pid.
 pub(super) fn run_check(
     root: &Path,
     packages: &BTreeSet<String>,
     message_format: &str,
     spawns: &SpawnRecorder,
     cancel: &CancellationToken,
+    progress: &ProgressSink,
+    wait_heartbeat: Duration,
 ) -> Result<CheckOutput> {
     let mut arguments = vec!["check", "--all-targets", "--message-format", message_format];
     for package in packages {
@@ -267,7 +288,7 @@ pub(super) fn run_check(
     // to see.
     let stdout = drain(child.take_stdout());
     let stderr = drain(child.take_stderr());
-    let status = exit_or_kill(&mut child, cancel)?;
+    let status = exit_or_kill(&mut child, cancel, progress, wait_heartbeat, packages)?;
     Ok(CheckOutput {
         succeeded: status.success(),
         stdout: stdout.join().unwrap_or_default(),
@@ -277,7 +298,20 @@ pub(super) fn run_check(
 
 /// The status `child` exits with, or [`RestructureError::CallerStopped`] once `cancel` fires first
 /// and the child has been killed.
-fn exit_or_kill(child: &mut RecordedChild, cancel: &CancellationToken) -> Result<ExitStatus> {
+///
+/// A check of a few packages' test targets takes minutes on a cold cache, and one blocked on a
+/// build script never finishes at all; the run says which check it is waiting on, and its pid, on
+/// the run's own heartbeat. The pid is the only child this repository can name — cargo's own
+/// `rustc` children are invisible to it.
+fn exit_or_kill(
+    child: &mut RecordedChild,
+    cancel: &CancellationToken,
+    progress: &ProgressSink,
+    wait_heartbeat: Duration,
+    packages: &BTreeSet<String>,
+) -> Result<ExitStatus> {
+    let started = Instant::now();
+    let mut last_beat = started;
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(status);
@@ -288,6 +322,16 @@ fn exit_or_kill(child: &mut RecordedChild, cancel: &CancellationToken) -> Result
             child.kill()?;
             child.wait()?;
             return Err(RestructureError::CallerStopped);
+        }
+        let now = Instant::now();
+        if now.duration_since(last_beat) >= wait_heartbeat {
+            last_beat = now;
+            (progress)(&format!(
+                "still waiting ({}) — {} (pid {}); the run cannot see cargo's own children",
+                human_delta(started.elapsed()),
+                described_check(packages),
+                child.id()
+            ));
         }
         std::thread::sleep(CANCEL_CHECK);
     }

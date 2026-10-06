@@ -112,9 +112,8 @@ pub struct Options {
     ///
     /// Not a budget: no wait ends at it, and a run still waits until the server is ready or its
     /// caller stops it. A collaborator rather than a flag — a front end never sets it, and a test
-    /// shortens it so that it does not have to wait thirty seconds for a beat.
-    ///
-    /// TODO(apply-heartbeat): the waits of a run beat at this cadence; none does yet.
+    /// shortens it so that it does not have to wait thirty seconds for a beat. The waits of a run
+    /// beat at this cadence; the compile gate's check does too.
     pub wait_heartbeat: Duration,
 }
 

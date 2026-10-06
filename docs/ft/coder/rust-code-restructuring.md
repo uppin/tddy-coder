@@ -462,6 +462,18 @@ unable to answer one method is `ServerNotSettled`, kept distinct from a malforme
 fixed by waiting or by looking at the server, the second by editing the plan, and reporting the
 second as the first sends the reader to the wrong place.
 
+**A wait that lasts says so, on a fixed heartbeat.** A server that stops talking — a build script
+that never finishes — used to leave a run that had printed one line silent for as long as it lasted.
+Now every polling wait says, every 30 seconds (`WAIT_HEARTBEAT`), which **stage** it is in, how long
+it has **waited**, **which server** it is waiting on (a pid the backend started, or "behind a shared
+client"), the server's **last words** and how long they have been **unchanged**, and the furthest
+phase it reported. The `unchanged for` figure is the one that separates a slow server from a stuck
+one. The heartbeat **diagnoses, it does not cure**: it adds no deadline, and a run still waits until
+the server is ready or its caller stops it. A request already in flight on the shared client is
+narrated too. A wait ended by cancellation names its stage, so the refusal reads `… after 240s while
+warming the crate index (last progress: …)`. rust-analyzer's own children (a build script) are
+invisible to every site here; the quoted progress text is evidence, not identification.
+
 **Ready means quiescent and healthy.** rust-analyzer answers hover while it is still running build
 scripts, before any `OUT_DIR` type exists for it, so a first answer is not readiness: an extraction
 asked then writes `req: _`. The waits keep polling while the server's last `experimental/serverStatus`

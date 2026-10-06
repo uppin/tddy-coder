@@ -16,20 +16,30 @@
 use crate::{RestructureError, Result};
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Duration;
 use tddy_lsp::client::LspClient;
 use tddy_lsp::LspError;
 use tokio_util::sync::CancellationToken;
+
+use super::rust::WAIT_HEARTBEAT;
 
 /// Wraps a shared [`LspClient`] with blocking `request` / `notify` entry points.
 pub struct LspClientBridge {
     client: Arc<LspClient>,
     /// How a request in flight learns that its caller has stopped waiting.
     cancel: CancellationToken,
+    /// How often a request in flight says what it is waiting for. Not a budget: nothing ends a
+    /// request at it.
+    wait_heartbeat: Duration,
 }
 
 impl LspClientBridge {
     pub fn new(client: Arc<LspClient>, cancel: CancellationToken) -> Self {
-        Self { client, cancel }
+        Self {
+            client,
+            cancel,
+            wait_heartbeat: WAIT_HEARTBEAT,
+        }
     }
 
     /// Point this bridge at another run's token.
@@ -41,14 +51,45 @@ impl LspClientBridge {
         self.cancel = cancel;
     }
 
+    /// Say what a request in flight is waiting for every `every`, instead of every
+    /// [`WAIT_HEARTBEAT`]. Set by [`RustBackend::with_wait_heartbeat`], for the same reason it
+    /// sets the backend's own: the cadence is a collaborator, not a budget.
+    pub fn set_wait_heartbeat(&mut self, every: Duration) {
+        self.wait_heartbeat = every;
+    }
+
     /// Send a request and return its `result` field, giving up as soon as the run is cancelled.
     pub fn request(&self, method: &str, params: Value) -> Result<Value> {
-        tokio::runtime::Handle::current()
-            .block_on(
-                self.client
-                    .request_abandonable(method, params, self.cancel.cancelled()),
-            )
-            .map_err(map_lsp_error)
+        self.request_narrated(method, params, || {})
+    }
+
+    /// [`Self::request`], telling `on_heartbeat` each time the request has been in flight for
+    /// another [`Self::wait_heartbeat`].
+    ///
+    /// The request future is pinned and polled in slices of the heartbeat rather than awaited
+    /// whole, because the ticker has to run *outside* the runtime context: a front end whose sink
+    /// sends into a channel with `blocking_send` would panic inside `block_on`, and a request
+    /// against a cold index lasts minutes — exactly the wait that used to say nothing at all.
+    pub fn request_narrated(
+        &self,
+        method: &str,
+        params: Value,
+        mut on_heartbeat: impl FnMut(),
+    ) -> Result<Value> {
+        let handle = tokio::runtime::Handle::current();
+        let request = self
+            .client
+            .request_abandonable(method, params, self.cancel.cancelled());
+        tokio::pin!(request);
+        loop {
+            let slice = handle
+                .block_on(async { tokio::time::timeout(self.wait_heartbeat, &mut request).await });
+            match slice {
+                Ok(outcome) => return outcome.map_err(map_lsp_error),
+                // The request is still in flight; the slice is what a beat is measured against.
+                Err(_still_waiting) => on_heartbeat(),
+            }
+        }
     }
 
     /// Every server notification received since the last call, oldest first, followed by the

@@ -12,9 +12,6 @@
 //! **It prints nothing.** The line goes back to the caller as a string; the only printer in this
 //! crate stays `restructure_cli.rs`.
 
-// TODO(apply-heartbeat): the five polling waits adopt `Waiting` and nothing calls it yet.
-#![allow(dead_code)]
-
 use std::time::{Duration, Instant};
 
 /// How often a wait that lasts says what it is waiting for.
@@ -22,11 +19,6 @@ use std::time::{Duration, Instant};
 /// Below the minute at which a developer starts to suspect a hang, above the two seconds at which a
 /// healthy load already narrates itself. Not a budget: nothing ends at this number.
 pub const WAIT_HEARTBEAT: Duration = Duration::from_secs(30);
-
-/// What a wait names as the thing it is waiting for, until the waits name their own.
-///
-/// TODO(apply-heartbeat): replaced, wait by wait, by the [`WaitStage`] each one is in.
-pub(super) const A_WAIT_THAT_NAMES_NO_STAGE: &str = "waiting for the index";
 
 /// The part of a run a wait is in, as the sentence a reader is told.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,10 +113,11 @@ impl Waiting {
     /// A fixed heartbeat: a server that is active does not postpone it, and one that is quiet does
     /// not bring it forward.
     pub(super) fn beat_due(&mut self, now: Instant) -> bool {
-        // TODO(apply-heartbeat): implement. Never due until then, which is how every wait behaved
-        // before there was a heartbeat.
-        let _ = (now, self.every, self.last_beat);
-        false
+        if now.duration_since(self.last_beat) < self.every {
+            return false;
+        }
+        self.last_beat = now;
+        true
     }
 }
 
@@ -134,9 +127,43 @@ impl Waiting {
 /// stage, which server, whether it has said it is loading, its last words with how long they have
 /// been unchanged, and the furthest phase it reported.
 pub(super) fn heartbeat_line(beat: &Beat<'_>) -> String {
-    // TODO(apply-heartbeat): implement. Empty until then: a line nobody sends.
-    let _ = beat;
-    String::new()
+    let server = match beat.on {
+        WaitedOn::OwnServer { pid } => format!("rust-analyzer (pid {pid})"),
+        WaitedOn::SharedClient => "rust-analyzer behind a shared client".to_string(),
+    };
+    let state = if beat.loading {
+        "is still loading"
+    } else {
+        "has not said it is ready"
+    };
+    let words = match beat.last_words {
+        Some(words) => format!(
+            "its last words, unchanged for {}: \"{words}\"",
+            human_delta(beat.quiet_for)
+        ),
+        None => "the server has said nothing yet".to_string(),
+    };
+    let mut line = format!(
+        "still waiting ({}) — {}: {server} {state}; {words}",
+        human_delta(beat.elapsed),
+        beat.stage.text(),
+    );
+    if let Some((percentage, phase)) = beat.furthest {
+        line.push_str(&format!("; furthest: {phase} {percentage}%"));
+    }
+    line
+}
+
+/// A span of time as a reader counts it: whole seconds below a minute, then minutes and
+/// zero-padded seconds. The units [`crate::restructure_cli::step_delta`] uses, without its sign or
+/// its sub-second precision — a heartbeat is measured in seconds, not milliseconds.
+pub(crate) fn human_delta(delta: Duration) -> String {
+    let seconds = delta.as_secs();
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else {
+        format!("{}m{:02}s", seconds / 60, seconds % 60)
+    }
 }
 
 #[cfg(test)]

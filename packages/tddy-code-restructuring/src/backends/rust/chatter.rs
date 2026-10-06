@@ -79,6 +79,13 @@ pub struct ServerChatter {
     /// `last` with no number in it, so the message could not say how far the index had got — which
     /// is the one thing a reader needs in order to decide whether raising the budget will help.
     furthest: Option<(u64, String)>,
+    /// When the server last said anything *new*: a different progress line, a flip of its
+    /// quiescence, or a change of its health.
+    ///
+    /// A repeat of the line it already said, and a notification the throttle suppressed with the
+    /// same text, are not news. What [`Self::quiet_for`] is measured from — and the figure that
+    /// separates a slow server from a stuck one in a wait's heartbeat.
+    changed_at: Option<Instant>,
 }
 
 impl ServerChatter {
@@ -107,15 +114,23 @@ impl ServerChatter {
             "$/progress" => self.progress_at(message.get("params")?, now),
             "experimental/serverStatus" => {
                 let params = message.get("params")?;
+                let mut changed = false;
                 if let Some(health) = params.get("health").and_then(Value::as_str) {
                     let said = params
                         .get("message")
                         .and_then(Value::as_str)
                         .map(str::to_string);
-                    self.health = Some((health.to_string(), said));
+                    let now_health = Some((health.to_string(), said));
+                    changed |= self.health != now_health;
+                    self.health = now_health;
                 }
-                self.quiescent = params.get("quiescent").and_then(Value::as_bool)?;
+                let quiescent = params.get("quiescent").and_then(Value::as_bool)?;
+                changed |= self.quiescent != quiescent;
+                self.quiescent = quiescent;
                 self.reported_status = true;
+                if changed {
+                    self.changed_at = Some(now);
+                }
                 None
             }
             _ => None,
@@ -156,6 +171,9 @@ impl ServerChatter {
 
         let title = self.titles.get(&token).cloned();
         let line = progress_line(title.as_deref(), value);
+        if self.last.as_deref() != Some(line.as_str()) {
+            self.changed_at = Some(now);
+        }
         self.last = Some(line.clone());
 
         let percentage = value.get("percentage").and_then(Value::as_u64);
@@ -281,10 +299,11 @@ impl ServerChatter {
     /// from a stuck one in a wait's heartbeat. Measured against the clock the caller supplies, like
     /// [`Self::absorb_at`], so a test can say what time it is.
     pub fn quiet_for(&self, now: Instant) -> std::time::Duration {
-        // TODO(apply-heartbeat): implement — record when the folded state last changed. Zero until
-        // then, which no heartbeat reads yet.
-        let _ = now;
-        std::time::Duration::ZERO
+        match self.changed_at {
+            Some(changed_at) => now.saturating_duration_since(changed_at),
+            // Nothing has ever been said, so there is nothing to have been quiet since.
+            None => std::time::Duration::ZERO,
+        }
     }
 
     /// The furthest percentage any phase has reported, and the phase it belonged to.

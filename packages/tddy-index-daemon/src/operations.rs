@@ -18,11 +18,12 @@
 //! run's state is keyed by its plan, so what the queue protects is the tree, not the journal.
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use tddy_code_restructuring::plan_store::OpStaleness;
 use tddy_code_restructuring::runner::{self, Command, Options};
 use tddy_rpc::Status;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OwnedMutexGuard};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
 
@@ -74,7 +75,10 @@ pub(crate) async fn serve_check(
     let index = index.clone();
 
     tokio::spawn(async move {
-        let _queued = index.hold(&root).await;
+        let Some(_queued) = hold_saying_so(&index, &root, &events).await else {
+            activity.cancelled();
+            return;
+        };
         // A shallow check is answered from the text alone, so it neither waits for an index nor
         // needs a server — which is what makes it worth having separately from an apply.
         let client = if deep {
@@ -192,7 +196,10 @@ pub(crate) async fn serve_apply(
     let index = index.clone();
 
     tokio::spawn(async move {
-        let _queued = index.hold(&root).await;
+        let Some(_queued) = hold_saying_so(&index, &root, &events).await else {
+            activity.cancelled();
+            return;
+        };
         // Loaded first, so a plan the store refuses — two operations sharing an id — is refused
         // before a language server is waited for.
         let held = match loaded_for_a_run(&index, &root, &plan).await {
@@ -277,6 +284,44 @@ async fn held_copy(
     })
     .await
     .map_err(|failure| joined("check", &failure))
+}
+
+/// Wait for `root`'s turn, saying so on the request's own stream every heartbeat — and dropping
+/// out of the queue when a send fails, which is the only signal this host gets that the caller has
+/// hung up.
+///
+/// The send is `events.send(..).await`, not the `blocking_send` [`progress_into`] uses: this runs
+/// on the async runtime, where `blocking_send` would panic. A caller who has gone is noticed within
+/// one heartbeat, and the pending lock is dropped with the future — the gate is neither held nor
+/// taken, so the next request on the root proceeds.
+///
+/// `None` is that hang-up. `Some(guard)` is this request's turn, which the caller holds for the
+/// whole run.
+async fn hold_saying_so(
+    index: &WorkspaceIndex,
+    root: &Path,
+    events: &EventSender<RestructureEvent>,
+) -> Option<OwnedMutexGuard<()>> {
+    let mut queued = std::pin::pin!(index.hold(root));
+    let mut beat = tokio::time::interval(index.wait_heartbeat());
+    // `interval`'s first tick is immediate; a queue is announced a cadence in, not at once.
+    beat.tick().await;
+    let began = Instant::now();
+    loop {
+        tokio::select! {
+            guard = &mut queued => return Some(guard),
+            _ = beat.tick() => {
+                let line = format!(
+                    "still waiting ({}s) — queued behind another operation on `{}`",
+                    began.elapsed().as_secs(),
+                    root.display()
+                );
+                if events.send(Ok(indexing_event(&line))).await.is_err() {
+                    return None;
+                }
+            }
+        }
+    }
 }
 
 /// One request's event channel and the stream its caller reads.

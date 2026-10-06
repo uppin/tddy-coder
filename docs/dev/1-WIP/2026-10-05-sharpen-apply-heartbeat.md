@@ -313,20 +313,24 @@ it cannot swallow a hover.
 
 ## Implementation milestones
 
-- [ ] **M1 — contract.** `fake_lsp` modes, `quiet_for`, `wait.rs` skeleton, `stage`, `Options.wait_heartbeat`,
+- [x] **M1 — contract.** `fake_lsp` modes, `quiet_for`, `wait.rs` skeleton, `stage`, `Options.wait_heartbeat`,
   `registry_for_waiting`, `CodeIndexPorts::wait_heartbeat`, all compiling; tests exist and fail by
   assertion; `./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon` run scoped with the failing
   names listed here.
-- [ ] **M2 — the five polling waits beat.** Tests 1, 2, 4, 5 below green; `rust.rs` net growth ≤ 10 lines
-  (measured with `restructure check --budget`-style production-line count and recorded).
-- [ ] **M3 — a request in flight beats** (D4). Test 8 green.
-- [ ] **M4 — the daemon.** Tests in `tddy-index-daemon/tests/wait_heartbeat_acceptance.rs` green, including
+- [x] **M2 — the five polling waits beat.** Tests 1, 2, 4, 5 below green. `rust.rs` production-line count
+  measured to the first real `mod tests` block: **2864 → 2975 (+111)**, well over this changeset's ≤10
+  estimate — the estimate omitted the `beat`/`waited_on` adapter (it reads backend state, so it lives on
+  the backend), `keep_waiting`'s rewrite, `request`'s in-flight narration and the doc comments this
+  codebase requires. Not shuffled between modules to hit a number; see Technical Debt below.
+- [x] **M3 — a request in flight beats** (D4). Test 8 green.
+- [x] **M4 — the daemon.** Tests in `tddy-index-daemon/tests/wait_heartbeat_acceptance.rs` green, including
   the readiness-untouched test (D9).
-- [ ] **M5 — the compile gate beats** (D5), or the milestone is cut and a todo recorded.
-- [ ] **M6 — docs and records.** README, `readiness-and-gates.md`, feature doc, `SKILL.md`,
+- [x] **M5 — the compile gate beats** (D5), or the milestone is cut and a todo recorded.
+- [x] **M6 — docs and records.** README, `readiness-and-gates.md`, feature doc, `SKILL.md`,
   `code-index-service.md`; poisoned-latch record re-measured and edited; three todos edited per
-  Prerequisites; `oversized-file-backends-rust.md` history row.
-- [ ] **M7 — gates, scoped.** `./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`;
+  Prerequisites; `oversized-file-backends-rust.md` history row. *(docs done; the code-issue re-measurements
+  and todo edits are left to the wrap step — see the TODO below.)*
+- [x] **M7 — gates, scoped.** `./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`;
   `cargo clippy -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon --all-targets -- -D warnings`;
   `cargo fmt --check`. The whole workspace is CI's (`scripts/ci-status.sh`).
 
@@ -446,7 +450,24 @@ Fixture style: `code_index_service_acceptance.rs` (service over an `LspRegistry`
 
 ## Technical Debt & Production Readiness
 
-*(empty — populated during development)*
+**Deferred, marked `TODO(apply-heartbeat)` in the tree:**
+
+- `runner/tidy.rs:117` — the tidy's `cargo check` beats at the production default cadence, not the run's.
+  `Tidying` carries the run's sink but not its cadence; adding the field would edit two tidy test
+  literals, which the green brief forbade. A partial cut of D5, which this changeset marks cuttable.
+- `runner/group_gate.rs:274` — the group gate's check is silent. `gate_group` reaches `failing_check`
+  through `GroupRun::finish`, which carries no progress sink; threading one in would edit the
+  `GroupGate` test literals. A discarding sink is passed meanwhile. The other partial cut of D5.
+
+**Not done here (wrap step):** the `packages/*/docs/code-issues/` re-measurements (the poisoned-latch
+record, and a history row for `oversized-file-backends-rust.md`) and the three `docs/dev/todo/` edits
+named in `## Prerequisites`.
+
+**`oversized-file-backends-rust.md` (~2,864 production lines).** This node grew `rust.rs` by **+111**
+production lines (2864 → 2975, counted to the first real `mod tests`). Decomposition is **deferred, not
+skipped**: the parent node `spawn-record` edits the same file, so a split here would cascade rename
+conflicts through its diff — the `pr-stack` rule against splitting a file a parent or dependent PR
+touches. Recorded for a follow-up branch after the stack lands.
 
 ## Decisions & Trade-offs
 
@@ -540,8 +561,9 @@ Honest about what is not yet real, all marked `TODO(apply-heartbeat)`:
   `registry_for_waiting`; the other `registry_for` callers still delegate with `WAIT_HEARTBEAT` (unchanged).
 - `IndexingIncomplete.stage` is a field and the message already reads `… after {n}s while {stage} (last
   progress: …)`; the three construction sites in `rust.rs` pass the constant until each wait names its own.
-- Not published, left to green: the daemon queue wait (D6), `exit_or_kill`'s beat (D5), `LspClientBridge::request`
-  slicing (D4), the five waits calling `Waiting`.
+- Delivered at green (the commit after this contract): the five waits calling `Waiting` and naming their
+  stage, `LspClientBridge::request` slicing (D4), `exit_or_kill`'s beat (D5 — except the tidy cadence and
+  the group gate; see Technical Debt), and the daemon queue wait (D6).
 
 ### Red-phase findings that change how green is written
 
@@ -640,10 +662,10 @@ Honest about what is not yet real, all marked `TODO(apply-heartbeat)`:
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`) — verify 100% pass; whole-workspace health is CI's
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the scoped tests (`./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`) — verify 100% pass; whole-workspace health is CI's
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
