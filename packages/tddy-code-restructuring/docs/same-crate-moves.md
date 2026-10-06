@@ -59,7 +59,7 @@ an earlier operation's pending edits are seen.
 
 ## Plan codec
 
-`plan.rs` has `RefactorKind::{MoveItem, ReparentModule}` and `Reexport::Outside`; neither kind satisfies
+`plan/refactor_kind.rs` has `RefactorKind::{MoveItem, ReparentModule}`; `plan.rs` has `Reexport::Outside`; neither kind satisfies
 `moves_across_crates`. `plan/codec.rs` reads: `to` is required; the anchor must be `items` or `item`;
 `reexport` is allowed on both (and `outside` only on both); `name` on `reparent_module` and `named` on it
 are refused; `also` and `to_file` are refused on both. `Reexport::repoints_callers` is true for `none` and

@@ -120,12 +120,11 @@ given.
 ## Where the code lives
 
 `src/` is organised by what a file decides. Over the 500 production-line budget are `backends/rust.rs` and
-`crate_move/test_binary.rs` (records in `docs/code-issues/`) and `plan.rs`, `plan/codec.rs`,
-`item_anchor.rs` and `runner/tidy.rs` (the budget is deferred and has no record yet).
+`crate_move/test_binary.rs` (records in `docs/code-issues/`).
 
 | Area | Modules |
 |---|---|
-| Plan vocabulary | `plan.rs`, `plan/codec.rs` (header codec, `hint_of`), `plan/item_path.rs` |
+| Plan vocabulary | `plan.rs`, `plan/refactor_kind.rs` (`RefactorKind`), `plan/codec.rs` with `plan/codec/{file_hint,groups}.rs`, `plan/item_path.rs` |
 | Journal | `journal.rs`, `journal/group.rs` (`PreImage`, `OpenGroup`) |
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |

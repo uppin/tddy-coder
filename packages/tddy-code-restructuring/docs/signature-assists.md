@@ -10,7 +10,7 @@ Product behaviour: [Rust code restructuring](../../../docs/ft/coder/rust-code-re
 
 | Piece | File |
 |---|---|
-| The two `RefactorKind` variants | `src/plan.rs` |
+| The two `RefactorKind` variants | `src/plan/refactor_kind.rs` |
 | The `name`-required refusals, raised before any server starts | `src/plan/codec.rs`, `parse_op` |
 | `SUPPORTED` entries and the `assist_for` rows (`remove unused parameter`, kind `refactor`; `convert tuple return type to tuple struct`, kind `refactor.rewrite`) | `src/backends/rust.rs` |
 | Carets, the used-parameter refusal and the struct rename | `src/backends/rust/signature.rs` |

@@ -23,6 +23,7 @@ through it. `symbol` and `range` anchors remain the vocabulary of v1 plans and p
 |---|---|
 | `plan.rs` | `Anchor::Item` / `Anchor::Items`, `ItemPath` (`crate::m::T::f`, `crate::m::<T as Trait>::f`), `Fingerprint`, the v1 and v2 headers, validation (a relative range must lie inside its item; `items` must be adjacent) |
 | `item_anchor.rs` | What every language shares: `module_path_of` (package name from the manifest with `-` read as `_`; `lib.rs`/`main.rs` are the crate root, `a.rs` and `a/mod.rs` are module `a`), relative to absolute ranges, the fingerprint check, `resolve_item_anchors`, `item_anchor_at`, `items_anchor`, `span_of`, and the `ItemResolver` trait |
+| `item_anchor/package_lookup.rs` | The nearest package that holds a path and the repo-root hint its refusal carries: `owning_package`, `repo_root_hint`, `collect_package_files` |
 | `backends/rust/item_path.rs` | The Rust resolver: walks rust-analyzer's `documentSymbol` outline segment by segment (modules, types, impl blocks keyed by self type and trait) |
 | `registry.rs` | Routes an item anchor to the backend that owns the file. A file no backend claims is `NoBackend`; a backend with no item resolver (`LanguageBackend::item_resolver` returns `None`) is `UnsupportedOp { op: "item anchors" }` |
 | `runner/entry_points.rs` | `open_run_resolving_anchors`, `item_anchors` (the `anchors` command), the static-check finding for item-anchored operations |
