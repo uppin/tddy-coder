@@ -469,6 +469,15 @@ skipped**: the parent node `spawn-record` edits the same file, so a split here w
 conflicts through its diff — the `pr-stack` rule against splitting a file a parent or dependent PR
 touches. Recorded for a follow-up branch after the stack lands.
 
+**File-length gate (step 3.5), 2026-10-06.** Two files crossed the 500-production-line budget:
+`rust.rs` (deferred above — parent overlap) and `tddy-index-daemon/src/index.rs`, which this node took
+from **491 → 508** with the `wait_heartbeat` field and its accessors. No other `#sharpen` node's own
+commits touch `index.rs`, so the stack-overlap stop does not apply; the developer chose to **defer with
+a record** rather than expand this feature node's scope with an unplanned engine split. Recorded as
+`packages/tddy-index-daemon/docs/code-issues/oversized-file-index.md` and
+`docs/dev/todo/2026-10-06-split-tddy-index-daemon-index-rs.md`. All other touched source files are under
+budget (`operations.rs` 459, `runner.rs` 437, `queries.rs` 446, …).
+
 ## Decisions & Trade-offs
 
 Decisions already taken (the developer, 2026-10-05):
@@ -653,13 +662,27 @@ Scoped tests: `wait.rs` 18/18, `chatter.rs` 22/22, `fake_lsp_busy_modes_test` 3/
 --check` clean.
 
 ### @validate-tests
-*(empty)*
+**2026-10-06 — clean.** The acceptance and unit suites are unchanged from the red phase (fluent
+Given/When/Then, named helpers, deterministic short cadences, no wall-clock assertions). The only
+test edits are five mechanical call-site follow-ups in `rust.rs`'s own unit tests for the two
+signatures the plan mandates — `keep_waiting(None, …)` ×3 and `incomplete_assist_index(…, &WaitStage,
+…)` ×2 — with every assertion and match arm intact. No test weakened, no anti-pattern introduced.
 
 ### @prod-ready
-*(empty)*
+**2026-10-06 — clean, two recorded deferrals.** No mock code, no test-only branches, no debug output:
+the library prints nothing (only `restructure_cli.rs` does, pinned by `library_returns_its_results`),
+the daemon streams through its own sinks, and `fake_lsp` is a documented `tests/bin` double. The only
+`TODO` markers this node added are the two D5 partial cuts (`tidy.rs:117`, `group_gate.rs:274`),
+recorded in Technical Debt above. The stale `options.rs` TODO ("none does yet") was corrected.
 
 ### @analyze-clean-code
-*(empty)*
+**2026-10-06 — clean.** The new functions are small and shallow: `heartbeat_line` (~25 lines, no
+nesting), `Waiting::beat_due` (5), `keep_waiting` (a loop with one `if`), `beat`/`waited_on` (~18),
+`LspClientBridge::request_narrated` (~20), `hold_saying_so` (~28, one `select!`), `exit_or_kill`'s
+beat (~10 added). Cadences are named constants (`WAIT_HEARTBEAT`, `CANCEL_CHECK`), not magic values.
+The one shared string is the greppable `still waiting` prefix, deliberately repeated at the three
+narration sites rather than factored behind an abstraction. File length: `rust.rs` and `index.rs` are
+over budget and recorded — see the file-length gate below.
 
 ## TODO
 
