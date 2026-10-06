@@ -83,7 +83,10 @@ record's.
    to re-run after an unrelated edit. `snapshot` of a plan **with item anchors** re-resolves them
    through a language server: with `TDDY_INDEX_SOCKET` set it is asked of the warm daemon (its
    `Snapshot` RPC), and without one it starts a cold rust-analyzer of its own. A plan with no item
-   anchors is answered in process either way.
+   anchors is answered in process either way. A plan whose first line is an operation has no header
+   yet — wrap an emitted anchor in a one-line plan and run `restructure snapshot` on it, and it writes
+   the header (v2 for item anchors, v1 for a `range`/`symbol`) from the files the anchors name; every
+   other command refuses such a plan until it has one.
 7. **Plan** — JSONL intents only; see `references/plan-schema.md`.
 8. **Prove seams** — `restructure check plan.jsonl --deep`. **`--deep` is the gate, not an option.**
    A plain `check` reads text; only `--deep` resolves each operation through the same path `apply`
