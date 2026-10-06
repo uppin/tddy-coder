@@ -346,10 +346,7 @@ mod tests {
 
     #[test]
     fn reads_the_self_type_of_an_inherent_generic_header() {
-        assert_eq!(
-            impl_self_type("impl<T> Host<T>"),
-            Some("Host".to_string())
-        );
+        assert_eq!(impl_self_type("impl<T> Host<T>"), Some("Host".to_string()));
         assert_eq!(impl_self_type("impl Host"), Some("Host".to_string()));
         assert_eq!(impl_self_type("impl Display for Host"), None);
         assert_eq!(impl_self_type("fn get(&self) -> T {"), None);

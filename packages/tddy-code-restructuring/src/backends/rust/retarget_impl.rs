@@ -148,9 +148,7 @@ impl RustBackend {
                 start: *start,
                 end: *end,
             }),
-            Anchor::Item { .. } | Anchor::Items { .. } => {
-                span_of(&op.anchor, workspace.root, self)
-            }
+            Anchor::Item { .. } | Anchor::Items { .. } => span_of(&op.anchor, workspace.root, self),
             Anchor::Symbol { .. } => Err(unlowered_item_anchor(&op.anchor, "`retarget_impl`")),
         }
     }

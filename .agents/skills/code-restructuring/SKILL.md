@@ -7,7 +7,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 
 **You never write the moved or extracted code.** You write a plan of *intents*. `tddy-tools restructure` resolves each intent through rust-analyzer (via `tddy-lsp`).
 
-**v1 scope:** Rust only — twenty-two operations, ten subcommands. No TypeScript.
+**v1 scope:** Rust only — twenty-three operations, ten subcommands. No TypeScript.
 
 ## CLI
 
@@ -18,7 +18,7 @@ tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]   # LINES c
 tddy-tools restructure snapshot <plan.jsonl>          # item anchors: answered by the warm daemon when TDDY_INDEX_SOCKET is set
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
-tddy-tools restructure verify --against <git-ref>
+tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]...
 tddy-tools restructure load   <plan.jsonl>...        # needs the index daemon (TDDY_INDEX_SOCKET)
 tddy-tools restructure unload <plan.jsonl>... | --all
 tddy-tools restructure plans

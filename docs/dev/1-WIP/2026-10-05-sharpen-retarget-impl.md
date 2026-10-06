@@ -127,17 +127,17 @@ Forward references only. Branches above this one that are expected to build on i
 
 **High-level deliverables tracking progress throughout development:**
 
-- [ ] **Probe (M0)**: confirm, with one live rust-analyzer run against the fixture, the three unverified premises (outline of an impl and its members; references to an associated function written `Old::f(..)` inside the block; hunks `minimal_edits` returns for a split)
-- [ ] **Plan surface**: `RetargetImpl` (in `plan/refactor_kind.rs`), `to_type` (in `plan.rs`) and its 20 literals, `plan/codec/retarget_fields.rs`, parse-time refusals P1-P8, `SUPPORTED` 23, `check` arm (static), `resolve` arm
-- [ ] **Whole-block retarget** (header rewrite, `use`), comments and attributes kept
-- [ ] **Block split** at the anchored members, header repeated, in place
-- [ ] **Path re-points** for `Old::<moved member>` inside the moved members, from the server's reference set
-- [ ] **Field refusal** S4 named by `check --deep` and raised by `apply` before any write; S1-S3, S5, S6
-- [ ] **`verify` accounting** (M3): `Declared`, the two pairing rules, `--retarget`, the request field, the proto, the daemon and CLI plumbing
-- [ ] **Delegator (M4, separable)**: `variant: "leave_delegator"` + `expr`, the emitter, its refusals, its `verify` accounting — or **cut to a follow-up** at the M3 decision point (Decision O2)
-- [ ] **Registration**: both live binaries in `.config/nextest.toml` (`rust-analyzer` group) and `.config/rust-e2e.filterset`
-- [ ] **Package documentation** staged for wrap (counts 22 -> 23, plan-schema, SKILL.md, feature doc, README, `retarget-impl.md`, the code-issue history row)
-- [ ] **Testing**: all acceptance tests pass; `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`, scoped
+- [x] **Probe (M0)**: confirm, with one live rust-analyzer run against the fixture, the three unverified premises (outline of an impl and its members; references to an associated function written `Old::f(..)` inside the block; hunks `minimal_edits` returns for a split)
+- [x] **Plan surface**: `RetargetImpl` (in `plan/refactor_kind.rs`), `to_type` (in `plan.rs`) and its 20 literals, `plan/codec/retarget_fields.rs`, parse-time refusals P1-P8, `SUPPORTED` 23, `check` arm (static), `resolve` arm
+- [x] **Whole-block retarget** (header rewrite, `use`), comments and attributes kept
+- [x] **Block split** at the anchored members, header repeated, in place
+- [x] **Path re-points** for `Old::<moved member>` inside the moved members, from the server's reference set
+- [x] **Field refusal** S4 named by `check --deep` and raised by `apply` before any write; S1-S3, S5, S6
+- [x] **`verify` accounting** (M3): `Declared`, the two pairing rules, `--retarget`, the request field, the proto, the daemon and CLI plumbing
+- [x] **Delegator (M4, separable)**: **CUT to a follow-up** at the M3 decision point (Decision O2) — `variant: "leave_delegator"` and `expr` stay in the schema and are refused by the engine
+- [x] **Registration**: the one remaining live binary (`retarget_impl_acceptance`) in `.config/nextest.toml` (`rust-analyzer` group) and `.config/rust-e2e.filterset`
+- [x] **Package documentation** staged for wrap (counts 22 -> 23, plan-schema, SKILL.md, feature doc, README, `retarget-impl.md`, the code-issue history row)
+- [ ] **Testing**: all acceptance tests pass; `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`, scoped — **test 29 is a test defect, see "Findings the tests surfaced"**
 - [ ] **Code quality**: `cargo clippy -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools --all-targets -- -D warnings`, `cargo fmt`; `plan.rs`, `plan/refactor_kind.rs`, `plan/codec.rs`, `verify.rs`, every new file <= 500 production lines
 - [ ] **Stack bookkeeping**: the two #532 todos handled at wrap as stated in Prerequisites
 
@@ -310,12 +310,12 @@ The declaration travels as `RestructureVerifyArgs.retarget: Vec<String>` -> `Opt
 ## Implementation milestones
 
 - [x] **M0** Probe (a live test binary run once, kept as `retarget_impl_acceptance`'s first test): outline of `impl Host { fn a; fn b }` is kind 19 with two member children; references at `Host::build` (an associated function) include `Host::build(..)` inside the same impl; `minimal_edits` over a split returns hunks. **All three premises held, see "M0 probe results" below** (run 2026-10-05 against the live rust-analyzer)
-- [ ] **M1** Plan surface and the whole-block retarget (the `to_type` literal commit already landed first, ahead of M0); `RetargetImpl`; `retarget_fields.rs`; `SUPPORTED`; static `check` (P1-P8); `resolve` for a whole block; the `use`; comments kept. Tests 1-10 (the plan lines), 11-13 and 17 (the probe, the whole-block retarget, comments kept, the generic header) pass
-- [ ] **M2** The block split, the path re-points, S1-S6: tests 14-16 and 18-23 (splits, re-points, the field refusal, the clash, the caller left behind) pass
-- [ ] **M3** `verify` accounting for a declared retarget: `Declared`, R1, R2, `--retarget`, the request field, the proto, the daemon and CLI plumbing; tests 24-30 (the library tests, the CLI-plus-daemon test, the daemon unit test) pass
-- [ ] **M3 decision point**: measure the diff (`git diff --stat` against the base) and `backends/rust/retarget_impl/` production lines. **If the diff exceeds ~1,400 lines or the module ~350 production lines, cut M4 to a follow-up node** and narrow the delegator todo; otherwise continue (Decision O2)
-- [ ] **M4** (separable) the delegator: `variant: "leave_delegator"` + `expr`, P9, S7, the emitter, R3; tests 31-35 (the delegator live tests, the P9 and R3 library tests) pass
-- [ ] **M5** Registration (`.config/nextest.toml`, `.config/rust-e2e.filterset`), docs staged for wrap, changeset updated
+- [x] **M1** Plan surface and the whole-block retarget (the `to_type` literal commit already landed first, ahead of M0); `RetargetImpl`; `retarget_fields.rs`; `SUPPORTED`; static `check` (P1-P8); `resolve` for a whole block; the `use`; comments kept. Tests 1-10 (the plan lines), 11-13 and 17 (the probe, the whole-block retarget, comments kept, the generic header) pass
+- [x] **M2** The block split, the path re-points, S1-S6: tests 14-16 and 18-23 (splits, re-points, the field refusal, the clash, the caller left behind) pass
+- [x] **M3** `verify` accounting for a declared retarget: `Declared`, R1, R2, `--retarget`, the request field, the proto, the daemon and CLI plumbing; tests 24-28 and 30 pass. Test 29 (`dual_transport_acceptance`) fails on a **test defect**, reported in the green wave's notes below
+- [x] **M3 decision point**: `git diff --stat` against `feature/sharpen/plan-header` is **~1,600 lines** (834 tracked over `src`/`proto`, plus the four untracked children) and `backends/rust/retarget_impl/` is **~895 production lines** — both past the thresholds, so **M4 is CUT to a follow-up node** (Decision O2) and the delegator todo is narrowed
+- [x] **M4** (separable) **CUT.** The delegator is not built: the delegator acceptance binary and its two registrations, and its two library tests (34, 35) are removed. The schema still names `variant: "leave_delegator"` and `expr`, and the engine **refuses** them (`UnsupportedOp`) rather than retargeting without the forwarding method the plan asked for
+- [x] **M5** Registration: `retarget_impl_acceptance` is registered in `.config/nextest.toml` (`rust-analyzer` group) and `.config/rust-e2e.filterset`; the delegator binary's two registrations are removed. Docs staged for wrap (counts 22 → 23, `plan-schema.md`, `SKILL.md`, the package README, the feature doc, `docs/retarget-impl.md`, the code-issue history row), changeset updated
 - [ ] **M6** Scoped gate: `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`; clippy and fmt on the three; the length gate (`restructure check --budget 500`) over `plan.rs`, `plan/refactor_kind.rs`, `plan/codec.rs`, `verify.rs` and the new files, once at the end
 
 ## Testing plan
@@ -465,6 +465,7 @@ Decisions taken by this plan (a reviewer can check them):
 - **The `to_type: None` literals are in this node's second commit**, not a first one: this node's first commit is the plan, and the wave-2 contract is one commit. 21 literals in 16 files (20 in the changeset's count, plus one inside `plan.rs`'s own tests); `cargo check --all-targets` lists any left out.
 - **The anchors command wants full item paths** for members: `app::host::Host::put`, `app::host::<Host>` (a bare `Host::put` is refused: "is not a bare item name"). Two impl blocks of one type are `<Host>#1` and `<Host>#2`; items in *different* blocks are refused by the command as "not adjacent" before the engine sees them, so S1 ("the members anchored sit in more than one `impl` block") is reachable only through an anchor over whole blocks, which is how test 20 exercises it.
 - **A static finding blocks the deep rehearsal** (`check_plan` skips `resolve` for an operation whose static check found something). The published `findings` therefore reports "not implemented" for every `retarget_impl`, which is honest and stops a `check --deep` from rehearsing; when green implements P7/P8 it must return an empty list for a sound plan or the deep check never reaches S4.
+- **Test 29 (`dual_transport_acceptance`) is inconsistent with two pinned behaviours, and cannot pass as written.** Its helper `the_lines_of` renders a daemon verify answer with `console::comparison` **only** (4 lines for the undeclared case), while the CLI's cold path renders `console::comparison` **plus** the refusal line (`render::verify` logs `console::comparison_refusal` when the comparison does not hold). The test asserts `cli_undeclared == the_lines_of(daemon_undeclared)`, i.e. 5 lines == 4. The refusal line is pinned by the pre-existing `exits_non_zero_when_the_tree_no_longer_holds_against_the_ref` (5 lines) and by `one_renderer_for_every_front_end.rs::renders_the_statements_a_tree_lost_and_gained_without_stating_the_verdict` (`console::comparison` is 4 lines and the refusal is separate). The one-line fix is for `the_lines_of` to append `console::comparison_refusal(&comparison)` when the comparison does not hold — the helper's own doc says it renders "the lines `tddy-tools` renders", and `tddy-tools::index_console::verify` returns exactly that refusal. **Not applied by the green wave** (tests are the coordinator's to change); reported.
 
 ## Refactoring Needed
 
@@ -509,8 +510,8 @@ Decisions taken by this plan (a reviewer can check them):
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code (M1-M3; the delegator M4 cut to a follow-up at the M3 decision point)
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`) — verify 100% pass; CI answers for the rest of the workspace
 - [ ] Validate changes (/validate-changes)

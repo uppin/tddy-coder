@@ -29,6 +29,9 @@ subcommand nor a transport is an error rather than a default.
   `tddy-tools restructure snapshot` routes an item-anchored plan here when `TDDY_INDEX_SOCKET` is set.
 - **Transactional groups**: `Apply` gates each plan group at its end and rolls it back exactly when it
   does not compile; a group's `OperationApplied` events (field `group`) are sent only once it is kept.
+- **Verify**: `Verify` holds the working tree against a git ref statement by statement.
+  `VerifyRequest.retargets` (repeated, `OLD=NEW`) carries the `impl` retargets the author declares, so
+  the comparison accounts for them; `tddy-tools restructure verify --retarget` fills it.
 - **Navigation**: `Definition`, `References` and `Hover` answer from the root's warm rust-analyzer in
   the service's one-based byte coordinates. Locations come back relative to the root, or absolute and
   marked `outside_root`. Rust sources only; any other file is refused.

@@ -135,7 +135,8 @@ fn field_names(fields: &syn::Fields) -> BTreeSet<String> {
 /// Every field a member's text reads through `self`, or names in a `Self { … }` expression or
 /// pattern.
 fn fields_read(member_text: &str) -> BTreeSet<String> {
-    let Ok(block) = syn::parse_str::<syn::ItemImpl>(&format!("impl T {{\n{member_text}\n}}\n")) else {
+    let Ok(block) = syn::parse_str::<syn::ItemImpl>(&format!("impl T {{\n{member_text}\n}}\n"))
+    else {
         return BTreeSet::new();
     };
     let mut reads = Reads::default();
@@ -216,14 +217,17 @@ mod tests {
     #[test]
     fn refuses_a_field_the_struct_lacks() {
         let declaration = Declaration::Struct(BTreeSet::from(["n".to_string()]));
-        let members = [("bump", "pub fn bump(&mut self) {\n    self.count += 1;\n}\n")];
+        let members = [(
+            "bump",
+            "pub fn bump(&mut self) {\n    self.count += 1;\n}\n",
+        )];
 
         let refusal = refuse(&members, "Roster", &declaration, "src/host.rs")
             .map(|_| ())
             .map_err(|error| error.to_string());
 
-        assert!(refusal
-            .unwrap_err()
-            .contains("`bump` reads `self.count`, which `Roster` does not declare (its fields: n)"));
+        assert!(refusal.unwrap_err().contains(
+            "`bump` reads `self.count`, which `Roster` does not declare (its fields: n)"
+        ));
     }
 }
