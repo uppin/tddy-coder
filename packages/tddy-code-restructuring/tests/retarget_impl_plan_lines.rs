@@ -299,31 +299,6 @@ async fn a_plain_check_reports_an_item_anchored_retarget_as_unexamined_rather_th
 }
 
 #[test]
-fn a_delegator_variant_without_an_expression_is_malformed_and_an_expression_without_it_too() {
-    // Given a retarget asking for a delegator but naming no receiver, and one naming a receiver but no delegator
-    let without_expr = a_plan_of_one(
-        "retarget_impl",
-        A_WHOLE_BLOCK,
-        ",\"to_type\":\"app::roster::Roster\",\"variant\":\"leave_delegator\"",
-    );
-    let without_variant = a_plan_of_one(
-        "retarget_impl",
-        A_WHOLE_BLOCK,
-        ",\"to_type\":\"app::roster::Roster\",\"expr\":\"self.roster()\"",
-    );
-
-    // When each is read
-    let refusals = [refusal_of(&without_expr), refusal_of(&without_variant)];
-
-    // Then each is malformed and names the pairing it broke
-    assert!(
-        refusals[0].contains("`variant: \"leave_delegator\"` needs `expr`")
-            && refusals[1].contains("needs `variant: \"leave_delegator\"`"),
-        "unexpected refusals: {refusals:?}"
-    );
-}
-
-#[test]
 fn a_whole_block_anchor_is_one_operation() {
     // Given a retarget anchored on a whole block
     let plan = a_retarget_to(A_WHOLE_BLOCK, "app::roster::Pair<T>");

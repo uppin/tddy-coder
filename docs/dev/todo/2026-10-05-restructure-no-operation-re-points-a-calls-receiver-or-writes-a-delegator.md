@@ -3,6 +3,15 @@
 **Category:** Future enhancement (missing capability; nothing breaks, the edits are done by hand)
 **Source:** #carve 17/21 (PR #532) stage B1
 
+## Still open after `#sharpen` 6/8 (`retarget_impl`)
+
+`retarget_impl` landed (the whole block, the split, the path re-points, the field refusal), and the
+**receiver half** (capability 1, `repoint_call`) is `feature/sharpen/repoint-call`'s. The
+**delegator half** (capability 2) was cut to a follow-up at the milestone decision point: the block
+split alone grew the module past its budget, so `variant: "leave_delegator"` and `expr` are
+**published in the schema and refused by the engine** (`UnsupportedOp`) rather than implemented. What
+remains here is the delegator emitter and its `verify` accounting, not the whole entry.
+
 ## What I ran
 
 After a method moves to another type, its callers and the host calls inside its body change by a few tokens,

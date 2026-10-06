@@ -193,32 +193,3 @@ fn a_declaration_is_two_different_bare_type_names() {
     // Then every one is refused
     assert_eq!(outcomes, [true; 6]);
 }
-
-const A_HOST_WHOSE_READER_IS_FORWARDED: &str =
-    "impl Host {\n    pub fn get(&self) -> u32 {\n        self.n\n    }\n}\n";
-const THE_SAME_WITH_A_DELEGATOR_LEFT: &str = "impl Host {\n    pub fn get(&self) -> u32 {\n        self.roster().get()\n    }\n}\nimpl Roster {\n    pub fn get(&self) -> u32 {\n        self.n\n    }\n}\n";
-
-/// The declaration of a delegator is the retarget it comes with; if the delegator milestone gives it
-/// a carrier of its own (`VerifyRequest` field 4), this test's declaration line changes with it.
-#[test]
-fn a_declared_delegator_is_accounted_for_and_an_undeclared_forwarding_method_is_reported() {
-    // Given a block retargeted with a forwarding method left on the old type
-    let (before, after) = (
-        A_HOST_WHOSE_READER_IS_FORWARDED,
-        THE_SAME_WITH_A_DELEGATOR_LEFT,
-    );
-
-    // When it is compared with the retarget declared, and without
-    let declared = comparing_declared(before, after, &["Host=Roster"]);
-    let undeclared = compare(&a_crate_holding(before), &a_crate_holding(after));
-
-    // Then the forwarding method and its duplicated signature are accounted for, and without a declaration both are reported
-    assert!(declared.holds(), "the delegator was reported: {declared:?}");
-    assert_eq!(
-        undeclared.added,
-        vec![
-            "pub fn get(&self) -> u32 {".to_string(),
-            "self.roster().get()".to_string()
-        ]
-    );
-}
