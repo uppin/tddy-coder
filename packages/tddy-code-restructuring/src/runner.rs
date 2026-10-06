@@ -35,6 +35,7 @@ pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, hash_touched_files};
 use crate::journal::{Journal, JournalRecord, ResumeDecision};
+use crate::spawn_record::SpawnRecorder;
 use crate::{LedgerCheckpoint, OpId, Plan, PositionLedger, RestructureError, Result};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -58,6 +59,10 @@ use std::path::{Path, PathBuf};
 /// id when it has one — both are journalled — and operations
 /// must be committed in the order the plan states them, because `ledger` is a projection over the
 /// journal and translating a later anchor depends on every earlier edit having been recorded.
+// Every parameter is a handle the write-ahead sequence threads — the operation's coordinates, the
+// tree, the three state files, and the recorder the git it runs reports through. Bundling them
+// would name the same set, and a caller that drives the loop owns each one separately.
+#[allow(clippy::too_many_arguments)]
 pub fn commit_operation(
     index: usize,
     id: Option<&OpId>,
@@ -66,6 +71,7 @@ pub fn commit_operation(
     paths: &StatePaths,
     journal: &mut Journal,
     ledger: &mut PositionLedger,
+    spawns: &SpawnRecorder,
 ) -> Result<()> {
     let pre = hash_touched_files(root, &resolved.edit)?;
     journal.append(
@@ -73,7 +79,7 @@ pub fn commit_operation(
         JournalRecord::in_flight(index, id.cloned(), pre.clone()),
     )?;
 
-    apply_workspace_edit(root, &resolved.edit)?;
+    apply_workspace_edit(root, &resolved.edit, spawns)?;
 
     let post = hash_touched_files(root, &resolved.edit)?;
     journal.append(
@@ -155,7 +161,7 @@ pub(crate) fn open_run_gated<T>(
     options: &Options,
     before_writing: impl FnOnce() -> Result<T>,
 ) -> Result<(Journal, T)> {
-    ensure_git_worktree(root)?;
+    ensure_git_worktree(root, &options.spawns)?;
 
     let continuing = options.continues_a_journal();
     // A fresh run's refusals read and never write, so they all come before `.restructure/` exists.

@@ -398,7 +398,8 @@ async fn performing_against(
     let edit = resolving_against(fixture, op, state)
         .await
         .unwrap_or_else(|error| panic!("resolving {described}: {error}"));
-    apply_workspace_edit(&root, &edit).expect("the resolved edit applies");
+    apply_workspace_edit(&root, &edit, &SpawnRecorder::discard())
+        .expect("the resolved edit applies");
     edit
 }
 

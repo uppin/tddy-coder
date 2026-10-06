@@ -16,7 +16,7 @@ use tokio::sync::{oneshot, Mutex};
 use crate::allowlist::{Language, LspAllowList};
 use crate::client::LspClient;
 use crate::error::LspError;
-use crate::server_body::LspServerBody;
+use crate::server_body::{LspServerBody, ObservedServerBody};
 use crate::spawn_observer::SpawnObserver;
 
 /// How long to wait for a freshly-spawned server to complete its handshake.
@@ -82,8 +82,8 @@ impl LspRegistry {
 
     /// Report every language server this registry starts, and how each ends, to `observer`.
     ///
-    /// TODO(spawn-record): `LspServerBody` does not yet call it; until it does the registry only
-    /// holds the observer, for the host to hand on (see [`LspRegistry::spawn_observer`]).
+    /// The observer rides with the registry so a host that also starts processes of its own can
+    /// hand the same one to its own recorder — see [`LspRegistry::spawn_observer`].
     pub fn with_spawn_observer(mut self, observer: Arc<dyn SpawnObserver>) -> Self {
         self.spawn_observer = Some(observer);
         self
@@ -174,11 +174,14 @@ impl LspRegistry {
 
         let channel = TaskChannel::output_only("0", "lsp", ChannelKind::Combined);
         let (client_tx, client_rx) = oneshot::channel();
-        let body = LspServerBody {
-            spec,
-            root_dir: key.root.clone(),
-            client_tx,
-        };
+        let body = ObservedServerBody::new(
+            LspServerBody {
+                spec,
+                root_dir: key.root.clone(),
+                client_tx,
+            },
+            self.spawn_observer.clone(),
+        );
         let handle = self
             .task_registry
             .spawn(

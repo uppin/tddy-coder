@@ -11976,6 +11976,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "log",
  "pretty_assertions",
  "rstest 0.24.0",
  "serde",

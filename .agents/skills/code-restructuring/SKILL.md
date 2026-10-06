@@ -31,6 +31,29 @@ operation, and writes the plan back. `apply` loads a plan that is not loaded; `l
 `--from ID` is accepted by a run with no daemon; with one, name the index. See
 [plan-schema.md](references/plan-schema.md).
 
+## Reading what a run executed
+
+Every process a run starts leaves a JSONL record — one `start` line (argv, cwd, pid, environment
+names) and one `end` line (exit status, signal, or a failed spawn):
+
+- **Cold CLI** (`tddy-tools restructure …`): `<root>/.restructure/spawns.jsonl`.
+- **Index daemon**: the file named by `--spawn-record`, which `run-index-daemon` points at
+  `${TDDY_INDEX_RUNTIME_DIR}/tddy-index-<tag>.spawns.jsonl` — the same file the script records its
+  own `cargo build`, dev-shell capture and launch in.
+
+```bash
+jq -c 'select(.event=="start") | {purpose, program, argv}' .restructure/spawns.jsonl
+# a start with no end is a process that never came back:
+jq -s 'group_by(.id) | map(select(length==1)) | .[]' .restructure/spawns.jsonl
+```
+
+**What it cannot show.** rust-analyzer's own children (build scripts, the proc-macro server) are
+started by rust-analyzer, so they are never recorded. Arguments are redacted and the environment is
+names only. A `SIGKILL` is visible only through the watcher `run-index-daemon` starts the daemon
+under, and a cold CLI run killed before `.restructure/` exists leaves no record at all. The record
+says *what* ran and *how it ended*; a process that **stalled** is the heartbeat's question, not this
+record's.
+
 ## Workflow (abbreviated)
 
 1. **Green baseline** — `./test -p <crate>`, **once, here**; record the counts *and the names of every

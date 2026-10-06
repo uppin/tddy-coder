@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use tddy_lsp::allowlist::{Language, LaunchSpec, LspAllowList};
 use tddy_lsp::registry::{LspKey, LspRegistry};
+use tddy_lsp::SpawnObserver;
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
@@ -28,6 +29,7 @@ use crate::backends::rust::ProgressSink;
 use crate::console;
 use crate::restructure_args::options_for;
 use crate::runner::{Command, Options, Outcome};
+use crate::spawn_record::{ColdRunSpawnRecord, SpawnRecorder};
 
 pub use crate::restructure_args::parse_position_range;
 pub use crate::restructure_args::{
@@ -38,9 +40,6 @@ pub use crate::restructure_args::{
 
 pub async fn run(args: RestructureArgs) -> Result<()> {
     let mut options = options_for(args);
-    install_console(&mut options);
-    let cancel = cancelled_on_interrupt();
-    let rehearsal = options.dry_run;
 
     // The one place the process directory becomes a workspace root. The library takes the root as a
     // parameter and reads the process directory nowhere, so that one process can serve several
@@ -48,14 +47,22 @@ pub async fn run(args: RestructureArgs) -> Result<()> {
     // it, and saying so once here is that choice. Read once so the language server and the run it
     // serves cannot disagree about which tree they are working on.
     let root = std::env::current_dir().context("current_dir")?;
+    // One sink for both the run's own processes and the language server it starts, so a cold run's
+    // record holds `git`, `cargo`, `rustfmt` and rust-analyzer in the one file.
+    let record = Arc::new(ColdRunSpawnRecord::for_run(&root));
+    install_console(&mut options, &record);
+    let cancel = cancelled_on_interrupt();
+    let rehearsal = options.dry_run;
 
     let client = if needs_lsp_client(&options) {
         let task_registry = TaskRegistry::new();
+        let observer: Arc<dyn SpawnObserver> = Arc::clone(&record) as Arc<dyn SpawnObserver>;
         let lsp_registry = LspRegistry::new(
             restructure_allow_list(),
             task_registry,
             Duration::from_secs(600),
-        );
+        )
+        .with_spawn_observer(observer);
         let key = LspKey {
             root: root.clone(),
             language: Language::Rust,
@@ -127,7 +134,7 @@ fn verdict_on(outcome: &Outcome) -> Result<()> {
 /// a plan, and an indexing line landing in the middle of it would make that document unreadable;
 /// the same holds less dramatically for a check's findings and an apply's summary. `anchors`' own
 /// per-operation account therefore also goes aside, because its stdout is the document.
-fn install_console(options: &mut Options) {
+fn install_console(options: &mut Options, record: &Arc<ColdRunSpawnRecord>) {
     let account: ProgressSink = if options.command == Command::Anchors {
         Arc::new(report_account_aside)
     } else {
@@ -140,6 +147,11 @@ fn install_console(options: &mut Options) {
     options.progress = progress;
     options.account = account;
     options.trace = report_trace;
+    // The record of every process this run starts, beside the plan's journal. Deferred: it is
+    // written only once the run creates `.restructure/`, so a run refused before its baseline
+    // `cargo check` passes leaves nothing in the tree — see [`ColdRunSpawnRecord`].
+    let observer: Arc<dyn SpawnObserver> = Arc::clone(record) as Arc<dyn SpawnObserver>;
+    options.spawns = SpawnRecorder::new(observer);
 }
 
 /// A sink that stamps each line with the time since the line before it, and writes it where

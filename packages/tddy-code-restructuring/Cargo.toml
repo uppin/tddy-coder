@@ -18,6 +18,9 @@ path = "../tddy-lsp/tests/bin/fake_lsp.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+# A record that cannot be written is logged and dropped, never raised: `log` is how a library that
+# owns no console says so. The same facade `tddy-lsp` and `tddy-index-daemon` already use.
+log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

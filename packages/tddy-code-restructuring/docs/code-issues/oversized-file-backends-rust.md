@@ -3,7 +3,7 @@
 **Location:** `packages/tddy-code-restructuring/src/backends/rust.rs`
 **Category:** oversized-file
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
-**Metrics:** **2,853 production lines** (2026-10-05, same-crate moves; 2,831 at 2026-10-04, #567; 2,705 at #569; 2,666 after #539; 4,475 before; 4,475 after #542, 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
+**Metrics:** **2,864 production lines** (2026-10-06, `#sharpen` 3/8 spawn-record; 2,853 at 2026-10-05, same-crate moves; 2,831 at 2026-10-04, #567; 2,705 at #569; 2,666 after #539; 4,475 before; 4,475 after #542, 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
 **Status:** Open — partially fixed (the impl-member seams remain). #539 (`#live-plan` 7/15) moved the free-item runs out (4,475 to 2,666); #527 had already taken 472 net
 
@@ -23,6 +23,7 @@
 | 2026-10-03 | 2,705 | #569 (`#live-plan` 9/15): +39. The two signature assists' own logic (carets, the used-parameter refusal, the struct rename) went to a new sibling, `backends/rust/signature.rs` (403 lines); what is left here is wiring: two `SUPPORTED` entries, two `assist_for` rows and the dispatch in `multi_file_assist`. The split of this file stays deferred — every open `#live-plan` node edits it — with the developer's consent. |
 | 2026-10-04 | 2,831 | #567 (`#live-plan` 15/15): +125 over the pre-PR 2,706. The eight signature and call-site operations' logic went to `backends/rust/signature_rewrites.rs` (170 production lines) and its children `declaration.rs` and `call_site.rs`, and `return_type_assist` to `return_type.rs`. What stays is the impl members `rewrite_signature`, `wrap_or_unwrap_return_type` and `offered_assist` and two resolve branches: `restructure check --deep` refused moving them (`rust-analyzer` cannot put a `mod` inside an `impl` body). Deferred with the developer's consent; the impl-member seam is `docs/dev/todo/2026-10-03-restructure-leftovers-of-the-live-plan-carve-and-tooling-pass.md` § 1. |
 | 2026-10-05 | 2,853 | `move_item` and `reparent_module` (same-crate moves): +22 over 2,831, counted to the first inline `#[cfg(test)] mod` (2,830 to 2,852 by the same awk at the merge base and at HEAD). Wiring only: `mod item_move;` and `mod module_reparent;`, two `SUPPORTED` entries (20 to 22), a `check` arm per operation and a `resolve` arm per operation. All logic is in `backends/rust/item_move/` and `backends/rust/module_reparent/`. The impl-member seams remain; none was cut |
+| 2026-10-06 | 2,864 | `#sharpen` 3/8 (`spawn-record`): +12 over the 2,852 at `235e9e4e`, counted the same way. Wiring only: `use crate::spawn_record::{purpose, SpawnRecorder}`, the `spawns` field with its doc, the `with_spawn_recorder` builder and its two constructor lines, and `start`'s `self.spawns.spawn(purpose::RUST_ANALYZER, …)` call (the `Command::new` there became `self.spawns.command`). The recorder itself, its JSONL sink and its redaction live in `spawn_record.rs` and its children. None of the impl-member seams was cut |
 
 ## What the gate found
 

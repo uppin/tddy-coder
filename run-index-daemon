@@ -77,6 +77,14 @@ LOG_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.log"
 HISTORY_FILE="${RUNTIME_DIR}/tddy-index-${TAG}.history.log"
 HISTORY_MAX_BYTES=$((10 * 1024 * 1024))
 
+# The record of every process this script and its daemon start, appended by both: the script's own
+# `cargo build`, dev-shell capture and launch, and the language servers the daemon starts (through
+# its `--spawn-record`). A sibling of the log rather than a part of it: the log is headered text the
+# script concatenates after the fact, and a JSONL a reader parses line by line cannot tolerate a
+# header. Rotated at the same size as the history file.
+SPAWN_RECORD="${RUNTIME_DIR}/tddy-index-${TAG}.spawns.jsonl"
+SPAWN_RECORD_MAX_BYTES=$((10 * 1024 * 1024))
+
 # A prebuilt daemon, when the caller names one: a release build, or a copy taken outside `target/` so
 # the rebuilds of an ongoing change cannot replace the binary a long carve is running against. Named
 # and not found is an error — never a quiet fall back to the debug build the caller meant to avoid.
@@ -150,12 +158,62 @@ archive_previous_log() {
   } >>"$HISTORY_FILE"
 }
 
+# Unix milliseconds, without a date-formatting dependency the record would have to parse back.
+now_ms() { date +%s000; }
+
+# `$1` safe to place inside a JSON string: backslashes and quotes escaped, control bytes dropped.
+json_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\000-\037'
+}
+
+# Rotate the record at the history file's size, so a checkout that restarts for months cannot fill
+# the temporary directory. One generation, replacing the last.
+rotate_spawn_record() {
+  if [[ -f "$SPAWN_RECORD" ]] && (($(wc -c <"$SPAWN_RECORD") > SPAWN_RECORD_MAX_BYTES)); then
+    mv -f "$SPAWN_RECORD" "${SPAWN_RECORD}.1"
+  fi
+}
+
+# The counter script-side records are numbered by, and the id of the record most recently started.
+RECORD_COUNTER=0
+LAST_RECORD_ID=""
+
+# Write a `start` line for a process this script starts, and remember its id for `record_end`.
+#
+# `pid` is `-` for a process whose pid is not the point (a synchronous `nix develop` run), and the
+# argv is what the reader needs to tell one `nix` from another. The id is `script-<shell pid>-<n>`
+# so it never collides with the daemon's own `<pid>-<n>` ids in the same file.
+record_start() { # purpose program pid [argv...]
+  local purpose="$1" program="$2" pid="$3"
+  shift 3
+  RECORD_COUNTER=$((RECORD_COUNTER + 1))
+  LAST_RECORD_ID="script-$$-${RECORD_COUNTER}"
+  local argv="" arg
+  for arg in "$@"; do
+    argv="${argv}${argv:+,}\"$(json_escape "$arg")\""
+  done
+  local pid_json="null"
+  [[ "$pid" != "-" ]] && pid_json="$pid"
+  rotate_spawn_record
+  printf '{"v":1,"event":"start","id":"%s","at_unix_ms":%s,"origin":"script","purpose":"%s","program":"%s","argv":[%s],"cwd":"%s","pid":%s,"env_names":[]}\n' \
+    "$LAST_RECORD_ID" "$(now_ms)" "$(json_escape "$purpose")" "$(json_escape "$program")" \
+    "$argv" "$(json_escape "$ROOT_DIR")" "$pid_json" >>"$SPAWN_RECORD"
+}
+
+# Write the `end` line for the record `record_start` most recently wrote, given its outcome object
+# (`{"exit":N}` or `{"signal":N}`).
+record_end() { # outcome-json
+  printf '{"v":1,"event":"end","id":"%s","at_unix_ms":%s,"outcome":%s}\n' \
+    "$LAST_RECORD_ID" "$(now_ms)" "$1" >>"$SPAWN_RECORD"
+}
+
 # The one line stdout carries, plus the narration a developer needs around it.
 announce() {
   local pid="$1"
   narrate ""
   narrate "index daemon pid ${pid}, serving code_index.CodeIndexService on ${SOCKET}"
   narrate "log:  ${LOG_FILE}   (earlier runs: ${HISTORY_FILE})"
+  narrate "spawns: ${SPAWN_RECORD}   (jq '.purpose' to list what was started)"
   narrate "stop: ./run-index-daemon --stop   (or: kill ${pid})"
   narrate ""
   narrate "To run against it:"
@@ -274,7 +332,14 @@ else
   BUILD_PACKAGES=(-p tddy-index-daemon)
   [[ "$WARM" == 1 ]] && BUILD_PACKAGES+=(-p tddy-tools)
   narrate "Building: ${BUILD_PACKAGES[*]}"
-  nix develop --profile ./.nix-profile -c cargo build "${BUILD_PACKAGES[@]}" >&2
+  record_start "build-daemon" "nix" "-" develop --profile ./.nix-profile -c cargo build "${BUILD_PACKAGES[@]}"
+  if nix develop --profile ./.nix-profile -c cargo build "${BUILD_PACKAGES[@]}" >&2; then
+    record_end '{"exit":0}'
+  else
+    build_status=$?
+    record_end "{\"exit\":${build_status}}"
+    exit "$build_status"
+  fi
 
   if [[ ! -x "$BINARY" ]]; then
     narrate "run-index-daemon: ${BINARY} was not built"
@@ -302,6 +367,7 @@ fi
 # LSP-backed operation with `Unavailable: lsp server exited`.
 narrate "Resolving the dev shell's environment so the daemon's rust-analyzer builds what cargo builds"
 DEV_SHELL_ENV=()
+record_start "capture-dev-shell-env" "nix" "-" develop --profile ./.nix-profile -c env -0
 while IFS= read -r -d '' assignment; do
   DEV_SHELL_ENV+=("$assignment")
 done < <(nix develop --profile ./.nix-profile -c env -0)
@@ -312,9 +378,11 @@ for assignment in "${DEV_SHELL_ENV[@]}"; do
   fi
 done
 if [[ -z "$DEV_SHELL_PATH" ]]; then
+  record_end '{"exit":1}'
   narrate "run-index-daemon: could not read the dev shell's environment; the daemon would not find rust-analyzer"
   exit 1
 fi
+record_end '{"exit":0}'
 
 # `setsid` comes from the dev shell, so a host without util-linux on its own PATH is not a reason
 # for the daemon to come up un-detached. Resolved explicitly rather than trusted to a `VAR=x cmd`
@@ -336,11 +404,14 @@ narrate "Starting index daemon on ${SOCKET}, in a session of its own"
 # connection seconds later, with the socket file still on disk. A session of its own is what makes
 # this a daemon rather than a background job.
 #
-# The pid is written from inside the process that becomes the daemon, not taken from `$!`: `setsid`
-# forks when its caller is already a process group leader and execs in place when it is not, so `$!`
-# is the daemon's pid in some shells and a wrapper's in others — and `--stop` reading the wrong one
-# kills the wrapper and orphans the multi-gigabyte server. `exec` leaves `$$` the daemon's own pid
-# either way.
+# The daemon runs as a **background child of a watcher shell** rather than `exec`-ing in place. A
+# shell that `exec`s makes `$$` the daemon's pid, so `--stop` signals the daemon — but it also leaves
+# nothing behind that can see how the daemon died, and a `SIGKILL` is exactly the death nobody can
+# observe from inside. Backgrounding the daemon keeps `$!` the daemon's pid, which is what the pid
+# file carries and what `--stop` signals, while the watcher's `wait` reads `$?` and writes the
+# record's `end` line: a signal death as `128+N`, a genuine exit as its status. The cost is one more
+# long-lived process (the watcher), and the honesty that an exit status above 128 is recorded as a
+# signal.
 #
 # stderr to the log by shell redirection rather than via the daemon's own --log-file, so this script
 # owns the truncation: readiness is decided by finding `listening on` in the file, and an appended
@@ -363,8 +434,20 @@ env -i "${DEV_SHELL_ENV[@]}" \
   TMPDIR="$DURABLE_TMPDIR" TMP="$DURABLE_TMPDIR" TEMP="$DURABLE_TMPDIR" TEMPDIR="$DURABLE_TMPDIR" \
   NIX_BUILD_TOP="$DURABLE_TMPDIR" \
   RUST_LOG="${TDDY_INDEX_LOG:-info}" \
-  "$SETSID" sh -c 'echo $$ >"$1"; exec "$2" --grpc-uds "$3"' \
-  run-index-daemon "$PID_FILE" "$BINARY" "$SOCKET" \
+  "$SETSID" sh -c '
+    pidfile="$1"; daemon="$2"; socket="$3"; record="$4"; cwd="$5"
+    id="script-$$-daemon"
+    "$daemon" --grpc-uds "$socket" --spawn-record "$record" &
+    child=$!
+    printf "%s" "$child" >"$pidfile"
+    printf "{\"v\":1,\"event\":\"start\",\"id\":\"%s\",\"at_unix_ms\":%s,\"origin\":\"script\",\"purpose\":\"index-daemon\",\"program\":\"%s\",\"argv\":[\"--grpc-uds\",\"%s\",\"--spawn-record\",\"%s\"],\"cwd\":\"%s\",\"pid\":%s,\"env_names\":[]}\n" \
+      "$id" "$(date +%s000)" "$daemon" "$socket" "$record" "$cwd" "$child" >>"$record"
+    wait "$child"
+    code=$?
+    if [ "$code" -gt 128 ]; then outcome="{\"signal\":$((code - 128))}"; else outcome="{\"exit\":$code}"; fi
+    printf "{\"v\":1,\"event\":\"end\",\"id\":\"%s\",\"at_unix_ms\":%s,\"outcome\":%s}\n" \
+      "$id" "$(date +%s000)" "$outcome" >>"$record"
+  ' run-index-daemon "$PID_FILE" "$BINARY" "$SOCKET" "$SPAWN_RECORD" "$ROOT_DIR" \
   </dev/null >/dev/null 2>>"$LOG_FILE" &
 
 daemon_pid=""

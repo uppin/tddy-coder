@@ -5,20 +5,24 @@
 //! non-git worktree is a hard error.
 
 use crate::edit::{FileEdit, Range, TextEdit, WorkspaceEdit};
+use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
 
 /// Apply one operation's complete edit set to disk.
 ///
 /// Creations are materialised first so that a text edit addressed to a file the engine just
 /// invented has somewhere to land.
-pub fn apply_workspace_edit(root: &Path, edit: &WorkspaceEdit) -> Result<()> {
+pub fn apply_workspace_edit(
+    root: &Path,
+    edit: &WorkspaceEdit,
+    spawns: &SpawnRecorder,
+) -> Result<()> {
     for change in &edit.changes {
         if let FileEdit::Create { path } = change {
-            create_tracked_file(root, path)?;
+            create_tracked_file(root, path, spawns)?;
         }
     }
     for change in &edit.changes {
@@ -28,18 +32,20 @@ pub fn apply_workspace_edit(root: &Path, edit: &WorkspaceEdit) -> Result<()> {
     }
     for change in &edit.changes {
         if let FileEdit::Rename { from, to } = change {
-            git_move(root, from, to)?;
+            git_move(root, from, to, spawns)?;
         }
     }
     Ok(())
 }
 
 /// Confirm `root` is inside a git worktree. `git mv` is mandatory, so this is checked up front.
-pub fn ensure_git_worktree(root: &Path) -> Result<()> {
-    let inside = Command::new("git")
+pub fn ensure_git_worktree(root: &Path, spawns: &SpawnRecorder) -> Result<()> {
+    let mut command = spawns.command("git");
+    command
         .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(root)
-        .output()
+        .current_dir(root);
+    let inside = spawns
+        .output(purpose::GIT, &mut command)
         .map(|output| output.status.success())
         .unwrap_or(false);
 
@@ -149,16 +155,16 @@ pub(crate) fn byte_offset(contents: &str, line: u32, col: u32) -> Result<usize> 
 }
 
 /// Move a file with `git mv`, creating the destination directory first. Preserves history.
-fn git_move(root: &Path, from: &str, to: &str) -> Result<()> {
+fn git_move(root: &Path, from: &str, to: &str, spawns: &SpawnRecorder) -> Result<()> {
     if let Some(parent) = Path::new(to).parent() {
         std::fs::create_dir_all(root.join(parent))?;
     }
-    run_git(root, &["mv", from, to])
+    run_git(root, &["mv", from, to], spawns)
 }
 
 /// Materialise a file the engine invented and register it with git, so its text edits are staged
 /// as part of the restructure rather than left as an untracked stray.
-fn create_tracked_file(root: &Path, path: &str) -> Result<()> {
+fn create_tracked_file(root: &Path, path: &str, spawns: &SpawnRecorder) -> Result<()> {
     let absolute = root.join(path);
     if let Some(parent) = absolute.parent() {
         std::fs::create_dir_all(parent)?;
@@ -166,15 +172,17 @@ fn create_tracked_file(root: &Path, path: &str) -> Result<()> {
     if !absolute.exists() {
         std::fs::write(&absolute, "")?;
     }
-    run_git(root, &["add", "-N", path])
+    run_git(root, &["add", "-N", path], spawns)
 }
 
 /// What a git command printed, for the reads that need an answer rather than an effect.
 ///
 /// Lives here because this module is the only one that touches the filesystem, and reading a blob out
 /// of a ref is the same kind of access as moving a file into place.
-pub fn git_output(root: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git").args(args).current_dir(root).output()?;
+pub fn git_output(root: &Path, args: &[&str], spawns: &SpawnRecorder) -> Result<String> {
+    let mut command = spawns.command("git");
+    command.args(args).current_dir(root);
+    let output = spawns.output(purpose::GIT, &mut command)?;
     if !output.status.success() {
         return Err(RestructureError::MalformedPlan(format!(
             "git {} failed: {}",
@@ -185,8 +193,10 @@ pub fn git_output(root: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-fn run_git(root: &Path, args: &[&str]) -> Result<()> {
-    let output = Command::new("git").args(args).current_dir(root).output()?;
+fn run_git(root: &Path, args: &[&str], spawns: &SpawnRecorder) -> Result<()> {
+    let mut command = spawns.command("git");
+    command.args(args).current_dir(root);
+    let output = spawns.output(purpose::GIT, &mut command)?;
     if output.status.success() {
         Ok(())
     } else {
@@ -246,7 +256,7 @@ mod tests {
     fn accepts_a_directory_inside_a_git_worktree() {
         let workspace = git_workspace();
 
-        assert!(ensure_git_worktree(workspace.path()).is_ok());
+        assert!(ensure_git_worktree(workspace.path(), &SpawnRecorder::discard()).is_ok());
     }
 
     /// `git mv` is how history survives a restructure, so a plain directory is a hard error rather
@@ -255,7 +265,7 @@ mod tests {
     fn refuses_a_directory_that_is_not_a_git_worktree() {
         let workspace = tempfile::tempdir().unwrap();
 
-        let outcome = ensure_git_worktree(workspace.path());
+        let outcome = ensure_git_worktree(workspace.path(), &SpawnRecorder::discard());
 
         assert!(matches!(
             outcome,
@@ -279,7 +289,7 @@ mod tests {
             }],
         };
 
-        apply_workspace_edit(workspace.path(), &edit).unwrap();
+        apply_workspace_edit(workspace.path(), &edit, &SpawnRecorder::discard()).unwrap();
 
         let contents = std::fs::read_to_string(workspace.path().join("src/shapes.ts")).unwrap();
         assert_eq!(contents, "export const a = 2;\n");
@@ -295,7 +305,7 @@ mod tests {
             }],
         };
 
-        apply_workspace_edit(workspace.path(), &edit).unwrap();
+        apply_workspace_edit(workspace.path(), &edit, &SpawnRecorder::discard()).unwrap();
 
         let status = git(workspace.path(), &["status", "--short", "--renames"]);
         assert!(status.starts_with('R'), "expected a rename, got: {status}");
@@ -311,7 +321,7 @@ mod tests {
             }],
         };
 
-        apply_workspace_edit(workspace.path(), &edit).unwrap();
+        apply_workspace_edit(workspace.path(), &edit, &SpawnRecorder::discard()).unwrap();
         // `--follow` reads committed history, and the executor deliberately does not commit for
         // the caller. Committing the staged rename here is what the caller would do next.
         Command::new("git")
@@ -351,7 +361,7 @@ mod tests {
             }],
         };
 
-        apply_workspace_edit(workspace.path(), &edit).unwrap();
+        apply_workspace_edit(workspace.path(), &edit, &SpawnRecorder::discard()).unwrap();
 
         let status = git(workspace.path(), &["status", "--short", "src/geometry.ts"]);
         assert!(

@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::apply::touched_paths;
 use crate::journal::{Journal, JournalRecord, OpStatus, PreImage};
+use crate::spawn_record::SpawnRecorder;
 use crate::{LedgerCheckpoint, OpId, Plan, Resolution, RestructureError, Result};
 
 use super::compile_gate::{failing_check, owning_packages};
@@ -133,8 +134,9 @@ impl GroupRun {
         paths: &StatePaths,
         journal: &mut Journal,
         cancel: &CancellationToken,
+        spawns: &SpawnRecorder,
     ) -> Result<Vec<(usize, Resolution)>> {
-        match gate_group(root, &self.group, journal, cancel) {
+        match gate_group(root, &self.group, journal, cancel, spawns) {
             Ok(()) => {
                 journal.append(
                     &paths.journal,
@@ -228,6 +230,7 @@ impl GroupRun {
         index: usize,
         resolved: Resolution,
         gate: &GroupGate<'_>,
+        spawns: &SpawnRecorder,
         journal: &mut Journal,
         on_check: impl FnOnce(&str),
     ) -> Result<Settled> {
@@ -240,7 +243,7 @@ impl GroupRun {
             return Ok(Settled::Pending);
         }
         on_check(open.name());
-        open.finish(gate.root, gate.paths, journal, gate.cancel)
+        open.finish(gate.root, gate.paths, journal, gate.cancel, spawns)
             .map(Settled::Ready)
     }
 }
@@ -258,6 +261,7 @@ pub fn gate_group(
     group: &str,
     journal: &Journal,
     cancel: &CancellationToken,
+    spawns: &SpawnRecorder,
 ) -> Result<()> {
     let touched: BTreeSet<String> = journal
         .group_records(group)
@@ -267,7 +271,7 @@ pub fn gate_group(
         .flat_map(touched_paths)
         .collect();
     let packages = owning_packages(root, touched.into_iter())?;
-    match failing_check(root, &packages, cancel)? {
+    match failing_check(root, &packages, spawns, cancel)? {
         None => Ok(()),
         Some((_, errors)) => Err(RestructureError::GroupDoesNotCompile {
             group: group.to_string(),
@@ -527,7 +531,13 @@ mod tests {
         let open = slot.expect("the member opened the group");
 
         // When the group is judged at its end
-        let outcome = open.finish(root.path(), &paths, &mut journal, &CancellationToken::new());
+        let outcome = open.finish(
+            root.path(),
+            &paths,
+            &mut journal,
+            &CancellationToken::new(),
+            &SpawnRecorder::discard(),
+        );
 
         // Then the failure is the unreadable manifest's, not "does not compile", and the group is
         // undone

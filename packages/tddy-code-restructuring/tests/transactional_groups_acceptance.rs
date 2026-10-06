@@ -31,6 +31,7 @@ use harness::{
 use tddy_code_restructuring::console;
 use tddy_code_restructuring::journal::{Journal, JournalRecord, OpStatus, PreImage};
 use tddy_code_restructuring::runner::{self, RunSummary, StatePaths};
+use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_code_restructuring::{
     Anchor, FileEdit, LedgerCheckpoint, OpId, Plan, Position, PositionLedger, Range, RefactorKind,
     RefactorOp, Resolution, TextEdit, WorkspaceEdit,
@@ -233,6 +234,7 @@ fn a_crash_after_the_first_member_of(fixture: &AFixtureWorkspace, plan: &Path) {
         &paths,
         &mut journal,
         &mut PositionLedger::new(),
+        &SpawnRecorder::discard(),
     )
     .expect("the first member commits");
     let written = Plan::parse(&std::fs::read_to_string(plan).expect("the plan reads"))

@@ -16,12 +16,12 @@ use crate::edit::{
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
-use crate::spawn_record::SpawnRecorder;
+use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
@@ -472,7 +472,7 @@ pub struct RustBackend {
     opened: Vec<String>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
-    #[allow(dead_code)] // TODO(spawn-record): `start` records the server through it
+    /// Where the language server this backend starts itself is recorded, when a run asks for it.
     spawns: SpawnRecorder,
 }
 
@@ -693,7 +693,7 @@ impl RustBackend {
             .join(&toolchain)
             .join("bin");
 
-        let mut command = Command::new(&self.binary);
+        let mut command = self.spawns.command(&self.binary);
         command
             .current_dir(root)
             .env("CARGO_HOME", &self.cargo_home)
@@ -713,12 +713,13 @@ impl RustBackend {
         }
         self.environment =
             server_process::describe_server_environment(&self.binary, &toolchain, &toolchain_bin);
-        let mut process = command
-            .spawn()
+        let mut process = self
+            .spawns
+            .spawn(purpose::RUST_ANALYZER, &mut command)
             .map_err(|error| failure(format!("could not start rust-analyzer: {error}")))?;
 
-        let stdin = process.stdin.take().expect("stdin was piped");
-        let stdout = BufReader::new(process.stdout.take().expect("stdout was piped"));
+        let stdin = process.take_stdin().expect("stdin was piped");
+        let stdout = BufReader::new(process.take_stdout().expect("stdout was piped"));
         self.server = Some(server_process::Server {
             process,
             stdin,

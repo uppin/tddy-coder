@@ -23,7 +23,7 @@
 use std::collections::BTreeSet;
 use std::io::Read;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{ExitStatus, Stdio};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -32,6 +32,7 @@ use tokio_util::sync::CancellationToken;
 use crate::apply::touched_paths;
 use crate::crate_move::declared_package_name;
 use crate::journal::Journal;
+use crate::spawn_record::{purpose, RecordedChild, SpawnRecorder};
 use crate::{Plan, RestructureError, Result};
 
 use super::tidy::{tidy, Tidied, Tidying};
@@ -62,7 +63,7 @@ pub fn refuse_a_broken_baseline(
         .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
     let packages = owning_packages(root, named)?;
 
-    match failing_check(root, &packages, cancel)? {
+    match failing_check(root, &packages, &options.spawns, cancel)? {
         None => Ok(()),
         Some((checked, errors)) => {
             Err(RestructureError::BaselineDoesNotCompile { checked, errors })
@@ -97,7 +98,7 @@ pub fn refuse_a_broken_result(
     let touched = completed_edit_paths(journal);
     let packages = owning_packages(root, touched.iter().cloned())?;
 
-    let checked = failing_check(root, &packages, cancel);
+    let checked = failing_check(root, &packages, &options.spawns, cancel);
     if matches!(checked, Err(RestructureError::CallerStopped)) {
         (options.progress)(&format!(
             "compile check cancelled: {applied} of {total} operation(s) are on disk and in the \
@@ -149,6 +150,7 @@ fn tidy_a_complete_run(
         touched,
         progress: &options.progress,
         cancel,
+        spawns: &options.spawns,
     };
     match tidy(&tidying)? {
         Tidied::Compiles => Ok(None),
@@ -213,12 +215,13 @@ const CANCEL_CHECK: Duration = Duration::from_millis(100);
 pub(super) fn failing_check(
     root: &Path,
     packages: &BTreeSet<String>,
+    spawns: &SpawnRecorder,
     cancel: &CancellationToken,
 ) -> Result<Option<(String, String)>> {
     if packages.is_empty() {
         return Ok(None);
     }
-    let output = run_check(root, packages, "short", cancel)?;
+    let output = run_check(root, packages, "short", spawns, cancel)?;
     if output.succeeded {
         return Ok(None);
     }
@@ -244,24 +247,26 @@ pub(super) fn run_check(
     root: &Path,
     packages: &BTreeSet<String>,
     message_format: &str,
+    spawns: &SpawnRecorder,
     cancel: &CancellationToken,
 ) -> Result<CheckOutput> {
     let mut arguments = vec!["check", "--all-targets", "--message-format", message_format];
     for package in packages {
         arguments.extend(["-p", package.as_str()]);
     }
-    let mut child = Command::new("cargo")
+    let mut command = spawns.command("cargo");
+    command
         .args(&arguments)
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    let mut child = spawns.spawn(purpose::COMPILE_GATE, &mut command)?;
     // Both pipes are drained on threads of their own while the check runs: a check that fails
     // writes more than a pipe holds, and a cargo blocked writing would never exit for `try_wait`
     // to see.
-    let stdout = drain(child.stdout.take());
-    let stderr = drain(child.stderr.take());
+    let stdout = drain(child.take_stdout());
+    let stderr = drain(child.take_stderr());
     let status = exit_or_kill(&mut child, cancel)?;
     Ok(CheckOutput {
         succeeded: status.success(),
@@ -272,7 +277,7 @@ pub(super) fn run_check(
 
 /// The status `child` exits with, or [`RestructureError::CallerStopped`] once `cancel` fires first
 /// and the child has been killed.
-fn exit_or_kill(child: &mut Child, cancel: &CancellationToken) -> Result<ExitStatus> {
+fn exit_or_kill(child: &mut RecordedChild, cancel: &CancellationToken) -> Result<ExitStatus> {
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(status);

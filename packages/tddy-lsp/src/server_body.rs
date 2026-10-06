@@ -3,7 +3,7 @@
 //! incrementally and never returns until cancelled (or the child exits).
 
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,6 +16,12 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::allowlist::LaunchSpec;
 use crate::client::LspClient;
+use crate::spawn_observer::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
+
+/// The purpose a language server started by this crate is recorded under.
+///
+/// The value the JSONL sink reads to label a record `lsp` rather than `engine`.
+const LANGUAGE_SERVER: &str = "language-server";
 
 /// How long a wedged server is given to shut down gracefully before its child is
 /// force-killed by this body (the registry provides a further SIGTERM→SIGKILL net).
@@ -42,14 +48,52 @@ pub struct LspServerBody {
     pub client_tx: oneshot::Sender<Arc<LspClient>>,
 }
 
+/// The body a registry with a [`SpawnObserver`] spawns: the same server, reporting through the
+/// observer the registry holds.
+///
+/// A wrapper rather than a field on [`LspServerBody`], because that struct's fields are public and
+/// built literally by callers that start a server with no host watching. The observer arrives at
+/// [`LspServerBody::run_with`] as an argument instead.
+pub(crate) struct ObservedServerBody {
+    body: LspServerBody,
+    observer: Option<Arc<dyn SpawnObserver>>,
+}
+
+impl ObservedServerBody {
+    pub(crate) fn new(body: LspServerBody, observer: Option<Arc<dyn SpawnObserver>>) -> Self {
+        Self { body, observer }
+    }
+}
+
+#[async_trait]
+impl TaskBody for ObservedServerBody {
+    async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
+        let ObservedServerBody { body, observer } = *self;
+        body.run_with(ctx, observer).await
+    }
+}
+
 #[async_trait]
 impl TaskBody for LspServerBody {
     async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
+        // No observer: this body was spawned directly, as a caller that starts a server with no
+        // host watching does.
+        (*self).run_with(ctx, None).await
+    }
+}
+
+impl LspServerBody {
+    /// Run the server, reporting its start and its end to `observer` when there is one.
+    async fn run_with(
+        self,
+        ctx: TaskContext,
+        observer: Option<Arc<dyn SpawnObserver>>,
+    ) -> TaskStatus {
         let LspServerBody {
             spec,
             root_dir,
             client_tx,
-        } = *self;
+        } = self;
 
         // Spawn the child language server.
         let mut command = Command::new(&spec.program);
@@ -79,6 +123,20 @@ impl TaskBody for LspServerBody {
             }
         };
 
+        // The server exists: report it before anything waits on it, so a start with no end is the
+        // record of a server that never came back.
+        let record = observer.as_ref().map(|observer| {
+            let start = ProcessStart {
+                purpose: LANGUAGE_SERVER,
+                program: spec.program.clone(),
+                args: spec.args.clone(),
+                cwd: root_dir.is_dir().then(|| root_dir.clone()),
+                env_names: spec.env.iter().map(|(name, _)| name.clone()).collect(),
+                pid: child.id(),
+            };
+            (Arc::clone(observer), observer.started(&start))
+        });
+
         if let Some(pid) = child.id() {
             ctx.register_child_pid(pid);
         }
@@ -87,6 +145,7 @@ impl TaskBody for LspServerBody {
             Some(channel) => channel,
             None => {
                 let _ = child.start_kill();
+                report_end(&record, child.wait().await);
                 return TaskStatus::Failed {
                     message: "language server task is missing its output channel".to_string(),
                 };
@@ -163,7 +222,7 @@ impl TaskBody for LspServerBody {
             Ok(client) => Arc::new(client),
             Err(err) => {
                 let _ = child.start_kill();
-                let _ = child.wait().await;
+                report_end(&record, child.wait().await);
                 stdin_task.abort();
                 stdout_task.abort();
                 stderr_task.abort();
@@ -182,6 +241,9 @@ impl TaskBody for LspServerBody {
                 stdin_task.abort();
                 stdout_task.abort();
                 stderr_task.abort();
+                if let Ok(status) = &result {
+                    report_end(&record, Ok(*status));
+                }
                 if ctx.is_cancelled() {
                     return TaskStatus::Cancelled;
                 }
@@ -198,10 +260,34 @@ impl TaskBody for LspServerBody {
         // server can't stall us), then ensure the child is gone.
         let _ = tokio::time::timeout(GRACEFUL_SHUTDOWN, client.shutdown()).await;
         let _ = child.start_kill();
-        let _ = child.wait().await;
+        report_end(&record, child.wait().await);
         stdin_task.abort();
         stdout_task.abort();
         stderr_task.abort();
         TaskStatus::Cancelled
+    }
+}
+
+/// Tell the observer how the child ended, when one is watching and the wait produced a status.
+fn report_end(
+    record: &Option<(Arc<dyn SpawnObserver>, ProcessToken)>,
+    status: std::io::Result<ExitStatus>,
+) {
+    if let (Some((observer, token)), Ok(status)) = (record, status) {
+        observer.ended(*token, &outcome_of(status));
+    }
+}
+
+/// How a process ended, from the status it was waited on with.
+fn outcome_of(status: ExitStatus) -> ProcessOutcome {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return ProcessOutcome::Signalled { signal };
+        }
+    }
+    ProcessOutcome::Exited {
+        code: status.code().unwrap_or(-1),
     }
 }

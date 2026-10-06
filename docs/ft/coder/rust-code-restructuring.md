@@ -565,6 +565,37 @@ A successful `apply` ends with a **tidy** over the files it wrote, once the tree
 A tidy that cannot repair a round undoes it and fails the run, saying so; it never leaves a broken
 tree, and never touches the plan's own edits.
 
+## What a run executes
+
+A run starts processes on the developer's behalf and, until now, left no record of them: `git` for
+the worktree probe and the moves, `cargo check --all-targets` for the baseline, the result and the
+tidy, `rustfmt` per written file, and — on the cold command line — a language server. An endpoint
+protection tool that blocks one of these, or a `cargo check` that blocks on a build script, used to
+leave a run that was gone with no line saying which child, which argv, or which signal.
+
+Every one of those goes through a **`SpawnRecorder`**, which reports to a **`SpawnObserver`** a start
+(argv, cwd, pid, the names of the environment it was given) and an end (exit code, terminating
+signal, or a failed spawn). The default recorder tells nobody; a host installs a sink. The one sink
+shipped here is **`JsonlSpawnRecord`** — append-only JSONL, one object per line, never truncated, so
+a restarted writer adds after its predecessor, and a `start` with no `end` is the record of a run
+that never came back.
+
+- **Where it is.** A cold CLI run writes `<root>/.restructure/spawns.jsonl`; the index daemon writes
+  `<TDDY_INDEX_RUNTIME_DIR>/tddy-index-<tag>.spawns.jsonl`, named by `--spawn-record`; and
+  `run-index-daemon` records its own `cargo build`, dev-shell capture and launch in the same file.
+- **Redacted.** `argv` is recorded only for an allow-listed program; a token, URL userinfo or a
+  credential-bearing flag's value becomes `<redacted>`; the environment is recorded as **names only**.
+- **What it cannot show.** rust-analyzer's own children (build scripts, the proc-macro server) are
+  started by rust-analyzer, not by this engine, so they are never recorded. A `SIGKILL` is visible
+  only through a parent that watched the child — which is why `run-index-daemon` launches the daemon
+  under a watcher shell rather than `exec`-ing it. And a cold CLI run killed before `.restructure/`
+  exists leaves no record, because the record must not be the thing that makes a refusal's "nothing
+  was written" false.
+- **Never fatal.** A record that cannot be written is logged and dropped; it never fails the run.
+
+The structural test `every_spawn_is_recorded` keeps it complete: a `Command::new` or `.spawn()` in
+production source outside `spawn_record.rs` fails the build.
+
 ## Verify
 
 `restructure verify --against <git-ref>` compares the working tree with a ref **statement by

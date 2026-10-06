@@ -2,9 +2,10 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use crate::backends::rust::ProgressSink;
+use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 
 /// How a manifest declares its edition.
@@ -54,6 +55,7 @@ pub(super) fn format_touched(
     root: &Path,
     touched: &BTreeSet<String>,
     progress: &ProgressSink,
+    spawns: &SpawnRecorder,
 ) -> Result<usize> {
     let mut changed = 0;
     for file in touched.iter().filter(|file| file.ends_with(".rs")) {
@@ -63,7 +65,7 @@ pub(super) fn format_touched(
         }
         let edition = edition_of(root, file)?;
         let before = std::fs::read(&path)?;
-        run_rustfmt(root, file, &edition)?;
+        run_rustfmt(root, file, &edition, spawns)?;
         if std::fs::read(&path)? != before {
             progress(&format!("formatted: {file}"));
             changed += 1;
@@ -72,12 +74,13 @@ pub(super) fn format_touched(
     Ok(changed)
 }
 
-fn run_rustfmt(root: &Path, file: &str, edition: &str) -> Result<()> {
-    let output = Command::new("rustfmt")
+fn run_rustfmt(root: &Path, file: &str, edition: &str, spawns: &SpawnRecorder) -> Result<()> {
+    let mut command = spawns.command("rustfmt");
+    command
         .args(["--edition", edition, file])
         .current_dir(root)
-        .stdin(Stdio::null())
-        .output()?;
+        .stdin(Stdio::null());
+    let output = spawns.output(purpose::TIDY_FORMAT, &mut command)?;
     if output.status.success() {
         return Ok(());
     }
@@ -165,7 +168,12 @@ mod tests {
                 Arc::new(move |line: &str| lines.lock().expect("lines").push(line.to_string()))
             };
             let touched: BTreeSet<String> = ["src/lib.rs".to_string()].into();
-            let outcome = format_touched(self.directory.path(), &touched, &sink);
+            let outcome = format_touched(
+                self.directory.path(),
+                &touched,
+                &sink,
+                &SpawnRecorder::discard(),
+            );
             let said = lines.lock().expect("lines").clone();
             (outcome, said)
         }

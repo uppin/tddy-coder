@@ -184,17 +184,17 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 
 ## Scope
 
-- [ ] **Seam in `tddy-lsp`**: `SpawnObserver`, `ProcessStart`, `ProcessOutcome`, `LspRegistry::with_spawn_observer`; `LspServerBody` reports the language server's start (pid) and its end (exit code, signal, or the kill it issues on cancel).
-- [ ] **Recorder in the engine**: `SpawnRecorder` with `output`/`spawn`/`RecordedChild`; the six production spawn sites routed through it (table in State A).
-- [ ] **JSONL sink and redaction**: `JsonlSpawnRecord` (append-only, one write per line, start before end); `redacted()` allow-list plus pattern redaction; environment **names only**.
-- [ ] **Structural guard**: a test that fails if `Command::new` appears in the engine's `src/` outside `spawn_record.rs` and `#[cfg(test)]`.
-- [ ] **CLI front end**: `restructure` installs a file sink (location: D1).
-- [ ] **Daemon**: `--spawn-record <path>`; the observer wired into the registry and into `Options` of check/apply.
-- [ ] **`run-index-daemon`** (#586 is merged; the history file exists on the base): records `cargo build`, the `nix develop … env -0` capture and the launch; launches the daemon as a child of a watcher shell that writes the daemon's exit line (status or signal); rotates the record at 10 MiB like the history file.
-- [ ] **Docs**: README, `readiness-and-gates.md`, feature doc, `code-index-service.md`, `SKILL.md` — what is recorded, where, what is not.
-- [ ] **Limits stated**: rust-analyzer's own children invisible; `SIGKILL` of the daemon visible only through the watcher; a kill during the CLI's pre-state phase (if D1 = A″) leaves no file.
-- [ ] **Re-measure** `oversized-file-backends-rust.md` and append a history row.
-- [ ] **Testing**: all acceptance tests passing (scoped).
+- [x] **Seam in `tddy-lsp`**: `SpawnObserver`, `ProcessStart`, `ProcessOutcome`, `LspRegistry::with_spawn_observer`; `LspServerBody` reports the language server's start (pid) and its end (exit code, signal, or the kill it issues on cancel).
+- [x] **Recorder in the engine**: `SpawnRecorder` with `output`/`spawn`/`RecordedChild`; the six production spawn sites routed through it (table in State A).
+- [x] **JSONL sink and redaction**: `JsonlSpawnRecord` (append-only, one write per line, start before end); `redacted()` allow-list plus pattern redaction; environment **names only**.
+- [x] **Structural guard**: a test that fails if `Command::new` appears in the engine's `src/` outside `spawn_record.rs` and `#[cfg(test)]`.
+- [x] **CLI front end**: `restructure` installs a file sink (location: D1).
+- [x] **Daemon**: `--spawn-record <path>`; the observer wired into the registry and into `Options` of check/apply.
+- [x] **`run-index-daemon`** (#586 is merged; the history file exists on the base): records `cargo build`, the `nix develop … env -0` capture and the launch; launches the daemon as a child of a watcher shell that writes the daemon's exit line (status or signal); rotates the record at 10 MiB like the history file.
+- [x] **Docs**: README, `readiness-and-gates.md`, feature doc, `code-index-service.md`, `SKILL.md` — what is recorded, where, what is not.
+- [x] **Limits stated**: rust-analyzer's own children invisible; `SIGKILL` of the daemon visible only through the watcher; a kill during the CLI's pre-state phase (if D1 = A″) leaves no file.
+- [x] **Re-measure** `oversized-file-backends-rust.md` and append a history row.
+- [x] **Testing**: all acceptance tests passing (scoped).
 
 ## Technical changes
 
@@ -306,22 +306,24 @@ cannot be a field of it.
 
 ## Implementation milestones
 
-- [ ] **M1 — contract.** Types and signatures above compile; `Options.spawns` exists and defaults to
+- [x] **M1 — contract.** Types and signatures above compile; `Options.spawns` exists and defaults to
   discard; the four test files exist and **fail by assertion** (`expected N records, found 0`), with
   `./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon` run scoped and the failing names
   listed in this file.
-- [ ] **M2 — the engine's sites.** The six production sites in State A go through the recorder;
+- [x] **M2 — the engine's sites.** The six production sites in State A go through the recorder;
   `every_spawn_is_recorded` is green (zero `Command::new` hits outside `spawn_record.rs`/tests);
   `spawn_record_acceptance` cases 1–4 green.
-- [ ] **M3 — the JSONL sink and the policy.** `redact.rs` table test green; the file is opened
+- [x] **M3 — the JSONL sink and the policy.** `redact.rs` table test green; the file is opened
   `O_APPEND`, one `write` per line, flushed; a second run appends (case 7).
-- [ ] **M4 — `tddy-lsp` and the daemon.** `spawn_observer_test` green; the daemon's acceptance test
+- [x] **M4 — `tddy-lsp` and the daemon.** `spawn_observer_test` green; the daemon's acceptance test
   green; `--spawn-record` documented in `--help`.
-- [ ] **M5 — `run-index-daemon`** *(#586 merged; the history file is on the base)*. Script-side records and the watcher; the two
+- [x] **M5 — `run-index-daemon`** *(#586 merged; the history file is on the base)*. Script-side records and the watcher; the two
   `#[ignore]`d production tests pass on a machine with the dev shell (command in Testing plan).
-- [ ] **M6 — docs and records.** `SKILL.md`, feature doc section, README, `readiness-and-gates.md`,
+  *(Script implemented and its record lines checked by hand; the two `#[ignore]`d tests are not run
+  from the green phase.)*
+- [x] **M6 — docs and records.** `SKILL.md`, feature doc section, README, `readiness-and-gates.md`,
   `code-index-service.md`; history row appended to `oversized-file-backends-rust.md`; todo narrowed.
-- [ ] **M7 — gates, scoped.** `./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`,
+- [x] **M7 — gates, scoped.** `./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`,
   `cargo clippy -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon --all-targets -- -D warnings`,
   `cargo fmt --check`; **the whole workspace is CI's** (`scripts/ci-status.sh`), not claimed from here.
 
@@ -365,12 +367,12 @@ sinks; `nextest`'s process-per-test hides it, plain `./verify` does not.
 
 ### Coverage requirements
 
-- [ ] Happy path: every site's start and end, with argv and cwd.
-- [ ] Error scenarios: non-zero exit (baseline `cargo check` 101), signal, failed spawn.
-- [ ] Edge cases: secret-looking argv and environment values; a program not on the allow-list; a record
+- [x] Happy path: every site's start and end, with argv and cwd.
+- [x] Error scenarios: non-zero exit (baseline `cargo check` 101), signal, failed spawn.
+- [x] Edge cases: secret-looking argv and environment values; a program not on the allow-list; a record
   file that cannot be written (the run still succeeds).
-- [ ] Integration points: engine to `tddy-lsp` observer to daemon file.
-- [ ] Actual effects: file contents parsed as JSON line by line, not substring-matched.
+- [x] Integration points: engine to `tddy-lsp` observer to daemon file.
+- [x] Actual effects: file contents parsed as JSON line by line, not substring-matched.
 
 ## Acceptance tests
 
@@ -379,35 +381,35 @@ Names read as behaviour; `Given/When/Then` bodies as in `cancellation_acceptance
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/tests/spawn_record_acceptance.rs`
 Fixture: `harness::a_workspace_whose_test_binary_stands_alone()` and a collecting observer; `fake_lsp`
 as the language server; **no rust-analyzer**; real `git`, `cargo`, `rustfmt`.
-- [ ] `an_apply_records_every_process_it_starts_with_its_argv_cwd_and_exit_status` — the record holds
+- [x] `an_apply_records_every_process_it_starts_with_its_argv_cwd_and_exit_status` — the record holds
   `git rev-parse --is-inside-work-tree`, a baseline `cargo check --all-targets --message-format json -p
   origin`, the result check, the tidy's check, `rustfmt` for each file the tidy formats and `git` for the move (which of these a
   given fixture reaches is confirmed at M1; the test asserts the ones it reaches, and the union over the
   cases covers all six engine sites);
   every `cwd` equals the workspace root; each start is paired with an end whose exit is `0`.
   *Fails today:* `Options.spawns` is never called, so `0 records, expected at least 5` (after M1).
-- [ ] `a_refused_baseline_records_the_failing_cargo_check_with_its_exit_status` — rewrite the origin lib
+- [x] `a_refused_baseline_records_the_failing_cargo_check_with_its_exit_status` — rewrite the origin lib
   so it does not compile; the record holds the baseline `cargo check` ending `exit 101` and **no**
   `rustfmt`; and `.restructure` still does not exist (the existing guarantee). *Fails today:* no records.
-- [ ] `a_process_killed_by_a_signal_is_recorded_with_the_signal_and_no_exit_code` (`#[cfg(unix)]`) —
+- [x] `a_process_killed_by_a_signal_is_recorded_with_the_signal_and_no_exit_code` (`#[cfg(unix)]`) —
   `recorder.output("t", sh -c 'kill -9 $$')` ends `{"signal":9}`. *Fails today:* the contract stub records nothing, so no `end` line exists to read.
-- [ ] `a_program_that_cannot_be_started_is_recorded_as_a_failed_spawn` — a program name that does not
+- [x] `a_program_that_cannot_be_started_is_recorded_as_a_failed_spawn` — a program name that does not
   exist: one `end` line with `spawn_failed`, no `pid`.
-- [ ] `a_cancelled_compile_gate_records_the_cargo_it_killed_as_signalled` — the fixture crate's
+- [x] `a_cancelled_compile_gate_records_the_cargo_it_killed_as_signalled` — the fixture crate's
   `build.rs` sleeps for a minute (the incident's shape: a build script that never finishes); the run's
   token is cancelled after the baseline's `start` line appears; the run returns `CallerStopped`, and the
   record shows that `cargo` ended `signal 9`. It also asserts the record names **no** build-script process
   — the stated limit.
-- [ ] `a_record_never_carries_an_environment_value_or_a_secret_looking_argument` — a recorder over the
+- [x] `a_record_never_carries_an_environment_value_or_a_secret_looking_argument` — a recorder over the
   JSONL sink running `git -c http.extraheader=Authorization:\ Bearer\ abc --version https://u:p@host/x
   --token=ghp_abc` (offline: `--version` ignores the rest), env `SECRET=value`: the file contains `<redacted>` for each, contains no `value`,
   `abc` or `u:p`, and lists `SECRET` among `env_names`.
-- [ ] `a_program_off_the_allow_list_has_its_arguments_withheld` — `argv` is the single placeholder.
-- [ ] `a_second_run_appends_to_the_record_instead_of_replacing_it` — two applies against one file leave
+- [x] `a_program_off_the_allow_list_has_its_arguments_withheld` — `argv` is the single placeholder.
+- [x] `a_second_run_appends_to_the_record_instead_of_replacing_it` — two applies against one file leave
   the first run's lines first, byte for byte.
-- [ ] `a_record_that_cannot_be_written_does_not_fail_the_run` — the sink points at a read-only path;
+- [x] `a_record_that_cannot_be_written_does_not_fail_the_run` — the sink points at a read-only path;
   the apply still returns its `RunSummary`.
-- [ ] `a_language_server_the_backend_starts_itself_is_recorded_with_the_names_of_its_pinned_environment`
+- [x] `a_language_server_the_backend_starts_itself_is_recorded_with_the_names_of_its_pinned_environment`
   — the one engine site `fake_lsp`-over-the-registry cannot reach: `RustBackend::new(<fake_lsp>,
   <tmp cargo home>, <tmp rustup home holding a settings.toml>)` with a recorder, one `anchor_for`; the
   record holds a `rust-analyzer`-purpose start whose `env_names` are `CARGO_HOME`, `RUSTUP_HOME`,
@@ -419,37 +421,39 @@ as the language server; **no rust-analyzer**; real `git`, `cargo`, `rustfmt`.
   style instead.
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/tests/every_spawn_is_recorded.rs`
-- [ ] `no_production_code_starts_a_process_except_through_the_recorder` — scans `src/**/*.rs` outside
+- [x] `no_production_code_starts_a_process_except_through_the_recorder` — scans `src/**/*.rs` outside
   `#[cfg(test)]` for `Command::new` and `.spawn()`; allowed only in `spawn_record.rs`. *Fails today* with
   the six sites listed by `file:line` (the same output a reader needs to find them).
 
 ### `tddy-code-restructuring` — unit, `packages/tddy-code-restructuring/src/spawn_record/redact.rs`
-- [ ] table test `redacted_cases` — one row per rule in State B (userinfo, token prefixes, `--token`
+- [x] table test `redacted_cases` — one row per rule in State B (userinfo, token prefixes, `--token`
   both forms, `-c` with sensitive key, non-allow-listed program).
 
 ### `tddy-lsp` — `packages/tddy-lsp/tests/spawn_observer_test.rs` (fixture: `fake_lsp`)
-- [ ] `a_language_server_launch_is_reported_with_its_program_args_cwd_and_pid` — registry with an
+- [x] `a_language_server_launch_is_reported_with_its_program_args_cwd_and_pid` — registry with an
   observer, `get_or_spawn`, then the start is reported with `program == CARGO_BIN_EXE_fake_lsp`, the
   root as `cwd`, a pid equal to the one `ctx.register_child_pid` got.
-- [ ] `a_language_server_that_is_shut_down_is_reported_ended_with_how_it_died` — `shutdown_all`, then an
+- [x] `a_language_server_that_is_shut_down_is_reported_ended_with_how_it_died` — `shutdown_all`, then an
   end with `Signalled { 9 }` or `Exited { 0 }` (the graceful `exit` path wins when the fake honours it;
   the test accepts exactly those two and nothing else).
-- [ ] `a_server_that_exits_before_the_handshake_is_reported_ended_with_its_exit_code` —
+- [x] `a_server_that_exits_before_the_handshake_is_reported_ended_with_its_exit_code` —
   `--exit-immediately`; end `Exited { 0 }` although initialization failed.
-- [ ] `a_registry_without_an_observer_behaves_exactly_as_before` — the existing `registry_reuse_test`
+- [x] `a_registry_without_an_observer_behaves_exactly_as_before` — the existing `registry_reuse_test`
   suite stays green unchanged (cited, not copied).
   *All three fail today:* the registry has no observer to call (after M1: zero events).
 
 ### `tddy-index-daemon` — `packages/tddy-index-daemon/tests/spawn_record_acceptance.rs` (fixture: `fake_lsp`)
-- [ ] `a_served_warm_appends_the_language_server_it_started_to_the_record_file` — service wired with a
+- [x] `a_served_warm_appends_the_language_server_it_started_to_the_record_file` — service wired with a
   `JsonlSpawnRecord` on a temp file; a `Warm` against `--loads-crate-graph` leaves one start line for the
   fake server with `origin: "lsp"`.
-- [ ] `a_restarted_daemon_appends_after_the_previous_runs_lines` — two services over one file.
-- [ ] `the_spawn_record_flag_names_the_file_the_daemon_writes` — `tddy-index-daemon --help` documents
+- [x] `a_restarted_daemon_appends_after_the_previous_runs_lines` — two services over one file.
+- [x] `the_spawn_record_flag_names_the_file_the_daemon_writes` — `tddy-index-daemon --help` documents
   `--spawn-record`, and a single-shot run with it creates the file (uses the daemon's existing
   single-shot lifetime, no socket).
 
 ### Production tests (`#[ignore]`d) — `packages/tddy-index-daemon/tests/detached_daemon_production.rs`
+The script is implemented; these two are **not run from the green phase** (they need the dev shell
+and a real `cargo build`, and the script's record lines were checked by hand against the JSON shape).
 - [ ] `a_daemon_killed_with_sigkill_leaves_an_exit_line_naming_the_signal` — real `run-index-daemon`
   with its own `TDDY_INDEX_RUNTIME_DIR`; `kill -9 <pid from the pid file>`; within 5 s the record ends the
   `index-daemon` entry with `{"signal":9}`.
@@ -622,10 +626,10 @@ Engine `spawn_record_acceptance` (10 of 10), `every_spawn_is_recorded` (1), unit
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
-- [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`) — verify 100% pass; whole-workspace health is CI's
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
+- [x] Repeat Red→Green→Update cycle until feature complete
+- [x] Run the scoped tests (`./test -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon`) — verify 100% pass; whole-workspace health is CI's
 - [ ] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
@@ -636,7 +640,7 @@ Engine `spawn_record_acceptance` (10 of 10), `every_spawn_is_recorded` (1), unit
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon --all-targets -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (`cargo clippy -p tddy-lsp -p tddy-code-restructuring -p tddy-index-daemon --all-targets -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-05-sharpen-spawn-record-initial-discovery.md`; narrows (does not delete) the `no-record-of-what-an-apply-executes` todo unless D6 is taken
 - [ ] USER REVIEW — work complete, decide next steps
 

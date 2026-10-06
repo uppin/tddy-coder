@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 
 use tddy_code_analysis::complexity_cache::InMemoryComplexityCache;
 use tddy_code_restructuring::plan_store::{FlushPolicy, PlanStore};
+use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_lsp::client::LspClient;
 use tddy_lsp::registry::{workspace_root_for, LspKey};
 use tddy_lsp::{Language, LspRegistry};
@@ -118,6 +119,19 @@ impl WorkspaceIndex {
             scores: Arc::new(InMemoryComplexityCache::default()),
             plans: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             flusher: Arc::new(std::sync::Once::new()),
+        }
+    }
+
+    /// The recorder a run's own processes go through, reporting to the same observer this index's
+    /// language servers report to.
+    ///
+    /// The observer rides inside the registry, so a host that installed one with
+    /// [`LspRegistry::with_spawn_observer`] records an operation's `git`/`cargo`/`rustfmt` beside
+    /// the language servers it starts, in one file.
+    pub fn spawn_recorder(&self) -> SpawnRecorder {
+        match self.servers.spawn_observer() {
+            Some(observer) => SpawnRecorder::new(Arc::clone(observer)),
+            None => SpawnRecorder::discard(),
         }
     }
 

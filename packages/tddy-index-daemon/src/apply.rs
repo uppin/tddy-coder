@@ -197,11 +197,19 @@ fn apply_held_plan(
                     &paths,
                     &mut journal,
                     &mut ledger,
+                    &options.spawns,
                 )?;
                 // A group's members reach the plan store, and the caller's eyes, together, once the
                 // group has compiled.
-                let settled =
-                    GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, |_| {})?;
+                let settled = GroupRun::settle(
+                    &mut group,
+                    index,
+                    resolved,
+                    &gate,
+                    &options.spawns,
+                    &mut journal,
+                    |_| {},
+                )?;
                 let Settled::Ready(ready) = settled else {
                     done += 1;
                     continue;
