@@ -11,7 +11,8 @@ Product behaviour: [Rust code restructuring](../../../docs/ft/coder/rust-code-re
 
 | Piece | File |
 |---|---|
-| The eight `RefactorKind` variants, `RefactorOp.{type_, expr, order}`, `OrderKey`, `RefactorKind::edits_a_call_site` | `src/plan.rs` |
+| The eight `RefactorKind` variants and `RefactorKind::edits_a_call_site` | `src/plan/refactor_kind.rs` |
+| `RefactorOp.{type_, expr, order}`, `OrderKey` | `src/plan.rs` |
 | `one_type`, `one_expr` (parsed with `syn`) and `permutation` (what `order` may be) | `src/plan/rust_syntax.rs` |
 | The per-operation field refusals, raised when the plan is read | `src/plan/codec/signature_fields.rs` |
 | Span and edit helpers shared by both halves, and the tests | `src/backends/rust/signature_rewrites.rs` |
