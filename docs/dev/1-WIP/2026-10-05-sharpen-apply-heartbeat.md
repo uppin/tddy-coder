@@ -166,20 +166,20 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 
 ## Scope
 
-- [ ] **`fake_lsp` modes** (the draft contract): `--never-quiescent`, `--goes-busy-after-hovers N`, `--hover-never-answers`, documented in the file header.
-- [ ] **`ServerChatter::quiet_for`**: when the server last said something *different* (a changed progress line, a quiescent or health flip).
-- [ ] **`backends/rust/wait.rs`**: `WaitStage` (its text), `Waiting` (start, last beat), pure `heartbeat_line`; `RustBackend::with_wait_heartbeat`; `WAIT_HEARTBEAT = 30 s`.
-- [ ] **The five polling waits** use it, and the heartbeat is emitted through `progress`: `readiness.rs` `ensure_indexed` (`:85`) and `await_answer` (`:190`); `rust.rs` the assist wait (`:967`), `settled_outline` (`:1568`), `locate_symbol` (`:2094`). `request_settled`'s `SETTLE_POLL` waits stay bounded by `CONTENT_MODIFIED_RETRIES` and are not narrated.
-- [ ] **A request in flight** on the shared client is narrated while it waits (D4): `LspClientBridge::request` waits in heartbeat-sized slices.
-- [ ] **The cancel message names the stage**: `IndexingIncomplete.stage` (and `incomplete_assist_index`); message reads `… after {n}s while {stage} (last progress: …)`.
-- [ ] **Options and registry**: `Options.wait_heartbeat`, `registry_for_waiting`; the daemon passes `CodeIndexPorts::wait_heartbeat`.
-- [ ] **Daemon queue (D6)**: a run waiting on `index.hold(root)` says it is queued behind another operation, and for how long; the same sends detect a caller that has hung up.
-- [ ] **Compile gate (D5)**: `cargo check`'s wait is narrated with its pid and `-p` list. *Cuttable to a follow-up if the node is large.*
-- [ ] **Readiness untouched on failure (D9)**: a test pins that a cancelled wait sets neither the backend's `indexed` nor the root's graph latch.
-- [ ] **No deadline guard**: a test pins that a busy server is still waited on after many heartbeats.
-- [ ] **Docs**: README `:20`, `readiness-and-gates.md`, feature doc § Waiting, `SKILL.md:153`, `code-index-service.md`; the two code-issue records re-measured; the three todos edited as in Prerequisites.
-- [ ] **Re-measure** `oversized-file-backends-rust.md`; append a history row.
-- [ ] **Testing**: all acceptance tests passing (scoped).
+- [x] **`fake_lsp` modes** (the draft contract): `--never-quiescent`, `--goes-busy-after-hovers N`, `--hover-never-answers`, documented in the file header.
+- [x] **`ServerChatter::quiet_for`**: when the server last said something *different* (a changed progress line, a quiescent or health flip).
+- [x] **`backends/rust/wait.rs`**: `WaitStage` (its text), `Waiting` (start, last beat), pure `heartbeat_line`; `RustBackend::with_wait_heartbeat`; `WAIT_HEARTBEAT = 30 s`.
+- [x] **The five polling waits** use it, and the heartbeat is emitted through `progress`: `readiness.rs` `ensure_indexed` (`:85`) and `await_answer` (`:190`); `rust.rs` the assist wait (`:967`), `settled_outline` (`:1568`), `locate_symbol` (`:2094`). `request_settled`'s `SETTLE_POLL` waits stay bounded by `CONTENT_MODIFIED_RETRIES` and are not narrated.
+- [x] **A request in flight** on the shared client is narrated while it waits (D4): `LspClientBridge::request` waits in heartbeat-sized slices.
+- [x] **The cancel message names the stage**: `IndexingIncomplete.stage` (and `incomplete_assist_index`); message reads `… after {n}s while {stage} (last progress: …)`.
+- [x] **Options and registry**: `Options.wait_heartbeat`, `registry_for_waiting`; the daemon passes `CodeIndexPorts::wait_heartbeat`.
+- [x] **Daemon queue (D6)**: a run waiting on `index.hold(root)` says it is queued behind another operation, and for how long; the same sends detect a caller that has hung up.
+- [x] **Compile gate (D5)**: `cargo check`'s wait is narrated with its pid and `-p` list. *Cuttable to a follow-up if the node is large.*
+- [x] **Readiness untouched on failure (D9)**: a test pins that a cancelled wait sets neither the backend's `indexed` nor the root's graph latch.
+- [x] **No deadline guard**: a test pins that a busy server is still waited on after many heartbeats.
+- [x] **Docs**: README `:20`, `readiness-and-gates.md`, feature doc § Waiting, `SKILL.md:153`, `code-index-service.md` — done. **Deferred to wrap:** the two code-issue records re-measured and the three `docs/dev/todo/` edits in `## Prerequisites` (both belong to the wrap step).
+- [ ] **Re-measure** `oversized-file-backends-rust.md`; append a history row. **Deferred to wrap** — this node grew the file by +111 production lines (2864 → 2975); the split itself is deferred because the parent `spawn-record` edits the same file (see Technical Debt).
+- [x] **Testing**: all acceptance tests passing (scoped).
 
 ## Technical changes
 
@@ -370,13 +370,13 @@ todo to ✅.
 
 ### Coverage requirements
 
-- [ ] Every one of the five waits names its stage (tests 1, 2, plus the unit table for the other three).
-- [ ] Heartbeats keep coming for as long as the wait lasts, with growing elapsed time.
-- [ ] The cancel message names the stage.
-- [ ] No deadline: still waiting after many beats.
-- [ ] Readiness flags unset after a cancel.
-- [ ] A caller that hangs up is noticed within a cadence; a queued run says so.
-- [ ] Nothing prints from the library (existing guard).
+- [x] Every one of the five waits names its stage (tests 1, 2, plus the unit table for the other three).
+- [x] Heartbeats keep coming for as long as the wait lasts, with growing elapsed time.
+- [x] The cancel message names the stage.
+- [x] No deadline: still waiting after many beats.
+- [x] Readiness flags unset after a cancel.
+- [x] A caller that hangs up is noticed within a cadence; a queued run says so.
+- [x] Nothing prints from the library (existing guard).
 
 ## Acceptance tests
 
@@ -385,64 +385,64 @@ Fixture style: `fake_lsp` through `LspRegistry` and `RustBackend::from_lsp_clien
 `cancellation_acceptance.rs`; a `Mutex<Vec<String>>` progress sink; a workspace holding `pub fn foo() -> u32`;
 the operation is a `rename_symbol` of `foo` driven on `spawn_blocking`. **Needs `--never-quiescent` etc.
 (the draft contract); no rust-analyzer.**
-- [ ] `a_wait_on_a_server_that_stays_busy_says_what_it_is_waiting_for_on_every_beat` —
+- [x] `a_wait_on_a_server_that_stays_busy_says_what_it_is_waiting_for_on_every_beat` —
   `--never-quiescent`, heartbeat 300 ms, 1.6 s of waiting: at least four lines begin `still waiting`;
   each contains `warming the crate index`, `still loading` and `build script num-bigint run`; the elapsed
   time in them never decreases. *Fails today:* no line begins `still waiting` (0 found; only the one-off
   `starting rust-analyzer session` / `warming crate index …` lines exist).
-- [ ] `a_wait_names_the_type_inference_stage_once_the_index_was_ready` — `--goes-busy-after-hovers 1`:
+- [x] `a_wait_names_the_type_inference_stage_once_the_index_was_ready` — `--goes-busy-after-hovers 1`:
   the first beats name `type inference at src/lib.rs:1`, **not** the warm-up (the index was ready, then
   went busy: the shape of a tree that changed after a ready index). *Fails today:* no beat.
-- [ ] `a_beat_says_how_long_the_server_has_said_nothing_new` — across beats the `unchanged for` figure
+- [x] `a_beat_says_how_long_the_server_has_said_nothing_new` — across beats the `unchanged for` figure
   grows by about one cadence per beat. *Fails today:* no beat.
-- [ ] `a_cancelled_wait_names_its_stage_and_where_the_server_got_to` — cancel after the second beat: the
+- [x] `a_cancelled_wait_names_its_stage_and_where_the_server_got_to` — cancel after the second beat: the
   refusal is `IndexingIncomplete` with `stage == "warming the crate index"`, `last` containing the
   build-script line, and its message containing `while warming the crate index`. *Fails today:* the
   variant has no `stage`, and the message names none.
-- [ ] `a_wait_has_no_deadline_however_many_beats_pass` — heartbeat 50 ms, 1.5 s (at least 25 beats): the
+- [x] `a_wait_has_no_deadline_however_many_beats_pass` — heartbeat 50 ms, 1.5 s (at least 25 beats): the
   operation is still running; then cancel ends it. **A guard** — green before and after; it exists because
   the developer decided *no deadline* (D1) and the cheapest way to break that is a "give up after N beats".
-- [ ] `a_request_in_flight_to_a_server_that_never_answers_is_narrated_while_it_waits` (D4) —
+- [x] `a_request_in_flight_to_a_server_that_never_answers_is_narrated_while_it_waits` (D4) —
   `--hover-never-answers`, bridged backend: beats arrive while the hover is unanswered, naming `a
   textDocument/hover request in flight`; cancel still ends it within the existing 5 s unwind. *Fails today:*
   silence for the whole request.
-- [ ] `a_cargo_check_that_does_not_finish_is_narrated_with_its_pid` (D5, same file; fixture crate whose
+- [x] `a_cargo_check_that_does_not_finish_is_narrated_with_its_pid` (D5, same file; fixture crate whose
   `build.rs` sleeps a minute; `Options.wait_heartbeat` 200 ms; real `cargo`; cancelled after two beats):
   beats contain `cargo check --all-targets -p origin` and `pid`; the run ends `CallerStopped`. *Fails
   today:* silence. **Skipped if D5 is cut.**
 
 ### `tddy-code-restructuring` — unit
-- [ ] `packages/tddy-code-restructuring/src/backends/rust/wait.rs` — `heartbeat_line` table: each of the six
+- [x] `packages/tddy-code-restructuring/src/backends/rust/wait.rs` — `heartbeat_line` table: each of the six
   stage texts; `has said nothing yet`; `quiet_for` formatting at 0 s, 59 s, 1 m 02 s; self-started vs shared
   client wording.
-- [ ] `packages/tddy-code-restructuring/src/backends/rust/chatter.rs` — `quiet_for` resets on a *different*
+- [x] `packages/tddy-code-restructuring/src/backends/rust/chatter.rs` — `quiet_for` resets on a *different*
   progress line, on a quiescent flip and on a health change, and **does not** reset on a repeat of the
   same line or on a notification the throttle suppressed with the same text.
-- [ ] `packages/tddy-code-restructuring/tests/library_returns_its_results.rs` — **unchanged, must stay
+- [x] `packages/tddy-code-restructuring/tests/library_returns_its_results.rs` — **unchanged, must stay
   green**: nothing the heartbeat adds prints.
 
 ### `tddy-lsp` — `packages/tddy-lsp/tests/fake_lsp_busy_modes_test.rs`
-- [ ] `a_server_started_never_quiescent_reports_loading_and_never_finishes` — through `LspClient`: a
+- [x] `a_server_started_never_quiescent_reports_loading_and_never_finishes` — through `LspClient`: a
   `serverStatus` with `quiescent: false` is observed; none with `true` within 1 s; hover answers non-null.
   *Fails today:* the flag is ignored, so no status is ever sent.
-- [ ] `a_server_that_goes_busy_after_its_first_hover_says_so_after_it` — `quiescent: true`, then
+- [x] `a_server_that_goes_busy_after_its_first_hover_says_so_after_it` — `quiescent: true`, then
   `false` after one hover.
-- [ ] `a_server_that_never_answers_a_hover_still_answers_everything_else` — `documentSymbol` answers;
+- [x] `a_server_that_never_answers_a_hover_still_answers_everything_else` — `documentSymbol` answers;
   hover does not.
 
 ### `tddy-index-daemon` — `packages/tddy-index-daemon/tests/wait_heartbeat_acceptance.rs`
 Fixture style: `code_index_service_acceptance.rs` (service over an `LspRegistry` whose server is
 `fake_lsp`), `CodeIndexPorts { wait_heartbeat: 300 ms, .. }`.
-- [ ] `a_busy_servers_beats_arrive_on_the_stream_as_indexing_events` — an `Apply` of a one-op plan over a
+- [x] `a_busy_servers_beats_arrive_on_the_stream_as_indexing_events` — an `Apply` of a one-op plan over a
   `--never-quiescent` server: the stream carries `Indexing` events whose line begins `still waiting` and
   names the stage. *Fails today:* none.
-- [ ] `a_caller_that_hangs_up_during_a_silent_wait_releases_the_root_within_one_beat` — first `Apply`
+- [x] `a_caller_that_hangs_up_during_a_silent_wait_releases_the_root_within_one_beat` — first `Apply`
   on the busy server; the test drops its stream after the first beat; a second `Apply` on the same root
   proceeds to its own wait within three cadences. *Fails today:* the first run is never cancelled (a silent
   server sends nothing, so nothing detects the hang-up) and the second never leaves the queue.
-- [ ] `a_run_queued_behind_another_on_its_root_says_so_and_for_how_long` (D6) — while the first is held,
+- [x] `a_run_queued_behind_another_on_its_root_says_so_and_for_how_long` (D6) — while the first is held,
   the second's stream carries `still waiting … queued behind another operation`. *Fails today:* silent.
-- [ ] `a_cancelled_wait_leaves_the_root_not_ready_and_the_next_warm_still_waits_for_the_graph` (D9) — after
+- [x] `a_cancelled_wait_leaves_the_root_not_ready_and_the_next_warm_still_waits_for_the_graph` (D9) — after
   the first run is hung up on, a `Warm` on the same root streams no `ready: true` within three cadences;
   the observable is the public stream (`graph_load_of` is `pub(crate)`, and `RustBackend.indexed` is
   per-request, so the root-level effect is the only thing a test outside the crate can see). A guard:
@@ -640,7 +640,17 @@ Honest about what is not yet real, all marked `TODO(apply-heartbeat)`:
 ## Validation Results
 
 ### @validate-changes
-*(empty)*
+**2026-10-06 — clean.** Stack gate: base `feature/sharpen/spawn-record`, branch already current,
+leak check clean (`origin/<base>..HEAD` is this PR's four commits only). Build: the three touched
+packages build clean. Boundaries held — no `warm.rs`, `graph.rs`, proto or `tddy-tools` change, no
+deletions, nothing from `## Dependencies` implemented (the edge list is empty). Stubs: only the two
+recorded `TODO(apply-heartbeat)` D5 partial cuts (`tidy.rs:117`, `group_gate.rs:274`). Changeset
+synced: Scope, Coverage and Acceptance boxes ticked; the two record-remeasurement items annotated
+deferred to wrap; `rust.rs` growth measured and recorded (2864 → 2975, +111).
+Scoped tests: `wait.rs` 18/18, `chatter.rs` 22/22, `fake_lsp_busy_modes_test` 3/3,
+`wait_heartbeat_acceptance` (code-restructuring) 7/7, `wait_heartbeat_acceptance` (daemon) 4/4,
+`library_returns_its_results` 6/6; `cargo clippy … --all-targets -- -D warnings` clean; `cargo fmt
+--check` clean.
 
 ### @validate-tests
 *(empty)*
