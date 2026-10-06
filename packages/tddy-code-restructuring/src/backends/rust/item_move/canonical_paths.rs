@@ -73,7 +73,7 @@ pub(super) fn defining_paths(
 ///
 /// Refuses when the text at a path's span cannot be read back as written — which never happens, so it
 /// is an error rather than a silent leave.
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn rewrite(
     moved_text: &str,
     survey: &PathSurvey,

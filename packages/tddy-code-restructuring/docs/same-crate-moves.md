@@ -30,7 +30,7 @@ The assembly is a function of texts, so it is unit-tested without a server.
 | `creation.rs` | the module a line with `name` creates: the parent must exist and not declare the name, the file is `<parent dir>/<name>.rs`, the declaration is inserted below the parent's last `mod` |
 | `destination.rs` | finding a module from its path by following `mod` declarations from `src/lib.rs` (then `src/main.rs`); the crate root is the empty path |
 | `outline.rs` | the run of items an anchor covers, from the outline; refuses a range inside an `impl`, a cut item, a module among the items, and a keyword on a line above its name |
-| `sites.rs` | the places that name a moved item, read around each reference position (a `use`, a qualified path, a bare name through an import); refuses a name in a nested `use` group |
+| `sites.rs` | the places that name a moved item, read around each reference position (a `use`, a qualified path, a bare name through an import); refuses a name in a nested `use` group. A caller that wrote a one-segment module qualifier bound by a `use` in scope keeps that shape — the destination's last segment is bound with a new `use` and the qualifier rewritten to it — unless that name is already taken, when today's full path is written and noted |
 | `scope.rs`, `reach.rs` | visibility read as a module subtree, so a keyword is respelled for the module it lands in and widened only as far as callers, imports and the moved code's own reach need; a created module's declaration and the declarations on the path to the destination are widened the same way |
 | `rebase.rs`, `bindings.rs` | relative spellings in moved code (`super::f()`, `pub(super)`) keep meaning what they meant; a `super::Name` that reached a plain private `use` is respelled to the item it stands for |
 | `imports.rs` | the source module's `use` header copied across (head from the crate root, bound names left out, unreachable modules dropped or widened, a group split per unbound name) |
@@ -38,6 +38,8 @@ The assembly is a function of texts, so it is unit-tested without a server.
 | `facade.rs` | the `pub use` a move leaves: `glob` is one line over the destination, `named` and `outside` one grouped line per visibility |
 | `outside.rs` | the one decision `reexport: outside` takes for both operations: which sites lie outside the crate (see below) |
 | `assemble.rs` | the new text of every file, from the original texts and the server's answers |
+| `canonical_paths.rs` | `canonical_paths: true` on a `move_item` line: each `crate::`-headed path in the moved text whose defining path differs is rewritten to it, every path rewritten or left is noted, and a path whose defining module is private is left as written |
+| `doc_links.rs` | the `///` / `//!` link pass: a fully-qualified link that names or reaches a moved item/module is respelled; prose, fenced examples and `self::`/`super::`/bare links are left alone |
 
 ## `backends/rust/module_reparent/` (`reparent_module`)
 
@@ -63,7 +65,31 @@ an earlier operation's pending edits are seen.
 `moves_across_crates`. `plan/codec.rs` reads: `to` is required; the anchor must be `items` or `item`;
 `reexport` is allowed on both (and `outside` only on both); `name` on `reparent_module` and `named` on it
 are refused; `also` and `to_file` are refused on both. `Reexport::repoints_callers` is true for `none` and
-`outside`. `RefactorOp.name` on a `move_item` names the module the move creates.
+`outside`. `RefactorOp.name` on a `move_item` names the module the move creates. `canonical_paths` is a
+`move_item`-only boolean, off by default (`plan/codec/canonical_paths.rs` refuses it on every other
+operation).
+
+## Output fidelity: caller imports, facade paths, doc links
+
+Three ways a `move_item` result is made to read as a hand edit, each with a test in
+`move_fidelity_acceptance`:
+
+- **A caller keeps its short qualifier.** A caller that reached the item through a one-segment module
+  qualifier bound by a `use` in its scope (`use crate::pairing; … pairing::f(..)`) gets the
+  destination's last segment bound with a new `use` and the qualifier rewritten to it
+  (`use crate::answers; … answers::f(..)`), not the full `crate::answers::f(..)` inlined. The old `use`
+  is left for the end-of-run tidy to prune when nothing else needs it. If the destination's last
+  segment is already taken in the caller's scope, today's full path is written and noted.
+- **A facade path in the moved text becomes the defining path** — behind `canonical_paths: true` (off
+  by default, so existing plans are unchanged). A `crate::config::Settings` where `crate::config` is a
+  `pub use kernel::config;` reads `kernel::config::Settings` in the destination. Every path met,
+  rewritten or left, is named in the run's notes; a path whose defining module is private is left as
+  written and noted. This reuses `crate_move`'s path survey, which is why `crate_move::survey` and
+  `crate_move::reexports` are `pub(crate)`.
+- **An intra-doc link to the moved item follows it.** A ``[`crate::pairing::f`]`` in a `///` or `//!`
+  line reads `crate::answers::f` after the move, for `move_item` and `reparent_module`. rust-analyzer
+  returns no reference for a doc link, so this is a text pass (`item_move/doc_links.rs`); prose,
+  fenced examples and `self::`/`super::`/bare links are left alone.
 
 ## `reexport: outside`
 
@@ -98,7 +124,8 @@ a generated workspace and a live rust-analyzer, with `assert_compiles_with_its_t
 `move_item_creates_module_acceptance`, `move_item_into_an_existing_module_acceptance`,
 `move_item_of_an_item_the_destination_imports_acceptance`, `move_item_outside_facade_acceptance`,
 `reparent_module_acceptance`, `reparent_module_beyond_the_basics_acceptance`,
-`reparent_module_through_the_old_parents_import_acceptance`, `same_crate_deep_check_acceptance` and
+`reparent_module_through_the_old_parents_import_acceptance`, `same_crate_deep_check_acceptance`,
+`move_fidelity_acceptance` and
 `anchors_package_relative_path`.
 
 ## Limits
