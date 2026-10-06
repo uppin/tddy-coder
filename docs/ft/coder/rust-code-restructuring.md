@@ -376,6 +376,18 @@ see dropped, or that module's declaration widened when the moved code names it).
 name in the moved text, so the copy is whole, and a **complete** run's [tidy](#the-tidy) removes the
 unused ones; a run stopped early leaves them as warnings and says so.
 
+**What a caller keeps, and what the moved text says.** A caller that reached the item through
+`use crate::old;` and wrote `old::f(…)` keeps that shape: the destination's last segment is imported
+and the call becomes `new::f(…)`, with the old `use` left for the tidy to prune. Every other qualifier
+form is written as the full destination path, and when the destination's last segment is already taken
+in the caller's scope the full path is kept and the run says why. `move_item` also takes an optional
+`canonical_paths: true` (off by default): a `crate::`-headed path in the moved text that goes through a
+`pub use` facade is respelled as the path that **defines** what it names, so the module can later leave
+its crate. A path whose defining module is not `pub` is left as written — it cannot be spelled from
+outside its crate — and so is a path inside a `use` item; every path met is named in the run's notes.
+An intra-doc link to a moved item (`` [`crate::old::f`] `` in a `///` or `//!` line, or a link to a
+moved module's item) follows the item after either operation; prose and fenced examples are untouched.
+
 **Gates.** `check --deep` resolves a move the way `apply` does and writes nothing; it hands the static
 preflight the lines the item anchor covers, so a well-formed item-anchored `move_item` plan is accepted
 there. A `reparent_module` moves files with `git mv`, so history follows.
@@ -826,5 +838,9 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   read, and such a package is misjudged. The facade for a module is exactly the module, so one outside
   caller of any item in it keeps the whole old path. The partition makes one manifest walk per distinct
   referring file, which a workspace with thousands of referring files pays once per file.
+- **Intra-doc links follow only the fully-qualified forms.** A `///` or `//!` link written `crate::…` or
+  with a crate name is respelled when its item moves; one written `self::…`, `super::…`, or as a bare or
+  module-relative name is left as written, because resolving it needs the file's own `use` set, which
+  this pass does not read. Prose and fenced code blocks are never touched.
 - Restructuring tests that start rust-analyzer are load-sensitive; run affected suites with `--test-threads=1` when binding a server.
 - Typed `tddy-lsp` assist methods are not yet first-class; restructuring uses `request_raw` / `notify_raw`.

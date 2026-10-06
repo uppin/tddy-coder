@@ -3,11 +3,13 @@
 //! A function of the original texts and of what the server said — the reference set of the module's
 //! name — so the assembly can be read, and tested, without a server.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use super::super::item_move::assemble::written_from_the_root;
 use super::super::item_move::bindings;
+use super::super::item_move::doc_links;
 use super::super::item_move::facade;
 use super::super::item_move::outside;
 use super::super::item_move::placement::vacated;
@@ -46,7 +48,7 @@ pub(super) struct Assembled {
 
 pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
     let survey = moving.survey;
-    let texts = original_texts(moving)?;
+    let mut texts = original_texts(moving)?;
     let landing = landing(
         moving.workspace,
         moving.request,
@@ -56,10 +58,19 @@ pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
     )?;
 
     let mut edits: BTreeMap<String, Vec<Edit>> = BTreeMap::new();
-    repoint_callers(moving, &texts, &mut edits)?;
+    let mut notes = repoint_callers(moving, &texts, &mut edits)?;
     rebase_the_moved_files(moving, &texts, &mut edits);
     leave_behind(moving, &landing, &mut edits);
     arrive(moving, &landing, &mut edits);
+    for (path, list) in doc_links::across_the_crate(
+        moving.workspace,
+        &moving.request.named.package,
+        &moved_module_paths(moving),
+        &mut texts,
+        Some((&survey.old_parent.file, survey.declaration.lines.clone())),
+    )? {
+        edits.entry(path).or_default().extend(list);
+    }
 
     let mut files = BTreeMap::new();
     for (path, mut list) in edits {
@@ -73,6 +84,10 @@ pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
             files.insert(path, (old, new));
         }
     }
+    notes.push(format!(
+        "{} file(s) move with the module, with the directory of its children",
+        survey.files.len()
+    ));
     Ok(Assembled {
         files,
         renames: survey
@@ -81,10 +96,7 @@ pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
             .map(|file| (file.from.clone(), file.to.clone()))
             .collect(),
         report: landing.report,
-        notes: vec![format!(
-            "{} file(s) move with the module, with the directory of its children",
-            survey.files.len()
-        )],
+        notes,
     })
 }
 
@@ -114,7 +126,7 @@ fn repoint_callers(
     moving: &Reparenting<'_>,
     texts: &BTreeMap<String, String>,
     edits: &mut BTreeMap<String, Vec<Edit>>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let to = &moving.survey.new_parent.path;
     let crate_name = &moving.request.named.package.crate_name;
     let qualifiers = Qualifiers {
@@ -130,6 +142,7 @@ fn repoint_callers(
         .iter()
         .map(|file| file.from.clone())
         .collect();
+    let sink = RefCell::new(Vec::new());
     let context = Context {
         root: moving.workspace.root,
         destination: &moving.survey.new_parent,
@@ -139,6 +152,7 @@ fn repoint_callers(
         region: ("", 0..0),
         moved_files: &moved,
         bound_by_the_facade: &BTreeSet::new(),
+        notes: &sink,
     };
     let files: BTreeSet<&String> = moving.sites.iter().map(|site| &site.path).collect();
     for path in files {
@@ -152,7 +166,7 @@ fn repoint_callers(
             .or_default()
             .extend(edits_for_file(&context, path, &texts[path], &here)?);
     }
-    Ok(())
+    Ok(sink.into_inner())
 }
 
 /// The relative paths in each moved file, kept meaning what they meant.
@@ -231,6 +245,30 @@ fn leave_behind(
             &survey.declaration.lines,
             &facade,
         ));
+}
+
+/// The moved module's old and new paths, in the two spellings a doc link may use: from the crate
+/// root (`crate::a::m`) and by the crate's extern name (`app::a::m`).
+fn moved_module_paths(moving: &Reparenting<'_>) -> Vec<(String, String)> {
+    let crate_name = moving.request.named.package.crate_name.as_str();
+    let mut new = moving.survey.new_parent.path.clone();
+    new.push(moving.request.name.clone());
+    let old = moving.request.module_path();
+    vec![
+        (written_from_the_root(&old), written_from_the_root(&new)),
+        (
+            named_from_the_root(crate_name, &old),
+            named_from_the_root(crate_name, &new),
+        ),
+    ]
+}
+
+/// `crate_name::a::b`, the spelling a file outside the crate writes.
+fn named_from_the_root(crate_name: &str, module: &[String]) -> String {
+    std::iter::once(crate_name)
+        .chain(module.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 /// The declaration, written into the new parent with the visibility it lands with.

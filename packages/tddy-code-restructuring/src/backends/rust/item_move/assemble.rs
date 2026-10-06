@@ -5,6 +5,7 @@
 //! tested, without a server. The bytes of the moved items are copied from the source range; only the
 //! tokens a move has to change inside them (a visibility, a relative path, a qualifier) are edited.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
@@ -12,6 +13,7 @@ use super::super::seam_refusal;
 use super::bindings;
 use super::canonical_paths;
 use super::destination::{Module, Package};
+use super::doc_links;
 use super::facade;
 use super::imports::{self, Source};
 use super::outline::{visibility_edit, Item, Run};
@@ -85,7 +87,15 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
     } else {
         BTreeSet::new()
     };
-    repoint_callers(moving, &texts, &region, &facade_names, &mut edits)?;
+    let mut notes = Vec::new();
+    repoint_callers(
+        moving,
+        &texts,
+        &region,
+        &facade_names,
+        &mut edits,
+        &mut notes,
+    )?;
 
     let moved_names: BTreeSet<String> = moving
         .run
@@ -93,7 +103,6 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
         .iter()
         .map(|item| item.name.clone())
         .collect();
-    let mut notes = Vec::new();
     let moved = moved_text(
         moving,
         &region,
@@ -105,6 +114,16 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
     let destination_edits = into_destination(moving, &mut texts, &moved_names, &moved, &mut notes)?;
     for (path, edit) in destination_edits {
         edits.entry(path).or_default().push(edit);
+    }
+    let pairs = moved_paths(moving);
+    for (path, list) in doc_links::across_the_crate(
+        moving.workspace,
+        moving.package,
+        &pairs,
+        &mut texts,
+        Some((moving.source_file, region.clone())),
+    )? {
+        edits.entry(path).or_default().extend(list);
     }
     edits
         .entry(moving.source_file.to_string())
@@ -286,6 +305,7 @@ fn repoint_callers(
     region: &Range<usize>,
     facade_names: &BTreeSet<String>,
     edits: &mut BTreeMap<String, Vec<Edit>>,
+    notes: &mut Vec<String>,
 ) -> Result<()> {
     let to = &moving.destination.path;
     let qualifiers = Qualifiers {
@@ -295,6 +315,7 @@ fn repoint_callers(
             .collect::<Vec<_>>()
             .join("::"),
     };
+    let sink = RefCell::new(Vec::new());
     let context = Context {
         root: moving.workspace.root,
         destination: moving.destination,
@@ -304,6 +325,7 @@ fn repoint_callers(
         region: (moving.source_file, region.clone()),
         moved_files: &[],
         bound_by_the_facade: facade_names,
+        notes: &sink,
     };
     let files: BTreeSet<&String> = moving.sites.iter().map(|site| &site.path).collect();
     for path in files {
@@ -317,6 +339,7 @@ fn repoint_callers(
             .or_default()
             .extend(edits_for_file(&context, path, &texts[path], &here)?);
     }
+    notes.extend(sink.into_inner());
     Ok(())
 }
 
@@ -366,9 +389,10 @@ fn moved_text(
         })
         .collect();
     let mut shifted = shifted;
+    // In the coordinates of the lines themselves, as the edits just above are.
+    let text = &moving.source_text[region.clone()];
+    shifted.extend(doc_links::edits(text, &moved_paths(moving)));
     if moving.canonical_paths {
-        // In the coordinates of the lines themselves, as the edits just above are.
-        let text = &moving.source_text[region.clone()];
         let claimed: Vec<Range<usize>> = landing
             .claimed
             .iter()
@@ -379,7 +403,37 @@ fn moved_text(
         shifted.extend(rewritten.edits);
         notes.extend(rewritten.notes);
     }
-    applied(&moving.source_text[region.clone()], &shifted)
+    applied(text, &shifted)
+}
+
+/// The old and new paths of every moved item, each in the two spellings a doc link may use: from the
+/// crate root (`crate::a::f`) and by the crate's extern name (`app::a::f`).
+fn moved_paths(moving: &Moving<'_>) -> Vec<(String, String)> {
+    let crate_name = moving.package.crate_name.as_str();
+    let mut pairs = Vec::new();
+    for item in &moving.run.items {
+        let crate_old = format!("{}::{}", written_from_the_root(moving.source), item.name);
+        let crate_new = format!(
+            "{}::{}",
+            written_from_the_root(&moving.destination.path),
+            item.name
+        );
+        pairs.push((crate_old, crate_new));
+        pairs.push((
+            named_from_the_root(crate_name, moving.source, &item.name),
+            named_from_the_root(crate_name, &moving.destination.path, &item.name),
+        ));
+    }
+    pairs
+}
+
+/// `crate_name::a::b::name`, the spelling a file outside the crate writes.
+fn named_from_the_root(crate_name: &str, module: &[String], name: &str) -> String {
+    std::iter::once(crate_name)
+        .chain(module.iter().map(String::as_str))
+        .chain(std::iter::once(name))
+        .collect::<Vec<_>>()
+        .join("::")
 }
 
 /// What stands where the lines were: nothing, or the facade that keeps the old path resolving.

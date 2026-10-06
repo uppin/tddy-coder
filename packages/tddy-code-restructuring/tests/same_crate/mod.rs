@@ -13,6 +13,8 @@
 
 #![allow(dead_code)]
 
+use std::sync::Arc;
+
 use tddy_code_restructuring::runner::RunSummary;
 use tddy_code_restructuring::{Anchor, RefactorOp};
 
@@ -248,8 +250,13 @@ pub async fn moving_items_with_canonical_paths(
     a_run_of_its_own(workspace);
     let plan = workspace.a_plan_of(&[a_move_item_asking_for_canonical_paths_op(&anchor, to)]);
     let (progress, heard) = a_sink_that_keeps_what_it_hears();
-    let outcome =
-        applying_the_plan_with(workspace, plan, |options| options.progress = progress).await;
+    let outcome = applying_the_plan_with(workspace, plan, |options| {
+        // A note is a line of the run's *account*, not of its indexing progress: listen on both so
+        // every line the run reports is kept.
+        options.account = Arc::clone(&progress);
+        options.progress = progress;
+    })
+    .await;
     let lines = heard.lock().expect("the lines are readable").clone();
     (outcome, lines)
 }

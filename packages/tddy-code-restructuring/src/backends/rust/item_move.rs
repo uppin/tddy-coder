@@ -17,6 +17,7 @@ pub(super) mod bindings;
 mod canonical_paths;
 mod creation;
 pub(super) mod destination;
+pub(super) mod doc_links;
 pub(super) mod facade;
 mod imports;
 mod outline;

@@ -174,14 +174,14 @@ Real dependency edges (whole stack): `tidy-engine-files -> plan-header, retarget
 ## Scope
 
 - [x] **M1 probe (B3)**: run 2026-10-05; the answer is recorded under Decisions (P1): rust-analyzer returns no doc-link position, so B3 takes the text-pass route.
-- [ ] **B1**: module-qualified callers keep their qualifier and gain an import (in `sites.rs`).
+- [x] **B1**: module-qualified callers keep their qualifier and gain an import (in `sites.rs`).
 - [x] **Field and literals (M0)**: `RefactorOp.canonical_paths` and `canonical_paths: false` on the 20 full struct literals in 15 files, `cargo check --all-targets`, first commit
 - [x] **Resolver reachable**: `pub(crate) mod survey;` and `pub(crate) mod reexports;` (2 lines in `crate_move.rs`).
-- [ ] **B2**: `canonical_paths` (a plan field, off by default) rewrites a facade path in the moved text to its defining path and reports every path rewritten or left.
-- [ ] **B3**: an intra-doc link to a moved item follows it, for `move_item` and `reparent_module` (route per the probe).
-- [ ] **Tests**: the acceptance tests below, red first; a new binary `move_fidelity_acceptance` registered in `.config/rust-e2e.filterset` and the `rust-analyzer` group of `.config/nextest.toml`.
-- [ ] **Docs**: `plan-schema.md`, the feature doc; package docs at wrap; the three branch-only todos handled at wrap.
-- [ ] **Gate**: scoped baseline held (`./test -p tddy-code-restructuring`), clippy `-D warnings` and `cargo fmt --check` on the package, the dependents' `cargo check --all-targets`.
+- [x] **B2**: `canonical_paths` (a plan field, off by default) rewrites a facade path in the moved text to its defining path and reports every path rewritten or left.
+- [x] **B3**: an intra-doc link to a moved item follows it, for `move_item` and `reparent_module` (route per the probe).
+- [x] **Tests**: the acceptance tests below, red first; a new binary `move_fidelity_acceptance` registered in `.config/rust-e2e.filterset` and the `rust-analyzer` group of `.config/nextest.toml`.
+- [~] **Docs**: `plan-schema.md` and the feature doc edited here; package docs at wrap; the three branch-only todos handled at wrap.
+- [x] **Gate**: scoped baseline held (`./test -p tddy-code-restructuring`), clippy `-D warnings` and `cargo fmt --check` on the package, the dependents' `cargo check --all-targets`.
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -342,7 +342,7 @@ Every name reads as a behaviour. Fixture: `an_app_holding` (`app`) unless stated
 
   **Literal count, measured** on `a77bca29` — `git grep -n 'RefactorOp {' -- packages | wc -l` prints 80; reading each brace body, 2 are definitions, 41 are function signatures, 17 end in `..base` (struct update, no edit) and **20 are full struct literals in 15 files**; cross-check `git grep -n 'order: Vec::new()' -- packages/tddy-code-restructuring | wc -l` prints 20 in 15 files. The earlier "80 in 22 files" counted every textual match. Per the developer's decision on `RefactorOp` fields (pay as you go; recorded in `tidy-engine-files` D7), these 20 edits are this node's **own first commit** (M0), checked with `cargo check -p tddy-code-restructuring --all-targets`.
 
-- **O3 (DECIDED with O1, developer-approved 2026-10-05; the approval's own wording is "a path whose defining module is private to its crate is left as written and noted") — what B2 does when the defining module is not nameable from the destination.** `followed` ignores visibility (`pub use inner::Thing;` over a private `mod inner;`). Chosen: read the `mod` visibilities along `defined_at` (in the defining crate's own sources, as `source_scan` already reads `mod` declarations) and leave the path as written, with a note, when any is not `pub` (about 40 lines). The test `leaves_a_facade_path_as_written_when_the_defining_module_is_private_and_says_so` is written for it. **Still to verify at M4 before committing to the 40 lines:** whether `source_scan` exposes a `mod`'s visibility (read it first). If it does not, say so and ask: that would change the cost, not the decision.
+- **O3 (DECIDED with O1, developer-approved 2026-10-05; the approval's own wording is "a path whose defining module is private to its crate is left as written and noted") — what B2 does when the defining module is not nameable from the destination.** `followed` ignores visibility (`pub use inner::Thing;` over a private `mod inner;`). Chosen: read the `mod` visibilities along `defined_at` (in the defining crate's own sources, as `source_scan` already reads `mod` declarations) and leave the path as written, with a note, when any is not `pub` (about 40 lines). The test `leaves_a_facade_path_as_written_when_the_defining_module_is_private_and_says_so` is written for it. **Verified at M4 (green, 2026-10-06):** `source_scan` did **not** expose a `mod`'s visibility — `ChildModule` carried only `name` and `body`. The cost O3 anticipated was paid: `ChildModule` gained `is_public` (plain `pub mod`, populated from the token before the keyword), and `canonical_paths.rs` walks `defined_at`'s modules in the defining crate's own sources, leaving the path as written when any is not `pub`. This is the one file O3 did not name; it changes no existing reading (a new field only).
 
 **Settled by this plan (reversible; say if you disagree):**
 - **D2 — the resolver is `survey_moved_file`, not `followed` alone.** `survey_moved_file` already resolves every path in a text through `followed` and returns spans (`site`); only the two `mod` lines are private. `followed` is widened too (the brief) but has no consumer here.
