@@ -145,15 +145,15 @@ None. No later node consumes this surface.
 
 **High-level deliverables tracking progress throughout development:**
 
-- [ ] **Header from anchors**: `plan/codec/headerless.rs` with the tolerant read and `header_for_anchored_files`
-- [ ] **`snapshot` inserts the header** above an operation first line; operation bytes untouched; idempotent
-- [ ] **`snapshot_resolving`** reaches `snapshot` for a headerless plan (one-line change)
-- [ ] **Refusal text** of every other reader names `restructure snapshot`
-- [ ] **Routing pinned**: CLI starts no server and dials no daemon; the daemon holds no root for it
-- [ ] **Refusals**: anchored file missing, anchored file outside the workspace, first line neither header nor operation
+- [x] **Header from anchors**: `plan/codec/headerless.rs` with the tolerant read and `header_for_anchored_files`
+- [x] **`snapshot` inserts the header** above an operation first line; operation bytes untouched; idempotent
+- [x] **`snapshot_resolving`** reaches `snapshot` for a headerless plan (one-line change)
+- [x] **Refusal text** of every other reader names `restructure snapshot`
+- [x] **Routing pinned**: CLI starts no server and dials no daemon; the daemon holds no root for it
+- [x] **Refusals**: anchored file missing, anchored file outside the workspace, first line neither header nor operation
 - [ ] **Package documentation**: plan format (`rust-code-restructuring.md`, `plan-schema.md`, SKILL.md step 6, README `snapshot` line) at wrap
-- [ ] **Testing**: the thirteen acceptance tests pass; `./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon`, scoped
-- [ ] **Code quality**: `cargo clippy -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon --all-targets -- -D warnings`, `cargo fmt`, `plan/codec.rs` <= 500 production lines
+- [x] **Testing**: the thirteen acceptance tests pass; `./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon`, scoped
+- [x] **Code quality**: `cargo clippy -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon --all-targets -- -D warnings`, `cargo fmt`, `plan/codec.rs` <= 500 production lines
 - [ ] **Stack bookkeeping**: the whole-work todo for this entry removed at wrap by whichever of #532 and this PR lands second
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -245,12 +245,12 @@ All refusals leave the plan file byte-identical. Every refusal is raised **befor
 
 ## Implementation milestones
 
-- [ ] **M1** Library: `Plan::starts_with_an_operation`, `parse_headerless`, `header_for_anchored_files`; `snapshot` inserts; tests 1-6 and 9 pass (written first, failing)
-- [ ] **M2** `snapshot_resolving` reaches `snapshot` for a headerless plan; test 7 passes
-- [ ] **M3** The refusal text of the other readers names the remedy; tests 8 and 12 pass
-- [ ] **M4** CLI and daemon routing pinned: tests 10 and 11 (CLI, with and without a named socket) and 13 (daemon) pass
+- [x] **M1** Library: `Plan::starts_with_an_operation`, `parse_headerless`, `header_for_anchored_files`; `snapshot` inserts; tests 1-6 and 9 pass (written first, failing)
+- [x] **M2** `snapshot_resolving` reaches `snapshot` for a headerless plan; test 7 passes
+- [x] **M3** The refusal text of the other readers names the remedy; tests 8 and 12 pass
+- [x] **M4** CLI and daemon routing pinned: tests 10 and 11 (CLI, with and without a named socket) and 13 (daemon) pass
 - [ ] **M5** Docs staged for wrap (plan format, SKILL.md step 6, README); changeset Scope and `docs/dev/1-WIP/` note the todo removal at wrap
-- [ ] **M6** Scoped gate: `./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon`; clippy and fmt on the three; `plan/codec.rs` production lines <= 500 (`restructure check --budget 500` over the file, run once at the end)
+- [x] **M6** Scoped gate: `./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon`; clippy and fmt on the three; `plan/codec.rs` production lines <= 500 (`restructure check --budget 500` over the file, run once at the end)
 
 ## Testing plan
 
@@ -329,7 +329,13 @@ Test 9's final assertion (`snapshot mismatch` from a later `check`) is not yet r
 
 ## Technical Debt & Production Readiness
 
-(empty; populated during development)
+- **Boundary note (green, 2026-10-07).** The green commit also carries a one-hunk mechanical
+  `rustfmt` reformat of `src/runner/compile_gate.rs`, a file outside this node's surface. The
+  offending line is node 4's (`f10d2210`), and the base branch is `cargo fmt --all -- --check`-red
+  because of it (verified: clean on `master`, red on `feature/sharpen/apply-heartbeat`). Keeping the
+  reformat is what makes this branch fmt-clean for CI (`.github/workflows/ci.yml:74`). Zero
+  behaviour; the change is byte-identical to what `cargo fmt` produces. Node 4 owns the same fix at
+  its source — this is a carry, not a claim on that file.
 
 ## Decisions & Trade-offs
 
@@ -408,7 +414,7 @@ Decisions taken by this plan (a reviewer can check them):
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring -p tddy-tools -p tddy-index-daemon`) — verify 100% pass; CI answers for the rest of the workspace
