@@ -416,9 +416,9 @@ fn the_cli_verifying(workspace: &Path, extra: &[&str]) -> (Vec<String>, bool) {
 }
 
 /// The lines `tddy-tools` renders for a daemon's verify answer: the shared renderer over the answer's
-/// own counts.
+/// own counts, and the refusal line a comparison that does not hold adds after them.
 fn the_lines_of(answer: &tddy_index_daemon::proto::code_index::VerifyResponse) -> Vec<String> {
-    tddy_code_restructuring::console::comparison(&tddy_code_restructuring::verify::Comparison {
+    let comparison = tddy_code_restructuring::verify::Comparison {
         before: answer.before as usize,
         after: answer.after as usize,
         missing: answer.missing.clone(),
@@ -428,7 +428,14 @@ fn the_lines_of(answer: &tddy_index_daemon::proto::code_index::VerifyResponse) -
             visibility: answer.visibility_normalised as usize,
             cfg_test_gates: answer.cfg_test_gates as usize,
         },
-    })
+    };
+    let mut lines = tddy_code_restructuring::console::comparison(&comparison);
+    if !comparison.holds() {
+        lines.push(tddy_code_restructuring::console::comparison_refusal(
+            &comparison,
+        ));
+    }
+    lines
 }
 
 /// A verify of `workspace` against `HEAD`, put to the served daemon at `port` with `retargets`.
