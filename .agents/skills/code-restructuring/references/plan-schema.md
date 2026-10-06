@@ -210,6 +210,7 @@ ordinary comments arrive as they were.
 | `to` | the destination module, which must exist. With `name`: its **parent** | the new parent, which must exist and have a file of its own (an inline new parent is refused) |
 | `name` | creates a new, empty module `name` in `to` before the items arrive: `<parent dir>/<name>.rs`, declared with the narrowest visibility the callers and the facade need. The parent may be a `<parent>.rs`, a `<parent>/mod.rs` or the crate root | refused: `reparent_module` creates nothing |
 | `reexport` | `glob` leaves `pub use <destination>::*;` where the items were; `named` leaves one grouped `pub use` per visibility naming the moved items; neither re-points a caller. `none` or absent **re-points every caller** found by the server. `outside`: see below | `glob` leaves `pub use <new parent>::<module>;` (at the module's old visibility) in the old parent and re-points nothing; `none` or absent re-points every caller; `named` is refused, because a module has no items of its own to list. `outside`: see below |
+| `canonical_paths` | `true` spells a `crate::`-headed path in the moved text as the path that **defines** what it names, and names every path rewritten or left in the run's notes; off by default (absent means the moved text travels as written) | refused: `reparent_module` carries whole files and runs no moved-text pass |
 
 **`none` means a different thing here than in `extract_module`.** There it refuses when another file
 names the items; a move exists to give them a new home with their callers following, so here it
@@ -250,6 +251,27 @@ from the crate root, anything the destination already binds left out, a module t
 see dropped or its declaration widened), and a trait import has no name in the moved text, so the copy
 is whole. A **complete** run's tidy removes the unused ones; a run stopped early with `--stop-after`
 leaves them as `unused_imports` warnings, and says so in its notes.
+
+**What a caller keeps.** A caller that reached the item through `use crate::old;` and wrote
+`old::f(…)` keeps that shape: the destination's last segment is imported (`use crate::new;`) and the
+call is rewritten to `new::f(…)`, with the old `use` left for the tidy to prune when nothing else
+needs it. Every other qualifier form (`crate::…`, `super::…`, `self::…`, two or more segments) is
+written as the full destination path, as before. When the destination's last segment is already taken
+in the caller's scope by a module or item of its own, the call keeps the full path and the run says
+why in its notes.
+
+**`canonical_paths`** (optional, `move_item` only, off by default) spells a `crate::`-headed path in
+the moved text as the path that **defines** what it names: a `crate::config::Settings` that goes
+through `pub use kernel::config;` reads `kernel::config::Settings`, so the module can later leave its
+crate. A path whose defining module is not `pub` is left as written — it cannot be spelled from
+outside its crate — and so is a path inside a `use` item (splitting a grouped `use` is a separate
+concern). Every path the pass met, rewritten or left, is named in the run's notes. The field is
+refused on any operation other than `move_item`, and off, a plan keeps its result byte for byte.
+
+**Intra-doc links follow the item.** A `` [`crate::old::f`] `` link in a `///` or `//!` line is
+respelled to the item's new path after a `move_item` or a `reparent_module`; a link to a moved
+module's item (`` [`crate::host::attachments::materialize`] ``) follows the module's new parent.
+Prose and fenced code blocks are left alone, and a `self::`/`super::` or bare link is left as written.
 
 `reparent_module` moves the module's file and every file its `mod` declarations lead to with `git mv`
 (`<parent>.rs` and `<parent>/mod.rs` forms on both ends), moves the `mod` declaration with its

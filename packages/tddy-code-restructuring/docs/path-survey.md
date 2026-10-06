@@ -3,10 +3,10 @@
 How a cross-crate move learns what the moved file names. The product contract is
 [Rust code restructuring](../../../docs/ft/coder/rust-code-restructuring.md#path-survey).
 
-## One reading, three consumers
+## One reading, four consumers
 
 `crate_move::survey::survey_moved_file` reads a moved file once, before any edit, and returns a
-`PathSurvey`. Three things are derived from it and from nothing else, so they cannot disagree about
+`PathSurvey`. Four things are derived from it and from nothing else, so they cannot disagree about
 what the file names:
 
 | Consumer | Reads | Writes |
@@ -14,6 +14,7 @@ what the file names:
 | `header::repointed_header` | every surveyed path | the edits that re-point each path, headers and bodies; the crates the file names; the edges back to the origin |
 | `refusals::refuse_a_dependency_cycle` | the edges | the cycle refusal, listing every path that forced it |
 | `moving::Move::destination_manifest` | the crates named, split by `#[cfg(test)]` | `[dependencies]` and `[dev-dependencies]` lines, copied from the origin's manifest |
+| `item_move::canonical_paths` (through `crate_move::survey`, now `pub(crate)`) | each `crate::`-headed path whose `defined_at` differs from what is written | the rewritten moved text, and a note naming every path rewritten or left |
 
 `move_cluster_to_crate` surveys each member and passes the set of co-moving members, so a path reaching
 a sibling that travels with it is `crate::`, not an edge. `check` reads the survey too, through

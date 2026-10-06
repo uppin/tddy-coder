@@ -14,6 +14,9 @@ pub(crate) struct ChildModule {
     pub(crate) name: String,
     /// The span between an inline module's braces; `None` for `mod name;`.
     pub(crate) body: Option<Range<usize>>,
+    /// Whether it is written plain `pub mod`, which is what makes it nameable from another crate.
+    /// `pub(crate)`, `pub(super)`, `pub(in …)` and no visibility at all all read as not `pub`.
+    pub(crate) is_public: bool,
 }
 
 /// What a module's own text declares at its top level.
@@ -61,6 +64,8 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
                         items.children.push(ChildModule {
                             name: name.to_string(),
                             body,
+                            // Plain `pub`: a `pub(…)` writes `)` right before the keyword.
+                            is_public: at > 0 && scan.ident(at - 1) == Some("pub"),
                         });
                     }
                 }

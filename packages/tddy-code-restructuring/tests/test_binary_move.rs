@@ -123,6 +123,7 @@ fn refuses_an_anchor_that_is_not_a_test_binary() {
         type_: None,
         expr: None,
         order: Vec::new(),
+        canonical_paths: false,
     };
 
     // When the move is read
@@ -244,6 +245,7 @@ fn a_move_of(source: &str, to: &str) -> tddy_code_restructuring::RefactorOp {
         type_: None,
         expr: None,
         order: Vec::new(),
+        canonical_paths: false,
     }
 }
 

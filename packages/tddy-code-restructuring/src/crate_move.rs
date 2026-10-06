@@ -281,13 +281,13 @@ pub(crate) use refusals::*;
 
 mod header;
 
-mod reexports;
+pub(crate) mod reexports;
 
 pub(crate) mod source_scan;
 
 pub(crate) mod module_files;
 
-mod survey;
+pub(crate) mod survey;
 
 mod module_home;
 pub use module_home::*;
@@ -447,6 +447,7 @@ mod tests {
             type_: None,
             expr: None,
             order: Vec::new(),
+            canonical_paths: false,
         }
     }
 

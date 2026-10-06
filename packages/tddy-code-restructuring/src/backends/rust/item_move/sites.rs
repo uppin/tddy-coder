@@ -5,6 +5,7 @@
 //! this reads is only the *shape* around each reported position: whether it ends a `use` item, a
 //! qualified path, or stands alone.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::path::Path;
@@ -15,6 +16,7 @@ use super::destination::Module;
 use super::text::{
     enclosing_modules, qualifier_start, scope_of, split_use, use_insertion, use_statements, Edit,
 };
+use crate::crate_move::source_scan::items_of_module;
 use crate::item_anchor::module_path_of;
 use crate::Result;
 
@@ -49,6 +51,9 @@ pub(in crate::backends::rust) struct Context<'a> {
     /// of one there needs no import of its own: the facade already brings it into scope, and a
     /// second binding of the name is `E0252`.
     pub(in crate::backends::rust) bound_by_the_facade: &'a BTreeSet<String>,
+    /// The run's account, for a qualifier this pass had to leave as today's full path (the
+    /// destination's name is already taken in the site's scope).
+    pub(in crate::backends::rust) notes: &'a RefCell<Vec<String>>,
 }
 
 impl Context<'_> {
@@ -208,7 +213,7 @@ fn starts_a_path(masked: &str, site: &Site) -> bool {
     masked[site.offset + site.name.len()..].starts_with("::")
 }
 
-/// The edit that points the qualifier written in front of `site` at the new home, or none when the
+/// The edits that point the qualifier written in front of `site` at the new home, or none when the
 /// code moves and the qualifier still reaches the same place.
 ///
 /// Only a qualifier can be re-pointed: a name that starts its path has nothing in front of it to
@@ -219,7 +224,7 @@ fn requalified(
     text: &str,
     site: &Site,
     qualifier: &str,
-) -> Result<Option<Edit>> {
+) -> Result<Vec<Edit>> {
     let start = qualifier_start(text, site.offset);
     if start == site.offset {
         return Err(seam_refusal(format!(
@@ -230,12 +235,84 @@ fn requalified(
     }
     let written = &text[start..site.offset];
     if context.keeps_its_qualifier(path, site.offset, written) {
-        return Ok(None);
+        return Ok(Vec::new());
     }
-    Ok(Some(Edit::replace(
+    if let Some(kept) = short_form(context, path, text, site, written, qualifier) {
+        return Ok(kept);
+    }
+    Ok(vec![Edit::replace(
         start..site.offset,
         format!("{qualifier}::"),
-    )))
+    )])
+}
+
+/// The edits that keep a one-segment module qualifier: the site reached the moved name as
+/// `module::name` through a `use` in its scope, so it keeps that shape — the destination's last
+/// segment is bound with a new `use`, and the qualifier rewritten to it. The old `use` is left for
+/// the unused-import tidy to prune when nothing else needs it.
+///
+/// `None` when today's full path stands: the written qualifier is not a `use`-bound module, or the
+/// destination's last segment is already taken in the scope by something else (which is named in
+/// the notes, so the reader sees why the long path is there).
+///
+/// This is the item move's shape only: a `reparent_module` caller qualifies the module by its old
+/// parent, which the full destination path re-points as it always did, so a module move (whose files
+/// are carried whole) keeps its behaviour here.
+fn short_form(
+    context: &Context<'_>,
+    path: &str,
+    text: &str,
+    site: &Site,
+    written: &str,
+    qualifier: &str,
+) -> Option<Vec<Edit>> {
+    if !context.moved_files.is_empty() {
+        return None;
+    }
+    let module = written.strip_suffix("::")?;
+    if module.is_empty() || module.contains("::") {
+        return None;
+    }
+    let scope = scope_of(text, &enclosing_modules(text, site.offset))?;
+    let items = items_of_module(&text[scope.clone()]);
+    if !items
+        .uses
+        .iter()
+        .any(|leaf| leaf.bound_name() == Some(module))
+    {
+        return None;
+    }
+    let last = qualifier.rsplit("::").next()?;
+    let already = items
+        .uses
+        .iter()
+        .any(|leaf| leaf.bound_name() == Some(last) && leaf.segments.join("::") == qualifier);
+    let taken = items
+        .uses
+        .iter()
+        .any(|leaf| leaf.bound_name() == Some(last))
+        || items.children.iter().any(|child| child.name == last)
+        || items.defined.iter().any(|defined| defined == last);
+    if !already && taken {
+        context.notes.borrow_mut().push(format!(
+            "`{last}` is already in scope in {path}, so the call to `{}` keeps the full path \
+             `{qualifier}`",
+            site.name
+        ));
+        return None;
+    }
+
+    let start = qualifier_start(text, site.offset);
+    let mut edits = vec![Edit::replace(start..site.offset, format!("{last}::"))];
+    if !already {
+        let (at, blank) = use_insertion(text, scope);
+        let mut line = format!("use {qualifier};\n");
+        if blank {
+            line.push('\n');
+        }
+        edits.push(Edit::insert(at, line));
+    }
+    Some(edits)
 }
 
 /// The `use` item `statement`, written again with the names that moved pointing at their new home.

@@ -426,10 +426,12 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     }
 
     signature_fields::refuse_a_signature_operation_it_cannot_honour(&op)?;
+    canonical_paths::refuse_canonical_paths_outside_move_item(&op)?;
 
     Ok(op)
 }
 
+mod canonical_paths;
 mod file_hint;
 mod groups;
 mod signature_fields;

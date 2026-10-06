@@ -892,6 +892,7 @@ mod tests {
             type_: None,
             expr: None,
             order: Vec::new(),
+            canonical_paths: false,
         }
     }
 
