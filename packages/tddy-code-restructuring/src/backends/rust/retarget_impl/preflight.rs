@@ -54,14 +54,14 @@ pub(super) fn findings(op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec
 }
 
 /// A `to_type` read apart: the package it is rooted at, the module path below it, and the type.
-struct ToType {
-    package: String,
-    module: Vec<String>,
-    name: String,
+pub(super) struct ToType {
+    pub(super) package: String,
+    pub(super) module: Vec<String>,
+    pub(super) name: String,
 }
 
 impl ToType {
-    fn parse(text: &str) -> Option<ToType> {
+    pub(super) fn parse(text: &str) -> Option<ToType> {
         let segments: Vec<&str> = text.split("::").map(str::trim).collect();
         let (package, rest) = segments.split_first()?;
         let (name, module) = rest.split_last()?;
@@ -75,7 +75,7 @@ impl ToType {
     }
 
     /// The path `to_type` names without its last segment, as a reader writes it.
-    fn module_path(&self) -> String {
+    pub(super) fn module_path(&self) -> String {
         std::iter::once(self.package.as_str())
             .chain(self.module.iter().map(String::as_str))
             .collect::<Vec<_>>()
