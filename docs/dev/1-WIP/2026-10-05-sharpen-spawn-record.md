@@ -604,7 +604,18 @@ Engine `spawn_record_acceptance` (10 of 10), `every_spawn_is_recorded` (1), unit
 ## Validation Results
 
 ### @validate-changes
-*(empty)*
+**2026-10-06 — clean.** Stack gate: base is now `master` (move-fidelity #589 merged and the branch
+was repointed); the branch contains `origin/master` and the leak check is clean (this PR's four
+commits only). Build: the three touched packages build clean. Boundaries held — no `plan/codec.rs`,
+`item_anchor.rs`, `item_move/*`, `crate_move/*`, `readiness.rs`, `warm.rs`, `graph.rs` or
+`1-OVERVIEW.md` change, and no deletions. Nothing from `## Dependencies` (empty edge list) is
+implemented here. No `TODO(spawn-record)` remains; no print macros and no `unwrap`/`expect` in the
+new production code. Scoped tests: engine `spawn_record_acceptance` 10/10, `every_spawn_is_recorded`
+1/1, `redact::redacted_cases` 1/1, `tddy-lsp` `spawn_observer_test` 3/3, daemon
+`spawn_record_acceptance` 3/3, `library_returns_its_results` 6/6, `apply_compile_gate_acceptance`
+5/5, `apply_tidy_acceptance` 4/4; `cargo clippy … --all-targets -- -D warnings` clean; `cargo fmt
+--check` clean. The two `#[ignore]`d production tests in `detached_daemon_production.rs` are **not
+run** here (they need the dev shell and a real build); the script they exercise is implemented.
 
 ### @validate-tests
 *(empty)*
