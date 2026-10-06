@@ -343,7 +343,7 @@ Decisions taken by this plan: no `RefactorOp` field; the op starts no server; no
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
