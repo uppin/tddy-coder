@@ -15,7 +15,7 @@ mod rewrite;
 use serde_json::Value;
 
 use super::item_move::text::{applied, line_start, use_insertion, Edit};
-use super::{seam_refusal, seam_survey, uri_of, RustBackend};
+use super::{failure, seam_refusal, seam_survey, uri_of, RustBackend};
 use crate::edit::{FileEdit, Range, Resolution, WorkspaceEdit};
 use crate::item_anchor::{span_of, unlowered_item_anchor};
 use crate::plan::{Anchor, RefactorOp};
@@ -56,6 +56,11 @@ impl RustBackend {
     ) -> Result<Resolution> {
         let file = op.anchor.file();
         let text = workspace.read(file)?;
+        // The static findings are re-run here, before any server, so `apply` refuses a plan a plain
+        // `check` would have reported — the parity every static preflight in this backend holds.
+        if let Some(finding) = preflight::findings(op, workspace)?.into_iter().next() {
+            return Err(failure(finding));
+        }
         if let Some(reason) = deferred_delegator(op) {
             return Err(crate::RestructureError::UnsupportedOp {
                 backend: reason,
