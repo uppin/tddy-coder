@@ -433,9 +433,48 @@ todo's ✅ verdict holds and its file is deleted at wrap.
 - **D6** — no headroom floor beyond 500; the three measured numbers are the record.
 
 ### Change Validation (@validate-changes)
+
+2026-10-06, base `d6b369b7`. Stack root: `/pr-stack-rebase` is verify-and-return — the branch is on
+`origin/master`'s tip and `origin/master..HEAD` lists this PR's five commits only (leak check clean).
+
+- **Files** — exactly the three sources, four children, the code-issue record and this node's two
+  documents; no consumer file changed, no unplanned deletion (C4).
+- **Build** — `cargo build -p tddy-code-restructuring` clean (23s).
+- **Stack boundary** — `## Responsibility` delivered (three files at 333/455/458, all facades in
+  place); no `## Dependencies` (root); `## Boundaries` held (no behaviour change, engine moves only,
+  no new test, no new crate edge); no dependent's surface in the diff; parent-owned files intact.
+- **Stubs / markers** — no `unimplemented!`/`todo!`/`unwrap()` in the four children; the only new
+  markers are the three recorded `TODO(sharpen)` lint corrections. The pre-existing `TODO`/`FIXME` in
+  `plan_store/live/fold.rs`, `plan/refactor_kind.rs:181` (moved verbatim with `RefactorKind`),
+  `backends/rust.rs` and `crate_move/header.rs` are unchanged.
+
+**Risk: Critical 0 · Warning 0 · Info 0.** No refactoring required.
+
 ### Test Validation (@validate-tests)
+
+No test code changed. Every diff hunk in the three source files is above that file's `#[cfg(test)]`
+module — `plan.rs` hunks end at base line 504 (module opens at 521), `item_anchor.rs` at 141 (module
+opens at 518), `plan/codec.rs` has no test module — and the four children are production only. The
+moved items are covered by the existing suite, unchanged by name (C2: 1,136 passed, the M0 set). No
+new test, no `#[ignore]`/`.skip`/`.only`, no description-body drift. **Nothing to refactor.**
 ### Production Readiness (@prod-ready)
+
+Changed production files: the three sources and four children. No `mock`/`fake`/`stub`/`spy`, no dev
+fallback, no `println!`/`eprintln!`/`dbg!`, no `HACK`/`WORKAROUND`/`XXX`. The only new markers are the
+three `TODO(sharpen)` lint corrections, each pointing at this changeset's Technical debt (documented
+debt, acceptable). No unused code — `cargo clippy -p tddy-code-restructuring --all-targets -- -D
+warnings` is clean; `cargo build -p tddy-code-restructuring` and the suite are green.
+
+**✅ Ready — 0 blockers, 0 warnings.**
 ### Code Quality (@analyze-clean-code)
+
+Changed non-test files: the three sources and four children, all at or under 500 production lines (the
+length gate above). The change is a **verbatim move** — no function body, signature or name changed —
+so function length, nesting, parameter count, magic values and duplication are exactly what they were
+at the base, where each moved item was already within the 150-line function budget (changeset
+Boundaries). No new function, constant or duplication is introduced.
+
+**Score: A** — 0 must-refactor, 0 needs-attention.
 
 ## Successor PRs
 
