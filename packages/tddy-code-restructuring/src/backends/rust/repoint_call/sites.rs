@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::super::early_return::masked_to_code;
+use super::super::item_move::sites::Site;
 use super::super::signature_rewrites::{edits_of, Replacement, Span};
 use super::super::{
     failure, lsp_edits, seam_refusal, server_defect, uri_of, LspPoint, RustBackend,
@@ -57,60 +58,13 @@ pub(super) fn repoint_receivers(
     let position = lsp_edits::lsp_position(*start);
     let sites = backend.sites_of(&uri, workspace, file, &text, &[(name.as_str(), &position)])?;
 
-    let mut texts: BTreeMap<String, String> = BTreeMap::new();
-    texts.insert(file.clone(), text);
-    let mut by_file: BTreeMap<String, Vec<usize>> = BTreeMap::new();
-    let mut refusals: Vec<(String, usize)> = Vec::new();
-    let mut comments: BTreeSet<(String, usize)> = BTreeSet::new();
-    let mut re_pointed = 0usize;
-
-    for site in &sites {
-        if !texts.contains_key(&site.path) {
-            texts.insert(site.path.clone(), workspace.read(&site.path)?);
-        }
-        let source = &texts[&site.path];
-        if in_a_comment(source, site.offset) {
-            comments.insert((site.path.clone(), site.offset));
-            continue;
-        }
-        let masked = masked_to_code(source);
-        if !is_a_method_call(&masked, site.offset, &site.name) {
-            refusals.push((site.path.clone(), line_of(source, site.offset)));
-            continue;
-        }
-        let at = receivers::insertions_for(source, site.offset, &hops)?;
-        by_file.entry(site.path.clone()).or_default().push(at);
-        re_pointed += 1;
-    }
-
-    // rust-analyzer reports no position for a doc-link target, so a comment naming the method is read
-    // from the text of the files this run looked at rather than from the reference set, and skipped
-    // like a comment site the server did report.
-    let skipped_comments = comments.len()
-        + texts
-            .iter()
-            .map(|(path, source)| comments_naming(source, path, &name, &comments))
-            .sum::<usize>();
-
-    if !refusals.is_empty() {
-        refusals.sort();
-        refusals.dedup();
-        let named: Vec<String> = refusals
-            .iter()
-            .map(|(path, line)| format!("{path}:{line}"))
-            .collect();
-        return Err(seam_refusal(format!(
-            "the anchor names every call of `{name}`, and {} of its references are not method calls \
-             — a path call, a function pointer or an import cannot be re-pointed — so nothing is \
-             written: {}",
-            named.len(),
-            named.join(", ")
-        )));
-    }
+    let classified = classify_sites(&sites, workspace, file, text, &hops)?;
+    let skipped_comments = classified.skipped_comments(&name);
+    refuse_on_non_calls(classified.refusals, &name)?;
 
     let mut changes = Vec::new();
-    for (path, offsets) in by_file {
-        let source = &texts[&path];
+    for (path, offsets) in classified.by_file {
+        let source = &classified.texts[&path];
         let edits = edits_of(
             source,
             offsets
@@ -127,8 +81,101 @@ pub(super) fn repoint_receivers(
     Ok(Resolution {
         edit: WorkspaceEdit { changes },
         report: Vec::new(),
-        notes: vec![the_note(&name, re_pointed, skipped_comments)],
+        notes: vec![the_note(&name, classified.re_pointed, skipped_comments)],
     })
+}
+
+/// The references of one method, sorted: the text of every file the run touched (read once), the
+/// insertion point of each call per file, the references that are not method calls, the sites inside
+/// a comment, and how many calls were re-pointed.
+struct Classified {
+    texts: BTreeMap<String, String>,
+    by_file: BTreeMap<String, Vec<usize>>,
+    refusals: Vec<(String, usize)>,
+    comments: BTreeSet<(String, usize)>,
+    re_pointed: usize,
+}
+
+impl Classified {
+    /// How many references sat in a comment and were skipped: the comment sites the server reported,
+    /// plus the whole-word occurrences of `name` in the comments of the files this run looked at.
+    fn skipped_comments(&self, name: &str) -> usize {
+        // rust-analyzer reports no position for a doc-link target, so a comment naming the method is
+        // read from the text of the files this run looked at rather than from the reference set, and
+        // skipped like a comment site the server did report.
+        self.comments.len()
+            + self
+                .texts
+                .iter()
+                .map(|(path, source)| comments_naming(source, path, name, &self.comments))
+                .sum::<usize>()
+    }
+}
+
+/// Read and classify every reference the server reported for the anchored method: each named file is
+/// read once, and each site is sorted into a method call to re-point, a comment (skipped) or a
+/// reference that cannot be re-pointed.
+fn classify_sites(
+    sites: &[Site],
+    workspace: &Workspace<'_>,
+    file: &str,
+    text: String,
+    hops: &str,
+) -> Result<Classified> {
+    let mut texts: BTreeMap<String, String> = BTreeMap::new();
+    texts.insert(file.to_string(), text);
+    let mut by_file: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut refusals: Vec<(String, usize)> = Vec::new();
+    let mut comments: BTreeSet<(String, usize)> = BTreeSet::new();
+    let mut re_pointed = 0usize;
+
+    for site in sites {
+        if !texts.contains_key(&site.path) {
+            texts.insert(site.path.clone(), workspace.read(&site.path)?);
+        }
+        let source = &texts[&site.path];
+        if in_a_comment(source, site.offset) {
+            comments.insert((site.path.clone(), site.offset));
+            continue;
+        }
+        let masked = masked_to_code(source);
+        if !is_a_method_call(&masked, site.offset, &site.name) {
+            refusals.push((site.path.clone(), line_of(source, site.offset)));
+            continue;
+        }
+        let at = receivers::insertions_for(source, site.offset, hops)?;
+        by_file.entry(site.path.clone()).or_default().push(at);
+        re_pointed += 1;
+    }
+
+    Ok(Classified {
+        texts,
+        by_file,
+        refusals,
+        comments,
+        re_pointed,
+    })
+}
+
+/// Refuse the whole run at once, naming every one of them, if any reference the server reported is
+/// not a method call: a path call, a function pointer or an import cannot be re-pointed.
+fn refuse_on_non_calls(mut refusals: Vec<(String, usize)>, name: &str) -> Result<()> {
+    if refusals.is_empty() {
+        return Ok(());
+    }
+    refusals.sort();
+    refusals.dedup();
+    let named: Vec<String> = refusals
+        .iter()
+        .map(|(path, line)| format!("{path}:{line}"))
+        .collect();
+    Err(seam_refusal(format!(
+        "the anchor names every call of `{name}`, and {} of its references are not method calls \
+         — a path call, a function pointer or an import cannot be re-pointed — so nothing is \
+         written: {}",
+        named.len(),
+        named.join(", ")
+    )))
 }
 
 /// The note an apply prints: how many calls were re-pointed, and how many references sat in a
