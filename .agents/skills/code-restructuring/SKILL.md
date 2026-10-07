@@ -63,7 +63,8 @@ record's.
 2. **Targeting** — run [`analyze-code-issues`](analyze-code-issues/SKILL.md); put CRAP note in changeset.
 3. **Understand shape** — LSP outline, references, cohesion; write `docs/dev/1-WIP/{slug}-initial-discovery.md`.
    Decide which operation each seam needs: items into a module of the same crate is `move_item`, a module
-   under another parent is `reparent_module`, a cut inside one file is `extract_module`; see
+   under another parent is `reparent_module`, a cut inside one file is `extract_module`, and members of
+   one type's `impl` into another type of the same crate is `retarget_impl`; see
    [Gathering a topic module](#gathering-a-topic-module).
 4. **Changeset** — `Type: Refactor` at `docs/dev/1-WIP/YYYY-MM-DD-<name>.md`; see `references/restructure-changeset.md`.
 5. **Anchor** — `restructure anchors <file.rs> --items A,B,C` emits an `items` anchor over whole
