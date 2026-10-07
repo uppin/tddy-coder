@@ -13112,9 +13112,7 @@ name = "tddy-screen-sharing"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "argon2",
  "async-trait",
- "chacha20poly1305",
  "libc",
  "log",
  "pretty_assertions",
@@ -13123,9 +13121,10 @@ dependencies = [
  "rstest 0.24.0",
  "serde",
  "serde_json",
- "serde_yaml",
  "sha2 0.10.9",
  "tddy-core",
+ "tddy-credential-sync",
+ "tddy-credentials",
  "tddy-daemon-kernel",
  "tddy-host-service",
  "tddy-livekit",

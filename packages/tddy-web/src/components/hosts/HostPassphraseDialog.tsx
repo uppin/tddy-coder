@@ -6,9 +6,10 @@
  * the fingerprint is shown, a changed key blocks the answer, and the plaintext never leaves this
  * component. Only the words differ, and they are the caller's to supply.
  *
- * Server-initiated, unlike `ScreenSharingPassphraseDialog` — that one is the UI deciding to ask
- * before making a call. Here the host raised the question on `StreamHostPrompts` and is blocked
- * until an answer comes back.
+ * Server-initiated: the host raised the question on `StreamHostPrompts` and is blocked until an
+ * answer comes back. It is the last place in this app that asks a person for a secret before a
+ * call — the session screen-sharing form no longer does, because a session's own key opens the
+ * credential store the desktop password lives in.
  *
  * The dialog always names the host and shows its public-key fingerprint — the one derived from the
  * key that will do the encrypting, which is what its caller passes — so an operator can verify out

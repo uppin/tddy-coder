@@ -3,14 +3,15 @@
  *
  * Shows a list of screen-sharing targets configured for the session and an Add form.
  * The form includes a protocol selector (VNC / RDP) that auto-fills the default port.
- * When a password is provided on the Add form, prompts for a vault passphrase
- * before calling AddTarget.
+ *
+ * A target's password goes straight to `AddTarget`. There is no passphrase to ask for: the
+ * daemon seals the password under the key the signed-in session already holds, so the second
+ * secret this form used to collect has nothing left to open.
  */
 
 import React, { useEffect, useReducer, useState } from "react";
 import type { Room } from "livekit-client";
 import { Protocol } from "../../gen/screen_sharing_pb";
-import { ScreenSharingPassphraseDialog } from "./ScreenSharingPassphraseDialog";
 import { ScreenSharingOverlay } from "./ScreenSharingOverlay";
 import { applyScreenSharingTabAction, initialScreenSharingTabState } from "./screenSharingTabState";
 
@@ -22,10 +23,9 @@ export interface SessionScreenSharingTabProps {
   sessionId: string;
   sessionToken: string;
   room: Room | null;
-  onListTargets: () => Promise<ScreenSharingTargetInfo[]>;
+  onListTargets: () => Promise<ScreenSharingTargetListing>;
   onAddTarget: (req: AddScreenSharingTargetReq) => Promise<ScreenSharingTargetInfo>;
   onRemoveTarget: (targetId: string) => Promise<void>;
-  onUnlockVault: (passphrase: string) => Promise<void>;
   onStartStream: (targetId: string) => Promise<StartStreamResult>;
   onStopStream: (targetId: string) => Promise<void>;
 }
@@ -37,6 +37,16 @@ export interface ScreenSharingTargetInfo {
   port: number;
   protocol: Protocol;
   username: string;
+}
+
+/**
+ * What `ListTargets` answered. `vaultLocked` is a state of the answer, not an empty list: a store
+ * this session's key does not open may hold targets, and showing it as empty tells the operator to
+ * add machines they already have.
+ */
+export interface ScreenSharingTargetListing {
+  targets: ScreenSharingTargetInfo[];
+  vaultLocked: boolean;
 }
 
 export interface AddScreenSharingTargetReq {
@@ -83,7 +93,6 @@ export function SessionScreenSharingTab({
   onListTargets,
   onAddTarget,
   onRemoveTarget,
-  onUnlockVault,
   onStartStream,
   onStopStream,
 }: SessionScreenSharingTabProps): React.ReactElement {
@@ -97,12 +106,6 @@ export function SessionScreenSharingTab({
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  // Pending add request — held while passphrase dialog is open
-  const [pendingAdd, setPendingAdd] = useState<AddScreenSharingTargetReq | null>(null);
-  const [passphraseOpen, setPassphraseOpen] = useState(false);
-  // Tracks whether UnlockVault has succeeded in this session — skips re-prompting.
-  const [vaultUnlocked, setVaultUnlocked] = useState(false);
-
   // Active stream result — stored when StartStream succeeds
   const [activeStreamResult, setActiveStreamResult] = useState<StartStreamResult | null>(null);
   // Transient error message shown below the form.
@@ -110,15 +113,16 @@ export function SessionScreenSharingTab({
 
   useEffect(() => {
     onListTargets()
-      .then((targets) =>
+      .then(({ targets, vaultLocked }) => {
+        dispatch({ type: "set_vault_locked", locked: vaultLocked });
         dispatch({
           type: "set_targets",
           targets: targets.map((t) => ({
             ...t,
             protocol: t.protocol === Protocol.RDP ? "rdp" : "vnc",
           })),
-        }),
-      )
+        });
+      })
       .catch(() => {/* ignore list errors — non-fatal */});
   // onListTargets is a callback prop; the effect intentionally runs once on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -141,12 +145,7 @@ export function SessionScreenSharingTab({
       protocol,
     };
 
-    if (password && !vaultUnlocked) {
-      setPendingAdd(req);
-      setPassphraseOpen(true);
-    } else {
-      submitAdd(req);
-    }
+    submitAdd(req);
   };
 
   const submitAdd = (req: AddScreenSharingTargetReq) => {
@@ -170,27 +169,6 @@ export function SessionScreenSharingTab({
       .catch((e: unknown) => {
         setErrorMsg(e instanceof Error ? e.message : "Failed to add target");
       });
-  };
-
-  const handlePassphraseConfirm = (passphrase: string) => {
-    setPassphraseOpen(false);
-    if (!pendingAdd) return;
-    const req = pendingAdd;
-    setPendingAdd(null);
-
-    onUnlockVault(passphrase)
-      .then(() => {
-        setVaultUnlocked(true);
-        submitAdd(req);
-      })
-      .catch((e: unknown) => {
-        setErrorMsg(e instanceof Error ? e.message : "Failed to unlock vault — wrong passphrase?");
-      });
-  };
-
-  const handlePassphraseCancel = () => {
-    setPassphraseOpen(false);
-    setPendingAdd(null);
   };
 
   const handleStart = (targetId: string) => {
@@ -227,6 +205,16 @@ export function SessionScreenSharingTab({
   return (
     <>
       <div data-testid="sessions-screen-sharing-tab-panel" className="flex flex-col gap-3 px-3 py-3">
+        {state.isVaultLocked && (
+          <p
+            data-testid="sessions-screen-sharing-vault-locked"
+            role="status"
+            className="text-xs text-destructive"
+          >
+            The credential store is locked under a different login, so saved desktops cannot be
+            shown. Sign in again with the login that created it.
+          </p>
+        )}
         <div data-testid="sessions-screen-sharing-target-list" className="flex flex-col gap-1">
           {state.targets.map((t) => (
             <div
@@ -332,13 +320,6 @@ export function SessionScreenSharingTab({
             {errorMsg}
           </p>
         )}
-
-        <ScreenSharingPassphraseDialog
-          open={passphraseOpen}
-          vaultExists={false}
-          onConfirm={handlePassphraseConfirm}
-          onCancel={handlePassphraseCancel}
-        />
       </div>
 
       {state.activeOverlayTargetId && activeStreamResult && (

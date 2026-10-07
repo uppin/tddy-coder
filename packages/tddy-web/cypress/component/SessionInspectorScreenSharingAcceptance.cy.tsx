@@ -232,14 +232,13 @@ it("submitting RDP target calls AddTarget with protocol RDP and correct fields",
 });
 
 // ---------------------------------------------------------------------------
-// AC-SS-4: Submitting with a password shows the passphrase dialog first
+// AC-SS-4: A password-carrying desktop is added with no second secret
 // ---------------------------------------------------------------------------
 
-it("shows the passphrase dialog before adding a target that has a password", () => {
+it("adds a desktop that has a password without asking for a second secret", () => {
   // Given
   const backend = aSessionsDrawerBackend([SESSION])
-    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[] }))
-    .onUnary(ScreenSharingService.method.unlockVault, () => ({ ok: true }))
+    .onUnary(ScreenSharingService.method.listTargets, () => ({ targets: [] as never[], vaultLocked: false }))
     .onUnary(ScreenSharingService.method.addTarget, (req) => ({
       target: {
         id: "t-secure-001",
@@ -262,16 +261,32 @@ it("shows the passphrase dialog before adding a target that has a password", () 
   page.screenSharingAddPassword().type("s3cr3t");
   page.screenSharingAddSubmit().click();
 
-  // Then — passphrase dialog appears
-  page.screenSharingPassphraseDialog().should("exist").and("be.visible");
-
-  // When — user confirms passphrase
-  page.screenSharingPassphraseInput().type("my-vault-passphrase");
-  page.screenSharingPassphraseConfirm().click();
-
-  // Then — UnlockVault was called before AddTarget
+  // Then — the password goes straight to the daemon, which seals it under the key this session
+  // already holds; there is no dialog in between and nothing to unlock
   cy.wrap(backend).should((b) => {
-    expect(b.callsTo(ScreenSharingService.method.unlockVault)).to.have.length(1);
-    expect(b.callsTo(ScreenSharingService.method.addTarget)).to.have.length(1);
+    const calls = b.callsTo(ScreenSharingService.method.addTarget);
+    expect(calls).to.have.length(1);
+    expect(calls[0].password).to.equal("s3cr3t");
   });
+});
+
+// ---------------------------------------------------------------------------
+// AC-SS-5: A store this session's key does not open reads as locked, not as empty
+// ---------------------------------------------------------------------------
+
+it("tells the operator the credential store is locked rather than showing no desktops", () => {
+  // Given a store sealed under a login this session does not have
+  const backend = aSessionsDrawerBackend([SESSION]).onUnary(
+    ScreenSharingService.method.listTargets,
+    () => ({ targets: [] as never[], vaultLocked: true }),
+  );
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  page.drawerItem(SESSION.sessionId).click();
+  page.inspectorScreenSharingTab().click();
+
+  // Then — rendering this as "no desktops" would tell the operator to add machines they already
+  // have, so the two states are told apart
+  page.screenSharingVaultLocked().should("exist").and("be.visible");
 });

@@ -280,9 +280,10 @@ alternative considered was to accept passive-only protection and disclose it in 
 
 ## The passphrase dialog
 
-**`HostPassphraseDialog`** is server-initiated, unlike `ScreenSharingPassphraseDialog` and
-`VncPassphraseDialog` — those are the UI deciding to ask before making a call; here the host raised
-the question and is blocked until an answer comes back. It always names the host and shows the
+**`HostPassphraseDialog`** is server-initiated: the host raised the question and is blocked until an answer comes back. It is the
+only dialog in the app that asks for a screen-sharing secret — the session Screen Sharing tab asks
+for none, because the signed-in session already opens the credential store a desktop's password is
+sealed in. It always names the host and shows the
 derived fingerprint, so an operator can verify out of band before handing over a secret.
 
 **The encryption happens inside the dialog, not in its caller.** `encryptForHost` runs there, so the

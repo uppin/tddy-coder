@@ -1,8 +1,11 @@
 //! Screen sharing control-plane service for tddy-daemon.
 //!
 //! Implements `ScreenSharingService` from `screen_sharing.proto` over the HTTP Connect
-//! transport. Manages the encrypted vault per session, caches derived keys in memory,
-//! and spawns/terminates protocol bridge processes (tddy-vnc / tddy-rdp) on demand.
+//! transport, and spawns/terminates protocol bridge processes (tddy-vnc / tddy-rdp) on demand.
+//!
+//! A target's password is a `screen-sharing` record in the session-gated credential store, reached
+//! through [`ScreenSharingTargetStore`]. **No RPC here carries a passphrase**: the caller's session
+//! is what opens the store, so there is nothing to unlock and `UnlockVault` no longer exists.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,9 +18,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
-use crate::screen_sharing_vault::{
-    vault_path, DerivedKey, ScreenSharingTarget, ScreenSharingVault,
-};
+use crate::screen_sharing_records::{ScreenSharingTargetStore, TargetError};
+use crate::session_vault_target_store::SessionVaultTargetStore;
+use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
 use tddy_host_service::host_desktop_targets::{HostDesktopTarget, HostDesktopTargetStore};
 use tddy_host_service::host_keypair::HostKeypair;
@@ -29,23 +32,18 @@ use tddy_service::proto::screen_sharing::{
     Protocol, RemoveTargetRequest, RemoveTargetResponse, ScreenSharingService,
     ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
     StartStreamResponse, StopHostStreamRequest, StopHostStreamResponse, StopStreamRequest,
-    StopStreamResponse, UnlockVaultRequest, UnlockVaultResponse,
+    StopStreamResponse,
 };
 
 const DEFAULT_STREAM_WIDTH: u32 = 1920;
 const DEFAULT_STREAM_HEIGHT: u32 = 1080;
 const DEFAULT_STREAM_FPS: u32 = 30;
 
-/// Per-session derived key cache: session_id → DerivedKey.
-///
-/// Populated by `UnlockVault`; read by `AddTarget` and `StartStream`.
-pub type ScreenSharingKeyCache = Arc<Mutex<HashMap<String, DerivedKey>>>;
-
 type UserResolver = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 /// Per-OS-user sessions base resolver: `Arc<dyn Fn(&str) -> Option<PathBuf>>`.
 ///
-/// Wired in `runtime.rs` with the daemon's resolved `tddy_data_dir` (config-only tddy home) so
-/// screen-sharing vaults live under the same data root as session trees, not a static `$HOME/.tddy`.
+/// Wired in `runtime.rs` with the daemon's resolved `tddy_data_dir` (config-only tddy home), so a
+/// session's metadata is read from the same data root as the session trees.
 pub type SessionsBase = Arc<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
 /// Bridge config serialized to the bridge binary's stdin (field names match `tddy_screenshare::BridgeConfig`).
@@ -64,6 +62,31 @@ struct BridgeSpawnConfig {
     height: u32,
     target_id: String,
     fps: u32,
+}
+
+/// A desktop a bridge can be spawned for, from either scope.
+///
+/// What the spawn path reads and nothing more: the label and username a scope stores travel
+/// separately, so the two scopes meet at the fields a bridge is addressed and configured by.
+struct BridgeTarget {
+    id: String,
+    host: String,
+    port: u16,
+    protocol: Protocol,
+}
+
+impl BridgeTarget {
+    /// A stored session target. Refused rather than coerced when its port is not one: proto has no
+    /// 16-bit integer, and a cast would quietly connect to some other port entirely.
+    fn from_proto(target: &ProtoScreenSharingTarget) -> Result<Self, String> {
+        Ok(Self {
+            id: target.id.clone(),
+            host: target.host.clone(),
+            port: u16::try_from(target.port)
+                .map_err(|_| format!("{} is not a port a desktop can listen on", target.port))?,
+            protocol: Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified),
+        })
+    }
 }
 
 /// What the host-scoped calls need, and the session-scoped ones do not.
@@ -89,7 +112,6 @@ struct HostScope {
 pub struct ScreenSharingServiceImpl {
     user_resolver: UserResolver,
     sessions_base: SessionsBase,
-    key_cache: ScreenSharingKeyCache,
     /// Optional daemon config — when set, `start_stream` spawns real bridge processes.
     config: Option<Arc<DaemonConfig>>,
     /// Active bridge PIDs keyed by [`session_bridge_key`] or [`host_bridge_key`], for the matching
@@ -98,22 +120,39 @@ pub struct ScreenSharingServiceImpl {
     /// Absent until the daemon wires host scope; the host-scoped calls report that rather than
     /// pretending a host has no desktops.
     host_scope: Option<HostScope>,
+    /// The credential store this session's targets live in.
+    ///
+    /// Optional for the same reason [`config`](Self::config) is: the wiring layer supplies it, and
+    /// a service built without one reports that rather than answering as though the person has no
+    /// desktops.
+    target_store: Option<Arc<dyn ScreenSharingTargetStore>>,
 }
 
 impl ScreenSharingServiceImpl {
-    pub fn new(
-        user_resolver: UserResolver,
-        sessions_base: SessionsBase,
-        key_cache: ScreenSharingKeyCache,
-    ) -> Self {
+    pub fn new(user_resolver: UserResolver, sessions_base: SessionsBase) -> Self {
         Self {
             user_resolver,
             sessions_base,
-            key_cache,
             config: None,
             active_bridges: Arc::new(Mutex::new(HashMap::new())),
             host_scope: None,
+            target_store: None,
         }
+    }
+
+    /// Supply the credential store a session's screen-sharing targets are records in.
+    #[must_use]
+    pub fn with_target_store(mut self, target_store: Arc<dyn ScreenSharingTargetStore>) -> Self {
+        self.target_store = Some(target_store);
+        self
+    }
+
+    /// Keep targets in the user's credential `vaults`; with none, the targets calls refuse.
+    #[must_use]
+    pub fn with_credential_vaults(self, vaults: Option<Arc<SessionVaults>>) -> Self {
+        let Some(vaults) = vaults else { return self };
+        let resolver = Arc::clone(&self.user_resolver);
+        self.with_target_store(Arc::new(SessionVaultTargetStore::new(vaults, resolver)))
     }
 
     /// Supply daemon config for bridge binary path resolution and LiveKit token generation.
@@ -200,12 +239,14 @@ impl ScreenSharingServiceImpl {
         }
     }
 
-    async fn require_key(&self, session_id: &str) -> Result<DerivedKey, Status> {
-        let cache = self.key_cache.lock().await;
-        cache
-            .get(session_id)
-            .cloned()
-            .ok_or_else(|| Status::failed_precondition("vault not unlocked"))
+    /// The wired credential store, or a refusal naming the fact that none is wired.
+    ///
+    /// `failed_precondition` rather than an empty listing: a daemon assembled without a store is a
+    /// deployment mistake, and answering "no targets" would hide it behind a plausible screen.
+    fn require_target_store(&self) -> Result<&Arc<dyn ScreenSharingTargetStore>, Status> {
+        self.target_store
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("no credential store is wired"))
     }
 
     /// Ask this host's operator for `target`'s password, and return what they typed.
@@ -267,7 +308,7 @@ impl ScreenSharingServiceImpl {
     async fn try_spawn_bridge(
         &self,
         config: &DaemonConfig,
-        target: &ScreenSharingTarget,
+        target: &BridgeTarget,
         username: String,
         password: String,
         bridge_identity: &str,
@@ -395,7 +436,7 @@ impl PreparedBridge {
 /// Everything a bridge spawn needs except the desktop's password.
 fn prepare_bridge(
     config: &DaemonConfig,
-    target: &ScreenSharingTarget,
+    target: &BridgeTarget,
     username: String,
     bridge_identity: &str,
     track_name: &str,
@@ -435,7 +476,7 @@ fn prepare_bridge(
 /// this function needs one, which is exactly why it can run before anybody is asked.
 fn build_bridge_spawn_config(
     config: &DaemonConfig,
-    target: &ScreenSharingTarget,
+    target: &BridgeTarget,
     username: String,
     bridge_identity: &str,
     track_name: &str,
@@ -588,14 +629,12 @@ fn decrypt_desktop_password(
 /// Converted rather than given a spawn path of its own: a second implementation would be free to
 /// drift from the one the session scope is proven against, and host scope is an addressing change,
 /// not a second way to start a bridge.
-fn host_target_as_bridge_target(target: &HostDesktopTarget) -> ScreenSharingTarget {
-    ScreenSharingTarget {
+fn host_target_as_bridge_target(target: &HostDesktopTarget) -> BridgeTarget {
+    BridgeTarget {
         id: target.target_id.clone(),
-        label: target.label.clone(),
         host: target.host.clone(),
         port: target.port,
         protocol: Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified),
-        username: target.username.clone(),
     }
 }
 
@@ -610,14 +649,23 @@ fn host_target_to_proto(t: &HostDesktopTarget) -> ProtoScreenSharingTarget {
     }
 }
 
-fn vault_target_to_proto(t: &ScreenSharingTarget) -> ProtoScreenSharingTarget {
-    ProtoScreenSharingTarget {
-        id: t.id.clone(),
-        label: t.label.clone(),
-        host: t.host.clone(),
-        port: t.port as u32,
-        protocol: t.protocol as i32,
-        username: t.username.clone(),
+/// How a store refusal reaches the caller.
+///
+/// `ListTargets` never passes [`TargetError::Locked`] here: for it, locked is a *state* carried in
+/// `vault_locked`, and turning it into a `Status` would collapse the distinction this node exists
+/// to keep. Every other call has no such field, so for them a locked store is a refusal.
+fn target_error_to_status(error: TargetError) -> Status {
+    match error {
+        TargetError::NoSuchSession => Status::unauthenticated("invalid session token"),
+        TargetError::Locked => Status::failed_precondition(
+            "the credential store is sealed under a different login and must be re-linked",
+        ),
+        TargetError::Malformed(reason) => {
+            Status::internal(format!("a stored target is unusable: {}", reason))
+        }
+        TargetError::Unavailable(reason) => {
+            Status::internal(format!("the credential store is unavailable: {}", reason))
+        }
     }
 }
 
@@ -776,31 +824,22 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         request: Request<ListTargetsRequest>,
     ) -> Result<Response<ListTargetsResponse>, Status> {
         let req = request.into_inner();
-        let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
-        let vault_file = vault_path(&session_dir);
+        let store = self.require_target_store()?;
 
-        if !ScreenSharingVault::exists(&vault_file) {
-            return Ok(Response::new(ListTargetsResponse { targets: vec![] }));
+        // A locked store is a *state* of this response, not an error on it. The three outcomes a
+        // screen must tell apart are open-and-empty, locked, and unavailable — collapsing the
+        // middle one into the first is what makes a person re-add desktops they already have.
+        match store.list(&req.session_token) {
+            Ok(targets) => Ok(Response::new(ListTargetsResponse {
+                targets,
+                vault_locked: false,
+            })),
+            Err(TargetError::Locked) => Ok(Response::new(ListTargetsResponse {
+                targets: vec![],
+                vault_locked: true,
+            })),
+            Err(error) => Err(target_error_to_status(error)),
         }
-
-        let targets = {
-            let cache = self.key_cache.lock().await;
-            if let Some(key) = cache.get(&req.session_id).cloned() {
-                drop(cache);
-                let (vault, _) = ScreenSharingVault::load_with_key(&vault_file, &key)
-                    .map_err(|e| Status::internal(format!("failed to load vault: {}", e)))?;
-                vault.list_targets()
-            } else {
-                drop(cache);
-                ScreenSharingVault::list_targets_from_file(&vault_file).map_err(|e| {
-                    Status::internal(format!("failed to read vault metadata: {}", e))
-                })?
-            }
-        };
-
-        Ok(Response::new(ListTargetsResponse {
-            targets: targets.iter().map(vault_target_to_proto).collect(),
-        }))
     }
 
     async fn add_target(
@@ -808,30 +847,25 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         request: Request<AddTargetRequest>,
     ) -> Result<Response<AddTargetResponse>, Status> {
         let req = request.into_inner();
-        let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
-        let vault_file = vault_path(&session_dir);
+        let store = self.require_target_store()?;
 
-        let key = self.require_key(&req.session_id).await?;
+        // The id is the store's to mint — a target's id is its account at the `screen-sharing`
+        // provider, so it is decided where the record is written.
+        let requested = ProtoScreenSharingTarget {
+            id: String::new(),
+            label: req.label,
+            host: req.host,
+            port: req.port,
+            protocol: req.protocol,
+            username: req.username,
+        };
 
-        let (mut vault, _) = ScreenSharingVault::load_with_key(&vault_file, &key)
-            .map_err(|e| Status::internal(format!("failed to load vault: {}", e)))?;
-
-        let protocol = Protocol::try_from(req.protocol).unwrap_or(Protocol::Unspecified);
-
-        let target = vault
-            .add_target(
-                &req.label,
-                &req.host,
-                req.port as u16,
-                &req.username,
-                &req.password,
-                protocol,
-                &key,
-            )
-            .map_err(|e| Status::internal(format!("failed to add target: {}", e)))?;
+        let target = store
+            .add(&req.session_token, &requested, &req.password)
+            .map_err(target_error_to_status)?;
 
         Ok(Response::new(AddTargetResponse {
-            target: Some(vault_target_to_proto(&target)),
+            target: Some(target),
         }))
     }
 
@@ -840,44 +874,13 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         request: Request<RemoveTargetRequest>,
     ) -> Result<Response<RemoveTargetResponse>, Status> {
         let req = request.into_inner();
-        let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
-        let vault_file = vault_path(&session_dir);
+        let store = self.require_target_store()?;
 
-        let key = self.require_key(&req.session_id).await?;
-
-        let (mut vault, _) = ScreenSharingVault::load_with_key(&vault_file, &key)
-            .map_err(|e| Status::internal(format!("failed to load vault: {}", e)))?;
-
-        vault
-            .remove_target(&req.target_id)
-            .map_err(|e| Status::not_found(format!("target not found: {}", e)))?;
+        store
+            .remove(&req.session_token, &req.target_id)
+            .map_err(target_error_to_status)?;
 
         Ok(Response::new(RemoveTargetResponse { ok: true }))
-    }
-
-    async fn unlock_vault(
-        &self,
-        request: Request<UnlockVaultRequest>,
-    ) -> Result<Response<UnlockVaultResponse>, Status> {
-        let req = request.into_inner();
-        let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
-        let vault_file = vault_path(&session_dir);
-
-        let key = if ScreenSharingVault::exists(&vault_file) {
-            let (_vault, key) = ScreenSharingVault::unlock(&vault_file, &req.passphrase)
-                .map_err(|_| Status::unauthenticated("invalid passphrase"))?;
-            key
-        } else {
-            let (_vault, key) = ScreenSharingVault::create(&vault_file, &req.passphrase)
-                .map_err(|e| Status::internal(format!("failed to create vault: {}", e)))?;
-            key
-        };
-
-        let mut key_cache = self.key_cache.lock().await;
-        key_cache.insert(req.session_id, key);
-        drop(key_cache);
-
-        Ok(Response::new(UnlockVaultResponse { ok: true }))
     }
 
     async fn start_stream(
@@ -886,9 +889,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
     ) -> Result<Response<StartStreamResponse>, Status> {
         let req = request.into_inner();
         let session_dir = self.resolve_session_dir(&req.session_token, &req.session_id)?;
-        let vault_file = vault_path(&session_dir);
-
-        let key = self.require_key(&req.session_id).await?;
+        let store = self.require_target_store()?;
 
         let metadata = tddy_core::session_metadata::read_session_metadata(&session_dir)
             .map_err(|e| Status::internal(format!("failed to read session metadata: {}", e)))?;
@@ -905,35 +906,34 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
 
         // Spawn the bridge process when daemon config is available.
         if let Some(ref config) = self.config {
-            match ScreenSharingVault::load_with_key(&vault_file, &key) {
-                Ok((vault, _)) => {
-                    let targets = vault.list_targets();
-                    if let Some(target) = targets.into_iter().find(|t| t.id == req.target_id) {
-                        let username = target.username.clone();
-                        let password = vault
-                            .decrypt_password(&req.target_id, &key)
-                            .unwrap_or_default();
-                        self.try_spawn_bridge(
-                            config,
-                            &target,
-                            username,
-                            password,
-                            &bridge_identity,
-                            &track_name,
-                            &livekit_room,
-                            session_bridge_key(&req.session_id, &req.target_id),
-                        )
-                        .await;
-                    } else {
-                        error!(
-                            "start_stream: target '{}' not found in vault",
-                            req.target_id
-                        );
+            let target = store
+                .list(&req.session_token)
+                .map_err(target_error_to_status)?
+                .into_iter()
+                .find(|t| t.id == req.target_id);
+            match target {
+                Some(target) => {
+                    let password = store
+                        .password_for(&req.session_token, &req.target_id)
+                        .map_err(target_error_to_status)?;
+                    match BridgeTarget::from_proto(&target) {
+                        Ok(bridge_target) => {
+                            self.try_spawn_bridge(
+                                config,
+                                &bridge_target,
+                                target.username.clone(),
+                                password,
+                                &bridge_identity,
+                                &track_name,
+                                &livekit_room,
+                                session_bridge_key(&req.session_id, &req.target_id),
+                            )
+                            .await;
+                        }
+                        Err(e) => error!("start_stream: target '{}': {}", req.target_id, e),
                     }
                 }
-                Err(e) => {
-                    error!("start_stream: failed to load vault: {}", e);
-                }
+                None => error!("start_stream: target '{}' not found", req.target_id),
             }
         }
 
@@ -1000,7 +1000,6 @@ mod tests {
     const THE_BROWSER_LIVEKIT_URL: &str = "wss://livekit.example.com";
     const A_VNC_PORT: u32 = 5900;
     const A_DESKTOP_PASSWORD: &str = "correct horse battery staple";
-    const A_VAULT_PASSPHRASE: &str = "hunter2-passphrase";
     /// What every desktop attached below is called. A prompt has to name the desktop it is asking
     /// about, so this is the word the dialog has to be able to show.
     const THE_DESKTOPS_LABEL: &str = "dev box";
@@ -1306,6 +1305,88 @@ mod tests {
         daemon
     }
 
+    /// The session's credential store, held in memory.
+    ///
+    /// Storage only: what a desktop *is* as a record goes through the real
+    /// [`record_for`](crate::screen_sharing_records::record_for) and
+    /// [`target_from`](crate::screen_sharing_records::target_from), because that mapping is what
+    /// `#keyring` 7/9 claims and a fake that reimplemented it would prove nothing.
+    #[derive(Default)]
+    struct TheSessionsCredentials {
+        records: std::sync::Mutex<Vec<tddy_credentials::CredentialRecord>>,
+    }
+
+    impl ScreenSharingTargetStore for TheSessionsCredentials {
+        fn list(&self, session_token: &str) -> Result<Vec<ProtoScreenSharingTarget>, TargetError> {
+            self.admits(session_token)?;
+            self.records
+                .lock()
+                .expect("the session's credentials")
+                .iter()
+                .map(crate::screen_sharing_records::target_from)
+                .collect()
+        }
+
+        fn add(
+            &self,
+            session_token: &str,
+            target: &ProtoScreenSharingTarget,
+            password: &str,
+        ) -> Result<ProtoScreenSharingTarget, TargetError> {
+            self.admits(session_token)?;
+
+            let mut records = self.records.lock().expect("the session's credentials");
+            let mut stored = target.clone();
+            stored.id = format!("target-{}", records.len());
+            records.push(crate::screen_sharing_records::record_for(
+                &stored,
+                password,
+                A_WRITE_CLOCK,
+            ));
+
+            Ok(stored)
+        }
+
+        fn remove(&self, session_token: &str, target_id: &str) -> Result<(), TargetError> {
+            self.admits(session_token)?;
+            self.records
+                .lock()
+                .expect("the session's credentials")
+                .retain(|record| {
+                    record.account != crate::screen_sharing_records::account_for(target_id)
+                });
+            Ok(())
+        }
+
+        fn password_for(
+            &self,
+            session_token: &str,
+            target_id: &str,
+        ) -> Result<String, TargetError> {
+            self.admits(session_token)?;
+            self.records
+                .lock()
+                .expect("the session's credentials")
+                .iter()
+                .find(|record| {
+                    record.account == crate::screen_sharing_records::account_for(target_id)
+                })
+                .map(|record| record.secret.expose().to_string())
+                .ok_or_else(|| TargetError::Malformed(format!("no target {target_id}")))
+        }
+    }
+
+    impl TheSessionsCredentials {
+        fn admits(&self, session_token: &str) -> Result<(), TargetError> {
+            (session_token == A_SESSION_TOKEN)
+                .then_some(())
+                .ok_or(TargetError::NoSuchSession)
+        }
+    }
+
+    /// The clock a stored record carries in these tests. Fixed, because nothing here measures time.
+    const A_WRITE_CLOCK: u64 = 1_758_240_000;
+
     fn a_daemon_configured(
         behaviour: TheOperator,
         adjust: impl FnOnce(&mut DaemonConfig),
@@ -1343,14 +1424,14 @@ mod tests {
         let service = ScreenSharingServiceImpl::new(
             Arc::new(|token: &str| (token == A_SESSION_TOKEN).then(|| THE_OS_USER.to_string())),
             Arc::new(move |_user: &str| Some(sessions_base.clone())),
-            Arc::new(Mutex::new(HashMap::new())),
         )
         .with_config(config)
         .with_host_scope(
             targets,
             Arc::clone(&keypair) as Arc<dyn HostKeypair>,
             Arc::clone(&operator) as Arc<dyn HostPromptRegistry>,
-        );
+        )
+        .with_target_store(Arc::new(TheSessionsCredentials::default()));
 
         DaemonUnderTest {
             service,
@@ -1563,8 +1644,10 @@ mod tests {
                 .copied()
         }
 
-        /// A session holding one password-less desktop in its unlocked vault — the per-session
-        /// path exactly as it exists today.
+        /// A session holding one password-less desktop in its credential store.
+        ///
+        /// There is no unlock step, and there is no longer one to call: the session token the
+        /// caller already holds is what opens the store.
         async fn a_session_holding_a_desktop(&self) -> String {
             let session_dir = self.storage.path().join("sessions").join(A_SESSION);
             std::fs::create_dir_all(&session_dir).expect("a session directory");
@@ -1579,15 +1662,6 @@ mod tests {
             .expect("a session's metadata");
 
             self.service
-                .unlock_vault(Request::direct(UnlockVaultRequest {
-                    session_token: A_SESSION_TOKEN.to_string(),
-                    session_id: A_SESSION.to_string(),
-                    passphrase: A_VAULT_PASSPHRASE.to_string(),
-                }))
-                .await
-                .expect("unlocking the session's vault");
-
-            self.service
                 .add_target(Request::direct(AddTargetRequest {
                     session_token: A_SESSION_TOKEN.to_string(),
                     session_id: A_SESSION.to_string(),
@@ -1599,7 +1673,7 @@ mod tests {
                     username: "ada".to_string(),
                 }))
                 .await
-                .expect("adding a desktop to the session's vault")
+                .expect("adding a desktop to the session's credentials")
                 .into_inner()
                 .target
                 .expect("the added target")

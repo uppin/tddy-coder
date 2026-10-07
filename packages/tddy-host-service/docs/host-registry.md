@@ -81,8 +81,8 @@ fallible, and the read-modify-write is serialised so two concurrent attaches do 
 another's target.
 
 The two scopes never see each other. A host-scoped target is invisible to
-`screen_sharing_vault`'s session store and a session-scoped one is invisible here, so deleting a
-session cannot delete a machine's desktop.
+the session-scoped store (a user's credential records) and a session-scoped one is invisible here,
+so deleting a session cannot delete a machine's desktop.
 
 ### Starting and stopping a host's desktop
 
@@ -115,7 +115,7 @@ bridges, the LiveKit republishing and the browser overlay are reused unchanged.
 
 ### The desktop password is prompted, never stored
 
-The session-scoped path keeps its credential in an encrypted vault. A host desktop's password is
+The session-scoped path keeps its credential as a `screen-sharing` record in the user's credential store. A host desktop's password is
 **not stored anywhere**:
 
 1. `StartHostStream` settles everything that can fail without a secret first — the target, the room,

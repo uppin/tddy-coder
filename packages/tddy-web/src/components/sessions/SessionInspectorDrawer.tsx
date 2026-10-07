@@ -529,16 +529,17 @@ export function SessionInspectorDrawer({
               onListTargets={() =>
                 screenSharingClient
                   .listTargets({ sessionToken: sessionToken ?? "", sessionId: session.sessionId })
-                  .then((r) =>
-                    r.targets.map((t) => ({
+                  .then((r) => ({
+                    vaultLocked: r.vaultLocked,
+                    targets: r.targets.map((t) => ({
                       id: t.id,
                       label: t.label,
                       host: t.host,
                       port: t.port,
                       protocol: t.protocol,
                       username: t.username,
-                    }))
-                  )
+                    })),
+                  }))
               }
               onAddTarget={(req) =>
                 screenSharingClient
@@ -564,11 +565,6 @@ export function SessionInspectorDrawer({
               onRemoveTarget={(targetId) =>
                 screenSharingClient
                   .removeTarget({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, targetId })
-                  .then(() => undefined)
-              }
-              onUnlockVault={(passphrase) =>
-                screenSharingClient
-                  .unlockVault({ sessionToken: sessionToken ?? "", sessionId: session.sessionId, passphrase })
                   .then(() => undefined)
               }
               onStartStream={(targetId) =>

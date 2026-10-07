@@ -511,17 +511,9 @@ export const sessionsDrawerPage = {
   screenSharingAddSubmit: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.sessionsScreenSharingAddSubmit, { timeout: 5000, ...options }),
 
-  /** The passphrase dialog. */
-  screenSharingPassphraseDialog: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.sessionsScreenSharingPassphraseDialog, { timeout: 5000, ...options }),
-
-  /** The passphrase input in the dialog. */
-  screenSharingPassphraseInput: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.sessionsScreenSharingPassphraseInput, options),
-
-  /** The confirm button in the passphrase dialog. */
-  screenSharingPassphraseConfirm: (options?: Parameters<typeof cy.get>[1]) =>
-    byTestId(TEST_IDS.sessionsScreenSharingPassphraseConfirm, { timeout: 5000, ...options }),
+  /** The notice shown when the credential store is sealed under a different login. */
+  screenSharingVaultLocked: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.sessionsScreenSharingVaultLocked, { timeout: 5000, ...options }),
 
   // ---------------------------------------------------------------------------
   // Screen Sharing overlay

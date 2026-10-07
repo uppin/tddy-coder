@@ -64,10 +64,8 @@ connection carries no media (see [Availability](#availability)).
 
 The Screen Sharing tab shows an Add form (label, host, port, protocol selector, password).
 The protocol selector offers **VNC** and **RDP**; selecting one updates the default port
-placeholder (VNC → 5900, RDP → 3389). Submitting the form:
-1. If the vault is locked, the passphrase dialog is shown first.
-2. On passphrase confirmation, the vault is created/unlocked, the target is added, and
-   appears in the target list.
+placeholder (VNC → 5900, RDP → 3389). Submitting the form sends the target, password included, straight to `AddTarget`; the target
+is added and appears in the target list. No dialog stands in between.
 
 ### AC-SS-3: Protocol selector in the Add form
 
@@ -76,12 +74,16 @@ selecting RDP shows port placeholder 3389. The selected protocol is sent as the 
 field in `AddTargetRequest` (`Protocol.VNC` or `Protocol.RDP`). The target list row
 displays the protocol label for each target.
 
-### AC-SS-4: Passphrase prompt on first use
+### AC-SS-4: No second secret
 
-The first operation that requires the vault (Add with password, Start stream) shows a
-`ScreenSharingPassphraseDialog`. After the user enters a correct passphrase, the vault is
-unlocked for the rest of the session. If the vault does not exist yet, the passphrase
-creates it.
+Adding a target and starting a stream ask the operator for nothing beyond the desktop's own
+details. The daemon seals the password under the credential store the signed-in session already
+opens, so no passphrase exists in the screen-sharing surface and no RPC in it carries one.
+
+A credential store that exists but is sealed under a different login than this session's is shown
+as **locked** — a notice in the tab saying saved desktops cannot be shown until the operator signs
+in with the login that created it. It is never shown as an empty target list, which would tell the
+operator to add machines already saved.
 
 ### AC-SS-5: Start stream
 
@@ -131,9 +133,13 @@ video track is unpublished.
 
 ### AC-SS-8: Credentials at rest
 
-Passwords are stored encrypted (Argon2 + ChaCha20-Poly1305) in `.screen-sharing.yaml`
-inside the session directory (mode 0600). The derived key is cached in daemon memory and
-never written to disk. Each target stores its protocol alongside the encrypted password.
+A target is a `screen-sharing` record in the signed-in user's credential store, the same store a
+GitHub token lives in. The password is the record's secret; the label, host, port, protocol and
+username travel in its metadata. Both are sealed together, so reading the store file reveals neither
+which machines the operator reaches nor their passwords. Targets belong to the user, so a target
+added in one session is listed in the next, and it propagates between the user's daemons like every
+other record. A daemon with no credential storage configured refuses the target calls rather than
+reporting "no targets".
 
 ### AC-SS-9: On-demand streaming
 
@@ -205,11 +211,11 @@ where it is added from, where it is stored, and what happens to its credential �
 
 | | Session-scoped | Host-scoped |
 |---|---|---|
-| Belongs to | one tddy session | one machine in the host registry |
+| Belongs to | the signed-in user, and is offered from any of their sessions | one machine in the host registry |
 | Opened from | the session inspector's Screen Sharing tab | the remote-desktop section of that host's row on the Hosts screen |
-| Stored in | `.screen-sharing.yaml` in the session directory | `host-desktop-targets.json` in the daemon's host-registry directory |
-| Credential | stored, encrypted, unlocked with the vault passphrase | asked for on every open and kept nowhere |
-| Outlives | nothing — deleting the session deletes it | every session; nothing a session does removes it |
+| Stored in | a `screen-sharing` record in the signed-in user's credential store | `host-desktop-targets.json` in the daemon's host-registry directory |
+| Credential | sealed in the record, opened by the signed-in session | asked for on every open and kept nowhere |
+| Outlives | every session of that user; deleting a session removes nothing | every session; nothing a session does removes it |
 
 Below the addressing the two are the same feature: the same `tddy-vnc` / `tddy-rdp` bridge binaries,
 the same JSON-on-stdin configuration so no credential reaches a command line, the same LiveKit video
@@ -246,7 +252,7 @@ does not — so a host's desktops are reachable only by an authenticated operato
 ### The desktop password is asked for, and kept nowhere
 
 A host desktop's password is **prompted, never stored**, which is deliberately unlike the
-session-scoped vault:
+session-scoped credential record:
 
 1. The daemon raises the question on that host's encrypted prompt channel, stamped with the GitHub
    user whose call is blocked on it. Nobody else is shown the question and nobody else can spend its
@@ -263,8 +269,8 @@ one that does not. An empty answer is therefore a real answer, and is how a pass
 opened. A question nobody answers before it expires fails the start — the call returns
 `DeadlineExceeded` and no bridge is spawned, rather than a process left authenticating to nothing.
 
-Why not the vault. The session-scoped vault exists and stores a credential, so this is two postures
-in one product. The Hosts screen is the deciding context: everything else it does with a secret —
+Why not the credential store. A session's desktop password is stored, so this is two postures in
+one product. The Hosts screen is the deciding context: everything else it does with a secret —
 loading an ssh key, for one — prompts and drops, and one model across that screen is easier to
 reason about than two. A host also has no session directory to keep an encrypted file in, and the
 prompt channel is the only place a host publishes the key an answer could be encrypted under.
@@ -274,7 +280,7 @@ prompt channel is the only place a host publishes the key an answer could be enc
 Whether a host has a desktop to reach at all is answered per host and per protocol, on the default
 ports, as two distinct facts: whether that host's daemon can spawn a bridge, and whether anything is
 serving a desktop there. That **reporting** starts no stream, spawns no bridge and touches no
-session target or vault — it is a bare TCP connect plus a check that a binary exists. **Connecting**
+session target or credential — it is a bare TCP connect plus a check that a binary exists. **Connecting**
 is the separate action described above, offered on the same row where those facts are reported, and
 it is the only thing on that screen that creates a host-scoped target or starts a bridge. See
 [`hosts-screen-tooling.md`](./hosts-screen-tooling.md).
@@ -294,8 +300,8 @@ it is the only thing on that screen that creates a host-scoped target or starts 
 
 - Audio forwarding
 - Multi-monitor (always the primary display)
-- Session-scoped targets do not persist across sessions; a desktop meant to outlive one belongs to
-  its host instead
+- Migrating desktops saved before targets became credential records: they are not read, and are
+  added again once
 - Connection health / reconnect UX beyond initial error display
 - NLA / Kerberos authentication for RDP (password auth only for MVP)
 - Discovering non-default desktop ports
