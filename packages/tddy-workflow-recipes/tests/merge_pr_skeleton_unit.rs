@@ -78,28 +78,18 @@ fn merge_pr_git_clean_tempdir_has_no_unmerged_paths() {
 
 #[test]
 fn merge_pr_github_merge_errors_when_token_missing() {
-    // Given
-    let prev_github = std::env::var("GITHUB_TOKEN").ok();
-    let prev_gh = std::env::var("GH_TOKEN").ok();
-    std::env::remove_var("GITHUB_TOKEN");
-    std::env::remove_var("GH_TOKEN");
+    // Given no token is passed
+    let token = "";
 
     // When
-    let r = github::merge_open_pr_for_branch(MergePrGithubParams::default());
+    let r = github::merge_open_pr_for_branch(MergePrGithubParams::default(), token);
     let err = r.unwrap_err();
 
     // Then
     assert!(
-        err.contains("GITHUB_TOKEN") || err.contains("GH_TOKEN") || err.contains("credential"),
+        err.contains("credential"),
         "expected missing credential message; got {err}"
     );
-
-    if let Some(v) = prev_github {
-        std::env::set_var("GITHUB_TOKEN", v);
-    }
-    if let Some(v) = prev_gh {
-        std::env::set_var("GH_TOKEN", v);
-    }
 }
 
 #[test]

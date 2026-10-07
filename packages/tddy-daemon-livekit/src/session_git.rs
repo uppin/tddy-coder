@@ -18,7 +18,7 @@
 //! and attributing them to a person's GitHub account would put commits in a person's name that
 //! the person never made. The two identities are separate on purpose; this module owns one of them.
 
-use tddy_accounts::ActingIdentity;
+use tddy_accounts::{ActingIdentity, GitIdentity};
 
 /// The four `git` environment variables a session's commits are made under.
 ///
@@ -28,6 +28,14 @@ use tddy_accounts::ActingIdentity;
 /// can read without running `git`.
 #[must_use]
 pub fn session_git_environment(acting: &ActingIdentity) -> Vec<(String, String)> {
-    let _ = acting;
-    todo!("TODO(keyring 9/9): author and committer, both the assigned account, and nothing else")
+    let GitIdentity { name, email } = &acting.git;
+    [
+        ("GIT_AUTHOR_NAME", name),
+        ("GIT_AUTHOR_EMAIL", email),
+        ("GIT_COMMITTER_NAME", name),
+        ("GIT_COMMITTER_EMAIL", email),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value.clone()))
+    .collect()
 }

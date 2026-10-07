@@ -725,7 +725,7 @@ impl PermissionServer {
     }
 
     #[tool(
-        description = "Create a GitHub pull request (REST POST /repos/{owner}/{repo}/pulls). Requires GITHUB_TOKEN or GH_TOKEN; uses curl against api.github.com."
+        description = "Create a GitHub pull request (REST POST /repos/{owner}/{repo}/pulls). Authenticates as the project's assigned GitHub account; uses curl against api.github.com."
     )]
     fn github_create_pull_request(
         &self,
@@ -745,7 +745,7 @@ impl PermissionServer {
             base: p.base,
             body: p.body,
         };
-        match create_pull_request_via_rest_api(&params) {
+        match create_pull_request_via_rest_api(&params, &github_token_for_agent()) {
             Ok(n) => {
                 log::debug!(
                     target: "tddy_tools::server",
@@ -767,7 +767,7 @@ impl PermissionServer {
     }
 
     #[tool(
-        description = "Update an existing GitHub pull request metadata (REST PATCH). Requires GITHUB_TOKEN or GH_TOKEN."
+        description = "Update an existing GitHub pull request metadata (REST PATCH). Authenticates as the project's assigned GitHub account."
     )]
     fn github_update_pull_request(
         &self,
@@ -788,7 +788,7 @@ impl PermissionServer {
             body: p.body,
             draft: p.draft,
         };
-        match update_pull_request_via_rest_api(&params) {
+        match update_pull_request_via_rest_api(&params, &github_token_for_agent()) {
             Ok(()) => {
                 log::debug!(
                     target: "tddy_tools::server",
@@ -1039,8 +1039,25 @@ fn repo_slug() -> Result<String, String> {
         .ok_or_else(|| format!("could not parse owner/repo from remote url: {}", url.trim()))
 }
 
+/// The GitHub credential the agent's PR tools authenticate with: none.
+///
+/// TODO(keyring 9/9): the project's resolved account does not reach `tddy-tools` yet, and the
+/// process environment is no longer a credential, so the PR tools refuse
+/// (`AuthenticationRequired`) until `ActingIdentity::token` is delivered here by something other
+/// than an exported variable.
+fn github_token_for_agent() -> String {
+    String::new()
+}
+
 fn real_gh() -> Result<tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi, String> {
-    Ok(tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::new(repo_slug()?))
+    // TODO(keyring 9/9): no resolved GitHub account reaches the agent's process yet, and the
+    // process environment is no longer a credential, so every authenticated call refuses. Thread
+    // the project's `ActingIdentity::token` here.
+    Ok(
+        tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::without_credential(
+            repo_slug()?,
+        ),
+    )
 }
 
 /// Default branch of the repo (`origin/HEAD` target). Returns an error rather than guessing a name:
@@ -1305,7 +1322,12 @@ fn pr_search_impl(p: PrSearchInput) -> Result<serde_json::Value, String> {
     let repo = repo_slug()?;
     // Built from the slug already resolved above rather than through `real_gh()`, which would run
     // `git remote get-url origin` a second time for the same answer.
-    let gh = tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::new(repo.clone());
+    // TODO(keyring 9/9): no resolved GitHub account reaches the agent's process yet, and the
+    // process environment is no longer a credential, so every authenticated call refuses. Thread
+    // the project's `ActingIdentity::token` here.
+    let gh = tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::without_credential(
+        repo.clone(),
+    );
     let hits = pr_insight::search_repository_prs(
         &gh,
         &repo,
@@ -1486,7 +1508,7 @@ impl rmcp::ServerHandler for PermissionServer {
         )
         .with_instructions(
             "Permission prompt tool for tddy-coder. Denies unexpected tool requests. \
-             When **GITHUB_TOKEN** or **GH_TOKEN** is set, this server also exposes GitHub PR tools: \
+             This server also exposes GitHub PR tools, which authenticate as the project's assigned GitHub account: \
              **github_create_pull_request** and **github_update_pull_request** (REST via curl to api.github.com).",
         )
     }

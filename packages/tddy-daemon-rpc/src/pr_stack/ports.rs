@@ -536,7 +536,10 @@ impl PrStackHandler for PrStackRpcHandler {
 
         let session_dir_for_op = session_dir.clone();
         tokio::task::spawn_blocking(move || {
-            let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::new(
+            // TODO(keyring 9/9): no resolved GitHub account reaches the repoint handler yet, and
+            // the process environment is no longer a credential, so every authenticated call
+            // refuses. Thread the project's `ActingIdentity::token` here.
+            let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::without_credential(
                 owner_repo,
             );
             tddy_workflow_recipes::pr_stack::repoint_planned_pr_node(

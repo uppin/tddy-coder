@@ -3,7 +3,7 @@
 use tddy_accounts::{
     acting_identity, IdentityError, META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB,
 };
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, FIRST_VERSION};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 
 fn github() -> ProviderId {
     ProviderId::new(PROVIDER_GITHUB)
@@ -14,7 +14,7 @@ fn a_github_account_labelled(label: &str) -> CredentialRecord {
         provider: github(),
         account: AccountId::new("acct-ada"),
         label: label.to_string(),
-        secret: "ghp_ada_token".to_string(),
+        secret: SecretString::new("ghp_ada_token"),
         metadata: [
             (META_SUBJECT_ID.to_string(), "101".to_string()),
             (META_SUBJECT.to_string(), "ada".to_string()),

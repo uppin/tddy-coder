@@ -27,6 +27,7 @@
 //! [`META_SUBJECT_ID`]: crate::META_SUBJECT_ID
 //! [`META_SUBJECT`]: crate::META_SUBJECT
 
+use crate::{resolve_account, AccountResolution, META_SUBJECT, META_SUBJECT_ID};
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 
 /// The one provider whose git identity convention this crate knows.
@@ -97,8 +98,32 @@ pub enum IdentityError {
 
 impl std::fmt::Display for IdentityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let _ = f;
-        todo!("TODO(keyring 9/9): four refusals, each naming what is wrong in its own words")
+        match self {
+            Self::NotAssigned { provider } => write!(
+                f,
+                "this project has no {provider} account assigned; assign one to the project in \
+                 its settings, and nothing in the daemon's environment will stand in for it"
+            ),
+            Self::UnknownOnThisHost { provider, account } => write!(
+                f,
+                "this project is assigned the {provider} account {account}, which this host does \
+                 not hold yet; link it on this host or wait for the vault to reach it"
+            ),
+            Self::Ambiguous { provider } => write!(
+                f,
+                "this project is assigned more than one {provider} account and none is chosen \
+                 for it; keep one assignment for {provider} and remove the others"
+            ),
+            Self::Unusable {
+                provider,
+                account,
+                missing,
+            } => write!(
+                f,
+                "the {provider} account {account} has no `{missing}` recorded, so there is no \
+                 identity to commit under; link the account again to refresh it"
+            ),
+        }
     }
 }
 
@@ -117,6 +142,46 @@ pub fn acting_identity(
     provider: &ProviderId,
     held: &[CredentialRecord],
 ) -> Result<ActingIdentity, IdentityError> {
-    let _ = (assignments, provider, held);
-    todo!("TODO(keyring 9/9): one resolution, then the record's own token and derived identity")
+    let account = match resolve_account(assignments, provider, held) {
+        AccountResolution::Assigned(account) => account,
+        AccountResolution::NotAssigned => {
+            return Err(IdentityError::NotAssigned {
+                provider: provider.clone(),
+            })
+        }
+        AccountResolution::UnknownOnThisHost(account) => {
+            return Err(IdentityError::UnknownOnThisHost {
+                provider: provider.clone(),
+                account,
+            })
+        }
+        AccountResolution::Ambiguous(provider) => {
+            return Err(IdentityError::Ambiguous { provider })
+        }
+    };
+    let record = held
+        .iter()
+        .find(|r| &r.provider == provider && r.account == account)
+        .expect("`resolve_account` answers Assigned only for a record in `held`");
+    let metadata = |key: &'static str| {
+        record
+            .metadata
+            .get(key)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| IdentityError::Unusable {
+                provider: provider.clone(),
+                account: account.clone(),
+                missing: key,
+            })
+    };
+    let subject_id = metadata(META_SUBJECT_ID)?;
+    let login = metadata(META_SUBJECT)?;
+    Ok(ActingIdentity {
+        account: account.clone(),
+        token: record.secret.expose().to_string(),
+        git: GitIdentity {
+            name: login.clone(),
+            email: format!("{subject_id}+{login}@users.noreply.github.com"),
+        },
+    })
 }

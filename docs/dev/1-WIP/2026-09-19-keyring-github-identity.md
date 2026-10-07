@@ -260,6 +260,47 @@ Pinned by `no_crate_still_resolves_a_github_token_from_the_process_environment` 
 "nothing reaches for this any more" is not a question the type system answers while the function
 still exists.
 
+## Green-phase findings
+
+**Done.** `acting_identity` (one `resolve_account`, then the record's own token and an identity derived
+from `META_SUBJECT_ID` / `META_SUBJECT`), `IdentityError: Display` (one message per variant, each naming
+the remedy), `session_git_environment` (four `GIT_*` pairs from one `ActingIdentity`, token excluded).
+`github_token_from_env`, `github_env_token_present`, `TokenSource::ProcessEnv` and the env-reading
+`curl_github_{get,post,patch,put}_json` wrappers are **deleted**; `create_pull_request`,
+`update_pull_request`, their `*_via_rest_api` forms and `merge_open_pr_for_branch` take `token: &str`
+and refuse a blank one.
+
+**Not done — refused with a `TODO(keyring 9/9)` rather than given a fallback.** No resolved account
+reaches these callers, and the process environment is no longer a credential, so each now refuses:
+
+- `tddy-tools` — the two PR MCP tools (`github_token_for_agent`) and `real_gh` / `pr_search_impl`;
+- `tddy-workflow-recipes` — `orchestrate_pr_stack/actions.rs` (merge and repoint tasks);
+- `tddy-pr-stack` — `assess.rs`;
+- `tddy-daemon-rpc` — `RepointPlannedPr` (`pr_stack/ports.rs`). ⚠ This one runs in the **daemon**, which
+  *does* have the caller's login and vaults (`pr_status.rs` uses them). Using `retained_github_token`
+  there would be the login-keyed credential this stack retires, so it was not chosen; resolving
+  `acting_identity` there needs the project row's assignments, which is the session-edge wiring below.
+- Prompt awareness of the PR tools (`merged_red_system_prompt(false)`, merge-pr hooks) is no longer
+  gated on an exported variable; it is off until an account reaches the agent.
+
+**M2's wiring is the open item.** Something must read the project's assignments and the session's
+vault, call `acting_identity`, and apply `session_git_environment` to the spawned agent. That call site
+lives in the session-spawn path (`tddy-session-lifecycle` / `runtime::build`), is not in this node's
+tests, and was not written. Delivering the *token* to the agent is a separate decision: the
+four-variable test deliberately excludes it.
+
+### Intended content of `packages/tddy-accounts/docs/github-identity-resolution.md`
+
+- **What it answers**: which GitHub account a project acts as, for both the token and the commit
+  identity, from one `acting_identity(assignments, provider, held)` call.
+- **Outcomes**: `Assigned` yields an `ActingIdentity { account, token, git }`; `NotAssigned`,
+  `UnknownOnThisHost`, `Ambiguous` and `Unusable` each refuse with their own message.
+- **Identity derivation**: name is the login (`META_SUBJECT`), email is
+  `{META_SUBJECT_ID}+{login}@users.noreply.github.com`; the record's label is never used.
+- **No environment**: nothing in `tddy-github` or `tddy-workflow-recipes` reads `GITHUB_TOKEN` /
+  `GH_TOKEN`; a token reaches a REST call only as a parameter.
+- **Unchanged**: WIP snapshots are signed by `tddy-daemon`.
+
 ## Green wave
 
 **Wave 5 of 5** — alone.
@@ -399,12 +440,12 @@ resolution this node builds.
 
 ✅ **M1 is not gated on #492 merging** — #492 is this stack's base, so its move is already in the tree.
 
-- [ ] **M1** — REST entry points take a token; environment resolution deleted
-- [ ] **M2** — one resolution at the session edge; token + identity from it
-- [ ] **M3** — a distinct failure per outcome
-- [ ] **M4** — retire `FileGitHubTokenStore`'s readers
-- [ ] **M5** — acceptance: two projects, two accounts, one daemon
-- [ ] **M6** — `packages/tddy-accounts/docs/github-identity-resolution.md`
+- [x] **M1** — REST entry points take a token; environment resolution deleted
+- [ ] **M2** — one resolution at the session edge; token + identity from it — ⚠ **partly**: `acting_identity` and `session_git_environment` are implemented; **no caller resolves at the session edge yet** (see *Green-phase findings*)
+- [x] **M3** — a distinct failure per outcome
+- [x] **M4** — retire `FileGitHubTokenStore`'s readers — already true on the base (`#keyring` 3/9–8/9); the three structural tests were green before this node's green phase touched anything
+- [x] **M5** — acceptance: two projects, two accounts, one daemon — `project_resolved_identity_acceptance.rs`
+- [ ] **M6** — `packages/tddy-accounts/docs/github-identity-resolution.md` — content recorded below, file not created (CLAUDE.md: `packages/*/docs/` is changeset-driven)
 
 ## Testing Plan
 

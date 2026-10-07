@@ -12,7 +12,6 @@ use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{clear_sinks, set_sinks};
 
-use crate::github_rest_common::github_env_token_present;
 use crate::review::{
     format_diff_context_for_prompt, merge_base_commit_for_review, resolve_git_repo_root,
 };
@@ -215,8 +214,8 @@ pub fn merge_pr_github_tools_awareness_line(has_github_token: bool) -> &'static 
     MERGE_PR_GITHUB_TOOLS_AWARENESS_AUTHENTICATED
 }
 
-/// Static copy for merge-pr when `GITHUB_TOKEN` / `GH_TOKEN` is set (see [`merge_pr_github_tools_awareness_line`]).
-const MERGE_PR_GITHUB_TOOLS_AWARENESS_AUTHENTICATED: &str = "When authenticated (**GITHUB_TOKEN** or **GH_TOKEN**), **tddy-tools** exposes GitHub pull request MCP tools (**github_create_pull_request**, **github_update_pull_request**) in addition to this workflow’s automated merge path—use them to open or update PR metadata without ad-hoc shell **curl**.";
+/// Static copy for merge-pr when an authenticated GitHub account is available (see [`merge_pr_github_tools_awareness_line`]).
+const MERGE_PR_GITHUB_TOOLS_AWARENESS_AUTHENTICATED: &str = "When authenticated as the project's GitHub account, **tddy-tools** exposes GitHub pull request MCP tools (**github_create_pull_request**, **github_update_pull_request**) in addition to this workflow’s automated merge path—use them to open or update PR metadata without ad-hoc shell **curl**.";
 
 #[must_use]
 fn system_prompt_for_task(
@@ -224,27 +223,17 @@ fn system_prompt_for_task(
     git_block: &str,
     target_branch: Option<&str>,
 ) -> Option<String> {
-    let mut base = match task_id {
+    // TODO(keyring 9/9): the GitHub PR tools awareness is not appended. It used to be gated on
+    // `GITHUB_TOKEN` being exported to the process, which is no longer a credential anywhere; the
+    // agent's process receives no resolved token, so its PR tools refuse and advertising them
+    // would be wrong. Append `merge_pr_github_tools_awareness_line(true)` once a project's
+    // resolved account reaches the agent.
+    let base = match task_id {
         TASK_ANALYZE => Some(analyze_system_prompt(git_block, target_branch)),
         TASK_SYNC_MAIN => Some(sync_main_system_prompt(git_block)),
         TASK_FINALIZE => Some(finalize_system_prompt()),
         _ => None,
     }?;
-
-    if github_env_token_present() {
-        let line = merge_pr_github_tools_awareness_line(true);
-        if !line.is_empty() {
-            log::info!(
-                "[merge-pr hooks] appending GitHub PR tools awareness to task_id={task_id} system prompt"
-            );
-            base.push_str("\n\n## GitHub PR tools (**tddy-tools**)\n\n");
-            base.push_str(line);
-        }
-    } else {
-        log::debug!(
-            "[merge-pr hooks] no GitHub token in environment — omitting GitHub PR tools awareness"
-        );
-    }
 
     Some(base)
 }

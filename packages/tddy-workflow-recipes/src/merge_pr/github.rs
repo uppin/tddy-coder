@@ -1,4 +1,4 @@
-//! GitHub REST merge for **merge-pr** (token detection, PR lookup, merge API).
+//! GitHub REST merge for **merge-pr** (PR lookup, merge API).
 
 use std::fs;
 use std::process::Command;
@@ -6,9 +6,7 @@ use std::process::Command;
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::github_rest_common::{
-    github_token_from_env, GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_MERGE_PR,
-};
+use crate::github_rest_common::{GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_MERGE_PR};
 
 /// Parameters for merging the open PR for the current branch.
 #[derive(Debug, Clone, Default)]
@@ -23,10 +21,19 @@ fn temp_response_path(prefix: &str) -> std::path::PathBuf {
 }
 
 /// Find open PR for `head={owner}:{branch}`, then merge via REST; returns merge commit SHA.
-pub fn merge_open_pr_for_branch(params: MergePrGithubParams) -> Result<String, String> {
-    let token = github_token_from_env().ok_or_else(|| {
-        "merge-pr: GitHub credentials missing; set GITHUB_TOKEN or GH_TOKEN".to_string()
-    })?;
+///
+/// `token` is the credential of the account the project is assigned. It is a plain parameter and
+/// never an `Option`: a blank one is refused, and nothing is read from the process environment.
+pub fn merge_open_pr_for_branch(
+    params: MergePrGithubParams,
+    token: &str,
+) -> Result<String, String> {
+    if token.trim().is_empty() {
+        return Err(
+            "merge-pr: GitHub credentials missing; no account is resolved for this project"
+                .to_string(),
+        );
+    }
 
     if params.owner.is_empty() || params.repo.is_empty() || params.branch.is_empty() {
         return Err("merge-pr: GitHub owner, repository, and branch must be non-empty".to_string());
@@ -42,7 +49,7 @@ pub fn merge_open_pr_for_branch(params: MergePrGithubParams) -> Result<String, S
     let pulls_http = curl_github_get_with_query(
         &pulls_url,
         &[("state", "open"), ("head", head.as_str())],
-        &token,
+        token,
         &pulls_path,
     )?;
 
@@ -84,7 +91,7 @@ pub fn merge_open_pr_for_branch(params: MergePrGithubParams) -> Result<String, S
     let merge_body_path = temp_response_path("tddy-gh-merge-body");
     fs::write(&merge_body_path, br#"{"merge_method":"merge"}"#).map_err(|e| e.to_string())?;
 
-    let merge_http = curl_github_put_json(&merge_url, &merge_body_path, &token, &merge_path)?;
+    let merge_http = curl_github_put_json(&merge_url, &merge_body_path, token, &merge_path)?;
     fs::remove_file(&merge_body_path).ok();
 
     if !(200..300).contains(&merge_http) {

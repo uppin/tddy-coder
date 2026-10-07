@@ -8,7 +8,7 @@ use tddy_accounts::{
     acting_identity, ActingIdentity, GitIdentity, IdentityError, META_SUBJECT, META_SUBJECT_ID,
     PROVIDER_GITHUB,
 };
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, FIRST_VERSION};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 
 fn github() -> ProviderId {
     ProviderId::new(PROVIDER_GITHUB)
@@ -20,7 +20,7 @@ fn a_github_account(account: &str, subject_id: &str, login: &str, token: &str) -
         provider: github(),
         account: AccountId::new(account),
         label: format!("{login}'s account"),
-        secret: token.to_string(),
+        secret: SecretString::new(token),
         metadata: [
             (META_SUBJECT_ID.to_string(), subject_id.to_string()),
             (META_SUBJECT.to_string(), login.to_string()),

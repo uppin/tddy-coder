@@ -101,7 +101,10 @@ impl Task for MergeTask {
             .get_sync::<u64>("merge_pr_number")
             .ok_or("MergeTask: merge_pr_number not in context")?;
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
-        let gh = super::github::RealGithubPrApi::new(&repo);
+        // TODO(keyring 9/9): no resolved GitHub account reaches the orchestrator's task context
+        // yet, and the process environment is no longer a credential, so every authenticated call
+        // refuses. Thread the project's `ActingIdentity::token` here.
+        let gh = super::github::RealGithubPrApi::without_credential(&repo);
 
         let _sha = super::bridge::execute_stack_merge(&session_dir, &node_id, pr_number, &gh)?;
 
@@ -157,7 +160,10 @@ impl Task for RepointTask {
             .get_sync::<String>("default_branch")
             .unwrap_or_else(|| "master".to_string());
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
-        let gh = super::github::RealGithubPrApi::new(&repo);
+        // TODO(keyring 9/9): no resolved GitHub account reaches the orchestrator's task context
+        // yet, and the process environment is no longer a credential, so every authenticated call
+        // refuses. Thread the project's `ActingIdentity::token` here.
+        let gh = super::github::RealGithubPrApi::without_credential(&repo);
 
         super::bridge::execute_stack_repoint(
             &session_dir,

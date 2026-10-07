@@ -259,15 +259,14 @@ pub trait GithubPrInsightApi: Send + Sync {
     ) -> Result<(), tddy_core::WorkflowError>;
 }
 
-/// Where a [`RealGithubPrApi`] gets its credential. Explicit never falls back to the environment:
-/// a caller acting for a specific operator must not silently authenticate as the host's ambient
-/// token.
+/// Where a [`RealGithubPrApi`] gets its credential. There is no environment variant, and there must
+/// never be one: a caller acting for a project must not silently authenticate as whoever exported
+/// the host's `GITHUB_TOKEN`.
 enum TokenSource {
-    /// `GITHUB_TOKEN` / `GH_TOKEN` of the running process — correct for the recipe and CLI callers,
-    /// which run as the operator.
-    ProcessEnv,
-    /// A token supplied by the caller (e.g. the daemon, acting for a logged-in web operator).
+    /// A token supplied by the caller — the one resolved for the account the project is assigned.
     Explicit(String),
+    /// No account is resolved for this caller. Every authenticated operation refuses.
+    Absent,
 }
 
 /// Real implementation using GitHub REST API via `curl`.
@@ -278,17 +277,8 @@ pub struct RealGithubPrApi {
 }
 
 impl RealGithubPrApi {
-    /// Authenticate with the process environment (`GITHUB_TOKEN` / `GH_TOKEN`) — the recipe and CLI
-    /// callers, which run as the operator.
-    pub fn new(repo: impl Into<String>) -> Self {
-        Self {
-            repo: repo.into(),
-            token: TokenSource::ProcessEnv,
-        }
-    }
-
-    /// Authenticate with an explicitly supplied token — a server acting for one operator, whose own
-    /// credential must be used instead of the host's ambient environment.
+    /// Authenticate with an explicitly supplied token — the one resolved for the account the
+    /// project is assigned (`tddy_accounts::acting_identity`).
     pub fn with_token(repo: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
             repo: repo.into(),
@@ -296,13 +286,28 @@ impl RealGithubPrApi {
         }
     }
 
+    /// A client for a caller that has **no** resolved account. It exists so such a caller keeps
+    /// compiling while it refuses, loudly, instead of reaching for an ambient credential: every
+    /// authenticated operation returns an error naming that no account is resolved.
+    ///
+    /// Each use is a place where the project's account does not yet reach the code — see the
+    /// `TODO(keyring 9/9)` at the call site.
+    pub fn without_credential(repo: impl Into<String>) -> Self {
+        Self {
+            repo: repo.into(),
+            token: TokenSource::Absent,
+        }
+    }
+
     /// Resolve the credential for one call, or an operator-facing reason why there is none.
     fn resolve_token(&self) -> Result<String, String> {
         match &self.token {
-            TokenSource::ProcessEnv => crate::github_rest_common::github_token_from_env()
-                .ok_or_else(|| "no GitHub token set (GITHUB_TOKEN / GH_TOKEN)".to_string()),
             TokenSource::Explicit(t) if !t.trim().is_empty() => Ok(t.clone()),
             TokenSource::Explicit(_) => Err("the supplied GitHub token is blank".to_string()),
+            TokenSource::Absent => Err(
+                "no GitHub account is resolved for this operation; assign one to the project"
+                    .to_string(),
+            ),
         }
     }
 
@@ -656,62 +661,33 @@ pub fn owner_repo_from_remote_url(remote_url: &str) -> Option<String> {
 mod real_impl_tests {
     use super::*;
 
-    /// `real_github_get_open_pr_errors_without_token` — when no GitHub token is set,
-    /// `RealGithubPrApi::get_open_pr` must return `Err` immediately (token gating) rather
-    /// than calling curl with an empty Authorization header.
     #[test]
-    fn real_github_get_open_pr_errors_without_token() {
-        let token_backup = (
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
+    fn real_github_get_open_pr_errors_without_a_credential() {
+        // Given a client with no resolved account
+        let api = RealGithubPrApi::without_credential("owner/repo");
 
-        let api = RealGithubPrApi::new("owner/repo");
+        // When it looks a PR up
         let result = api.get_open_pr("owner:feature/branch");
 
-        if let Some(t) = token_backup.0 {
-            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
-        }
-        if let Some(t) = token_backup.1 {
-            unsafe { std::env::set_var("GH_TOKEN", t) };
-        }
-
+        // Then it fails before reaching curl
         assert!(
             result.is_err(),
-            "get_open_pr must return Err when no GitHub token is set; got: {result:?}"
+            "get_open_pr must return Err when no account is resolved; got: {result:?}"
         );
     }
 
-    /// `real_github_close_pr_errors_without_token` — `close_pr` must fail closed when no GitHub
-    /// token is configured, never issuing a curl PATCH with an empty Authorization header.
     #[test]
-    fn real_github_close_pr_errors_without_token() {
-        let token_backup = (
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
+    fn real_github_close_pr_errors_with_a_blank_token() {
+        // Given a client holding a blank token
+        let api = RealGithubPrApi::with_token("owner/repo", "  ");
 
-        let api = RealGithubPrApi::new("owner/repo");
+        // When it closes a PR
         let result = api.close_pr(7);
 
-        if let Some(t) = token_backup.0 {
-            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
-        }
-        if let Some(t) = token_backup.1 {
-            unsafe { std::env::set_var("GH_TOKEN", t) };
-        }
-
+        // Then it fails closed, never issuing a PATCH with an empty Authorization header
         assert!(
             result.is_err(),
-            "close_pr must return Err when no GitHub token is set; got: {result:?}"
+            "close_pr must return Err when the token is blank; got: {result:?}"
         );
     }
 }

@@ -1,4 +1,8 @@
-//! Shared GitHub REST API constants and token resolution for **tddy-workflow-recipes** and consumers (e.g. **tddy-tools**).
+//! Shared GitHub REST API constants and curl transport for **tddy-workflow-recipes** and consumers (e.g. **tddy-tools**).
+//!
+//! No function in here resolves a credential. A token reaches a call only by being passed to it, and
+//! a blank one is refused before curl runs: which GitHub account acts is decided by the project's
+//! assignment (`tddy-accounts`), never by whatever the process environment happens to hold.
 //!
 //! Keep `Accept` and `X-GitHub-Api-Version` in sync across merge-pr curl and tddy-tools GitHub PR helpers.
 
@@ -14,23 +18,13 @@ pub const USER_AGENT_MERGE_PR: &str = "tddy-coder-workflow-recipes";
 /// `User-Agent` for **tddy-tools** GitHub PR MCP / REST calls.
 pub const USER_AGENT_TDDY_TOOLS: &str = "tddy-tools";
 
-/// Resolve GitHub token from the environment (`GITHUB_TOKEN` preferred, then `GH_TOKEN`).
-#[must_use]
-pub fn github_token_from_env() -> Option<String> {
-    std::env::var("GITHUB_TOKEN")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            std::env::var("GH_TOKEN")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-        })
-}
-
-/// True when a non-empty `GITHUB_TOKEN` or `GH_TOKEN` is set (prompt gating, merge-pr, etc.).
-#[must_use]
-pub fn github_env_token_present() -> bool {
-    github_token_from_env().is_some()
+/// Refuse a blank credential before any process is spawned — an empty `Authorization: Bearer`
+/// header is not "unauthenticated", it is a request that fails at GitHub with a less useful reason.
+fn require_token(op: &str, token: &str) -> Result<(), tddy_core::WorkflowError> {
+    if token.trim().is_empty() {
+        return Err(curl_err(format!("{op}: no GitHub token supplied")));
+    }
+    Ok(())
 }
 
 /// Root of the GitHub REST API every call in this module is built from.
@@ -54,6 +48,7 @@ fn run_curl_json_body(
     body: &str,
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
+    require_token(&format!("GitHub {method}"), token)?;
     let body_path = temp_github_path("tddy-gh-req-body");
     let out_path = temp_github_path("tddy-gh-resp");
     std::fs::write(&body_path, body.as_bytes()).map_err(|e| curl_err(e.to_string()))?;
@@ -106,21 +101,7 @@ fn run_curl_json_body(
     Ok(body_raw)
 }
 
-/// HTTP PATCH with a JSON body string, returns the response body.
-/// Uses curl; token from `github_token_from_env()`.
-pub fn curl_github_patch_json(
-    repo: &str,
-    path: &str,
-    body: &str,
-) -> Result<String, tddy_core::WorkflowError> {
-    let token = github_token_from_env().ok_or_else(|| {
-        curl_err("curl_github_patch_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
-    })?;
-    curl_github_patch_json_with_token(repo, path, body, &token)
-}
-
-/// HTTP PATCH with a caller-supplied token — for a server acting on behalf of one operator, whose
-/// own credential must be used rather than the host process environment.
+/// HTTP PATCH with a JSON body string, returns the response body, authenticated as `token`.
 pub fn curl_github_patch_json_with_token(
     repo: &str,
     path: &str,
@@ -131,20 +112,7 @@ pub fn curl_github_patch_json_with_token(
     run_curl_json_body(&url, "PATCH", body, token)
 }
 
-/// HTTP POST with a JSON body string, returns the response body.
-/// Uses curl; token from `github_token_from_env()`.
-pub fn curl_github_post_json(
-    repo: &str,
-    path: &str,
-    body: &str,
-) -> Result<String, tddy_core::WorkflowError> {
-    let token = github_token_from_env().ok_or_else(|| {
-        curl_err("curl_github_post_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
-    })?;
-    curl_github_post_json_with_token(repo, path, body, &token)
-}
-
-/// HTTP POST with a caller-supplied token (see [`curl_github_patch_json_with_token`]).
+/// HTTP POST with a JSON body string (see [`curl_github_patch_json_with_token`]).
 pub fn curl_github_post_json_with_token(
     repo: &str,
     path: &str,
@@ -155,19 +123,7 @@ pub fn curl_github_post_json_with_token(
     run_curl_json_body(&url, "POST", body, token)
 }
 
-/// HTTP GET with query parameters, returns the response body.
-pub fn curl_github_get_json(
-    repo: &str,
-    path: &str,
-    query: &[(&str, &str)],
-) -> Result<String, tddy_core::WorkflowError> {
-    let token = github_token_from_env().ok_or_else(|| {
-        curl_err("curl_github_get_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
-    })?;
-    curl_github_get_json_with_token(repo, path, query, &token)
-}
-
-/// HTTP GET with a caller-supplied token (see [`curl_github_patch_json_with_token`]).
+/// HTTP GET with query parameters (see [`curl_github_patch_json_with_token`]).
 pub fn curl_github_get_json_with_token(
     repo: &str,
     path: &str,
@@ -198,6 +154,7 @@ fn run_curl_get(
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
+    require_token("GitHub GET", token)?;
     let out_path = temp_github_path("tddy-gh-get");
 
     let mut cmd = std::process::Command::new("curl");
@@ -246,19 +203,7 @@ fn run_curl_get(
     Ok(body)
 }
 
-/// HTTP PUT with a JSON body string, returns the response body.
-pub fn curl_github_put_json(
-    repo: &str,
-    path: &str,
-    body: &str,
-) -> Result<String, tddy_core::WorkflowError> {
-    let token = github_token_from_env().ok_or_else(|| {
-        curl_err("curl_github_put_json: no GitHub token set (GITHUB_TOKEN / GH_TOKEN)")
-    })?;
-    curl_github_put_json_with_token(repo, path, body, &token)
-}
-
-/// HTTP PUT with a caller-supplied token (see [`curl_github_patch_json_with_token`]).
+/// HTTP PUT with a JSON body string (see [`curl_github_patch_json_with_token`]).
 pub fn curl_github_put_json_with_token(
     repo: &str,
     path: &str,
@@ -273,66 +218,58 @@ pub fn curl_github_put_json_with_token(
 mod tests {
     use super::*;
 
-    /// `curl_github_patch_json_returns_error_without_token` — when neither `GITHUB_TOKEN` nor
-    /// `GH_TOKEN` is set, `curl_github_patch_json` must return `Err` (token required) rather than
-    /// panicking or calling curl with an empty Authorization header.
     #[test]
-    fn curl_github_patch_json_returns_error_without_token() {
-        // Ensure the env vars are unset for this test.
-        // Note: test binaries run in parallel; use serial_test if env mutation causes flakiness.
-        let token_backup = (
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
+    fn a_blank_token_is_refused_before_a_patch_reaches_curl() {
+        // Given no credential at all
+        let token = "";
+
+        // When a PATCH is attempted with it
+        let result = curl_github_patch_json_with_token(
+            "owner/repo",
+            "pulls/1",
+            r#"{"base":"master"}"#,
+            token,
         );
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
 
-        let result = curl_github_patch_json("owner/repo", "pulls/1", r#"{"base":"master"}"#);
-
-        // Restore
-        if let Some(t) = token_backup.0 {
-            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
-        }
-        if let Some(t) = token_backup.1 {
-            unsafe { std::env::set_var("GH_TOKEN", t) };
-        }
-
+        // Then it is refused
         assert!(
             result.is_err(),
-            "curl_github_patch_json must return Err when no GitHub token is set; got: {result:?}"
+            "a PATCH must return Err when no GitHub token is supplied; got: {result:?}"
         );
     }
 
-    /// `curl_github_post_json_returns_error_without_token` — same gate for POST.
     #[test]
-    fn curl_github_post_json_returns_error_without_token() {
-        let token_backup = (
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
+    fn a_whitespace_token_is_refused_before_a_post_reaches_curl() {
+        // Given a token that is only whitespace
+        let token = "  \n";
 
-        let result = curl_github_post_json(
+        // When a POST is attempted with it
+        let result = curl_github_post_json_with_token(
             "owner/repo",
             "pulls",
             r#"{"title":"x","head":"y","base":"master"}"#,
+            token,
         );
 
-        if let Some(t) = token_backup.0 {
-            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
-        }
-        if let Some(t) = token_backup.1 {
-            unsafe { std::env::set_var("GH_TOKEN", t) };
-        }
-
+        // Then it is refused
         assert!(
             result.is_err(),
-            "curl_github_post_json must return Err when no GitHub token is set; got: {result:?}"
+            "a POST must return Err when the GitHub token is blank; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn a_blank_token_is_refused_before_a_get_reaches_curl() {
+        // Given no credential at all
+        let token = "";
+
+        // When a GET is attempted with it
+        let result = curl_github_get_json_with_token("owner/repo", "pulls", &[], token);
+
+        // Then it is refused
+        assert!(
+            result.is_err(),
+            "a GET must return Err when no GitHub token is supplied; got: {result:?}"
         );
     }
 }

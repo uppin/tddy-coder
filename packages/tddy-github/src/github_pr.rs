@@ -6,9 +6,7 @@ use std::process::Command;
 
 use serde_json::{json, Value};
 
-use crate::github_rest_common::{
-    github_token_from_env, GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_TDDY_TOOLS,
-};
+use crate::github_rest_common::{GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_TDDY_TOOLS};
 
 /// Stable MCP tool names for GitHub PR operations (must match MCP registration).
 pub const GITHUB_CREATE_PULL_REQUEST_MCP_NAME: &str = "github_create_pull_request";
@@ -57,7 +55,7 @@ pub struct UpdatePullRequestParams {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GithubPrError {
-    /// Missing or empty `GITHUB_TOKEN` / `GH_TOKEN`.
+    /// No token was supplied, or it was blank.
     AuthenticationRequired,
     /// Transport, HTTP, or API error (message must never include token material).
     Rest(String),
@@ -69,7 +67,7 @@ impl std::fmt::Display for GithubPrError {
             GithubPrError::AuthenticationRequired => {
                 write!(
                     f,
-                    "GitHub authentication required: set GITHUB_TOKEN or GH_TOKEN"
+                    "GitHub authentication required: no GitHub account is resolved for this operation"
                 )
             }
             GithubPrError::Rest(s) => write!(f, "{s}"),
@@ -131,6 +129,7 @@ pub fn registered_github_pr_mcp_tool_names() -> Vec<&'static str> {
 pub fn create_pull_request(
     transport: &mut MockGithubTransport,
     params: &CreatePullRequestParams,
+    token: &str,
 ) -> Result<u64, GithubPrError> {
     log::debug!(
         target: "tddy_workflow_recipes::github_pr",
@@ -138,15 +137,15 @@ pub fn create_pull_request(
         params.owner,
         params.repo
     );
-    let Some(token) = github_token_from_env() else {
+    if token.trim().is_empty() {
         log::info!(
             target: "tddy_workflow_recipes::github_pr",
-            "create_pull_request: no GITHUB_TOKEN/GH_TOKEN — rejecting before HTTP"
+            "create_pull_request: no token supplied — rejecting before HTTP"
         );
         return Err(GithubPrError::AuthenticationRequired);
-    };
+    }
 
-    let headers = github_rest_headers(&token);
+    let headers = github_rest_headers(token);
     let body = build_create_pull_request_json(params);
     log::debug!(
         target: "tddy_workflow_recipes::github_pr",
@@ -169,6 +168,7 @@ pub fn create_pull_request(
 pub fn update_pull_request(
     transport: &mut MockGithubTransport,
     params: &UpdatePullRequestParams,
+    token: &str,
 ) -> Result<(), GithubPrError> {
     log::debug!(
         target: "tddy_workflow_recipes::github_pr",
@@ -177,15 +177,15 @@ pub fn update_pull_request(
         params.repo,
         params.pull_number
     );
-    let Some(token) = github_token_from_env() else {
+    if token.trim().is_empty() {
         log::info!(
             target: "tddy_workflow_recipes::github_pr",
-            "update_pull_request: no GITHUB_TOKEN/GH_TOKEN — rejecting before HTTP"
+            "update_pull_request: no token supplied — rejecting before HTTP"
         );
         return Err(GithubPrError::AuthenticationRequired);
-    };
+    }
 
-    let headers = github_rest_headers(&token);
+    let headers = github_rest_headers(token);
     let body = build_update_pull_request_json(params);
     log::debug!(
         target: "tddy_workflow_recipes::github_pr",
@@ -209,6 +209,7 @@ pub fn update_pull_request(
 /// Create a pull request over the network (used by MCP). Requires `curl` on `PATH`.
 pub fn create_pull_request_via_rest_api(
     params: &CreatePullRequestParams,
+    token: &str,
 ) -> Result<u64, GithubPrError> {
     log::info!(
         target: "tddy_workflow_recipes::github_pr",
@@ -216,13 +217,15 @@ pub fn create_pull_request_via_rest_api(
         params.owner,
         params.repo
     );
-    let token = github_token_from_env().ok_or(GithubPrError::AuthenticationRequired)?;
+    if token.trim().is_empty() {
+        return Err(GithubPrError::AuthenticationRequired);
+    }
     let url = format!(
         "https://api.github.com/repos/{}/{}/pulls",
         params.owner, params.repo
     );
     let body = build_create_pull_request_json(params);
-    let (status, raw) = curl_github_json("POST", &url, &body, &token)?;
+    let (status, raw) = curl_github_json("POST", &url, &body, token)?;
     if !(200..300).contains(&status) {
         log::debug!(
             target: "tddy_workflow_recipes::github_pr",
@@ -254,6 +257,7 @@ pub fn create_pull_request_via_rest_api(
 /// Update a pull request over the network (used by MCP). Requires `curl` on `PATH`.
 pub fn update_pull_request_via_rest_api(
     params: &UpdatePullRequestParams,
+    token: &str,
 ) -> Result<(), GithubPrError> {
     log::info!(
         target: "tddy_workflow_recipes::github_pr",
@@ -262,13 +266,15 @@ pub fn update_pull_request_via_rest_api(
         params.repo,
         params.pull_number
     );
-    let token = github_token_from_env().ok_or(GithubPrError::AuthenticationRequired)?;
+    if token.trim().is_empty() {
+        return Err(GithubPrError::AuthenticationRequired);
+    }
     let url = format!(
         "https://api.github.com/repos/{}/{}/pulls/{}",
         params.owner, params.repo, params.pull_number
     );
     let body = build_update_pull_request_json(params);
-    let (status, raw) = curl_github_json("PATCH", &url, &body, &token)?;
+    let (status, raw) = curl_github_json("PATCH", &url, &body, token)?;
     if !(200..300).contains(&status) {
         log::debug!(
             target: "tddy_workflow_recipes::github_pr",
@@ -352,52 +358,40 @@ fn curl_github_json(
 mod red_unit_tests {
     use super::*;
     use serde_json::json;
-    use serial_test::serial;
 
-    #[test]
-    #[serial]
-    fn github_rest_recorded_request_includes_bearer_and_accept_headers() {
-        // Given
-        std::env::set_var("GITHUB_TOKEN", "ghp_unit_test_token");
-        let _clear = ClearGithubEnvOnDrop;
-        let mut transport = MockGithubTransport::new();
-        let params = CreatePullRequestParams {
+    fn a_pull_request(head: &str, base: &str, body: &str) -> CreatePullRequestParams {
+        CreatePullRequestParams {
             owner: "o".into(),
             repo: "r".into(),
             title: "t".into(),
-            head: "h".into(),
-            base: "main".into(),
-            body: "b".into(),
-        };
+            head: head.into(),
+            base: base.into(),
+            body: body.into(),
+        }
+    }
+
+    #[test]
+    fn github_rest_recorded_request_includes_bearer_and_accept_headers() {
+        // Given
+        let mut transport = MockGithubTransport::new();
+        let params = a_pull_request("h", "main", "b");
 
         // When
-        create_pull_request(&mut transport, &params).expect("authenticated create");
+        create_pull_request(&mut transport, &params, "ghp_unit_test_token")
+            .expect("authenticated create");
 
         // Then
         let req = transport.requests.first().expect("one request");
-        let auth = req
-            .headers
-            .get("Authorization")
-            .map(String::as_str)
-            .unwrap_or("");
-        assert!(
-            auth.starts_with("Bearer "),
-            "expected Bearer token header once wired; headers={:?}",
+        assert_eq!(
+            req.headers.get("Authorization").map(String::as_str),
+            Some("Bearer ghp_unit_test_token"),
+            "the supplied token is the one the request carries; headers={:?}",
             req.headers
         );
         assert_eq!(
             req.headers.get("Accept").map(String::as_str),
             Some("application/vnd.github+json")
         );
-    }
-
-    struct ClearGithubEnvOnDrop;
-
-    impl Drop for ClearGithubEnvOnDrop {
-        fn drop(&mut self) {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
     }
 
     #[test]
@@ -414,77 +408,54 @@ mod red_unit_tests {
     }
 
     #[test]
-    #[serial]
-    fn create_pull_request_rejects_without_github_token() {
-        struct RestoreEnv {
-            github: Option<String>,
-            gh: Option<String>,
-        }
-
-        impl Drop for RestoreEnv {
-            fn drop(&mut self) {
-                match &self.github {
-                    Some(v) => std::env::set_var("GITHUB_TOKEN", v),
-                    None => std::env::remove_var("GITHUB_TOKEN"),
-                }
-                match &self.gh {
-                    Some(v) => std::env::set_var("GH_TOKEN", v),
-                    None => std::env::remove_var("GH_TOKEN"),
-                }
-            }
-        }
-
-        // Given
-        let _restore = RestoreEnv {
-            github: std::env::var("GITHUB_TOKEN").ok(),
-            gh: std::env::var("GH_TOKEN").ok(),
-        };
-        std::env::remove_var("GITHUB_TOKEN");
-        std::env::remove_var("GH_TOKEN");
-
+    fn create_pull_request_rejects_without_a_token() {
+        // Given no credential
         let mut transport = MockGithubTransport::new();
-        let params = CreatePullRequestParams {
-            owner: "o".into(),
-            repo: "r".into(),
-            title: "t".into(),
-            head: "h".into(),
-            base: "b".into(),
-            body: "x".into(),
-        };
+        let params = a_pull_request("h", "b", "x");
 
         // When
-        let result = create_pull_request(&mut transport, &params);
+        let result = create_pull_request(&mut transport, &params, "");
 
-        // Then
-        assert!(result.is_err(), "expected auth error, got {result:?}");
+        // Then it is refused and nothing is recorded
         assert!(matches!(result, Err(GithubPrError::AuthenticationRequired)));
         assert!(transport.requests.is_empty());
     }
 
     #[test]
-    #[serial]
-    fn create_pull_request_json_body_matches_github_pulls_contract() {
-        // Given
-        std::env::set_var("GITHUB_TOKEN", "ghp_unit");
-        let _clear = ClearGithubEnvOnDrop;
+    fn update_pull_request_rejects_a_blank_token() {
+        // Given a blank credential
         let mut transport = MockGithubTransport::new();
-        let params = CreatePullRequestParams {
-            owner: "a".into(),
-            repo: "b".into(),
-            title: "T".into(),
-            head: "feat".into(),
-            base: "main".into(),
-            body: "BB".into(),
+        let params = UpdatePullRequestParams {
+            owner: "o".into(),
+            repo: "r".into(),
+            pull_number: 1,
+            title: None,
+            body: None,
+            draft: None,
         };
 
         // When
-        create_pull_request(&mut transport, &params).unwrap();
+        let result = update_pull_request(&mut transport, &params, "   ");
+
+        // Then it is refused and nothing is recorded
+        assert!(matches!(result, Err(GithubPrError::AuthenticationRequired)));
+        assert!(transport.requests.is_empty());
+    }
+
+    #[test]
+    fn create_pull_request_json_body_matches_github_pulls_contract() {
+        // Given
+        let mut transport = MockGithubTransport::new();
+        let params = a_pull_request("feat", "main", "BB");
+
+        // When
+        create_pull_request(&mut transport, &params, "ghp_unit").unwrap();
 
         // Then
         assert_eq!(
             transport.requests[0].body,
             json!({
-                "title": "T",
+                "title": "t",
                 "head": "feat",
                 "base": "main",
                 "body": "BB"

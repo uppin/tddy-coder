@@ -332,7 +332,10 @@ impl Task for AssessTask {
                 .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
         };
 
-        let gh = tddy_github::pr_api::RealGithubPrApi::new(&github_owner_repo);
+        // TODO(keyring 9/9): no resolved GitHub account reaches the stack assessment yet, and the
+        // process environment is no longer a credential, so every authenticated call refuses.
+        // Thread the project's `ActingIdentity::token` here.
+        let gh = tddy_github::pr_api::RealGithubPrApi::without_credential(&github_owner_repo);
 
         let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
         let autonomous_merge = context
