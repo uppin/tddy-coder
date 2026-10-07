@@ -15,6 +15,7 @@ use tddy_rpc::Status;
 use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::agent_host_callbacks::AgentRoster;
+use super::split_ports::SplitSessions;
 use super::svc_materialize_staged_attachment::AttachmentState;
 use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
@@ -182,6 +183,27 @@ impl DaemonSessionHost {
             roster_keepalive_interval: self.roster_keepalive_interval,
             session_admissions: Arc::clone(&self.session_admissions),
             model_registry: self.model_registry.clone(),
+            host: Arc::new(self.clone()),
+        }
+    }
+
+    /// The split topic's fields, owned, plus this host's callbacks: the handle the split topic's
+    /// methods live on, for the places a borrowed state cannot go.
+    ///
+    /// Built per call, like [`Self::agent_roster`]. The callbacks are a clone of this host, whose
+    /// every mutable field is behind an `Arc`.
+    pub(crate) fn split_sessions(&self) -> SplitSessions {
+        SplitSessions {
+            config: self.config.clone(),
+            tddy_data_dir: self.tddy_data_dir.clone(),
+            staging_base_dir: self.staging_base_dir.clone(),
+            peer_routing: self.peer_routing.clone(),
+            session_rooms: Arc::clone(&self.session_rooms),
+            workspace_sandboxes: Arc::clone(&self.workspace_sandboxes),
+            workspace_sandbox_provisioner: Arc::clone(&self.workspace_sandbox_provisioner),
+            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+            session_tokens: self.session_tokens.clone(),
+            agent_roster: self.agent_roster(),
             host: Arc::new(self.clone()),
         }
     }

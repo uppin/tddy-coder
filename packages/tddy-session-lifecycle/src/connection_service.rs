@@ -233,6 +233,8 @@ pub use hooks_and_urls::*;
 
 mod agent_host_callbacks;
 
+mod split_ports;
+
 mod svc_agent_host_ports;
 
 mod svc_agent_roster_delegators;

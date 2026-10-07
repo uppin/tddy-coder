@@ -1,4 +1,5 @@
-//! The session host as the agent topic's callbacks (see [`AgentHostCallbacks`]).
+//! The session host as the agent topic's and the split topic's callbacks (see
+//! [`AgentHostCallbacks`] and [`SplitHost`]).
 //!
 //! Each method forwards to the host method or impl that already does the work, so the topic and
 //! every other caller take exactly one path.
@@ -11,12 +12,17 @@ use std::sync::Arc;
 use tddy_daemon_livekit::session_room::{
     OpenedSessionRoom, RemoteSnapshotSource, WorktreeSnapshot,
 };
-use tddy_rpc::Status;
+use tddy_rpc::{Request, Response, Status};
 use tddy_sandbox_runner::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
+use tddy_service::proto::session::{
+    DeleteSessionRequest, DeleteSessionResponse, StartSessionRequest, StartSessionResponse,
+};
 use tddy_session_agents::session_agent_clone::HostedClone;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use super::agent_host_callbacks::AgentHostCallbacks;
+use super::split_ports::{SplitHost, SplitSessionAgents, SplitSessionFiles};
 use super::DaemonSessionHost;
 
 #[async_trait::async_trait]
@@ -66,5 +72,35 @@ impl AgentHostCallbacks for DaemonSessionHost {
         worktree_root: &Path,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
         DaemonSessionHost::ensure_session_room(self, session_id, session_dir, worktree_root).await
+    }
+}
+
+#[async_trait::async_trait]
+impl SplitHost for DaemonSessionHost {
+    async fn start_workspace_session(
+        &self,
+        req: StartSessionRequest,
+        progress: &AttachmentProgressSink,
+    ) -> Result<Response<StartSessionResponse>, Status> {
+        self.start_session_core(req, progress).await
+    }
+
+    async fn delete_session(
+        &self,
+        request: Request<DeleteSessionRequest>,
+    ) -> Result<Response<DeleteSessionResponse>, Status> {
+        self.delete_session_at_session_coordinate(request).await
+    }
+
+    fn session_files(&self) -> Arc<SplitSessionFiles> {
+        Arc::new(Arc::new(self.clone()).session_files_service())
+    }
+
+    fn session_agents(&self) -> Arc<SplitSessionAgents> {
+        Arc::new(self.session_agents_service())
+    }
+
+    fn session_room_roster(&self) -> Result<tddy_rpc::MultiRpcService, Status> {
+        Arc::new(self.clone()).session_room_roster()
     }
 }
