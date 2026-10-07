@@ -1535,19 +1535,11 @@ pub async fn build(
             Arc::new(tddy_session_lifecycle::host_keypair::FileHostKeypair::new(
                 tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
             ));
-        let ss_subject_resolver = ss_user_resolver.clone();
-        let mut ss_svc =
+        let ss_svc =
             tddy_screen_sharing::ScreenSharingServiceImpl::new(ss_user_resolver, ss_sessions_base)
                 .with_config(Arc::clone(&config_arc))
-                .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts));
-        // A target's password is a record in the caller's credential vault, so there is nothing to
-        // store it in without `auth_storage`: the targets calls then refuse rather than answer
-        // "no targets".
-        if let Some(vaults) = auth_result.credential_vaults.clone() {
-            ss_svc = ss_svc.with_target_store(Arc::new(
-                tddy_screen_sharing::SessionVaultTargetStore::new(vaults, ss_subject_resolver),
-            ));
-        }
+                .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts))
+                .with_credential_vaults(auth_result.credential_vaults.clone());
         // The entry comes from `tddy-screen-sharing` rather than being assembled here: the
         // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
         rpc_entries.push(tddy_screen_sharing::build_screen_sharing_entry(ss_svc));

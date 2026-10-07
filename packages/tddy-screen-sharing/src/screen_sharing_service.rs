@@ -19,6 +19,8 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::screen_sharing_records::{ScreenSharingTargetStore, TargetError};
+use crate::session_vault_target_store::SessionVaultTargetStore;
+use tddy_credentials::SessionVaults;
 use tddy_daemon_kernel::config::{resolve_rdp_binary_path, resolve_vnc_binary_path, DaemonConfig};
 use tddy_host_service::host_desktop_targets::{HostDesktopTarget, HostDesktopTargetStore};
 use tddy_host_service::host_keypair::HostKeypair;
@@ -143,6 +145,14 @@ impl ScreenSharingServiceImpl {
     pub fn with_target_store(mut self, target_store: Arc<dyn ScreenSharingTargetStore>) -> Self {
         self.target_store = Some(target_store);
         self
+    }
+
+    /// Keep targets in the user's credential `vaults`; with none, the targets calls refuse.
+    #[must_use]
+    pub fn with_credential_vaults(self, vaults: Option<Arc<SessionVaults>>) -> Self {
+        let Some(vaults) = vaults else { return self };
+        let resolver = Arc::clone(&self.user_resolver);
+        self.with_target_store(Arc::new(SessionVaultTargetStore::new(vaults, resolver)))
     }
 
     /// Supply daemon config for bridge binary path resolution and LiveKit token generation.
@@ -641,9 +651,9 @@ fn host_target_to_proto(t: &HostDesktopTarget) -> ProtoScreenSharingTarget {
 
 /// How a store refusal reaches the caller.
 ///
-/// [`TargetError::Locked`] is deliberately absent: it is a *state* of `ListTargets`, carried in
-/// `vault_locked`, and any caller that turns it into a `Status` has collapsed the distinction this
-/// node exists to keep. The compiler cannot enforce that, so it is written down here.
+/// `ListTargets` never passes [`TargetError::Locked`] here: for it, locked is a *state* carried in
+/// `vault_locked`, and turning it into a `Status` would collapse the distinction this node exists
+/// to keep. Every other call has no such field, so for them a locked store is a refusal.
 fn target_error_to_status(error: TargetError) -> Status {
     match error {
         TargetError::NoSuchSession => Status::unauthenticated("invalid session token"),

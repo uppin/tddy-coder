@@ -40,6 +40,26 @@ function anRdpTarget(overrides: Partial<ScreenSharingTarget> = {}): ScreenSharin
 // ---------------------------------------------------------------------------
 
 describe("applyScreenSharingTabAction", () => {
+  it("starts with the credential store not reported as locked", () => {
+    // Given nothing has been asked of the daemon yet
+    // When
+    const state = initialScreenSharingTabState;
+
+    // Then — locked is what ListTargets reports, never something assumed before it answers
+    expect(state.isVaultLocked).toBe(false);
+  });
+
+  it("set_vault_locked records that the credential store could not be opened", () => {
+    // Given
+    const before = initialScreenSharingTabState;
+
+    // When
+    const state = applyScreenSharingTabAction(before, { type: "set_vault_locked", locked: true });
+
+    // Then
+    expect(state.isVaultLocked).toBe(true);
+  });
+
   it("set_targets replaces the target list with the provided targets", () => {
     // Given
     const vnc = aVncTarget();

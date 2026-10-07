@@ -63,10 +63,10 @@ impl std::fmt::Display for AccountId {
 
 /// One stored credential.
 ///
-/// `label` and `metadata` are **inside** the AEAD along with `secret`, which is the limit being
-/// fixed relative to `tddy_screen_sharing::screen_sharing_vault`: there, a target's label and host
-/// sit in cleartext beside the sealed password, so anyone who can read the file learns what the
-/// operator has access to even without the secret. Here, tampering with either fails the open.
+/// `label` and `metadata` are **inside** the AEAD along with `secret`, which fixes a limit the
+/// retired per-session screen-sharing vault had: there, a target's label and host sat in cleartext
+/// beside the sealed password, so anyone who could read the file learned what the operator has
+/// access to even without the secret. Here, tampering with either fails the open.
 ///
 /// `metadata` carries whatever a provider needs that is not the secret — a refresh token's expiry,
 /// the scopes granted, the avatar URL a UI shows. It is a map rather than typed fields so a new

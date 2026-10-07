@@ -1,9 +1,10 @@
 //! Desktop targets that belong to a **host** rather than to a coding session.
 //!
-//! Every `ScreenSharingService` request carries a `session_id`, and
-//! [`crate::screen_sharing_vault`] keeps its credentials under the session directory. That is right
-//! for a desktop attached to a piece of work, and wrong for a machine: a desktop outlives any
-//! session on it, and deleting a session must not delete the host's target.
+//! Every `ScreenSharingService` request carries a `session_id`, and a session's own desktops are
+//! `screen-sharing` records in the signed-in user's credential store, reached through that
+//! session. That is right for a desktop a person carries from session to session, and wrong for a
+//! machine: a desktop outlives any session on it, and deleting a session must not delete the
+//! host's target.
 //!
 //! # What this does not do
 //!
@@ -75,7 +76,7 @@ struct TargetsFile {
 }
 
 /// A [`HostDesktopTargetStore`] persisted under one directory, alongside — never inside — the
-/// per-session screen-sharing vault.
+/// credential store a session's own desktops live in.
 pub struct FileHostDesktopTargetStore {
     targets_path: PathBuf,
     /// Held across each read-modify-write. Two RPCs attaching a desktop at the same moment both
