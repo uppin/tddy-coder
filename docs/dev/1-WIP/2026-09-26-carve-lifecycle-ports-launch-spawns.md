@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s stack spawns (T9) and its jail and CLI-spawn launches run over `LaunchState` and a `LaunchHost` port, in place
 
 **Date**: 2026-09-26
-**Status**: 📋 Planned. Awaiting the developer's review of D1, D3 (`LaunchHost`, `StackParentHost`) and D10
+**Status**: ✅ Implemented in place (M6.1–M7a.4), pending Linux CI's sandboxed suites. D1 (Recipe B), D3 (recommended) and D10 (a: header-only) applied
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 19/21, branch `feature/carve/lifecycle-ports-launch-spawns`, on top of `#carve` 18
 (`feature/carve/lifecycle-ports-split`). Plan label **16d** (M6 + M7a)
@@ -537,7 +537,13 @@ are node 17's to approve.)
 
 ## Validation results
 
-(Empty. Filled per milestone during `/green`.)
+Measured on `feature/carve/lifecycle-ports-launch-spawns` over 16c's tip `7abe4a74`, scoped to `tddy-session-lifecycle`:
+
+- Baseline: **575 passed, 22 failed (the same 22 by name), 1 ignored**; `tddy-session-agents` 75 passed.
+- `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; clippy `-D warnings` (all targets) and `fmt --check` clean on lifecycle.
+- Deviations: one owned handle `LaunchSessions` (the plan's `LaunchState` and the launch handle are one struct, as `SplitSessions` is); `resume_sandboxed_claude_cli_session` moved by `move_item` with `name` (an `extract_module` would have made it a child of the T4 module), into `svc_resume_sandboxed_claude_cli_session`; A5's literal grep matches the three `Arc::new(self.clone())` hand-offs, which now clone the handle (Recipe B keeps them textually identical).
+- `restructure verify --against 7abe4a74`: 27 statements lost, each a hand re-point (field read or host call) listed in the run; never exits zero for hand edits.
+- TODO(crap-svc-start-sandboxed-cursor-cli-session) in `svc_start_sandboxed_cursor_cli_session.rs` records the deferred "tests first" rule (D10).
 
 ## TODO
 
