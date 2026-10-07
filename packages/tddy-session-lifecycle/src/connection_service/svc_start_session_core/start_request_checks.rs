@@ -1,5 +1,3 @@
-use super::DaemonSessionHost;
-
 use std::path::Path;
 
 use super::super::validate_stack_seed_base_session;
@@ -12,9 +10,10 @@ use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_service::proto::session::StartSessionRequest;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) fn eligible_daemon_ids(&self) -> (String, Vec<String>) {
         let local_id = local_instance_id_for_config(&self.config);
         let eligible_rows = self

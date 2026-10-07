@@ -1,7 +1,5 @@
 use crate::connection_service::service_util;
 
-use super::DaemonSessionHost;
-
 use super::ToolSpawnPurpose;
 
 use super::ToolSpawnPlan;
@@ -22,9 +20,10 @@ use tddy_rpc::Status;
 
 use super::super::AttachmentProgressSink;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_service::proto::session::StartSessionRequest;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) async fn spawn_tool_session(
         &self,
         req: StartSessionRequest,
@@ -74,7 +73,6 @@ impl DaemonSessionHost {
             if enable_conversation_spawn {
                 let sid = Uuid::now_v7().to_string();
                 let sock = self
-                    .launch_sessions()
                     .spawn_host_session_socket(
                         &sid,
                         &os_user,

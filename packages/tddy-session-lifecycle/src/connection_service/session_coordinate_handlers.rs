@@ -172,6 +172,7 @@ impl DaemonSessionHost {
         let conn_req: tddy_service::proto::session::StartSessionRequest =
             super::family_proto_bridge::wire_same(&request.into_inner())?;
         let conn_resp = self
+            .launch_sessions()
             .start_session_core(conn_req, &AttachmentProgressSink::discarding())
             .await?;
         Ok(Response::new(super::family_proto_bridge::wire_same(
@@ -394,7 +395,10 @@ impl DaemonSessionHost {
         });
         tokio::spawn(async move {
             let sink = AttachmentProgressSink::streaming(conn_progress_tx);
-            let started = service.start_session_core(req, &sink).await;
+            let started = service
+                .launch_sessions()
+                .start_session_core(req, &sink)
+                .await;
             // The terminal event goes out only after every progress event ahead of it has been
             // forwarded: they travel through the forwarding task, so sending the terminal one
             // directly would let it overtake a phase's end. Dropping the sink closes the channel

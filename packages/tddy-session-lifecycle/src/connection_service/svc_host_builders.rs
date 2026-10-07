@@ -196,15 +196,6 @@ impl DaemonSessionHost {
         self
     }
 
-    /// This daemon as the claimant of the clones a session's peer-owned agents read.
-    pub(crate) fn seed_clone_claimant(
-        &self,
-    ) -> crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant {
-        crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant {
-            service: self.agent_roster(),
-        }
-    }
-
     /// Substitute the pre-session attachment staging base (builder pattern) — lets a test point
     /// staging at a `TempDir` it owns and assert *where* staged bytes land, instead of sharing the
     /// process temp dir with every other test run.

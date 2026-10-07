@@ -130,6 +130,7 @@ impl DaemonSessionHost {
             None => None,
         };
         let result = self
+            .launch_sessions()
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Resume,
                 os_user,

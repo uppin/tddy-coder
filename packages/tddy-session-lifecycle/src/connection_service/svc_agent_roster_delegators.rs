@@ -71,6 +71,7 @@ impl DaemonSessionHost {
     }
 
     /// [`AgentRoster::seeded_roster_records`](super::agent_host_callbacks::AgentRoster::seeded_roster_records).
+    #[cfg(test)]
     pub(crate) async fn seeded_roster_records(
         &self,
         specialized_agents: &[String],

@@ -7,8 +7,9 @@
 //! not fields and live in wiring above this topic: [`LaunchHost`] is how the topic reaches them
 //! without naming the host.
 //!
-//! [`LaunchSessions`] carries the seven fields the topic's bodies read, plus the roster handle and
-//! the two fields attachment materialization reads. Its fields carry the host's names, so a method
+//! [`LaunchSessions`] carries the fields the topic's bodies read, plus the roster handle, the split
+//! handle, the presenter-observer deps and the two fields attachment materialization reads. Its
+//! fields carry the host's names, so a method
 //! that moves from `impl DaemonSessionHost` to `impl LaunchSessions` changes its `impl` header and
 //! nothing in the body, and the `self.clone()` it hands to a task is textually the same. This
 //! follows [`AgentRoster`](super::agent_host_callbacks::AgentRoster) and
@@ -19,16 +20,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::peer_routing::PeerRouting;
 use tddy_rpc::Status;
 use tddy_service::proto::session::SessionAttachment;
+use tddy_spawn::spawn_worker::SpawnClient;
 use tddy_task::TaskRegistry;
 
 use super::agent_host_callbacks::AgentRoster;
+use super::session_worktree_observer::SessionWorktreeObserver;
+use super::split_ports::SplitSessions;
 use super::svc_materialize_staged_attachment::AttachmentState;
 use super::svc_start_claude_cli_session::SessionStdioEndpoint;
 use super::AttachmentMaterialization;
 use crate::cli_session_manager::CliSessionManager;
+use crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps;
 use crate::PrStackHandler;
 
 /// The capabilities of the session host the launch topic calls and does not own.
@@ -70,6 +76,16 @@ pub(crate) struct LaunchSessions {
     /// The agent topic's handle: a jail start claims its seeded clones and resolves its agent defs
     /// through it.
     pub(crate) agent_roster: AgentRoster,
+    /// The split topic's handle: a start or resume of a split or jailed-codebase session, and a
+    /// delete of its paired checkout, go through it.
+    pub(crate) split_sessions: SplitSessions,
+    /// What the presenter observer of a freshly spawned workflow session reads.
+    pub(crate) presenter_observer_deps: PresenterObserverDeps,
+    pub(crate) user_resolver: SessionUserResolver,
+    pub(crate) spawn_client: Option<Arc<SpawnClient>>,
+    /// Told of each started session's worktree. `None` on a host whose embedder acts on nothing of
+    /// the kind.
+    pub(crate) worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
     /// The host's capabilities that are not fields.
     pub(crate) host: Arc<dyn LaunchHost>,
 }
@@ -83,6 +99,18 @@ impl LaunchSessions {
             staging_base_dir: &self.staging_base_dir,
             peer_routing: &self.peer_routing,
         }
+    }
+
+    /// Start the presenter observer for a freshly spawned workflow session (see
+    /// [`PresenterObserverDeps::maybe_spawn_presenter_observer`]), over this handle's sinks.
+    pub(crate) fn maybe_spawn_presenter_observer(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        grpc_port: u16,
+    ) {
+        self.presenter_observer_deps
+            .maybe_spawn_presenter_observer(os_user, session_id, grpc_port);
     }
 
     /// Pre-creates `session_dir` when needed and materializes the request's attachments before

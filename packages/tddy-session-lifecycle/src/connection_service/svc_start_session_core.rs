@@ -27,13 +27,14 @@ use super::AttachmentProgressSink;
 
 use tddy_service::proto::session::StartSessionRequest;
 
-use super::DaemonSessionHost;
+use super::svc_agent_roster_wiring::DaemonSeedCloneClaimant;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
 use tddy_daemon_kernel::trim_to_option;
 
 mod tool_spawn_plan;
+use crate::connection_service::launch_ports::LaunchSessions;
 pub(in crate::connection_service) use tool_spawn_plan::*;
 
 /// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
@@ -44,7 +45,7 @@ struct CliStart {
     initial_prompt: String,
 }
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// The one implementation behind both `StartSession` and `StreamStartSession`.
     ///
     /// `progress` is where attachment materialization reports to: the stream's sender for the
@@ -76,7 +77,11 @@ impl DaemonSessionHost {
         let agent_trim = req.agent.trim();
         let agent_def = match agent_trim.is_empty() {
             true => None,
-            false => self.agent_def_for_spawn(agent_trim, &github_user).await?,
+            false => {
+                self.agent_roster
+                    .agent_def_for_spawn(agent_trim, &github_user)
+                    .await?
+            }
         };
         if !agent_trim.is_empty() && agent_def.is_none() {
             let allowed = self.config.allowed_agents();
@@ -155,13 +160,13 @@ impl DaemonSessionHost {
                 codebase_instance_id,
             } => {
                 return self
-                    .split_sessions()
+                    .split_sessions
                     .start_split_claude_cli_session(os_user, codebase_instance_id, &req, progress)
                     .await;
             }
             CodebasePlacement::SandboxedCodebase => {
                 return self
-                    .split_sessions()
+                    .split_sessions
                     .start_sandboxed_codebase_session(os_user, &req, progress)
                     .await;
             }
@@ -201,11 +206,7 @@ impl DaemonSessionHost {
         // A requested new branch another session already owns is refused here, before the
         // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
         // so nothing has been created yet when it fires.
-        if let Some(conflict) = self
-            .launch_sessions()
-            .owned_branch_conflict(os_user, &req)
-            .await?
-        {
+        if let Some(conflict) = self.owned_branch_conflict(os_user, &req).await? {
             log::info!(
                 "StartSession: refusing branch {:?} owned by session {}",
                 conflict.branch,
@@ -293,7 +294,7 @@ impl DaemonSessionHost {
                         .index_workspace_worktree(&sessions_base, &session_id)
                         .await
                     {
-                        self.agent_roster()
+                        self.agent_roster
                             .unwind_seeded_roster(
                                 &session_id,
                                 &codebase,
@@ -309,7 +310,7 @@ impl DaemonSessionHost {
                 // worktree directly, so it belongs before a jail exists rather than through one.
                 if req.sandbox {
                     if let Err(status) = self
-                        .split_sessions()
+                        .split_sessions
                         .provision_workspace_tool_sandbox(&sessions_base, &session_id)
                         .await
                     {
@@ -397,8 +398,13 @@ impl DaemonSessionHost {
             // Resolved before the spawn, not after: an agent the request names and this daemon
             // cannot resolve fails the start, exactly as it does on the sandboxed paths, rather
             // than persisting a roster entry that resolves to nothing on the next resume.
-            let started_agents = self.seeded_roster_records(&req.specialized_agents).await?;
-            let clones = self.seed_clone_claimant();
+            let started_agents = self
+                .agent_roster
+                .seeded_roster_records(&req.specialized_agents)
+                .await?;
+            let clones = DaemonSeedCloneClaimant {
+                service: self.agent_roster.clone(),
+            };
             let sessions_base = start.sessions_base.clone();
             let session_id = start.session_id.clone();
             let started = self

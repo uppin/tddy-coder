@@ -83,7 +83,9 @@ impl SplitHost for DaemonSessionHost {
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_session_core(req, progress).await
+        self.launch_sessions()
+            .start_session_core(req, progress)
+            .await
     }
 
     async fn delete_session(
