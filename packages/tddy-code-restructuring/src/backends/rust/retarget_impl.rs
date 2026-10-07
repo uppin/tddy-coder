@@ -47,6 +47,33 @@ fn deferred_delegator(op: &RefactorOp) -> Option<String> {
     })
 }
 
+/// The guard the server never sees: the static findings re-run, the deferred-delegator refusal, and
+/// the `to_type` the plan must name — as the type to retarget, its new self text and its bare name.
+fn the_retarget<'a>(
+    op: &'a RefactorOp,
+    workspace: &Workspace<'_>,
+) -> Result<(&'a str, &'a str, &'a str)> {
+    // The static findings are re-run here, before any server, so `apply` refuses a plan a plain
+    // `check` would have reported — the parity every static preflight in this backend holds.
+    if let Some(finding) = preflight::findings(op, workspace)?.into_iter().next() {
+        return Err(failure(finding));
+    }
+    if let Some(reason) = deferred_delegator(op) {
+        return Err(crate::RestructureError::UnsupportedOp {
+            backend: reason,
+            op: "RetargetImpl".to_string(),
+        });
+    }
+    let to_type = op.to_type.as_deref().ok_or_else(|| {
+        crate::RestructureError::MalformedPlan(
+            "`retarget_impl` needs `to_type`: the type the members move to".to_string(),
+        )
+    })?;
+    let new_self = to_type.rsplit("::").next().unwrap_or(to_type);
+    let new_name = base_name(new_self);
+    Ok((to_type, new_self, new_name))
+}
+
 impl RustBackend {
     /// Resolve a `retarget_impl` into the edit to the one file that holds the block.
     pub(super) fn retarget_impl(
@@ -56,24 +83,7 @@ impl RustBackend {
     ) -> Result<Resolution> {
         let file = op.anchor.file();
         let text = workspace.read(file)?;
-        // The static findings are re-run here, before any server, so `apply` refuses a plan a plain
-        // `check` would have reported — the parity every static preflight in this backend holds.
-        if let Some(finding) = preflight::findings(op, workspace)?.into_iter().next() {
-            return Err(failure(finding));
-        }
-        if let Some(reason) = deferred_delegator(op) {
-            return Err(crate::RestructureError::UnsupportedOp {
-                backend: reason,
-                op: "RetargetImpl".to_string(),
-            });
-        }
-        let to_type = op.to_type.as_deref().ok_or_else(|| {
-            crate::RestructureError::MalformedPlan(
-                "`retarget_impl` needs `to_type`: the type the members move to".to_string(),
-            )
-        })?;
-        let new_self = to_type.rsplit("::").next().unwrap_or(to_type);
-        let new_name = base_name(new_self);
+        let (to_type, new_self, new_name) = the_retarget(op, workspace)?;
         let range = self.retarget_range(op, workspace)?;
 
         let uri = uri_of(&workspace.root.join(file));
@@ -122,15 +132,7 @@ impl RustBackend {
         let replacement = layout.assemble(&moved_text);
 
         let use_line = imports::the_use(workspace, file, to_type)?;
-        let mut edits = vec![Edit::replace(layout.replaced.clone(), replacement)];
-        if let Some(line) = use_line {
-            let (at, blank) = use_insertion(&text, 0..text.len());
-            let mut inserted = format!("{line}\n");
-            if blank {
-                inserted.push('\n');
-            }
-            edits.push(Edit::insert(at, inserted));
-        }
+        let edits = the_edits(&text, replacement, layout.replaced.clone(), use_line);
         let new_text = applied(&text, &edits)?;
 
         Ok(Resolution {
@@ -157,6 +159,26 @@ impl RustBackend {
             Anchor::Symbol { .. } => Err(unlowered_item_anchor(&op.anchor, "`retarget_impl`")),
         }
     }
+}
+
+/// The edits that move the block: the replacement of the anchored range, plus the `use` of the new
+/// type, inserted at the top, when the new type needs one.
+fn the_edits(
+    text: &str,
+    replacement: String,
+    replaced: std::ops::Range<usize>,
+    use_line: Option<String>,
+) -> Vec<Edit> {
+    let mut edits = vec![Edit::replace(replaced, replacement)];
+    if let Some(line) = use_line {
+        let (at, blank) = use_insertion(text, 0..text.len());
+        let mut inserted = format!("{line}\n");
+        if blank {
+            inserted.push('\n');
+        }
+        edits.push(Edit::insert(at, inserted));
+    }
+    edits
 }
 
 /// The text of one member, its attached trivia included.
