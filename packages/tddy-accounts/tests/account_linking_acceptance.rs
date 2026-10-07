@@ -23,7 +23,7 @@ use tddy_accounts::{
     AccountLinker, AccountStore, AccountsError, AccountsServiceImpl, LinkChallenge, LinkError,
     LinkProgress, LinkedAccountStore, LinkedIdentity, META_SUBJECT, META_SUBJECT_ID,
 };
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, FIRST_VERSION};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 use tddy_rpc::{Request, Status};
 use tddy_service::proto::accounts::{
     AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse, LinkState,
@@ -65,7 +65,7 @@ fn adas_own_account() -> CredentialRecord {
         provider: github(),
         account: AccountId::new("account-ada"),
         label: "Ada".to_string(),
-        secret: "the-token-ada-signed-in-with".to_string(),
+        secret: SecretString::new("the-token-ada-signed-in-with"),
         metadata,
         updated_at: 1_726_700_000,
         version: FIRST_VERSION,
@@ -82,7 +82,7 @@ fn graces_linked_account() -> CredentialRecord {
         provider: github(),
         account: AccountId::new("account-grace"),
         label: "Grace".to_string(),
-        secret: "the-token-grace-linked-with".to_string(),
+        secret: SecretString::new("the-token-grace-linked-with"),
         metadata,
         updated_at: 1_726_700_000,
         version: FIRST_VERSION,
@@ -298,7 +298,7 @@ async fn a_link_begun_by(
     session_token: &str,
 ) -> Result<BeginLinkAccountResponse, Status> {
     service
-        .begin_link_account(Request::new(BeginLinkAccountRequest {
+        .begin_link_account(Request::direct(BeginLinkAccountRequest {
             session_token: session_token.to_string(),
             provider: GITHUB.to_string(),
         }))
@@ -311,7 +311,7 @@ async fn the_poll_after(
     link_id: &str,
 ) -> Result<PollLinkAccountResponse, Status> {
     service
-        .poll_link_account(Request::new(PollLinkAccountRequest {
+        .poll_link_account(Request::direct(PollLinkAccountRequest {
             session_token: ADAS_SESSION.to_string(),
             link_id: link_id.to_string(),
         }))
@@ -331,7 +331,7 @@ async fn the_listing_from(
     service: &AccountsServiceImpl<AVaultAdaCanOpen>,
 ) -> Result<ListAccountsResponse, Status> {
     service
-        .list_accounts(Request::new(ListAccountsRequest {
+        .list_accounts(Request::direct(ListAccountsRequest {
             session_token: ADAS_SESSION.to_string(),
         }))
         .await
@@ -343,7 +343,7 @@ async fn removing(
     account_id: &str,
 ) -> Result<RemoveAccountResponse, Status> {
     service
-        .remove_account(Request::new(RemoveAccountRequest {
+        .remove_account(Request::direct(RemoveAccountRequest {
             session_token: ADAS_SESSION.to_string(),
             provider: GITHUB.to_string(),
             account_id: account_id.to_string(),

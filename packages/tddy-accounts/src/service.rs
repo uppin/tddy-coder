@@ -157,6 +157,24 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             providers: grouped_by_provider(&remaining, self.sync_status.as_deref()),
         }))
     }
+
+    async fn begin_link_account(
+        &self,
+        _request: Request<BeginLinkAccountRequest>,
+    ) -> Result<Response<BeginLinkAccountResponse>, Status> {
+        let linking = self.require_linking()?;
+        let _ = (&linking.linker, &linking.store);
+        todo!("TODO(keyring 8/9): begin the provider's dance; carry the operator's code through")
+    }
+
+    async fn poll_link_account(
+        &self,
+        _request: Request<PollLinkAccountRequest>,
+    ) -> Result<Response<PollLinkAccountResponse>, Status> {
+        let linking = self.require_linking()?;
+        let _ = (&linking.linker, &linking.store);
+        todo!("TODO(keyring 8/9): one poll; on approval store the record and return the summary")
+    }
 }
 
 /// Group records by provider in the order the store returned them — the store already orders by
@@ -234,24 +252,6 @@ fn status_for(refusal: AccountsError) -> Status {
             "no {provider} account {account} is linked, so there is nothing to rename"
         )),
         AccountsError::Unavailable(reason) => Status::internal(reason),
-    }
-
-    async fn begin_link_account(
-        &self,
-        _request: Request<BeginLinkAccountRequest>,
-    ) -> Result<Response<BeginLinkAccountResponse>, Status> {
-        let linking = self.require_linking()?;
-        let _ = (&linking.linker, &linking.store);
-        todo!("TODO(keyring 8/9): begin the provider's dance; carry the operator's code through")
-    }
-
-    async fn poll_link_account(
-        &self,
-        _request: Request<PollLinkAccountRequest>,
-    ) -> Result<Response<PollLinkAccountResponse>, Status> {
-        let linking = self.require_linking()?;
-        let _ = (&linking.linker, &linking.store);
-        todo!("TODO(keyring 8/9): one poll; on approval store the record and return the summary")
     }
 }
 

@@ -14,7 +14,7 @@ use pretty_assertions::assert_eq;
 use tddy_accounts::{
     record_for_link, removal_allowed, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
 };
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, FIRST_VERSION};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 
 const GITHUB: &str = "github";
 const WHEN_THE_LINK_COMPLETED: u64 = 1_758_240_000;
@@ -61,7 +61,7 @@ fn a_held_account(identity: &LinkedIdentity, account: &str, label: &str) -> Cred
         provider: github(),
         account: AccountId::new(account),
         label: label.to_string(),
-        secret: "the-token-from-the-first-link".to_string(),
+        secret: SecretString::new("the-token-from-the-first-link"),
         metadata,
         updated_at: 1_726_700_000,
         version: FIRST_VERSION,
@@ -166,7 +166,7 @@ fn re_linking_replaces_the_credential() {
         WHEN_THE_LINK_COMPLETED,
     );
 
-    assert_eq!(linked.secret, "a-fresh-token");
+    assert_eq!(linked.secret.expose(), "a-fresh-token");
 }
 
 #[test]
