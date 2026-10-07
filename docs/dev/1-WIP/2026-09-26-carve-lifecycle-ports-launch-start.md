@@ -606,6 +606,27 @@ timeout` (Docker), and passes alone (`session_room_acceptance`: 21 passed). The 
 
 `svc_start_session_core.rs` 488 -> 494 lines, `session_coordinate_handlers.rs` 424 -> 453 (the extracted function stays in the file); neither reaches 500.
 
+### PR-wrap validation (2026-10-08)
+
+| Step | Result |
+|---|---|
+| `/validate-changes` (stack mode) | Responsibility delivered; Dependencies not implemented here (`LaunchHost`, the three trait blocks and every consumer crate are unchanged: `git diff` over `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop` is empty); Boundaries respected (no crate move, no new edge); no deleted file; no `unwrap`/`expect`/`println!`/`unsafe` added. `cargo check -p tddy-session-lifecycle --all-targets` clean. Findings: none |
+| `/validate-tests` | No test file is touched by this PR: nothing to validate |
+| `/validate-prod-ready` | The only markers in added lines are `FIXME(2026-07-12-fast-session-change)` and `TODO(seeded-agents-on-any-placement)`, both moved verbatim with the code they annotate (the same lines are removed from the old file), and `TODO(restructure-retarget-impl-s6)`, added here with its reason (the consented one-line import respelling; see "The engine refusal") |
+| `/analyze-clean-code` | No edit. Every changed file is moved or re-typed by node 17 (`#carve` 21), so none may be split here, and no code is hand-moved. Function sizes are those recorded under Code issues below |
+
+### Code issues re-measured (fn line to closing brace, `HEAD` vs `origin/master`)
+
+| Record | `origin/master` | `HEAD` | Verdict |
+|---|---:|---:|---|
+| `start_session_core` | 381 | 386 | regressed (+5, rustfmt wraps of re-pointed calls); kept open |
+| `resume_claude_cli_session` | 121 lines, signature `&self` + 6 | 120 lines, same signature | unchanged under Recipe B (no parameter added); kept open |
+| `resume_session_at_session_coordinate` | 138 | 141 | +3 rustfmt wraps; kept open |
+| `ensure_project_available_for_start` | 99 | 99 (moved to `svc_ensure_project_available_for_start.rs:123`) | unchanged; Location updated; kept open |
+| `oversized-file-connection-service` | 571 lines (`wc -l`) | 573 | +2 `mod` lines; kept open |
+
+None is clean by number, so none is deleted.
+
 ## TODO
 
 - [x] Create changeset: this document
@@ -613,7 +634,7 @@ timeout` (Docker), and passes alone (`session_room_acceptance`: 21 passed). The 
 - [x] Rebase onto 16d once it is green
 - [x] Record the baseline on 16d's tip (575 / 22 / 1)
 - [x] Implementation M7b.1–M7b.4, then M8.1–M8.3
-- [ ] `/validate-changes`
+- [x] `/validate-changes` (2026-10-08)
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
 
@@ -634,7 +655,7 @@ Tasks executed at wrap:
 
 **Documentation**
 - [ ] `packages/tddy-session-lifecycle/docs/module-layout.md`: the full topic and ports layout after the conversion (via the changeset workflow)
-- [ ] The four M7b/M8 code issues re-measured; `resume_claude_cli_session` parameters unchanged under Recipe B
+- [x] The four M7b/M8 code issues re-measured (2026-10-08; all kept open); `resume_claude_cli_session` parameters unchanged under Recipe B
 - [ ] `docs/dev/todo/2026-09-24-lifecycle-session-entry-from-listing-not-started.md` deleted at wrap: M8 landed the lift (`session_entry_from_listing`), file left in place for the developer
 - [ ] Release-note entry in `packages/tddy-session-lifecycle/docs/changesets/` with the before and after numbers
 
