@@ -64,6 +64,7 @@ fn a_move_to_a_file_of(anchor: Anchor) -> RefactorOp {
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 

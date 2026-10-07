@@ -371,6 +371,7 @@ async fn verify(
         .verify(VerifyRequest {
             workspace_root,
             against: args.against,
+            retargets: args.retarget,
         })
         .await
         .map_err(refused)?

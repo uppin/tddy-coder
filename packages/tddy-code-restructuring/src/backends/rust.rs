@@ -42,6 +42,7 @@ mod nested_modules;
 mod prelude_shadow;
 mod readiness;
 mod relative_visibility;
+mod retarget_impl;
 mod selection;
 mod signature;
 mod signature_rewrites;
@@ -69,7 +70,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 22] = [
+const SUPPORTED: [RefactorKind; 23] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -92,6 +93,7 @@ const SUPPORTED: [RefactorKind; 22] = [
     RefactorKind::RemoveCallArg,
     RefactorKind::ChangeCallArg,
     RefactorKind::ReorderCallArgs,
+    RefactorKind::RetargetImpl,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1122,6 +1124,9 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::ReparentModule {
             return module_reparent::findings(op, workspace);
         }
+        if op.op == RefactorKind::RetargetImpl {
+            return retarget_impl::findings(op, workspace);
+        }
         let Anchor::Range { start, end, .. } = &op.anchor else {
             return Ok(Vec::new());
         };
@@ -1281,6 +1286,12 @@ impl RustBackend {
         // the same way and opening the parent's document for itself.
         if op.op == RefactorKind::ReparentModule {
             return self.reparent_module(op, workspace);
+        }
+
+        // Changes the self type of an inherent `impl`'s members, authored here and informed by the
+        // server, and opens the document for itself.
+        if op.op == RefactorKind::RetargetImpl {
+            return self.retarget_impl(op, workspace);
         }
 
         // The same operation over a set, and one edit rather than one per member: a

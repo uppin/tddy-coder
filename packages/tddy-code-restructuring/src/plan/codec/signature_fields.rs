@@ -24,10 +24,10 @@ fn refuse_a_field_the_operation_cannot_honour(op: &RefactorOp) -> Result<()> {
              `change_return_type` honour — `{kind:?}` cannot"
         )));
     }
-    if op.expr.is_some() && !matches!(kind, AddCallArg | ChangeCallArg) {
+    if op.expr.is_some() && !matches!(kind, AddCallArg | ChangeCallArg | RetargetImpl) {
         return Err(malformed(format!(
             "`expr` names a call argument, which only `add_call_arg` and `change_call_arg` \
-             honour — `{kind:?}` cannot"
+             honour, or the receiver of `retarget_impl`'s delegator — `{kind:?}` cannot"
         )));
     }
     if !op.order.is_empty() && !matches!(kind, ReorderParams | ReorderCallArgs) {

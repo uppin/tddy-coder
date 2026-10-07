@@ -189,7 +189,7 @@ pub(in crate::backends::rust) fn enclosing_modules(text: &str, offset: usize) ->
 }
 
 /// The span of the module reached through the inline modules `chain` of `text`.
-pub(super) fn scope_of(text: &str, chain: &[String]) -> Option<Range<usize>> {
+pub(in crate::backends::rust) fn scope_of(text: &str, chain: &[String]) -> Option<Range<usize>> {
     let mut scope = 0..text.len();
     for name in chain {
         let items = items_of_module(&text[scope.clone()]);
@@ -206,7 +206,7 @@ pub(super) fn scope_of(text: &str, chain: &[String]) -> Option<Range<usize>> {
 
 /// Where a new `use` item goes in the module spanning `scope`: the offset, and whether a blank line
 /// has to follow it because it opens the module's items rather than joining its imports.
-pub(super) fn use_insertion(text: &str, scope: Range<usize>) -> (usize, bool) {
+pub(in crate::backends::rust) fn use_insertion(text: &str, scope: Range<usize>) -> (usize, bool) {
     let masked = masked_to_code(text);
     let base = depth_at(&masked, scope.start);
     let last_import = use_statements(&masked)

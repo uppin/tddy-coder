@@ -781,6 +781,7 @@ pub fn a_cluster_move_of(modules: &[&str], reexport: Option<Reexport>) -> Refact
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 
@@ -809,6 +810,7 @@ pub fn a_move_of(
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 
@@ -864,6 +866,7 @@ pub fn a_move_of_the_host_registry(
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 
@@ -893,6 +896,7 @@ pub fn a_rename_in(file: &str, symbol: &str, to: &str) -> RefactorOp {
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 
@@ -1810,6 +1814,7 @@ fn an_extraction(op: RefactorKind, anchor: Anchor, name: &str) -> RefactorOp {
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     }
 }
 
@@ -2701,4 +2706,29 @@ pub async fn rebasing_the_plan_file(
             .map_err(|error| error.to_string())
     })
     .await
+}
+
+/// What a live rust-analyzer answers to each `(method, params)` in turn, once the index is
+/// quiescent — all of them from the one server, in order, so a probe of two requests pays for one
+/// crate-graph load.
+///
+/// Raw on purpose: this is how a test asks the server what the engine is entitled to assume about
+/// the shape of an answer, without the engine in between.
+pub async fn what_the_server_answers(
+    fixture: &AFixtureWorkspace,
+    questions: &[(&str, serde_json::Value)],
+) -> Vec<serde_json::Value> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let client = a_rust_analyzer_rooted_at(fixture.path()).await;
+    until_quiescent(&client).await;
+
+    let mut answers = Vec::new();
+    for (method, params) in questions {
+        let answer = client
+            .request_raw(method, params.clone())
+            .await
+            .unwrap_or_else(|error| panic!("the server failed `{method}`: {error}"));
+        answers.push(answer);
+    }
+    answers
 }

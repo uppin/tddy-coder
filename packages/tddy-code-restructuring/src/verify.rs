@@ -83,6 +83,9 @@ pub use statements::statements;
 mod tokens;
 pub use tokens::token_difference;
 
+mod retarget;
+pub use retarget::{Declared, Retarget};
+
 /// Last resort for what the exact and 1:1 passes left: when the leftover lost statements and the
 /// leftover gained ones carry the same token multiset, they differ only in layout and qualifiers.
 fn reflow_pass(missing: Vec<String>, added: Vec<String>) -> Paired {
@@ -150,7 +153,21 @@ fn re_point_key(statement: &str) -> String {
 /// Anything else — a changed argument, another call target, a statement with no counterpart — stays
 /// reported.
 pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, String>) -> Comparison {
+    compare_with(before, after, &Declared::default())
+}
+
+/// [`compare`], told of the `impl` retargets the author declared (`restructure verify --retarget`).
+///
+/// The declaration is read by [`retarget::account`], which pairs a renamed statement with its
+/// original and excuses the headers a split repeats. A retarget that was not declared is reported as
+/// it always was.
+pub fn compare_with(
+    before: &BTreeMap<String, String>,
+    after: &BTreeMap<String, String>,
+    declared: &Declared,
+) -> Comparison {
     let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+    let mut before_statements: Vec<String> = Vec::new();
     let mut before_total = 0usize;
     let mut after_total = 0usize;
     let mut gates = 0usize;
@@ -160,7 +177,8 @@ pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, Strin
         gates += excused;
         before_total += found.len();
         for statement in found {
-            *counts.entry(statement).or_default() += 1;
+            *counts.entry(statement.clone()).or_default() += 1;
+            before_statements.push(statement);
         }
     }
     for text in after.values() {
@@ -184,7 +202,8 @@ pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, Strin
     }
 
     let widened = pair_by(missing, added, visibility_key);
-    let paired = pair_by(widened.missing, widened.added, re_point_key);
+    let accounted = retarget::account(widened.missing, widened.added, declared, &before_statements);
+    let paired = pair_by(accounted.missing, accounted.added, re_point_key);
     let reflowed = reflow_pass(paired.missing, paired.added);
 
     Comparison {
@@ -193,7 +212,7 @@ pub fn compare(before: &BTreeMap<String, String>, after: &BTreeMap<String, Strin
         missing: reflowed.missing,
         added: reflowed.added,
         excused: Excused {
-            repointed: paired.pairs + reflowed.pairs,
+            repointed: accounted.pairs + paired.pairs + reflowed.pairs,
             visibility: widened.pairs,
             cfg_test_gates: gates,
         },

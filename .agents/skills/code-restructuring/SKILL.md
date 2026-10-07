@@ -7,7 +7,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 
 **You never write the moved or extracted code.** You write a plan of *intents*. `tddy-tools restructure` resolves each intent through rust-analyzer (via `tddy-lsp`).
 
-**v1 scope:** Rust only — twenty-two operations, ten subcommands. No TypeScript.
+**v1 scope:** Rust only — twenty-three operations, ten subcommands. No TypeScript.
 
 ## CLI
 
@@ -18,7 +18,7 @@ tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]   # LINES c
 tddy-tools restructure snapshot <plan.jsonl>          # item anchors: answered by the warm daemon when TDDY_INDEX_SOCKET is set
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
-tddy-tools restructure verify --against <git-ref>
+tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]...
 tddy-tools restructure load   <plan.jsonl>...        # needs the index daemon (TDDY_INDEX_SOCKET)
 tddy-tools restructure unload <plan.jsonl>... | --all
 tddy-tools restructure plans
@@ -63,7 +63,8 @@ record's.
 2. **Targeting** — run [`analyze-code-issues`](analyze-code-issues/SKILL.md); put CRAP note in changeset.
 3. **Understand shape** — LSP outline, references, cohesion; write `docs/dev/1-WIP/{slug}-initial-discovery.md`.
    Decide which operation each seam needs: items into a module of the same crate is `move_item`, a module
-   under another parent is `reparent_module`, a cut inside one file is `extract_module`; see
+   under another parent is `reparent_module`, a cut inside one file is `extract_module`, and members of
+   one type's `impl` into another type of the same crate is `retarget_impl`; see
    [Gathering a topic module](#gathering-a-topic-module).
 4. **Changeset** — `Type: Refactor` at `docs/dev/1-WIP/YYYY-MM-DD-<name>.md`; see `references/restructure-changeset.md`.
 5. **Anchor** — `restructure anchors <file.rs> --items A,B,C` emits an `items` anchor over whole

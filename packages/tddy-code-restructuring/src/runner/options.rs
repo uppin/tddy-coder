@@ -17,7 +17,7 @@ usage:
   restructure status <plan.jsonl>
   restructure check  <plan.jsonl> [--deep] [--budget LINES]
   restructure anchors <file.rs> --items A,B,C
-  restructure verify --against <git-ref>
+  restructure verify --against <git-ref> [--retarget OLD=NEW]...
   restructure snapshot <plan.jsonl>
 
   --dry-run     resolve every operation and print the edits without writing anything
@@ -84,6 +84,8 @@ pub struct Options {
     pub at: Option<crate::edit::Range>,
     /// The git ref `verify` compares against.
     pub against: Option<String>,
+    /// The `OLD=NEW` retargets `verify` is told of (`--retarget`, repeatable).
+    pub retargets: Vec<String>,
     /// Where the language server's own indexing lines go while an operation waits for an index.
     ///
     /// Progress happens *while* a call is in flight and has nowhere to wait, so it needs a sink
@@ -134,6 +136,7 @@ impl Default for Options {
             plans: Vec::new(),
             all: false,
             against: None,
+            retargets: Vec::new(),
             progress: discard(),
             account: discard(),
             trace: untraced,
@@ -197,6 +200,11 @@ impl Options {
                         .clone(),
                 )
             }
+            "--retarget" => self.retargets.push(
+                rest.next()
+                    .ok_or_else(|| usage("--retarget needs OLD=NEW"))?
+                    .clone(),
+            ),
             flag if flag.starts_with("--") => return Err(usage(format!("unknown flag `{flag}`"))),
             path if self.target.is_none() => self.target = Some(PathBuf::from(path)),
             extra => {

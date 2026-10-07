@@ -261,6 +261,10 @@ pub struct RefactorOp {
     /// honours it and any other operation is refused rather than having it ignored.
     #[serde(default, skip_serializing_if = "is_false")]
     pub canonical_paths: bool,
+    /// The type `retarget_impl`'s members move to: a path rooted at the package name,
+    /// `app::roster::Roster`, with optional generic arguments (see [`rust_syntax::one_type`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_type: Option<String>,
 }
 
 /// One entry of an operation's `order`: a parameter's name, or an argument's one-based position.

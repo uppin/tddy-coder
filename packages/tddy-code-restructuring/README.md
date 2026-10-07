@@ -14,7 +14,7 @@ Exposed via `tddy-tools restructure`:
 - `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that have more than LINES **production lines** (before the first `#[cfg(test)]` that opens a `mod`), as a record rather than a gate
 - `snapshot <plan.jsonl>` — rewrites the plan's header, or writes one when the plan has none (its first line is an operation); for a plan of item anchors it also re-resolves them against the current tree
 - `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries; `--items` takes bare names, `krate::module::Alpha`, and `<Type>` / `<Type>#N` for an inherent `impl` block (`item_anchor::parse_item_list` is the one rule for every front end)
-- `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes
+- `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes; `--retarget OLD=NEW` (repeatable) makes it account for a declared `retarget_impl`
 - `warm` — loads the tree's crate graph into the index daemon (it needs the daemon)
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
@@ -119,7 +119,12 @@ bypass the recorder.
 `extract_module_to_file`, `extract_trait`, `inline_method`, `remove_unused_param` (`name`: the parameter),
 `convert_tuple_return_to_struct` (`name`: the new struct), `move_module_to_crate` (`to`,
 `reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`), `move_item` (`to`,
-`name`, `reexport`) and `reparent_module` (`to`, `reexport`).
+`name`, `reexport`), `reparent_module` (`to`, `reexport`) and `retarget_impl` (`to_type`).
+
+`retarget_impl` rewrites an inherent `impl`'s self type to another type of the same crate — the whole
+block, or the run of members its anchor names (the block is split at the run, in place). It re-points
+the `Old::` paths the moved members wrote, adds one `use`, and refuses before writing when a moved
+member reads a field the new type lacks; see [docs/retarget-impl.md](docs/retarget-impl.md).
 
 `move_item` and `reparent_module` move items, and a module with its directory, **within one crate**, with
 `reexport: outside` leaving a facade only for what another package reaches; see
@@ -173,8 +178,8 @@ leaves no record on this path. The daemon's own record is always open and has no
 | Process record | `spawn_record.rs` with `spawn_record/{jsonl,deferred,redact}.rs` (`SpawnRecorder`, `JsonlSpawnRecord`, `ColdRunSpawnRecord`, `redacted`) |
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
-| Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs` |
-| Rust backend | `backends/rust.rs`, and beside it `item_move/` (with `canonical_paths.rs`, `doc_links.rs`), `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
+| Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs`, `verify/retarget.rs` (`Declared`, R1 and R2) |
+| Rust backend | `backends/rust.rs`, and beside it `item_move/` (with `canonical_paths.rs`, `doc_links.rs`), `retarget_impl/` (with `outline.rs`, `rewrite.rs`, `fields.rs`, `imports.rs`, `preflight.rs`), `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
 | Cross-crate moves | `crate_move/{moving,cluster,source_scan}.rs` with `moving/facade_writer.rs`, `cluster/stranded.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs`. `crate_move::survey` and `crate_move::reexports` are `pub(crate)`, read by `item_move`'s canonical-path pass |
 
 Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream
@@ -184,8 +189,8 @@ identifiers.
 
 ## Authored transformations
 
-Most operations delegate to a rust-analyzer assist; three are written here, because no assist
-performs them: `extract_class`, the facade `use` line, and the cross-crate moves.
+Most operations delegate to a rust-analyzer assist; four are written here, because no assist
+performs them: `extract_class`, the facade `use` line, the cross-crate moves, and `retarget_impl`.
 
 rust-analyzer has no cross-crate move, so these have nothing to delegate to. What
 keeps it honest is that it is engine-**informed**: every caller it rewrites comes from a real

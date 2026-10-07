@@ -439,6 +439,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 
     signature_fields::refuse_a_signature_operation_it_cannot_honour(&op)?;
     canonical_paths::refuse_canonical_paths_outside_move_item(&op)?;
+    retarget_fields::refuse_a_retarget_it_cannot_honour(&op)?;
 
     Ok(op)
 }
@@ -447,6 +448,7 @@ mod canonical_paths;
 mod file_hint;
 mod groups;
 mod headerless;
+mod retarget_fields;
 mod signature_fields;
 
 /// The destination and the by-item anchor an operation within one crate cannot do without.

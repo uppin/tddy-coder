@@ -147,6 +147,9 @@ pub enum RefactorKind {
     /// Reorders the arguments of one call expression; `order` lists the current one-based argument
     /// positions in their new order.
     ReorderCallArgs,
+    /// Moves members of an inherent `impl` to another type of the same crate: the whole block's
+    /// self type changes, or the block is split at the anchored run. `to_type` names the new type.
+    RetargetImpl,
 }
 
 impl RefactorKind {

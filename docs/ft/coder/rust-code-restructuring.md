@@ -8,7 +8,7 @@
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text, apart from one type or one expression where an operation needs it) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — twenty-two operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twenty-three operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -311,6 +311,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `extract_module_to_file` | Move items to new file |
 | `move_item` | Move a contiguous run of module-level items into **another module of the same crate**, in any file. See [Same-crate moves](#same-crate-moves) |
 | `reparent_module` | Move a module's file, and the directory of its children, under **another parent of the same crate**. See [Same-crate moves](#same-crate-moves) |
+| `retarget_impl` | Rewrite an inherent `impl`'s self type to **another type of the same crate** — the whole block, or the run of members its anchor names. See [`retarget_impl`](#retarget_impl) |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
 | `remove_unused_param` | Remove a parameter the body never reads, from the declaration and from **every call site in every file**. The anchor names the function and `name` is the parameter. rust-analyzer offers the removal only for an unused parameter, so naming a used one is refused — the refusal names the parameter and says it is used, and nothing is written. A `name` that is not a parameter of the function is refused as well |
@@ -406,6 +407,34 @@ and the per-operation account go to injected sinks, and results are returned as 
 `restructure_cli.rs` prints, and a test enforces that by reading the crate's own sources: a server
 serving this engine over its own stdin/stdout would otherwise have every RPC frame after the first
 log line corrupted.
+
+### `retarget_impl`
+
+An inherent `impl`'s members move to another type of the same crate: the whole block's self type
+changes, or the block is split at the run of members its anchor names. The anchor is one `item` on
+`<Type>` (or `<Type>#N`), or one `items`/`item` anchor on members `c::m::Type::member` of one inherent
+`impl`; `to_type` is the new self type — a path rooted at the package name, `app::roster::Roster`,
+with optional generic arguments on the last segment. A `range` or `symbol` anchor, a trait impl, a
+`to_type` in another package, and a `to_type` whose module declares no such type are refused before a
+server starts.
+
+The members, their attributes and comments are byte ranges of the source: the only text the engine
+authors is the header's self type, the repeated `impl` headers and one `use crate::<module>::<Name>;`.
+A run that is a proper subset of the block becomes up to three blocks **in place, in source order** —
+`[Old: P] [New: M] [Old: A]`, an empty piece omitted — so the free-standing comments and blank lines
+before the run stay with the block that precedes it, and the comments attached to the run's first
+member travel with it. Paths written `Old::` to a **moved** member, from the server's own reference
+set, are re-pointed to `New::`; a member that stayed, a method call (`self.m()`), and a bare `Old` in
+type position are left as written. The generic parameter list and `where` clause of the header are
+kept. `check --deep` rehearses the operation the way `apply` does: a moved member that reads a field
+the new type lacks (S4), a declaration whose fields cannot be read (S5), a retarget to the type the
+block already is (S3), a `use` that would clash with a name the file already binds (S6), and an anchor
+whose members sit in two blocks (S1) are all refused before anything is written. Callers of a moved
+member are **not** re-pointed: an outside caller breaks (`E0599`) and the compile gate names it, which
+is the documented outcome — pair the operation with `repoint_call` in one `group`, or run `move_item`
+over `<New>` afterwards to put the new block in the new type's module. The forwarding delegator
+(`variant: "leave_delegator"` with `expr`) is named by the schema and **refused** by the engine; it is
+a follow-up. Behaviour and limits: [`docs/retarget-impl.md`](../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
 
 ## LSP integration
 
@@ -633,6 +662,15 @@ excused, counted, and summarised in one line, so the exit status is a signal:
 `VerifyResponse` carries the counts as `repointed`, `visibility_normalised` and `cfg_test_gates`. A
 real loss prints `verify: tokens lost: …; tokens gained: …`, and a lost comment is still reported. One
 real loss anywhere keeps the reflow of the other leftovers reported beside it.
+
+`--retarget OLD=NEW` (repeatable) tells `verify` of an `impl` retarget the author made, so it excuses
+exactly the differences one produces: a statement equal once every whole-identifier `OLD` becomes
+`NEW` (a re-pointed call, a whole generic header), and the header a split repeats (`impl<T> Host<T>`,
+its `where` and its predicate lines). Both count into `repointed`; there is no new response field. A
+rename that was not declared, a changed argument, and any lost statement or comment stay reported.
+`verify` proves only that the differences are of the shape a declared retarget produces, not that the
+plan made them — a hand edit that renames `OLD` to `NEW` is excused too, because the author declared
+it.
 
 ## Workflow
 

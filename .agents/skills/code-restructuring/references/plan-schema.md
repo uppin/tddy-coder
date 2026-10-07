@@ -128,6 +128,7 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `move_test_binary_to_crate` | the test binary's path | `to` | — | ✅ |
 | `move_item` | `items` anchor (or one `item` anchor) over whole module-level items of one file | `to` (the destination module; with `name`, its parent), `name` (creates the destination), `reexport` = `glob` \| `named` \| `none` \| `outside` | — | ✅ |
 | `reparent_module` | `items` anchor on the module's `mod` declaration | `to` (the new parent), `reexport` = `glob` \| `none` \| `outside` | — | ✅ |
+| `retarget_impl` | `item` anchor on `<Type>` (or `<Type>#N`), or `items`/`item` on members `c::m::Type::member` of one inherent `impl` | `to_type` (the new self type) | — | ✅ |
 | `extract_trait` | range at the `impl` keyword | `name` | — | ✅ |
 | `inline_method` | symbol | — | — | ✅ |
 | `remove_unused_param` | symbol or item (the function) | `name` (the parameter) | — | ✅ |
@@ -284,6 +285,44 @@ attributes and respells its visibility only as far as the callers need, re-point
 the module, and rebases the relative paths inside the moved files (`super::x`, `use super::*;`) so
 they reach what they reached. Files in the module's directory that no declaration reaches stay behind,
 and the directories the move empties stay on disk.
+
+### `retarget_impl`
+
+```jsonl
+{"op":"retarget_impl","anchor":{"kind":"items","file":"src/host.rs","items":["app::host::Host::put","app::host::Host::last"],"fingerprints":["sha256:…","sha256:…"]},"to_type":"app::roster::Roster"}
+{"op":"retarget_impl","anchor":{"kind":"item","item":"app::host::<Host>","file":"src/host.rs","fingerprint":"sha256:…"},"to_type":"app::roster::Roster"}
+```
+
+| Field | Meaning |
+|---|---|
+| `anchor` | **Whole block**: one `item` anchor on `<Type>` (or `<Type>#N`, the Nth in source order), no relative range. **Member run**: one `items` anchor whose items are members `c::m::Type::member` of **one** inherent `impl` and contiguous (only blank lines between), or one `item` anchor on a single member. A `range` or `symbol` anchor, or an `item` anchor with a relative range, is refused |
+| `to_type` | The new self type: an item path rooted at the package name (`-` read as `_`) with optional generic arguments on the last segment — `app::roster::Roster`, `app::roster::Pair<T>`. Exactly one `syn::Type`, and a path type (no `&`, `dyn`, tuple, array, `impl`). The engine writes `crate::…` in the `use` it adds and the bare last segment (generics as written) in the header |
+
+The members, their attributes and comments are byte ranges of the source; the engine authors only the
+header's self type, the repeated `impl` headers and one `use`. A proper subset of the block becomes up
+to three blocks **in place, in source order** (`[Old: P] [New: M] [Old: A]`, an empty piece omitted),
+so the free-standing comments before the run stay with the preceding block and the comments attached to
+the run's first member travel with it. Paths written `Old::` to a **moved** member are re-pointed to
+`New::`; a member that stayed, a method call (`self.m()`) and a bare `Old` in type position are left as
+written. The generic parameter list and `where` clause are kept.
+
+**Refused before a server starts** (`plan is malformed:`, from the plan alone): `to_type` missing, not
+one path type, or on another operation; a wrong anchor kind; a trait impl (`<Old as Trait>`); `to`,
+`name` or `with_private_deps`; a `to_type` in another package; and a `to_type` whose module declares no
+such type.
+
+**Refused by `check --deep` and `apply` before anything is written** (`this seam cannot be cut here:`):
+an anchor whose members sit in two `impl` blocks (S1); a member cut in half (S2); `to_type` that is the
+type the block already is (S3); a moved member that reads a field the new type lacks (S4, one refusal
+naming every member/field pair); a declaration whose fields cannot be read (S5); and a `use` that would
+clash with a name the file already binds (S6).
+
+**Not done.** Callers of a moved member are not re-pointed — pair the operation with `repoint_call` in
+one `group`, or accept the `E0599` the compile gate names. Fields are refused, not rewritten. The block
+stays in its file (run `move_item` over `<New>` afterwards to move it). The forwarding delegator
+(`variant: "leave_delegator"` with `expr`) is named by the schema and **refused** by the engine; it is a
+follow-up. See
+[`docs/retarget-impl.md`](../../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
 
 ### Notes that matter when planning
 

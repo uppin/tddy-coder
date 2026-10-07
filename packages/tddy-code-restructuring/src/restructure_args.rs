@@ -177,6 +177,10 @@ pub fn parse_position_range(text: &str) -> std::result::Result<crate::edit::Rang
 pub struct RestructureVerifyArgs {
     #[arg(long)]
     pub against: String,
+    /// An `impl` retarget the author made, `OLD=NEW` (repeatable, one per `retarget_impl`): the
+    /// differences it causes are accounted for rather than reported.
+    #[arg(long = "retarget", value_name = "OLD=NEW")]
+    pub retarget: Vec<String>,
 }
 
 /// A struct of its own rather than a second use of [`RestructurePlanArgs`]: `--dry-run`,
@@ -238,6 +242,7 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
         RestructureCommand::Verify(verify) => Options {
             command: Command::Verify,
             against: Some(verify.against),
+            retargets: verify.retarget,
             ..Options::default()
         },
         RestructureCommand::Snapshot(snapshot) => Options {

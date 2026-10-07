@@ -292,6 +292,7 @@ async fn a_test_binary_move_after_a_module_move_names_the_defining_crate() {
         expr: None,
         order: Vec::new(),
         canonical_paths: false,
+        to_type: None,
     };
 
     // When the plan is applied

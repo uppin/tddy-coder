@@ -240,6 +240,11 @@ pub(crate) struct VerifyArgs {
     /// The git ref to compare the working tree against.
     #[arg(long, value_name = "REF")]
     pub(crate) against: String,
+
+    /// An `impl` retarget the author made, `OLD=NEW` (repeatable): `verify` accounts for the
+    /// differences it causes instead of reporting them.
+    #[arg(long = "retarget", value_name = "OLD=NEW")]
+    pub(crate) retarget: Vec<String>,
 }
 
 /// One operation, as the request its RPC carries — the only form the single-shot path deals in.
@@ -373,6 +378,7 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
         RestructureCommand::Verify(verify) => Requested::Verify(VerifyRequest {
             workspace_root: named(&verify.root.workspace_root)?,
             against: verify.against,
+            retargets: verify.retarget,
         }),
         RestructureCommand::Load(load) => Requested::LoadPlans(LoadPlansRequest {
             workspace_root: named(&load.root.workspace_root)?,
@@ -645,8 +651,8 @@ mod tests {
     }
 
     #[test]
-    fn verify_carries_only_the_tree_and_the_ref_it_holds_it_against() {
-        // Given a verify against a ref
+    fn verify_carries_the_tree_the_ref_and_the_retargets_it_is_told_of() {
+        // Given a verify against a ref, told of two retargets
         let requested = requested_by(&[
             "restructure",
             "verify",
@@ -654,9 +660,13 @@ mod tests {
             "/trees/one",
             "--against",
             "HEAD~1",
+            "--retarget",
+            "Host=Roster",
+            "--retarget",
+            "Old=New",
         ]);
 
-        // Then that ref and that tree are the whole request
+        // Then the tree, the ref and both retargets, in the order given, are the whole request
         let Requested::Verify(verify) = requested else {
             panic!("expected a verify request");
         };
@@ -665,6 +675,7 @@ mod tests {
             VerifyRequest {
                 workspace_root: "/trees/one".to_string(),
                 against: "HEAD~1".to_string(),
+                retargets: vec!["Host=Roster".to_string(), "Old=New".to_string()],
             }
         );
     }
