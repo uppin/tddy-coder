@@ -108,7 +108,7 @@ fn the_self_handle_that_only_the_god_object_needed_is_gone() {
 /// set exact.
 #[test]
 fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
-    const ENDPOINT: [&str; 21] = [
+    const ENDPOINT: [&str; 22] = [
         "main.rs",
         "lib.rs",
         "server.rs",
@@ -159,6 +159,14 @@ fn every_module_left_in_the_daemon_is_one_of_the_endpoint_set() {
         // `tddy-daemon-livekit` may not depend on each other, so only the crate that depends on
         // both can join them.
         "credential_sync.rs",
+        // `#keyring` 8/9's account-linking adapters: `tddy-accounts`' `AccountLinker` and
+        // `LinkedAccountStore` ports, implemented over `tddy-github`'s device flow and
+        // `tddy-daemon-auth`'s session vaults. Wiring by the same criterion — no RPC method, no
+        // session state (an attempt is a pending approval, not a session), built only by
+        // `runtime.rs` — and it can live nowhere else: `tddy-accounts` depends on neither
+        // `tddy-github` nor `tddy-daemon-auth`, so only the crate that depends on all three can
+        // join them.
+        "account_linking.rs",
     ];
 
     let mut files = Vec::new();
