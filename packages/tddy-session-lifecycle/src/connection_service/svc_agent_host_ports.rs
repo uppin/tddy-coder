@@ -23,6 +23,7 @@ use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use super::agent_host_callbacks::AgentHostCallbacks;
 use super::launch_ports::LaunchHost;
+use super::session_acting_identity::{SessionAccountAccess, SharedGithubCredential};
 use super::split_ports::{SplitHost, SplitSessionAgents, SplitSessionFiles};
 use super::DaemonSessionHost;
 
@@ -117,5 +118,25 @@ impl LaunchHost for DaemonSessionHost {
 
     fn pr_stack(&self) -> Result<Arc<dyn crate::PrStackHandler>, Status> {
         Ok(self.rpc_families()?.pr_stack_handler())
+    }
+
+    fn session_account_access(&self, session_token: &str) -> SessionAccountAccess {
+        DaemonSessionHost::session_account_access(self, session_token)
+    }
+
+    fn session_github_credential(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Option<SharedGithubCredential> {
+        DaemonSessionHost::session_github_credential(
+            self,
+            os_user,
+            session_id,
+            project_id,
+            session_token,
+        )
     }
 }

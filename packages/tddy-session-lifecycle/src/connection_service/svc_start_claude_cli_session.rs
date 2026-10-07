@@ -8,8 +8,6 @@ use std::path::Path;
 
 use super::spawn_claude_cli_session_inner;
 
-use super::session_acting_identity::SessionAccountAccess;
-
 use super::StackChildSpawnHandler;
 
 use tddy_core::output::SESSIONS_SUBDIR;
@@ -129,11 +127,7 @@ impl LaunchSessions {
             semantic_index,
             create_remote_branch,
             ssh_config_host,
-            &SessionAccountAccess::new(
-                self.credential_vaults(),
-                self.user_resolver(),
-                session_token,
-            ),
+            &self.host.session_account_access(session_token),
             &self.task_registry,
             progress,
         )

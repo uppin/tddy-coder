@@ -90,7 +90,7 @@ impl LaunchSessions {
                 conversation_spawn_handler,
                 // The host-side `tddy-tools` the jail's Shell relay runs reaches this listener, so
                 // the token is asked of the host per call, as in a co-located session.
-                self.session_github_credential(
+                self.host.session_github_credential(
                     os_user,
                     jail.session_id,
                     jail.project_id,

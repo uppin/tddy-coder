@@ -31,6 +31,8 @@ use super::AttachmentMaterialization;
 use crate::cli_session_manager::CliSessionManager;
 use crate::PrStackHandler;
 
+use super::session_acting_identity::{SessionAccountAccess, SharedGithubCredential};
+
 /// The capabilities of the session host the launch topic calls and does not own.
 ///
 /// Implemented once, on the host, in wiring (`svc_agent_host_ports`).
@@ -46,6 +48,20 @@ pub(crate) trait LaunchHost: Send + Sync {
     /// This daemon's PR-stack handler, which a stack base or a stack link owned by a peer is asked
     /// of, or `FAILED_PRECONDITION` when the host was never given the RPC families.
     fn pr_stack(&self) -> Result<Arc<dyn PrStackHandler>, Status>;
+
+    /// What a session's vault reads go through: this daemon's vaults, how a session token names
+    /// its owner, and the token the session was started with.
+    fn session_account_access(&self, session_token: &str) -> SessionAccountAccess;
+
+    /// The handler that answers a session's tools' `github-token` over its project's assignments
+    /// as they stand now, or `None` — logged by the host — when the project cannot be read.
+    fn session_github_credential(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Option<SharedGithubCredential>;
 }
 
 /// The session host's launch fields, owned, plus its callbacks.
