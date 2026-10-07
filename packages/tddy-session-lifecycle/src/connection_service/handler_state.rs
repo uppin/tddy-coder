@@ -205,6 +205,12 @@ impl DaemonSessionHost {
             presenter_observer_deps: self.presenter_observer_deps(),
             user_resolver: self.user_resolver.clone(),
             spawn_client: self.spawn_client.clone(),
+            workspace_sandboxes: Arc::clone(&self.workspace_sandboxes),
+            rpc_activity: self.rpc_activity.clone(),
+            session_agent_inference: Arc::clone(&self.session_agent_inference),
+            session_rooms: Arc::clone(&self.session_rooms),
+            hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
+            session_admissions: Arc::clone(&self.session_admissions),
             worktree_observer: self.worktree_observer.clone(),
             host: Arc::new(self.clone()),
         }

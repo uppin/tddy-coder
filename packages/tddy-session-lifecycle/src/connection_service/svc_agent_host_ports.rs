@@ -92,7 +92,9 @@ impl SplitHost for DaemonSessionHost {
         &self,
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
-        self.delete_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .delete_session_at_session_coordinate(request)
+            .await
     }
 
     fn session_files(&self) -> Arc<SplitSessionFiles> {

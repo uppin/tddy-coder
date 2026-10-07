@@ -1,5 +1,3 @@
-use super::DaemonSessionHost;
-
 use crate::{session_deletion, user_sessions_path::projects_path_for_user};
 
 use tddy_service::proto::session::DeleteSessionResponse;
@@ -20,9 +18,10 @@ use tddy_rpc::Response;
 
 use tddy_service::proto::session::SignalSessionRequest;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_rpc::Request;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(crate) async fn signal_session_at_session_coordinate(
         &self,
         request: Request<SignalSessionRequest>,
@@ -139,14 +138,14 @@ impl DaemonSessionHost {
         // A split session's worktree lives on another daemon, which must lose it first: deleting
         // this side alone would leave a checkout on a host with no session left to reclaim it. A
         // failure to reach that daemon fails the delete rather than silently dropping its half.
-        self.split_sessions()
+        self.split_sessions
             .delete_paired_codebase_session(&sessions_base, session_id, &req.session_token)
             .await?;
         // Every clone this session's roster created, on every host that built one — including hosts
         // the operator never looked at. Refused rather than continued if one cannot be reached, for
         // the same reason the paired workspace above is: a delete that succeeded here while a
         // checkout survived elsewhere is exactly the silent leak this is for.
-        self.agent_roster()
+        self.agent_roster
             .tear_down_every_agent_clone(session_id, &req.session_token)
             .await?;
         // Every admission this session minted is void with the session: a mirror that re-admits

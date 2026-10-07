@@ -1,6 +1,6 @@
 use crate::connection_service::service_util;
 
-use super::DaemonSessionHost;
+use crate::connection_service::DaemonSessionHost;
 
 use crate::connection_service::svc_start_session_core::{ToolSpawnPlan, ToolSpawnPurpose};
 

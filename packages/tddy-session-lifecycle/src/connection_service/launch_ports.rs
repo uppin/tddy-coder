@@ -20,10 +20,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_kernel::relay_idle::RpcActivity;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::peer_routing::PeerRouting;
+use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
+use tddy_daemon_livekit::session_room::SessionRoomRegistry;
 use tddy_rpc::Status;
 use tddy_service::proto::session::SessionAttachment;
+use tddy_session_agents::session_agent_clone::HostedAgentClones;
+use tddy_session_agents::session_agent_inference::SessionAgentInferenceStore;
 use tddy_spawn::spawn_worker::SpawnClient;
 use tddy_task::TaskRegistry;
 
@@ -83,6 +88,18 @@ pub(crate) struct LaunchSessions {
     pub(crate) presenter_observer_deps: PresenterObserverDeps,
     pub(crate) user_resolver: SessionUserResolver,
     pub(crate) spawn_client: Option<Arc<SpawnClient>>,
+    pub(crate) workspace_sandboxes:
+        Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
+    /// The relay's idle tracker, bumped on every RPC this topic serves.
+    pub(crate) rpc_activity: RpcActivity,
+    /// What each agent session's own conversation says its agent is doing, which `ListSessions`
+    /// reports.
+    pub(crate) session_agent_inference: Arc<SessionAgentInferenceStore>,
+    pub(crate) session_rooms: Arc<SessionRoomRegistry>,
+    /// The checkouts this daemon holds on other daemons' behalf; a delete forgets the one it holds
+    /// for the session.
+    pub(crate) hosted_agent_clones: Arc<HostedAgentClones>,
+    pub(crate) session_admissions: Arc<SessionAdmissionRegistry>,
     /// Told of each started session's worktree. `None` on a host whose embedder acts on nothing of
     /// the kind.
     pub(crate) worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,

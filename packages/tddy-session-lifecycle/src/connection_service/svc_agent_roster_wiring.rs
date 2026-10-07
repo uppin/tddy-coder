@@ -28,6 +28,7 @@ impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for DaemonSessionHo
         codebase_instance_id: &str,
     ) -> Result<tddy_daemon_livekit::session_room::WorktreeSnapshot, Status> {
         let answered = self
+            .launch_sessions()
             .get_worktree_snapshot_at_session_coordinate(Request::direct(
                 GetWorktreeSnapshotRequest {
                     session_token: session_token.to_string(),
