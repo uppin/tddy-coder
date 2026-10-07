@@ -30,6 +30,8 @@ import { accountsScreenPage } from "../support/pages/accountsScreenPage";
 const UPDATED_AT = 1_726_700_000n;
 const USER_CODE = "WXYZ-1234";
 const VERIFICATION_URI = "https://github.com/login/device";
+/** What the provider asks between polls. The page waits it before the first poll, so it is short. */
+const POLL_INTERVAL_SECONDS = 1n;
 
 function anAccount(overrides: Partial<AccountSummary>): AccountSummary {
   return {
@@ -73,11 +75,11 @@ function aDaemonWhereALinkEndsAs(state: LinkState): InMemoryRpcBackend {
       userCode: USER_CODE,
       verificationUri: VERIFICATION_URI,
       expiresInSeconds: 900n,
-      intervalSeconds: 5n,
+      intervalSeconds: POLL_INTERVAL_SECONDS,
     }),
     pollLinkAccount: () => {
       linked = state === LinkState.LINK_LINKED;
-      return { state, account: GRACE, intervalSeconds: 5n };
+      return { state, account: GRACE, intervalSeconds: POLL_INTERVAL_SECONDS };
     },
   });
 }
@@ -127,6 +129,68 @@ describe("Linking a second account", () => {
     accountsScreenPage.addAccountButton("github").click();
 
     cy.wrap(asked).should("deep.equal", ["github"]);
+  });
+
+  it("waits the interval the provider named before the first poll", () => {
+    const polls: string[] = [];
+    cy.clock();
+    mountAccounts(
+      anInMemoryRpcBackend().implement(AccountsService, {
+        listAccounts: () => ({
+          providers: githubHolding([ADA]),
+          vaultLocked: false,
+          sessionAccount: SESSION_IS_ADA,
+        }),
+        beginLinkAccount: () => ({
+          linkId: "link-1",
+          userCode: USER_CODE,
+          verificationUri: VERIFICATION_URI,
+          expiresInSeconds: 900n,
+          intervalSeconds: 5n,
+        }),
+        pollLinkAccount: (request) => {
+          polls.push(request.linkId);
+          return { state: LinkState.LINK_PENDING, intervalSeconds: 5n };
+        },
+      }),
+    );
+    accountsScreenPage.addAccountButton("github").click();
+    accountsScreenPage.linkUserCode().should("contain.text", USER_CODE);
+
+    cy.tick(4999);
+
+    cy.wrap(polls).should("deep.equal", []);
+  });
+
+  it("polls once the interval the provider named has passed", () => {
+    const polls: string[] = [];
+    cy.clock();
+    mountAccounts(
+      anInMemoryRpcBackend().implement(AccountsService, {
+        listAccounts: () => ({
+          providers: githubHolding([ADA]),
+          vaultLocked: false,
+          sessionAccount: SESSION_IS_ADA,
+        }),
+        beginLinkAccount: () => ({
+          linkId: "link-1",
+          userCode: USER_CODE,
+          verificationUri: VERIFICATION_URI,
+          expiresInSeconds: 900n,
+          intervalSeconds: 5n,
+        }),
+        pollLinkAccount: (request) => {
+          polls.push(request.linkId);
+          return { state: LinkState.LINK_PENDING, intervalSeconds: 5n };
+        },
+      }),
+    );
+    accountsScreenPage.addAccountButton("github").click();
+    accountsScreenPage.linkUserCode().should("contain.text", USER_CODE);
+
+    cy.tick(5000);
+
+    cy.wrap(polls).should("deep.equal", ["link-1"]);
   });
 
   it("adds the linked account to the provider's group", () => {

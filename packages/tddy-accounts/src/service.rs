@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tddy_credential_sync::AccountSyncSummary;
@@ -33,10 +33,28 @@ const SUBJECT_METADATA_KEY: &str = "subject";
 struct Linking {
     linker: Arc<dyn AccountLinker>,
     store: Arc<dyn LinkedAccountStore>,
-    /// Attempts begun and not yet finished: `link_id` to the session that began it and the
-    /// provider it targets. A poll presents only the `link_id`, and a link belongs to the session
-    /// that began it.
-    attempts: Mutex<HashMap<String, (String, ProviderId)>>,
+    /// Attempts begun and not yet finished, by `link_id`. A poll presents only the `link_id`, and a
+    /// link belongs to the session that began it.
+    ///
+    /// Bounded in time: an attempt nobody polls to a terminal answer would otherwise stay for the
+    /// daemon's life. Each carries the deadline its challenge gave, and is dropped past it — see
+    /// [`Attempt::deadline`].
+    attempts: Mutex<HashMap<String, Attempt>>,
+}
+
+/// One link in progress.
+struct Attempt {
+    session_token: String,
+    provider: ProviderId,
+    /// When the provider's code stops being redeemable, as the challenge said at begin. Past it the
+    /// attempt can only end `LINK_EXPIRED`, so it is not kept.
+    deadline: Instant,
+}
+
+impl Attempt {
+    fn is_over(&self, now: Instant) -> bool {
+        now >= self.deadline
+    }
 }
 
 /// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`], and — when the
@@ -199,11 +217,25 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             Err(refusal) => return Err(link_status_for(refusal)),
         }
         let challenge = linking.linker.begin(&provider).map_err(link_status_for)?;
-        linking
+        let now = Instant::now();
+        let mut attempts = linking
             .attempts
             .lock()
-            .map_err(|_| Status::internal("link attempts are unavailable"))?
-            .insert(challenge.link_id.clone(), (request.session_token, provider));
+            .map_err(|_| Status::internal("link attempts are unavailable"))?;
+        attempts.retain(|_, attempt| !attempt.is_over(now));
+        attempts.insert(
+            challenge.link_id.clone(),
+            Attempt {
+                session_token: request.session_token,
+                provider,
+                // `checked_add` fails only for a window longer than the clock can represent, which
+                // no provider issues; an attempt that cannot be dated is refused, not kept forever.
+                deadline: now
+                    .checked_add(Duration::from_secs(challenge.expires_in_seconds))
+                    .ok_or_else(|| Status::internal("the link window is not representable"))?,
+            },
+        );
+        drop(attempts);
         Ok(Response::new(BeginLinkAccountResponse {
             link_id: challenge.link_id,
             user_code: challenge.user_code,
@@ -220,14 +252,26 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         let linking = self.require_linking()?;
         let request = request.into_inner();
         let provider = {
-            let attempts = linking
+            let mut attempts = linking
                 .attempts
                 .lock()
                 .map_err(|_| Status::internal("link attempts are unavailable"))?;
-            match attempts.get(&request.link_id) {
-                Some((session, provider)) if session == &request.session_token => provider.clone(),
+            let now = Instant::now();
+            let provider = match attempts.get(&request.link_id) {
+                Some(attempt) if attempt.session_token == request.session_token => {
+                    if attempt.is_over(now) {
+                        attempts.remove(&request.link_id);
+                        return Ok(Response::new(PollLinkAccountResponse {
+                            state: LinkState::LinkExpired as i32,
+                            ..PollLinkAccountResponse::default()
+                        }));
+                    }
+                    attempt.provider.clone()
+                }
                 _ => return Err(link_status_for(LinkError::NoSuchLink)),
-            }
+            };
+            attempts.retain(|_, attempt| !attempt.is_over(now));
+            provider
         };
         let progress = linking
             .linker

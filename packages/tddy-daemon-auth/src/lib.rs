@@ -48,8 +48,8 @@ pub mod vault_lifetimes;
 /// **no session services at all**, which is a deliberate refusal rather than an oversight.
 pub use auth::{
     build_auth_entries, build_auth_entries_admitting, build_auth_entries_with,
-    build_token_service_entry, session_token_authenticator, AuthBuildResult,
-    LiveKitTokenServiceImpl,
+    build_token_service_entry, github_account_linking_provider, session_token_authenticator,
+    AuthBuildResult, LiveKitTokenServiceImpl,
 };
 pub use first_login_admission::FirstLoginEnrolment;
 pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};

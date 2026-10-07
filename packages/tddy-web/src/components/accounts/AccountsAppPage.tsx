@@ -165,10 +165,12 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };
 
-  // One poll, then the next after the interval the daemon last named. The first poll is
-  // immediate: the daemon answers `LINK_PENDING` for an attempt nobody has approved yet.
-  // TODO(#keyring 8/9): GitHub asks for the first poll only after `interval`; the spec requires an
-  // immediate one, so confirm the daemon-side linker absorbs an early poll as pending.
+  // Every poll, the first included, waits the interval the daemon last named: GitHub's device
+  // flow answers `slow_down` to a poll that comes sooner than that.
+  const schedulePoll = (linkId: string, intervalSeconds: number) => {
+    pollTimer.current = setTimeout(() => pollLink(linkId, intervalSeconds), intervalSeconds * 1000);
+  };
+
   const pollLink = (linkId: string, intervalSeconds: number) => {
     if (!client) return;
     client
@@ -177,7 +179,7 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         switch (res.state) {
           case LinkState.LINK_PENDING: {
             const next = res.intervalSeconds > 0n ? Number(res.intervalSeconds) : intervalSeconds;
-            pollTimer.current = setTimeout(() => pollLink(linkId, next), next * 1000);
+            schedulePoll(linkId, next);
             return;
           }
           case LinkState.LINK_LINKED:
@@ -217,7 +219,7 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           userCode: res.userCode,
           verificationUri: res.verificationUri,
         });
-        pollLink(res.linkId, Number(res.intervalSeconds));
+        schedulePoll(res.linkId, Number(res.intervalSeconds));
       })
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };

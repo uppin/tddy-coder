@@ -1,5 +1,6 @@
 //! `tddy-daemon` endpoint — wiring, configuration, and transport only.
 
+pub mod account_linking;
 pub mod agent_tool_socket;
 pub mod common_room_key_directory;
 pub mod config;
