@@ -12,7 +12,7 @@ use crate::registry::Workspace;
 
 use super::super::rehearsal::Rehearsal;
 
-use crate::item_anchor::has_item_anchors;
+use crate::item_anchor::{has_item_anchors, plan_file_has_item_anchors};
 
 use super::registry_for_static;
 
@@ -71,6 +71,9 @@ use std::path::Path;
 pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
     let path = options.plan()?;
     let text = std::fs::read_to_string(&path)?;
+    if Plan::starts_with_an_operation(&text) {
+        return insert_a_header(root, path, &text);
+    }
     let plan = Plan::parse(&text)?;
     let header = plan.rehashed_header(root)?;
 
@@ -100,6 +103,26 @@ pub fn snapshot(root: &Path, options: Options) -> Result<SnapshotRewrite> {
     })
 }
 
+/// [`snapshot`] of a plan whose first line is an operation: the header is computed from the files
+/// its anchors name and inserted above the first non-blank line, every other byte as it arrived.
+fn insert_a_header(root: &Path, path: std::path::PathBuf, text: &str) -> Result<SnapshotRewrite> {
+    let plan = Plan::parse_headerless(text)?;
+    let header = plan.header_for_anchored_files(root)?;
+    let blank: usize = text
+        .split_inclusive('\n')
+        .take_while(|line| line.trim().is_empty())
+        .map(str::len)
+        .sum();
+    let produced = format!("{}{header}\n{}", &text[..blank], &text[blank..]);
+    std::fs::write(&path, &produced)?;
+    Ok(SnapshotRewrite {
+        plan: path.to_string_lossy().to_string(),
+        paths: plan.anchored_files().len(),
+        rewritten: true,
+        stale: Vec::new(),
+    })
+}
+
 /// [`snapshot`], and for a plan with item anchors the anchors are re-resolved too: each hint
 /// follows its item through the edits made since the plan was written, and an operation whose item
 /// changed or went is reported and left as written ([`rebase_plan_file`]).
@@ -113,7 +136,7 @@ pub fn snapshot_resolving(
     cancel: CancellationToken,
 ) -> Result<SnapshotRewrite> {
     let path = options.plan()?;
-    if !has_item_anchors(&read_plan(&path)?) {
+    if !plan_file_has_item_anchors(&path) {
         return snapshot(root, options);
     }
     let client = client.ok_or_else(|| {

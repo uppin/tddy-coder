@@ -48,9 +48,9 @@ impl Plan {
     pub fn parse(jsonl: &str) -> Result<Plan> {
         let mut lines = jsonl.lines().filter(|line| !line.trim().is_empty());
 
-        let header = lines.next().ok_or_else(|| malformed("plan is empty"))?;
-        if header_version(header) == Some(HINTED_SCHEMA_VERSION) {
-            let header: HintedHeader = serde_json::from_str(header).map_err(|_| {
+        let first_line = lines.next().ok_or_else(|| malformed("plan is empty"))?;
+        if header_version(first_line) == Some(HINTED_SCHEMA_VERSION) {
+            let header: HintedHeader = serde_json::from_str(first_line).map_err(|_| {
                 malformed("first line must be a v2 header carrying a `files` map of hints")
             })?;
             let ops = parse_ops(lines)?;
@@ -61,8 +61,20 @@ impl Plan {
                 ops,
             });
         }
-        let header: SnapshotHeader = serde_json::from_str(header)
-            .map_err(|_| malformed("first line must be a snapshot header"))?;
+        let header: SnapshotHeader = serde_json::from_str(first_line).map_err(|_| {
+            // A plan whose first line is an operation is only missing its header, and `snapshot`
+            // writes one; naming it is what turns a dead end into a next step. A first line that
+            // is neither header nor operation is not something that command can help with, so it
+            // keeps the plain refusal.
+            if Plan::starts_with_an_operation(first_line) {
+                malformed(
+                    "first line must be a snapshot header; this plan's first line is an operation, \
+                     so run `restructure snapshot <plan>` to write one",
+                )
+            } else {
+                malformed("first line must be a snapshot header")
+            }
+        })?;
         if header.v != SCHEMA_VERSION {
             return Err(malformed(format!(
                 "plan declares schema version {} but this executor speaks {SCHEMA_VERSION}",
@@ -434,6 +446,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 mod canonical_paths;
 mod file_hint;
 mod groups;
+mod headerless;
 mod signature_fields;
 
 /// The destination and the by-item anchor an operation within one crate cannot do without.

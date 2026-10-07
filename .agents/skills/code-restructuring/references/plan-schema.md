@@ -20,6 +20,11 @@ plan runs, because an item anchor does not depend on the rest of the file. A v1 
 before, including the `snapshot mismatch` refusal. `restructure snapshot` rewrites the header of
 whichever version the plan has.
 
+A plan whose first line is an operation has no header yet. `restructure snapshot` writes one from the
+files the operations' anchors name — v2 when every anchor is an `item` or `items`, v1 when any is a
+`range` or `symbol` — and every other reader refuses such a plan, naming `restructure snapshot` as the
+remedy.
+
 The plan is a **command log** that the executor reads through a plan store and writes back as it runs.
 Every operation carries an `id` (`"id":"op-3"`, opaque): the store gives one to any operation loaded
 without it and writes it into the file, two operations sharing an id are refused as malformed, and the

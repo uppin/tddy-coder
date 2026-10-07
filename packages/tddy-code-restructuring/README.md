@@ -12,7 +12,7 @@ Exposed via `tddy-tools restructure`:
 - `load <plan.jsonl>...`, `unload <plan.jsonl>... | --all`, `plans` — hold plans in the index daemon's plan store (they need the daemon)
 - `status <plan.jsonl>`
 - `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move; `--budget` reports the files the plan names that have more than LINES **production lines** (before the first `#[cfg(test)]` that opens a `mod`), as a record rather than a gate
-- `snapshot <plan.jsonl>` — rewrites the plan's header; for a plan of item anchors it also re-resolves them against the current tree
+- `snapshot <plan.jsonl>` — rewrites the plan's header, or writes one when the plan has none (its first line is an operation); for a plan of item anchors it also re-resolves them against the current tree
 - `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries; `--items` takes bare names, `krate::module::Alpha`, and `<Type>` / `<Type>#N` for an inherent `impl` block (`item_anchor::parse_item_list` is the one rule for every front end)
 - `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes
 - `warm` — loads the tree's crate graph into the index daemon (it needs the daemon)
