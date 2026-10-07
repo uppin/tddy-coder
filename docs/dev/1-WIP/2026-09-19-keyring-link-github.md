@@ -208,11 +208,11 @@ about it.
 - [x] **PRD**: [PRD-2026-09-19-keyring-link-github.md](../../ft/daemon/1-WIP/PRD-2026-09-19-keyring-link-github.md)
 - [x] **Changeset**: this document
 - [x] **Draft PR contract**: surface + failing tests (wave 2, commit 2)
-- [ ] **Flow**: `BeginLinkAccount` / `PollLinkAccount` over 2/9's device flow, no session minted
-- [ ] **Dedup**: on GitHub user id; re-link updates in place
-- [ ] **Refusal**: the session's own account cannot be removed
-- [ ] **UI**: Add account; the session account marked
-- [ ] **Testing**: unit + acceptance, scoped
+- [~] **Flow**: `BeginLinkAccount` / `PollLinkAccount` served over the `AccountLinker` port, no session minted — ⚠ **no daemon-side adapter over 2/9's device flow yet** (M1)
+- [x] **Dedup**: on GitHub user id; re-link updates in place
+- [x] **Refusal**: the session's own account cannot be removed
+- [x] **UI**: Add account; the session account marked
+- [x] **Testing**: unit + acceptance, scoped
 - [ ] **Package Documentation**: `packages/tddy-accounts/docs/account-linking.md`
 - [ ] **Code Quality**: scoped clippy; CI green
 
@@ -264,10 +264,10 @@ far from the moment a person would connect the two.
 ## Implementation Milestones
 
 - [ ] **M1** — split the device flow; login behaviour unchanged (test first)
-- [ ] **M2** — `BeginLinkAccount` / `PollLinkAccount` and the link state
-- [ ] **M3** — dedup on GitHub user id; re-link preserves `account_id`
-- [ ] **M4** — the `RemoveAccount` refusal
-- [ ] **M5** — Add account + the session marker
+- [x] **M2** — `BeginLinkAccount` / `PollLinkAccount` and the link state
+- [x] **M3** — dedup on GitHub user id; re-link preserves `account_id`
+- [x] **M4** — the `RemoveAccount` refusal
+- [x] **M5** — Add account + the session marker
 - [ ] **M6** — acceptance: two accounts, one session, assignments intact
 - [ ] **M7** — `packages/tddy-accounts/docs/account-linking.md`
 
@@ -331,3 +331,16 @@ via `scripts/ci-status.sh`.
 - [ ] `packages/tddy-accounts/docs/account-linking.md`
 - [ ] `/wrap-context-docs` — this node claims **no** `docs/dev/todo/` entry and **no** code-issue
       record
+
+## Validation Results
+
+Scoped to `tddy-accounts`, `tddy-service` and the single Cypress spec `AccountLinkingAcceptance`; whole-workspace health is CI's.
+
+- ✅ Stack gate: current on `feature/keyring/screen-share`; `origin/<base>..HEAD` is this PR's four commits; no parent file deleted.
+- ✅ `./test -p tddy-accounts -p tddy-service`: 214 passed, 0 failed. Cypress `AccountLinkingAcceptance`: 13/13.
+- ✅ `## Dependencies` held: nothing of 2/9 or 4/9 reimplemented; `## Boundaries` held: no response carries a token.
+- ⚠ **M1 not delivered**: nothing implements `AccountLinker` / `LinkedAccountStore` or calls `with_linking`, so a real daemon answers `FAILED_PRECONDITION` on both RPCs. The device-flow split in `tddy-daemon-auth` listed under Technical Changes is absent.
+- ⚠ **M6 (acceptance: two accounts, one session, assignments intact)** is covered at service level only, for the same reason.
+- ⚠ `AccountsServiceImpl` link attempts (`Linking::attempts`) are removed only on a terminal poll; an abandoned pending attempt stays in the map for the daemon's life.
+- ⚠ The web page polls once immediately; GitHub wants the first poll after `interval` (`TODO(#keyring 8/9)` in `AccountsAppPage.tsx`).
+- 🔲 M7: `packages/tddy-accounts/docs/account-linking.md` not written.
