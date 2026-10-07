@@ -3,8 +3,6 @@ use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use super::spawn_claude_cli_session_inner;
 
-use super::session_acting_identity::SessionAccountAccess;
-
 use uuid::Uuid;
 
 use super::conversation_branch_slug;
@@ -79,9 +77,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             "",
-            // TODO(keyring 9/9): the orchestrator's session token is not held here, so a child
-            // spawned by an agent resolves no account and commits under the checkout's identity.
-            &SessionAccountAccess::none(),
+            // The orchestrator's owner's vault: a child is the same owner's, on the same project.
+            &self.account_access,
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
             &super::AttachmentProgressSink::discarding(),

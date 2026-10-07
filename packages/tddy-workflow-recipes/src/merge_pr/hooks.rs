@@ -12,6 +12,7 @@ use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{clear_sinks, set_sinks};
 
+use crate::github_pr_tools::github_pr_tools_available;
 use crate::review::{
     format_diff_context_for_prompt, merge_base_commit_for_review, resolve_git_repo_root,
 };
@@ -92,8 +93,12 @@ impl RunnerHooks for MergePrWorkflowHooks {
                 .to_string()
         };
 
-        if let Some(prompt) = system_prompt_for_task(task_id, &git_block, target_branch.as_deref())
-        {
+        if let Some(prompt) = system_prompt_for_task(
+            task_id,
+            &git_block,
+            target_branch.as_deref(),
+            github_pr_tools_available(context),
+        ) {
             context.set_sync("system_prompt", prompt);
         }
 
@@ -222,13 +227,8 @@ fn system_prompt_for_task(
     task_id: &str,
     git_block: &str,
     target_branch: Option<&str>,
+    github_pr_tools_available: bool,
 ) -> Option<String> {
-    // TODO(keyring 9/9): the GitHub PR tools awareness is not appended. It used to be gated on
-    // `GITHUB_TOKEN` being exported to the process, which is no longer a credential anywhere. The
-    // agent's PR tools now ask the session host for the project's account per call, but whether a
-    // given session has one is only known at call time, so advertising them here would still
-    // promise what a refusal may withhold. Append `merge_pr_github_tools_awareness_line(true)`
-    // once the prompt can know the session resolves an account.
     let base = match task_id {
         TASK_ANALYZE => Some(analyze_system_prompt(git_block, target_branch)),
         TASK_SYNC_MAIN => Some(sync_main_system_prompt(git_block)),
@@ -236,7 +236,13 @@ fn system_prompt_for_task(
         _ => None,
     }?;
 
-    Some(base)
+    // The PR tools are advertised only when this session's host answers their token requests; the
+    // driver of the workflow says so in the context (see `crate::github_pr_tools`).
+    let awareness = merge_pr_github_tools_awareness_line(github_pr_tools_available);
+    if awareness.is_empty() {
+        return Some(base);
+    }
+    Some(format!("{base}\n\n{awareness}\n"))
 }
 
 #[cfg(test)]
@@ -307,14 +313,14 @@ mod tests {
     #[test]
     fn system_prompt_for_task_unknown_returns_none() {
         // When / Then
-        assert!(super::system_prompt_for_task("end", "x", None).is_none());
+        assert!(super::system_prompt_for_task("end", "x", None, false).is_none());
     }
 
     #[test]
     fn system_prompt_for_task_all_known_goals() {
         // When / Then — all known goal prompts must be non-None
-        assert!(super::system_prompt_for_task(TASK_ANALYZE, "g", None).is_some());
-        assert!(super::system_prompt_for_task(TASK_SYNC_MAIN, "g", None).is_some());
-        assert!(super::system_prompt_for_task(TASK_FINALIZE, "g", None).is_some());
+        assert!(super::system_prompt_for_task(TASK_ANALYZE, "g", None, false).is_some());
+        assert!(super::system_prompt_for_task(TASK_SYNC_MAIN, "g", None, false).is_some());
+        assert!(super::system_prompt_for_task(TASK_FINALIZE, "g", None, false).is_some());
     }
 }

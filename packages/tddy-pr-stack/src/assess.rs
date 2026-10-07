@@ -332,10 +332,10 @@ impl Task for AssessTask {
                 .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
         };
 
-        // TODO(keyring 9/9): no resolved GitHub account reaches the stack assessment yet, and the
-        // process environment is no longer a credential, so every authenticated call refuses.
-        // Thread the project's `ActingIdentity::token` here.
-        let gh = tddy_github::pr_api::RealGithubPrApi::without_credential(&github_owner_repo);
+        // The project's account, asked of the session's host per call — never read from the
+        // environment. With no host to ask, or a refusal, the task fails with the host's reason.
+        let token = tddy_core::toolcall::request_github_token_from_session().await?;
+        let gh = tddy_github::pr_api::RealGithubPrApi::with_token(&github_owner_repo, token);
 
         let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
         let autonomous_merge = context

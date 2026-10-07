@@ -63,6 +63,12 @@ impl DaemonSessionHost {
 
         // --- cursor-cli branch: resume without LiveKit ---
         if metadata.session_type.as_deref() == Some("cursor-cli") {
+            let identity = self.session_identity(
+                os_user,
+                &req.session_id,
+                &metadata.project_id,
+                &req.session_token,
+            );
             return bridge_conn_resume_response(
                 crate::cursor_cli_spawn::resume_cursor_cli_session(
                     &self.claude_cli_manager,
@@ -70,6 +76,7 @@ impl DaemonSessionHost {
                     &req.session_id,
                     &session_dir,
                     metadata,
+                    identity.git_environment,
                 )
                 .await,
             );

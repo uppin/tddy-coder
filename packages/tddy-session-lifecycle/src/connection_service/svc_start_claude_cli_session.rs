@@ -26,6 +26,8 @@ use super::AttachmentProgressSink;
 
 use super::launch_ports::LaunchSessions;
 
+use super::session_acting_identity::SessionAccountAccess;
+
 impl LaunchSessions {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_claude_cli_session(
@@ -79,6 +81,7 @@ impl LaunchSessions {
                     sessions_base: sessions_base.clone(),
                     orchestrator_session_id: session_id.to_string(),
                     orchestrator_session_dir: session_dir,
+                    account_access: self.host.session_account_access(session_token),
                 }))
             } else {
                 None
@@ -93,6 +96,7 @@ impl LaunchSessions {
                 project_id,
                 &sessions_base,
                 &sessions_base.join(SESSIONS_SUBDIR).join(session_id),
+                self.host.session_account_access(session_token),
             )
         });
         spawn_claude_cli_session_inner(
@@ -138,6 +142,7 @@ impl LaunchSessions {
     /// enables conversation spawning (grill-me). Returns `None` for recipes that don't (a plain TDD
     /// session, or a PR-stack orchestrator which uses `spawn-child` instead), so `spawn_conversation`
     /// is rejected there rather than silently spawning.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn conversation_spawn_handler_for(
         &self,
         recipe: &Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>,
@@ -146,6 +151,9 @@ impl LaunchSessions {
         project_id: &str,
         sessions_base: &Path,
         orchestrator_session_dir: &Path,
+        // The orchestrator's owner's vault access: a conversation it spawns is that owner's, on the
+        // same project, and resolves its account through this.
+        account_access: SessionAccountAccess,
     ) -> Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>> {
         if !recipe_enables_conversation_spawn(recipe.name()) {
             return None;
@@ -161,6 +169,7 @@ impl LaunchSessions {
             orchestrator_session_id: session_id.to_string(),
             model_override: None,
             orchestrator_session_dir: orchestrator_session_dir.to_path_buf(),
+            account_access,
         }))
     }
 
@@ -180,6 +189,7 @@ impl LaunchSessions {
         os_user: &str,
         project_id: &str,
         model: Option<String>,
+        account_access: SessionAccountAccess,
     ) -> Option<String> {
         let path = std::env::temp_dir().join(format!("tddy-host-{session_id}.sock"));
         let _ = std::fs::remove_file(&path); // clear any stale socket from a prior run
@@ -208,6 +218,7 @@ impl LaunchSessions {
             orchestrator_session_id: session_id.to_string(),
             orchestrator_session_dir,
             model_override: model,
+            account_access,
         });
         let service = tddy_host_service::host_session_service::HostSessionService::new(handler);
         let session_stdio = Arc::clone(&self.session_stdio);

@@ -228,7 +228,8 @@ mod svc_pr_status_for_caller;
 
 mod svc_start_claude_cli_session;
 
-mod session_acting_identity;
+pub(crate) mod session_acting_identity;
+pub use session_acting_identity::project_github_token;
 
 mod hooks_and_urls;
 pub use hooks_and_urls::*;

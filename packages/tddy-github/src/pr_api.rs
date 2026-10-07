@@ -286,12 +286,11 @@ impl RealGithubPrApi {
         }
     }
 
-    /// A client for a caller that has **no** resolved account. It exists so such a caller keeps
-    /// compiling while it refuses, loudly, instead of reaching for an ambient credential: every
-    /// authenticated operation returns an error naming that no account is resolved.
-    ///
-    /// Each use is a place where the project's account does not yet reach the code — see the
-    /// `TODO(keyring 9/9)` at the call site.
+    /// A client for a caller that holds **no** resolved account, because the operation it runs
+    /// reaches no GitHub call (a plan-only repoint). It exists so such a caller can still hold a
+    /// `GithubPrApi`, and so that if it does reach one anyway, every authenticated operation
+    /// returns an error naming that no account is resolved instead of reaching for an ambient
+    /// credential.
     pub fn without_credential(repo: impl Into<String>) -> Self {
         Self {
             repo: repo.into(),

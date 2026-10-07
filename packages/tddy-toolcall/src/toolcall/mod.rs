@@ -9,6 +9,7 @@
 pub mod build;
 mod client;
 mod client_wire;
+mod github_token_client;
 mod listener;
 pub mod lsp;
 pub mod restructure;
@@ -23,6 +24,7 @@ pub use client_wire::{
     ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest, SubmitResponse,
     TransitionRequest,
 };
+pub use github_token_client::{request_github_token, request_github_token_from_session};
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
     start_toolcall_listener_with_conversation_handler, ChildSpawnHandler, ConversationSpawnHandler,

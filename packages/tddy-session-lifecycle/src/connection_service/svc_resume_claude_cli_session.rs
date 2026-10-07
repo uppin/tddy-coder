@@ -15,8 +15,6 @@ use crate::connection_service::hooks_and_urls;
 use super::launch_ports::LaunchSessions;
 use super::DaemonSessionHost;
 
-use super::session_acting_identity::{SessionGithubCredential, SharedGithubCredential};
-
 impl DaemonSessionHost {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
     pub(crate) async fn resume_claude_cli_session(
@@ -33,7 +31,13 @@ impl DaemonSessionHost {
         if meta.sandbox == Some(true) {
             return self
                 .launch_sessions()
-                .resume_sandboxed_claude_cli_session(os_user, session_id, session_dir, meta)
+                .resume_sandboxed_claude_cli_session(
+                    os_user,
+                    session_id,
+                    session_token,
+                    session_dir,
+                    meta,
+                )
                 .await;
         }
         let model = meta.model.clone().unwrap_or_default();
@@ -57,6 +61,7 @@ impl DaemonSessionHost {
             .map(|w| w.context_dir.clone())
             .or_else(|| meta.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.clone());
+        let is_split = split.is_some();
         let (split_args, split_env) = match split {
             Some(w) => (w.extra_args, w.env),
             None => (Vec::new(), Vec::new()),
@@ -73,10 +78,16 @@ impl DaemonSessionHost {
         let mut append_system_prompt_file: Option<PathBuf> = None;
         // One resolution for the project this session belongs to; a refusal (or a project that can no
         // longer be read) resumes the agent under the checkout's own identity, with the reason logged.
-        // TODO(keyring 9/9): split-agent resumes are not given an identity here either.
-        let (git_environment, github_credential_handler) =
-            self.resumed_session_identity(os_user, session_id, &meta.project_id, session_token);
-        let mut env_extra: Vec<(String, String)> = git_environment;
+        // A split agent gets no commit pairs: it has no checkout (its working directory is a context
+        // dir) and commits are made by the tools running on the codebase daemon, never by this
+        // process's environment.
+        let identity = self.session_identity(os_user, session_id, &meta.project_id, session_token);
+        let github_credential_handler = identity.github_credential;
+        let mut env_extra: Vec<(String, String)> = if is_split {
+            Vec::new()
+        } else {
+            identity.git_environment
+        };
         env_extra.extend(split_env);
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
@@ -146,31 +157,6 @@ impl DaemonSessionHost {
             livekit_url: String::new(),
             livekit_server_identity: String::new(),
         }))
-    }
-}
-
-impl DaemonSessionHost {
-    /// The commit identity a resumed session is launched with and the handler that answers its
-    /// tools' `github-token` — both from the project's assignments, read once here. A project that
-    /// can no longer be read yields neither: the agent keeps the checkout's identity and its tools'
-    /// token requests are refused.
-    fn resumed_session_identity(
-        &self,
-        os_user: &str,
-        session_id: &str,
-        project_id: &str,
-        session_token: &str,
-    ) -> (Vec<(String, String)>, Option<SharedGithubCredential>) {
-        let Some(accounts) = self.project_account_assignments(os_user, session_id, project_id)
-        else {
-            return (Vec::new(), None);
-        };
-        let access = self.session_account_access(session_token);
-        let git_environment = access.git_environment_or_inherited(session_id, &accounts);
-        (
-            git_environment,
-            Some(Arc::new(SessionGithubCredential::new(access, &accounts))),
-        )
     }
 }
 

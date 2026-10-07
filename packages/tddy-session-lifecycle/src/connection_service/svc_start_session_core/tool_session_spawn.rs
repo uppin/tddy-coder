@@ -80,6 +80,7 @@ impl DaemonSessionHost {
                         &os_user,
                         &pid_for_spawn,
                         model_for_spawn.clone(),
+                        self.session_account_access(&req.session_token),
                     )
                     .await;
                 (Some(sid), sock)
@@ -106,6 +107,12 @@ impl DaemonSessionHost {
             .await?;
             pre_session_id = Some(tool_session_id);
         }
+        // TODO(keyring 9/9): a tool session (`tddy-coder`) starts under the checkout's own commit
+        // identity, and its agent's PR tools are refused for want of a credential handler. Both
+        // need the supervisor/worker wire: `ToolSpawnPlan` -> `SpawnRequest` carries no env and no
+        // channel back to this daemon's `SessionGithubCredential`, so the child cannot be given
+        // the `GIT_*` pairs (`SessionAccountAccess::session_identity`) nor a way to ask for the
+        // token. Adding either is a wire change, left for a decision.
         let result = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Start,

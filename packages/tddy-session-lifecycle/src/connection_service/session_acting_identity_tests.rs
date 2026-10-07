@@ -62,6 +62,14 @@ fn ada_and_grace_held() -> Vec<CredentialRecord> {
 fn a_daemon_where_ada_unlocked(
     records: Vec<CredentialRecord>,
 ) -> (tempfile::TempDir, SessionAccountAccess) {
+    let (dir, vaults) = vaults_where_ada_unlocked(records);
+    (dir, access_with(Some(vaults), ADAS_SESSION))
+}
+
+/// The vaults of a daemon on which Ada has unlocked hers, holding `records`.
+fn vaults_where_ada_unlocked(
+    records: Vec<CredentialRecord>,
+) -> (tempfile::TempDir, Arc<SessionVaults>) {
     let dir = tempfile::tempdir().expect("a temporary directory");
     let passphrase = SecretString::new(ADAS_PASSPHRASE);
     let store =
@@ -74,7 +82,7 @@ fn a_daemon_where_ada_unlocked(
     vaults
         .unlock(ADA, &passphrase)
         .expect("Ada's passphrase opens her vault");
-    (dir, access_with(Some(vaults), ADAS_SESSION))
+    (dir, vaults)
 }
 
 fn access_with(vaults: Option<Arc<SessionVaults>>, token: &str) -> SessionAccountAccess {
@@ -378,4 +386,113 @@ async fn each_call_reads_the_vault_as_it_stands() {
         Err(SessionIdentityRefusal::Vault(AccountsError::Locked).to_string())
     );
     assert_eq!(once_unlocked, Ok("ghp_ada_token".to_string()));
+}
+
+// ── A session's identity: the commit pairs and the token handler, from one lookup ─────────
+
+#[tokio::test]
+async fn a_project_that_could_not_be_read_gives_the_session_neither_pairs_nor_a_handler() {
+    // Given Ada's unlocked vault and a project row that could not be read
+    let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
+
+    // When the session's identity is resolved with no assignments to resolve
+    let identity = access.session_identity("s1", None);
+
+    // Then the agent keeps the checkout's identity and its tools get no token
+    assert!(identity.git_environment.is_empty());
+    assert!(identity.github_credential.is_none());
+}
+
+#[tokio::test]
+async fn an_assigned_project_gives_the_session_its_pairs_and_a_handler_for_the_same_account() {
+    // Given Ada's unlocked vault holding two accounts, and a project assigned to Grace's
+    let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
+
+    // When the session's identity is resolved
+    let identity = access.session_identity("s1", Some(&assigned("acct-grace")));
+
+    // Then the commits are Grace's, and so is the token the tools are given
+    assert_eq!(
+        pair(&identity.git_environment, "GIT_AUTHOR_NAME"),
+        Some("grace")
+    );
+    let handler = identity.github_credential.expect("a handler is bound");
+    assert_eq!(
+        handler.github_token().await,
+        Ok("ghp_grace_token".to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_refused_assignment_still_binds_a_handler_that_refuses_with_the_reason() {
+    // Given a project assigning nothing, in Ada's open vault
+    let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
+
+    // When the session's identity is resolved
+    let identity = access.session_identity("s1", Some(&[]));
+
+    // Then no pairs are added, and the tools' request is refused with the resolver's message
+    assert!(identity.git_environment.is_empty());
+    let handler = identity.github_credential.expect("a handler is bound");
+    assert_eq!(
+        handler.github_token().await,
+        Err(IdentityError::NotAssigned { provider: github() }.to_string())
+    );
+}
+
+// ── The token for a daemon-side operation, over the project's assignments ─────────────────
+
+fn ada_is_ada(token: &str) -> Option<String> {
+    (token == ADAS_SESSION).then(|| ADA.to_string())
+}
+
+#[test]
+fn a_daemon_side_operation_gets_the_token_of_the_account_the_project_assigns() {
+    // Given Ada's unlocked vault holding two accounts, and a project assigned to Grace's
+    let (_dir, vaults) = vaults_where_ada_unlocked(ada_and_grace_held());
+
+    // When an operation Ada's session asks for resolves the project's token
+    let token = project_github_token(
+        Some(vaults),
+        Arc::new(ada_is_ada),
+        ADAS_SESSION,
+        &assigned("acct-grace"),
+    );
+
+    // Then it is Grace's
+    assert_eq!(token, Ok("ghp_grace_token".to_string()));
+}
+
+#[test]
+fn a_daemon_side_operation_on_an_unassigned_project_is_refused_with_the_resolvers_message() {
+    // Given Ada's unlocked vault and a project assigning no account, with GITHUB_TOKEN exported
+    std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
+    let (_dir, vaults) = vaults_where_ada_unlocked(ada_and_grace_held());
+
+    // When an operation Ada's session asks for resolves the project's token
+    let token = project_github_token(Some(vaults), Arc::new(ada_is_ada), ADAS_SESSION, &[]);
+
+    // Then the refusal is NotAssigned's message, and the environment rescued nothing
+    assert_eq!(
+        token,
+        Err(IdentityError::NotAssigned { provider: github() }.to_string())
+    );
+}
+
+#[test]
+fn a_daemon_side_operation_with_no_vaults_names_that() {
+    // Given a daemon with no vaults wired
+    // When an operation resolves the project's token
+    let token = project_github_token(
+        None,
+        Arc::new(ada_is_ada),
+        ADAS_SESSION,
+        &assigned("acct-ada"),
+    );
+
+    // Then the refusal says no vault is available
+    assert_eq!(
+        token,
+        Err(SessionIdentityRefusal::NoVaultsConfigured.to_string())
+    );
 }

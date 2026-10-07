@@ -101,10 +101,10 @@ impl Task for MergeTask {
             .get_sync::<u64>("merge_pr_number")
             .ok_or("MergeTask: merge_pr_number not in context")?;
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
-        // TODO(keyring 9/9): no resolved GitHub account reaches the orchestrator's task context
-        // yet, and the process environment is no longer a credential, so every authenticated call
-        // refuses. Thread the project's `ActingIdentity::token` here.
-        let gh = super::github::RealGithubPrApi::without_credential(&repo);
+        // The project's account, asked of the session's host per call — never read from the
+        // environment. With no host to ask, or a refusal, the task fails with the host's reason.
+        let token = tddy_core::toolcall::request_github_token_from_session().await?;
+        let gh = super::github::RealGithubPrApi::with_token(&repo, token);
 
         let _sha = super::bridge::execute_stack_merge(&session_dir, &node_id, pr_number, &gh)?;
 
@@ -160,10 +160,10 @@ impl Task for RepointTask {
             .get_sync::<String>("default_branch")
             .unwrap_or_else(|| "master".to_string());
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
-        // TODO(keyring 9/9): no resolved GitHub account reaches the orchestrator's task context
-        // yet, and the process environment is no longer a credential, so every authenticated call
-        // refuses. Thread the project's `ActingIdentity::token` here.
-        let gh = super::github::RealGithubPrApi::without_credential(&repo);
+        // The project's account, asked of the session's host per call — never read from the
+        // environment. With no host to ask, or a refusal, the task fails with the host's reason.
+        let token = tddy_core::toolcall::request_github_token_from_session().await?;
+        let gh = super::github::RealGithubPrApi::with_token(&repo, token);
 
         super::bridge::execute_stack_repoint(
             &session_dir,

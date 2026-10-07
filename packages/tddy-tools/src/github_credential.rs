@@ -14,27 +14,22 @@ use tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi;
 
 /// The token of the account the session's project acts as, from the host listening on `socket`.
 ///
-/// `Err` carries the reason there is none, verbatim from the host when it refused.
+/// `Err` carries the reason there is none, verbatim from the host when it refused. The PR tools are
+/// synchronous and run on the MCP server's runtime, so the request runs on a thread of its own with
+/// a runtime of its own rather than blocking inside the caller's.
 pub(crate) fn github_token_from(socket: Option<&Path>) -> Result<String, String> {
-    let socket = socket.ok_or_else(|| {
-        "TDDY_SOCKET is not set, so there is no session host to ask for this project's GitHub \
-         account; the PR tools only work in a managed session"
-            .to_string()
-    })?;
-    let response = ask_host(socket)?;
-    match response["status"].as_str() {
-        Some("ok") => response["token"]
-            .as_str()
-            .filter(|token| !token.trim().is_empty())
-            .map(str::to_string)
-            .ok_or_else(|| "the session host answered with no GitHub token".to_string()),
-        Some("error") => Err(response["message"]
-            .as_str()
-            .filter(|message| !message.is_empty())
-            .unwrap_or("the session host refused to resolve a GitHub account")
-            .to_string()),
-        _ => Err("the session host sent an unrecognised answer to github-token".to_string()),
-    }
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("could not start a runtime to ask the session host: {e}"))?
+                    .block_on(tddy_core::toolcall::request_github_token(socket))
+            })
+            .join()
+            .map_err(|_| "asking the session host for a GitHub token panicked".to_string())?
+    })
 }
 
 /// A GitHub client for `repo` that authenticates as the session's project account.
@@ -46,27 +41,6 @@ pub(crate) fn github_api_for(
         repo,
         github_token_from(socket)?,
     ))
-}
-
-/// One `github-token` round trip. The PR tools are synchronous and run on the MCP server's runtime,
-/// so the call runs on a thread of its own with a runtime of its own rather than blocking inside
-/// the caller's.
-fn ask_host(socket: &Path) -> Result<serde_json::Value, String> {
-    std::thread::scope(|scope| {
-        scope
-            .spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| format!("could not start a runtime to ask the session host: {e}"))?
-                    .block_on(tddy_core::toolcall::dispatch_toolcall(
-                        socket,
-                        serde_json::json!({ "type": "github-token" }),
-                    ))
-            })
-            .join()
-            .map_err(|_| "asking the session host for a GitHub token panicked".to_string())?
-    })
 }
 
 #[cfg(test)]

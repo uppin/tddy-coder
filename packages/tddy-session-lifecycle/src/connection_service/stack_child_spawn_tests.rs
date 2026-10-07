@@ -1,6 +1,12 @@
+use super::session_acting_identity::SessionAccountAccess;
 use super::*;
-use tddy_core::toolcall::ChildSpawnHandler;
+use tddy_accounts::{META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB};
+use tddy_core::toolcall::{ChildSpawnHandler, ConversationSpawnHandler};
 use tddy_core::{Stack, StackNode};
+use tddy_credentials::{
+    AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, SessionVaults,
+    FIRST_VERSION,
+};
 use tddy_daemon_kernel::{SessionUserResolver, SessionsBaseResolver};
 use tddy_testing_commons::wait::eventually;
 use tddy_workflow::SESSION_ATTACHMENTS_SUBDIR;
@@ -9,6 +15,8 @@ const VALID_TOKEN: &str = "stack-child-token";
 const TEST_PROJECT_ID: &str = "stack-child-project";
 const TEST_MODEL: &str = "claude-opus-4-8";
 const ORCHESTRATOR_SESSION_ID: &str = "018f7777-cccc-7000-3333-000000000001";
+const OWNER: &str = "ada";
+const OWNER_SESSION: &str = "the-orchestrators-session-token";
 const NODE_ID: &str = "n1";
 const NODE_TITLE: &str = "Token store";
 const NODE_DESCRIPTION: &str = "Adds the token store the rest of the stack reads.";
@@ -27,6 +35,11 @@ struct Orchestrator {
     os_user: String,
     sessions: tempfile::TempDir,
     agent_command_line_path: PathBuf,
+    agent_environment_path: PathBuf,
+    /// What the orchestrator's owner's session reads a vault with; none until the test gives the
+    /// owner one.
+    account_access: SessionAccountAccess,
+    _vault: Option<tempfile::TempDir>,
     _repo: tempfile::TempDir,
     _config_dir: tempfile::TempDir,
     _stub_dir: tempfile::TempDir,
@@ -44,7 +57,12 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
 
     let stub_dir = tempfile::tempdir().expect("stub dir");
     let agent_command_line_path = stub_dir.path().join("agent-command-line.txt");
-    let stub = write_argv_recording_stub(stub_dir.path(), &agent_command_line_path);
+    let agent_environment_path = stub_dir.path().join("agent-environment.txt");
+    let stub = write_argv_recording_stub(
+        stub_dir.path(),
+        &agent_command_line_path,
+        &agent_environment_path,
+    );
 
     let config_dir = tempfile::tempdir().expect("config dir");
     let config_path = config_dir.path().join("daemon.yaml");
@@ -80,6 +98,9 @@ fn a_pr_stack_orchestrator() -> Orchestrator {
         os_user,
         sessions,
         agent_command_line_path,
+        agent_environment_path,
+        account_access: SessionAccountAccess::none(),
+        _vault: None,
         _repo: repo,
         _config_dir: config_dir,
         _stub_dir: stub_dir,
@@ -176,7 +197,74 @@ impl Orchestrator {
             sessions_base: self.sessions_base().to_path_buf(),
             orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
             orchestrator_session_dir: self.session_dir(ORCHESTRATOR_SESSION_ID),
+            account_access: self.account_access.clone(),
         }
+    }
+
+    /// The handler the `spawn_conversation` tool reaches, wired as
+    /// [`DaemonSessionHost::conversation_spawn_handler_for`] wires it.
+    fn conversation_spawn_handler(&self) -> GrillMeConversationSpawnHandler {
+        GrillMeConversationSpawnHandler {
+            stack_parent_host: Arc::new(self.service.launch_sessions()),
+            config: self.config.clone(),
+            tddy_data_dir: self.sessions_base().to_path_buf(),
+            claude_cli_manager: Arc::clone(&self.service.claude_cli_manager),
+            os_user: self.os_user.clone(),
+            project_id: TEST_PROJECT_ID.to_string(),
+            sessions_base: self.sessions_base().to_path_buf(),
+            orchestrator_session_id: ORCHESTRATOR_SESSION_ID.to_string(),
+            orchestrator_session_dir: self.session_dir(ORCHESTRATOR_SESSION_ID),
+            model_override: None,
+            account_access: self.account_access.clone(),
+        }
+    }
+
+    /// The project is assigned `account`, which the orchestrator's owner holds in an unlocked
+    /// vault: the daemon-side half of what a session start leaves in its handlers.
+    fn with_the_project_assigned_to_an_account_its_owner_holds(mut self, account: &str) -> Self {
+        let projects_yaml = self.sessions.path().join("projects").join("projects.yaml");
+        let rows = std::fs::read_to_string(&projects_yaml).expect("projects.yaml");
+        std::fs::write(
+            &projects_yaml,
+            format!(
+                "{rows}    accounts:\n      - provider: {PROVIDER_GITHUB}\n        account_id: {account}\n"
+            ),
+        )
+        .expect("assign the account");
+
+        let vault = tempfile::tempdir().expect("vault dir");
+        let passphrase = SecretString::new("correct horse battery staple");
+        let store = CredentialStore::create(
+            &CredentialStore::path_in(vault.path(), OWNER),
+            &passphrase,
+            OWNER,
+        )
+        .expect("the owner's vault is created");
+        store
+            .put(CredentialRecord {
+                provider: ProviderId::new(PROVIDER_GITHUB),
+                account: AccountId::new(account),
+                label: "ada's account".to_string(),
+                secret: SecretString::new("ghp_ada_token"),
+                metadata: std::collections::BTreeMap::from([
+                    (META_SUBJECT_ID.to_string(), "101".to_string()),
+                    (META_SUBJECT.to_string(), "ada".to_string()),
+                ]),
+                updated_at: 1_700_000_000,
+                version: FIRST_VERSION,
+            })
+            .expect("the record is retained");
+        let vaults = Arc::new(SessionVaults::new(vault.path()));
+        vaults
+            .unlock(OWNER, &passphrase)
+            .expect("the owner's passphrase opens the vault");
+        self.account_access = SessionAccountAccess::new(
+            Some(vaults),
+            Arc::new(|token: &str| (token == OWNER_SESSION).then(|| OWNER.to_string())),
+            OWNER_SESSION,
+        );
+        self._vault = Some(vault);
+        self
     }
 
     /// What the operator's Start-session dialog sends for this node: the same documents, as
@@ -217,6 +305,20 @@ impl Orchestrator {
         let path = self.agent_command_line_path.clone();
         eventually(
             "the child's agent to record its command line",
+            AGENT_SPAWN,
+            || {
+                std::fs::read_to_string(&path)
+                    .map_err(|e| format!("the stub has recorded nothing yet: {e}"))
+            },
+        )
+        .await
+    }
+
+    /// The environment the child's agent was actually spawned with, once the stub has recorded it.
+    async fn the_agent_was_spawned_in(&self) -> String {
+        let path = self.agent_environment_path.clone();
+        eventually(
+            "the child's agent to record its environment",
             AGENT_SPAWN,
             || {
                 std::fs::read_to_string(&path)
@@ -280,13 +382,15 @@ fn register_project(projects_dir: &Path, repo: &Path) {
 
 /// A stand-in for `claude` that writes each argument it was given on its own line, so a
 /// multi-line prompt is recoverable verbatim.
-fn write_argv_recording_stub(dir: &Path, record_to: &Path) -> PathBuf {
+fn write_argv_recording_stub(dir: &Path, record_to: &Path, environment_to: &Path) -> PathBuf {
     let script = dir.join("stub_claude.sh");
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n",
-            record_to.display()
+            // The environment lands by rename, so a reader never sees the file half-written.
+            "#!/bin/sh\nenv > '{env}.partial' && mv '{env}.partial' '{env}'\nprintf '%s\\n' \"$@\" > '{}'\n",
+            record_to.display(),
+            env = environment_to.display()
         ),
     )
     .expect("write stub");
@@ -367,6 +471,77 @@ async fn a_child_the_agent_spawned_is_told_to_read_its_changeset() {
         Some("Read your changeset at artifacts/attachments/changeset.md before writing code — it states this PR's responsibility, its boundaries, and what each dependency delivers."),
         "the child must be pointed at the changeset it actually holds"
     );
+}
+
+#[tokio::test]
+async fn a_child_the_agent_spawned_commits_as_the_account_its_orchestrators_owner_holds() {
+    // Given an orchestrator whose owner holds the account its project is assigned
+    let orchestrator = a_pr_stack_orchestrator()
+        .with_the_project_assigned_to_an_account_its_owner_holds("acct-ada");
+
+    // When the agent spawns the planned node
+    orchestrator
+        .child_spawn_handler()
+        .spawn_child(NODE_ID)
+        .await
+        .expect("spawning the planned node must succeed");
+
+    // Then the child's agent was launched under that account's commit identity
+    let environment = orchestrator.the_agent_was_spawned_in().await;
+    assert!(
+        environment.lines().any(|l| l == "GIT_AUTHOR_NAME=ada"),
+        "the child must commit as the owner's account; got: {environment:?}"
+    );
+    assert!(
+        environment
+            .lines()
+            .any(|l| l == "GIT_COMMITTER_EMAIL=101+ada@users.noreply.github.com"),
+        "the child must carry the account's noreply address; got: {environment:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_child_the_agent_spawned_is_never_handed_the_token_in_its_environment() {
+    // Given an orchestrator whose owner holds the account its project is assigned
+    let orchestrator = a_pr_stack_orchestrator()
+        .with_the_project_assigned_to_an_account_its_owner_holds("acct-ada");
+
+    // When the agent spawns the planned node
+    orchestrator
+        .child_spawn_handler()
+        .spawn_child(NODE_ID)
+        .await
+        .expect("spawning the planned node must succeed");
+
+    // Then the token is nowhere in the child's environment
+    let environment = orchestrator.the_agent_was_spawned_in().await;
+    assert!(
+        !environment.contains("ghp_ada_token"),
+        "the token must be asked for, never delivered; got: {environment:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_conversation_the_agent_spawned_commits_as_the_account_its_orchestrators_owner_holds() {
+    // Given an orchestrator whose owner holds the account its project is assigned
+    let orchestrator = a_pr_stack_orchestrator()
+        .with_the_project_assigned_to_an_account_its_owner_holds("acct-ada");
+
+    // When the agent spawns a conversation
+    orchestrator
+        .conversation_spawn_handler()
+        .spawn_conversation("Implement the token store", None, None)
+        .await
+        .expect("spawning the conversation must succeed");
+
+    // Then the conversation's agent was launched under that account's commit identity, and was
+    // never handed the token
+    let environment = orchestrator.the_agent_was_spawned_in().await;
+    assert!(
+        environment.lines().any(|l| l == "GIT_AUTHOR_NAME=ada"),
+        "the conversation must commit as the owner's account; got: {environment:?}"
+    );
+    assert!(!environment.contains("ghp_ada_token"));
 }
 
 // ── The operator's path: the Start-session dialog ────────────────────────────────────────

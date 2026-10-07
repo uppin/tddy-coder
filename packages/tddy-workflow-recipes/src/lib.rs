@@ -5,6 +5,7 @@ pub mod bugfix;
 pub mod feature_start_slash;
 pub mod free_prompting;
 pub mod github_pr;
+pub mod github_pr_tools;
 pub mod github_rest_common;
 pub mod grill_me;
 pub mod merge_pr;

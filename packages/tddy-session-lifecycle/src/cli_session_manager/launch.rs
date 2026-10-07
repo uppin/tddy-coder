@@ -48,6 +48,8 @@ impl CliSessionManager {
         model: &str,
         binary_path: &str,
         chat_id: Option<&str>,
+        // Extra per-session env pairs applied to the cursor process.
+        env: Vec<(String, String)>,
     ) -> anyhow::Result<Arc<pty_handle::PtyHandle>> {
         self.start_cursor(
             session_id,
@@ -56,7 +58,7 @@ impl CliSessionManager {
             binary_path,
             chat_id,
             None,
-            Vec::new(),
+            env,
         )
         .await
     }

@@ -187,3 +187,46 @@ fn merge_pr_analyze_reads_changeset_branch_intent() {
          (feature/other), not the currently checked-out branch (master); got:\n{prompt}"
     );
 }
+
+#[test]
+fn merge_pr_prompt_advertises_the_github_pr_tools_when_the_session_can_authenticate_them() {
+    // Given a session whose host answers the tools' token requests
+    let h = MergePrWorkflowHooks::new(None);
+    let ctx = Context::new();
+    ctx.set_sync(
+        tddy_workflow_recipes::github_pr_tools::GITHUB_PR_TOOLS_AVAILABLE_KEY,
+        true,
+    );
+
+    // When the analyze task is prepared
+    h.before_task("analyze", &ctx).expect("before_task");
+
+    // Then the prompt carries the awareness line
+    let prompt = ctx
+        .get_sync::<String>("system_prompt")
+        .expect("system_prompt");
+    assert!(
+        prompt
+            .contains(tddy_workflow_recipes::merge_pr::merge_pr_github_tools_awareness_line(true)),
+        "the PR tools awareness must be appended; got: {prompt}"
+    );
+}
+
+#[test]
+fn merge_pr_prompt_does_not_advertise_the_github_pr_tools_without_a_credential_to_ask_for() {
+    // Given a session whose context says nothing about a credential
+    let h = MergePrWorkflowHooks::new(None);
+    let ctx = Context::new();
+
+    // When the analyze task is prepared
+    h.before_task("analyze", &ctx).expect("before_task");
+
+    // Then the prompt makes no promise of PR tools
+    let prompt = ctx
+        .get_sync::<String>("system_prompt")
+        .expect("system_prompt");
+    assert!(
+        !prompt.contains("github_create_pull_request"),
+        "no awareness without a credential; got: {prompt}"
+    );
+}

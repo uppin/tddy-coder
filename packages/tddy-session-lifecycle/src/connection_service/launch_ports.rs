@@ -31,7 +31,7 @@ use super::AttachmentMaterialization;
 use crate::cli_session_manager::CliSessionManager;
 use crate::PrStackHandler;
 
-use super::session_acting_identity::{SessionAccountAccess, SharedGithubCredential};
+use super::session_acting_identity::{SessionAccountAccess, SessionIdentity};
 
 /// The capabilities of the session host the launch topic calls and does not own.
 ///
@@ -53,15 +53,16 @@ pub(crate) trait LaunchHost: Send + Sync {
     /// its owner, and the token the session was started with.
     fn session_account_access(&self, session_token: &str) -> SessionAccountAccess;
 
-    /// The handler that answers a session's tools' `github-token` over its project's assignments
-    /// as they stand now, or `None` — logged by the host — when the project cannot be read.
-    fn session_github_credential(
+    /// The identity a session of `project_id` is launched with — its commit pairs and the handler
+    /// that answers its tools' `github-token` — over the project's assignments as they stand now.
+    /// Neither when the project cannot be read (logged by the host).
+    fn session_identity(
         &self,
         os_user: &str,
         session_id: &str,
         project_id: &str,
         session_token: &str,
-    ) -> Option<SharedGithubCredential>;
+    ) -> SessionIdentity;
 }
 
 /// The session host's launch fields, owned, plus its callbacks.

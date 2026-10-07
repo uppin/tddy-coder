@@ -6,6 +6,8 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use std::sync::Arc;
 
+use super::session_acting_identity::SessionAccountAccess;
+
 /// Whether a managed session running `recipe_name` binds a `spawn-conversation` handler on its
 /// toolcall listener. Only the grill-me recipe does — a plain TDD session has nothing to hand off,
 /// and the PR-stack orchestrator uses `spawn-child` (resolving a planned node) instead.
@@ -61,4 +63,7 @@ pub(crate) struct GrillMeConversationSpawnHandler {
     /// session writes `model: None` to its metadata, unlike a claude-cli session). The daemon knows
     /// the model at spawn time and supplies it here so `spawn_conversation` can still inherit one.
     pub(crate) model_override: Option<String>,
+    /// What the orchestrator's own start read its owner's vault with — the same owner and project
+    /// as the conversation it spawns, see [`StackChildSpawnHandler::account_access`].
+    pub(crate) account_access: SessionAccountAccess,
 }

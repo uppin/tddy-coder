@@ -1,11 +1,12 @@
 //! Family P — [`tddy_session_lifecycle::PrStackHandler`], answered by [`PrStackRpcHandler`].
 
 use super::branch_legs::{base_sync_unavailable, base_sync_view, worktree_leg};
-use super::guards::{require_pr_stack_orchestrator, validate_repoint_target};
+use super::guards::{require_pr_stack_orchestrator, token_for_repoint, validate_repoint_target};
 use super::pr_status::owner_repo_from_repo_root;
 use super::{wire_same_anyhow, PrStackRpcHandler};
 use async_trait::async_trait;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_projects::project_storage;
 use tddy_rpc::{Request, Response, Status};
@@ -18,7 +19,7 @@ use tddy_service::proto::pr_stack::{
 };
 use tddy_service::proto::types::BranchSession;
 use tddy_session_lifecycle::connection_service::{
-    resolve_os_user, spawn_blocking_with_timeout, wire_same,
+    project_github_token, resolve_os_user, spawn_blocking_with_timeout, wire_same,
 };
 use tddy_session_lifecycle::session_list_enrichment;
 use tddy_session_lifecycle::session_reader::DaemonSessionListing;
@@ -534,14 +535,43 @@ impl PrStackHandler for PrStackRpcHandler {
         )
         .map_err(Status::invalid_argument)?;
 
+        // Only a node that owns a branch has a PR to re-target, so only it needs GitHub. Its token is
+        // the account the orchestrator's project is assigned, from the caller's own vault — resolved
+        // here, before the plan is rewritten, so a refusal changes nothing. The login-keyed
+        // `retained_github_token` is not used: it is the credential this stack retires.
+        let node_owns_branch = stack
+            .node(&node_id)
+            .is_some_and(|node| node.branch.is_some());
+        let token = token_for_repoint(node_owns_branch, || {
+            let project_id = tddy_core::read_session_metadata(&session_dir)
+                .map_err(|e| format!("the orchestrator's session metadata could not be read: {e}"))?
+                .project_id;
+            let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
+                .ok_or_else(|| "could not resolve the projects path".to_string())?;
+            let project = project_storage::find_project(&projects_dir, project_id.trim())
+                .map_err(|e| format!("the orchestrator's project could not be read: {e}"))?
+                .ok_or_else(|| {
+                    format!("the orchestrator's project '{project_id}' is not registered")
+                })?;
+            project_github_token(
+                self.credential_vaults.clone(),
+                Arc::clone(&self.user_resolver),
+                &req.session_token,
+                &project.accounts,
+            )
+        })?;
+
         let session_dir_for_op = session_dir.clone();
         tokio::task::spawn_blocking(move || {
-            // TODO(keyring 9/9): no resolved GitHub account reaches the repoint handler yet, and
-            // the process environment is no longer a credential, so every authenticated call
-            // refuses. Thread the project's `ActingIdentity::token` here.
-            let gh = tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::without_credential(
-                owner_repo,
-            );
+            // A plan-only repoint reaches no GitHub call, so it holds no credential.
+            let gh = match token {
+                Some(token) => tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::with_token(
+                    owner_repo, token,
+                ),
+                None => tddy_workflow_recipes::orchestrate_pr_stack::github::RealGithubPrApi::without_credential(
+                    owner_repo,
+                ),
+            };
             tddy_workflow_recipes::pr_stack::repoint_planned_pr_node(
                 &session_dir_for_op,
                 &repo_root,
