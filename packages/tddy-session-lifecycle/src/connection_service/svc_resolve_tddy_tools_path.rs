@@ -1,4 +1,4 @@
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 use std::path::PathBuf;
 

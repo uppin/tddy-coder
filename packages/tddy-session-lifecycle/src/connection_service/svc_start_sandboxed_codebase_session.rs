@@ -17,9 +17,9 @@ use uuid::Uuid;
 
 use super::{agent_roster, AttachmentProgressSink};
 use crate::connection_service::split_ports::SplitSessions;
-use crate::livekit_peer_discovery::local_instance_id_for_config;
-use crate::session_deletion;
-use crate::user_sessions_path::{projects_path_for_user, sessions_base_for_user};
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_kernel::user_paths::{projects_path_for_user, sessions_base_for_user};
+use tddy_session_activity::session_deletion;
 
 impl SplitSessions {
     /// Start a session whose **codebase** is jailed on this daemon and whose **agent** is not.
@@ -214,7 +214,7 @@ impl SplitSessions {
             .split_roster_from_codebase_host(session_token, checkout_session_id, &local_instance_id)
             .await?;
         let withdrawals = crate::split_session::wire_roster_withdrawals(&roster.agents);
-        let agent = crate::context_files::context_agent_for_session_type("claude-cli");
+        let agent = tddy_session_files::context_files::context_agent_for_session_type("claude-cli");
         let context = self
             .split_context_from_codebase_host(
                 session_token,

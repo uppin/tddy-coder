@@ -1,8 +1,8 @@
 use tddy_pty::strip_resize;
 
-use crate::pty_runtime::DEFAULT_TERM_COLS;
+use tddy_pty::runtime::DEFAULT_TERM_COLS;
 
-use crate::pty_runtime::DEFAULT_TERM_ROWS;
+use tddy_pty::runtime::DEFAULT_TERM_ROWS;
 
 use portable_pty::PtySize;
 use tddy_task::{TaskChannel, TaskId};

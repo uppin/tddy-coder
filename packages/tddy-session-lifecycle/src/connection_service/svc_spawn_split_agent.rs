@@ -1,8 +1,7 @@
 use uuid::Uuid;
 
-use crate::{
-    connection_service::hooks_and_urls, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::hooks_and_urls;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use std::sync::Arc;
 
@@ -360,7 +359,7 @@ impl SplitSessions {
         tddy_tools_path: &std::path::Path,
         withdrawals: Vec<(String, Vec<String>)>,
     ) -> Result<(std::path::PathBuf, Vec<String>), Status> {
-        let agent = crate::context_files::context_agent_for_session_type("claude-cli");
+        let agent = tddy_session_files::context_files::context_agent_for_session_type("claude-cli");
         let context = self
             .split_context_from_codebase_host(
                 &req.session_token,

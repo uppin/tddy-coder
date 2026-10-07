@@ -41,7 +41,7 @@ impl SplitSessions {
         // read from. What it does need is its jail back — the registry is in-process, so a daemon
         // restart emptied it while the metadata saying the checkout is sandboxed survived.
         if codebase_daemon
-            == crate::livekit_peer_discovery::local_instance_id_for_config(&self.config)
+            == tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&self.config)
         {
             return self
                 .resume_colocated_jail_wiring(
@@ -65,7 +65,7 @@ impl SplitSessions {
         // process left behind: the repository moved on while the session was stopped, and a resumed
         // agent reading a snapshot from before the stop is reading rules that may have been
         // retracted.
-        let agent = crate::context_files::context_agent_for_session_type("claude-cli");
+        let agent = tddy_session_files::context_files::context_agent_for_session_type("claude-cli");
         let context = self
             .split_context_from_codebase_host(
                 session_token,

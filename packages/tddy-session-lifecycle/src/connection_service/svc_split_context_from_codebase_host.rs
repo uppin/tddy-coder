@@ -247,7 +247,7 @@ impl SplitSessions {
         codebase_daemon: &str,
         agent: &str,
         verb: &str,
-    ) -> Result<crate::context_sync::PrefetchedContext, Status> {
+    ) -> Result<tddy_session_files::context_sync::PrefetchedContext, Status> {
         let read = ContextRead {
             verb,
             codebase_session,
@@ -309,7 +309,10 @@ impl SplitSessions {
                 "split context: session {codebase_session} on daemon {codebase_daemon} serves no \
                  allow-listed path; the context dir will hold the managed-codebase preamble alone"
             );
-            return crate::context_sync::PrefetchedContext::new(entries, Default::default());
+            return tddy_session_files::context_sync::PrefetchedContext::new(
+                entries,
+                Default::default(),
+            );
         }
 
         // **One** call for the whole set, not one per path. Every byte here is fetched before the
@@ -370,7 +373,7 @@ impl SplitSessions {
             }
         }
 
-        crate::context_sync::PrefetchedContext::new(entries, files)
+        tddy_session_files::context_sync::PrefetchedContext::new(entries, files)
     }
 }
 impl DaemonSessionHost {

@@ -1,4 +1,4 @@
-use crate::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use tddy_core::read_session_metadata;
 
@@ -26,7 +26,7 @@ impl SplitSessions {
     /// peer's answer proves — see the `peer_has_no_such_session` arm below.
     pub(crate) async fn tear_down_codebase_session(
         &self,
-        slot: &crate::livekit_peer_discovery::CommonRoom,
+        slot: &tddy_daemon_kernel::peer_forwarding::CommonRoom,
         codebase_instance_id: &str,
         codebase_session_id: &str,
         session_token: &str,

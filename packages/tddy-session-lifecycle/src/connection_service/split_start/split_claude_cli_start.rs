@@ -1,8 +1,7 @@
 use super::super::SplitStartFailure;
 
-use crate::{
-    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::agent_roster;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use uuid::Uuid;
 
@@ -63,9 +62,11 @@ impl SplitSessions {
 
         let slot = self.peer_routing.common_room_slot("StartSession")?.clone();
 
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
 
         // The workspace session's id is chosen *here*, before the peer is asked for anything, and

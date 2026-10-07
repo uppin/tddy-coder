@@ -6,8 +6,8 @@ use tddy_core::BranchWorktreeIntent;
 
 use tddy_rpc::Status;
 
-use crate::config::DaemonConfig;
 use std::time::Duration;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 /// Build a session's semantic index over its worktree into its session dir, blocking until the
 /// index is terminal.
@@ -52,7 +52,7 @@ pub(crate) fn find_registered_project(
     Status,
 > {
     let projects_dir =
-        crate::user_sessions_path::projects_path_for_user(os_user, Some(tddy_data_dir))
+        tddy_daemon_kernel::user_paths::projects_path_for_user(os_user, Some(tddy_data_dir))
             .ok_or_else(|| Status::internal("could not resolve projects path"))?;
     let project = tddy_projects::project_storage::find_project(&projects_dir, project_id)
         .map_err(|e| Status::internal(e.to_string()))?
@@ -121,15 +121,15 @@ pub(crate) fn starting_session_metadata(
 /// `transition`. Returns the intent, which decides whether the new branch is pushed.
 pub(crate) fn write_initial_changeset(
     session_id: &str,
-    branch: &crate::branch_intent::BranchIntentRequest<'_>,
-    policy: crate::branch_intent::BranchIntentPolicy,
+    branch: &tddy_worktree_service::branch_intent::BranchIntentRequest<'_>,
+    policy: tddy_worktree_service::branch_intent::BranchIntentPolicy,
     project_main_branch_ref: Option<&str>,
     session_dir: &Path,
     orchestrator_session_id: Option<&str>,
     managed_recipe: Option<&dyn tddy_core::workflow::recipe::WorkflowRecipe>,
 ) -> Result<BranchWorktreeIntent, Status> {
-    let crate::branch_intent::ResolvedBranchWorkflow { intent, workflow } =
-        crate::branch_intent::resolve_branch_workflow(
+    let tddy_worktree_service::branch_intent::ResolvedBranchWorkflow { intent, workflow } =
+        tddy_worktree_service::branch_intent::resolve_branch_workflow(
             session_id,
             branch,
             policy,
@@ -321,5 +321,5 @@ pub(crate) fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCo
 /// spawn paths never diverge on which `claude` they pick (explicit config path honored; bare name
 /// auto-resolved to a real host install).
 pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
-    crate::config::resolve_claude_binary_path(config)
+    tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

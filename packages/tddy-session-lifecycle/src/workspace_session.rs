@@ -77,15 +77,15 @@ pub async fn start_workspace_session(
     // Resolved before anything is created: a branch intent this daemon cannot honour is a malformed
     // request, and a request refused after a session directory exists leaves the caller — which for
     // a split session is another daemon — to clean up something it never wanted.
-    let workflow = crate::branch_intent::resolve_branch_workflow(
+    let workflow = tddy_worktree_service::branch_intent::resolve_branch_workflow(
         session_id,
-        &crate::branch_intent::BranchIntentRequest {
+        &tddy_worktree_service::branch_intent::BranchIntentRequest {
             branch_worktree_intent: branch.branch_worktree_intent,
             new_branch_name: branch.new_branch_name,
             selected_integration_base_ref: branch.selected_integration_base_ref,
             selected_branch_to_work_on: branch.selected_branch_to_work_on,
         },
-        crate::branch_intent::BranchIntentPolicy::workspace(),
+        tddy_worktree_service::branch_intent::BranchIntentPolicy::workspace(),
         project.main_branch_ref.as_deref(),
     )?
     .workflow;
