@@ -101,6 +101,7 @@ package(tddy-code-restructuring) and (
     or binary(move_fidelity_acceptance)
     or binary(retarget_impl_acceptance)
     or binary(repoint_call_acceptance)
+    or binary(repoint_facade_imports_live_acceptance)
 )
 """
 test-group = "rust-analyzer"

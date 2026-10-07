@@ -245,7 +245,7 @@ fn one_use_per_path(path: &SurveyedPath) -> RestructureError {
 
 /// The path written from the start of `from_head`, up to where a group, a glob, an alias or the end
 /// of the declaration begins.
-fn written_prefix(from_head: &str) -> &str {
+pub(crate) fn written_prefix(from_head: &str) -> &str {
     let mut end = segment_length(from_head);
     while let Some(after) = from_head[end..].strip_prefix("::") {
         let length = segment_length(after);

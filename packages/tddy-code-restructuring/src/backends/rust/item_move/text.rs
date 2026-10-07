@@ -113,7 +113,7 @@ pub(in crate::backends::rust) fn depth_at(masked: &str, offset: usize) -> usize 
 
 /// The span of every `use` item in the masked text, from its visibility (or the keyword) to the `;`
 /// that ends it, at whatever depth it is written.
-pub(super) fn use_statements(masked: &str) -> Vec<Range<usize>> {
+pub(in crate::backends::rust) fn use_statements(masked: &str) -> Vec<Range<usize>> {
     let bytes = masked.as_bytes();
     let mut found = Vec::new();
     for (at, _) in masked.match_indices("use") {
@@ -155,7 +155,7 @@ fn with_visibility_before(masked: &str, at: usize) -> usize {
 }
 
 /// A `use` item split into what precedes the keyword (its visibility) and its tree, without the `;`.
-pub(super) fn split_use(statement: &str) -> Option<(&str, &str)> {
+pub(in crate::backends::rust) fn split_use(statement: &str) -> Option<(&str, &str)> {
     let keyword = statement
         .match_indices("use")
         .map(|(at, _)| at)

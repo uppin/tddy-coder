@@ -43,6 +43,7 @@ mod prelude_shadow;
 mod readiness;
 mod relative_visibility;
 mod repoint_call;
+mod repoint_facade;
 mod retarget_impl;
 mod selection;
 mod signature;
@@ -71,7 +72,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 24] = [
+const SUPPORTED: [RefactorKind; 25] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -96,6 +97,7 @@ const SUPPORTED: [RefactorKind; 24] = [
     RefactorKind::ReorderCallArgs,
     RefactorKind::RetargetImpl,
     RefactorKind::RepointCall,
+    RefactorKind::RepointFacadeImports,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1132,6 +1134,9 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::RepointCall {
             return repoint_call::findings(op, workspace);
         }
+        if op.op == RefactorKind::RepointFacadeImports {
+            return repoint_facade::findings(op, workspace);
+        }
         let Anchor::Range { start, end, .. } = &op.anchor else {
             return Ok(Vec::new());
         };
@@ -1303,6 +1308,12 @@ impl RustBackend {
         // here, answered before a server exists for the single form.
         if op.op == RefactorKind::RepointCall {
             return self.repoint_call(op, workspace);
+        }
+
+        // Re-points the paths of a file or a module that go through a facade of another crate:
+        // text edits authored here, answered before a server is asked anything.
+        if op.op == RefactorKind::RepointFacadeImports {
+            return self.repoint_facade_imports(op, workspace);
         }
 
         // The same operation over a set, and one edit rather than one per member: a

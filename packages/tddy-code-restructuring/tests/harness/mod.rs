@@ -2496,13 +2496,25 @@ pub async fn checking_the_plan(
     plan: PathBuf,
     deep: bool,
 ) -> Result<Vec<String>, String> {
+    checking_the_plan_with(fixture, plan, deep, |_| {}).await
+}
+
+/// [`checking_the_plan`], with `adjust` given the run's options before it starts — for a check
+/// that listens to the account it gives.
+pub async fn checking_the_plan_with(
+    fixture: &AFixtureWorkspace,
+    plan: PathBuf,
+    deep: bool,
+    adjust: impl FnOnce(&mut runner::Options),
+) -> Result<Vec<String>, String> {
     let root = fixture.path().to_path_buf();
-    let options = runner::Options {
+    let mut options = runner::Options {
         command: runner::Command::Check,
         target: Some(plan),
         deep,
         ..runner::Options::default()
     };
+    adjust(&mut options);
     let found = if deep {
         let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
         let client = a_rust_analyzer_rooted_at(&root).await;

@@ -142,6 +142,7 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `change_call_arg` | same | `variant` = position, `expr` | — | ✅ |
 | `reorder_call_args` | same | `order` (every argument position, once) | — | ✅ |
 | `repoint_call` | `item` + relative range over one call (single form), or `item` on a method with no range (bulk form) | `callee` (the new callee, or a `$receiver<hops>.<method>` template) | — | ✅ |
+| `repoint_facade_imports` | `symbol` (one file) or `items`/`item` on a `mod` declaration (the module's files) | — | — | ✅ |
 | `organize_imports` | symbol | — | ✅ | — |
 | `add_missing_imports` | symbol | — | ✅ | — |
 
@@ -360,6 +361,37 @@ siblings); no method is renamed (`rename_symbol`); a reference inside a comment 
 counted in the note; a method nothing calls is a no-op with a note. `self.<field>` -> `state.<field>`
 is a **field** read and stays the separate open capability. See
 [`docs/repoint-call.md`](../../../../packages/tddy-code-restructuring/docs/repoint-call.md).
+
+### `repoint_facade_imports`
+
+```jsonl
+{"op":"repoint_facade_imports","anchor":{"kind":"symbol","file":"packages/app/src/a.rs","path":"a"}}
+{"op":"repoint_facade_imports","anchor":{"kind":"items","file":"packages/app/src/connection_service.rs","items":["app::connection_service::agent_roster"],"fingerprints":["sha256:…"]}}
+```
+
+| Field | Meaning |
+|---|---|
+| `anchor` | A `symbol` anchor names **one file** (`path` is informational, as for `move_module_to_crate`). An `items`/`item` anchor on a module's **`mod` declaration** names **the module's files** (inline modules followed) |
+
+The line carries **only its anchor**: every other field (`to`, `name`, `reexport`, `variant`, `type`,
+`expr`, `order`, `also`, `to_file`, `with_private_deps`, `callee`, `canonical_paths`) is refused as one
+the operation cannot honour, before the line is deserialized.
+
+Every path of the anchor's file(s) whose first hop is a `pub use` of **another crate** inside the
+file's own crate is re-pointed to the path where the item is **defined** — `crate::config::Settings`
+where `lib.rs` holds `pub use kernel::config;` reads `kernel::config::Settings` — in `use` items at any
+depth (groups included) and in bodies. Comments, strings and the file's own paths are left alone. A
+group whose members agree on the new prefix has its prefix replaced in place; a group whose members
+need different qualifiers is split (the members that stay keep the group, then one `use` per lifted
+member). `check --deep` lists every path it would rewrite as `file:line: written -> defined`; a second
+run rewrites nothing and says so. Text-only: no server is asked anything.
+
+**Refused, naming the path, the file and the line, with nothing written** (`plan is malformed:`): a
+defining crate the package's manifest does not declare; a path spelled across whitespace or a comment;
+a facade that renames an item used in a body; a rewrite that would bind a name the scope already binds;
+a group that must split but carries an attribute or doc comment above it; a nested group member whose
+leaves reach two crates; a range anchor that covers no `mod` declaration. See
+[`docs/repoint-facade.md`](../../../../packages/tddy-code-restructuring/docs/repoint-facade.md).
 
 ### Notes that matter when planning
 

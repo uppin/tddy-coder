@@ -154,6 +154,11 @@ pub enum RefactorKind {
     /// or the receiver of every call of one method (anchored on the method, `callee` a
     /// `$receiver<hops>.<method>` template). The arguments are kept byte for byte.
     RepointCall,
+    /// Re-points every path of one file (or of every file of one module) that goes through a
+    /// facade of another crate to the path where the item is defined, in `use` items and in
+    /// bodies. The line carries only an anchor: a `symbol` anchor names one file, an `items`
+    /// anchor on a `mod` declaration names a module.
+    RepointFacadeImports,
 }
 
 impl RefactorKind {

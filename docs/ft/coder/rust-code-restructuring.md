@@ -8,7 +8,7 @@
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text, apart from one type or one expression where an operation needs it) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — twenty-four operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twenty-five operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -71,7 +71,7 @@ there is no budget to state. See [Waiting](#waiting).
 | | Run state is **keyed by the plan** — `<root>/.restructure/<plan stem>-<digest>/` — so a completed plan does not block the next one under the same root, and `--resume` resumes the plan it was given rather than whichever ran last. Every multi-layer restructuring is several plans in one repository, which is why this is not an implementation detail. A journal left at `<root>/.restructure/` by an older run is adopted when resuming, and otherwise refused by name; it is never silently taken over by a different plan |
 | `load` / `unload` / `plans` | Hold plans in the index daemon's [plan store](#plan-store): `load` reads each plan once and gives every operation an id, `unload` writes changed plans back and drops them (`--all` for every plan of the tree), `plans` lists what is held. All three need the index daemon (`TDDY_INDEX_SOCKET`) and are refused without one |
 | `status` | completed / in_flight / pending / failed |
-| `check` | All findings, no writes; `--deep` resolves through the same path as apply; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many **production lines** — lines before the first `#[cfg(test)]` that opens a `mod`, so a file's inline tests are not counted; other languages count every line — a report, never a gate |
+| `check` | All findings, no writes; `--deep` resolves through the same path as apply and prints each operation's own notes — for `repoint_facade_imports`, the paths it would rewrite; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many **production lines** — lines before the first `#[cfg(test)]` that opens a `mod`, so a file's inline tests are not counted; other languages count every line — a report, never a gate |
 | `snapshot` | Rewrite the plan's line-1 header from the working tree, or write one when the plan has none — its first line is an operation, and the header is computed from the files the operations' anchors name (see [Plan format](#plan-format)). A plan of range and symbol anchors keeps every operation line byte-identical and needs no index, and is answered in process. A plan of **item** anchors is also re-resolved against the current tree through rust-analyzer: hints and the fingerprints of unchanged items are rewritten, and each operation whose item changed or is gone is reported and left as written (see [Live plans](#live-plans)). With `TDDY_INDEX_SOCKET` set that re-resolution runs on the daemon's warm index (the `Snapshot` RPC); without it the command starts a rust-analyzer of its own |
 | `warm` | Load this tree's crate graph into the index daemon and narrate its progress until the graph is queryable, so the first real request does not pay for the load. A daemon-only command: with no daemon configured it is refused, naming `./run-index-daemon` as what starts one. It ends only on the daemon's final `ready` message, and a stream that closes without one is an error, not a warm root. `./run-index-daemon` runs it for its own checkout (see [Warm code-intelligence daemon](warm-code-intelligence-daemon.md#running-it)) |
 | `anchors` | Emit an anchor a plan can carry. `--items A,B` emits an `items` anchor covering the named adjacent items (trivia included); `--at L:C[-L:C]` emits an `item` anchor for the innermost item enclosing that position, with its relative range, fingerprint and hint filled in. See [Item anchors](#item-anchors) |
@@ -332,6 +332,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `change_call_arg` | Replace one argument of one call with `expr`, at `variant` |
 | `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
 | `repoint_call` | Rewrite the part of a call **in front of** its arguments. Single form: one call's callee. Bulk form: insert hops after the receiver of every call of a method. See [`repoint_call`](#repoint_call) |
+| `repoint_facade_imports` | Re-point every path of one file (or of every file of one module) that goes through a `pub use` of **another crate** to the path where the item is **defined**. A `symbol` anchor names one file; an `items`/`item` anchor on a `mod` declaration names the module. See [`repoint_facade_imports`](#repoint_facade_imports) |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
@@ -464,6 +465,38 @@ re-point (a path call, a function pointer, an import). A reference inside a comm
 counted in the apply note; a method nothing calls is a no-op with a note. `check --deep` rehearses the
 operation the way `apply` does. `verify --repoint OLD=NEW` accounts for a declared re-point. Behaviour
 and limits: [`docs/repoint-call.md`](../../../packages/tddy-code-restructuring/docs/repoint-call.md).
+
+### `repoint_facade_imports`
+
+A module that is to move into another crate must name what it uses by the crate that **defines** it,
+or the move presents an edge back to the crate it leaves. `repoint_facade_imports` applies the [path
+survey](#path-survey)'s answer to one file, or to every file of one module, and writes nothing else: no
+facade is written, removed or edited, no manifest is changed, and no server is asked anything.
+
+- **Anchoring.** A `symbol` anchor names **one file** (the `path` is informational, as for
+  `move_module_to_crate`); an `items`/`item` anchor on a module's `mod` declaration names **the
+  module's files**. The line carries no other field — every one is refused as one the operation cannot
+  honour.
+- **What is re-pointed.** Every path whose first hop is a `pub use` of another crate inside the file's
+  own crate, in `use` items at any depth (groups included) and in bodies: `crate::config::DaemonConfig`
+  where `lib.rs` holds `pub use tddy_daemon_kernel::config;` becomes
+  `tddy_daemon_kernel::config::DaemonConfig`. Comments, strings and the crate's own paths are
+  untouched.
+- **A grouped `use`.** A group whose members agree on the new prefix has its prefix replaced in place;
+  a group whose members need different qualifiers is split — the members that stay keep the group,
+  each re-pointed member becomes its own `use`.
+- **Refused, naming the path, the file and the line, with nothing written:** a defining crate the
+  package does not depend on; a facade that renames an item used in a body; a path spelled across
+  whitespace or a comment; a rewrite that would bind a name the scope already binds (`E0252`); and a
+  group that must be split but carries an attribute or doc comment above it.
+- **`check --deep` lists the paths it would rewrite**, one `file:line: written -> defined` line per
+  path; the list is a note, not a finding. The operation is **idempotent**: a second run rewrites
+  nothing and says so.
+
+`verify` accounts for the result with no declaration: a re-pointed body path pairs under the re-point
+pass (the lowercase module qualifier is deleted on both sides), and a `use` — a split group included —
+is scaffolding. Behaviour and limits:
+[`docs/repoint-facade.md`](../../../packages/tddy-code-restructuring/docs/repoint-facade.md).
 
 ## LSP integration
 
@@ -711,6 +744,11 @@ lowercase module qualifier (`f(` becoming `m::f(`) needs no declaration — the 
 already excuses it; what needs one is a hop on a receiver, a method chain, or a path whose new
 qualifier is a type.
 
+`repoint_facade_imports` needs no declaration either: a body path re-pointed through a facade pairs
+under the re-point pass above (the lowercase module qualifier is deleted on both sides), and a `use` —
+a split group included — is scaffolding. A facade that renames an item used in a body is refused, so
+the operation never produces a change `verify` would report.
+
 ## Workflow
 
 1. Green baseline — `./test -p <crate>`.
@@ -775,6 +813,11 @@ left, and the destination's manifest. The three cannot disagree about what the f
   the move.
 - **Real read errors refuse.** A module file the walk through the re-exports must read and cannot is an
   error naming it; only "no such file" means a name is not there.
+
+The same reading serves `repoint_facade_imports`: it re-points every path of one file (or of every
+file of one module) whose defining path differs from the path as written **and** whose defining crate
+is not the file's own, without moving anything. See
+[`repoint_facade_imports`](#repoint_facade_imports).
 
 How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restructuring/docs/path-survey.md).
 
