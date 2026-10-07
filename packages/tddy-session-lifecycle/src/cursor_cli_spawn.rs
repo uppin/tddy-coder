@@ -1,4 +1,4 @@
-//! Cursor Agent CLI session spawn/resume helpers for `DaemonSessionHost`.
+//! Cursor Agent CLI session spawn/resume helpers for the launch topic (`LaunchSessions`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

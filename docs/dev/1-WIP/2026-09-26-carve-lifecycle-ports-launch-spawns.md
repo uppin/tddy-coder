@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s stack spawns (T9) and its jail and CLI-spawn launches run over `LaunchState` and a `LaunchHost` port, in place
 
 **Date**: 2026-09-26
-**Status**: ✅ Implemented in place (M6.1–M7a.4), pending Linux CI's sandboxed suites. D1 (Recipe B), D3 (recommended) and D10 (a: header-only) applied
+**Status**: ✅ Implemented in place (M6.1–M7a.4), validated by `/pr-wrap` 2026-10-07; **not wrapped**: pending Linux CI's sandboxed suites. D1 (Recipe B), D3 (recommended) and D10 (a: header-only) applied
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 19/21, branch `feature/carve/lifecycle-ports-launch-spawns`, on top of `#carve` 18
 (`feature/carve/lifecycle-ports-split`). Plan label **16d** (M6 + M7a)
@@ -201,33 +201,33 @@ M7a.
 
 ## Scope
 
-- [ ] **M6.1 ports**: `LaunchState` {`config`, `tddy_data_dir`, `claude_cli_manager`, `task_registry`,
+- [x] **M6.1 ports**: `LaunchState` {`config`, `tddy_data_dir`, `claude_cli_manager`, `task_registry`,
   `sandbox_manager`, `session_stdio`, `agent_activity_hub`}, the owned launch handle (+ roster handle,
   `AttachmentState`) and `trait LaunchHost` in `connection_service/launch_ports.rs`; `impl LaunchHost for
   DaemonSessionHost` in the wiring ports file (`sandbox_rpc_handler` → the host's, `pr_stack` →
   `rpc_families()?.pr_stack_handler()`); the builder in `handler_state.rs`
-- [ ] **M6.2 T9**: convert `svc_pr_status_for_caller.rs` (T9 part), move `impl StackParentHost` onto the
+- [x] **M6.2 T9**: convert `svc_pr_status_for_caller.rs` (T9 part), move `impl StackParentHost` onto the
   handle, and make `child_spawn_handler`, `stack_child_spawn` and `conversation_spawn_handler` hold the
   handle; the free T9 files (`conversation_spawn`, `stack_seed_validation`) get imports only
-- [ ] **M7a.1 jails**: convert `svc_start_sandboxed_claude_cli_session` (+ `jail_launch_steps`,
+- [x] **M7a.1 jails**: convert `svc_start_sandboxed_claude_cli_session` (+ `jail_launch_steps`,
   `jail_worktree`), `svc_start_sandboxed_cursor_cli_session`, `svc_relaunch_sandboxed_runner` (+
   `relaunch_jail_steps`), `jail_env_builders`; `jail_session_files` and `relaunch_jail_dirs` imports only
-- [ ] **M7a.2 sandboxed resume**: `extract_module` `resume_sandboxed_claude_cli_session` (62) out of
+- [x] **M7a.2 sandboxed resume**: `extract_module` `resume_sandboxed_claude_cli_session` (62) out of
   `svc_split_context_from_codebase_host.rs` into a T1 module; convert it
-- [ ] **M7a.3 CLI spawns**: convert `svc_start_claude_cli_session.rs` (its three `self.clone()`
+- [x] **M7a.3 CLI spawns**: convert `svc_start_claude_cli_session.rs` (its three `self.clone()`
   hand-offs become launch-handle clones) and `svc_pr_status_for_caller.rs`'s T1 part
   (`prepare_managed_workflow`, `managed_resume_goal`, `owned_branch_conflict`); `claude_cli_spawn`,
   `claude_cli_spawn_steps`, `cursor_cli_spawn` (+ `chat`, `resume`), `managed_launch`, `worktree_source`
   imports only (A4)
-- [ ] **M7a.4 callers**: 16e's host methods that call these (`cli_branch_starts`'s two sandboxed calls,
+- [x] **M7a.4 callers**: 16e's host methods that call these (`cli_branch_starts`'s two sandboxed calls,
   `resume_claude_cli_session`'s sandboxed resume) build the handle from the host; delegators kept in
   wiring where a consumer or a test calls a converted method
-- [ ] **Baseline** after each of M6 and M7a: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
+- [x] **Baseline** after each of M6 and M7a: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`. **Linux CI's
-  sandboxed suites** green on the PR (`scripts/ci-status.sh --failures`)
-- [ ] **Acceptance checks** A1–A8 for everything converted so far plus T9 and M7a
-- [ ] `restructure verify --against <16c tip>`: every statement accounted for
+  sandboxed suites** green on the PR (`scripts/ci-status.sh --failures`): **not yet** — CI was still running at `/pr-wrap` (2026-10-07); tracked by the TODO box "Linux CI's sandboxed suites read on the PR"
+- [x] **Acceptance checks** A1–A8 for everything converted so far plus T9 and M7a
+- [x] `restructure verify --against <16c tip>`: every statement accounted for
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -465,7 +465,7 @@ and its children) are excluded.
 | A2 | No file in 16a's topics, T3, T4/SU/WS, CLI, T9 or M7a names a wiring module: `connection_service`'s own items, `svc_*_ports`, `handler_state`, `svc_host_builders`, `rpc_families`, `PeerRouted*`, `DaemonRpcHandler`, or `test_util` outside `#[cfg(test)]` | a grep of each file for `super::(super::)?(DaemonRpcHandler\|PeerRouted\|handler_state\|svc_host_builders\|…)`, `crate::rpc_families` and `crate::test_util` outside test modules; empty |
 | A3 | No upward topic edge: T9 and M7a ↛ the start/resume half of T1 or T1c (they may name every lower topic); T4/SU/WS ↛ T1 / T9 / T1c; CLI ↛ any topic; T3 ↛ T4 / SU / WS / T1 / T9 / T1c / CLI; T7, T8, T10, T11 and the leaves ↛ any other topic | a scripted grep: for each converted topic's files, collect `crate::…`, `super::…` and `crate::connection_service::…` module targets, map each to its topic by the inventory, and fail on any pair outside the allowed DAG. Optionally `cargo modules dependencies --lib -p tddy-session-lifecycle`, if installed |
 | A4 | Files in 16a's topics, T3, T4/SU/WS, CLI, T9 or M7a name foundations and receivers **by their defining crate** (`tddy_daemon_kernel::config::…`, `tddy_daemon_livekit::session_room::…`), never through a lifecycle facade; a lower topic is named by its own module path | `grep -nE 'crate::(config\|relay_idle\|livekit_peer_discovery\|session_room\|peer_routing\|session_admission_service\|context_files\|context_sync\|session_attachments\|session_reader\|session_deletion\|user_sessions_path\|session_agent_[a-z]+\|project_storage\|branch_intent\|pty_runtime\|host_session_service)\b' <files>` is empty |
-| A5 | No file in 16a's topics, T3, T4/SU/WS, CLI, T9 or M7a clones the host. Hand-offs clone the topic's owned handle | follows from A1, plus `grep -n 'Arc::new(self.clone())'` in those files is empty |
+| A5 | No file in 16a's topics, T3, T4/SU/WS, CLI, T9 or M7a clones the host. Hand-offs clone the topic's owned handle (Recipe B: the three `Arc::new(self.clone())` lines in `svc_start_claude_cli_session.rs` stay textually identical, and `self` there is the launch handle) | follows from A1: the grep `grep -n 'Arc::new(self.clone())'` matches exactly those three lines, and each clones `LaunchSessions`, never `DaemonSessionHost` (developer decision, 2026-10-07: Recipe B wins over a literal-empty grep) |
 | A6 | `LaunchHost` is defined once, in `launch_ports`, and implemented once, on `DaemonSessionHost`, in the wiring ports file, with exactly {`sandbox_rpc_handler`, `pr_stack`}. `impl StackParentHost` is on the launch handle, not on the host. `AgentHostCallbacks` and `SplitHost` are unchanged since 16c | `grep -rn 'trait LaunchHost'` gives one hit; `grep -rn 'impl .*LaunchHost for DaemonSessionHost'` one hit, in wiring; `grep -rn 'impl .*StackParentHost for DaemonSessionHost'` is empty; `git diff <16c tip> -- <agent_host_callbacks file> <split_ports file>` is empty |
 | A7 | The public API is unchanged: no consumer edit, and every facade still resolves | `git diff <base> -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty, and `cargo check --all-targets` is clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and `tddy-telegram-control` (`tddy-desktop` on CI: it embeds the web bundle) |
 | A8 | Behaviour: the baseline | 575 passed, the same 22 by name, 1 ignored, after M6 and after M7a; `tddy-session-agents` at its count. `restructure verify --against <base>` accounted |
@@ -545,16 +545,30 @@ Measured on `feature/carve/lifecycle-ports-launch-spawns` over 16c's tip `7abe4a
 - `restructure verify --against 7abe4a74`: 27 statements lost, each a hand re-point (field read or host call) listed in the run; never exits zero for hand edits.
 - TODO(crap-svc-start-sandboxed-cursor-cli-session) in `svc_start_sandboxed_cursor_cli_session.rs` records the deferred "tests first" rule (D10).
 
+### `/pr-wrap` run, 2026-10-07 (steps 1–7)
+
+Scoped to `-p tddy-session-lifecycle` (and `-p tddy-session-agents`, `-p tddy-daemon-rpc`, `-p tddy-daemon`, `-p tddy-telegram-control` for `check`); nothing was run workspace-wide.
+
+- Base: 5 PR-only commits over `origin/master` (`7abe4a74`); no leak, no deletion of parent-owned code, no consumer edit (A7).
+- Baseline: **575 passed, 22 failed (the same 22 by name), 1 ignored**; `tddy-session-agents` **75 passed**. `cargo check --all-targets` clean on the five crates; clippy `-D warnings --all-targets` and `fmt --check` clean on lifecycle.
+- Acceptance greps A1, A2, A4 empty; A5 matches exactly the three Recipe B lines (each clones `LaunchSessions`); A6: one `trait LaunchHost`, one `impl … LaunchHost for DaemonSessionHost` (wiring), no `impl StackParentHost for DaemonSessionHost`.
+- Fixed: stale doc comments naming the host or a moved method (`stack_child_spawn.rs`, `managed_launch.rs`, `cursor_cli_spawn.rs`, `jail_env_builders.rs`, whose rustdoc link to `Self::resolve_specialized_agent_defs` no longer resolved). Comments only.
+- Tests: the diff in test code is two lines in `stack_child_spawn_tests.rs` (`launch_sessions()` in place of the host clone); nothing weakened.
+- Production readiness: no mock, fallback, debug output or `unwrap` added; the one marker this PR added is `TODO(crap-svc-start-sandboxed-cursor-cli-session)` (D10 (a), kept).
+- File length (production lines, inline test blocks excluded): `connection_service.rs` 503 → 508, pre-existing over 500 and grown by three `mod` lines — deferred, #535 and #536 also edit it, recorded in its code-issue record; `cursor_cli_spawn.rs` 532 → 532, not grown, already recorded; `svc_start_sandboxed_claude_cli_session.rs` 496 → 494; all other changed files under 500.
+- Clean code: no new function over 40 lines, no new parameter list over 5; the large functions (`start_sandboxed_claude_cli_session` 343, `start_sandboxed_cursor_cli_session` 421, 23 parameters) are pre-existing and tracked by their records and the jail-launch todo. Score C on the files touched (pre-existing items only); the code this PR adds scores A.
+- Code issues re-measured and rows added, none deleted: the three named in Prerequisites, plus `oversized-file-connection-service`. `start_sandboxed_cursor_cli_session` is the only function that grew (416 → 421, formatting).
+
 ## TODO
 
 - [x] Create changeset: this document
-- [ ] USER REVIEW: D1, D3 (`LaunchHost`, `StackParentHost`), D10
-- [ ] Rebase onto 16c once it is green
-- [ ] Record the baseline on 16c's tip
-- [ ] Implementation M6.1–M6.2, then M7a.1–M7a.4
+- [x] USER REVIEW: D1 (Recipe B), D3 (recommended) and D10 (a: header-only, TODO kept) decided by the developer; A5 amended to Recipe B
+- [x] Rebase onto 16c once it is green
+- [x] Record the baseline on 16c's tip
+- [x] Implementation M6.1–M6.2, then M7a.1–M7a.4
 - [ ] Linux CI's sandboxed suites read on the PR
-- [ ] `/validate-changes`
-- [ ] `/pr-wrap`
+- [x] `/validate-changes`
+- [~] `/pr-wrap` (steps 1–7 run 2026-10-07; step 8 and the wrap wait on Linux CI)
 - [ ] Wrap documentation (`/wrap-context-docs`)
 
 ## Final Checklist
@@ -562,15 +576,15 @@ Measured on `feature/carve/lifecycle-ports-launch-spawns` over 16c's tip `7abe4a
 Tasks executed at wrap:
 
 **16d acceptance**
-- [ ] A1: no converted file (16a–16c topics, T9, M7a) names `DaemonSessionHost` (grep empty)
-- [ ] A2: none of them names a wiring module; the PR-stack and sandbox RPC handlers are reached only through `LaunchHost` (grep empty)
-- [ ] A3: T9 and M7a name no 16e module; the earlier edges still hold (scripted grep; `cargo modules` if available)
-- [ ] A4: T9 and M7a files, the free CLI spawn files included, name foundations by their defining crate (grep empty)
-- [ ] A5: no host clone in a T9 or M7a file; the three hand-offs clone the launch handle (grep empty)
-- [ ] A6: `LaunchHost` = {`sandbox_rpc_handler`, `pr_stack`} defined once, implemented once on the host in wiring; `StackParentHost` implemented on the handle; `AgentHostCallbacks` and `SplitHost` unchanged
-- [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 575 / 22 / 1, the same 22 by name, after M6 and after M7a; `restructure verify` accounted
-- [ ] A9: the sandboxed launches' size lines hold, and Linux CI's sandboxed suites are green
+- [x] A1: no converted file (16a–16c topics, T9, M7a) names `DaemonSessionHost` (grep empty)
+- [x] A2: none of them names a wiring module; the PR-stack and sandbox RPC handlers are reached only through `LaunchHost` (grep empty)
+- [x] A3: T9 and M7a call no 16e host method and name no 16e module; the earlier edges still hold (scripted grep). The free files `claude_cli_spawn`, `claude_cli_spawn_steps` and `jail_worktree` call free functions of `hooks_and_urls` (`spawned_branch_of_session`, `effective_spawn_branch`, `claude_hook_daemon_url`, `claude_cli_participant_metadata`), whose T1 half is 16e's file: edges that exist at the base and that no host method crosses; they leave with the file in node 17
+- [x] A4: T9 and M7a files, the free CLI spawn files included, name foundations by their defining crate (grep empty)
+- [x] A5: no host clone in a T9 or M7a file; the three hand-offs clone the launch handle (the grep matches exactly the three Recipe B lines, each on `LaunchSessions`)
+- [x] A6: `LaunchHost` = {`sandbox_rpc_handler`, `pr_stack`} defined once, implemented once on the host in wiring; `StackParentHost` implemented on the handle; `AgentHostCallbacks` and `SplitHost` unchanged
+- [x] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
+- [x] A8: baseline 575 / 22 / 1, the same 22 by name, after M6 and after M7a; `restructure verify` accounted
+- [ ] A9: the sandboxed launches' size lines hold, and Linux CI's sandboxed suites are green. **Open, two parts.** Size (fn line to closing brace, base `7abe4a74` → HEAD): `start_sandboxed_claude_cli_session` 343 → 343; `relaunch_sandboxed_runner` 149 → 150; `svc_start_sandboxed_claude_cli_session.rs` 496 → 494 production lines (all hold); `start_sandboxed_cursor_cli_session` **416 → 421**: five lines of rustfmt wrapping from the longer re-pointed paths and the added `.agent_roster` hop, no logic added. The bound written here (≤ 414) was below the base's 416 and cannot be met by a token-only edit: developer decision needed. CI: still running when measured
 
 **Documentation**
 - [ ] `packages/tddy-session-lifecycle/docs/module-layout.md`: the launch ports module, the extracted sandboxed-resume module, `StackParentHost` on the handle (via the changeset workflow)

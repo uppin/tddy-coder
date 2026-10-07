@@ -19,9 +19,9 @@ pub(crate) struct StackChildSpawnHandler {
     /// spawn takes, rather than a second one that would drift from it.
     pub(crate) stack_parent_host: Arc<dyn StackParentHost>,
 
-    /// The daemon whose attachment path materializes the child's documents. A shallow clone (every
-    /// mutable field is behind an `Arc`), exactly as [`DaemonSeedCloneClaimant`] holds one: the
-    /// documents go through [`DaemonSessionHost::prepare_session_attachments`], the same
+    /// The launch handle whose attachment path materializes the child's documents. A shallow clone
+    /// (every shared field is behind an `Arc`), exactly as [`DaemonSeedCloneClaimant`] holds one:
+    /// the documents go through [`LaunchSessions::prepare_session_attachments`], the same
     /// materializer `StartSession` uses, so a child cannot differ by how it was started.
     pub(crate) service: LaunchSessions,
     pub(crate) config: DaemonConfig,

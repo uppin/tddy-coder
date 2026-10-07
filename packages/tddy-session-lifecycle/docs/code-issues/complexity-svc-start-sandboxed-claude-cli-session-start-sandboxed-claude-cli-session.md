@@ -19,6 +19,7 @@
 | 2026-10-04 | — | — | — | — | touched by #573 (`#live-plan` 14/15): one added line, `env.extend(self.restructure_tools_env())`, beside the existing `lsp_tools_env` one (file 493 → 494 lines). Metrics not re-derived |
 | 2026-10-05 | 342 | — | — | — | touched by the same-crate moves and **unchanged by them**: the file gained the `mod jail_env_builders;` line when that module was re-parented under it (494 to 495 production lines); the function is 342 lines at `origin/master` and at HEAD (fn line to closing brace), still at `:96`. Nesting, branches and exits not re-derived |
 | 2026-10-05 | 343 | — | — | — | touched by #532 (`#carve` 17/21): +1 (342 → 343, fn line to closing brace) — the seed-clone claim goes through `.agent_roster()`. No control flow added; nesting, branches and exits not re-derived |
+| 2026-10-07 | 343 | — | — | — | touched by #534 (`#carve` 19/21): converted onto `LaunchSessions` by an `impl` header change, the roster call through `self.agent_roster`, and imports re-pointed (A4). **Unchanged: 343** (fn line to closing brace, `:94`–`:436`, the same count at the base `7abe4a74`); file 496 → 494 production lines. No branch added; still never executed on macOS (its suites sit in the known-red 22 — the sandbox RPC bridge is never installed), so its preservation rests on compiling, the token-only edit rule and Linux CI. Nesting, branches and exits not re-derived |
 
 ## What the tool found
 

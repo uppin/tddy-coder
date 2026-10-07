@@ -5,7 +5,7 @@ use tddy_rpc::Status;
 
 impl LaunchSessions {
     /// Build the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env pair for already-resolved
-    /// specialized-agent defs (see [`Self::resolve_specialized_agent_defs`]). Empty input produces
+    /// specialized-agent defs (see [`AgentRoster::resolve_specialized_agent_defs`](super::super::agent_host_callbacks::AgentRoster::resolve_specialized_agent_defs)). Empty input produces
     /// no env pairs.
     ///
     /// TODO(session-agent-roster): the in-jail runner derives `--allowedTools` /
