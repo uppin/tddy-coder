@@ -11,36 +11,11 @@
 //! Feature: `docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox.
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_sandbox::workspace_tool_sandbox::{
     WorkspaceSandbox, WorkspaceSandboxProvisioner, WorkspaceSandboxRegistry, WorkspaceSandboxSpec,
 };
-use tddy_rpc::Status;
-
-/// What `session_id`'s jail is built over: the session's own directory, and the checkout that is
-/// the only part of this host inside it.
-///
-/// One definition for the start that first provisions the jail and the dispatch that rebuilds it,
-/// so a replacement confines exactly what the original did. Read from `.session.yaml` rather than
-/// taken from the caller, for the same reason every other routing decision about a jailed session
-/// is.
-pub(crate) fn workspace_sandbox_spec(
-    sessions_base: &Path,
-    session_id: &str,
-) -> Result<WorkspaceSandboxSpec, Status> {
-    Ok(WorkspaceSandboxSpec {
-        session_id: session_id.to_string(),
-        session_dir: unified_session_dir_path(sessions_base, session_id),
-        worktree_path:
-            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
-                sessions_base,
-                session_id,
-            )?,
-    })
-}
 
 /// Rebuilds a dead workspace jail — once per death, however many tool calls witnessed it.
 ///

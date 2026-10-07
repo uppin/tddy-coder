@@ -1,10 +1,7 @@
-use super::super::DaemonSessionHost;
-
 use super::super::SplitStartFailure;
 
-use crate::{
-    connection_service::agent_roster, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::agent_roster;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use uuid::Uuid;
 
@@ -16,9 +13,10 @@ use tddy_rpc::Response;
 
 use super::super::AttachmentProgressSink;
 
+use crate::connection_service::split_ports::SplitSessions;
 use tddy_service::proto::session::StartSessionRequest;
 
-impl DaemonSessionHost {
+impl SplitSessions {
     /// Start a **split** session: the agent runs here, its worktree lives on `codebase_instance_id`.
     ///
     /// The codebase daemon creates a `workspace` session holding the worktree; this daemon spawns the
@@ -58,14 +56,17 @@ impl DaemonSessionHost {
         // codebase host had cut a worktree would mean tearing one down to report a typo. References
         // naming another host are resolved by the daemon that holds the roster, from that host's own
         // view of the common room.
-        self.resolve_specialized_agent_defs(&req.specialized_agents)
+        self.agent_roster
+            .resolve_specialized_agent_defs(&req.specialized_agents)
             .await?;
 
-        let slot = self.common_room_slot("StartSession")?.clone();
+        let slot = self.peer_routing.common_room_slot("StartSession")?.clone();
 
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
 
         // The workspace session's id is chosen *here*, before the peer is asked for anything, and
@@ -95,7 +96,7 @@ impl DaemonSessionHost {
                 &slot,
                 codebase_instance_id,
                 &workspace_req,
-                self.split_forward_deadline(),
+                agent_roster::split_forward_deadline(&self.config),
             )
             .await;
         let workspace = match forwarded {

@@ -4,11 +4,9 @@ use super::DaemonSessionHost;
 
 use uuid::Uuid;
 
-use super::super::AttachmentMaterialization;
+use crate::connection_service::attached_initial_prompt::attached_initial_prompt;
 
 use super::super::AttachmentProgressSink;
-
-use std::path::Path;
 
 use tddy_rpc::Status;
 
@@ -94,34 +92,6 @@ impl DaemonSessionHost {
         .await
     }
 
-    /// Materialize the request's attachments into the session, and return its first prompt with a
-    /// line naming the attached changeset when one materialized.
-    pub(in crate::connection_service) async fn attached_initial_prompt(
-        &self,
-        req: &StartSessionRequest,
-        os_user: &str,
-        sessions_base: &Path,
-        session_id: &str,
-        progress: &AttachmentProgressSink,
-    ) -> Result<String, Status> {
-        let materialized = self
-            .prepare_session_attachments(&AttachmentMaterialization {
-                session_token: &req.session_token,
-                os_user,
-                sessions_base,
-                session_id,
-                attachments: &req.attachments,
-                progress,
-            })
-            .await?;
-        Ok(
-            crate::stack_doc_attachments::prompt_with_attached_changeset(
-                req.initial_prompt.trim(),
-                &materialized,
-            ),
-        )
-    }
-
     /// Where a new CLI-agent session lives, the id it is given, and its first prompt.
     pub(super) async fn cli_start_prelude(
         &self,
@@ -133,9 +103,15 @@ impl DaemonSessionHost {
             crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
                 .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
-        let initial_prompt = self
-            .attached_initial_prompt(req, os_user, &sessions_base, &session_id, progress)
-            .await?;
+        let initial_prompt = attached_initial_prompt(
+            &self.attachment_state(),
+            req,
+            os_user,
+            &sessions_base,
+            &session_id,
+            progress,
+        )
+        .await?;
         Ok(CliStart {
             sessions_base,
             session_id,

@@ -7,10 +7,11 @@ the test suites are [test-suites.md](test-suites.md).
 
 ## Sizes, and how they are counted
 
-120 non-test `src/*.rs` files hold about **21,100 production lines**. One file is over 500
-production lines, `cursor_cli_spawn.rs` (532); the next largest are
-`connection_service/svc_start_sandboxed_claude_cli_session.rs` (495), `connection_service.rs` (488)
-and `connection_service/svc_start_session_core.rs` (480). Six production functions are over 150
+125 non-test `src/*.rs` files hold about **21,300 production lines**. Two files are over 500
+production lines, `cursor_cli_spawn.rs` (532) and `connection_service.rs` (503, in
+[`code-issues/`](code-issues/oversized-file-connection-service.md)); the next largest are
+`connection_service/svc_start_sandboxed_claude_cli_session.rs` (496) and
+`connection_service/svc_start_session_core.rs` (484). Six production functions are over 150
 lines, each with a recorded reason: five in
 [`docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md`](../../../docs/dev/todo/2026-09-24-lifecycle-functions-still-over-150-lines.md),
 and `handle_rpc` in [`code-issues/`](code-issues/).
@@ -69,7 +70,7 @@ placement and session type. Its children hold the steps:
 |---|---|
 | `start_request_checks.rs` | `forward_start_session` (a start owned by a peer), `provision_project_for_start`, `validate_stack_seed_against_project` |
 | `workspace_branch_start.rs` | `seed_and_start_workspace_session` |
-| `cli_branch_starts.rs` | the claude-cli and cursor-cli branches: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`), `attached_initial_prompt` (shared with the split agent), and the four `*_from_request` starts |
+| `cli_branch_starts.rs` | the claude-cli and cursor-cli branches: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`; the initial prompt comes from the split topic's [`attached_initial_prompt`](#split-sessions)), and the four `*_from_request` starts |
 | `tool_session_spawn.rs` | `spawn_tool_session` and `spawn_tddy_coder`: the one `tddy-coder` spawn, for both a start and a resume |
 | `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with) and `ToolSpawnPurpose` (`Start` / `Resume`: the deadline label, the log lines, and whether the worker traces itself) |
 
@@ -96,13 +97,28 @@ copies of one launch sequence. Merging them waits on test coverage:
 
 ### Split sessions
 
+The split topic (topic 4 below) runs over [`SplitSessions`](#per-topic-state-and-the-topics-that-name-no-host),
+an owned handle over the host's split fields, and the `SplitHost` callback port. A split session is an agent
+paired with a codebase on a sandboxed checkout: its LiveKit room, its context read from the codebase host, its
+teardown.
+
 | File | Holds |
 |---|---|
+| `split_ports.rs` | `SplitSessions`, `trait SplitHost: AgentHostCallbacks` and the two aliases of the service surfaces its callbacks return (`SplitSessionFiles`, `SplitSessionAgents`) |
 | `svc_spawn_split_agent.rs` | `spawn_split_agent` (the agent half of a split session), cut into `join_split_livekit_room`, `split_agent_context_and_args` and `write_split_agent_metadata`, with `SplitAgentProcess<'a>` |
-| `svc_spawn_split_agent/svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session |
+| `svc_spawn_split_agent/svc_paired_codebase_teardown.rs` | `delete_paired_codebase_session`: tearing down the paired codebase session, which deletes through `SplitHost::delete_session` |
 | `split_start/split_claude_cli_start.rs` | `start_split_claude_cli_session` |
-| `svc_split_context_from_codebase_host.rs` | the split agent's context from the codebase host |
-| `svc_start_sandboxed_codebase_session.rs` | a workspace start combined with `spawn_split_agent` |
+| `svc_split_context_from_codebase_host.rs` | the split agent's context from the codebase host. The file also holds `resume_sandboxed_claude_cli_session`, a host method of the launch topic |
+| `svc_start_sandboxed_codebase_session.rs` | a workspace start combined with `spawn_split_agent`; it starts the workspace session through `SplitHost::start_workspace_session` |
+| `svc_resume_claude_cli_session/svc_resume_split_wiring.rs` | the split half of a session resume: `resume_split_wiring` and `split_roster_from_codebase_host`, which reads the roster through `SplitHost::session_agents` |
+| `svc_ensure_session_room_for_agents/svc_provision_workspace_tool_sandbox.rs` | `provision_workspace_tool_sandbox` |
+| `attached_initial_prompt.rs` | `attached_initial_prompt`, over [`AttachmentState`](#per-topic-state-and-the-topics-that-name-no-host); the split agent and the launch topic's CLI starts call it |
+| `svc_split_delegators.rs` | the one split method a test outside the topic still calls on the host, `split_context_from_codebase_host`, as a `#[cfg(test)]` forward to the handle |
+| `svc_resolve_tddy_tools_path.rs` | `resolve_tddy_tools_path` and `agent_tool_socket_for_embedded_host`, both on the handle |
+
+`service_util.rs`, `workspace_session.rs` and `split_session.rs` (with `agent_argv.rs` and `agent_credentials.rs`)
+are the topic's free files. `workspace_session.rs` holds `workspace_sandbox_spec`, which the sandbox
+provisioning and the jail rebuild in `local_exec_tools.rs` both call.
 
 ### Session RPC handlers
 
@@ -122,7 +138,7 @@ from the host that is not a field they reach through `AgentHostCallbacks`.
 | `agent_host_callbacks.rs` | the `AgentHostCallbacks` trait, the `AgentRoster` handle and its `state()` |
 | `svc_provision_agent_clone.rs` | `AgentRoster`'s provisioning and tear-down of agent clones, the roster broadcast and publish, and the clone and worktree lookups (12 methods) |
 | `svc_start_hosted_agent_clone.rs` | starting a hosted clone, the unready and departed-daemon refusals, the forwarded and local conversation opens, and the clone's codebase access (9 methods) |
-| `svc_ensure_session_room_for_agents.rs` | claiming, seeding and unwinding a clone's roster entry, and `ensure_session_room_for_agents` (6 methods). The file also holds two host methods of other topics: `provision_workspace_tool_sandbox` and `index_workspace_worktree` |
+| `svc_ensure_session_room_for_agents.rs` | claiming, seeding and unwinding a clone's roster entry, and `ensure_session_room_for_agents` (6 methods). The file also holds `index_workspace_worktree`, a host method of another topic |
 | `svc_resolve_listed_worktree.rs` | agent-def resolution (`resolvable_agent_defs`, `agent_def_for_spawn`, `resolve_specialized_agent_defs`), `seeded_roster_records`, `roster_session_dir` and `report_shadowed_agent_def` (6 methods), beside the host's `ensure_project_available_for_start` |
 | `svc_turn_end_reporter.rs` | the cancel forward to an agent's owning daemon and the local and remote roster records for an agent id (4 methods) |
 | `agent_roster.rs` | the free roster functions (`workspace_start_request`, `started_roster_rev`, `dispatch_envelope`, `refuse_unenforceable_withdrawal`, `session_enforces_a_withdrawal`, `roster_agent_ids`, `agent_tool_reads_the_clone`), the `agent_records` re-export and `split_forward_deadline(config)` |
@@ -191,7 +207,7 @@ The other modules that were cut from a neighbour's file sit under the parent of 
 
 ## Per-topic state, and the topics that name no host
 
-Five topics, and the leaves beside them, run without `DaemonSessionHost`. Each reads the host fields
+Six topics, and the leaves beside them, run without `DaemonSessionHost`. Each reads the host fields
 its bodies need through a value the host builds in `connection_service/handler_state.rs`, or takes
 those fields as parameters:
 
@@ -201,6 +217,7 @@ those fields as parameters:
 | Presenter observer | `PresenterObserverDeps`: `tddy_data_dir`, `presenter_event_sink` and `session_notification_bus` (both shared) | `presenter_observer_task/presenter_observer_spawn.rs`, with `maybe_spawn_presenter_observer`. `presenter_observer_task.rs` and `presenter_intent_client.rs` take plain arguments | `presenter_observer_deps()`; `maybe_spawn_presenter_observer` stays a host method that delegates |
 | Attachments | `AttachmentState<'a>`, borrowed for one call: `config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`. No hand-off to a task needs an owned form | `svc_materialize_staged_attachment.rs`, with the staged-file and host-document materializers. `session_attachment_materialization.rs` has `prepare_session_attachments` and `materialize_session_attachments` | `attachment_state()`; `prepare_session_attachments` stays a host method that delegates |
 | Agent clones and roster | `AgentRoster`: the host's roster fields under the host's names (`config`, `tddy_data_dir`, `user_resolver`, `peer_routing`, `room_roster`, `session_rooms`, `session_agent_rosters`, `session_agent_clones`, `hosted_agent_clones`, `roster_keepalive_interval`, `session_admissions`, `model_registry`), owned, plus `host: Arc<dyn AgentHostCallbacks>`. It is `Clone`, because a claim, a seeded-roster guard and a codebase-access closure hand it to a `'static` task. `state()` lends the twelve fields as `tddy_session_agents::AgentRosterState<'_>` | `agent_host_callbacks.rs`, with the 37 methods in the files of [Agent clones and roster](#agent-clones-and-roster) | `agent_roster()`; `AgentHostCallbacks` has five methods: `worktree_snapshot`, `run_exec_tool_locally`, `ensure_session_room`, `hosted_clone_for`, `run_hosted_clone_tool` |
+| Split sessions | `SplitSessions`: the host's split fields under the host's names (`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `session_rooms`, `workspace_sandboxes`, `workspace_sandbox_provisioner`, `claude_cli_manager`, `session_tokens`), owned, plus the agent topic's `AgentRoster` handle and `host: Arc<dyn SplitHost>`. It is `Clone` and built per call. `attachment_state()` lends `AttachmentState` and `remote_worktree_snapshots()` makes the `RemoteSnapshotSource` a room's poll loop measures a peer's checkout with | `split_ports.rs`, with the methods in the files of [Split sessions](#split-sessions) | `split_sessions()`; `SplitHost` extends `AgentHostCallbacks` with five methods: `start_workspace_session`, `delete_session`, `session_files`, `session_agents`, `session_room_roster` |
 | Admission token and OS user | no state value: free functions of the two or three fields they read | `mint_first_admission_token(config, session_admissions, session_id, owning_daemon_instance_id)` in `connection_service/first_admission_token.rs`; `resolve_os_user(config, user_resolver, session_token)` in `os_user_resolution.rs` | `mint_first_admission_token` (`handler_state.rs`) and `resolve_os_user` (`svc_resolve_os_user.rs`), both delegators |
 
 Two more host methods are free functions of the fields they read, and stay as host methods that
@@ -219,18 +236,17 @@ through `session_list_enrichment`). Call sites keep naming `crate::session_notif
 `seeded_clone_guard.rs`, `seed_codebase.rs`, `roster_replacement.rs`, `svc_provision_agent_clone.rs`,
 `svc_start_hosted_agent_clone.rs`, `svc_turn_end_reporter.rs`, `os_user_resolution.rs`, `svc_materialize_staged_attachment.rs`,
 `session_attachment_materialization.rs`, `session_dir_lookup.rs`, `session_notifications.rs`,
-`session_notification_publishing.rs`, and the leaves `placement.rs`, `remote_git_pack_execution.rs`,
-`agent_list_mapping.rs` and `hooks_and_urls/daemon_urls.rs`. In the two mixed files
-(`svc_ensure_session_room_for_agents.rs`, `svc_resolve_listed_worktree.rs`) only the agent topic's `impl AgentRoster`
+`session_notification_publishing.rs`, the split topic (`split_ports.rs`, `attached_initial_prompt.rs`, `svc_spawn_split_agent.rs`, `svc_paired_codebase_teardown.rs`, `split_claude_cli_start.rs`, `svc_start_sandboxed_codebase_session.rs`, `svc_resume_split_wiring.rs`, `svc_provision_workspace_tool_sandbox.rs`, `svc_resolve_tddy_tools_path.rs`, `service_util.rs`, `workspace_session.rs`, `split_session.rs` with its two children), the PTY runtime (`cli_session_manager.rs` with its children, `session_toolcall.rs`), and the leaves `placement.rs`, `remote_git_pack_execution.rs`,
+`agent_list_mapping.rs` and `hooks_and_urls/daemon_urls.rs`. In the three mixed files
+(`svc_ensure_session_room_for_agents.rs`, `svc_resolve_listed_worktree.rs`, `svc_split_context_from_codebase_host.rs`) only the agent topic's `impl AgentRoster` or the split topic's `impl SplitSessions`
 and free functions are host-free; their other host methods stay `impl DaemonSessionHost`. The leaves and the state-taking topics
 name foundations and receivers by their defining crate (`tddy_daemon_kernel::config::DaemonConfig`,
 `tddy_daemon_livekit::peer_routing::PeerRouting`), not through a lifecycle facade.
 
 Two files carry the host by necessity: `svc_demo_vm_ports.rs` (the public
 `DemoVmServiceImpl::new` and `demo_vm_entry`, which are wiring) and `handler_state.rs` (the
-builders and delegators above). Every topic not in this section (split
-sessions, the CLI and sandboxed starts and resumes, stack spawns and the session-coordinate
-handlers) is still `impl DaemonSessionHost` code, apart from what it calls on the agent topic.
+builders and delegators above). Every topic not in this section (the CLI and sandboxed starts and resumes, stack spawns and the session-coordinate
+handlers) is still `impl DaemonSessionHost` code, apart from what it calls on the agent and split topics.
 
 ## Shared helpers: `connection_service/service_util.rs`
 
@@ -324,7 +340,7 @@ The crate declares no topics. This grouping comes from module docs and function 
 | 1 | Agent CLI start and resume: Claude and Cursor in PTYs, the sandboxed variants, `tddy-tools` path, hooks, local exec tools, agent-def resolution | `claude_cli_spawn`, `cursor_cli_spawn`, `svc_start_*_cli_session*`, `svc_relaunch_sandboxed_runner`, `svc_resume_claude_cli_session`, `hooks_and_urls`, `local_exec_tools`, `jail_relaunch` |
 | 2 | RPC host core: `DaemonSessionHost`, the `session.SessionService` handlers and adapter, the RPC-families port, shared helpers | `connection_service.rs`, `session_coordinate_handlers`, `daemon_rpc_handler`, `service_util`, `svc_host_builders`, `rpc_families`, `handler_state` |
 | 3 | Agent clones, roster and multi-agent rooms | `agent_host_callbacks`, `agent_roster`, `roster_replacement`, `svc_provision_agent_clone`, `svc_start_hosted_agent_clone`, `svc_ensure_session_room_for_agents`, `svc_resolve_listed_worktree`, `svc_turn_end_reporter`, `seeded_clone_guard`, `seed_codebase`, `peer_session_answer`, `session_dir_lookup`; its wiring is `svc_agent_host_ports`, `svc_agent_roster_wiring` and `svc_agent_roster_delegators`; the host-free parts are in `tddy-session-agents` |
-| 4 | Split and sandboxed-codebase sessions | `split_session`, `split_start`, `svc_spawn_split_agent`, `svc_split_context_from_codebase_host`, `svc_start_sandboxed_codebase_session` |
+| 4 | Split and sandboxed-codebase sessions | `split_ports`, `split_session`, `split_start`, `svc_spawn_split_agent`, `svc_split_context_from_codebase_host`, `svc_start_sandboxed_codebase_session`, `svc_resume_split_wiring`, `svc_provision_workspace_tool_sandbox`, `attached_initial_prompt`, `service_util`, `workspace_session`; its wiring is `svc_agent_host_ports` and `svc_split_delegators` |
 | 5 | Session catalog: list with enrichment, read, delete, notifications, workspace sessions | `session_notifications` (a facade) and `session_notification_publishing` (`SessionNotificationPublishing`), `workspace_session`; listing, reading and deletion are in `tddy-session-activity` |
 | 6 | Terminals, PTY runtime, and the tasks and actions RPCs | `cli_session_manager`, `terminal_session_adapter`, `svc_terminal_ports`; the PTY runtime is in `tddy-terminal-rpc`, the tasks and actions services in `tddy-daemon-sandbox` |
 | 7 | Routing, peers, OS user, room admission, local token, relay idle | `svc_resolve_os_user` (the host's routing delegations and the host's `resolve_exec_tool_worktree`), `peer_session_answer` (the free `resolve_exec_tool_worktree`, `peer_has_no_such_session`, `split_pairing`), `os_user_resolution`, `first_admission_token`; routing and admission are in `tddy-daemon-livekit`, the local token and relay idle in `tddy-daemon-kernel` |
@@ -333,14 +349,13 @@ The crate declares no topics. This grouping comes from module docs and function 
 | 10 | Activity ports and presenter observation | `svc_activity_ports`, `presenter_observer_spawn`, `presenter_observer_task`, `presenter_intent_client` |
 | 11 | Demo VM | `activity_hub` (`DemoVmState`, `DemoVmHandle`), `demo_vm_coordinate_handlers`, `svc_demo_vm_ports` |
 
-What is left of each topic here, apart from the agent roster, the demo VM, the presenter observer, attachments and
+What is left of each topic here, apart from the agent roster, split sessions, the demo VM, the presenter observer, attachments and
 admission (see [Per-topic state](#per-topic-state-and-the-topics-that-name-no-host)), is `impl
 DaemonSessionHost` code: an inherent `impl` of this crate's type cannot leave it (`E0116`), and most
 of it calls other host methods or hands `self.clone()` to a task. Converting those methods in place
 into functions over per-topic state and callback ports, and then moving each converted topic to its
 receiver, is the rest of the `#carve` stack, which starts with moving the agent topic into
 `tddy-session-agents`:
-[#533](https://github.com/uppin/tddy-coder/pull/533) (split sessions),
 [#534](https://github.com/uppin/tddy-coder/pull/534) (stack spawns and the jail and CLI launches),
 [#535](https://github.com/uppin/tddy-coder/pull/535) (session start, resume and the coordinate
 handlers) and [#536](https://github.com/uppin/tddy-coder/pull/536) (the moves that leave this crate a

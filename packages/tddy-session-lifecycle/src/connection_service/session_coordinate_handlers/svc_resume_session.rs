@@ -84,7 +84,8 @@ impl DaemonSessionHost {
                     .await
                     .is_none()
             {
-                self.provision_workspace_tool_sandbox(&sessions_base, &req.session_id)
+                self.split_sessions()
+                    .provision_workspace_tool_sandbox(&sessions_base, &req.session_id)
                     .await?;
             }
             return Ok(Response::new(ResumeSessionResponse {

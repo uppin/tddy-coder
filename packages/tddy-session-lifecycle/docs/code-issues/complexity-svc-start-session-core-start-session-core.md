@@ -20,6 +20,7 @@
 | 2026-09-24 | 358 | — | — | — | #524: plans `10a` and `10b` (15 extract-methods between the returns) and DRY #2, #4, #8 (857 → 358). Plan `19` authored the four branch bodies and the agent-allowlist check as extract-methods; each was refused for its early returns (E4) |
 | 2026-10-04 | 373 | — | — | — | #571 (`#live-plan` 12/15): 358 → 373 (+15), by brace matching from the `fn start_session_core` line on `origin/feature/live-plan/session-lsp-tools` (which reproduces the 358 above) and on HEAD. Added: the `begin_phase` / `end_phase` calls around the workspace start's seed and semantic index, the `announce_worktree_ready` call after each of the three reporting starts, and the `sessions_base` / `session_id` captures the claude-cli and cursor-cli branches take before their `.await?`. Nesting, branches and exits not re-derived. Not split: the remaining seams are the early-return guards the engine refuses (E4) |
 | 2026-10-05 | 374 | — | — | — | touched by #532 (`#carve` 17/21): +1 (373 → 374, fn line to closing brace) — rustfmt wraps `.agent_roster().unwind_seeded_roster(…)` over one more line. No control flow added; nesting, branches and exits not re-derived |
+| 2026-10-07 | 377 | — | — | — | touched by `#carve` 18/21 (`SplitSessions`): +3 (374 → 377, fn line to closing brace) from three `self.split_sessions()` re-points where the launch topic calls the split topic through its handle. No control flow added. Measured by brace matching on `HEAD` vs `origin/master` |
 
 ## What the tool found
 

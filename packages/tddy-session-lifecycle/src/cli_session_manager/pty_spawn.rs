@@ -5,15 +5,16 @@ use super::MAIN_TERMINAL_ID;
 use tddy_task::TaskId;
 use tokio::sync::{oneshot, watch};
 
-use crate::{cli_session_manager::pty_handle, pty_runtime::PtyReady};
+use crate::cli_session_manager::pty_handle;
+use tddy_pty::runtime::PtyReady;
 
 use tddy_task::TaskHandle;
 
 use super::TerminalEntry;
 
-use crate::pty_runtime::PtyRuntime;
+use tddy_terminal_rpc::pty_runtime::PtyRuntime;
 
-use crate::pty_runtime::PtySpawnSpec;
+use tddy_terminal_rpc::pty_runtime::PtySpawnSpec;
 
 use std::sync::Arc;
 

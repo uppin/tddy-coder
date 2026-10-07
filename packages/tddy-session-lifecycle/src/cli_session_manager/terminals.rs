@@ -195,7 +195,10 @@ impl CliSessionManager {
                         still_alive
                     );
                     for &pid in &still_alive {
-                        let _ = crate::session_deletion::signal_pid(pid as i32, libc::SIGKILL);
+                        let _ = tddy_session_activity::session_deletion::signal_pid(
+                            pid as i32,
+                            libc::SIGKILL,
+                        );
                     }
                 }
             }

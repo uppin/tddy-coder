@@ -107,7 +107,7 @@ pub fn build_split_context_dir(
     session_dir: &Path,
     withdrawals: &[(String, Vec<String>)],
     globs: &[&str],
-    source: &dyn crate::context_sync::ContextSource,
+    source: &dyn tddy_session_files::context_sync::ContextSource,
 ) -> Result<PathBuf, Status> {
     let context_dir = split_context_dir(session_dir);
     std::fs::create_dir_all(&context_dir)
@@ -116,7 +116,12 @@ pub fn build_split_context_dir(
     let replacements = agent_argv::subagent_replacements(withdrawals, &borrowed);
     let preamble = tddy_sandbox::managed_codebase_preamble(&replacements);
 
-    crate::context_sync::ContextSyncer::populate(&context_dir, &preamble, globs, source)?;
+    tddy_session_files::context_sync::ContextSyncer::populate(
+        &context_dir,
+        &preamble,
+        globs,
+        source,
+    )?;
 
     // Written last and unconditionally, because a repository with no `CLAUDE.md` still has to leave
     // the agent something saying where its codebase is. `prepend_preamble` is a no-op on a file the
@@ -271,7 +276,7 @@ impl SplitLiveKitRoom {
     /// Called before the codebase daemon is asked to create anything: a wiring failure discovered
     /// afterwards would strand a worktree on a host the operator may never look at.
     pub fn from_config(
-        config: &crate::config::DaemonConfig,
+        config: &tddy_daemon_kernel::config::DaemonConfig,
         room: impl Into<String>,
     ) -> Result<Self, Status> {
         let (_common_room, url, api_key, api_secret) =
@@ -288,8 +293,8 @@ impl SplitLiveKitRoom {
             url,
             api_key,
             api_secret,
-            host_identity: crate::livekit_peer_discovery::daemon_rpc_identity(
-                &crate::livekit_peer_discovery::local_instance_id_for_config(config),
+            host_identity: tddy_daemon_kernel::peer_forwarding::daemon_rpc_identity(
+                &tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(config),
             ),
         })
     }
@@ -324,14 +329,14 @@ pub struct SplitSpawnTarget<'a> {
 /// that failed has already failed this call, for the reason [`build_split_context_dir`] gives.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_split_agent_wiring(
-    config: &crate::config::DaemonConfig,
+    config: &tddy_daemon_kernel::config::DaemonConfig,
     tokens: &SessionTokens,
     session_dir: &Path,
     tddy_tools_path: &str,
     target: &SplitSpawnTarget<'_>,
     withdrawals: &[(String, Vec<String>)],
     globs: &[&str],
-    source: &dyn crate::context_sync::ContextSource,
+    source: &dyn tddy_session_files::context_sync::ContextSource,
 ) -> Result<SplitAgentWiring, Status> {
     // This session's own room, hosted by this daemon — the one running the agent, and therefore the
     // session's facilitating daemon. Named from `session_id`, never from `codebase_session_id`: the
@@ -911,9 +916,12 @@ mod tests {
 
     /// A repository holding no agent guidance at all — the case that proves the notice is written
     /// even when there is nothing to write it in front of.
-    fn a_repo_with_no_guidance() -> (tempfile::TempDir, crate::context_sync::LocalWorktreeSource) {
+    fn a_repo_with_no_guidance() -> (
+        tempfile::TempDir,
+        tddy_session_files::context_sync::LocalWorktreeSource,
+    ) {
         let repo = tempfile::tempdir().unwrap();
-        let source = crate::context_sync::LocalWorktreeSource::new(
+        let source = tddy_session_files::context_sync::LocalWorktreeSource::new(
             repo.path().to_path_buf(),
             CLAUDE_GLOBS,
             A_GENEROUS_CONTEXT_CAP,

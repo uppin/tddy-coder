@@ -234,20 +234,6 @@ impl DaemonSessionHost {
         self
     }
 
-    /// The signer and verifier an agent's own credential is minted with, or the refusal a daemon
-    /// that signs nothing gives.
-    pub(crate) fn session_tokens(
-        &self,
-    ) -> Result<&tddy_daemon_auth::SessionTokens, tddy_rpc::Status> {
-        self.session_tokens.as_ref().ok_or_else(|| {
-            tddy_rpc::Status::failed_precondition(
-                "this daemon signs no session tokens, so an agent's tool calls could not be \
-                 authenticated: configure `github:` — which gives the daemon its signing \
-                 identity — and retry",
-            )
-        })
-    }
-
     /// Shared agent-activity hub, so the sandbox tool path can publish through the same channel the
     /// `StreamSessionActivity` subscribers read.
     pub fn agent_activity_hub(&self) -> Arc<tddy_daemon_kernel::AgentActivityHub> {

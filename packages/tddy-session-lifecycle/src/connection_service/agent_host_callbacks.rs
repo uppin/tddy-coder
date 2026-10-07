@@ -39,9 +39,6 @@ use tddy_session_agents::AgentRosterState;
 pub(crate) trait AgentHostCallbacks: Send + Sync {
     /// Measure a checkout that lives on a peer: the same answer a caller's own
     /// `GetWorktreeSnapshot` gets, peer routing and blocking-pool budget included.
-    // TODO(#carve 18/21): drop this allowance once `join_split_livekit_room` (T4, the split
-    // topic) calls it over the handle.
-    #[allow(dead_code)]
     async fn worktree_snapshot(
         &self,
         session_token: &str,
