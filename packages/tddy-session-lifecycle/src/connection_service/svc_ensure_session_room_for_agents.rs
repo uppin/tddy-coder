@@ -208,7 +208,8 @@ impl DaemonSessionHost {
         );
         Ok(())
     }
-
+}
+impl SplitSessions {
     /// Build the jail a sandboxed `workspace` session runs its tools in, and register it under the
     /// session id every later dispatch looks it up by
     /// (`docs/ft/daemon/remote-codebase-mode.md` § Workspace tool sandbox).
@@ -411,4 +412,5 @@ impl AgentRoster {
     }
 }
 
+use crate::connection_service::split_ports::SplitSessions;
 use tddy_session_agents::opened_session_room;

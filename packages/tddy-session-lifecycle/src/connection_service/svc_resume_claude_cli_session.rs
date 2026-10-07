@@ -1,6 +1,4 @@
-// `list_session_agents` is a `SessionAgentService` trait method, so the trait has to be in scope.
 use tddy_service::proto::session_agents_svc::ListSessionAgentsRequest;
-use tddy_service::proto::session_agents_svc::SessionAgentService as _;
 
 use tddy_rpc::Request;
 
@@ -19,6 +17,7 @@ use std::path::PathBuf;
 use crate::connection_service::hooks_and_urls;
 
 use super::DaemonSessionHost;
+use crate::connection_service::split_ports::SplitSessions;
 
 impl DaemonSessionHost {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
@@ -45,6 +44,7 @@ impl DaemonSessionHost {
         // token, since the original is scoped to a lifetime that may well have elapsed while the
         // session was stopped.
         let split = self
+            .split_sessions()
             .resume_split_wiring(
                 &meta,
                 sessions_base,
@@ -141,7 +141,8 @@ impl DaemonSessionHost {
             livekit_server_identity: String::new(),
         }))
     }
-
+}
+impl SplitSessions {
     /// Rebuild the remote-tool wiring for a split session being resumed, or `None` for a co-located
     /// one.
     ///
@@ -256,7 +257,8 @@ impl DaemonSessionHost {
         codebase_daemon: &str,
     ) -> Result<tddy_service::proto::session_agents_svc::SessionAgentRoster, Status> {
         let roster = self
-            .session_agents_service()
+            .host
+            .session_agents()
             .list_session_agents(Request::direct(ListSessionAgentsRequest {
                 session_token: session_token.to_string(),
                 session_id: codebase_session.to_string(),

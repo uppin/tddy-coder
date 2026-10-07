@@ -4,9 +4,9 @@ use std::path::PathBuf;
 
 use tddy_rpc::Status;
 
-use super::DaemonSessionHost;
+use crate::connection_service::split_ports::SplitSessions;
 
-impl DaemonSessionHost {
+impl SplitSessions {
     /// Resolve the `tddy-tools` binary from this deployment's **toolchain** — the directory its
     /// tddy binaries are installed in ([`tddy_daemon_kernel::toolchain`]).
     ///

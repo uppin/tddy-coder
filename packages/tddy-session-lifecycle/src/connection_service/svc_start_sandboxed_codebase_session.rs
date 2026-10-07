@@ -15,12 +15,13 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use uuid::Uuid;
 
-use super::{agent_roster, AttachmentProgressSink, DaemonSessionHost};
+use super::{agent_roster, AttachmentProgressSink};
+use crate::connection_service::split_ports::SplitSessions;
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 use crate::session_deletion;
 use crate::user_sessions_path::{projects_path_for_user, sessions_base_for_user};
 
-impl DaemonSessionHost {
+impl SplitSessions {
     /// Start a session whose **codebase** is jailed on this daemon and whose **agent** is not.
     ///
     /// Two sessions come out of one request: a local `workspace` session carrying
@@ -41,7 +42,8 @@ impl DaemonSessionHost {
         // Resolved before anything is created, for the reason the split path resolves it before
         // the peer is contacted: a reference naming nothing is a request error, and refusing one
         // after the checkout existed would mean tearing a jailed worktree down to report a typo.
-        self.resolve_specialized_agent_defs(&req.specialized_agents)
+        self.agent_roster
+            .resolve_specialized_agent_defs(&req.specialized_agents)
             .await?;
 
         let sessions_base = sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
@@ -69,10 +71,12 @@ impl DaemonSessionHost {
                 &checkout_session_id,
             )?
         };
-        let workspace =
-            Box::pin(self.start_session_core(workspace_req, &AttachmentProgressSink::discarding()))
-                .await?
-                .into_inner();
+        let workspace = Box::pin(
+            self.host
+                .start_workspace_session(workspace_req, &AttachmentProgressSink::discarding()),
+        )
+        .await?
+        .into_inner();
         // A branch another session owns is reported, not created: nothing was built, so the
         // conflict travels back to the caller as it would for a co-located start.
         if workspace.branch_conflict.is_some() {

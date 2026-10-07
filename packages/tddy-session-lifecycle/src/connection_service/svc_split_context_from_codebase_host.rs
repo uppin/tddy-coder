@@ -3,7 +3,7 @@ use std::time::Duration;
 use tddy_service::proto::session::ResumeSessionResponse;
 use tddy_service::proto::session_files::{
     ContextFileBatchChunk, ContextManifestEntry, ContextManifestRequest,
-    ReadContextFileBatchRequest, SessionFilesService,
+    ReadContextFileBatchRequest,
 };
 
 use futures_util::StreamExt;
@@ -14,7 +14,9 @@ use std::path::PathBuf;
 
 use tddy_rpc::Status;
 
-use super::{DaemonSessionHost, PeerRoutedSessionFiles};
+use super::split_ports::SplitSessionFiles;
+use super::DaemonSessionHost;
+use crate::connection_service::split_ports::SplitSessions;
 
 /// Every frame of one served context read, as the single value the split path below needs.
 ///
@@ -167,17 +169,18 @@ impl ContextRead<'_> {
     }
 }
 
-impl DaemonSessionHost {
+impl SplitSessions {
     /// This daemon's `session_files.SessionFilesService` surface — the one coordinate the two
     /// context reads below are served at, whichever host holds the codebase.
     ///
-    /// Reached through an `Arc` of a clone, as [`Self::session_room_roster`] is reached from the
-    /// split start (`svc_spawn_split_agent`): `Clone` here is the documented shallow, shared clone,
-    /// so the surface talks to this daemon's own config, roster and room slot. Deliberately not
+    /// Reached through `SplitHost::session_files`, which builds it over an `Arc` of a clone of the
+    /// host, as the room roster is reached from the split start (`svc_spawn_split_agent`): `Clone`
+    /// there is the documented shallow, shared clone, so the surface talks to this daemon's own
+    /// config, roster and room slot. Deliberately not
     /// [`Self::self_arc`], which panics unless `runtime.rs` recorded the self handle — a split
     /// session's context read must not depend on wiring only the daemon binary performs.
-    fn session_files_of_this_daemon(&self) -> PeerRoutedSessionFiles {
-        std::sync::Arc::new(self.clone()).session_files_service()
+    fn session_files_of_this_daemon(&self) -> std::sync::Arc<SplitSessionFiles> {
+        self.host.session_files()
     }
 
     /// The project's own guidance, fetched from the daemon that holds the codebase.
@@ -369,7 +372,8 @@ impl DaemonSessionHost {
 
         crate::context_sync::PrefetchedContext::new(entries, files)
     }
-
+}
+impl DaemonSessionHost {
     /// Re-spawn and re-dial a sandboxed claude-cli session.
     pub(crate) async fn resume_sandboxed_claude_cli_session(
         &self,

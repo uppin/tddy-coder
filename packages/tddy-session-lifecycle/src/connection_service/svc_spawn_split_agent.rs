@@ -20,7 +20,8 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use std::path::Path;
 
-use super::DaemonSessionHost;
+use super::attached_initial_prompt::attached_initial_prompt;
+use crate::connection_service::split_ports::SplitSessions;
 
 /// What the split agent's claude-cli process is spawned with: its context dir, its tools' route
 /// back, and the request's model and prompt.
@@ -38,7 +39,7 @@ struct SplitAgentProcess<'a> {
     extra_args: Vec<String>,
 }
 
-impl DaemonSessionHost {
+impl SplitSessions {
     /// Spawn the agent half of a session whose checkout it does not hold, and record the pairing.
     ///
     /// Serves both placements that separate the agent from its worktree, because they differ in
@@ -71,9 +72,15 @@ impl DaemonSessionHost {
         // Where the codebase lives is not a reason for a planned PR's child to come up without its
         // boundaries: the same rule the co-located branches apply, on the attachments this host
         // materialized into the session it is about to run the agent for.
-        let initial_prompt = self
-            .attached_initial_prompt(req, os_user, sessions_base, session_id, progress)
-            .await?;
+        let initial_prompt = attached_initial_prompt(
+            &self.attachment_state(),
+            req,
+            os_user,
+            sessions_base,
+            session_id,
+            progress,
+        )
+        .await?;
 
         let (tddy_tools_path, remote) = self.split_agent_tool_wiring(
             session_id,
@@ -293,7 +300,7 @@ impl DaemonSessionHost {
                 &req.session_token,
             )?);
             let remote_source = Arc::new(tddy_daemon_livekit::session_room::RemoteCheckout::new(
-                Arc::new(self.clone()),
+                self.remote_worktree_snapshots(),
                 codebase_session_id.to_string(),
                 codebase_instance_id.to_string(),
                 token_minter,
@@ -309,7 +316,7 @@ impl DaemonSessionHost {
                         rooms: &self.session_rooms,
                     }
                     .for_remote_worktree(session_id, session_dir),
-                    || Arc::new(self.clone()).session_room_roster(),
+                    || self.host.session_room_roster(),
                     remote_source,
                 )
                 .await?

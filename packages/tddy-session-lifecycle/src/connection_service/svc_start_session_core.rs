@@ -155,11 +155,13 @@ impl DaemonSessionHost {
                 codebase_instance_id,
             } => {
                 return self
+                    .split_sessions()
                     .start_split_claude_cli_session(os_user, codebase_instance_id, &req, progress)
                     .await;
             }
             CodebasePlacement::SandboxedCodebase => {
                 return self
+                    .split_sessions()
                     .start_sandboxed_codebase_session(os_user, &req, progress)
                     .await;
             }
@@ -303,6 +305,7 @@ impl DaemonSessionHost {
                 // worktree directly, so it belongs before a jail exists rather than through one.
                 if req.sandbox {
                     if let Err(status) = self
+                        .split_sessions()
                         .provision_workspace_tool_sandbox(&sessions_base, &session_id)
                         .await
                     {

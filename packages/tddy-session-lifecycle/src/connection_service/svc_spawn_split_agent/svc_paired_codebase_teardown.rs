@@ -1,5 +1,3 @@
-use super::DaemonSessionHost;
-
 use crate::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_core::read_session_metadata;
@@ -15,8 +13,9 @@ use crate::connection_service::peer_session_answer::peer_has_no_such_session;
 use tddy_service::proto::session::DeleteSessionRequest;
 
 use super::super::SplitStartFailure;
+use crate::connection_service::split_ports::SplitSessions;
 
-impl DaemonSessionHost {
+impl SplitSessions {
     /// Delete the `workspace` session holding a split session's worktree on `codebase_instance_id`.
     ///
     /// Used only to unwind a failed start, where the caller already has an error to return: the
@@ -101,12 +100,12 @@ impl DaemonSessionHost {
         // No recursion beyond this hop: the workspace half records `agent_*`, not `codebase_*`,
         // so `split_pairing` answers `None` for it.
         if codebase_daemon == local_instance_id_for_config(&self.config) {
-            let deleted = Box::pin(self.delete_session_at_session_coordinate(
-                tddy_rpc::Request::direct(DeleteSessionRequest {
+            let deleted = Box::pin(self.host.delete_session(tddy_rpc::Request::direct(
+                DeleteSessionRequest {
                     session_token: session_token.to_string(),
                     session_id: codebase_session.to_string(),
-                }),
-            ))
+                },
+            )))
             .await;
             match deleted {
                     Ok(_) => log::info!(
@@ -126,7 +125,7 @@ impl DaemonSessionHost {
             return Ok(());
         }
 
-        let slot = self.common_room_slot("DeleteSession")?;
+        let slot = self.peer_routing.common_room_slot("DeleteSession")?;
         // `common_room_slot` only proves this daemon is *configured* for a common room, not that it
         // is currently joined to one — the discovery loop empties this slot on every disconnect.
         // The distinction is load-bearing here: a forward attempted with no room fails locally with

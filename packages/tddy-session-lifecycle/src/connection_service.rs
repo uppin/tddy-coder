@@ -235,9 +235,13 @@ mod agent_host_callbacks;
 
 mod split_ports;
 
+mod attached_initial_prompt;
+
 mod svc_agent_host_ports;
 
 mod svc_agent_roster_delegators;
+
+mod svc_split_delegators;
 
 mod agent_roster;
 pub(crate) use agent_roster::*;
