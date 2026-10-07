@@ -1,5 +1,5 @@
-//! The session host as the agent topic's and the split topic's callbacks (see
-//! [`AgentHostCallbacks`] and [`SplitHost`]).
+//! The session host as the agent topic's, the split topic's and the launch topic's callbacks (see
+//! [`AgentHostCallbacks`], [`SplitHost`] and [`LaunchHost`]).
 //!
 //! Each method forwards to the host method or impl that already does the work, so the topic and
 //! every other caller take exactly one path.
@@ -22,6 +22,7 @@ use tddy_session_agents::session_agent_clone::HostedClone;
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use super::agent_host_callbacks::AgentHostCallbacks;
+use super::launch_ports::LaunchHost;
 use super::split_ports::{SplitHost, SplitSessionAgents, SplitSessionFiles};
 use super::DaemonSessionHost;
 
@@ -102,5 +103,19 @@ impl SplitHost for DaemonSessionHost {
 
     fn session_room_roster(&self) -> Result<tddy_rpc::MultiRpcService, Status> {
         Arc::new(self.clone()).session_room_roster()
+    }
+}
+
+impl LaunchHost for DaemonSessionHost {
+    fn sandbox_rpc_handler(
+        &self,
+        session_id: &str,
+        session_dir: &Path,
+    ) -> Arc<dyn tddy_sandbox_runner::HostRpcHandler> {
+        DaemonSessionHost::sandbox_rpc_handler(self, session_id, session_dir)
+    }
+
+    fn pr_stack(&self) -> Result<Arc<dyn crate::PrStackHandler>, Status> {
+        Ok(self.rpc_families()?.pr_stack_handler())
     }
 }

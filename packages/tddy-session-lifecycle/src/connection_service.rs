@@ -235,6 +235,8 @@ mod agent_host_callbacks;
 
 mod split_ports;
 
+mod launch_ports;
+
 mod attached_initial_prompt;
 
 mod svc_agent_host_ports;
