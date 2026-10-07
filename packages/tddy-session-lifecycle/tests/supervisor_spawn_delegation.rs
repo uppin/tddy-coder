@@ -260,6 +260,65 @@ fn asks_for_the_path_prefix_a_users_spawn_path_extra_declares() {
 }
 
 #[test]
+fn asks_for_the_commit_identity_variables_a_session_is_spawned_with_and_nothing_more() {
+    // Given a planned child for a project that acts as ada, and a user with no spawn_path_extra
+    let request = supervisor_spawn::spawn_session_request(
+        "alice",
+        Path::new("/usr/bin/tddy-coder"),
+        &[],
+        Path::new("/srv/tddy/repos/alice/project"),
+        None,
+    );
+    let identity: Vec<(String, String)> = [
+        ("GIT_AUTHOR_NAME", "ada"),
+        ("GIT_AUTHOR_EMAIL", "101+ada@users.noreply.github.com"),
+        ("GIT_COMMITTER_NAME", "ada"),
+        ("GIT_COMMITTER_EMAIL", "101+ada@users.noreply.github.com"),
+    ]
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .to_vec();
+
+    // When the supervisor is asked to run it under her identity
+    let request = supervisor_spawn::with_commit_identity(request, &identity);
+
+    // Then the four pairs are the whole environment named — which an operator must list in
+    // `allowed_env_keys`, and which carries no token
+    assert_eq!(
+        request.env,
+        std::collections::BTreeMap::from([
+            (
+                "GIT_AUTHOR_EMAIL".to_string(),
+                "101+ada@users.noreply.github.com".to_string()
+            ),
+            ("GIT_AUTHOR_NAME".to_string(), "ada".to_string()),
+            (
+                "GIT_COMMITTER_EMAIL".to_string(),
+                "101+ada@users.noreply.github.com".to_string()
+            ),
+            ("GIT_COMMITTER_NAME".to_string(), "ada".to_string()),
+        ])
+    );
+}
+
+#[test]
+fn asks_for_no_commit_identity_when_the_project_resolves_to_no_account() {
+    // Given a planned child for a project whose account did not resolve
+    let request = supervisor_spawn::spawn_session_request(
+        "alice",
+        Path::new("/usr/bin/tddy-coder"),
+        &[],
+        Path::new("/srv/tddy/repos/alice/project"),
+        None,
+    );
+
+    // When the supervisor is asked to run it under no identity
+    let request = supervisor_spawn::with_commit_identity(request, &[]);
+
+    // Then the request still names no environment, so the shipped empty policy permits the spawn
+    assert_eq!(request.env, std::collections::BTreeMap::new());
+}
+
+#[test]
 fn asks_the_supervisor_to_clone_a_repository_as_the_target_user() {
     // Given
     let git = PathBuf::from("/usr/bin/git");

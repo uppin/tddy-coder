@@ -64,6 +64,9 @@ shutdown_grace_secs: 20
 #     - __INSTALL_BIN_DIR__/tddy-tools
 #   allowed_mount_roots: [/home, /srv/repos]     # roots a sandbox bind-mount source must fall under
 #   allowed_env_keys: [RUST_LOG, TZ]             # env keys a caller may set on a session
+#   # A project that acts as a GitHub account has its tool sessions spawned with that account's
+#   # commit identity, so list GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME and
+#   # GIT_COMMITTER_EMAIL as well — otherwise those spawns are refused. Never a token.
 #
 # allowed_env_keys is a DENY, not a filter: a request carrying a key that is not listed is refused
 # outright rather than having the key dropped. That is deliberate — silently discarding an

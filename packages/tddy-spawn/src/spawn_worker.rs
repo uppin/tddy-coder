@@ -78,6 +78,15 @@ pub struct SpawnRequest {
     /// rather than the child's stdio fds (which can't cross the fork boundary).
     #[serde(default)]
     pub host_session_socket: Option<String>,
+    /// The commit identity the child's agent authors under: the four `GIT_AUTHOR_*` /
+    /// `GIT_COMMITTER_*` pairs of the account the session's project acts as. **Never a token** — the
+    /// spawner refuses any other key, and a session's tools ask the daemon for the token per call
+    /// over the toolcall socket. Absent on the wire means empty: this daemon and its worker (or the
+    /// supervisor path) are separate processes that may be at different versions, and an old
+    /// request must keep spawning under the checkout's own identity. Omit in JSON for legacy
+    /// clients.
+    #[serde(default)]
+    pub git_environment: Vec<(String, String)>,
     /// `log.default.level` for the child's `--config` (from daemon YAML `log:`, e.g. `dev.desktop.yaml`).
     #[serde(default = "default_child_log_level")]
     pub child_log_level: String,
@@ -354,6 +363,7 @@ fn spawn_worker_main(request_fd: libc::c_int, response_fd: libc::c_int) {
                         // path crosses this fork boundary as a plain string (unlike stdio fds), so it
                         // works from the worker-spawned child just like the direct path.
                         host_session_socket: req.host_session_socket.as_deref(),
+                        git_environment: &req.git_environment,
                     },
                     req.child_log_level.as_str(),
                     req.child_log_format.as_str(),
@@ -460,6 +470,7 @@ pub fn build_spawn_request(
         stack_seed_base_session: opts.stack_seed_base_session.map(String::from),
         model: opts.model.map(String::from),
         host_session_socket: opts.host_session_socket.map(String::from),
+        git_environment: opts.git_environment.to_vec(),
         child_log_level,
         child_log_format,
         coder_log_config_yaml,
@@ -564,5 +575,74 @@ mod tests {
             ),
             spawner::StartupWatch::default()
         );
+    }
+
+    fn the_commit_identity_of_ada() -> Vec<(String, String)> {
+        [
+            ("GIT_AUTHOR_NAME", "ada"),
+            ("GIT_AUTHOR_EMAIL", "101+ada@users.noreply.github.com"),
+            ("GIT_COMMITTER_NAME", "ada"),
+            ("GIT_COMMITTER_EMAIL", "101+ada@users.noreply.github.com"),
+        ]
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .to_vec()
+    }
+
+    #[test]
+    fn build_spawn_request_carries_the_commit_identity_through_to_the_spawn_request() {
+        // Given a tool spawn for a project that acts as ada
+        let identity = the_commit_identity_of_ada();
+        let opts = SpawnOptions {
+            git_environment: &identity,
+            ..Default::default()
+        };
+
+        // When
+        let req = a_spawn_request_with(opts, spawner::StartupWatch::default());
+
+        // Then the worker is handed her four pairs
+        assert_eq!(req.git_environment, identity);
+    }
+
+    #[test]
+    fn a_spawn_request_round_trips_its_commit_identity_over_the_worker_pipe() {
+        // Given a request carrying ada's identity
+        let identity = the_commit_identity_of_ada();
+        let sent = a_spawn_request_with(
+            SpawnOptions {
+                git_environment: &identity,
+                ..Default::default()
+            },
+            spawner::StartupWatch::default(),
+        );
+
+        // When it crosses the worker's JSON IPC
+        let wire = serde_json::to_string(&WorkerRequest::Spawn(Box::new(sent))).unwrap();
+        let received = match serde_json::from_str::<WorkerRequest>(&wire).unwrap() {
+            WorkerRequest::Spawn(req) => req,
+            WorkerRequest::Clone(_) => panic!("a spawn request decoded as a clone"),
+        };
+
+        // Then the same pairs arrive
+        assert_eq!(received.git_environment, identity);
+    }
+
+    #[test]
+    fn a_spawn_request_from_a_client_that_predates_the_commit_identity_carries_none() {
+        // Given a request written by a daemon that had no such field
+        let mut json = serde_json::to_value(a_spawn_request_with(
+            SpawnOptions::default(),
+            spawner::StartupWatch::default(),
+        ))
+        .unwrap();
+        json.as_object_mut()
+            .expect("a request is a JSON object")
+            .remove("git_environment");
+
+        // When the worker decodes it
+        let req: SpawnRequest = serde_json::from_value(json).expect("decode old spawn request");
+
+        // Then no identity is added — the checkout's own stays in force
+        assert_eq!(req.git_environment, Vec::<(String, String)>::new());
     }
 }

@@ -13950,6 +13950,7 @@ dependencies = [
  "tddy-github",
  "tddy-pr-stack",
  "tddy-rpc",
+ "tddy-stdio",
  "tddy-testing-commons",
  "tddy-workflow",
  "tempfile",

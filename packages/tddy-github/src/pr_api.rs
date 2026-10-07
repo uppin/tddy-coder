@@ -267,6 +267,30 @@ enum TokenSource {
     Explicit(String),
     /// No account is resolved for this caller. Every authenticated operation refuses.
     Absent,
+    /// Asked of the session's host the first time an operation needs it, so a caller whose work
+    /// turns out to reach no GitHub call never asks. A refusal is the host's own message and is not
+    /// remembered: the next operation asks again. A token the host did hand over is kept for this
+    /// client's life, as an [`Explicit`](Self::Explicit) one is.
+    Asked {
+        ask: Box<dyn Fn() -> Result<String, String> + Send + Sync>,
+        answered: std::sync::OnceLock<String>,
+    },
+}
+
+/// `tddy_core::toolcall::request_github_token_from_session`, from a synchronous caller.
+fn ask_the_session_host() -> Result<String, String> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("could not ask the session host for a GitHub token: {e}"))?
+                    .block_on(tddy_core::toolcall::request_github_token_from_session())
+            })
+            .join()
+            .map_err(|_| "asking the session host for a GitHub token panicked".to_string())?
+    })
 }
 
 /// Real implementation using GitHub REST API via `curl`.
@@ -298,9 +322,45 @@ impl RealGithubPrApi {
         }
     }
 
+    /// Authenticate with the token `ask` returns, called the first time an operation needs one. The
+    /// reason `ask` fails with reaches the caller verbatim, prefixed by the operation that needed
+    /// it. There is no environment behind it.
+    pub fn asking(
+        repo: impl Into<String>,
+        ask: impl Fn() -> Result<String, String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            repo: repo.into(),
+            token: TokenSource::Asked {
+                ask: Box::new(ask),
+                answered: std::sync::OnceLock::new(),
+            },
+        }
+    }
+
+    /// [`Self::asking`] the host of the calling process's own session — the `github-token` request
+    /// over the socket `TDDY_SOCKET` names, the one `tddy-tools` makes.
+    ///
+    /// The ask is sync, so it runs on a thread and runtime of its own: it is safe to be reached from
+    /// an async task (and from a runtime thread), and it never depends on the caller's runtime
+    /// making progress while the caller waits.
+    pub fn asking_the_session_host(repo: impl Into<String>) -> Self {
+        Self::asking(repo, ask_the_session_host)
+    }
+
     /// Resolve the credential for one call, or an operator-facing reason why there is none.
     fn resolve_token(&self) -> Result<String, String> {
         match &self.token {
+            TokenSource::Asked { ask, answered } => {
+                if let Some(token) = answered.get() {
+                    return Ok(token.clone());
+                }
+                let token = ask()?;
+                if token.trim().is_empty() {
+                    return Err("the session host answered with a blank GitHub token".to_string());
+                }
+                Ok(answered.get_or_init(|| token).clone())
+            }
             TokenSource::Explicit(t) if !t.trim().is_empty() => Ok(t.clone()),
             TokenSource::Explicit(_) => Err("the supplied GitHub token is blank".to_string()),
             TokenSource::Absent => Err(
@@ -659,6 +719,75 @@ pub fn owner_repo_from_remote_url(remote_url: &str) -> Option<String> {
 #[cfg(test)]
 mod real_impl_tests {
     use super::*;
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A client that asks `asked` and is refused in `reason`'s words.
+    fn a_client_refused_with(reason: &'static str, asked: &Arc<AtomicUsize>) -> RealGithubPrApi {
+        let asked = Arc::clone(asked);
+        RealGithubPrApi::asking("owner/repo", move || {
+            asked.fetch_add(1, Ordering::SeqCst);
+            Err(reason.to_string())
+        })
+    }
+
+    #[test]
+    fn a_client_that_asks_for_its_token_asks_nothing_until_an_operation_needs_one() {
+        // Given a client built to ask
+        let asked = Arc::new(AtomicUsize::new(0));
+
+        // When it is constructed and used for nothing
+        let _client = a_client_refused_with("no account", &asked);
+
+        // Then nothing was asked
+        assert_eq!(asked.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn an_operation_that_needs_a_token_fails_with_the_reason_it_was_refused_for() {
+        // Given a client whose ask is refused
+        let asked = Arc::new(AtomicUsize::new(0));
+        let api = a_client_refused_with("this project has no github account assigned", &asked);
+
+        // When an operation needs a token
+        let error = api.merge_pr(7).expect_err("a refused ask is a failure");
+
+        // Then it asked once and the host's words are the failure's
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+        assert!(
+            error
+                .to_string()
+                .contains("this project has no github account assigned"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_is_asked_again_by_the_next_operation_rather_than_remembered() {
+        // Given a client whose ask is refused
+        let asked = Arc::new(AtomicUsize::new(0));
+        let api = a_client_refused_with("no account", &asked);
+
+        // When two operations need a token
+        let _ = api.merge_pr(7);
+        let _ = api.close_pr(8);
+
+        // Then each asked: a project assigned an account in between is not stuck refused
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_blank_answer_is_refused_rather_than_sent_as_a_credential() {
+        // Given a client whose host answers with a blank token
+        let api = RealGithubPrApi::asking("owner/repo", || Ok("  ".to_string()));
+
+        // When an operation needs a token
+        let error = api.merge_pr(7).expect_err("a blank token is no credential");
+
+        // Then it is refused as blank
+        assert!(error.to_string().contains("blank"), "got: {error}");
+    }
 
     #[test]
     fn real_github_get_open_pr_errors_without_a_credential() {

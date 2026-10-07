@@ -24,7 +24,12 @@
   shared by `tddy-tools` and the workflow actions
 - **tddy-daemon-rpc**: `RepointPlannedPr` resolves the project's account itself (`project_github_token`)
 - **tddy-workflow-recipes** / **tddy-pr-stack**: the engine-driven stack tasks ask the session host for the
-  token; the prompt awareness gate reads a context flag instead of a hardcoded `false`
+  token **only when an action that reaches GitHub runs**; the prompt awareness gate reads a context flag
+  instead of a hardcoded `false`
+- **tddy-github**: `RealGithubPrApi::asking` / `asking_the_session_host` — a client that asks for its token the
+  first time an operation needs one
+- **tddy-spawn**: the commit-identity pairs ride the supervisor/worker wire (`SpawnRequest::git_environment`,
+  `SpawnOptions::git_environment`) — see *Tool sessions: the commit identity over the spawn wire*
 
 ## Related Feature Documentation
 
@@ -325,7 +330,7 @@ any path, so a push still cannot succeed as the wrong GitHub account through thi
 
 ### Follow-ups
 
-Closed — see *Closing the remaining seams*. Still open: tool-session (`tddy-coder`) starts, see *Still open*.
+Closed — see *Closing the remaining seams*. The tool-session (`tddy-coder`) commit identity is closed too (*Tool sessions: the commit identity over the spawn wire*); its token delivery is not, see *Still open*.
 
 ## Token delivery to the agent's tools
 
@@ -389,7 +394,7 @@ read from session metadata and nothing was missing.
   at GitHub* is not: `RealGithubPrApi` shells out to `api.github.com`, so the tests prove the token is
   asked for, the refusal surfaces, and a client is built from the answer — not that the REST call
   carries it;
-- tool-session (`tddy-coder`) sessions and the engine-driven prompt flag — see *Still open*.
+- tool-session (`tddy-coder`) token delivery and the engine-driven prompt flag — see *Still open*.
 
 ## Closing the remaining seams
 
@@ -410,6 +415,7 @@ request with the resolver's own message.
 | sandboxed cursor-cli start | yes (new) | yes (new) | `session_env` |
 | plain cursor-cli start / resume | yes (new) | none — a cursor-cli session runs no toolcall listener | the cursor process env |
 | agent-spawned children (`spawn-child`, `spawn-conversation`) | yes (new) | yes (new, via the child's own start) | as the claude-cli start |
+| **tool session (`tddy-coder`) start / resume** | **yes (new)** | **none — a decision is open, see *Still open*** | the child's process environment, over the spawn wire |
 | split-agent | **not applicable** | none | — |
 
 **Why the jail's pairs go in `session_env`.** The jailed agent never mounts the checkout; it edits and
@@ -442,32 +448,113 @@ plan-only repoint reaches no GitHub call, so it is never refused and never asks 
 (`token_for_repoint`). A refusal is `FAILED_PRECONDITION` with the resolver's words, **before** the plan is
 rewritten, so a refused repoint changes nothing.
 
-**Agent-process workflow actions** (`AssessTask`, `MergeTask`, `RepointTask`) ask the host with
-`tddy_core::toolcall::request_github_token_from_session()` — the same `github-token` round trip `tddy-tools`
-makes, reading `TDDY_SOCKET` only to learn *whom to ask*. The socket client moved to `tddy-toolcall`
-(`request_github_token`); both `tddy-tools` and these crates reach it through `tddy-core`'s facade. It could
-not sit in `tddy-tools`, which depends on `tddy-workflow-recipes`. ⚠ These tasks belong to
-`OrchestratePrStackRecipe`, which is **retained but inert in production** (`recipe_resolve` maps every CLI
-name to `PrStackRecipe`); they have no live driver, and the request is made eagerly, so an `assess` over a
-stack with nothing for GitHub to answer now needs a host too. The live callers of the same helpers
+**Agent-process workflow actions** (`AssessTask`, `MergeTask`, `RepointTask`) ask the host with the same
+`github-token` round trip `tddy-tools` makes (`tddy_core::toolcall::request_github_token_from_session()`,
+reading `TDDY_SOCKET` only to learn *whom to ask*). The socket client lives in `tddy-toolcall`
+(`request_github_token`); it could not sit in `tddy-tools`, which depends on `tddy-workflow-recipes`. ⚠ These
+tasks belong to `OrchestratePrStackRecipe`, which is **retained but inert in production** (`recipe_resolve` maps
+every CLI name to `PrStackRecipe`); they have no live driver. The live callers of the same helpers
 (`assemble_views`, `execute_stack_merge`, `execute_stack_repoint`) are the `pr_*` tools, which already pass a
 token.
+
+**They ask on demand, never before.** *Decision (developer):* a task asks the host only when an action that
+reaches GitHub actually runs, so plan-only paths never touch the socket and a refusal surfaces at the action that
+needed the token, in the host's own words. Measured against the code, the premise "asks when constructed" did not
+hold — `build_graph` and the `*Task::new()` constructors never asked; the eagerness was at the top of each task's
+`run`. What changed:
+
+| Task | Before | Now |
+|---|---|---|
+| construction (`build_graph`, `*Task::new()`) | asked nothing | asks nothing (pinned) |
+| `AssessTask` | asked on every run | `RealGithubPrApi::asking_the_session_host`: asks the first time a node that owns a branch has its PR looked up; a stack whose nodes own none asks nothing. A refusal propagates through `assemble_views`'s `?` |
+| `RepointTask` | asked on every run | asks only when `repoint_reaches_github` — some dependent owns a branch, so there is a PR to re-target. Asked **up front** in that case, not lazily per call, because `execute_stack_repoint` downgrades a failed GitHub call to a `warn` and a lazily-surfaced refusal would be swallowed while the dependents' PRs kept their old base |
+| `MergeTask` | asked at the top of `run` | unchanged: merging always reaches GitHub, and asking *before* `execute_stack_merge` is what keeps a refusal from leaving a `Planned` journal behind (pinned: no `stack-op.json` after a refused merge) |
+
+`RealGithubPrApi::asking` holds a *supplier*, not a token: a refusal is **not remembered** (the next operation asks
+again, so assigning an account mid-run is not stuck behind the earlier refusal) and a token the host did hand over
+is kept for that client's life, as a `with_token` client keeps its own. The sync supplier runs the async request on
+a thread and runtime of its own, so it is safe from an async task and from a runtime thread and never depends on the
+caller's runtime making progress while the caller waits. Pinned in
+`tddy-workflow-recipes/tests/orchestrate_pr_stack_github_on_demand.rs` (against a real socket host that counts the
+requests it receives) and the `real_impl_tests` in `tddy-github/src/pr_api.rs`.
 
 **Prompt awareness.** `merged_red_system_prompt` and the merge-pr system prompts advertise the PR tools only
 when the workflow context carries `github_pr_tools_available = true`
 (`tddy_workflow_recipes::github_pr_tools`). Neither hardcodes `false` any more, and neither probes the
 environment.
 
+## Tool sessions: the commit identity over the spawn wire
+
+A `tddy-coder` tool session is started by `ToolSpawnPlan` → `SpawnOptions` → one of three backends (the in-process
+`spawn_as_user`, the forked `spawn_worker` over a JSON pipe, `tddy-supervisor` over its own wire). It now carries
+**the four `GIT_AUTHOR_*` / `GIT_COMMITTER_*` pairs** of the account its project acts as, on **start and resume**:
+one `SessionAccountAccess::session_identity` lookup (the same one every other path makes — `DaemonSessionHost::session_identity`),
+of which only `git_environment` is used. A refused resolution still starts the session with no pairs, logged
+(the consented decision). Pinned end to end in `tddy-session-lifecycle/tests/tool_session_git_identity.rs`, which drives
+the real `StartSession` / `ResumeSession` into a script that records the environment it started with.
+
+**Wire change.** `SpawnRequest` (the worker's JSON request) gains `git_environment: Vec<(String, String)>` with
+`#[serde(default)]`; `SpawnOptions` gains `git_environment: &[(String, String)]` (`Default` = empty, so every existing
+`..Default::default()` literal is unaffected); `SessionChildPlan` gains `env`, applied by `spawn_as_user`
+(`Command::envs`) and, on the supervised path, added to the `SpawnSession` request's `env`
+(`supervisor_spawn::with_commit_identity`). The supervisor's own `SpawnSessionRequest` **already had** an `env` map —
+no supervisor protocol change.
+
+**Compatibility.** The daemon, its forked worker and the supervisor are separate processes that may be at different
+versions. *New daemon → old worker:* serde ignores the unknown field, the child is spawned without the pairs — the
+session starts under the checkout's own identity (the same outcome as a refused resolution). *Old daemon → new
+worker:* the field is absent, which deserializes as empty (`a_spawn_request_from_a_client_that_predates_the_commit_identity_carries_none`
+removes the key from a real request and decodes it). The round trip is pinned
+(`a_spawn_request_round_trips_its_commit_identity_over_the_worker_pipe`).
+
+**What carries a token: nothing here.** The field's contract is the four pairs. `plan_session_child` refuses any other
+key (`SESSION_GIT_ENVIRONMENT_KEYS`) before any I/O — naming the key, never the value — because the supervisor wire's
+`env` is a generic map and a future caller could otherwise put a credential on it
+(`a_github_token_is_refused_as_session_environment`, `a_loader_variable_is_refused_as_session_environment`). The
+account's token reaches a session's tools only by being *asked for*, per call, over the toolcall socket
+(`github-token` → `SessionGithubCredential`), on every path that has a handler; `a_planned_child_is_given_exactly_the_four_commit_identity_pairs`
+and `the_accounts_token_is_in_no_variable_the_tool_session_starts_with` pin the environment, and `GITHUB_TOKEN` in the
+daemon's environment resolves no identity (`a_github_token_in_the_daemons_environment_gives_an_unassigned_project_no_identity`).
+⚠ A *daemon* that itself has `GITHUB_TOKEN` exported hands it to its children by ordinary process-environment
+inheritance — no code here adds it, and nothing reads it (the REST client takes a parameter only), but the variable
+is in the child's environment. That is the operator's configuration, not this change; `spawn_as_user` does not
+`env_clear`.
+
+**⚠ Operator consequence, supervised hosts.** The supervisor's `spawn_policy.allowed_env_keys` is a *deny*, not a
+filter: a request naming a key it does not list is refused outright. A project that resolves to an account now sends
+the four keys, so on a supervised host they must be listed (`supervisor.yaml.production`, `dev.supervisor.yaml` and
+`daemon.yaml.production` now say so, in comments) or **every tool-session spawn for such a project is refused**, not
+degraded. That fails loudly rather than silently starting under the machine's identity, which is deliberate; it is
+also a behaviour change an upgrade must be told about. A project that resolves to nothing sends no key and spawns
+exactly as before.
+
 ### Still open
 
-- **Tool sessions (`tddy-coder` via the supervisor/worker wire)** start under the checkout's commit identity
-  and their agent's PR tools are refused ("its listener has no credential handler"). `tool_session_spawn.rs`
-  carries a `TODO(keyring 9/9)`. A fix is a **wire change**: `SpawnRequest` has no env field and the child has
-  no channel back to the daemon's `SessionGithubCredential`. Not done — a decision, not an edit.
-- **The prompt flag is set by nobody.** The hooks that read `github_pr_tools_available` run in a `tddy-coder`
-  process, whose listener has no credential handler for the same reason; until the wire above exists the
-  prompts truthfully stay silent. `TODO(keyring 9/9)` in `tddy-workflow-recipes/src/github_pr_tools.rs`. A
-  daemon-managed claude-cli session never runs these hooks.
+- **A tool session's PR tools still cannot reach the token.** A `tddy-coder` child's own toolcall listener has no
+  `GithubCredentialHandler` (`start_toolcall_listener_with_conversation_handler` has no such parameter), so its
+  agent's `github-token` is refused ("its listener has no credential handler") — truthful, and never an environment
+  fallback. **Stopped on purpose, because a real channel does not exist yet.** The only channel from that process
+  back to the daemon is `--host-session-socket` (`spawn_host_session_socket`), and it is unfit for a token:
+  1. it is bound **only for grill-me recipes** (`recipe_enables_conversation_spawn`), not for every tool session;
+  2. it is created **mode `0o777`** — its own `TODO(stdio-relay)` says to tighten it before cross-user production — so
+     serving a token on it would let any local user connect and fetch the owner's token;
+  3. it hosts `HostSessionService`, which has exactly one method (`spawn_conversation`); the token needs a new relay
+     verb on both ends (daemon `HostSessionService`, coder `DaemonRelayConversationSpawnHandler` sibling) plus a
+     `GithubCredentialHandler` on the coder's listener that forwards to it.
+  Done right it is: bind a per-session socket for *every* tool session with owner-only permissions (or a
+  credential-checked connect), add a `github-token` verb to `HostSessionService` answered by the session's
+  `SessionGithubCredential`, and a coder-side forwarding handler passed to the listener. That is a transport and
+  permissions decision, not an edit — left as one `TODO(keyring 9/9)` at `tool_session_spawn.rs` (the spawn site).
+- **The prompt flag has no production setter, and cannot honestly have one yet.** The hooks that read
+  `github_pr_tools_available` run in that same `tddy-coder` process, and its listener has no handler, so the flag
+  would be `false` on every path: a setter would be dead code asserting a constant. When a handler exists on that
+  listener, the process that builds it sets the flag from its presence (the condition the claude-cli paths bind their
+  handler under); until then the prompts truthfully stay silent. `TODO(keyring 9/9)` in
+  `tddy-workflow-recipes/src/github_pr_tools.rs` reworded to say exactly this. A daemon-managed claude-cli session
+  never runs those hooks, so there is no other site.
+- **Telegram-started tool sessions get no commit identity.** No session token — hence no vault — reaches
+  `telegram_spawn_options`, so nothing can resolve the project's account; they start under the checkout's own
+  identity. `TODO(keyring 9/9)` in `tddy-telegram-control/src/telegram_session_control/workflow_spawn.rs`.
 - **Plain cursor-cli: no PR-tool token.** It has no toolcall listener at all, so there is nothing to answer.
 - **Sandboxed cursor-cli resume is not implemented** (`resume_cursor_cli_session` ignores `sandbox`), so there
   is no relaunch to carry an identity.
@@ -531,17 +618,25 @@ content is below and is written into the package at wrap.
 ## Verification (measured)
 
 Scoped, not whole-workspace; CI is the authority on everything else. `./test -p <pkg>` (`--no-fail-fast`,
-`--test-threads=1`), `.verify-result.txt` read, on 2026-10-07/08.
+`--test-threads=1`), `.verify-result.txt` read, on 2026-10-08, after the tool-session identity and on-demand
+recipe changes.
 
 | Scope | passed | failed |
 |---|---|---|
-| `tddy-session-lifecycle` | 605 | 22 — all pre-existing: 16 *"sandbox RPC bridge not installed"* (`sandboxed_session_*`, `sandboxed_claude_cli_*`, `sandboxed_cursor_cli_*`, `resume/delete_sandbox_session_*`) and 6 `session_sync_livekit` (`tddy-remote-git-repo` not built, then *"Once instance has previously been poisoned"*) |
-| `tddy-accounts` `tddy-daemon-livekit` `tddy-daemon-auth` `tddy-toolcall` `tddy-tools` | 888 | 0 |
-| `tddy-workflow-recipes` `tddy-pr-stack` `tddy-github` `tddy-daemon-rpc` | 898 | 1 — `pr_stack_artifact_paths_acceptance::a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent`: the expected path is `/tmp/nix-shell…/pr-stack-plan.md` and the actual one `/private/tmp/nix-shell…/pr-stack-plan.md`, i.e. macOS's `/tmp` symlink; no file this change touches is in that path. Not baselined against a clean tree |
+| `tddy-spawn` `tddy-session-lifecycle` `tddy-workflow-recipes` `tddy-pr-stack` `tddy-github` `tddy-telegram-control` `tddy-supervisor` | 1669 | 23 — all pre-existing, by name: 16 *"sandbox RPC bridge not installed"* (`sandboxed_session_*` ×5, `sandboxed_claude_cli_*` ×5, `sandboxed_cursor_cli_*` ×4, `resume/delete_sandbox_session_*` ×2); 6 `session_sync_livekit_acceptance` (`mirrors_*`, `removes_a_file_the_agent_deleted`, `restores_a_mirror_*`, `follows_the_session_head_*` — `tddy-remote-git-repo` not built, then *"Once instance has previously been poisoned"*); 1 `pr_stack_artifact_paths_acceptance::a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent` (`/tmp` vs `/private/tmp`) |
+| `tddy-accounts` `tddy-daemon-livekit` `tddy-daemon-auth` `tddy-toolcall` `tddy-tools` `tddy-daemon-rpc` | 1139 | 0 |
 
-Scoped `cargo clippy -D warnings --all-targets` and `cargo fmt` over the seven touched packages
-(`tddy-session-lifecycle`, `tddy-daemon-rpc`, `tddy-github`, `tddy-workflow-recipes`, `tddy-toolcall`,
-`tddy-tools`, `tddy-pr-stack`): clean.
+New tests, all green: `tddy-spawn` 3 in `spawn_worker.rs` (request carries / round-trips / old payload decodes empty)
+and 5 in `tests/session_git_environment.rs`; `tddy-session-lifecycle` 6 in `tests/tool_session_git_identity.rs` and 2 in
+`tests/supervisor_spawn_delegation.rs`; `tddy-workflow-recipes` 8 in `tests/orchestrate_pr_stack_github_on_demand.rs`;
+`tddy-github` 4 in `pr_api.rs`. The failures above are untouched by this change and were not baselined against a clean
+tree beyond the previous run's identical list.
+
+Scoped `cargo check --all-targets` over `tddy-spawn`, `tddy-session-lifecycle`, `tddy-workflow-recipes`,
+`tddy-pr-stack`, `tddy-github`, `tddy-supervisor`, `tddy-telegram-control`, `tddy-daemon`, `tddy-coder`,
+`tddy-toolcall`, `tddy-tools` (every consumer of `SpawnOptions` / `SpawnRequest`): clean. `cargo clippy -D warnings
+--all-targets` and `cargo fmt` over the six packages with source changes (`tddy-spawn`, `tddy-session-lifecycle`,
+`tddy-workflow-recipes`, `tddy-pr-stack`, `tddy-github`, `tddy-telegram-control`): clean.
 
 ## Green wave
 
@@ -628,7 +723,7 @@ two above. **"Not measured" is not "clean"**; this node claims nothing about the
 - [x] **Deletion**: the environment resolution path; `FileGitHubTokenStore`'s readers — `login_time_token_store_is_retired.rs` (4 structural tests)
 - [x] **Testing**: unit + acceptance, scoped — see *Verification (measured)*
 - [x] **Package Documentation**: `packages/tddy-accounts/docs/github-identity-resolution.md` — content written under *M6* above; the file itself is created at wrap, since `packages/*/docs/` is changeset-driven
-- [ ] **Code Quality**: scoped clippy ✅ (`-D warnings`, `--all-targets`, the seven touched packages); ⚠ CI green not yet read
+- [ ] **Code Quality**: scoped clippy ✅ (`-D warnings`, `--all-targets`, the six packages with source changes — see *Verification (measured)*); ⚠ CI green not yet read
 
 ## Technical Changes
 
@@ -683,7 +778,7 @@ resolution this node builds.
 ✅ **M1 is not gated on #492 merging** — #492 is this stack's base, so its move is already in the tree.
 
 - [x] **M1** — REST entry points take a token; environment resolution deleted
-- [x] **M2** — one resolution at the session edge; token + identity from it — every session path this daemon owns (see *Closing the remaining seams*); ⚠ tool sessions (`tddy-coder`) remain, behind a wire change — see *Still open*
+- [x] **M2** — one resolution at the session edge; token + identity from it — every session path this daemon owns (see *Closing the remaining seams*), and the commit identity now reaches tool sessions (`tddy-coder`) over the spawn wire; ⚠ their agent's *token* does not — see *Still open*
 - [x] **M3** — a distinct failure per outcome
 - [x] **M4** — retire `FileGitHubTokenStore`'s readers — already true on the base (`#keyring` 3/9–8/9); the three structural tests were green before this node's green phase touched anything
 - [x] **M5** — acceptance: two projects, two accounts, one daemon — `project_resolved_identity_acceptance.rs`

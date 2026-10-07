@@ -330,6 +330,10 @@ fn telegram_spawn_options<'a>(
         // Telegram-spawned sessions don't wire the reverse spawn_conversation channel.
         // TODO(stdio-relay): telegram path.
         host_session_socket: None,
+        // TODO(keyring 9/9): a Telegram spawn has no signed-in owner whose vault could resolve the
+        // project's account (no session token reaches this path), so it adds no commit identity and
+        // the checkout's own stays in force — the same outcome as a refused resolution elsewhere.
+        git_environment: &[],
     }
 }
 

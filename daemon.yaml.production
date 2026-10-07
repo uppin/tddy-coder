@@ -47,6 +47,12 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # ~/.tddy/config.yaml sets spawn_path_extra, the PATH key under allowed_env_keys. An unlisted tool,
 # user or env key is refused rather than silently adjusted.
 #
+# A tddy-coder tool session of a project that acts as a GitHub account is also spawned with that
+# account's commit identity — GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME and
+# GIT_COMMITTER_EMAIL — which must be listed under allowed_env_keys too, or the supervisor refuses
+# that spawn. (A project that resolves to no account adds none of them.) Never a token: the
+# account's token is asked of the daemon per call and is in no spawn environment.
+#
 # STILL SPAWNED BY THE DAEMON ITSELF, and therefore still running as the daemon user on a supervised
 # host: sandbox sessions (tddy-sandbox-cgroups builds those jails in-process) and the claude-cli /
 # cursor-cli / PTY session types (pty_runtime.rs drops privilege by shelling out to `setpriv`, which

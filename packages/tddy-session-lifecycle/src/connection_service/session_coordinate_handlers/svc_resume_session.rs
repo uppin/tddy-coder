@@ -136,6 +136,17 @@ impl DaemonSessionHost {
                 .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?,
             None => None,
         };
+        // One resolution for the project this session belongs to, as on start; a project that no
+        // longer resolves resumes the session under the checkout's own identity, with the reason
+        // logged. Only the commit pairs go to the child — never the account's token.
+        let git_environment = self
+            .session_identity(
+                &os_user,
+                &req.session_id,
+                &metadata.project_id,
+                &req.session_token,
+            )
+            .git_environment;
         let result = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Resume,
@@ -157,6 +168,7 @@ impl DaemonSessionHost {
                 model: None,
                 // TODO(stdio-relay): wire the resume path's reverse channel too.
                 host_session_socket: None,
+                git_environment,
             })
             .await?;
         self.maybe_spawn_presenter_observer(

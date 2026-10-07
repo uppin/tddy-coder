@@ -332,10 +332,10 @@ impl Task for AssessTask {
                 .unwrap_or_else(|| context.get_sync::<String>("repo").unwrap_or_default())
         };
 
-        // The project's account, asked of the session's host per call — never read from the
+        // The project's account, asked of the session's host the first time a node's PR is looked
+        // up — so a stack no node of which owns a branch asks for nothing — and never read from the
         // environment. With no host to ask, or a refusal, the task fails with the host's reason.
-        let token = tddy_core::toolcall::request_github_token_from_session().await?;
-        let gh = tddy_github::pr_api::RealGithubPrApi::with_token(&github_owner_repo, token);
+        let gh = tddy_github::pr_api::RealGithubPrApi::asking_the_session_host(&github_owner_repo);
 
         let views = assemble_views(&session_dir, &sessions_root, &stack, &gh, &default_branch)?;
         let autonomous_merge = context

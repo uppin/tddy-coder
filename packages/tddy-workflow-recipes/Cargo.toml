@@ -37,3 +37,6 @@ tempfile = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
+# The on-demand GitHub tests stand up a session host on a unix socket, as `tddy-toolcall`'s own
+# acceptance suite does, to count the requests the stack tasks make of it.
+tddy-stdio = { path = "../tddy-stdio" }

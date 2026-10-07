@@ -107,12 +107,29 @@ impl DaemonSessionHost {
             .await?;
             pre_session_id = Some(tool_session_id);
         }
-        // TODO(keyring 9/9): a tool session (`tddy-coder`) starts under the checkout's own commit
-        // identity, and its agent's PR tools are refused for want of a credential handler. Both
-        // need the supervisor/worker wire: `ToolSpawnPlan` -> `SpawnRequest` carries no env and no
-        // channel back to this daemon's `SessionGithubCredential`, so the child cannot be given
-        // the `GIT_*` pairs (`SessionAccountAccess::session_identity`) nor a way to ask for the
-        // token. Adding either is a wire change, left for a decision.
+        // The commit identity of the account this project acts as: one lookup over the project's
+        // assignments, the same one every other session path makes. A project that does not resolve
+        // adds no pairs (logged) and the session still starts under the checkout's own identity.
+        // Only the pairs reach the child: the account's token is never in its environment, argv or
+        // files — see the `TODO(keyring 9/9)` below for why its tools cannot ask for it yet.
+        let git_environment = self
+            .session_identity(
+                &os_user,
+                pre_session_id.as_deref().unwrap_or("new"),
+                &pid_for_spawn,
+                &req.session_token,
+            )
+            .git_environment;
+        // TODO(keyring 9/9): a tool session's agent cannot reach the project account's token, so its
+        // PR tools are refused ("its listener has no credential handler"). The channel back to this
+        // daemon's `SessionGithubCredential` is the per-session `--host-session-socket`, which
+        // (1) is bound only for grill-me recipes, (2) is created with mode 0o777 (its own
+        // `TODO(stdio-relay)`), so serving a token over it would let any local user fetch the
+        // owner's token, and (3) hosts `HostSessionService`, which has one method
+        // (`spawn_conversation`). Handing the token over needs a decision on the transport
+        // (socket ownership/permissions, binding it for every tool session) and a new relay verb on
+        // both ends; it is not an edit. Until then the child's tools are refused with that reason —
+        // never given an environment fallback.
         let result = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Start,
@@ -131,6 +148,7 @@ impl DaemonSessionHost {
                 stack_seed_base_session: stack_seed_base_session_for_spawn,
                 model: model_for_spawn,
                 host_session_socket,
+                git_environment,
             })
             .await?;
         log::debug!(

@@ -103,6 +103,23 @@ pub fn execute_stack_merge(
     Ok(sha)
 }
 
+/// Whether [`execute_stack_repoint`] over `dependents` can reach GitHub: some dependent owns a
+/// branch, so there is a PR to re-target. A dependent that is not in the stack, or owns no branch,
+/// is skipped by the repoint before any GitHub call.
+pub fn repoint_reaches_github(
+    orchestrator_session_dir: &Path,
+    dependents: &[String],
+) -> Result<bool, WorkflowError> {
+    let changeset = tddy_core::changeset::read_changeset(orchestrator_session_dir)?;
+    let stack = changeset.stack.unwrap_or_default();
+    Ok(dependents.iter().any(|dependent| {
+        stack
+            .nodes
+            .iter()
+            .any(|node| &node.node_id == dependent && node.branch.is_some())
+    }))
+}
+
 /// Repoint all dependents of a merged node: rebase+force-push each branch, patch GitHub PR base.
 ///
 /// Advances the journal through `RepointingDependent { idx }` phases, deletes it on completion.
