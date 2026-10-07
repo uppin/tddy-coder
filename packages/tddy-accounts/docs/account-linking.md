@@ -1,7 +1,7 @@
 # Account linking
 
 How `tddy-accounts` adds a second account to a person's credential vault without becoming it.
-Product intent: [PRD](../../../docs/ft/daemon/1-WIP/PRD-2026-09-19-keyring-link-github.md).
+Product view: [account linking](../../../docs/ft/daemon/account-linking.md).
 
 ## The boundary: a link never mints a session
 

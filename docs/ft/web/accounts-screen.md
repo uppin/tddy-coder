@@ -2,7 +2,7 @@
 
 The **Accounts** screen at `#/accounts` shows the accounts a daemon keeps for the signed-in person —
 GitHub today, other providers as they are added — grouped by provider. From it a person can
-**rename** an account or **remove** one. It is reached from the hamburger menu, between **Hosts** and
+**rename** an account, **remove** one, or **add** another. It is reached from the hamburger menu, between **Hosts** and
 **VMs**, and by direct URL.
 
 ## Why it exists
@@ -16,7 +16,9 @@ surface only as git operations failing later, unexplained.
 ## What a row shows
 
 Per account: the **label** a person chose, the provider's own identifier for the account (the
-**subject**, e.g. a GitHub login), and a note when no usable credential is stored.
+**subject**, e.g. a GitHub login), and a note when no usable credential is stored. The account the **session was established with** carries
+a marker, and has no remove control: removing it is refused because the vault's key derives from it
+([Account linking](../daemon/account-linking.md#the-sessions-account-cannot-be-removed)).
 
 **No secret ever reaches the screen.** The service has no field that could carry one and no method
 that returns one; whether a credential is present is a single yes/no.
@@ -42,8 +44,26 @@ itself: the app-wide vault prompt does, and reloading the page brings it back af
 - **Remove** forgets one account's credential, after a confirmation. The rest stay.
 - A failed rename or removal is reported beside the list, which stays as it was.
 
-**Linking a new account is not done here.** Each provider's link flow is its own; this screen shows
-and curates what exists.
+### Add account
+
+Each provider group offers **Add account**. Pressing it begins one attempt (pressing it twice in a row
+starts only one), and the screen shows the **code** to type and **where to type it**. It waits the
+interval the daemon named before the first check, then checks again one interval later for as long as
+nobody has approved. The attempt ends in one of:
+
+- **Linked** — the account joins the provider's group; the session marker stays where it was and
+  nobody is signed in or out.
+- **Refused** — the person denied it at the provider.
+- **Expired** — the code outlived its window.
+- **Vault locked** — the approval had nowhere to go; stated as that, not as a refusal.
+- **Could not begin / gave up** — the daemon's reason is shown. One failed check in transit is retried;
+  several in a row end the attempt.
+
+Leaving the page stops the checking. While nobody has approved, the code stays on screen. See
+[Account linking](../daemon/account-linking.md).
+
+The control is shown for every provider group, including on a daemon that wired no linking (a stub
+GitHub provider); there the daemon refuses the request and the screen shows its reason.
 
 ## Scope and access
 

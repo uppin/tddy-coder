@@ -6,8 +6,8 @@ It is the surface the `/accounts` screen in `tddy-web` reads
 ([accounts screen](../../tddy-web/docs/accounts-screen.md)); the product view is
 [docs/ft/web/accounts-screen.md](../../../docs/ft/web/accounts-screen.md).
 
-Three methods, and deliberately no fourth. The service never **links** an account: each provider's
-link flow is an authorization dance of its own and lives with that provider.
+Three methods that read and curate, plus two that link ([Linking](#linking)). Linking is the only way
+a credential enters the vault through this service, and it never produces a session.
 
 | RPC | Does |
 |---|---|
@@ -131,6 +131,14 @@ duplicating that severity ordering here would be a second place it could drift f
 `tddy-credential-sync`. `tddy-daemon`'s `credential_sync` module is what actually implements the
 port, reading a live `SyncEngine`'s journal; see `tddy-credential-sync`'s own
 `docs/credential-sync.md` for the engine side.
+
+## Linking
+
+`BeginLinkAccount(session_token, provider)` and `PollLinkAccount(session_token, link_id)` add an
+account without replacing the session, and `ListAccountsResponse.session_account` marks the account
+the session was established with (which `RemoveAccount` refuses to remove). They are served only when
+`AccountsServiceImpl::with_linking` was called; otherwise both answer `FAILED_PRECONDITION`. Detail:
+[account-linking.md](./account-linking.md).
 
 ## Registration
 
