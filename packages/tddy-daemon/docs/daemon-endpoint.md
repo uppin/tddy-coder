@@ -97,6 +97,16 @@ it. No `auth_storage` means none of this — no vaults, no accounts entry, `cred
 `tests/runtime_signing_identity_acceptance.rs` pins that the key `runtime::build` advertises is the
 key it signs with.
 
+## Screen sharing
+
+`runtime::build` registers `screen_sharing.ScreenSharingService` through
+`tddy_screen_sharing::build_screen_sharing_entry`, handing the service
+`with_credential_vaults(auth_result.credential_vaults.clone())`. With vaults, a session's targets are
+`screen-sharing` records in the caller's credential vault, found by the same session-token resolver
+the service authenticates with. With no `auth_storage` there are no vaults, no target store, and the
+target calls refuse; the host-scoped calls and the bridge paths are unaffected. No key cache is held
+by the daemon. See [screen-sharing-service.md](../../tddy-screen-sharing/docs/screen-sharing-service.md).
+
 ## Credential sync
 
 `src/credential_sync.rs` is where `#keyring` 6/9's `tddy_credential_sync::SyncEngine` is actually
