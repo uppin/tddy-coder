@@ -1,15 +1,104 @@
 //! The single form: the callee of one call replaced, the arguments untouched.
 
+use super::super::seam_refusal;
+use super::super::signature_rewrites::{call_in, edits_of, Call, Replacement, Span};
 use crate::edit::{Range, TextEdit};
 use crate::Result;
 
 /// The edits that replace everything before the argument list of the one call `range` covers in
 /// `text` with `callee`.
 ///
-/// TODO(repoint-call): implement (the range is exactly one call, the old callee holds no call, a
-/// turbofish the new callee cannot restate is refused, a callee equal to the current one is refused).
-pub(super) fn rewrite_callee(_text: &str, _range: Range, _callee: &str) -> Result<Vec<TextEdit>> {
-    Err(super::unfinished())
+/// The range must be exactly one call — [`call_in`] refuses anything else. What is replaced is the
+/// callee alone: the arguments and the parentheses around them are kept byte for byte, and a
+/// comment between the callee and the `(` is not this operation's to move.
+pub(super) fn rewrite_callee(text: &str, range: Range, callee: &str) -> Result<Vec<TextEdit>> {
+    let call = call_in(text, range)?;
+    let current = text[call.from..call.open].trim_end();
+    refuse(&call, text, current, callee)?;
+    Ok(edits_of(
+        text,
+        vec![Replacement {
+            span: Span {
+                from: call.from,
+                to: call.open,
+            },
+            with: callee.trim().to_string(),
+        }],
+    ))
+}
+
+/// The refusals the single form makes about the call and the callee, before any edit is built.
+fn refuse(call: &Call, text: &str, current: &str, callee: &str) -> Result<()> {
+    if current.trim() == callee.trim() {
+        return Err(seam_refusal(format!(
+            "`{current}` is the callee the call already writes: re-pointing a call to itself \
+             re-points nothing"
+        )));
+    }
+
+    // An original method call with a turbofish cannot be restated by a field or method chain — there
+    // is nowhere in `self.peer.m` to write `::<T>`. A path callee may carry its own.
+    let whole = &text[call.from..call.to];
+    if let Ok(syn::Expr::MethodCall(method)) = syn::parse_str::<syn::Expr>(whole) {
+        if method.turbofish.is_some() {
+            let carries_its_own = matches!(
+                syn::parse_str::<syn::Expr>(callee.trim()),
+                Ok(syn::Expr::Path(_))
+            );
+            if !carries_its_own {
+                let turbofish = current.find("::<").map_or("::<…>", |at| &current[at..]);
+                return Err(seam_refusal(format!(
+                    "the call `{whole}` carries a turbofish `{turbofish}`, which a field or method \
+                     chain cannot restate: use a path callee that carries its own turbofish"
+                )));
+            }
+        }
+    }
+
+    // The old callee must hold no call: `a.m(x).n` replaced by `b.n` would drop `m(x)`'s arguments
+    // silently, so the inner call is re-pointed on its own range first.
+    if let Some(inner) = the_call_the_callee_holds(current) {
+        return Err(seam_refusal(format!(
+            "the callee `{current}` holds a call, `{inner}`, whose arguments would be dropped \
+             silently: re-point the inner call on its own range first"
+        )));
+    }
+
+    Ok(())
+}
+
+/// The call the callee `current` holds, or `None` when it is only paths, fields, indexes and
+/// postfixes. The call is the receiver of the callee's own outermost member.
+fn the_call_the_callee_holds(current: &str) -> Option<String> {
+    let parsed = syn::parse_str::<syn::Expr>(current).ok()?;
+    match &parsed {
+        syn::Expr::Call(_) | syn::Expr::MethodCall(_) => Some(current.trim().to_string()),
+        syn::Expr::Field(field) => match &*field.base {
+            syn::Expr::Call(_) | syn::Expr::MethodCall(_) => {
+                let dot = last_dot_outside_brackets(current)?;
+                Some(current[..dot].trim().to_string())
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The offset of the last `.` of `text` that is not inside a bracket — the one that separates the
+/// outermost member of a field or method chain.
+fn last_dot_outside_brackets(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut found = None;
+    for (at, byte) in bytes.iter().enumerate() {
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b'.' if depth == 0 => found = Some(at),
+            _ => {}
+        }
+    }
+    found
 }
 
 #[cfg(test)]

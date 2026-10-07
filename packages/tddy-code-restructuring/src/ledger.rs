@@ -24,6 +24,10 @@ struct AppliedEdit {
     start: Position,
     end: Position,
     new_line_count: u32,
+    /// How the edit moves a position that shares its line and lies at or after its end, when the edit
+    /// stays on one line. `0` for an edit that spans lines, whose positions move by whole lines only.
+    #[serde(default)]
+    col_delta: i32,
 }
 
 /// A ledger written to disk after a completed operation, tagged with the operation it reflects.
@@ -77,8 +81,22 @@ impl PositionLedger {
         };
 
         let mut line = pos.line;
+        let mut col = pos.col;
         for edit in applied {
-            if line >= edit.end.line {
+            if edit.stays_on_one_line() {
+                // An edit that stays on one line moves only the column of a position on that line: a
+                // position at or after its end shifts by the width it changed, and one inside the
+                // text it replaced is invalidated.
+                if line == edit.start.line {
+                    if col >= edit.end.col {
+                        col = col.saturating_add_signed(edit.col_delta);
+                    } else if col > edit.start.col {
+                        return Err(crate::RestructureError::AnchorInvalidated {
+                            path: origin.display().to_string(),
+                        });
+                    }
+                }
+            } else if line >= edit.end.line {
                 line = line.saturating_add_signed(edit.line_delta());
             } else if line >= edit.start.line {
                 return Err(crate::RestructureError::AnchorInvalidated {
@@ -86,7 +104,7 @@ impl PositionLedger {
                 });
             }
         }
-        Ok(Position { line, col: pos.col })
+        Ok(Position { line, col })
     }
 
     /// Fold one operation's complete multi-file edit set into the ledger.
@@ -186,6 +204,7 @@ impl PositionLedger {
                 start: shift(edit.range.start, rebase),
                 end: shift(edit.range.end, rebase),
                 new_line_count: line_count(&edit.new_text),
+                col_delta: col_delta(edit),
             };
             rebase += entry.line_delta();
             applied.push(entry);
@@ -207,6 +226,22 @@ impl AppliedEdit {
     fn line_delta(&self) -> i32 {
         self.new_line_count as i32 - (self.end.line - self.start.line) as i32
     }
+
+    /// Whether the edit leaves its line unchanged, so a position sharing it moves by column alone.
+    fn stays_on_one_line(&self) -> bool {
+        self.start.line == self.end.line && self.new_line_count == 0
+    }
+}
+
+/// How `edit` moves the column of a position at or after its end on its own line, when it stays on
+/// one line; `0` otherwise, where the positions move by whole lines instead.
+fn col_delta(edit: &TextEdit) -> i32 {
+    let one_line = edit.range.start.line == edit.range.end.line && line_count(&edit.new_text) == 0;
+    if !one_line {
+        return 0;
+    }
+    let removed = (edit.range.end.col - edit.range.start.col) as i32;
+    edit.new_text.chars().count() as i32 - removed
 }
 
 fn shift(pos: Position, lines: i32) -> Position {

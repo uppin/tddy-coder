@@ -24,7 +24,7 @@ pub(in super::super) fn rewrite_declaration(
     let (open, close) = offset_at(text, name_at)
         .and_then(|name| parameter_list(&code, name))
         .ok_or_else(|| seam_refusal("the anchor does not name a function with a parameter list"))?;
-    let parameters = parameters(&code, open, close);
+    let parameters = parameters(text, &code, open, close);
 
     let replacements = match op.op {
         RefactorKind::ChangeParamType => change_param_type(&code, &parameters, op),
@@ -180,6 +180,6 @@ fn begins_the_word(code: &str, at: usize, word: &str) -> bool {
 }
 
 /// The parameters between the parentheses at `open` and `close`, each trimmed of its whitespace.
-fn parameters(code: &str, open: usize, close: usize) -> Vec<Span> {
-    entries(code, open, close, true)
+fn parameters(text: &str, code: &str, open: usize, close: usize) -> Vec<Span> {
+    entries(text, code, open, close, true)
 }

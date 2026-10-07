@@ -351,7 +351,7 @@ async fn the_bulk_form_edits_a_caller_in_another_crate_and_a_test_binary() {
             ("src/peer.rs", PEER),
             (
                 "tests/uses_slot.rs",
-                "use app::host::Host;\n\n#[test]\nfn slots() {\n    let host = Host { peer: app::peer::Peer };\n    assert_eq!(host.slot(5), 5);\n}\n",
+                "use app::host::Host;\n\n#[test]\nfn slots() {\n    let host = Host {\n        peer: app::peer::Peer,\n    };\n    assert_eq!(host.slot(5), 5);\n}\n",
             ),
         ],
         &[(

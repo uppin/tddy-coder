@@ -314,11 +314,11 @@ fn replace_whole_identifier(text: &str, from: &str, to: &str) -> String {
     out
 }
 
-fn is_word_byte(character: Option<&char>) -> bool {
+pub(crate) fn is_word_byte(character: Option<&char>) -> bool {
     character.is_some_and(|character| character.is_alphanumeric() || *character == '_')
 }
 
-fn word_end(chars: &[char], at: usize) -> usize {
+pub(crate) fn word_end(chars: &[char], at: usize) -> usize {
     let mut end = at;
     while is_word_byte(chars.get(end)) {
         end += 1;
@@ -327,7 +327,7 @@ fn word_end(chars: &[char], at: usize) -> usize {
 }
 
 /// The offset just past the string literal opening at `at`.
-fn string_end(chars: &[char], at: usize) -> usize {
+pub(crate) fn string_end(chars: &[char], at: usize) -> usize {
     let mut end = at + 1;
     while end < chars.len() {
         match chars[end] {

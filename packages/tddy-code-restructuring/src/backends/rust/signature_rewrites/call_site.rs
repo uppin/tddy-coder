@@ -8,9 +8,13 @@ use crate::plan::{OrderKey, RefactorKind, RefactorOp};
 use crate::Result;
 
 /// The call expression `range` covers, with the arguments it passes.
-struct Call {
+pub(in crate::backends::rust) struct Call {
+    /// The offset the call's own text starts at, its leading whitespace trimmed.
+    pub(in crate::backends::rust) from: usize,
+    /// The offset just past the call's own text.
+    pub(in crate::backends::rust) to: usize,
     /// The offset of the `(` opening the argument list.
-    open: usize,
+    pub(in crate::backends::rust) open: usize,
     arguments: Vec<Span>,
 }
 
@@ -96,7 +100,7 @@ fn argument_position(position: &str, len: usize, limit: usize) -> Result<usize> 
 }
 
 /// The call `range` covers, refusing a range that is anything else.
-fn call_in(text: &str, range: Range) -> Result<Call> {
+pub(in crate::backends::rust) fn call_in(text: &str, range: Range) -> Result<Call> {
     let outside = || seam_refusal("the anchor's range lies outside its file");
     let (start, end) = offset_at(text, range.start)
         .zip(offset_at(text, range.end))
@@ -128,7 +132,12 @@ fn call_in(text: &str, range: Range) -> Result<Call> {
             arguments.len()
         )));
     }
-    Ok(Call { open, arguments })
+    Ok(Call {
+        from,
+        to,
+        open,
+        arguments,
+    })
 }
 
 /// The `(` that matches the `)` ending `bytes[from..to]`.
@@ -158,7 +167,7 @@ fn opening_of_the_last_group(bytes: &[u8], from: usize, to: usize) -> Option<usi
 fn arguments_of(text: &str, code: &str, open: usize, close: usize) -> Vec<Span> {
     let mut arguments = Vec::new();
     let mut joined: Option<Span> = None;
-    for piece in entries(code, open, close, false) {
+    for piece in entries(text, code, open, close, false) {
         let candidate = Span {
             from: joined.map_or(piece.from, |pending| pending.from),
             to: piece.to,
