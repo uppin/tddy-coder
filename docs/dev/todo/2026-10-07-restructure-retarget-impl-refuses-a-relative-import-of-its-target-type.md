@@ -1,6 +1,6 @@
 # 2026-10-07 — `retarget_impl` refuses a file that already imports its target type by a `super::` path
 
-**Category:** Restructure engine defect (blocks `#carve` 20/21 from finishing)
+**Category:** Restructure engine defect (worked around once, with the developer's consent; the engine is not fixed)
 **Source:** `#carve` 20/21, [`2026-09-26-carve-lifecycle-ports-launch-start`](../1-WIP/2026-09-26-carve-lifecycle-ports-launch-start.md), M7b.3
 
 ## What happened
@@ -42,3 +42,7 @@ Either of:
    not worked around.
 
 Proven by `check --deep` on a warm index daemon; nothing was written for this operation.
+
+## Status (2026-10-08)
+
+Option 2 was taken for `#carve` 20/21 with the developer's consent, relayed by the coordinator: the import in `svc_resume_claude_cli_session.rs` is respelled by hand and carries `TODO(restructure-retarget-impl-s6)`. The engine defect (option 1) stays open.

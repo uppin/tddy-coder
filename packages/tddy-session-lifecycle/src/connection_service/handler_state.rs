@@ -128,18 +128,6 @@ impl DaemonSessionHost {
         }
     }
 
-    /// Start the presenter observer for a freshly spawned workflow session (see
-    /// [`PresenterObserverDeps::maybe_spawn_presenter_observer`]), over this host's sinks.
-    pub(crate) fn maybe_spawn_presenter_observer(
-        &self,
-        os_user: &str,
-        session_id: &str,
-        grpc_port: u16,
-    ) {
-        self.presenter_observer_deps()
-            .maybe_spawn_presenter_observer(os_user, session_id, grpc_port);
-    }
-
     /// The same fields, owned, plus this host's callbacks: the handle the agent topic's methods
     /// live on, for the places a borrowed state cannot go (a task, a `'static` closure).
     ///

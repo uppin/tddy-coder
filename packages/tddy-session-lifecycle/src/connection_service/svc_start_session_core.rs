@@ -27,7 +27,7 @@ use super::AttachmentProgressSink;
 
 use tddy_service::proto::session::StartSessionRequest;
 
-use super::svc_agent_roster_wiring::DaemonSeedCloneClaimant;
+use crate::connection_service::agent_host_callbacks::DaemonSeedCloneClaimant;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 

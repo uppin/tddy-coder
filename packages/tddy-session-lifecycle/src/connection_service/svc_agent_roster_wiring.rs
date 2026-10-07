@@ -1,18 +1,7 @@
-use crate::connection_service::agent_host_callbacks::AgentRoster;
 use crate::connection_service::DaemonSessionHost;
-use crate::connection_service::{seed_codebase, seeded_clone_guard, SeededAgentClones};
 use tddy_rpc::Request;
 use tddy_rpc::Status;
 use tddy_service::proto::session::GetWorktreeSnapshotRequest;
-
-/// The daemon in its capacity as the claimant of the clones a session's peer-owned agents read.
-///
-/// A shallow clone of the service (every mutable field is behind an `Arc`) rather than the service
-/// itself, so the free spawn functions can be handed the one collaborator they need without naming
-/// the concrete daemon type in their signatures.
-pub(crate) struct DaemonSeedCloneClaimant {
-    pub(crate) service: AgentRoster,
-}
 
 /// The daemon measuring a checkout that lives on one of its peers.
 ///
@@ -54,20 +43,5 @@ impl tddy_daemon_livekit::session_room::RemoteSnapshotSource for DaemonSessionHo
             // stale content. See docs/dev/TODO.md.
             wip_tree: String::new(),
         })
-    }
-}
-
-#[async_trait::async_trait]
-impl SeededAgentClones for DaemonSeedCloneClaimant {
-    async fn claim_for_seed(
-        &self,
-        session_id: &str,
-        codebase: &seed_codebase::SeedCodebase,
-        session_token: &str,
-        records: &mut [tddy_core::SessionAgentRecord],
-    ) -> Result<seeded_clone_guard::SeededCloneGuard, Status> {
-        self.service
-            .claim_co_located_seed_clones(session_id, codebase, session_token, records)
-            .await
     }
 }

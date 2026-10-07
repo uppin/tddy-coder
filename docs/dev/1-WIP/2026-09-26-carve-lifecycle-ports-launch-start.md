@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s session start, resume and coordinate handlers run over the launch ports, completing the in-place conversion
 
 **Date**: 2026-09-26
-**Status**: ⚠ Partly implemented (2026-10-07). Everything but `resume_claude_cli_session` and `resume_session_at_session_coordinate` is converted; those two wait on an engine refusal (see Validation results)
+**Status**: ✅ Implemented (2026-10-08). The refused resume pair was converted after the developer consented to respelling one `use` by hand (see Validation results). Open: A3 finds two T4 → `hooks_and_urls` edges that node 17 must resolve
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 20/21, branch `feature/carve/lifecycle-ports-launch-start`, on top of `#carve` 19
 (`feature/carve/lifecycle-ports-launch-spawns`). Plan label **16e** (M7b + M8)
@@ -187,29 +187,29 @@ T1c.
 
 ## Scope
 
-- [~] **M7b.1 state** (done, with differences: see Validation results): `LaunchState` gains `hosted_agent_clones`, `peer_routing`, `rpc_activity`,
+- [x] **M7b.1 state** (with differences: see Validation results): `LaunchState` gains `hosted_agent_clones`, `peer_routing`, `rpc_activity`,
   `session_admissions`, `session_agent_inference`, `session_rooms`, `spawn_client`, `user_resolver`,
   `workspace_sandboxes` (16 in total); the launch handle gains the split handle and
   `PresenterObserverDeps`; the builder fills them
 - [x] **M7b.2 extract** (done with `move_item`, not `extract_module`): `extract_module` `ensure_project_available_for_start` + `spawn_project_clone`
   (185) out of `svc_resolve_listed_worktree.rs`, and `index_workspace_worktree` (22) out of
   `svc_ensure_session_room_for_agents.rs`, into T1 modules
-- [~] **M7b.3 convert** (all but `svc_resume_claude_cli_session.rs`, refused by `retarget_impl`): `svc_start_session_core.rs` and `cli_branch_starts`, `start_request_checks`,
+- [x] **M7b.3 convert** (`svc_resume_claude_cli_session.rs` last, after the consented import respelling): `svc_start_session_core.rs` and `cli_branch_starts`, `start_request_checks`,
   `tool_session_spawn`, `workspace_branch_start`; the T1 part of `svc_resume_claude_cli_session.rs`;
   the two extracted modules. `tool_spawn_plan` and `hooks_and_urls.rs`'s T1 part: imports only
 - [x] **M7b.4 re-point** the `SplitHost` impl's `start_workspace_session` to the launch handle's
   `start_session_core`
-- [~] **M8.1 convert** (all but `svc_resume_session.rs`, which calls the refused function): `session_coordinate_handlers.rs` (5 methods), `svc_resume_session.rs`,
+- [x] **M8.1 convert**: `session_coordinate_handlers.rs` (5 methods), `svc_resume_session.rs`,
   `svc_signal_delete_session.rs`; `stream_start_…`'s `self.clone()` → a launch-handle clone; lift
   `session_entry_from_listing`
-- [~] **M8.2 re-point** (every entry but `resume_session`): the `SessionHandler` / `SessionService` impls (`svc_session_lifecycle_ports.rs`)
+- [x] **M8.2 re-point**: the `SessionHandler` / `SessionService` impls (`svc_session_lifecycle_ports.rs`)
   and the `SplitHost` impl's `delete_session` to the launch handle
-- [~] **M8.3 sweep** (two non-wiring files remain, see A9):: `grep -rn 'impl DaemonSessionHost'` lists only wiring files; every remaining
+- [x] **M8.3 sweep** (see A9):: `grep -rn 'impl DaemonSessionHost'` lists only wiring files; every remaining
   method there is a builder, an accessor, a port impl or a delegator a consumer or test calls
 - [x] **Baseline** after each of M7b and M8: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [~] **Acceptance checks** A1–A9 over every topic (A1, A2, A9 not met; see Validation results)
+- [~] **Acceptance checks** A1–A9 over every topic (all met except A3's two `hooks_and_urls` edges and A4's one out-of-scope hit; see Validation results)
 - [ ] `restructure verify --against <16d tip>`: every statement accounted for (cannot exit zero over hand edits; see Validation results)
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -570,27 +570,37 @@ dead host methods, and after the extract the two clippy `ptr_arg` signature fixe
   The struct lives in `svc_agent_roster_wiring.rs`, so A2 is not met by it; it was already named there by
   `cli_branch_starts.rs`'s signature. Moving it into the agent topic is a move for the engine, not done here.
 
-### Stopped on: an engine refusal
+### The engine refusal, and how it was closed
 
-`retarget_impl` over `svc_resume_claude_cli_session.rs` is refused by `check --deep` (S6: the file already binds
+`retarget_impl` over `svc_resume_claude_cli_session.rs` was refused by `check --deep` (S6: the file already bound
 `LaunchSessions` through `use super::launch_ports::LaunchSessions;`). Recorded in
 [`2026-10-07-restructure-retarget-impl-refuses-a-relative-import-of-its-target-type`](../todo/2026-10-07-restructure-retarget-impl-refuses-a-relative-import-of-its-target-type.md).
-It was **not** worked around. Consequence: `resume_claude_cli_session` and `resume_session_at_session_coordinate`
-stay `impl DaemonSessionHost`, the `resume_session` `SessionHandler` entry still calls the host method, and A1 and A9 list those two files.
+The refusal was reported and not worked around. The developer then consented (relayed by the coordinator, 2026-10-08) to
+respelling that one `use` as `use crate::connection_service::launch_ports::LaunchSessions;` by hand, marked
+`TODO(restructure-retarget-impl-s6)` and listed in the commit. After that `check --deep` gave no findings, and the engine moved
+`resume_claude_cli_session` and `resume_session_at_session_coordinate`. The `resume_session` `SessionHandler` entry now calls the
+handle. Hand edits after the move: `self.split_sessions()` / `self.launch_sessions().m()` re-points, `self.agent_def_for_spawn` ->
+`self.agent_roster.agent_def_for_spawn`, two unused imports and the now-dead host `maybe_spawn_presenter_observer` removed.
+`DaemonSeedCloneClaimant` and its `SeededAgentClones` impl were moved into `agent_host_callbacks` by two engine `move_item` runs
+(the engine did not refuse), which closes A2.
 
 ### Acceptance checks, run on the final tree
 
 | # | Result |
 |---|---|
-| A1 | Not met. `grep` over topic files (comments excluded) hits `svc_resume_claude_cli_session.rs:16,18` and `session_coordinate_handlers/svc_resume_session.rs:3,28`, the refused pair |
-| A2 | Not met. `svc_agent_roster_wiring::DaemonSeedCloneClaimant` is named at `svc_start_session_core.rs:30` and `svc_start_session_core/cli_branch_starts.rs:160` (the second is older). No other wiring module is named |
-| A3 | Partly checked: no lower-topic file names a launch module (`launch_ports`, `svc_start_session_core`, `session_coordinate_handlers`, `svc_resume_claude_cli_session`, `svc_ensure_project_available_for_start`, `svc_index_workspace_worktree`). The full topic-map script was not written |
+| A1 | Met. `grep` over topic files (comments excluded) is empty |
+| A2 | Met. No topic file names `svc_agent_roster_wiring`, `handler_state`, `svc_host_builders`, a `svc_*_ports`, `PeerRouted*`, `DaemonRpcHandler`, `rpc_families` or `test_util` |
+| A3 | Scripted rank check (`CLI/leaves < T3 < T4/SU/WS < T1/T9/T1c`, 65 modules ranked by the inventory, `super::` and `crate::connection_service::` targets, test modules cut): **2 upward edges**, `svc_spawn_split_agent.rs` and `svc_start_sandboxed_codebase_session.rs` (T4) naming `hooks_and_urls` (T1) for `local_daemon_hook_url` and `claude_hook_daemon_url`. Both predate this node (16c). They are pure URL helpers, so node 17 should place them in a leaf rather than leave T4 depending on T1 |
 | A4 | Met for every M7b and M8 file and `hooks_and_urls.rs`. One hit left, `local_exec_tools.rs:23` (`use crate::session_agent_clone::{HostedAgentClones, HostedClone}`), a file this node does not own |
-| A5 | `grep 'Arc::new(self.clone())'` in topic files: three lines in `svc_start_claude_cli_session.rs` (72, 153, 200), the 16d Recipe B hand-offs, each cloning `LaunchSessions` |
-| A6 | One `trait` and one `impl ... for DaemonSessionHost` each (`agent_host_callbacks.rs:39`, `split_ports.rs:60`, `launch_ports.rs:48`; impls in `svc_agent_host_ports.rs:30,80,113`); no trait block changed vs `befc94163` |
-| A7 | `git diff befc94163 HEAD -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty; `cargo check --all-targets` clean on the five packages (`tddy-desktop` on CI) |
-| A8 | Baseline held at each point (above). `restructure verify --against HEAD --retarget DaemonSessionHost=LaunchSessions` lists 40 lost and 54 gained statements, all hand re-points; it cannot exit zero for hand edits |
-| A9 | Non-wiring `impl DaemonSessionHost` files: `svc_resume_claude_cli_session.rs` and `session_coordinate_handlers/svc_resume_session.rs` (refused pair), plus `conversation_worktree_op.rs` (older, not in the plan's wiring list) |
+| A5 | The grep matches exactly the three 16d Recipe B lines in `svc_start_claude_cli_session.rs` (72, 153, 200), each cloning `LaunchSessions` |
+| A6 | One `trait` and one `impl ... for DaemonSessionHost` each; no trait block changed vs `befc94163` |
+| A7 | `git diff befc94163 -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty; `cargo check --all-targets` clean on the five packages (`tddy-desktop` on CI) |
+| A8 | Baseline held (below). `restructure verify` lists only hand re-points and cannot exit zero for them |
+| A9 | Non-wiring `impl DaemonSessionHost`: none from this node. `conversation_worktree_op.rs` (older, not in the plan's wiring list) and the builder half of `session_worktree_observer.rs` remain |
+
+Final baseline run (after the resume pair and the claimant move): 574 passed, 23 failed, 1 ignored. The extra failure,
+`session_room_acceptance::a_commit_reaches_both_agent_participants_from_a_single_publish`, is `LiveKit testkit … container startup
+timeout` (Docker), and passes alone (`session_room_acceptance`: 21 passed). The other 22 are the same names, so the suite is 575 / 22 / 1.
 
 ### Size
 
@@ -602,7 +612,7 @@ stay `impl DaemonSessionHost`, the `resume_session` `SessionHandler` entry still
 - [ ] USER REVIEW: D1
 - [x] Rebase onto 16d once it is green
 - [x] Record the baseline on 16d's tip (575 / 22 / 1)
-- [~] Implementation M7b.1–M7b.4, then M8.1–M8.3 (partly; two files wait on the engine)
+- [x] Implementation M7b.1–M7b.4, then M8.1–M8.3
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
@@ -612,15 +622,15 @@ stay `impl DaemonSessionHost`, the `resume_session` `SessionHandler` entry still
 Tasks executed at wrap:
 
 **16e acceptance (the whole conversion)**
-- [ ] A1: no topic module names `DaemonSessionHost` (grep empty) — **2 files**: `svc_resume_claude_cli_session.rs`, `svc_resume_session.rs`
-- [ ] A2: no topic module names a wiring module (grep empty) — **`svc_agent_roster_wiring::DaemonSeedCloneClaimant`** named in `svc_start_session_core.rs` and `cli_branch_starts.rs`
-- [~] A3: no upward topic edge anywhere (launch-topic module names grepped over the lower topics: none; the full scripted map was not built)
+- [x] A1: no topic module names `DaemonSessionHost` (grep empty)
+- [x] A2: no topic module names a wiring module (grep empty; `DaemonSeedCloneClaimant` moved into `agent_host_callbacks` by the engine)
+- [~] A3: no upward topic edge anywhere (scripted rank check: two edges, `svc_spawn_split_agent` and `svc_start_sandboxed_codebase_session` → `hooks_and_urls`; for node 17)
 - [~] A4: every topic module names foundations and receivers by their defining crate (grep empty except `local_exec_tools.rs:23`, a file this node does not own)
 - [x] A5: no host clone in any topic module; the hand-offs clone the launch handle (the grep matches exactly the three 16d Recipe B lines, each cloning `LaunchSessions`)
 - [x] A6: the three callback traits defined once and implemented once on the host in wiring, approved methods only
 - [x] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [~] A8: baseline 575 / 22 / 1, the same 22 by name, after M7b and after M8 (held); `restructure verify` not accounted (hand edits)
-- [ ] A9: no `impl DaemonSessionHost` outside wiring files — **2 files** plus `conversation_worktree_op.rs` (older, not in the plan's wiring list)
+- [x] A8: baseline 575 / 22 / 1, the same 22 by name, after M7b, after M8 and at the end; `restructure verify` cannot exit zero over hand edits
+- [x] A9: no `impl DaemonSessionHost` outside wiring files (`conversation_worktree_op.rs` is older and not in the plan's wiring list; reported)
 
 **Documentation**
 - [ ] `packages/tddy-session-lifecycle/docs/module-layout.md`: the full topic and ports layout after the conversion (via the changeset workflow)

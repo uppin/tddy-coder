@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::connection_service::{seed_codebase, seeded_clone_guard, SeededAgentClones};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
@@ -117,5 +118,29 @@ impl AgentRoster {
             session_admissions: &self.session_admissions,
             model_registry: &self.model_registry,
         }
+    }
+}
+
+/// The daemon in its capacity as the claimant of the clones a session's peer-owned agents read.
+///
+/// A shallow clone of the service (every mutable field is behind an `Arc`) rather than the service
+/// itself, so the free spawn functions can be handed the one collaborator they need without naming
+/// the concrete daemon type in their signatures.
+pub(crate) struct DaemonSeedCloneClaimant {
+    pub(crate) service: AgentRoster,
+}
+
+#[async_trait::async_trait]
+impl SeededAgentClones for DaemonSeedCloneClaimant {
+    async fn claim_for_seed(
+        &self,
+        session_id: &str,
+        codebase: &seed_codebase::SeedCodebase,
+        session_token: &str,
+        records: &mut [tddy_core::SessionAgentRecord],
+    ) -> Result<seeded_clone_guard::SeededCloneGuard, Status> {
+        self.service
+            .claim_co_located_seed_clones(session_id, codebase, session_token, records)
+            .await
     }
 }

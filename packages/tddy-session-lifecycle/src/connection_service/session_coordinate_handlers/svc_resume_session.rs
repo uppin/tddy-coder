@@ -1,7 +1,5 @@
 use crate::connection_service::service_util;
 
-use crate::connection_service::DaemonSessionHost;
-
 use crate::connection_service::svc_start_session_core::{ToolSpawnPlan, ToolSpawnPurpose};
 
 use std::path::PathBuf;
@@ -22,10 +20,11 @@ use tddy_rpc::Response;
 
 use tddy_service::proto::session::ResumeSessionRequest;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_rpc::Request;
 use tddy_spawn::spawner;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(crate) async fn resume_session_at_session_coordinate(
         &self,
         request: Request<ResumeSessionRequest>,
@@ -86,7 +85,7 @@ impl DaemonSessionHost {
                     .await
                     .is_none()
             {
-                self.split_sessions()
+                self.split_sessions
                     .provision_workspace_tool_sandbox(&sessions_base, &req.session_id)
                     .await?;
             }
@@ -123,6 +122,7 @@ impl DaemonSessionHost {
         // this daemon defined still reaches the child as a def it can build a backend from.
         let resume_agent_def: Option<String> = match resume_agent.as_deref() {
             Some(name) => self
+                .agent_roster
                 .agent_def_for_spawn(name, &github_user)
                 .await?
                 .as_ref()
@@ -132,7 +132,6 @@ impl DaemonSessionHost {
             None => None,
         };
         let result = self
-            .launch_sessions()
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Resume,
                 os_user,

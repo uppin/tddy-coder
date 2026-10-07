@@ -70,7 +70,9 @@ impl SessionHandler for DaemonSessionHost {
         &self,
         request: Request<tddy_service::proto::session::ResumeSessionRequest>,
     ) -> Result<Response<tddy_service::proto::session::ResumeSessionResponse>, Status> {
-        self.resume_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .resume_session_at_session_coordinate(request)
+            .await
     }
 
     async fn signal_session(

@@ -12,10 +12,11 @@ use std::path::PathBuf;
 
 use crate::connection_service::hooks_and_urls;
 
-use super::launch_ports::LaunchSessions;
-use super::DaemonSessionHost;
+// TODO(restructure-retarget-impl-s6): spelled `crate::` by hand so `retarget_impl` does not read it as a clash
+// with the `use` it adds; see docs/dev/todo/2026-10-07-restructure-retarget-impl-refuses-a-relative-import-of-its-target-type.md.
+use crate::connection_service::launch_ports::LaunchSessions;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
     pub(crate) async fn resume_claude_cli_session(
         &self,
@@ -30,7 +31,6 @@ impl DaemonSessionHost {
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         if meta.sandbox == Some(true) {
             return self
-                .launch_sessions()
                 .resume_sandboxed_claude_cli_session(os_user, session_id, session_dir, meta)
                 .await;
         }
@@ -41,7 +41,7 @@ impl DaemonSessionHost {
         // token, since the original is scoped to a lifetime that may well have elapsed while the
         // session was stopped.
         let split = self
-            .split_sessions()
+            .split_sessions
             .resume_split_wiring(
                 &meta,
                 sessions_base,
@@ -80,7 +80,7 @@ impl DaemonSessionHost {
                     .as_ref()
                     .and_then(|c| c.tddy_tools_path.as_deref()),
             );
-            let launch = self.launch_sessions().prepare_managed_workflow(
+            let launch = self.prepare_managed_workflow(
                 &session_id_owned,
                 recipe,
                 &session_dir,

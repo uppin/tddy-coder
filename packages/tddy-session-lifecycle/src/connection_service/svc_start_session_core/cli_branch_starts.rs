@@ -159,7 +159,7 @@ impl LaunchSessions {
         start: CliStart,
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
         mut started_agents: Vec<tddy_core::SessionAgentRecord>,
-        clones: crate::connection_service::svc_agent_roster_wiring::DaemonSeedCloneClaimant,
+        clones: crate::connection_service::agent_host_callbacks::DaemonSeedCloneClaimant,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
         crate::cursor_cli_spawn::spawn_cursor_cli_session_reporting(
