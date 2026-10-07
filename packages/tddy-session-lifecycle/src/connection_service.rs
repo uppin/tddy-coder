@@ -228,6 +228,8 @@ mod svc_pr_status_for_caller;
 
 mod svc_start_claude_cli_session;
 
+mod session_acting_identity;
+
 mod hooks_and_urls;
 pub use hooks_and_urls::*;
 
@@ -503,6 +505,9 @@ mod resume_agent_recipe_restore_tests;
 
 #[cfg(test)]
 mod specialized_subagent_env_unit_tests;
+
+#[cfg(test)]
+mod session_acting_identity_tests;
 
 #[cfg(test)]
 mod seeded_roster_records_unit_tests;

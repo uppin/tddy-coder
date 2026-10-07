@@ -164,6 +164,8 @@ pub(super) struct ManagedClaudeCliLaunch<'a> {
     pub(super) session_dir: &'a Path,
     pub(super) worktree_path: &'a Path,
     pub(super) tddy_tools_path: String,
+    /// The `GIT_*` pairs of the account the project resolved to; empty when it resolved none.
+    pub(super) git_environment: Vec<(String, String)>,
 }
 
 pub(super) async fn managed_claude_cli_launch(
@@ -188,10 +190,11 @@ pub(super) async fn managed_claude_cli_launch(
         session_dir,
         worktree_path,
         tddy_tools_path,
+        git_environment,
     } = launch;
     let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
     let mut append_system_prompt_file: Option<PathBuf> = None;
-    let mut env_extra: Vec<(String, String)> = Vec::new();
+    let mut env_extra = git_environment;
     if let Some(recipe) = managed_recipe.clone() {
         let launch = managed_launch::prepare_managed_workflow_inner(
             tddy_data_dir,
@@ -206,7 +209,7 @@ pub(super) async fn managed_claude_cli_launch(
             conversation_spawn_handler.clone(),
         )?;
         append_system_prompt_file = Some(launch.prompt_file);
-        env_extra = launch.env;
+        env_extra.extend(launch.env);
         managed = Some(launch.workflow);
     }
     // Semantic index: build the per-session vector index over the worktree before launching the
@@ -304,3 +307,6 @@ pub(super) fn claude_cli_livekit_room(
     };
     (lk_room, lk_url, lk_server_identity)
 }
+
+#[cfg(test)]
+mod claude_cli_spawn_steps_tests;

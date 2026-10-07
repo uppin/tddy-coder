@@ -15,6 +15,10 @@ use crate::connection_service::hooks_and_urls;
 use super::launch_ports::LaunchSessions;
 use super::DaemonSessionHost;
 
+use super::session_acting_identity::SessionAccountAccess;
+
+use super::service_util;
+
 impl DaemonSessionHost {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
     pub(crate) async fn resume_claude_cli_session(
@@ -69,7 +73,12 @@ impl DaemonSessionHost {
         // changeset.yaml so the workflow continues from where it left off, not from the start goal.
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
         let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut env_extra: Vec<(String, String)> = split_env;
+        // One resolution for the project this session belongs to; a refusal (or a project that can no
+        // longer be read) resumes the agent under the checkout's own identity, with the reason logged.
+        // TODO(keyring 9/9): split-agent resumes are not given an identity here either.
+        let mut env_extra: Vec<(String, String)> =
+            self.resumed_git_environment(os_user, session_id, &meta.project_id, session_token);
+        env_extra.extend(split_env);
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
@@ -139,4 +148,35 @@ impl DaemonSessionHost {
         }))
     }
 }
+
+impl DaemonSessionHost {
+    fn resumed_git_environment(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Vec<(String, String)> {
+        let accounts =
+            match service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id) {
+                Ok((_, project)) => project.accounts,
+                Err(status) => {
+                    log::warn!(
+                        target: "tddy_daemon::connection_service",
+                        "session {session_id} resumes without an account identity: its project \
+                         could not be read: {}",
+                        status.message()
+                    );
+                    return Vec::new();
+                }
+            };
+        SessionAccountAccess::new(
+            self.credential_vaults(),
+            self.user_resolver(),
+            session_token,
+        )
+        .git_environment_or_inherited(session_id, &accounts)
+    }
+}
+
 mod svc_resume_split_wiring;

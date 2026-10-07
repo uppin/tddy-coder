@@ -289,6 +289,37 @@ lives in the session-spawn path (`tddy-session-lifecycle` / `runtime::build`), i
 tests, and was not written. Delivering the *token* to the agent is a separate decision: the
 four-variable test deliberately excludes it.
 
+## M2 — session-start wiring
+
+**Wired**: the co-located (unsandboxed) claude-cli session, on **start** and on **resume**. One
+`acting_identity` resolution per start or resume — the project's `accounts` assignments against the
+GitHub records of the caller's own vault (`SessionVaultAccountStore::list(session_token)`) — whose
+commit identity goes through `session_git_environment` into the agent's `env_extra`. Code:
+`tddy-session-lifecycle/src/connection_service/session_acting_identity.rs`; the token is **not**
+delivered, and nothing in the path reads `GITHUB_TOKEN` / `GH_TOKEN`. `tddy-session-lifecycle`
+gained path dependencies on `tddy-accounts` and `tddy-credentials` (no external crates, no cycle).
+
+### Decision (developer-consented): a refused resolution does not stop the session
+
+When resolution fails for **any** reason — `NotAssigned`, `UnknownOnThisHost`, `Ambiguous`,
+`Unusable`, a vault that is locked / uninitialized / has no such session / is unavailable, or no
+vaults configured — the session **still starts, with no `GIT_*` variables added**, and the refusal is
+logged at `warn` (`tddy_daemon::connection_service`).
+
+⚠ **This is the one place the identity half is not strictly enforced.** On a refused project the
+agent's commits use the checkout's inherited `user.name` / `user.email` — the status quo — so a
+commit can still be authored by whoever the machine is configured as. It is accepted because it keeps
+existing, unassigned projects working. It is *not* a token fallback: no credential is delivered on
+any path, so a push still cannot succeed as the wrong GitHub account through this seam.
+
+### Follow-ups (not wired; marked `TODO(keyring 9/9)` where they meet the seam)
+
+- sandboxed claude-cli, cursor-cli, split-agent, and tool-session (`tddy-coder` via the
+  supervisor/worker wire) starts — they keep the checkout's identity;
+- children spawned by an agent (`child_spawn_handler`, `conversation_spawn_handler`): the
+  orchestrator's session token is not held there, so they resolve nothing and log the refusal;
+- delivering a token to the agent (`github_token_for_agent` in `tddy-tools` is unchanged).
+
 ### Intended content of `packages/tddy-accounts/docs/github-identity-resolution.md`
 
 - **What it answers**: which GitHub account a project acts as, for both the token and the commit
@@ -441,7 +472,7 @@ resolution this node builds.
 ✅ **M1 is not gated on #492 merging** — #492 is this stack's base, so its move is already in the tree.
 
 - [x] **M1** — REST entry points take a token; environment resolution deleted
-- [ ] **M2** — one resolution at the session edge; token + identity from it — ⚠ **partly**: `acting_identity` and `session_git_environment` are implemented; **no caller resolves at the session edge yet** (see *Green-phase findings*)
+- [x] **M2** — one resolution at the session edge; token + identity from it — ⚠ **partly**: wired for the co-located claude-cli start and resume only; every other session path is a follow-up (see *M2 — session-start wiring*)
 - [x] **M3** — a distinct failure per outcome
 - [x] **M4** — retire `FileGitHubTokenStore`'s readers — already true on the base (`#keyring` 3/9–8/9); the three structural tests were green before this node's green phase touched anything
 - [x] **M5** — acceptance: two projects, two accounts, one daemon — `project_resolved_identity_acceptance.rs`
