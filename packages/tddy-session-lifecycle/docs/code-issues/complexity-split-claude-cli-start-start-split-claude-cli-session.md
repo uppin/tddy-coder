@@ -1,6 +1,6 @@
 # complexity: start_split_claude_cli_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/split_start/split_claude_cli_start.rs:32` — `start_split_claude_cli_session`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/split_start/split_claude_cli_start.rs:30` — `start_split_claude_cli_session`
 **Moved:** 2026-10-05 by `reparent_module` under `split_start`, from `connection_service/svc_materialize_staged_attachment/`; 2026-09-24 by #524 plan `11` (misplaced code: split sessions), from `connection_service/svc_materialize_staged_attachment.rs:270`; this record was `complexity-svc-materialize-staged-attachment-start-split-claude-cli-session.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -18,6 +18,7 @@
 | 2026-09-18 | 146 | 3 | 6 | 9 | first detection |
 | 2026-09-24 | 146 | — | — | — | #524: moved whole by plan `11`, body unchanged |
 | 2026-10-05 | 146 | 3 | 6 | 9 | moved whole by `reparent_module` (`#restructure` same-crate moves, `reexport: outside`): the file went from `svc_materialize_staged_attachment/` to `split_start/`, the body is byte-identical (fn line to closing brace: 146 at `origin/master` and at HEAD, `:32` both). Nesting, branches and exits are the first detection's: the file is a pure rename. |
+| 2026-10-07 | 149 | 3 | 6 | 9 | touched by `#carve` 18/21 (`SplitSessions`): the method moved from `impl DaemonSessionHost` to `impl SplitSessions` by `retarget_impl`, and two re-points grew it by **3** (146 to 149, fn line to closing brace at `4157e47f` and at HEAD): `self.agent_roster.resolve_specialized_agent_defs(..)` wraps over two lines (+1), and rustfmt breaks the longer `tddy_daemon_kernel::user_paths::sessions_base_for_user(..)` that `repoint_facade_imports` wrote across four lines instead of two (+2). **One line of headroom under the 150 budget.** Now at `:30`. Branches, exits and nesting not re-derived |
 
 ## What the tool found
 

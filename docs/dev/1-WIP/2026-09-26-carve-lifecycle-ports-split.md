@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s split topic (T4, `service_util`, `workspace_session`) runs over `SplitState` and a `SplitHost` port, in place
 
 **Date**: 2026-09-26
-**Status**: 📋 Planned. Awaiting the developer's review of D1, D3 (`SplitHost`) and D5
+**Status**: 🟡 Implemented, awaiting the developer's review and push. D1 (Recipe B), D3 and D5 were settled on 2026-10-07; M5.1-M5.6 are committed, and the baseline held at 575 / 22 / 1
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 18/21, branch `feature/carve/lifecycle-ports-split`, on top of `#carve` 17
 (`feature/carve/lifecycle-ports-agents`). Plan label **16c** (M5)
@@ -193,29 +193,29 @@ The scan followed `deferred-work/references/planning-cross-check.md`. No record 
 
 ## Scope
 
-- [ ] **M5.1 state and port**: `SplitState` (fields below), its owned handle (D1) and
+- [x] **M5.1 state and port**: `SplitState` (fields below), its owned handle (D1) and
   `trait SplitHost: AgentHostCallbacks` in `connection_service/split_ports.rs`; `impl SplitHost for
   DaemonSessionHost` in the wiring ports file (`start_workspace_session` → the host's
   `start_session_core`, `delete_session` → `delete_session_at_session_coordinate`, `session_files` →
   `PeerRoutedSessionFiles`, `session_agents` → `session_agents_service()`); the builder in
   `handler_state.rs`
-- [ ] **M5.2 extract**: `extract_module` `resume_split_wiring` + `split_withdrawals_from_codebase_host`
+- [x] **M5.2 extract**: `extract_module` `resume_split_wiring` + `split_withdrawals_from_codebase_host`
   (100) out of `svc_resume_claude_cli_session.rs`, and `provision_workspace_tool_sandbox` (27) out of
   `svc_ensure_session_room_for_agents.rs`, each into a T4 module
-- [ ] **M5.3 move down**: `attached_initial_prompt` from `svc_start_session_core/cli_branch_starts.rs`
+- [x] **M5.3 move down**: `attached_initial_prompt` from `svc_start_session_core/cli_branch_starts.rs`
   into T4 (D3); the launch topic's caller calls it there
-- [ ] **M5.4 convert** the T4 files in the inventory below; the three `self.clone()` hand-offs become
+- [x] **M5.4 convert** the T4 files in the inventory below; the three `self.clone()` hand-offs become
   split-handle clones or `SplitHost` calls
-- [ ] **M5.5 imports**: T4's free files, `service_util`, `workspace_session`, and the CLI files
+- [x] **M5.5 imports**: T4's free files, `service_util`, `workspace_session`, and the CLI files
   (`cli_session_manager` and its nine children, `session_toolcall`) name foundations by their defining
   crate (A4): `crate::pty_runtime` → `tddy_terminal_rpc::pty_runtime`, `crate::session_deletion` →
   `tddy_session_activity::…`
-- [ ] **M5.6 re-point wiring callers** of T4 host methods; keep the delegators (Responsibility)
-- [ ] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
+- [x] **M5.6 re-point wiring callers** of T4 host methods; keep the delegators (Responsibility)
+- [x] **Baseline** after the milestone: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] **Acceptance checks** A1–A8 for 16a's topics, T3, T4/SU/WS and CLI
-- [ ] `restructure verify --against <16b tip>`: every statement accounted for
+- [x] **Acceptance checks** A1–A8 for 16a's topics, T3, T4/SU/WS and CLI
+- [x] `restructure verify --against <16b tip>`: every statement accounted for (by hand: verify cannot exit zero, see Validation results)
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -531,15 +531,119 @@ Settled by the developer (2026-09-26), carried here:
 
 ## Validation results
 
-(Empty. Filled during `/green`.)
+Run on 2026-10-07 in the worktree, scoped to the packages this node touches. Nothing here is a workspace-wide
+run; `tddy-desktop` and the rest of the workspace are CI's.
+
+**Commits** (on `4157e47f`):
+
+| Milestone | Commit |
+|---|---|
+| M5.1 `SplitSessions`, `SplitHost`, host impl, builder | `cfd8d0c5` |
+| M5.3 + M5.4 + M5.6 convert, move `attached_initial_prompt` down, re-point callers | `e0dc016a` |
+| M5.2 the two `extract_module`s | `683d6e99` |
+| M5.5 imports by defining crate | `6a8485de` |
+| `workspace_sandbox_spec` out of `jail_relaunch` (extra cut) | `e152f33b` |
+
+**Baseline.** `./dev cargo test -p tddy-session-lifecycle --no-fail-fast -- --test-threads=1 --skip sandboxed_bash_pty_action_streams_output`
+
+| Run | Passed | Failed | Ignored |
+|---|---:|---:|---:|
+| Tip `4157e47f`, binaries not built | 563 | 34 | 1 |
+| Tip `4157e47f`, after building what `./test` builds | **575** | **22** | **1** |
+| After M5 (`e152f33b`) | **575** | **22** | **1** |
+
+The first row is an environment artifact, not a regression: `./dev cargo test` does not build
+`tddy-sandbox-runner` and the other binaries `./test` builds first, and 12 sandboxed-codebase tests
+(`sandboxed_codebase_lifecycle_acceptance`, `sandboxed_codebase_placement_acceptance`,
+`cursor_cli_session_acceptance`) died with "sandboxed child exited with code Some(127)". Built with the
+`./test` build line, the tip matches this document's baseline. The 22 failing names after M5 are
+identical to the 22 before (`diff` empty), and are the names in "Baseline" above. Those 12 sandboxed-codebase
+tests, which exercise `start_sandboxed_codebase_session`, `delete_paired_codebase_session` and the resume
+wiring, **pass on macOS** here, so they guard those paths; the 16 sandboxed failures (`sandbox RPC bridge not
+installed`) and the 6 `session_sync_livekit_acceptance` failures still cannot run on macOS, so the start,
+relaunch and delete paths they cover rest on compiling, the edit rule and Linux CI.
+
+The tests ran once, after M5.5 and the extra cut, not after every commit; the earlier commits are each
+checked by `cargo check --all-targets`, `clippy -D warnings` and `fmt --check` on lifecycle.
+
+`./dev cargo test -p tddy-session-agents`: 75 passed, 0 failed (the package is not touched; no count was taken
+before, so there is no before/after).
+
+**Gates.**
+
+| Gate | Result |
+|---|---|
+| `cargo check --all-targets -p tddy-session-lifecycle` | clean after every commit |
+| `cargo check --all-targets -p tddy-session-agents -p tddy-daemon-rpc -p tddy-daemon -p tddy-telegram-control` | clean |
+| `cargo clippy -p tddy-session-lifecycle -- -D warnings` | clean |
+| `cargo fmt -p tddy-session-lifecycle -- --check` | clean |
+
+**Acceptance A1-A8.**
+
+| # | Result |
+|---|---|
+| A1 | `grep -n DaemonSessionHost` over the converted set, comment lines excluded, finds only `svc_split_context_from_codebase_host.rs:18,379`: the `use` and the `impl` of `resume_sandboxed_claude_cli_session`, the T1 half the document excludes until 16d |
+| A2 | the wiring-module grep (`super::…DaemonRpcHandler|PeerRouted…|handler_state|svc_host_builders|svc_*_ports|rpc_families|test_util`, `crate::rpc_families`, `crate::test_util`) is empty over the converted set |
+| A3 | CLI files name only CLI siblings (`cli_session_manager`, `session_toolcall`). T4/SU/WS name `split_ports`, `attached_initial_prompt`, `hooks_and_urls`, `service_util`, `peer_session_answer`, `agent_roster` (T3), `claude_cli_session` (CLI) and `workspace_session`, plus **one edge the inventory missed**: `provision_workspace_tool_sandbox` named `jail_relaunch::workspace_sandbox_spec`, and `jail_relaunch` is the launch topic. `e152f33b` moves that function to `workspace_session` with `move_item` (its other caller, `local_exec_tools`, is re-pointed). `workspace_session` still reaches `service_util` items through `crate::connection_service::{find_registered_project, project_repo_root, starting_session_metadata}`, an intra-topic facade path (`service_util` is a private module of `connection_service`), left for node 17, which moves both |
+| A4 | the `crate::(config|…|pty_runtime|…)` grep is empty over the converted set. The engine resolved `crate::pty_runtime::{DEFAULT_TERM_COLS, DEFAULT_TERM_ROWS, PtyReady}` to `tddy_pty::runtime`, and `PtyRuntime`, `PtySpawnSpec` to `tddy_terminal_rpc::pty_runtime` |
+| A5 | `grep -n 'Arc::new(self.clone())'` is empty over the converted set |
+| A6 | one `trait SplitHost: AgentHostCallbacks` (`split_ports.rs:60`), one `impl SplitHost for DaemonSessionHost` (`svc_agent_host_ports.rs:79`); the methods are `start_workspace_session`, `delete_session`, `session_files`, `session_agents`, `session_room_roster`; no `LaunchHost`. `git diff 4157e47f -- agent_host_callbacks.rs` is only the removal of the `#[allow(dead_code)]` and its TODO on `worktree_snapshot`, which `join_split_livekit_room` now uses |
+| A7 | `git diff 4157e47f -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty |
+| A8 | 575 / 22 / 1, the same 22 names (table above) |
+
+**`restructure verify --against 4157e47f --retarget DaemonSessionHost=SplitSessions`** exits non-zero, as it always does for an extract
+(`2026-09-18-restructure-verify-cannot-exit-zero-for-an-extract-module`): "26 re-pointed through a module qualifier, 80
+cfg(test) gate lines excused", 32 statements lost, 167 gained. Accounted by hand: every lost statement has its
+counterpart among the gained ones, and the counterparts are exactly the edit rule's re-points listed in `e0dc016a`'s
+message. The comments lost are the `#[allow(dead_code)]` TODO (removed on request), a `// ... trait has to be in
+scope` comment that went with its now-unused `use`, and two doc paragraphs reworded where the thing they named moved
+(the module header of `svc_agent_host_ports.rs`, and `session_files_of_this_daemon`).
+
+**What the engine did.** `retarget_impl` (8 operations) and bulk `repoint_call` (4 callers only the launch topic has)
+moved the headers and the outside callers; the run's own compile gate failed as documented (18 errors, all the field
+and host calls the edit rule covers), and the hand edits listed in `e0dc016a` fixed them. Both `extract_module`
+(`to_file`, `reexport: none`) runs and the 27-file `repoint_facade_imports` and the `move_item` applied clean. Nothing
+was refused. The engine does not tidy the imports of a run whose gate fails, so the unused `use` lines it left were
+removed by hand, as `cargo` named them.
+
+**Premises in this document that were wrong.**
+- `split_withdrawals_from_codebase_host` does not exist; the T4 roster read is `split_roster_from_codebase_host`.
+- `AgentHostCallbacks` has 5 methods (`worktree_snapshot`, `run_exec_tool_locally`, `hosted_clone_for`,
+  `run_hosted_clone_tool`, `ensure_session_room`), not 3, and no `session_room_roster`, so that is a `SplitHost` method.
+- `split_claude_cli_start.rs` is `connection_service/split_start/split_claude_cli_start.rs`.
+- `svc_resolve_tddy_tools_path`'s host methods (`resolve_tddy_tools_path`, `agent_tool_socket_for_embedded_host`)
+  moved with `retarget_impl` like the rest (D1), not as free functions; the public free function is unchanged.
+- The `jail_relaunch` edge above.
+- `SplitHost::session_files` and `session_agents` cannot return `PeerRoutedSessionFiles` / `PeerRoutedSessionAgents`
+  (A2 names `PeerRouted*`); they return `Arc<dyn SessionFilesService<…>>` / `Arc<dyn SessionAgentService<…>>`, spelled
+  once as the aliases `SplitSessionFiles` and `SplitSessionAgents`, because both traits have associated stream types.
+- There is no borrowed `SplitState`: no free function in this topic takes one, so it would be dead code. The owned
+  handle is `SplitSessions` (named for the topic, as `AgentRoster` is).
+
+**Deviations and additions to this document's scope.**
+- `attached_initial_prompt` is a free function over `AttachmentState` in its own module (`attached_initial_prompt.rs`),
+  `pub(in crate::connection_service)` as it was, called by the launch topic's `cli_start_prelude` and by the split spawn.
+- `DaemonSessionHost::session_tokens()` had no caller left and is deleted; `SplitSessions::session_tokens()` carries the
+  same body (a copy, not a delegator: the host field is `Option<SessionTokens>` and the handle owns a clone).
+- A `#[cfg(test)]` delegator keeps `DaemonSessionHost::split_context_from_codebase_host` for
+  `split_context_from_codebase_host_tests` (`svc_split_delegators.rs`), as the plan asks for a delegator for every
+  test-called T4 method. It is test-only code; the in-crate test is unchanged.
+- `Box::pin(...)` around `host.start_workspace_session(..)` and `host.delete_session(..)` is kept from the original,
+  although the `async_trait` methods already box.
+- No visibility widened: the moved methods keep theirs, and the extractions' private members stayed private.
+
+**Not done / still open.** `module-layout.md` is not updated (it goes in at wrap, through the changeset workflow, as
+listed under Documentation). The T1 half of `svc_split_context_from_codebase_host.rs`
+(`resume_sandboxed_claude_cli_session`) and `index_workspace_worktree` in `svc_ensure_session_room_for_agents.rs` stay
+host methods for 16d/16e. `tddy-desktop` is checked on CI only.
 
 ## TODO
 
 - [x] Create changeset: this document
-- [ ] USER REVIEW: D1, D3 (`SplitHost` methods, `attached_initial_prompt` move), D5
-- [ ] Rebase onto 16b once it is green
-- [ ] Record the baseline on 16b's tip
-- [ ] Implementation M5.1–M5.6
+- [x] USER REVIEW: D1 (Recipe B), D3 (`SplitHost` methods, `attached_initial_prompt` move), D5. Settled by the developer on 2026-10-07
+- [x] Rebase onto 16b once it is green (16b is #532 and is on `origin/master`; the branch is based on it)
+- [x] Record the baseline on 16b's tip (575 / 22 / 1 on `4157e47f`, once the binaries `./test` builds were built; see Validation results)
+- [x] Implementation M5.1–M5.6
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
 - [ ] Wrap documentation (`/wrap-context-docs`)
@@ -549,19 +653,19 @@ Settled by the developer (2026-09-26), carried here:
 Tasks executed at wrap:
 
 **16c acceptance**
-- [ ] A1: no 16a-topic, T3, T4/SU/WS or CLI file names `DaemonSessionHost` (grep empty)
-- [ ] A2: none of them names a wiring module (grep empty)
-- [ ] A3: T4/SU/WS name no launch-topic module; CLI names no topic; the 16a/16b edges still hold (scripted grep; `cargo modules` if available)
-- [ ] A4: those files, CLI included, name foundations by their defining crate (grep empty)
-- [ ] A5: no host clone in a T4 file; the three hand-offs clone the split handle or call `SplitHost` (grep empty)
-- [ ] A6: `SplitHost: AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only; `AgentHostCallbacks` unchanged; no `LaunchHost` yet
-- [ ] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [ ] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted
-- [ ] `start_split_claude_cli_session` ≤ 150 lines; no touched file ≥ 500
+- [x] A1: no 16a-topic, T3, T4/SU/WS or CLI file names `DaemonSessionHost` (grep empty, except the T1 `resume_sandboxed_claude_cli_session` half of `svc_split_context_from_codebase_host.rs`, excluded by item range until 16d)
+- [x] A2: none of them names a wiring module (grep empty)
+- [x] A3: T4/SU/WS name no launch-topic module; CLI names no topic; the 16a/16b edges still hold (scripted; one extra edge found and cut, see Validation results)
+- [x] A4: those files, CLI included, name foundations by their defining crate (grep empty)
+- [x] A5: no host clone in a T4 file; the three hand-offs go through `SplitHost` callbacks (grep empty)
+- [x] A6: `SplitHost: AgentHostCallbacks` defined once, implemented once on the host in wiring, approved methods only; `AgentHostCallbacks` unchanged except the removal of its `dead_code` allowance and TODO, which the developer asked for; no `LaunchHost` yet
+- [x] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control` (`tddy-desktop` on CI)
+- [x] A8: baseline 575 / 22 / 1, the same 22 by name; `restructure verify` accounted by hand
+- [x] `start_split_claude_cli_session` ≤ 150 lines (149, one line of headroom); no touched file ≥ 500 (largest production file touched: 485)
 
 **Documentation**
 - [ ] `packages/tddy-session-lifecycle/docs/module-layout.md`: the split ports module, the two extracted T4 modules and `attached_initial_prompt`'s new home (via the changeset workflow)
-- [ ] The three T4 code issues re-measured (`start_split_claude_cli_session` ≤ 150; `spawn_split_agent` parameters unchanged under Recipe B)
+- [x] The three T4 code issues re-measured (`start_split_claude_cli_session` 149; `delete_paired_codebase_session` 96, unchanged; `spawn_split_agent` 112 to 118 lines, still 9 parameters). The three records carry the 2026-10-07 row
 - [ ] Release-note entry in `packages/tddy-session-lifecycle/docs/changesets/` with the before and after numbers
 
 ## Successor PRs
