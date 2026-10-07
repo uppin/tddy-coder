@@ -79,3 +79,20 @@ counts (`wc -l`, tests included) of the files 16a touched that are over 500, bas
 
 `cursor_cli_spawn.rs` (532) and `split_session.rs` (1,399) are over 500 whole-file lines at the base
 too and were not touched. No function grew in 16a.
+
+## Status 2026-10-07: `connection_service.rs` crosses 500 at `#carve` 18/21
+
+`connection_service.rs` went from **497 to 503 production lines** (inline-test-block rule; `loc.py` from the
+change history's "LoC assessment", `origin/master` against `#carve` 18/21's head). The growth is three
+`mod` declarations and their blank lines: `split_ports`, `attached_initial_prompt` and `svc_split_delegators`.
+It is the module-declaration hub, so each node of the stack that adds a module adds to it.
+
+The developer consented to **deferring** the decomposition (2026-10-07, `/pr-wrap` step 3.5), for the reason the
+step names for a stack branch: the dependents #534, #535 and #536 also edit this file, and #536 moves modules out
+of it, so a restructure here would cascade its rename fallout into all three. The record is
+`packages/tddy-session-lifecycle/docs/code-issues/oversized-file-connection-service.md`. Revisit after the stack
+lands: if #536 leaves the file under 500, close the record with the final measurement.
+
+The gate's naive count, to the first `#[cfg(test)]`, reads 18 for this file, so it cannot see the crossing; that
+is the gap in
+[`2026-09-19-the-file-length-gate-stops-at-the-first-cfg-test-use`](./2026-09-19-the-file-length-gate-stops-at-the-first-cfg-test-use.md).

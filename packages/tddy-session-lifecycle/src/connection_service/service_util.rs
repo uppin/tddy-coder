@@ -317,9 +317,9 @@ pub(crate) fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCo
 
 /// Resolve the `claude` binary for the interactive (non-sandboxed) StartSession path.
 ///
-/// Delegates to [`crate::config::resolve_claude_binary_path`] so the interactive and sandboxed
-/// spawn paths never diverge on which `claude` they pick (explicit config path honored; bare name
-/// auto-resolved to a real host install).
+/// Delegates to [`tddy_daemon_kernel::config::resolve_claude_binary_path`] so the interactive and
+/// sandboxed spawn paths never diverge on which `claude` they pick (explicit config path honored;
+/// bare name auto-resolved to a real host install).
 pub fn resolve_start_session_claude_binary(config: &DaemonConfig) -> String {
     tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

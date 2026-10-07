@@ -15,6 +15,7 @@
 | 2026-09-19 | 119 | 9 | 112 → 119 and **8 → 9 parameters** in PR #518 |
 | 2026-09-24 | 119 | 9 | re-measured for #524 (2026-09-24): unchanged, and not touched by it |
 | 2026-10-05 | 119 | 9 | touched by the same-crate moves and **unchanged by them**: `split_pairing` is named through `peer_session_answer`, one line re-pointed; 119 lines and 9 parameters at `origin/master` and at HEAD (fn line to closing brace) |
+| 2026-10-07 | 120 | 9 | touched by `#carve` 18/21: the T4 halves (`resume_split_wiring`, `split_roster_from_codebase_host`) were extracted to `svc_resume_claude_cli_session/svc_resume_split_wiring.rs`; this function gained **1** line (119 → 120, rustfmt wrap). **Parameters not re-counted here**: a brace-matching count on `HEAD` reads 8 against this record's 9 (it may count differently), so the 9 is carried unchanged and the discrepancy is left for the next measurement |
 
 ## What grew it
 
