@@ -1510,12 +1510,10 @@ pub async fn build(
             service: Arc::new(vm_server) as Arc<dyn tddy_rpc::RpcService>,
         });
 
-        // Screen sharing service — vault management + VNC/RDP bridge spawning.
-        // Wire `sessions_base` with the daemon's resolved `tddy_data_dir` so vaults live
-        // under the config-only tddy home (config → profile default → `$HOME/.tddy`),
-        // matching `sessions_base_resolver` above — not a statically-derived `$HOME/.tddy`.
-        let ss_key_cache: tddy_screen_sharing::ScreenSharingKeyCache =
-            Arc::new(Mutex::new(HashMap::new()));
+        // Screen sharing service — target records in the credential store + VNC/RDP bridge
+        // spawning. Wire `sessions_base` with the daemon's resolved `tddy_data_dir` so session
+        // metadata is read from the config-only tddy home (config → profile default →
+        // `$HOME/.tddy`), matching `sessions_base_resolver` above.
         let ss_sessions_base: tddy_screen_sharing::SessionsBase = {
             let dd = tddy_data_dir.clone();
             Arc::new(move |user: &str| {
@@ -1537,13 +1535,19 @@ pub async fn build(
             Arc::new(tddy_session_lifecycle::host_keypair::FileHostKeypair::new(
                 tddy_session_lifecycle::host_registry::host_registry_dir(&tddy_data_dir),
             ));
-        let ss_svc = tddy_screen_sharing::ScreenSharingServiceImpl::new(
-            ss_user_resolver,
-            ss_sessions_base,
-            Arc::clone(&ss_key_cache),
-        )
-        .with_config(Arc::clone(&config_arc))
-        .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts));
+        let ss_subject_resolver = ss_user_resolver.clone();
+        let mut ss_svc =
+            tddy_screen_sharing::ScreenSharingServiceImpl::new(ss_user_resolver, ss_sessions_base)
+                .with_config(Arc::clone(&config_arc))
+                .with_host_scope(ss_host_targets, ss_host_keypair, Arc::clone(&host_prompts));
+        // A target's password is a record in the caller's credential vault, so there is nothing to
+        // store it in without `auth_storage`: the targets calls then refuse rather than answer
+        // "no targets".
+        if let Some(vaults) = auth_result.credential_vaults.clone() {
+            ss_svc = ss_svc.with_target_store(Arc::new(
+                tddy_screen_sharing::SessionVaultTargetStore::new(vaults, ss_subject_resolver),
+            ));
+        }
         // The entry comes from `tddy-screen-sharing` rather than being assembled here: the
         // subsystem's whole contract with this wiring layer is the `ServiceEntry` it returns.
         rpc_entries.push(tddy_screen_sharing::build_screen_sharing_entry(ss_svc));

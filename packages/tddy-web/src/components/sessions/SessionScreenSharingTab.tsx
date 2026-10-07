@@ -23,7 +23,7 @@ export interface SessionScreenSharingTabProps {
   sessionId: string;
   sessionToken: string;
   room: Room | null;
-  onListTargets: () => Promise<ScreenSharingTargetInfo[]>;
+  onListTargets: () => Promise<ScreenSharingTargetListing>;
   onAddTarget: (req: AddScreenSharingTargetReq) => Promise<ScreenSharingTargetInfo>;
   onRemoveTarget: (targetId: string) => Promise<void>;
   onStartStream: (targetId: string) => Promise<StartStreamResult>;
@@ -37,6 +37,16 @@ export interface ScreenSharingTargetInfo {
   port: number;
   protocol: Protocol;
   username: string;
+}
+
+/**
+ * What `ListTargets` answered. `vaultLocked` is a state of the answer, not an empty list: a store
+ * this session's key does not open may hold targets, and showing it as empty tells the operator to
+ * add machines they already have.
+ */
+export interface ScreenSharingTargetListing {
+  targets: ScreenSharingTargetInfo[];
+  vaultLocked: boolean;
 }
 
 export interface AddScreenSharingTargetReq {
@@ -103,15 +113,16 @@ export function SessionScreenSharingTab({
 
   useEffect(() => {
     onListTargets()
-      .then((targets) =>
+      .then(({ targets, vaultLocked }) => {
+        dispatch({ type: "set_vault_locked", locked: vaultLocked });
         dispatch({
           type: "set_targets",
           targets: targets.map((t) => ({
             ...t,
             protocol: t.protocol === Protocol.RDP ? "rdp" : "vnc",
           })),
-        }),
-      )
+        });
+      })
       .catch(() => {/* ignore list errors — non-fatal */});
   // onListTargets is a callback prop; the effect intentionally runs once on mount.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -194,6 +205,16 @@ export function SessionScreenSharingTab({
   return (
     <>
       <div data-testid="sessions-screen-sharing-tab-panel" className="flex flex-col gap-3 px-3 py-3">
+        {state.isVaultLocked && (
+          <p
+            data-testid="sessions-screen-sharing-vault-locked"
+            role="status"
+            className="text-xs text-destructive"
+          >
+            The credential store is locked under a different login, so saved desktops cannot be
+            shown. Sign in again with the login that created it.
+          </p>
+        )}
         <div data-testid="sessions-screen-sharing-target-list" className="flex flex-col gap-1">
           {state.targets.map((t) => (
             <div

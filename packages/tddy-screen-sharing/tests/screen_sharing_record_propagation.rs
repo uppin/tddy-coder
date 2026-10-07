@@ -32,11 +32,18 @@ fn the_desktop_as_written_at(written_at: u64) -> VaultEntry {
     VaultEntry::Record(record_for(&a_desktop(), A_DESKTOP_PASSWORD, written_at))
 }
 
+/// A peer's edit of the desktop this daemon holds: the next version of the same record.
+fn the_desktop_edited_at(written_at: u64) -> VaultEntry {
+    let mut edited = record_for(&a_desktop(), A_DESKTOP_PASSWORD, written_at);
+    edited.version += 1;
+    VaultEntry::Record(edited)
+}
+
 #[test]
 fn a_peers_later_edit_of_a_desktop_wins_the_same_way_any_credential_does() {
     // Given this daemon's copy of a desktop, and a peer's later one
     let local = the_desktop_as_written_at(AN_EARLIER_WRITE);
-    let incoming = the_desktop_as_written_at(A_LATER_WRITE);
+    let incoming = the_desktop_edited_at(A_LATER_WRITE);
 
     // When the engine reconciles them — the same call a GitHub token takes
     let decision = SyncEngine::reconcile(Some(&local), &incoming);

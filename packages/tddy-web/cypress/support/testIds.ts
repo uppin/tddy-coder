@@ -685,8 +685,6 @@ export const TEST_IDS = {
   sessionsScreenSharingAddSubmit: "sessions-screen-sharing-add-submit",
   /** Shown when the credential store exists and this session's key does not open it. */
   sessionsScreenSharingVaultLocked: "sessions-screen-sharing-vault-locked",
-  /** Shown when the credential store exists and this session's key does not open it. */
-  sessionsScreenSharingVaultLocked: "sessions-screen-sharing-vault-locked",
 
   // Screen Sharing overlay
   screenSharingOverlay: "screen-sharing-overlay",

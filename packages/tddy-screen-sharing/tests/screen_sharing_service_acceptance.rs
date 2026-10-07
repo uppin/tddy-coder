@@ -15,21 +15,16 @@
 //! travels in the metadata — goes through the real [`record_for`] and [`target_from`], because that
 //! mapping is the whole of this node's claim and a fake that reimplemented it would test nothing.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 
-use tokio::sync::Mutex;
-
-use tddy_credentials::CredentialRecord;
+use tddy_credentials::{CredentialRecord, SecretString};
 use tddy_rpc::{Code, Request};
 use tddy_screen_sharing::screen_sharing_records::{
     account_for, record_for, screen_sharing_provider, target_from, ScreenSharingTargetStore,
     TargetError,
 };
-use tddy_screen_sharing::screen_sharing_service::{
-    ScreenSharingKeyCache, ScreenSharingServiceImpl,
-};
+use tddy_screen_sharing::screen_sharing_service::ScreenSharingServiceImpl;
 use tddy_service::proto::screen_sharing::{
     AddTargetRequest, ListTargetsRequest, Protocol, RemoveTargetRequest, ScreenSharingService,
     ScreenSharingTarget, StartStreamRequest,
@@ -122,7 +117,7 @@ impl ScreenSharingTargetStore for AnInMemoryTargetStore {
         self.the_records_it_holds()
             .into_iter()
             .find(|record| record.account == account_for(target_id))
-            .map(|record| record.secret)
+            .map(|record| record.secret.expose().to_string())
             .ok_or_else(|| TargetError::Malformed(format!("no target {target_id}")))
     }
 }
@@ -143,9 +138,8 @@ fn a_service_with_no_store(sessions_dir: &std::path::Path) -> ScreenSharingServi
     let sessions_base: SessionsBaseFn = Arc::new(move |_user| Some(sessions_path.clone()));
     let user_resolver: UserResolverFn =
         Arc::new(|token| (token == VALID_TOKEN).then(|| "testuser".to_string()));
-    let key_cache: ScreenSharingKeyCache = Arc::new(Mutex::new(HashMap::new()));
 
-    ScreenSharingServiceImpl::new(user_resolver, sessions_base, key_cache)
+    ScreenSharingServiceImpl::new(user_resolver, sessions_base)
 }
 
 fn session_dir(base: &std::path::Path) -> PathBuf {
@@ -230,7 +224,7 @@ async fn a_desktops_password_is_retained_as_a_screen_sharing_credential() {
     let records = store.the_records_it_holds();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].provider, screen_sharing_provider());
-    assert_eq!(records[0].secret, A_DESKTOP_PASSWORD);
+    assert_eq!(records[0].secret, SecretString::new(A_DESKTOP_PASSWORD));
 }
 
 // ---------------------------------------------------------------------------

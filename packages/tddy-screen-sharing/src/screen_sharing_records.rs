@@ -14,13 +14,15 @@
 //! | `host`, `port`, `protocol`, `username` | `metadata`, under the keys below |
 //! | the password | `secret` |
 //!
-//! **Every one of those is inside the AEAD**, which is the limit being fixed relative to
-//! [`crate::screen_sharing_vault`]: there a target's label and host sit in cleartext beside the
-//! sealed password, so anyone who can read the file learns which machines the operator reaches
-//! without ever opening a secret. Here, tampering with `host` fails the open.
+//! **Every one of those is inside the AEAD**: the retired per-session vault kept a target's label
+//! and host in cleartext beside the sealed password, so anyone who could read the file learned which
+//! machines the operator reaches without ever opening a secret. Here, tampering with `host` fails
+//! the open.
 
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
-use tddy_service::proto::screen_sharing::ScreenSharingTarget;
+use std::collections::BTreeMap;
+
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
+use tddy_service::proto::screen_sharing::{Protocol, ScreenSharingTarget};
 
 /// The provider every screen-sharing credential is stored under.
 ///
@@ -87,19 +89,81 @@ pub enum TargetError {
 /// in rather than read here so the caller controls the clock in a test.
 #[must_use]
 pub fn record_for(
-    _target: &ScreenSharingTarget,
-    _password: &str,
-    _written_at: u64,
+    target: &ScreenSharingTarget,
+    password: &str,
+    written_at: u64,
 ) -> CredentialRecord {
-    todo!("TODO(keyring 7/9): implement — id to account, metadata into the sealed map")
+    let protocol = Protocol::try_from(target.protocol).unwrap_or(Protocol::Unspecified);
+    CredentialRecord {
+        provider: screen_sharing_provider(),
+        account: account_for(&target.id),
+        label: target.label.clone(),
+        secret: SecretString::new(password),
+        metadata: BTreeMap::from([
+            (META_HOST.to_string(), target.host.clone()),
+            (META_PORT.to_string(), target.port.to_string()),
+            (
+                META_PROTOCOL.to_string(),
+                protocol_name(protocol).to_string(),
+            ),
+            (META_USERNAME.to_string(), target.username.clone()),
+        ]),
+        updated_at: written_at,
+        version: FIRST_VERSION,
+    }
 }
 
 /// The target a record describes, or why it is not one.
 ///
 /// Returns a [`TargetError::Malformed`] rather than a defaulted target when the metadata is
-/// missing or unparseable: see that variant's note.
-pub fn target_from(_record: &CredentialRecord) -> Result<ScreenSharingTarget, TargetError> {
-    todo!("TODO(keyring 7/9): implement — metadata back into the target, refusing defaults")
+/// missing or unparseable: see that variant's note. The username is the one field that may be
+/// absent, because it is optional for VNC.
+pub fn target_from(record: &CredentialRecord) -> Result<ScreenSharingTarget, TargetError> {
+    let required = |key: &str| {
+        record
+            .metadata
+            .get(key)
+            .ok_or_else(|| TargetError::Malformed(format!("missing {key}")))
+    };
+
+    let port = required(META_PORT)?;
+    let port = port
+        .parse::<u16>()
+        .map_err(|_| TargetError::Malformed(format!("{META_PORT} is not a port: {port}")))?;
+    let protocol = required(META_PROTOCOL)?;
+    let protocol = protocol_named(protocol).ok_or_else(|| {
+        TargetError::Malformed(format!("{META_PROTOCOL} is not a protocol: {protocol}"))
+    })?;
+
+    Ok(ScreenSharingTarget {
+        id: record.account.as_str().to_string(),
+        label: record.label.clone(),
+        host: required(META_HOST)?.clone(),
+        port: u32::from(port),
+        protocol: protocol as i32,
+        username: record
+            .metadata
+            .get(META_USERNAME)
+            .cloned()
+            .unwrap_or_default(),
+    })
+}
+
+fn protocol_name(protocol: Protocol) -> &'static str {
+    match protocol {
+        Protocol::Vnc => "VNC",
+        Protocol::Rdp => "RDP",
+        Protocol::Unspecified => "UNSPECIFIED",
+    }
+}
+
+fn protocol_named(name: &str) -> Option<Protocol> {
+    match name {
+        "VNC" => Some(Protocol::Vnc),
+        "RDP" => Some(Protocol::Rdp),
+        "UNSPECIFIED" => Some(Protocol::Unspecified),
+        _ => None,
+    }
 }
 
 /// The port this service reads and writes screen-sharing credentials through.

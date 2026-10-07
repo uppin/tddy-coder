@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId, FIRST_VERSION};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 use tddy_screen_sharing::screen_sharing_records::{
     account_for, record_for, screen_sharing_provider, target_from, TargetError, META_HOST,
     META_PORT, META_PROTOCOL, META_USERNAME, SCREEN_SHARING_PROVIDER,
@@ -15,6 +15,7 @@ use tddy_service::proto::screen_sharing::{Protocol, ScreenSharingTarget};
 
 const A_DESKTOP_PASSWORD: &str = "the-desktop-password";
 const WRITTEN_AT: u64 = 1_758_240_000;
+const AN_OPERATOR: &str = "an-operator";
 
 fn a_vnc_target() -> ScreenSharingTarget {
     ScreenSharingTarget {
@@ -43,7 +44,7 @@ fn a_record_holding(metadata: BTreeMap<String, String>) -> CredentialRecord {
         provider: screen_sharing_provider(),
         account: AccountId::new("target-0a1b"),
         label: "dev box".to_string(),
-        secret: A_DESKTOP_PASSWORD.to_string(),
+        secret: SecretString::new(A_DESKTOP_PASSWORD),
         metadata,
         updated_at: WRITTEN_AT,
         version: FIRST_VERSION,
@@ -93,7 +94,7 @@ fn a_targets_password_is_the_records_secret() {
     let record = record_for(&target, A_DESKTOP_PASSWORD, WRITTEN_AT);
 
     // Then
-    assert_eq!(record.secret, A_DESKTOP_PASSWORD);
+    assert_eq!(record.secret, SecretString::new(A_DESKTOP_PASSWORD));
 }
 
 #[test]
@@ -200,10 +201,10 @@ fn tampering_with_a_stored_targets_host_fails_the_open() {
 
     // Given a desktop sealed into a real credential store
     let storage = tempfile::tempdir().expect("a storage directory");
-    let path = CredentialStore::path_in(storage.path());
-    let login_key = b"the-key-a-login-derived";
-    let vault = CredentialStore::open_or_create(&path, login_key, "an-operator")
-        .expect("a fresh store opens");
+    let path = CredentialStore::path_in(storage.path(), AN_OPERATOR);
+    let passphrase = SecretString::new("the-passphrase-the-operator-chose");
+    let vault =
+        CredentialStore::create(&path, &passphrase, AN_OPERATOR).expect("a fresh store is created");
     vault
         .put(record_for(&a_vnc_target(), A_DESKTOP_PASSWORD, WRITTEN_AT))
         .expect("sealing a desktop");
@@ -214,13 +215,24 @@ fn tampering_with_a_stored_targets_host_fails_the_open() {
         !sealed.contains("10.0.0.5"),
         "the host must not be readable in the sealed file"
     );
-    let tampered = sealed.replace("\"ciphertext\":\"", "\"ciphertext\":\"00");
-    std::fs::write(&path, tampered).expect("the tampered file");
+    tamper_with_the_first_sealed_record(&path);
 
     // Then the store refuses to open it — never a target with a host somebody else chose
-    let reopened = CredentialStore::open_or_create(&path, login_key, "an-operator")
+    let reopened = CredentialStore::open_with_passphrase(&path, &passphrase, AN_OPERATOR)
         .expect("the header still opens")
         .list(Some(&screen_sharing_provider()));
 
     assert_eq!(reopened, Err(VaultError::Crypto));
+}
+
+/// Flip the first sealed record's ciphertext, as a writer of the file would to change what it says.
+fn tamper_with_the_first_sealed_record(path: &std::path::Path) {
+    let mut file: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path).expect("the sealed file")).expect("JSON");
+    let ciphertext = file["records"][0]["ciphertext"]
+        .as_str()
+        .expect("a sealed record")
+        .to_string();
+    file["records"][0]["ciphertext"] = serde_json::Value::String(format!("00{ciphertext}"));
+    std::fs::write(path, serde_json::to_vec_pretty(&file).expect("JSON")).expect("tampered file");
 }

@@ -48,7 +48,8 @@ export type ScreenSharingTabAction =
 export const initialScreenSharingTabState: ScreenSharingTabState = {
   targets: [],
   streamStatus: {},
-  isVaultLocked: true,
+  // Nothing has been asked yet: locked is what `ListTargets` reports, never assumed before it.
+  isVaultLocked: false,
   error: null,
   activeOverlayTargetId: null,
 };
