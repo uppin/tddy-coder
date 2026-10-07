@@ -222,7 +222,7 @@ fn rewrite_of(text: &str, group: &[SurveyedPath], reaches: &[Reach]) -> Result<O
 }
 
 /// The name a plain `use` has to go on binding when re-pointing it changes its last segment.
-fn keeps_its_name<'a>(
+pub(crate) fn keeps_its_name<'a>(
     text: &str,
     after_prefix: usize,
     group: &[SurveyedPath],
@@ -245,7 +245,7 @@ fn one_use_per_path(path: &SurveyedPath) -> RestructureError {
 
 /// The path written from the start of `from_head`, up to where a group, a glob, an alias or the end
 /// of the declaration begins.
-fn written_prefix(from_head: &str) -> &str {
+pub(crate) fn written_prefix(from_head: &str) -> &str {
     let mut end = segment_length(from_head);
     while let Some(after) = from_head[end..].strip_prefix("::") {
         let length = segment_length(after);

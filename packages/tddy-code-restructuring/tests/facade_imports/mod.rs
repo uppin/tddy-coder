@@ -17,6 +17,7 @@ use tddy_code_restructuring::apply::apply_workspace_edit;
 use tddy_code_restructuring::backends::rust::{discard, RustBackend};
 use tddy_code_restructuring::registry::{LanguageBackend, Workspace};
 use tddy_code_restructuring::runner::{self, Command, Options};
+use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_code_restructuring::{
     client_capabilities, server_settings, Overlay, RefactorOp, Resolution,
 };
@@ -251,7 +252,8 @@ pub async fn the_file_after(workspace: &AFixtureWorkspace, op: RefactorOp, file:
     let resolved = resolving(workspace, op)
         .await
         .expect("the operation resolves");
-    apply_workspace_edit(workspace.path(), &resolved.edit).expect("the edit applies");
+    apply_workspace_edit(workspace.path(), &resolved.edit, &SpawnRecorder::discard())
+        .expect("the edit applies");
     workspace.read(file)
 }
 

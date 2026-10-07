@@ -389,7 +389,7 @@ fn rewrite_statement(
 }
 
 /// The members of a `use` group, split at the commas that are not inside a nested group.
-fn members_of(inner: &str) -> Vec<&str> {
+pub(in crate::backends::rust) fn members_of(inner: &str) -> Vec<&str> {
     let mut members = Vec::new();
     let (mut depth, mut from) = (0usize, 0usize);
     for (at, character) in inner.char_indices() {

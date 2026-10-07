@@ -259,6 +259,11 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         }
     }
 
+    // A `repoint_facade_imports` line carries only an anchor, and a field it must not carry is
+    // refused by name before the line is deserialized — so a value that is no `Reexport` names
+    // `reexport` rather than an unknown variant.
+    facade_imports_fields::refuse_a_facade_repoint_it_cannot_honour(&raw)?;
+
     let op: RefactorOp =
         serde_json::from_value(raw).map_err(|error| malformed(error.to_string()))?;
 
@@ -441,7 +446,6 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
     canonical_paths::refuse_canonical_paths_outside_move_item(&op)?;
     retarget_fields::refuse_a_retarget_it_cannot_honour(&op)?;
     repoint_call_fields::refuse_a_repoint_it_cannot_honour(&op)?;
-    facade_imports_fields::refuse_a_facade_repoint_it_cannot_honour(&op)?;
 
     Ok(op)
 }

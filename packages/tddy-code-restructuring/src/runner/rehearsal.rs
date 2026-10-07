@@ -66,8 +66,7 @@ impl Rehearsal {
                 Ok(Rehearsed {
                     survey,
                     refusal: None,
-                    // TODO(repoint-facade): forward `resolved.notes`, which `Rehearsal` drops today.
-                    notes: Vec::new(),
+                    notes: resolved.notes,
                 })
             }
             Err(refusal) => Ok(Rehearsed {

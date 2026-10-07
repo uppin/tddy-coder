@@ -5,18 +5,44 @@
 //! `apply` report it alike. What needs the code (which paths go through a facade, whether the
 //! defining crate is declared) is `backends/rust/repoint_facade`'s.
 //!
-//! TODO(repoint-facade): implement the refusals. Until then nothing is refused here, and an
-//! operation that gets past the codec is refused by `resolve` naming the node, so no plan line
-//! succeeds on the strength of a field this operation would ignore.
+//! The line is read as JSON rather than as a deserialized operation, so a field the operation has
+//! no use for is refused *by name* even when its own value would not deserialize — `reexport:
+//! "keep"` names `reexport`, not an unknown variant.
 
-use super::super::RefactorOp;
+use super::super::malformed;
 use crate::Result;
+use serde_json::Value;
+
+/// The fields a `repoint_facade_imports` line must not carry. Each belongs to another operation.
+const REFUSED: [&str; 12] = [
+    "to",
+    "name",
+    "reexport",
+    "variant",
+    "type",
+    "expr",
+    "order",
+    "also",
+    "to_file",
+    "with_private_deps",
+    "callee",
+    "canonical_paths",
+];
 
 /// A `repoint_facade_imports` line carries an anchor and nothing else.
-///
-/// TODO(repoint-facade): refuse `to`, `name`, `reexport`, `variant`, `type`, `expr`, `order`,
-/// `also`, `to_file`, `with_private_deps`, `callee` and `canonical_paths`, naming the field, and
-/// refuse a `range` anchor.
-pub(super) fn refuse_a_facade_repoint_it_cannot_honour(_op: &RefactorOp) -> Result<()> {
-    Ok(())
+pub(super) fn refuse_a_facade_repoint_it_cannot_honour(line: &Value) -> Result<()> {
+    if line.get("op").and_then(Value::as_str) != Some("repoint_facade_imports") {
+        return Ok(());
+    }
+    let Some(object) = line.as_object() else {
+        return Ok(());
+    };
+    match REFUSED.iter().find(|field| object.contains_key(**field)) {
+        Some(field) => Err(malformed(format!(
+            "`{field}` is a field `repoint_facade_imports` cannot honour: it re-points the paths \
+             of one file (or of every file of one module) that go through a facade of another \
+             crate, and carries only its anchor"
+        ))),
+        None => Ok(()),
+    }
 }
