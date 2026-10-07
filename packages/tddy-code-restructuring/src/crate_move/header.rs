@@ -222,7 +222,7 @@ fn rewrite_of(text: &str, group: &[SurveyedPath], reaches: &[Reach]) -> Result<O
 }
 
 /// The name a plain `use` has to go on binding when re-pointing it changes its last segment.
-pub(crate) fn keeps_its_name<'a>(
+fn keeps_its_name<'a>(
     text: &str,
     after_prefix: usize,
     group: &[SurveyedPath],

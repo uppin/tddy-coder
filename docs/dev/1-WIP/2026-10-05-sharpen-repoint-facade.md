@@ -69,7 +69,7 @@ such a path to its defining crate for `move_module_to_crate`; it has no operatio
 {"op":"repoint_facade_imports","anchor":{"kind":"items","file":"packages/tddy-session-lifecycle/src/connection_service.rs","items":["tddy_session_lifecycle::connection_service::agent_roster"],"fingerprints":["sha256:…"]}}
 ```
 
-The line carries **no other field**; every one (`to`, `name`, `reexport`, `variant`, `type`, `expr`, `order`, `also`, `to_file`, `with_private_deps`, `callee`) is refused as one the operation cannot honour.
+The line carries **no other field**; every one (`to`, `name`, `reexport`, `variant`, `type`, `expr`, `order`, `also`, `to_file`, `with_private_deps`, `callee`, `canonical_paths`) is refused as one the operation cannot honour. (`to_type` is refused for every non-`retarget_impl` operation by the generic retarget rule, and `canonical_paths` is refused both by `facade_imports_fields` and by the generic `canonical_paths` rule.)
 **Anchor** (F1): a `symbol` anchor names **one file** (like `move_module_to_crate`; `path` is informational and is not searched), or an `items`/`item` anchor on a module's `mod` declaration names **the module's files**
 (`module_files::files_of`, inline modules followed). Plain `check` can examine the first; the second needs `--deep` (it must be lowered).
 
@@ -120,7 +120,7 @@ A `use` group:
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | **`tidy-engine-files`** (K=1, `feature/sharpen/tidy-engine-files`) | `plan.rs`, `plan/codec.rs`, `item_anchor.rs` <= 500 production lines by child modules, no behaviour change. In particular `RefactorKind` and its `impl` now live in `plan/refactor_kind.rs` (its decision D1, developer-approved 2026-10-05), reachable at the old path through `pub use`. **File overlap and layout only**: no signature is consumed | the `RepointFacadeImports` variant is added in `plan/refactor_kind.rs`; the codec call sits in the post-split `plan/codec.rs`; `facade_imports_fields.rs` follows the child-module precedent. This node adds **no** `RefactorOp` field, so the 20 struct literals are untouched and `plan.rs` is not edited | re-split them |
-| **`move-fidelity`** (K=2, `feature/sharpen/move-fidelity`) | Exactly two lines of visibility in `crate_move.rs`: `mod survey;` and `mod reexports;` become `pub(crate) mod`. That makes the resolver reachable from `backends/rust`: `survey::{survey_moved_file, PathSurvey, SurveyedPath}` and `reexports::followed` (all already `pub(crate)` items inside private modules). Its own use of them is `item_move/canonical_paths.rs`, behind its `canonical_paths` plan field, which this node does not touch. Its B1 edits `sites.rs` `requalified` (module-qualified callers) and does **not** split grouped `use` | **consumes exactly**: `survey_moved_file`, `PathSurvey` and `SurveyedPath` (fields `written`, `resolved`, `defining_crate`, `defined_at`, `in_test`, `in_body`, `site`); `Destination::read` (`pub`) and `Destination::path_dependency` (`pub(crate)`), neither from move-fidelity. **Widened here, visibility only, one line each**, because move-fidelity does not do it: `crate_move.rs` `mod header;` and `mod manifest_edits;` to `pub(crate)` (for `header::{written_prefix, keeps_its_name}` and `manifest_edits::{declares_dependency, Table, position_of, replacement}`; a prefix-agreement helper is split out of `rewrite_of`), `item_move/text::{use_statements, split_use}`, and `sites::members_of` | **re-implement** the walk through `pub use`, globs and path dependencies (`Walk`), the sighting scanner (`source_scan::sightings`), `resolved_against`, `use`-tree member splitting or `declares_dependency`; **change** `followed`'s "origin's paths only" rule or any B1/B2 behaviour; call `repointed_header` (it needs a `Move`) or `rewrite_statement` (it is `Site`-driven); use `canonical_paths` or `defining_paths` |
+| **`move-fidelity`** (K=2, `feature/sharpen/move-fidelity`) | Exactly two lines of visibility in `crate_move.rs`: `mod survey;` and `mod reexports;` become `pub(crate) mod`. That makes the resolver reachable from `backends/rust`: `survey::{survey_moved_file, PathSurvey, SurveyedPath}` and `reexports::followed` (all already `pub(crate)` items inside private modules). Its own use of them is `item_move/canonical_paths.rs`, behind its `canonical_paths` plan field, which this node does not touch. Its B1 edits `sites.rs` `requalified` (module-qualified callers) and does **not** split grouped `use` | **consumes exactly**: `survey_moved_file`, `PathSurvey` and `SurveyedPath` (fields `written`, `resolved`, `defining_crate`, `defined_at`, `in_test`, `in_body`, `site`); `Destination::read` (`pub`) and `Destination::path_dependency` (`pub(crate)`), neither from move-fidelity. **Widened here, visibility only, one line each**, because move-fidelity does not do it: `crate_move.rs` `mod header;` and `mod manifest_edits;` to `pub(crate)` (for `header::written_prefix` and `manifest_edits::{declares_dependency, Table, position_of, replacement}`; the prefix-agreement rule is re-implemented as `group::rule_p_prefix` rather than split out of `rewrite_of`), `item_move/text::{use_statements, split_use}`, and `sites::members_of` | **re-implement** the walk through `pub use`, globs and path dependencies (`Walk`), the sighting scanner (`source_scan::sightings`), `resolved_against`, `use`-tree member splitting or `declares_dependency`; **change** `followed`'s "origin's paths only" rule or any B1/B2 behaviour; call `repointed_header` (it needs a `Move`) or `rewrite_statement` (it is `Site`-driven); use `canonical_paths` or `defining_paths` |
 
 Not rows, because nothing of theirs is consumed: `retarget-impl` (K=6) and `repoint-call` (K=7) sit below this node on the line. **`retarget-impl`'s `verify` declaration carrier (`verify::compare_with`, `Declared`, `--retarget`, `VerifyRequest.retargets`) is consumed only if decision F3 is taken as "copy attributes" (option (b), not the recommendation)**: the recommended F3(a) refuses, adds no `verify` rule and consumes nothing, so `retarget-impl -> repoint-facade` is **not** an edge unless F3(b) is chosen. The pinned `verify` tests (31-32) call `verify::compare`, which exists on `master` and stays after `retarget-impl`. `repoint-call` adds `--repoint` and `callee`; this node touches neither.
 
@@ -130,7 +130,7 @@ Published with the wave-2 contract commit; **owned surface, new today**:
 
 - `RefactorKind::RepointFacadeImports` (serde `repoint_facade_imports`), added in `plan/refactor_kind.rs`; no `RefactorOp` field (so no struct literal is edited, unlike the three field-adding nodes).
 - Crate-private: `backends::rust::repoint_facade::{findings(&RefactorOp, &Workspace) -> Result<Vec<String>>, RustBackend::repoint_facade_imports(&mut self, &RefactorOp, &Workspace) -> Result<Resolution>}`;
-  `rewrite::path_edits(text: &str, survey: &PathSurvey, manifest: &str) -> Result<Vec<Rewrite>>` (`Rewrite { written, defined_at, line, split_from_group }`);
+  `rewrite::path_edits(text: &str, survey: &PathSurvey, manifest: &str, file: &str) -> Result<Vec<Rewrite>>` (`Rewrite { written, defined_at, line, split_from_group }`);
   `group::split_or_reprefix(statement: &str, leaves: &[Rewrite]) -> Result<String>`; `Rehearsed.notes: Vec<String>`.
 - `Resolution.notes` carries the list in the format of rule 6.
 - Failing tests: the thirty red ones in "Acceptance tests" (31-32 are green pins).
@@ -216,11 +216,11 @@ Would add a server wait to a text edit and disagree with the resolver `move_modu
 
 ### Coverage Requirements
 
-- [ ] Happy: plain `use`, group (P and S), glob, body, chain of facades, path dependency, registry crate
-- [ ] Refusals: undeclared crate, rename in a body, whitespace-spelled path, duplicate binding, attribute on a split group, nested group with disagreeing leaves
-- [ ] Untouched: comments, doc comments, strings, own paths, in-crate facade, foreign-named paths
-- [ ] Idempotence, module vs file scope, `check` parity with `resolve`
-- [ ] Actual effects: bytes on disk; `cargo check --all-targets`
+- [x] Happy: plain `use`, group (P and S), glob, body, chain of facades, path dependency, registry crate
+- [x] Refusals: undeclared crate, rename in a body, whitespace-spelled path, duplicate binding, attribute on a split group, nested group with disagreeing leaves
+- [x] Untouched: comments, doc comments, strings, own paths, in-crate facade, foreign-named paths
+- [x] Idempotence, module vs file scope, `check` parity with `resolve`
+- [x] Actual effects: bytes on disk; `cargo check --all-targets`
 
 ## Acceptance tests
 
@@ -286,7 +286,9 @@ All F1-F11 were taken as **recommended**; nothing in the tests contradicts one.
 
 ## Technical Debt & Production Readiness
 
-(empty; populated during development)
+No new debt. `/validate-prod-ready` found no mock/fake code, no dev fallback, no `TODO`/`FIXME`, no debug output and no unconditional `unwrap`/`panic` in this node's production surface (the one `expect` in `group.rs` is guarded by a `len() == 1` check). The PR introduces no technical-debt marker.
+
+**Carried alert (not this PR's to fix):** `src/backends/rust.rs` is ≥500 production lines (510). It is the stack-overlap file — `retarget-impl` and `repoint-call` edit it too — so the split is deferred to a follow-up after the stack lands, per the stack brief. This node's wiring into it is ~10 lines.
 
 ## Decisions & Trade-offs
 
@@ -316,23 +318,49 @@ Decisions taken by this plan: no `RefactorOp` field; the op starts no server; no
 (empty)
 
 ### From @validate-changes (Change Validation)
-(empty)
+- **INFO — dead visibility widening (fixed).** `crate_move/header.rs` widened `keeps_its_name` to `pub(crate)`, but nothing outside `header.rs` calls it (the re-point's `as <old>` logic lives in `plain_path`), so the widening was dead surface. Reverted to private `fn`; the `## Dependencies` row was corrected.
+- **INFO — refused-field list (synced).** `facade_imports_fields` also refuses `canonical_paths` (redundant with the generic `canonical_paths` rule, but harmless and explicit), and `to_type` is refused by the generic `retarget_fields` rule. Rule 72 of this changeset now lists both, and notes where each is refused.
+- **INFO — Draft PR contract (synced).** `rewrite::path_edits` takes a fourth `file: &str` parameter (used to name the file in refusals); the contract line was updated.
 
 ### From @validate-tests (Test Quality)
-(empty)
+- No actionable issues. All changed tests use Given/When/Then, name behaviour, assert exactly (byte-for-byte on files, exact note lines), and are deterministic (library suite over `fake_lsp`; the live suite is serialized by the `rust-analyzer` group). No `#[ignore]`, no sleeps, no always-passing tests.
+- **INFO (no action) —** several acceptance tests pair a positive and a negative case in one function (`…and_is_refused_in_a_body`, `…and_above_a_plain_use_is_kept`); this matches the repo's 53-file `*_acceptance` convention and the red-phase design, and the task forbids restructuring the node's contract tests.
+- **INFO (no action) —** the `_acceptance` filename suffix conflicts with the generic fluent-tests naming guidance, but it is the package-wide convention (53 sibling files) and renaming is out of scope.
+- **INFO (no action) —** `tests/facade_imports/mod.rs` carries `#![allow(dead_code)]` because each of three test binaries uses a different subset of the shared fixtures.
 
 ### From @prod-ready (Production Readiness)
-(empty)
+- No blockers, no warnings. The `keeps_its_name` dead widening (above) was the only unused-code item.
 
 ### From @analyze-clean-code (Code Quality)
-(empty)
+- **Score B.** No "must refactor" functions. `src/backends/rust.rs` ≥500 production lines is the carried stack-overlap alert (recorded under Technical Debt; **not acted on**).
+- **Fixed — `edits_for` (was 59 non-blank lines, nesting 4).** Split by responsibility into `edits_for` (10), `use_statement_edits` (49, nesting now 3), `body_path_edits` (17) and `mark_split_from_group` (5).
+- **Fixed — `group_rewrite` (5 parameters).** Dropped the redundant `statement` parameter (derivable from `text` + `span`); now 4.
+- **Remaining "needs attention" (accepted, not acted on).** Three cohesive functions sit in the 41–60-line band just under the must-refactor threshold: `use_statement_edits` (49), `rewrite::path_edits` (55), `group::split_or_reprefix` (53). They are single-responsibility and heavily commented; further splitting is deferred as low-value churn on a stack node.
 
 ### From @refactor (Completed Refactorings)
-(empty)
+- `crate_move/header.rs`: `keeps_its_name` `pub(crate) fn` → `fn` (dead widening removed).
+- `backends/rust/repoint_facade.rs`: `edits_for` split into `edits_for` + `use_statement_edits` + `body_path_edits` + `mark_split_from_group`; `group_rewrite` lost its redundant `statement` parameter.
+- Verified after the refactor: `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean, `cargo fmt --check` clean, and 922 lib + 28 facade acceptance + 2 verify-pin + 3 live tests pass.
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+Run date: 2026-10-07, worktree `swirling-sauteeing-pike`, base tip `feature/sharpen/repoint-call` @ `60e8a394`.
+
+### /validate-changes — ✅ No blockers
+- **Stack gate:** branch already contained the latest base tip (`60e8a394`) and the commit range `origin/feature/sharpen/repoint-call..HEAD` holds this PR's five commits only — **verify-and-return, no rewrite**. Base tip unchanged.
+- **Stack boundary:** ✅ clean. Changeset items implemented or explicitly deferred; `## Responsibility` fully delivered (no `TODO`/`unimplemented!` stub); nothing from `## Dependencies` re-implemented (the parent-owned `survey`, `reexports::followed`, `repointed_header`, `rewrite_statement` are untouched); `## Boundaries` respected (no facade/manifest/rename written); diff contains only this PR's 25 files; no parent-owned file deleted.
+- **Build:** `cargo build -p tddy-code-restructuring` ✅ clean. **Clippy:** `--all-targets -- -D warnings` ✅ clean. **Fmt:** `--check` ✅ clean.
+- **Tests:** `./test -p tddy-code-restructuring` → **1334 passed, 0 failed, 1 ignored** (the ignored is a pre-existing doctest placeholder).
+- **Findings:** 3 INFO (all fixed/synced — see Refactoring Needed).
+
+### /validate-tests — ✅ No actionable issues
+28 + 3 + 2 tests analysed (library acceptance, live acceptance, verify pins) plus the new inline unit tests. Fluent-tests compliant (Given/When/Then, behaviour names, exact assertions, deterministic). INFO-only convention observations recorded; no test was changed.
+
+### /validate-prod-ready — ✅ Ready
+No mock/fake code, no dev fallback, no `TODO`/`FIXME`, no debug output, no unguarded `unwrap`/`panic` in this node's production surface. One INFO (dead widening) fixed.
+
+### /analyze-clean-code — ✅ Score B
+No "must refactor" functions. One oversized file (`src/backends/rust.rs`, ≥500 production lines) — the carried stack-overlap alert, not acted on. Two "needs attention" items fixed (`edits_for` split; `group_rewrite` parameter dropped); three line-length items accepted (see Refactoring Needed).
 
 ## TODO
 
@@ -348,16 +376,16 @@ Decisions taken by this plan: no `RefactorOp` field; the op starts no server; no
 - [x] TDD Green — implement with quality code
 - [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
 - [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-05-sharpen-repoint-facade-initial-discovery.md`, and the facade-import todo if it has reached `master` (else whichever of #532 and this PR lands second deletes it)

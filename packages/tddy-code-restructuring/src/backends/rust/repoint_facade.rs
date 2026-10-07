@@ -105,10 +105,24 @@ fn origin_of(workspace: &Workspace<'_>, file: &str) -> Result<(Destination, Vec<
 fn edits_for(file: &str, text: &str, rewrites: &mut [Rewrite]) -> Result<Vec<TextEdit>> {
     let masked = masked_to_code(text);
     let statements = use_statements(&masked);
-    let mut edits = Vec::new();
     let mut taken = vec![false; rewrites.len()];
+    let mut edits = use_statement_edits(file, text, &statements, rewrites, &mut taken)?;
+    edits.extend(body_path_edits(text, rewrites, &taken)?);
+    Ok(edits)
+}
 
-    for span in &statements {
+/// A replacement per `use` statement that holds a path to rewrite: the statement's own tree when it
+/// is a group, and its path when it is a plain import. Marks each path it handled in `taken`, so the
+/// body pass leaves it alone.
+fn use_statement_edits(
+    file: &str,
+    text: &str,
+    statements: &[std::ops::Range<usize>],
+    rewrites: &mut [Rewrite],
+    taken: &mut [bool],
+) -> Result<Vec<TextEdit>> {
+    let mut edits = Vec::new();
+    for span in statements {
         let (first, last) = span_lines(text, span);
         let inside: Vec<usize> = (0..rewrites.len())
             .filter(|index| {
@@ -128,11 +142,9 @@ fn edits_for(file: &str, text: &str, rewrites: &mut [Rewrite]) -> Result<Vec<Tex
                 .iter()
                 .map(|index| rewrites[*index].clone())
                 .collect();
-            let rewritten = group_rewrite(file, text, span, statement, &leaves)?;
+            let rewritten = group_rewrite(file, text, span, &leaves)?;
             if rewritten.contains('\n') {
-                for index in &inside {
-                    rewrites[*index].split_from_group = true;
-                }
+                mark_split_from_group(rewrites, &inside);
             }
             edits.push(manifest_edits::replacement(text, span.clone(), &rewritten));
         } else {
@@ -150,7 +162,12 @@ fn edits_for(file: &str, text: &str, rewrites: &mut [Rewrite]) -> Result<Vec<Tex
             ));
         }
     }
+    Ok(edits)
+}
 
+/// A replacement of the path itself, per rewrite no `use` statement handled — the paths in bodies.
+fn body_path_edits(text: &str, rewrites: &[Rewrite], taken: &[bool]) -> Result<Vec<TextEdit>> {
+    let mut edits = Vec::new();
     for (index, rewrite) in rewrites.iter().enumerate() {
         if taken[index] {
             continue;
@@ -162,8 +179,15 @@ fn edits_for(file: &str, text: &str, rewrites: &mut [Rewrite]) -> Result<Vec<Tex
             &rewrite.defined_at,
         ));
     }
-
     Ok(edits)
+}
+
+/// Mark each of `inside` as a member of a grouped `use` that left the group (Rule S), so the note
+/// says so.
+fn mark_split_from_group(rewrites: &mut [Rewrite], inside: &[usize]) {
+    for index in inside {
+        rewrites[*index].split_from_group = true;
+    }
 }
 
 /// One whole `use` item's replacement, with the indentation of the statement it replaced added to
@@ -172,9 +196,9 @@ fn group_rewrite(
     file: &str,
     text: &str,
     span: &std::ops::Range<usize>,
-    statement: &str,
     leaves: &[Rewrite],
 ) -> Result<String> {
+    let statement = &text[span.clone()];
     let line = manifest_edits::position_of(text, span.start).line;
     let rewritten = group::split_or_reprefix(statement, leaves)?;
     if rewritten.contains('\n') && attribute_above(text, line) {
