@@ -175,7 +175,9 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
   refusal already ends with its own remedy.
 - **Waiting** — a run waits until the server is ready or until you stop it; there is no
   `--indexing-budget` any more (it derived a per-operation ceiling of a twentieth of itself, which
-  refused large files at 45s). `^C` cancels, and the refusal says how far the index got.
+  refused large files at 45s). While it waits it says so every 30 seconds — the stage, how long it
+  has waited, which server, and how long that server has said nothing new — so a silent build script
+  is told from a slow index. `^C` cancels, and the refusal names the stage and how far the index got.
 - **A warm index** — a cold start is minutes per run, so for an iterative carve start the daemon once
   and point the CLI at it:
 

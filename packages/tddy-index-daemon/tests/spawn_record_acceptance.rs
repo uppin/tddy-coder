@@ -30,6 +30,7 @@ fn a_host_recording_to(record: &Path) -> tddy_rpc::ServiceEntry {
     build_code_index_entry(CodeIndexPorts {
         servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
             .with_spawn_observer(Arc::new(sink)),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     })
 }
 

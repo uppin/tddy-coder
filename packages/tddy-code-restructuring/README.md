@@ -18,6 +18,9 @@ Exposed via `tddy-tools restructure`:
 - `warm` — loads the tree's crate graph into the index daemon (it needs the daemon)
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
+While it waits it says so on a fixed heartbeat (`WAIT_HEARTBEAT`, 30 s): the stage it is in, how long
+it has waited, which server it is waiting on, and how long that server has said nothing new — so a
+silent server is diagnosed rather than given a deadline.
 "Ready" means rust-analyzer has reported itself quiescent (or never sends the status at all) **and**
 healthy: an index whose health is anything but `ok` is refused, quoting the server's message.
 

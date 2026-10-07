@@ -160,6 +160,7 @@ fn wired(
     };
     let service = Arc::new(CodeIndexServiceImpl::new(CodeIndexPorts {
         servers: servers.clone(),
+        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
     }));
     (tasks, servers, service)
 }

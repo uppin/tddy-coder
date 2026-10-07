@@ -41,6 +41,20 @@ latest status on the client (`LspClient::server_status`), and `LspClientBridge::
 appends it after whatever it drained. The same readiness and health rules hold on the cold path and
 against a warm index daemon, because the daemon builds its backends through `runner::registry_for`.
 
+**A wait that lasts says so.** Every polling wait owns a `Waiting` (`backends/rust/wait.rs`) and, on
+a fixed heartbeat (`WAIT_HEARTBEAT`, 30 s), emits one line through the run's `progress` sink:
+`still waiting (2m00s) — warming the crate index: rust-analyzer behind a shared client is still
+loading; its last words, unchanged for 1m58s: "…"; furthest: …`. The line names the **stage**, the
+**elapsed** time, **which server** (a pid this backend started, or "behind a shared client"), the
+server's **last words** and how long they have been **unchanged** (`ServerChatter::quiet_for` — the
+figure that separates a slow server from a stuck one), and the furthest phase reported. The cadence
+is a collaborator a host or a test injects (`with_wait_heartbeat`, `Options.wait_heartbeat`,
+`CodeIndexPorts.wait_heartbeat`), never a budget: nothing ends at it. A request already **in flight**
+on the shared client is narrated too — `LspClientBridge` polls it in heartbeat-sized slices and beats
+between them — so the one wait the poll loops cannot reach is not the silent one. A wait ended by
+cancellation names its stage in `IndexingIncomplete.stage`, and the heartbeat reads the chatter and
+the clock and writes neither readiness flag.
+
 **A `null` hover that will never change is read from the server's diagnostics, not waited out.**
 Two kinds of position never resolve, however long the index has been ready, and rust-analyzer says
 which in its pull diagnostics (`textDocument/diagnostic`). Once the index is loaded and a hover is

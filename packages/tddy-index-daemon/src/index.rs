@@ -95,6 +95,8 @@ struct RootState {
 #[derive(Clone)]
 pub struct WorkspaceIndex {
     servers: LspRegistry,
+    /// The cadence at which a run that waits says what it is waiting for.
+    wait_heartbeat: std::time::Duration,
     roots: Arc<Mutex<BTreeMap<PathBuf, RootState>>>,
     /// Complexity scores, kept against the hash of the source that produced them.
     ///
@@ -115,6 +117,7 @@ impl WorkspaceIndex {
     pub fn new(servers: LspRegistry) -> Self {
         Self {
             servers,
+            wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
             roots: Arc::new(Mutex::new(BTreeMap::new())),
             scores: Arc::new(InMemoryComplexityCache::default()),
             plans: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
@@ -133,6 +136,20 @@ impl WorkspaceIndex {
             Some(observer) => SpawnRecorder::new(Arc::clone(observer)),
             None => SpawnRecorder::discard(),
         }
+    }
+
+    /// Say what a waiting run is waiting for every `every`, instead of every
+    /// [`tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT`].
+    #[must_use]
+    pub fn with_wait_heartbeat(mut self, every: std::time::Duration) -> Self {
+        self.wait_heartbeat = every;
+        self
+    }
+
+    /// The cadence at which a waiting run says what it is waiting for.
+    #[must_use]
+    pub fn wait_heartbeat(&self) -> std::time::Duration {
+        self.wait_heartbeat
     }
 
     /// The plans `root` has loaded, creating its store on first use.

@@ -74,6 +74,7 @@ async fn anchor_covering(
         at,
         progress: std::sync::Arc::clone(&progress),
         trace: logged_trace,
+        wait_heartbeat: index.wait_heartbeat(),
         ..Options::default()
     };
 
@@ -83,6 +84,7 @@ async fn anchor_covering(
     // request for this workspace queues behind it.
     let cancel = CancellationToken::new();
     let _stop_when_dropped = cancel.clone().drop_guard();
+    let options_heartbeat = options.wait_heartbeat;
     let (anchor, range) = tokio::task::spawn_blocking(move || {
         let anchor = runner::item_anchors(
             &root,
@@ -90,7 +92,8 @@ async fn anchor_covering(
             Some(std::sync::Arc::clone(&client)),
             cancel.clone(),
         )?;
-        let mut registry = runner::registry_for(client, cancel, progress, logged_trace);
+        let mut registry =
+            runner::registry_for_waiting(client, cancel, progress, logged_trace, options_heartbeat);
         let range = item_anchor::span_of(&anchor, &root, &mut registry)?;
         Ok((anchor, range))
     })

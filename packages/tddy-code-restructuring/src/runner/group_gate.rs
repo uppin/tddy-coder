@@ -18,6 +18,7 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
 use crate::apply::touched_paths;
+use crate::backends::rust::{discard, WAIT_HEARTBEAT};
 use crate::journal::{Journal, JournalRecord, OpStatus, PreImage};
 use crate::spawn_record::SpawnRecorder;
 use crate::{LedgerCheckpoint, OpId, Plan, Resolution, RestructureError, Result};
@@ -271,7 +272,13 @@ pub fn gate_group(
         .flat_map(touched_paths)
         .collect();
     let packages = owning_packages(root, touched.into_iter())?;
-    match failing_check(root, &packages, spawns, cancel)? {
+    // The group gate has no progress sink in scope: it is reached from the apply loop through
+    // `GroupRun::finish`, which carries only the root, the paths and the token. Its check is
+    // therefore run silently.
+    // TODO(apply-heartbeat): carry the run's sink and cadence into `GroupGate` so a group's check
+    // that blocks is narrated like the baseline's.
+    let silent = discard();
+    match failing_check(root, &packages, spawns, cancel, &silent, WAIT_HEARTBEAT)? {
         None => Ok(()),
         Some((_, errors)) => Err(RestructureError::GroupDoesNotCompile {
             group: group.to_string(),

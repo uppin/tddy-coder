@@ -17,6 +17,7 @@ set, which that entry does not cover.
 | Run | Cold-graph cost | Graphs lost | Note |
 |---|---|---|---|
 | 2026-09-19 | 52m51s | 3 | first detection; box at load 30–48 from ~10 concurrent worktrees |
+| 2026-10-06 | — | — | re-measured during `#sharpen` 4/8 (`apply-heartbeat`). **Mechanism 1 does not hold on master:** the latch (`graph.rs::GraphLoad`) is set only when the server reports `quiescent: true`, never before the graph finishes loading, and `RustBackend.indexed` is per request (set only on an observed ready hover) — so nothing in the current code sets either before readiness. Mechanisms 2 (`--status` reports liveness, not graph state) and 3 (a `timeout`/pipeline hides the failure) are unchanged. The heartbeat added by `#591` bounds the *silence* of a wait, not the poisoning; the record stays open for mechanisms 2 and 3 |
 
 ## What the tool found
 

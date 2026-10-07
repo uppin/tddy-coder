@@ -43,7 +43,7 @@ use std::path::Path;
 use tokio_util::sync::CancellationToken;
 
 use super::compile_gate::{compiler_errors, described_check, run_check};
-use crate::backends::rust::ProgressSink;
+use crate::backends::rust::{ProgressSink, WAIT_HEARTBEAT};
 use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
 use diagnostics::{parse, Diagnostic, Fix, Span};
@@ -114,12 +114,18 @@ struct Failure {
 /// Check the tree, telling the caller the run stopped when its token fires: the files may already
 /// be tidied by then, and the cancellation alone would not say so.
 fn check(tidying: &Tidying<'_>) -> Result<Checked> {
+    // The tidy's own heartbeat is the production default: `Tidying` carries the run's sink but not
+    // its cadence, and the tidy's check is short next to a cold baseline. A host that injects a
+    // cadence gets the default here rather than the run's.
+    // TODO(apply-heartbeat): thread the run's cadence through `Tidying` so the tidy beats with it.
     let output = match run_check(
         tidying.root,
         tidying.packages,
         "json",
         tidying.spawns,
         tidying.cancel,
+        tidying.progress,
+        WAIT_HEARTBEAT,
     ) {
         Err(RestructureError::CallerStopped) => {
             (tidying.progress)("tidy cancelled: the tidied files are on disk and were not checked");

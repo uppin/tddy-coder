@@ -44,6 +44,11 @@ pub struct CodeIndexPorts {
     /// it so the same registry can be reaped on the host's own schedule and shared with anything
     /// else the process serves.
     pub servers: LspRegistry,
+    /// How often a run that is waiting — for an index, or its turn on a root — says what it is
+    /// waiting for. Not a budget: nothing a run waits on ends at it. Production passes
+    /// [`tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT`]; a test passes a short one so it
+    /// need not wait to hear a beat.
+    pub wait_heartbeat: std::time::Duration,
 }
 
 /// `code_index.CodeIndexService`, over a registry of warm language servers.
@@ -55,7 +60,7 @@ impl CodeIndexServiceImpl {
     #[must_use]
     pub fn new(ports: CodeIndexPorts) -> Self {
         Self {
-            index: WorkspaceIndex::new(ports.servers),
+            index: WorkspaceIndex::new(ports.servers).with_wait_heartbeat(ports.wait_heartbeat),
         }
     }
 

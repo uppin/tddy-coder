@@ -45,8 +45,13 @@ mod relative_visibility;
 mod selection;
 mod signature;
 mod signature_rewrites;
+mod wait;
 
 pub use chatter::ServerChatter;
+pub use wait::WAIT_HEARTBEAT;
+
+pub(crate) use wait::human_delta;
+use wait::{heartbeat_line, Beat, WaitStage, WaitedOn, Waiting};
 
 use early_return::refuse_early_returns;
 
@@ -474,6 +479,8 @@ pub struct RustBackend {
     root: Option<PathBuf>,
     /// Where the language server this backend starts itself is recorded, when a run asks for it.
     spawns: SpawnRecorder,
+    /// How often a wait that lasts says what it is waiting for. Not a budget: nothing ends at it.
+    wait_heartbeat: Duration,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -525,6 +532,7 @@ impl RustBackend {
             opened: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
+            wait_heartbeat: WAIT_HEARTBEAT,
         }
     }
 
@@ -565,6 +573,21 @@ impl RustBackend {
         self
     }
 
+    /// Say what a wait is waiting for every `every`, instead of every [`WAIT_HEARTBEAT`].
+    ///
+    /// The cadence is a collaborator a host or a test injects, not a budget: no wait ends at it, and
+    /// a run still waits until the server is ready or its caller stops it.
+    pub fn with_wait_heartbeat(mut self, every: Duration) -> Self {
+        self.wait_heartbeat = every;
+        // The bridge needs it too: a request in flight is narrated from *inside* it, so the
+        // cadence has to reach the half that owns the request. A bridge left on the default would
+        // narrate a run's requests at thirty seconds however short the run's own heartbeat is.
+        if let Some(bridge) = &mut self.bridge {
+            bridge.set_wait_heartbeat(every);
+        }
+        self
+    }
+
     /// Attach to an already-initialized rust-analyzer session from `tddy-lsp`.
     ///
     /// No child process is spawned; [`LspClientBridge`] forwards requests through the shared
@@ -601,6 +624,7 @@ impl RustBackend {
             opened: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
+            wait_heartbeat: WAIT_HEARTBEAT,
         }
     }
 
@@ -628,13 +652,22 @@ impl RustBackend {
     /// Returns whether waiting may continue. The cancellation check is *here*, beside the sleep,
     /// rather than left to an await point in a caller: every wait in this backend is synchronous
     /// and runs inside `spawn_blocking`, so a dropped future leaves the closure sleeping on.
-    fn keep_waiting(&self, poll: Duration) -> bool {
+    ///
+    /// `waiting` is the wait this poll belongs to, and a beat is checked on each slice of the sleep
+    /// rather than once per poll: a poll interval is two seconds, and a heartbeat measured against
+    /// it would be at most that late. `None` is a poll that is not a wait — `request_settled`'s
+    /// bounded retries — which says nothing.
+    fn keep_waiting(&self, mut waiting: Option<&mut Waiting>, poll: Duration) -> bool {
         let until = Instant::now() + poll;
         loop {
             if self.cancel.is_cancelled() {
                 return false;
             }
-            let remaining = until.saturating_duration_since(Instant::now());
+            let now = Instant::now();
+            if let Some(waiting) = waiting.as_deref_mut() {
+                self.beat(waiting, now);
+            }
+            let remaining = until.saturating_duration_since(now);
             if remaining.is_zero() {
                 return true;
             }
@@ -642,15 +675,53 @@ impl RustBackend {
         }
     }
 
+    /// Say what a wait is waiting for, when [`Waiting`] says a beat is due at `now`.
+    ///
+    /// The line is built from the wait's stage and clock and from the chatter's own account of the
+    /// server — which server it is, whether it has said it is loading, its last words and how long
+    /// they have been unchanged. Nothing here sets a readiness flag: a heartbeat reads the chatter
+    /// and the clock and writes neither.
+    fn beat(&self, waiting: &mut Waiting, now: Instant) {
+        if !waiting.beat_due(now) {
+            return;
+        }
+        let line = heartbeat_line(&Beat {
+            stage: waiting.stage(),
+            elapsed: waiting.elapsed(now),
+            on: self.waited_on(),
+            loading: self.chatter.loading(),
+            last_words: self.chatter.last.as_deref(),
+            quiet_for: self.chatter.quiet_for(now),
+            furthest: self.chatter.furthest(),
+        });
+        (self.progress)(&line);
+    }
+
+    /// The server a wait is waiting on, as far as this repository can name it.
+    ///
+    /// A server this backend started is named by its process; one reached through a shared client
+    /// is the host's process, which this backend cannot see.
+    fn waited_on(&self) -> WaitedOn {
+        match &self.server {
+            Some(server) => WaitedOn::OwnServer {
+                pid: server.process.id(),
+            },
+            None => WaitedOn::SharedClient,
+        }
+    }
+
     /// The refusal for a wait that ended before the server was ready.
     ///
     /// Where the index got to is carried rather than dropped, because a server that stalled at 12%
-    /// and one that was nearly done want opposite responses from whoever reads this.
-    fn incomplete_index(&self, waited: Duration) -> RestructureError {
+    /// and one that was nearly done want opposite responses from whoever reads this. The stage is
+    /// carried for the same reason: a reader acts differently on a warm-up and on a wait for a
+    /// symbol, and the refusal is all a cancelled run says.
+    fn incomplete_index(&self, stage: &WaitStage, waited: Duration) -> RestructureError {
         RestructureError::IndexingIncomplete {
             seconds: waited.as_secs(),
             last: self.chatter.how_far(),
             environment: self.environment.clone(),
+            stage: stage.text().to_string(),
         }
     }
 
@@ -746,7 +817,21 @@ impl RustBackend {
     fn request(&mut self, id: u64, method: &str, params: Value) -> Result<Value> {
         if let Some(bridge) = &self.bridge {
             let started = Instant::now();
-            let outcome = bridge.request(method, params);
+            // A request in flight is a wait like any other, and the one the poll loops cannot
+            // reach: the thread is inside the transport, not beside a sleep. The bridge waits in
+            // heartbeat-sized slices and calls this ticker between them, so the run still says what
+            // it is waiting for while the server computes an answer.
+            let mut waiting = Waiting::begin(
+                WaitStage::a_request_in_flight(method),
+                self.wait_heartbeat,
+                started,
+            );
+            let outcome = {
+                let backend: &RustBackend = self;
+                bridge.request_narrated(method, params, || {
+                    backend.beat(&mut waiting, Instant::now());
+                })
+            };
             // The self-spawned transport folds progress in as it reads the stream; a bridged one
             // never sees the stream, so it collects what arrived and folds it in here. Without
             // this the whole load is silent and a timeout cannot say where the server got to.
@@ -761,9 +846,8 @@ impl RustBackend {
             // retryable, which is what keeps `request_settled` from re-asking a server on behalf
             // of somebody who has gone.
             return match outcome {
-                Err(RestructureError::CallerStopped) => {
-                    Err(self.incomplete_index(started.elapsed()))
-                }
+                Err(RestructureError::CallerStopped) => Err(self
+                    .incomplete_index(&WaitStage::a_request_in_flight(method), started.elapsed())),
                 other => other,
             };
         }
@@ -807,8 +891,13 @@ impl RustBackend {
             let id = self.take_id();
             match self.request(id, method, params.clone()) {
                 Err(RestructureError::ServerCatchingUp) => {
-                    if !self.keep_waiting(SETTLE_POLL) {
-                        return Err(self.incomplete_index(started.elapsed()));
+                    // Not a wait that narrates: this loop is bounded by `CONTENT_MODIFIED_RETRIES`,
+                    // and the request it is about to re-issue narrates itself while it is in flight.
+                    if !self.keep_waiting(None, SETTLE_POLL) {
+                        return Err(self.incomplete_index(
+                            &WaitStage::a_request_in_flight(method),
+                            started.elapsed(),
+                        ));
                     }
                 }
                 outcome => return outcome,
@@ -941,6 +1030,12 @@ impl RustBackend {
             range
         };
         let started = Instant::now();
+        let file = relative_to(uri, &self.workspace_root()?)?;
+        let mut waiting = Waiting::begin(
+            WaitStage::an_answer_for_the_assist(wanted, &file, range.start.line),
+            self.wait_heartbeat,
+            started,
+        );
         // #500's account of what the wait is for, said once rather than per poll: a reader needs to
         // know which assist is outstanding, not how many times it has been asked for.
         let mut reported_wait = false;
@@ -976,11 +1071,12 @@ impl RustBackend {
             if inference.unwrap_or(self.indexed) {
                 return Err(absent_assist(wanted, &offered));
             }
-            if !self.keep_waiting(INDEXING_POLL) {
+            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
                 return Err(incomplete_assist_index(
                     wanted,
                     &offered,
                     inference,
+                    waiting.stage(),
                     started.elapsed(),
                     self.chatter.how_far(),
                     self.environment.clone(),
@@ -1568,6 +1664,12 @@ impl RustBackend {
     /// cancellation, as for every other wait here, and then names where the index got to.
     fn settled_outline(&mut self, uri: &str) -> Result<Value> {
         let started = Instant::now();
+        let file = relative_to(uri, &self.workspace_root()?)?;
+        let mut waiting = Waiting::begin(
+            WaitStage::the_outline_of(&file),
+            self.wait_heartbeat,
+            started,
+        );
         loop {
             let symbols = self.request_settled(
                 "textDocument/documentSymbol",
@@ -1577,8 +1679,8 @@ impl RustBackend {
                 self.refuse_degraded_index()?;
                 return Ok(symbols);
             }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
+            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
+                return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
         }
     }
@@ -2091,6 +2193,12 @@ impl RustBackend {
     /// from the file — that is a mistake in the request, and waiting cannot fix it.
     fn locate_symbol(&mut self, uri: &str, name: &str) -> Result<Value> {
         let started = Instant::now();
+        let file = relative_to(uri, &self.workspace_root()?)?;
+        let mut waiting = Waiting::begin(
+            WaitStage::locating(name, &file),
+            self.wait_heartbeat,
+            started,
+        );
         loop {
             let symbols = self.request_settled(
                 "textDocument/documentSymbol",
@@ -2103,8 +2211,8 @@ impl RustBackend {
             if self.indexed || !outline_is_empty(&symbols) {
                 return Err(failure(format!("`{name}` is not declared in this file")));
             }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
+            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
+                return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
         }
     }
@@ -2367,6 +2475,7 @@ fn incomplete_assist_index(
     wanted: &str,
     offered: &[String],
     inference_ready: Option<bool>,
+    stage: &WaitStage,
     waited: Duration,
     last: String,
     environment: String,
@@ -2384,12 +2493,14 @@ fn incomplete_assist_index(
                 }
             ),
             environment,
+            stage: stage.text().to_string(),
         };
     }
     RestructureError::IndexingIncomplete {
         seconds: waited.as_secs(),
         last,
         environment,
+        stage: stage.text().to_string(),
     }
 }
 
@@ -4256,7 +4367,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         // When it would sleep out a poll interval far longer than any test
         let started = Instant::now();
-        let keep_waiting = backend.keep_waiting(Duration::from_secs(300));
+        let keep_waiting = backend.keep_waiting(None, Duration::from_secs(300));
 
         // Then it does not wait at all, and reports the wait as over
         assert!(!keep_waiting, "a cancelled wait asked to continue");
@@ -4277,7 +4388,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         // When it sleeps out a poll interval
         let started = Instant::now();
-        let keep_waiting = backend.keep_waiting(Duration::from_millis(300));
+        let keep_waiting = backend.keep_waiting(None, Duration::from_millis(300));
 
         // Then it waited the interval and reports the wait as continuing
         assert!(keep_waiting, "an uncancelled wait reported itself over");
@@ -4298,7 +4409,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
 
         // When it is asked whether a wait may continue
         // Then it may, because nothing has said otherwise
-        assert!(backend.keep_waiting(Duration::ZERO));
+        assert!(backend.keep_waiting(None, Duration::ZERO));
     }
 
     /// The error class the TODO called wrong: the plan was not malformed, the indexer never
@@ -4360,6 +4471,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "extract into function",
             &["Extract into variable".to_string()],
             Some(false),
+            &WaitStage::an_answer_for_the_assist("extract into function", "src/lib.rs", 1),
             Duration::from_secs(120),
             "working (100%)".to_string(),
             "cargo 1.94".to_string(),
@@ -4386,6 +4498,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
             "extract into function",
             &[],
             None,
+            &WaitStage::an_answer_for_the_assist("extract into function", "src/lib.rs", 1),
             Duration::from_secs(45),
             "discovering sysroot".to_string(),
             "cargo 1.94".to_string(),
@@ -4397,6 +4510,7 @@ use tddy_service::proto::session::{StartSessionResponse};\n",
                 seconds,
                 last,
                 environment,
+                ..
             } => {
                 assert_eq!(seconds, 45);
                 assert_eq!(last, "discovering sysroot");

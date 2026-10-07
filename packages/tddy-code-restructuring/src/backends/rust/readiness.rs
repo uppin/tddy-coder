@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use super::{
-    first_symbol_position, path_of, seam_refusal, server_defect, LspPoint, RustBackend,
-    INDEXING_POLL,
+    first_symbol_position, path_of, relative_to, seam_refusal, server_defect, LspPoint,
+    RustBackend, WaitStage, Waiting, INDEXING_POLL,
 };
 use crate::{RestructureError, Result};
 
@@ -71,6 +71,11 @@ impl RustBackend {
         };
 
         let started = Instant::now();
+        let mut waiting = Waiting::begin(
+            WaitStage::warming_the_crate_index(),
+            self.wait_heartbeat,
+            started,
+        );
         loop {
             let hover = self.request_settled(
                 "textDocument/hover",
@@ -82,8 +87,8 @@ impl RustBackend {
                 (self.progress)("crate index ready");
                 return self.refuse_degraded_index();
             }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
+            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
+                return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
         }
     }
@@ -147,6 +152,13 @@ impl RustBackend {
     ) -> Result<Answerable> {
         (self.progress)("waiting for type inference at the anchor");
         let started = Instant::now();
+        let file = relative_to(uri, &self.workspace_root()?)?;
+        let line = LspPoint::read(Some(position))?.line as u32 + 1;
+        let mut waiting = Waiting::begin(
+            WaitStage::type_inference_at(&file, line),
+            self.wait_heartbeat,
+            started,
+        );
         let mut ready_and_silent_since: Option<Instant> = None;
         loop {
             let hover = self.request_settled(
@@ -187,8 +199,8 @@ impl RustBackend {
             } else {
                 ready_and_silent_since = None;
             }
-            if !self.keep_waiting(INDEXING_POLL) {
-                return Err(self.incomplete_index(started.elapsed()));
+            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
+                return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
         }
     }
