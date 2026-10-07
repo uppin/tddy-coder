@@ -4,6 +4,7 @@
 //! and only the files a comparison is defined over.
 
 use crate::apply::{ensure_git_worktree, git_output};
+use crate::spawn_record::SpawnRecorder;
 use crate::Result;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -22,28 +23,33 @@ pub fn verify(root: &Path, options: Options) -> Result<crate::verify::Comparison
         .against
         .clone()
         .ok_or_else(|| usage("verify needs --against <git-ref>"))?;
-    ensure_git_worktree(root)?;
+    ensure_git_worktree(root, &options.spawns)?;
 
-    let before = sources_at(root, &against)?;
-    let after = sources_now(root)?;
+    let before = sources_at(root, &against, &options.spawns)?;
+    let after = sources_now(root, &options.spawns)?;
     Ok(crate::verify::compare(&before, &after))
 }
 
-fn sources_at(root: &Path, git_ref: &str) -> Result<BTreeMap<String, String>> {
-    let listing = git_output(root, &["ls-tree", "-r", "--name-only", git_ref])?;
+fn sources_at(
+    root: &Path,
+    git_ref: &str,
+    spawns: &SpawnRecorder,
+) -> Result<BTreeMap<String, String>> {
+    let listing = git_output(root, &["ls-tree", "-r", "--name-only", git_ref], spawns)?;
     let mut sources = BTreeMap::new();
 
     for path in listing.lines().filter(|path| is_comparable(path)) {
-        let blob = git_output(root, &["show", &format!("{git_ref}:{path}")])?;
+        let blob = git_output(root, &["show", &format!("{git_ref}:{path}")], spawns)?;
         sources.insert(path.to_string(), blob);
     }
     Ok(sources)
 }
 
-fn sources_now(root: &Path) -> Result<BTreeMap<String, String>> {
+fn sources_now(root: &Path, spawns: &SpawnRecorder) -> Result<BTreeMap<String, String>> {
     let listing = git_output(
         root,
         &["ls-files", "--cached", "--others", "--exclude-standard"],
+        spawns,
     )?;
     let confined = root.canonicalize()?;
     let mut sources = BTreeMap::new();

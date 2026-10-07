@@ -6,7 +6,7 @@ use std::io::BufReader;
 
 use std::process::ChildStdin;
 
-use std::process::Child;
+use crate::spawn_record::RecordedChild;
 
 /// Drop `use` declarations left binding nothing at all.
 ///
@@ -44,7 +44,8 @@ pub(crate) fn binds_nothing(line: &str) -> bool {
 }
 
 pub(crate) struct Server {
-    pub(crate) process: Child,
+    /// The child, wrapped so its end is reported to the run's recorder when it is waited on.
+    pub(crate) process: RecordedChild,
     pub(crate) stdin: ChildStdin,
     pub(crate) stdout: BufReader<ChildStdout>,
 }

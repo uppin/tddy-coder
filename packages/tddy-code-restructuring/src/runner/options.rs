@@ -6,6 +6,7 @@
 //! [`Options`] without caring how it was read.
 
 use crate::backends::rust::{discard, ProgressSink};
+use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
 use std::path::PathBuf;
 
@@ -102,6 +103,10 @@ pub struct Options {
     /// end rather than one per caller — the audience is whoever is working out why a seam behaved
     /// as it did, not the person waiting. Silent by default, like the other two.
     pub trace: fn(&str),
+    /// Where a record of every process this run starts goes: `git`, `cargo check`, `rustfmt`.
+    ///
+    /// Silent by default, like the three above. A failure to write the record never fails the run.
+    pub spawns: SpawnRecorder,
 }
 
 impl Default for Options {
@@ -124,6 +129,7 @@ impl Default for Options {
             progress: discard(),
             account: discard(),
             trace: untraced,
+            spawns: SpawnRecorder::discard(),
         }
     }
 }

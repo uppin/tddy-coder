@@ -16,11 +16,12 @@ use crate::edit::{
 use crate::item_anchor::{unlowered_item_anchor, ItemAtResolver, ItemResolver};
 use crate::plan::{Anchor, Reexport, RefactorKind, RefactorOp};
 use crate::registry::{Language, LanguageBackend, Workspace};
+use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tddy_lsp::client::LspClient;
@@ -471,6 +472,8 @@ pub struct RustBackend {
     opened: Vec<String>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
+    /// Where the language server this backend starts itself is recorded, when a run asks for it.
+    spawns: SpawnRecorder,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -521,6 +524,7 @@ impl RustBackend {
             claimed: Vec::new(),
             opened: Vec::new(),
             root: None,
+            spawns: SpawnRecorder::discard(),
         }
     }
 
@@ -546,6 +550,12 @@ impl RustBackend {
         if let Some(bridge) = &mut self.bridge {
             bridge.set_cancellation(cancel);
         }
+        self
+    }
+
+    /// Record the language server this backend starts itself, through `spawns`.
+    pub fn with_spawn_recorder(mut self, spawns: SpawnRecorder) -> Self {
+        self.spawns = spawns;
         self
     }
 
@@ -590,6 +600,7 @@ impl RustBackend {
             claimed: Vec::new(),
             opened: Vec::new(),
             root: None,
+            spawns: SpawnRecorder::discard(),
         }
     }
 
@@ -682,7 +693,7 @@ impl RustBackend {
             .join(&toolchain)
             .join("bin");
 
-        let mut command = Command::new(&self.binary);
+        let mut command = self.spawns.command(&self.binary);
         command
             .current_dir(root)
             .env("CARGO_HOME", &self.cargo_home)
@@ -702,12 +713,13 @@ impl RustBackend {
         }
         self.environment =
             server_process::describe_server_environment(&self.binary, &toolchain, &toolchain_bin);
-        let mut process = command
-            .spawn()
+        let mut process = self
+            .spawns
+            .spawn(purpose::RUST_ANALYZER, &mut command)
             .map_err(|error| failure(format!("could not start rust-analyzer: {error}")))?;
 
-        let stdin = process.stdin.take().expect("stdin was piped");
-        let stdout = BufReader::new(process.stdout.take().expect("stdout was piped"));
+        let stdin = process.take_stdin().expect("stdin was piped");
+        let stdout = BufReader::new(process.take_stdout().expect("stdout was piped"));
         self.server = Some(server_process::Server {
             process,
             stdin,

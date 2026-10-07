@@ -44,6 +44,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::compile_gate::{compiler_errors, described_check, run_check};
 use crate::backends::rust::ProgressSink;
+use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
 use diagnostics::{parse, Diagnostic, Fix, Span};
 use format::format_touched;
@@ -59,6 +60,8 @@ pub(super) struct Tidying<'a> {
     pub touched: &'a BTreeSet<String>,
     pub progress: &'a ProgressSink,
     pub cancel: &'a CancellationToken,
+    /// Where the `cargo` and `rustfmt` this tidy runs are recorded.
+    pub spawns: &'a SpawnRecorder,
 }
 
 /// Whether the tidied tree compiles.
@@ -111,7 +114,13 @@ struct Failure {
 /// Check the tree, telling the caller the run stopped when its token fires: the files may already
 /// be tidied by then, and the cancellation alone would not say so.
 fn check(tidying: &Tidying<'_>) -> Result<Checked> {
-    let output = match run_check(tidying.root, tidying.packages, "json", tidying.cancel) {
+    let output = match run_check(
+        tidying.root,
+        tidying.packages,
+        "json",
+        tidying.spawns,
+        tidying.cancel,
+    ) {
         Err(RestructureError::CallerStopped) => {
             (tidying.progress)("tidy cancelled: the tidied files are on disk and were not checked");
             return Err(RestructureError::CallerStopped);
@@ -498,7 +507,12 @@ fn refuse_unappliable(file: &str, edits: &[&Fix], length: usize) -> Result<()> {
 
 /// Format the touched files; whether any changed, so the caller knows to check again.
 fn format_touched_files(tidying: &Tidying<'_>) -> Result<bool> {
-    let changed = format_touched(tidying.root, tidying.touched, tidying.progress)?;
+    let changed = format_touched(
+        tidying.root,
+        tidying.touched,
+        tidying.progress,
+        tidying.spawns,
+    )?;
     Ok(changed > 0)
 }
 
@@ -586,6 +600,7 @@ mod tests {
                 touched: &touched,
                 progress: &sink,
                 cancel: &cancel,
+                spawns: &SpawnRecorder::discard(),
             });
             let said = lines.lock().expect("lines").clone();
             (verdict, said)
@@ -1004,6 +1019,7 @@ mod tests {
             touched: &touched,
             progress: &progress,
             cancel: &cancel,
+            spawns: &SpawnRecorder::discard(),
         });
 
         // Then it passes without having checked anything

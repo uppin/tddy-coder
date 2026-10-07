@@ -257,6 +257,12 @@ finish the unit they are building into `target/`.
 `path:l:c: error[E…]`) are kept. When no line matches, the whole stderr is returned, so a failure is
 reported in full rather than masked.
 
+**Recorded.** Every `cargo check` this runs — the baseline, the result check and the tidy's own —
+goes through the run's `SpawnRecorder` under the purpose `compile-gate`, so the record holds what
+was executed and how each ended. A check killed on cancel is recorded with the signal that killed
+it; a tree that fails the baseline is recorded with the exit status the compiler returned (101 for a
+type error). See [What a run executes](../README.md#what-a-run-executes).
+
 **Classes.** Neither failure is malformed input, a refused seam or an unusable server answer, so each
 is its own `RestructureError` variant. `tddy-index-daemon`'s `status_of` maps the baseline to
 `FailedPrecondition` (the same request fails until the tree is repaired) and the applied tree to
@@ -351,7 +357,10 @@ saying so. A nested group is left in place and reported. The tidy never leaves a
 never touches the plan's own edits.
 
 **Formatting.** `rustfmt` runs over every file the run wrote, with its package's edition, so the
-`cargo fmt --all --check` step of CI's lint job finds nothing the engine left.
+`cargo fmt --all --check` step of CI's lint job finds nothing the engine left. Each `rustfmt` and
+each `cargo check` the tidy runs is reported through the run's `SpawnRecorder` (`tidy-format` and
+`compile-gate`), so the record holds them beside the apply's own `git` — see
+[What a run executes](../README.md#what-a-run-executes).
 
 **The shape that defeated the first version.** A split into nine modules left eleven wide `named`
 facade groups; the library unit and the test unit reported different name sets for each. The two units'

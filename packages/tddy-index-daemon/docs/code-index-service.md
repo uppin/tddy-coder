@@ -195,6 +195,29 @@ at once rather than leaving it for a resume, and a cancel during the group's own
 (`CallerStopped`) for the next resume to roll back. A resume (`--resume`) rolls an open group back before
 it runs anything. `stop_after` is judged only where a group would begin.
 
+## The spawn record
+
+`--spawn-record <PATH>` names an append-only JSONL file the daemon writes, one object per line, of
+every process it starts: a `start` line when a process exists (argv, cwd, pid, the **names** of its
+environment) and an `end` line when it is waited on (exit code, terminating signal, or a failed
+spawn). It is the daemon's half of
+[what a run executes](../../../docs/ft/coder/rust-code-restructuring.md#what-a-run-executes).
+
+The observer is built once in `main.rs` from `--spawn-record`, handed to the `LspRegistry` with
+`.with_spawn_observer(...)`, and rides inside the registry: `WorkspaceIndex::spawn_recorder()` hands
+the same observer to the `Options` a `check` or `apply` builds, so a language server's start and an
+operation's `git`/`cargo`/`rustfmt` land in the one file. The registry's records carry
+`origin: "lsp"`; an operation's carry `origin: "engine"`.
+
+The record never truncates, so a restarted daemon appends after its predecessor's lines. Arguments
+are redacted and the environment is recorded as names only. A write that fails is logged and
+dropped: it never fails a request.
+
+**The daemon's own exit is not written here.** The daemon `exec`s nothing and writes no line about
+itself; `run-index-daemon` launches it as a background child of a watcher shell whose `wait` writes
+the `index-daemon` `end` line — the one thing a `SIGKILL` cannot do from inside. See the script's
+own narration for the file's location.
+
 ## Refusals
 
 `status.rs` holds one `match` per error type — `RestructureError`, `AnalysisError`, `LspError` — each

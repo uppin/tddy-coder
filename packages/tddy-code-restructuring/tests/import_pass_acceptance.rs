@@ -29,6 +29,7 @@ use harness::{
     the_module_named, HOST_MODULE, ORIGIN_LIB, SERVICE_MODULE,
 };
 use tddy_code_restructuring::apply::apply_workspace_edit;
+use tddy_code_restructuring::spawn_record::SpawnRecorder;
 use tddy_code_restructuring::Reexport;
 
 /// `fn constant() -> u32 { 7 }`: a seam that names nothing at all.
@@ -255,7 +256,8 @@ async fn imports_the_parent_s_type_on_a_server_an_earlier_check_rehearsed_its_pa
         .unwrap_or_else(|refusal| panic!("the seam was refused: {refusal}"));
 
     // Then
-    apply_workspace_edit(workspace.path(), &edit).expect("the resolved edit applies");
+    apply_workspace_edit(workspace.path(), &edit, &SpawnRecorder::discard())
+        .expect("the resolved edit applies");
     let module = the_module_named(&workspace.read(HOST_MODULE), "tallying");
     assert!(
         module.contains("use super::super::Failure;"),

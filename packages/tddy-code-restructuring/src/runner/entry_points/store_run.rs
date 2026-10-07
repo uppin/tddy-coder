@@ -347,6 +347,7 @@ fn apply_held_plan(
                 &paths,
                 &mut journal,
                 &mut ledger,
+                &options.spawns,
             )?;
             // A group's members reach the plan store together, once the group has compiled.
             let on_check = |name: &str| {
@@ -354,8 +355,15 @@ fn apply_held_plan(
                     "op {index} of {total}: checking group `{name}` compiles"
                 ));
             };
-            let settled =
-                GroupRun::settle(&mut group, index, resolved, &gate, &mut journal, on_check)?;
+            let settled = GroupRun::settle(
+                &mut group,
+                index,
+                resolved,
+                &gate,
+                &options.spawns,
+                &mut journal,
+                on_check,
+            )?;
             done += 1;
             let Settled::Ready(ready) = settled else {
                 continue;

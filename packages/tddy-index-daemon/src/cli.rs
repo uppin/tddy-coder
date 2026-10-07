@@ -62,6 +62,15 @@ pub(crate) struct IndexDaemonArgs {
     /// (`INSTALL_DAEMON_LOG_DIR`), not something a binary should invent a path for.
     #[arg(long, value_name = "PATH")]
     pub(crate) log_file: Option<PathBuf>,
+
+    /// Append a record of every process this daemon starts to this file: one JSON object per
+    /// line, a `start` line when a process exists and an `end` line with its exit status or the
+    /// signal that ended it. Never truncated, so a restarted daemon appends after its
+    /// predecessor. Arguments are redacted and the environment is recorded as names only.
+    ///
+    /// Not recorded: what rust-analyzer itself starts (build scripts, the proc-macro server).
+    #[arg(long, value_name = "PATH")]
+    pub(crate) spawn_record: Option<PathBuf>,
 }
 
 /// The operations a single-shot run can ask for, grouped as the command line that already exists

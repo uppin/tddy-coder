@@ -77,6 +77,39 @@ requests reads the tree on disk again after each one. See
 `tddy-index-daemon` is that host. See
 [warm-code-intelligence-daemon.md](../../docs/ft/coder/warm-code-intelligence-daemon.md).
 
+## What a run executes
+
+A run starts `git`, `cargo check`, `rustfmt` and, on the cold command line, a language server. Each
+one goes through a `SpawnRecorder` (`src/spawn_record.rs`), which reports a start (argv, cwd, pid,
+the **names** of the environment it was given) and an end (exit code, terminating signal, or a
+spawn that failed) to a `SpawnObserver`. The default recorder tells nobody, as `Options::progress`
+defaults to discard; a host that wants a record installs a sink on `Options::spawns`, or
+`RustBackend::with_spawn_recorder` for the server the backend starts itself.
+
+The only sink shipped here is `JsonlSpawnRecord` (`spawn_record/jsonl.rs`): one JSON object per
+line, appended `O_APPEND`, never truncated, so a restarted writer adds after its predecessor. A
+`start` line is written as soon as the process exists; the `end` line when it is waited on — so a
+run killed in between leaves a `start` with no `end`, which is the point. Times are Unix
+milliseconds (`at_unix_ms`), so no date-formatting dependency is pulled in.
+
+**Secrets never reach the file.** `argv` is recorded only for an allow-listed program (`git`,
+`cargo`, `rustfmt`, `rust-analyzer`, `nix`, `setsid`, `sh`); any other program is recorded with a
+count of its arguments and no more. Within an allow-listed program, an argument carrying URL
+userinfo, a token prefix, a `--*token*`-shaped flag's value, or the value of a `-c <key>=<value>`
+whose key names a credential is replaced by `<redacted>`. The environment is recorded as **names
+only**.
+
+**What it cannot show.** rust-analyzer's own children — build scripts and the proc-macro server —
+are started by rust-analyzer, not by anything this crate runs, so they are never recorded; a
+`SIGKILL` is visible only where a parent watched the child; and a cold CLI run killed before
+`.restructure/` exists leaves no record (see below). A stall is the heartbeat's question, not this
+record's.
+
+`a record that cannot be written never fails the run`: the sink logs the failure and stops recording
+to that file. The structural test `tests/every_spawn_is_recorded.rs` fails if a `Command::new` or
+`.spawn()` appears in production source outside `spawn_record.rs`, so the next spawn site cannot
+bypass the recorder.
+
 ## Operations (v1)
 
 `extract_method`, `extract_variable`, `rename_symbol`, `extract_module` (`reexport`, `to_file`),
@@ -117,6 +150,14 @@ Run state is keyed by the **plan**, at `<root>/.restructure/<plan stem>-<digest>
 follows another under the same root without hand-archiving and `--resume` resumes the plan it was
 given.
 
+A cold CLI run's process record lives at `<root>/.restructure/spawns.jsonl` — beside the state
+directory, not inside it, because `.restructure/` is created only **after** the baseline
+`cargo check`, and a refusal says "nothing was written". `ColdRunSpawnRecord`
+(`spawn_record/deferred.rs`) therefore holds every line in memory until `.restructure/` exists and
+writes nothing for a run refused before its state directory is created. The gap it leaves is
+stated: a run killed during the baseline check — the longest wait before `.restructure/` exists —
+leaves no record on this path. The daemon's own record is always open and has no such gap.
+
 ## Where the code lives
 
 `src/` is organised by what a file decides. Over the 500 production-line budget are `backends/rust.rs` and
@@ -126,6 +167,7 @@ given.
 |---|---|
 | Plan vocabulary | `plan.rs`, `plan/refactor_kind.rs` (`RefactorKind`), `plan/codec.rs` with `plan/codec/{file_hint,groups}.rs`, `plan/item_path.rs` |
 | Journal | `journal.rs`, `journal/group.rs` (`PreImage`, `OpenGroup`) |
+| Process record | `spawn_record.rs` with `spawn_record/{jsonl,deferred,redact}.rs` (`SpawnRecorder`, `JsonlSpawnRecord`, `ColdRunSpawnRecord`, `redacted`) |
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
 | Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs` |

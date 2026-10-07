@@ -103,6 +103,9 @@ pub(crate) async fn serve_check(
             // schema has for exactly that.
             progress: progress_into(events.clone(), cancel.clone()),
             account: note_into(events.clone(), cancel.clone()),
+            // The same observer the language servers report to, so a check's `cargo`/`git` join
+            // them in the one record the host named with `--spawn-record`.
+            spawns: index.spawn_recorder(),
             ..Options::default()
         };
 
@@ -178,6 +181,9 @@ pub(crate) async fn serve_apply(
         resume: request.resume,
         from: request.from.map(|from| from as usize),
         stop_after: request.stop_after.map(|stop_after| stop_after as usize),
+        // The same observer the language servers report to, so an apply's `git`/`cargo`/`rustfmt`
+        // join them in the one record the host named with `--spawn-record`.
+        spawns: index.spawn_recorder(),
         ..Options::default()
     };
     let (events, stream) = event_stream();

@@ -29,15 +29,23 @@ gone and no line saying which child, which argv, or which signal.
 
 ## What would close it
 
-1. **A spawn log**: every process the engine, the CLI and the index daemon start — argv, cwd, pid,
+1. ~~**A spawn log**: every process the engine, the CLI and the index daemon start — argv, cwd, pid,
    start time, and on exit its status **or terminating signal** — appended (never truncated) to the
-   daemon's history, and for a CLI run to a file beside the plan's journal.
-2. **The daemon's own exit**: today `exec` makes the daemon the pid itself, so a `SIGKILL` leaves no
+   daemon's history, and for a CLI run to a file beside the plan's journal.~~ **Delivered** by
+   `#sharpen` 3/8 (`spawn-record`, PR #590): an append-only JSONL record, one `start` and one `end`
+   line per process, redacted and environment-names-only, at
+   `<TDDY_INDEX_RUNTIME_DIR>/tddy-index-<tag>.spawns.jsonl` for the daemon and
+   `<root>/.restructure/spawns.jsonl` for a cold CLI run.
+2. ~~**The daemon's own exit**: today `exec` makes the daemon the pid itself, so a `SIGKILL` leaves no
    trace at all. A one-line "exited: status/signal, at <time>" written by a parent that is *not* the
    pid `--stop` signals (or by the daemon's signal handlers for everything but `SIGKILL`) would make
-   "killed by something else" distinguishable from "crashed".
+   "killed by something else" distinguishable from "crashed".~~ **Delivered** by the same node: the
+   daemon runs as a background child of a watcher shell, whose `wait` writes the `index-daemon` `end`
+   line — a `SIGKILL` as `{"signal":9}`.
 3. **A per-operation line in the apply output** naming the plan operation id, so a log line can be
-   joined to the journal record it belongs to.
+   joined to the journal record it belongs to. **Still open.** The record carries `at_unix_ms` and
+   `pid`, so a join by time is possible by hand, but nothing names the op. It needs `runner.rs` to
+   tell the recorder which operation is running, which is not in `#sharpen` 3/8's scope.
 
 Not done here: the engine change is its own node (`tddy-code-restructuring` is out of scope for the
 `#carve` stack).
