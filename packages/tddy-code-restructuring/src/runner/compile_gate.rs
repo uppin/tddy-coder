@@ -238,7 +238,15 @@ pub(super) fn failing_check(
     if packages.is_empty() {
         return Ok(None);
     }
-    let output = run_check(root, packages, "short", spawns, cancel, progress, wait_heartbeat)?;
+    let output = run_check(
+        root,
+        packages,
+        "short",
+        spawns,
+        cancel,
+        progress,
+        wait_heartbeat,
+    )?;
     if output.succeeded {
         return Ok(None);
     }
