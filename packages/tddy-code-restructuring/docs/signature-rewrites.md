@@ -5,6 +5,10 @@
 rust-analyzer has no assist that retypes or adds a parameter, reorders parameters, or edits one call's
 arguments. `change_return_type` with a `variant` is the exception, below.
 
+The call-site half edits an argument list. Its sibling is `repoint_call`, which edits the part of a
+call **in front of** the argument list — one call's callee, or the receiver of every call of a method;
+see [repoint-call.md](repoint-call.md).
+
 Product behaviour: [Rust code restructuring](../../../docs/ft/coder/rust-code-restructuring.md#signature-and-call-site-operations).
 
 ## Where it lives

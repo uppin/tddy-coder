@@ -15,9 +15,9 @@ use crate::Result;
 
 /// A half-open byte range of the text an operation reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Span {
-    from: usize,
-    to: usize,
+pub(in crate::backends::rust) struct Span {
+    pub(in crate::backends::rust) from: usize,
+    pub(in crate::backends::rust) to: usize,
 }
 
 impl Span {
@@ -32,9 +32,9 @@ impl Span {
 /// it reports are exactly as narrow as the change: a later operation of the same plan anchored on
 /// the same line — the function's own name, say — is still addressable.
 #[derive(Debug, PartialEq, Eq)]
-struct Replacement {
-    span: Span,
-    with: String,
+pub(in crate::backends::rust) struct Replacement {
+    pub(in crate::backends::rust) span: Span,
+    pub(in crate::backends::rust) with: String,
 }
 
 /// `span` replaced by `with`.
@@ -51,7 +51,10 @@ fn inserting(at: usize, inserted: &str) -> Vec<Replacement> {
 }
 
 /// `replacements` as the edits of `text`, in the file's own one-based coordinates.
-fn edits_of(text: &str, replacements: Vec<Replacement>) -> Vec<TextEdit> {
+pub(in crate::backends::rust) fn edits_of(
+    text: &str,
+    replacements: Vec<Replacement>,
+) -> Vec<TextEdit> {
     let position = |offset: usize| {
         let before = &text[..offset];
         Position {
@@ -76,15 +79,20 @@ pub(super) use declaration::{returned_type, rewrite_declaration};
 
 /// The entries between the delimiters at `open` and `close`, split at the commas outside any
 /// brackets (and, for a parameter list, outside any generic arguments), each trimmed.
-fn entries(code: &str, open: usize, close: usize, counting_angles: bool) -> Vec<Span> {
+///
+/// The split is found on the masked `code`, but the trim reads `text`: a literal is masked to its
+/// first byte followed by spaces, and trimming the mask would cut a span short of a closing quote
+/// that ends an entry.
+fn entries(text: &str, code: &str, open: usize, close: usize, counting_angles: bool) -> Vec<Span> {
     let bytes = code.as_bytes();
     let mut found = Vec::new();
     let mut depth = 0usize;
     let mut from = open + 1;
     let mut push = |from: usize, to: usize| {
-        let trimmed = code[from..to].trim();
+        let written = &text[from..to];
+        let trimmed = written.trim();
         if !trimmed.is_empty() {
-            let start = from + (code[from..to].len() - code[from..to].trim_start().len());
+            let start = from + (written.len() - written.trim_start().len());
             found.push(Span {
                 from: start,
                 to: start + trimmed.len(),
@@ -162,6 +170,7 @@ fn required<'a>(field: Option<&'a str>, name: &str) -> Result<&'a str> {
 
 mod call_site;
 pub(super) use call_site::rewrite_call;
+pub(in crate::backends::rust) use call_site::{call_in, Call};
 
 #[cfg(test)]
 mod tests {
@@ -197,6 +206,7 @@ mod tests {
             order: Vec::new(),
             canonical_paths: false,
             to_type: None,
+            callee: None,
         };
         fill(&mut op);
         op

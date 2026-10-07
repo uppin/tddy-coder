@@ -245,6 +245,11 @@ pub(crate) struct VerifyArgs {
     /// differences it causes instead of reporting them.
     #[arg(long = "retarget", value_name = "OLD=NEW")]
     pub(crate) retarget: Vec<String>,
+
+    /// A call re-point the author made, `OLD=NEW` callee texts (repeatable): `verify` accounts for
+    /// the differences it causes instead of reporting them.
+    #[arg(long = "repoint", value_name = "OLD=NEW")]
+    pub(crate) repoint: Vec<String>,
 }
 
 /// One operation, as the request its RPC carries — the only form the single-shot path deals in.
@@ -379,6 +384,7 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
             workspace_root: named(&verify.root.workspace_root)?,
             against: verify.against,
             retargets: verify.retarget,
+            repoints: verify.repoint,
         }),
         RestructureCommand::Load(load) => Requested::LoadPlans(LoadPlansRequest {
             workspace_root: named(&load.root.workspace_root)?,
@@ -676,7 +682,42 @@ mod tests {
                 workspace_root: "/trees/one".to_string(),
                 against: "HEAD~1".to_string(),
                 retargets: vec!["Host=Roster".to_string(), "Old=New".to_string()],
+                repoints: Vec::new(),
             }
+        );
+    }
+
+    #[test]
+    fn verify_carries_the_repoints_it_is_told_of_beside_the_retargets() {
+        // Given a verify against a ref, told of a retarget and of two call re-points
+        let requested = requested_by(&[
+            "restructure",
+            "verify",
+            "--workspace-root",
+            "/trees/one",
+            "--against",
+            "HEAD~1",
+            "--retarget",
+            "Host=Roster",
+            "--repoint",
+            ".slot=.peer.slot",
+            "--repoint",
+            "self.dir_for=lookup::dir_for",
+        ]);
+
+        // Then both lists reach the request, each in the order given
+        let Requested::Verify(verify) = requested else {
+            panic!("expected a verify request");
+        };
+        assert_eq!(
+            (verify.retargets, verify.repoints),
+            (
+                vec!["Host=Roster".to_string()],
+                vec![
+                    ".slot=.peer.slot".to_string(),
+                    "self.dir_for=lookup::dir_for".to_string()
+                ]
+            )
         );
     }
 

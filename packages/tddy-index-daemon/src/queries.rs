@@ -287,6 +287,7 @@ async fn comparison_against(
         command: Command::Verify,
         against: Some(request.against),
         retargets: request.retargets,
+        repoints: request.repoints,
         ..Options::default()
     };
 

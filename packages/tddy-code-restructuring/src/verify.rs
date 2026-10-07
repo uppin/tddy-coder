@@ -83,6 +83,8 @@ pub use statements::statements;
 mod tokens;
 pub use tokens::token_difference;
 
+mod repoint;
+pub use repoint::Repoint;
 mod retarget;
 pub use retarget::{Declared, Retarget};
 
@@ -203,7 +205,8 @@ pub fn compare_with(
 
     let widened = pair_by(missing, added, visibility_key);
     let accounted = retarget::account(widened.missing, widened.added, declared, &before_statements);
-    let paired = pair_by(accounted.missing, accounted.added, re_point_key);
+    let called = repoint::account(accounted.missing, accounted.added, declared);
+    let paired = pair_by(called.missing, called.added, re_point_key);
     let reflowed = reflow_pass(paired.missing, paired.added);
 
     Comparison {
@@ -212,7 +215,7 @@ pub fn compare_with(
         missing: reflowed.missing,
         added: reflowed.added,
         excused: Excused {
-            repointed: accounted.pairs + paired.pairs + reflowed.pairs,
+            repointed: accounted.pairs + called.pairs + paired.pairs + reflowed.pairs,
             visibility: widened.pairs,
             cfg_test_gates: gates,
         },

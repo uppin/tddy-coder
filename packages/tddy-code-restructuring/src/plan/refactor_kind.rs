@@ -150,6 +150,10 @@ pub enum RefactorKind {
     /// Moves members of an inherent `impl` to another type of the same crate: the whole block's
     /// self type changes, or the block is split at the anchored run. `to_type` names the new type.
     RetargetImpl,
+    /// Re-points the callee of one call (anchored on the call, `callee` the complete new callee),
+    /// or the receiver of every call of one method (anchored on the method, `callee` a
+    /// `$receiver<hops>.<method>` template). The arguments are kept byte for byte.
+    RepointCall,
 }
 
 impl RefactorKind {

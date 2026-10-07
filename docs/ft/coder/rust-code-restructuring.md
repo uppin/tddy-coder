@@ -8,7 +8,7 @@
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text, apart from one type or one expression where an operation needs it) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — twenty-three operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twenty-four operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -221,7 +221,9 @@ How the crate delivers this: [readiness-and-gates.md](../../../packages/tddy-cod
 A signature change breaks every caller, and no assist changes a parameter's type, adds or reorders a
 parameter, or edits one call's arguments. The eight operations from `change_param_type` to
 `reorder_call_args` do, in two halves: the **signature operations** edit only the function's
-declaration, and the **call-site operations** each edit one call. Nothing fans out to callers, so a
+declaration, and the **call-site operations** each edit one call. [`repoint_call`](#repoint_call) is a
+call-site operation too: it edits the part of a call **in front of** its arguments, which the argument
+operations never touch. Nothing fans out to callers, so a
 caller is its own operation, and a [transactional group](#transactional-groups) makes the declaration
 and its callers one unit that must compile only at its end:
 
@@ -236,6 +238,11 @@ and its callers one unit that must compile only at its end:
 - **A call-site operation is anchored on one call expression**: an item anchor on the function that
   contains the call, with a range relative to that item covering `callee(args)` or
   `receiver.method(args)`. A range that is not exactly one call is refused, naming the text.
+- **`repoint_call` edits the callee, not the arguments.** Its `callee` is the new callee — one path
+  or method chain over one call (the *single* form), or a `$receiver<hops>.<method>` template whose
+  hops are inserted after the receiver of every call of a method (the *bulk* form, an item anchor
+  with no range). The arguments stay byte for byte; an argument changes through `add_call_arg` and
+  its siblings. See [`repoint_call`](#repoint_call).
 - **A group missing a caller is rolled back**, and the refusal carries the compiler's error for the
   caller left out.
 - **A parameter is renamed with `rename_symbol`** and a range anchor on its name; no symbol anchor
@@ -324,6 +331,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `remove_call_arg` | Remove one argument from one call, at `variant` |
 | `change_call_arg` | Replace one argument of one call with `expr`, at `variant` |
 | `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
+| `repoint_call` | Rewrite the part of a call **in front of** its arguments. Single form: one call's callee. Bulk form: insert hops after the receiver of every call of a method. See [`repoint_call`](#repoint_call) |
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
@@ -435,6 +443,27 @@ is the documented outcome — pair the operation with `repoint_call` in one `gro
 over `<New>` afterwards to put the new block in the new type's module. The forwarding delegator
 (`variant: "leave_delegator"` with `expr`) is named by the schema and **refused** by the engine; it is
 a follow-up. Behaviour and limits: [`docs/retarget-impl.md`](../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
+
+### `repoint_call`
+
+A call is re-pointed by rewriting the part in front of its argument list; the arguments are kept byte
+for byte. The **single form** replaces one call's callee: an `item` anchor on the function that holds
+the call, with a relative range over exactly one call, and `callee` = the complete new callee — one
+path or method chain (`self.slot(x)` → `self.peer.slot(x)`, `slot(x)` → `lookup::slot(x)`). The **bulk
+form** re-points the receiver of every call of a method the server knows: an `item` anchor on the
+method (a `self` receiver, **no** range) and `callee` = a `$receiver<hops>.<method>` template, whose
+hops are inserted after each receiver (`x.m(..)` → `x.agent_roster().m(..)`). The form is read from
+the anchor's shape; there is no `variant`. Arguments are never added or removed — an argument changes
+through `add_call_arg` and its siblings in the same `group`.
+
+Refused before anything is written: a `callee` that is not one path or method chain, a single range
+that is not exactly one call, an old callee that holds a call (its arguments would be dropped), a
+method-call turbofish a field chain cannot restate, a callee equal to the current one, a bulk anchor
+that is not a method, and — named all at once, each `file:line` — every reference the bulk form cannot
+re-point (a path call, a function pointer, an import). A reference inside a comment is left alone and
+counted in the apply note; a method nothing calls is a no-op with a note. `check --deep` rehearses the
+operation the way `apply` does. `verify --repoint OLD=NEW` accounts for a declared re-point. Behaviour
+and limits: [`docs/repoint-call.md`](../../../packages/tddy-code-restructuring/docs/repoint-call.md).
 
 ## LSP integration
 
@@ -671,6 +700,16 @@ rename that was not declared, a changed argument, and any lost statement or comm
 `verify` proves only that the differences are of the shape a declared retarget produces, not that the
 plan made them — a hand edit that renames `OLD` to `NEW` is excused too, because the author declared
 it.
+
+`--repoint OLD=NEW` (repeatable) tells `verify` of a call re-point the author made. It pairs a lost
+statement with a gained one equal to it once every call written `OLD` becomes `NEW` — an `OLD`
+immediately followed by `(` or `::<`, outside strings, comments and lifetimes — and counts the pairs
+into `repointed`. `OLD`/`NEW` are callee texts: a whole callee (`.slot=.peer.slot`), or the
+method-and-hop of the bulk form (`.slot=.agent_roster().slot`). A hop that was not declared, a
+replaced hop, a changed argument and a different method stay reported. A plain re-point through a
+lowercase module qualifier (`f(` becoming `m::f(`) needs no declaration — the re-point pass above
+already excuses it; what needs one is a hop on a receiver, a method chain, or a path whose new
+qualifier is a type.
 
 ## Workflow
 

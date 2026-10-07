@@ -7,7 +7,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 
 **You never write the moved or extracted code.** You write a plan of *intents*. `tddy-tools restructure` resolves each intent through rust-analyzer (via `tddy-lsp`).
 
-**v1 scope:** Rust only — twenty-three operations, ten subcommands. No TypeScript.
+**v1 scope:** Rust only — twenty-four operations, ten subcommands. No TypeScript.
 
 ## CLI
 

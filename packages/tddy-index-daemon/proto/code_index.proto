@@ -284,6 +284,8 @@ message VerifyRequest {
   string against        = 2;
   // `impl` retargets the author declares, `OLD=NEW` each, so verify can account for them.
   repeated string retargets = 3;
+  // Call re-points (`repoint_call`) the author declares, `OLD=NEW` callee texts each.
+  repeated string repoints = 4;
 }
 
 message VerifyResponse {
