@@ -1,19 +1,23 @@
 //! `accounts.AccountsService` over an [`AccountStore`].
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tddy_credential_sync::AccountSyncSummary;
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
-    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
+    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse, LinkState,
     ListAccountsRequest, ListAccountsResponse, PollLinkAccountRequest, PollLinkAccountResponse,
-    ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse, SetAccountLabelRequest,
-    SetAccountLabelResponse, SyncStatus,
+    ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse, SessionAccount,
+    SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
 };
 
-use crate::linking::{AccountLinker, LinkedAccountStore};
+use crate::linking::{
+    record_for_link, removal_allowed, AccountLinker, LinkError, LinkProgress, LinkedAccountStore,
+};
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
 
@@ -29,6 +33,10 @@ const SUBJECT_METADATA_KEY: &str = "subject";
 struct Linking {
     linker: Arc<dyn AccountLinker>,
     store: Arc<dyn LinkedAccountStore>,
+    /// Attempts begun and not yet finished: `link_id` to the session that began it and the
+    /// provider it targets. A poll presents only the `link_id`, and a link belongs to the session
+    /// that began it.
+    attempts: Mutex<HashMap<String, (String, ProviderId)>>,
 }
 
 /// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`], and — when the
@@ -74,7 +82,11 @@ impl<S> AccountsServiceImpl<S> {
         linker: Arc<dyn AccountLinker>,
         store: Arc<dyn LinkedAccountStore>,
     ) -> Self {
-        self.linking = Some(Linking { linker, store });
+        self.linking = Some(Linking {
+            linker,
+            store,
+            attempts: Mutex::new(HashMap::new()),
+        });
         self
     }
 
@@ -103,6 +115,12 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         let response = match self.store.list(&request.session_token) {
             Ok(records) => ListAccountsResponse {
                 providers: grouped_by_provider(&records, self.sync_status.as_deref()),
+                session_account: self.session_account_of(&request.session_token)?.map(
+                    |(provider, account)| SessionAccount {
+                        provider: provider.as_str().to_string(),
+                        account_id: account.as_str().to_string(),
+                    },
+                ),
                 ..ListAccountsResponse::default()
             },
             Err(AccountsError::Locked) => ListAccountsResponse {
@@ -142,12 +160,21 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         request: Request<RemoveAccountRequest>,
     ) -> Result<Response<RemoveAccountResponse>, Status> {
         let request = request.into_inner();
-        self.store
-            .remove(
-                &request.session_token,
-                &ProviderId::new(request.provider),
-                &AccountId::new(request.account_id),
+        let provider = ProviderId::new(request.provider);
+        let account = AccountId::new(request.account_id);
+        let session_account = self.session_account_of(&request.session_token)?;
+        removal_allowed(
+            (&provider, &account),
+            session_account.as_ref().map(|(p, a)| (p, a)),
+        )
+        .map_err(|_| {
+            Status::failed_precondition(
+                "this is the account your session was established with, and your vault's key \
+                 derives from it; sign in with another account before removing it",
             )
+        })?;
+        self.store
+            .remove(&request.session_token, &provider, &account)
             .map_err(status_for)?;
         let remaining = self
             .store
@@ -160,20 +187,158 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
 
     async fn begin_link_account(
         &self,
-        _request: Request<BeginLinkAccountRequest>,
+        request: Request<BeginLinkAccountRequest>,
     ) -> Result<Response<BeginLinkAccountResponse>, Status> {
         let linking = self.require_linking()?;
-        let _ = (&linking.linker, &linking.store);
-        todo!("TODO(keyring 8/9): begin the provider's dance; carry the operator's code through")
+        let request = request.into_inner();
+        let provider = ProviderId::new(request.provider);
+        // Only an unknown session stops a link from beginning. A closed vault is reported when the
+        // approval arrives, as `LINK_VAULT_LOCKED`, which is where the operator can be told.
+        match linking.store.held(&request.session_token, &provider) {
+            Ok(_) | Err(LinkError::Locked) => {}
+            Err(refusal) => return Err(link_status_for(refusal)),
+        }
+        let challenge = linking.linker.begin(&provider).map_err(link_status_for)?;
+        linking
+            .attempts
+            .lock()
+            .map_err(|_| Status::internal("link attempts are unavailable"))?
+            .insert(challenge.link_id.clone(), (request.session_token, provider));
+        Ok(Response::new(BeginLinkAccountResponse {
+            link_id: challenge.link_id,
+            user_code: challenge.user_code,
+            verification_uri: challenge.verification_uri,
+            expires_in_seconds: saturating_i64(challenge.expires_in_seconds),
+            interval_seconds: saturating_i64(challenge.interval_seconds),
+        }))
     }
 
     async fn poll_link_account(
         &self,
-        _request: Request<PollLinkAccountRequest>,
+        request: Request<PollLinkAccountRequest>,
     ) -> Result<Response<PollLinkAccountResponse>, Status> {
         let linking = self.require_linking()?;
-        let _ = (&linking.linker, &linking.store);
-        todo!("TODO(keyring 8/9): one poll; on approval store the record and return the summary")
+        let request = request.into_inner();
+        let provider = {
+            let attempts = linking
+                .attempts
+                .lock()
+                .map_err(|_| Status::internal("link attempts are unavailable"))?;
+            match attempts.get(&request.link_id) {
+                Some((session, provider)) if session == &request.session_token => provider.clone(),
+                _ => return Err(link_status_for(LinkError::NoSuchLink)),
+            }
+        };
+        let progress = linking
+            .linker
+            .poll(&request.link_id)
+            .map_err(link_status_for)?;
+        let state_only = |state: LinkState| PollLinkAccountResponse {
+            state: state as i32,
+            ..PollLinkAccountResponse::default()
+        };
+        let response = match progress {
+            LinkProgress::Pending { interval_seconds } => PollLinkAccountResponse {
+                state: LinkState::LinkPending as i32,
+                interval_seconds: saturating_i64(interval_seconds),
+                ..PollLinkAccountResponse::default()
+            },
+            LinkProgress::Denied => {
+                self.finish_attempt(linking, &request.link_id)?;
+                state_only(LinkState::LinkDenied)
+            }
+            LinkProgress::Expired => {
+                self.finish_attempt(linking, &request.link_id)?;
+                state_only(LinkState::LinkExpired)
+            }
+            LinkProgress::Approved {
+                identity,
+                access_token,
+            } => {
+                self.finish_attempt(linking, &request.link_id)?;
+                match store_link(
+                    linking,
+                    &request.session_token,
+                    &provider,
+                    &identity,
+                    &access_token,
+                ) {
+                    Ok(record) => PollLinkAccountResponse {
+                        state: LinkState::LinkLinked as i32,
+                        account: Some(summary_of(&record, self.sync_status.as_deref())),
+                        ..PollLinkAccountResponse::default()
+                    },
+                    Err(LinkError::Locked) => state_only(LinkState::LinkVaultLocked),
+                    Err(refusal) => return Err(link_status_for(refusal)),
+                }
+            }
+        };
+        Ok(Response::new(response))
+    }
+}
+
+impl<S> AccountsServiceImpl<S> {
+    /// The account the session was established with. `None` when no linking is wired, because
+    /// nothing then knows which account that is.
+    fn session_account_of(
+        &self,
+        session_token: &str,
+    ) -> Result<Option<(ProviderId, AccountId)>, Status> {
+        self.linking.as_ref().map_or(Ok(None), |linking| {
+            linking
+                .store
+                .session_account(session_token)
+                .map_err(link_status_for)
+        })
+    }
+
+    fn finish_attempt(&self, linking: &Linking, link_id: &str) -> Result<(), Status> {
+        linking
+            .attempts
+            .lock()
+            .map_err(|_| Status::internal("link attempts are unavailable"))?
+            .remove(link_id);
+        Ok(())
+    }
+}
+
+/// Deduplicate against what the vault holds and write the result. Mints nothing.
+fn store_link(
+    linking: &Linking,
+    session_token: &str,
+    provider: &ProviderId,
+    identity: &crate::linking::LinkedIdentity,
+    access_token: &str,
+) -> Result<CredentialRecord, LinkError> {
+    let held = linking.store.held(session_token, provider)?;
+    let linked_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| LinkError::Unavailable(error.to_string()))?
+        .as_secs();
+    let record = record_for_link(&held, provider, identity, access_token, linked_at);
+    linking.store.put(session_token, record.clone())?;
+    Ok(record)
+}
+
+fn saturating_i64(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
+
+fn link_status_for(refusal: LinkError) -> Status {
+    match refusal {
+        LinkError::NoSuchSession => {
+            Status::unauthenticated("the session token names no signed-in session")
+        }
+        LinkError::Locked => Status::failed_precondition(
+            "your credential vault is locked on this daemon; unlock it with your passphrase",
+        ),
+        LinkError::NoSuchLink => {
+            Status::not_found("no link attempt by that id is in progress; begin a new one")
+        }
+        LinkError::UnsupportedProvider(provider) => {
+            Status::invalid_argument(format!("accounts at {provider} cannot be linked"))
+        }
+        LinkError::Unavailable(reason) => Status::internal(reason),
     }
 }
 

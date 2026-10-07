@@ -13,7 +13,7 @@
 //! [`account_linking_acceptance`](../tests/account_linking_acceptance.rs) asserts it over the
 //! serialised response rather than over the struct.
 
-use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
+use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 
 /// Metadata key holding the provider's own immutable identifier for the account.
 ///
@@ -161,8 +161,31 @@ pub fn record_for_link(
     access_token: &str,
     linked_at: u64,
 ) -> CredentialRecord {
-    let _ = (held, provider, identity, access_token, linked_at);
-    todo!("TODO(keyring 8/9): dedup on subject id; a re-link keeps account id and label")
+    let existing = held.iter().find(|record| {
+        &record.provider == provider
+            && record.metadata.get(META_SUBJECT_ID) == Some(&identity.subject_id)
+    });
+
+    let mut metadata = existing
+        .map(|record| record.metadata.clone())
+        .unwrap_or_default();
+    metadata.insert(META_SUBJECT_ID.to_string(), identity.subject_id.clone());
+    metadata.insert(META_SUBJECT.to_string(), identity.login.clone());
+
+    CredentialRecord {
+        provider: provider.clone(),
+        // The provider's id is already unique per person, so a new account derives its id from it
+        // rather than from a login name, which can be released and re-registered.
+        account: existing.map_or_else(
+            || AccountId::new(format!("{}-{}", provider.as_str(), identity.subject_id)),
+            |record| record.account.clone(),
+        ),
+        label: existing.map_or_else(|| identity.login.clone(), |record| record.label.clone()),
+        secret: SecretString::new(access_token),
+        metadata,
+        updated_at: linked_at,
+        version: existing.map_or(FIRST_VERSION, |record| record.version.saturating_add(1)),
+    }
 }
 
 /// Whether `RemoveAccount` may forget this account.
@@ -172,6 +195,10 @@ pub fn removal_allowed(
     target: (&ProviderId, &AccountId),
     session_account: Option<(&ProviderId, &AccountId)>,
 ) -> Result<(), RemovalRefusal> {
-    let _ = (target, session_account);
-    todo!("TODO(keyring 8/9): refuse only the account this session was established with")
+    match session_account {
+        Some((provider, account)) if provider == target.0 && account == target.1 => {
+            Err(RemovalRefusal::SessionAccount)
+        }
+        _ => Ok(()),
+    }
 }

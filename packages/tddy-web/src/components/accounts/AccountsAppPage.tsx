@@ -11,10 +11,11 @@
  * session this page is already reading the vault with.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ConnectError } from "@connectrpc/connect";
 import {
   AccountsService,
+  LinkState,
   SyncStatus,
   type AccountSummary,
   type ListAccountsResponse,
@@ -28,6 +29,7 @@ import {
   type AccountRow,
   type AccountSyncStatus,
   type AccountsOutcome,
+  type LinkAttempt,
   type ProviderGroup,
 } from "./AccountsScreen";
 
@@ -72,7 +74,14 @@ function groupsFromRpc(providers: ProviderAccounts[]): ProviderGroup[] {
 function outcomeFromRpc(res: ListAccountsResponse): AccountsOutcome {
   if (res.vaultUninitialized) return { kind: "uninitialized" };
   if (res.vaultLocked) return { kind: "locked" };
-  return { kind: "listed", providers: groupsFromRpc(res.providers) };
+  return {
+    kind: "listed",
+    providers: groupsFromRpc(res.providers),
+    sessionAccount: res.sessionAccount && {
+      provider: res.sessionAccount.provider,
+      accountId: res.sessionAccount.accountId,
+    },
+  };
 }
 
 /** The daemon's reason, verbatim — without the transport's `[code]` prefix. */
@@ -94,9 +103,6 @@ function withRenamed(providers: ProviderGroup[], provider: string, renamed: Acco
   );
 }
 
-// TODO(#keyring 8/9): carry `session_account` through onto the outcome, call `BeginLinkAccount`
-// from `onAddAccount`, poll `PollLinkAccount` at the interval the daemon named, and re-read the
-// listing once a link reports `LINK_LINKED`.
 export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { sessionToken } = useAuthContext();
   const client = useDaemonClient(AccountsService);
@@ -105,6 +111,11 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
   // A failed rename or removal is reported beside the list rather than replacing it: the list the
   // person was looking at is still what the vault holds.
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const [linkAttempt, setLinkAttempt] = useState<LinkAttempt | undefined>(undefined);
+  // The pending poll timer, so leaving the page or starting another attempt stops it.
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(pollTimer.current), []);
 
   // One read per visit; it re-fires only when the selected daemon or the session token changes,
   // and each of those genuinely invalidates the answer (see `HostsAppPage`).
@@ -137,11 +148,76 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         setOutcome((previous) =>
           previous?.kind === "listed"
             ? {
-                kind: "listed",
+                ...previous,
                 providers: withRenamed(previous.providers, provider, rowFromRpc(renamed)),
               }
             : previous,
         );
+      })
+      .catch((e: unknown) => setActionError(reasonOf(e)));
+  };
+
+  const reread = () => {
+    if (!client) return;
+    client
+      .listAccounts({ sessionToken: sessionToken ?? "" })
+      .then((res) => setOutcome(outcomeFromRpc(res)))
+      .catch((e: unknown) => setActionError(reasonOf(e)));
+  };
+
+  // One poll, then the next after the interval the daemon last named. The first poll is
+  // immediate: the daemon answers `LINK_PENDING` for an attempt nobody has approved yet.
+  // TODO(#keyring 8/9): GitHub asks for the first poll only after `interval`; the spec requires an
+  // immediate one, so confirm the daemon-side linker absorbs an early poll as pending.
+  const pollLink = (linkId: string, intervalSeconds: number) => {
+    if (!client) return;
+    client
+      .pollLinkAccount({ sessionToken: sessionToken ?? "", linkId })
+      .then((res) => {
+        switch (res.state) {
+          case LinkState.LINK_PENDING: {
+            const next = res.intervalSeconds > 0n ? Number(res.intervalSeconds) : intervalSeconds;
+            pollTimer.current = setTimeout(() => pollLink(linkId, next), next * 1000);
+            return;
+          }
+          case LinkState.LINK_LINKED:
+            setLinkAttempt(undefined);
+            reread();
+            return;
+          case LinkState.LINK_DENIED:
+            setLinkAttempt({ kind: "denied" });
+            return;
+          case LinkState.LINK_EXPIRED:
+            setLinkAttempt({ kind: "expired" });
+            return;
+          case LinkState.LINK_VAULT_LOCKED:
+            setLinkAttempt({ kind: "locked" });
+            return;
+          default:
+            setLinkAttempt(undefined);
+            setActionError("the daemon answered a link poll with an unknown state");
+        }
+      })
+      .catch((e: unknown) => {
+        setLinkAttempt(undefined);
+        setActionError(reasonOf(e));
+      });
+  };
+
+  const addAccount = (provider: string) => {
+    if (!client) return;
+    clearTimeout(pollTimer.current);
+    setActionError(null);
+    client
+      .beginLinkAccount({ sessionToken: sessionToken ?? "", provider })
+      .then((res) => {
+        setLinkAttempt({
+          kind: "awaiting",
+          provider,
+          userCode: res.userCode,
+          verificationUri: res.verificationUri,
+        });
+        pollLink(res.linkId, Number(res.intervalSeconds));
       })
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };
@@ -152,7 +228,12 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       .removeAccount({ sessionToken: sessionToken ?? "", provider, accountId })
       .then((res) => {
         setActionError(null);
-        setOutcome({ kind: "listed", providers: groupsFromRpc(res.providers) });
+        // The response carries what remains, not who the session is — and removal never changes that.
+        setOutcome((previous) => ({
+          kind: "listed",
+          providers: groupsFromRpc(res.providers),
+          sessionAccount: previous?.kind === "listed" ? previous.sessionAccount : undefined,
+        }));
       })
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };
@@ -169,8 +250,8 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           outcome={outcome}
           onRename={rename}
           onRemove={remove}
-          // TODO(#keyring 8/9): begin a link and drive its poll.
-          onAddAccount={() => {}}
+          linkAttempt={linkAttempt}
+          onAddAccount={addAccount}
         />
       ) : null}
     </AppShell>

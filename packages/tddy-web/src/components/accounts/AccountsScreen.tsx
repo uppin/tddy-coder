@@ -89,17 +89,76 @@ export interface AccountsScreenProps {
   onAddAccount: (provider: string) => void;
 }
 
-// TODO(#keyring 8/9): render the add-account control per provider (`onAddAccount`), the attempt's
-// code and verification link and its four end states (`linkAttempt`), and the marker on the account
-// this session was established with — whose remove control is refused rather than offered.
-export function AccountsScreen({ outcome, onRename, onRemove }: AccountsScreenProps) {
-  return <div data-testid="accounts-screen">{renderOutcome(outcome, onRename, onRemove)}</div>;
+export function AccountsScreen({
+  outcome,
+  linkAttempt,
+  onRename,
+  onRemove,
+  onAddAccount,
+}: AccountsScreenProps) {
+  return (
+    <div data-testid="accounts-screen">
+      {renderOutcome(outcome, onRename, onRemove, onAddAccount)}
+      {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Where an add-account attempt stands. The four states render different words on purpose: a
+ * refusal at the provider, an expired code and a vault this session cannot open are not the same
+ * thing to say to a person.
+ */
+function LinkAttemptView({ attempt }: { attempt: LinkAttempt }) {
+  switch (attempt.kind) {
+    case "awaiting":
+      return (
+        <div data-testid="accounts-link-awaiting" className="mt-4 text-sm space-y-1">
+          <p>
+            Enter this code at{" "}
+            <a
+              data-testid="accounts-link-verification-uri"
+              className="underline"
+              href={attempt.verificationUri}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {attempt.verificationUri}
+            </a>{" "}
+            to add the {attempt.provider} account:
+          </p>
+          <p data-testid="accounts-link-user-code" className="font-mono text-lg">
+            {attempt.userCode}
+          </p>
+        </div>
+      );
+    case "denied":
+      return (
+        <p data-testid="accounts-link-denied" className="mt-4 text-sm">
+          The account was not added: authorization was refused at the provider.
+        </p>
+      );
+    case "expired":
+      return (
+        <p data-testid="accounts-link-expired" className="mt-4 text-sm">
+          The code expired before it was approved. Add the account again to get a new one.
+        </p>
+      );
+    case "locked":
+      return (
+        <p data-testid="accounts-link-locked" className="mt-4 text-sm">
+          The account was approved, but your credential vault is locked on this daemon, so it could
+          not be stored. Unlock the vault with your passphrase and add the account again.
+        </p>
+      );
+  }
 }
 
 function renderOutcome(
   outcome: AccountsOutcome,
   onRename: AccountsScreenProps["onRename"],
   onRemove: AccountsScreenProps["onRemove"],
+  onAddAccount: AccountsScreenProps["onAddAccount"],
 ) {
   switch (outcome.kind) {
     case "uninitialized":
@@ -150,11 +209,24 @@ function renderOutcome(
                     key={account.accountId}
                     provider={group.provider}
                     account={account}
+                    isSessionAccount={
+                      outcome.sessionAccount?.provider === group.provider &&
+                      outcome.sessionAccount.accountId === account.accountId
+                    }
                     onRename={onRename}
                     onRemove={onRemove}
                   />
                 ))}
               </ul>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                data-testid={`accounts-add-${group.provider}`}
+                onClick={() => onAddAccount(group.provider)}
+              >
+                Add account
+              </Button>
             </section>
           ))}
         </div>
@@ -178,11 +250,19 @@ function PromptWhereabouts() {
 interface AccountRowViewProps {
   provider: string;
   account: AccountRow;
+  /** Whether this is the account the session was established with. */
+  isSessionAccount: boolean;
   onRename: AccountsScreenProps["onRename"];
   onRemove: AccountsScreenProps["onRemove"];
 }
 
-function AccountRowView({ provider, account, onRename, onRemove }: AccountRowViewProps) {
+function AccountRowView({
+  provider,
+  account,
+  isSessionAccount,
+  onRename,
+  onRemove,
+}: AccountRowViewProps) {
   const rowId = `accounts-row-${provider}-${account.accountId}`;
   const [draftLabel, setDraftLabel] = useState(account.label);
   // Removal is irreversible from this screen, so the first press only asks.
@@ -196,6 +276,11 @@ function AccountRowView({ provider, account, onRename, onRemove }: AccountRowVie
       <span data-testid={`${rowId}-subject`} className="text-muted-foreground">
         {account.subject}
       </span>
+      {isSessionAccount ? (
+        <span data-testid={`${rowId}-session`} className="text-xs text-emerald-700">
+          Signed in with this account
+        </span>
+      ) : null}
       {account.hasSecret ? null : (
         <span className="text-amber-700 text-xs">no credential stored</span>
       )}
@@ -218,7 +303,7 @@ function AccountRowView({ provider, account, onRename, onRemove }: AccountRowVie
           Rename
         </Button>
       </form>
-      {confirmingRemoval ? (
+      {isSessionAccount ? null : confirmingRemoval ? (
         <span className="flex items-center gap-2">
           <span>Remove this account's credential?</span>
           <Button
