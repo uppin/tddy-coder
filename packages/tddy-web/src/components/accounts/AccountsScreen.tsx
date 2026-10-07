@@ -2,10 +2,13 @@
  * Accounts screen — every credential a daemon holds, grouped by provider.
  *
  * Presentational: it renders what it is given, matching the `HostsScreen` / `HostsAppPage` split.
- * `AccountsAppPage` owns the `ListAccounts` call and the four outcomes it can come back with.
+ * `AccountsAppPage` owns the `ListAccounts` call and the four outcomes it can come back with, and
+ * the `BeginLinkAccount` / `PollLinkAccount` pair behind the add-account control.
  *
  * **No row ever carries a secret.** `accounts.proto` has no field to put one in; `hasSecret` is the
- * single bit that tells a linked account from a stale row.
+ * single bit that tells a linked account from a stale row. The same holds through the link flow:
+ * what a person sees of it is a short code and where to type it, and the credential it produces
+ * never comes back up the wire.
  */
 
 import { useState } from "react";
@@ -39,6 +42,18 @@ export interface ProviderGroup {
 }
 
 /**
+ * The account this session was established with.
+ *
+ * Carried beside the groups rather than as a flag on a row, mirroring `ListAccountsResponse`: it is
+ * a fact about *the caller*, and the same record is an ordinary linked account to a daemon that
+ * received it through `#keyring` 6/9's propagation.
+ */
+export interface SessionAccountRef {
+  provider: string;
+  accountId: string;
+}
+
+/**
  * What the daemon came back with. The four are held apart deliberately: an open-and-empty vault, no
  * vault yet, a vault that exists but is not unlocked on this daemon, and a read that failed are
  * different facts with different remedies — choose a passphrase, enter the passphrase, fix the
@@ -46,25 +61,104 @@ export interface ProviderGroup {
  * already have.
  */
 export type AccountsOutcome =
-  | { kind: "listed"; providers: ProviderGroup[] }
+  | { kind: "listed"; providers: ProviderGroup[]; sessionAccount?: SessionAccountRef }
   | { kind: "uninitialized" }
   | { kind: "locked" }
   | { kind: "error"; reason: string };
 
+/**
+ * Where an attempt to add another account stands.
+ *
+ * `denied` and `locked` are separate states for the same reason `LinkState` keeps them apart: the
+ * operator refusing at the provider and this daemon having nowhere to put the result are unrelated
+ * failures, and only one of them is about a decision somebody made.
+ */
+export type LinkAttempt =
+  | { kind: "awaiting"; provider: string; userCode: string; verificationUri: string }
+  | { kind: "denied" }
+  | { kind: "expired" }
+  | { kind: "locked" };
+
 export interface AccountsScreenProps {
   outcome: AccountsOutcome;
+  /** Set while an add-account attempt is in flight or has just ended. */
+  linkAttempt?: LinkAttempt;
   onRename: (provider: string, accountId: string, label: string) => void;
   onRemove: (provider: string, accountId: string) => void;
+  /** Begin adding another account at this provider. Never signs anybody in. */
+  onAddAccount: (provider: string) => void;
 }
 
-export function AccountsScreen({ outcome, onRename, onRemove }: AccountsScreenProps) {
-  return <div data-testid="accounts-screen">{renderOutcome(outcome, onRename, onRemove)}</div>;
+export function AccountsScreen({
+  outcome,
+  linkAttempt,
+  onRename,
+  onRemove,
+  onAddAccount,
+}: AccountsScreenProps) {
+  return (
+    <div data-testid="accounts-screen">
+      {renderOutcome(outcome, onRename, onRemove, onAddAccount)}
+      {linkAttempt ? <LinkAttemptView attempt={linkAttempt} /> : null}
+    </div>
+  );
+}
+
+/**
+ * Where an add-account attempt stands. The four states render different words on purpose: a
+ * refusal at the provider, an expired code and a vault this session cannot open are not the same
+ * thing to say to a person.
+ */
+function LinkAttemptView({ attempt }: { attempt: LinkAttempt }) {
+  switch (attempt.kind) {
+    case "awaiting":
+      return (
+        <div data-testid="accounts-link-awaiting" className="mt-4 text-sm space-y-1">
+          <p>
+            Enter this code at{" "}
+            <a
+              data-testid="accounts-link-verification-uri"
+              className="underline"
+              href={attempt.verificationUri}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {attempt.verificationUri}
+            </a>{" "}
+            to add the {attempt.provider} account:
+          </p>
+          <p data-testid="accounts-link-user-code" className="font-mono text-lg">
+            {attempt.userCode}
+          </p>
+        </div>
+      );
+    case "denied":
+      return (
+        <p data-testid="accounts-link-denied" className="mt-4 text-sm">
+          The account was not added: authorization was refused at the provider.
+        </p>
+      );
+    case "expired":
+      return (
+        <p data-testid="accounts-link-expired" className="mt-4 text-sm">
+          The code expired before it was approved. Add the account again to get a new one.
+        </p>
+      );
+    case "locked":
+      return (
+        <p data-testid="accounts-link-locked" className="mt-4 text-sm">
+          The account was approved, but your credential vault is locked on this daemon, so it could
+          not be stored. Unlock the vault with your passphrase and add the account again.
+        </p>
+      );
+  }
 }
 
 function renderOutcome(
   outcome: AccountsOutcome,
   onRename: AccountsScreenProps["onRename"],
   onRemove: AccountsScreenProps["onRemove"],
+  onAddAccount: AccountsScreenProps["onAddAccount"],
 ) {
   switch (outcome.kind) {
     case "uninitialized":
@@ -115,11 +209,24 @@ function renderOutcome(
                     key={account.accountId}
                     provider={group.provider}
                     account={account}
+                    isSessionAccount={
+                      outcome.sessionAccount?.provider === group.provider &&
+                      outcome.sessionAccount.accountId === account.accountId
+                    }
                     onRename={onRename}
                     onRemove={onRemove}
                   />
                 ))}
               </ul>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                data-testid={`accounts-add-${group.provider}`}
+                onClick={() => onAddAccount(group.provider)}
+              >
+                Add account
+              </Button>
             </section>
           ))}
         </div>
@@ -143,11 +250,19 @@ function PromptWhereabouts() {
 interface AccountRowViewProps {
   provider: string;
   account: AccountRow;
+  /** Whether this is the account the session was established with. */
+  isSessionAccount: boolean;
   onRename: AccountsScreenProps["onRename"];
   onRemove: AccountsScreenProps["onRemove"];
 }
 
-function AccountRowView({ provider, account, onRename, onRemove }: AccountRowViewProps) {
+function AccountRowView({
+  provider,
+  account,
+  isSessionAccount,
+  onRename,
+  onRemove,
+}: AccountRowViewProps) {
   const rowId = `accounts-row-${provider}-${account.accountId}`;
   const [draftLabel, setDraftLabel] = useState(account.label);
   // Removal is irreversible from this screen, so the first press only asks.
@@ -161,6 +276,11 @@ function AccountRowView({ provider, account, onRename, onRemove }: AccountRowVie
       <span data-testid={`${rowId}-subject`} className="text-muted-foreground">
         {account.subject}
       </span>
+      {isSessionAccount ? (
+        <span data-testid={`${rowId}-session`} className="text-xs text-emerald-700">
+          Signed in with this account
+        </span>
+      ) : null}
       {account.hasSecret ? null : (
         <span className="text-amber-700 text-xs">no credential stored</span>
       )}
@@ -183,7 +303,7 @@ function AccountRowView({ provider, account, onRename, onRemove }: AccountRowVie
           Rename
         </Button>
       </form>
-      {confirmingRemoval ? (
+      {isSessionAccount ? null : confirmingRemoval ? (
         <span className="flex items-center gap-2">
           <span>Remove this account's credential?</span>
           <Button

@@ -67,6 +67,7 @@ async fn a_stub_users_pre_opened_vault_is_listed_without_its_secret() {
             }],
             vault_locked: false,
             vault_uninitialized: false,
+            session_account: None,
         }
     );
     // And the secret is nowhere in what went over the wire
@@ -95,6 +96,7 @@ async fn a_stub_user_with_no_vault_is_told_none_exists_yet() {
             providers: vec![],
             vault_locked: false,
             vault_uninitialized: true,
+            session_account: None,
         }
     );
 }

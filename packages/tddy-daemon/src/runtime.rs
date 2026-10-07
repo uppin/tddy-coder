@@ -1548,12 +1548,11 @@ pub async fn build(
         // token resolves to the GitHub login, which is the vault's subject. Not registered without
         // `auth_storage`: there is no vault to show, and nothing stands in for one.
         if let Some(vaults) = auth_result.credential_vaults.clone() {
-            let mut accounts_service = tddy_accounts::AccountsServiceImpl::new(Arc::new(
-                tddy_accounts::SessionVaultAccountStore::new(
-                    Arc::clone(&vaults),
-                    accounts_user_resolver,
-                ),
-            ));
+            let mut accounts_service = crate::account_linking::accounts_service_over(
+                &vaults,
+                accounts_user_resolver,
+                &auth_config,
+            );
 
             // `#keyring` 6/9's sync engine: journaled credential propagation to this daemon's
             // admitted peers, over the same common room as every other LiveKit-dependent service

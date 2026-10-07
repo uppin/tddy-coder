@@ -66,7 +66,7 @@ impl GitHubAuthFlow {
 /// Which GitHub provider `github:` makes this daemon register — the one decision both
 /// [`build_auth_entries_with`] and [`github_auth_flow`] read, so the flow a dashboard is told can
 /// never differ from the provider actually serving it.
-enum GitHubProviderKind<'a> {
+pub(crate) enum GitHubProviderKind<'a> {
     /// `stub: true`. Serves both flows; declared as the redirect flow, which is what every
     /// dashboard driving a stub daemon signs in with.
     Stub,
@@ -86,7 +86,7 @@ impl GitHubProviderKind<'_> {
 }
 
 /// `None` is a `github:` block that registers no auth service: neither a stub nor a `client_id`.
-fn github_provider_kind(github: &GitHubConfig) -> Option<GitHubProviderKind<'_>> {
+pub(crate) fn github_provider_kind(github: &GitHubConfig) -> Option<GitHubProviderKind<'_>> {
     if github.stub.unwrap_or(false) {
         return Some(GitHubProviderKind::Stub);
     }

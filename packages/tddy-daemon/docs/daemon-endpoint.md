@@ -62,7 +62,12 @@ registry backs `accounts.AccountsService`: `build` registers
 `tddy_accounts::build_accounts_entry` over a `SessionVaultAccountStore` built from those vaults and a
 clone of the session-token → GitHub-login resolver the other per-user services take (the login is the
 vault's subject)
-([accounts-service.md](../../tddy-accounts/docs/accounts-service.md)). The built `DaemonRuntime` keeps
+([accounts-service.md](../../tddy-accounts/docs/accounts-service.md)). The service is assembled by
+`account_linking::accounts_service_over`, which also wires account linking
+(`GitHubAccountLinker` and `VaultLinkedAccountStore`, over
+`tddy_daemon_auth::github_account_linking_provider`) — and wires none for a stub GitHub provider, so
+the two link RPCs answer `FAILED_PRECONDITION` there
+([account-linking.md](../../tddy-accounts/docs/account-linking.md#daemon-wiring-tddy-daemon)). The built `DaemonRuntime` keeps
 the one handle privately and exposes it read-only as `DaemonRuntime::credential_vaults()` — the very
 registry its services hold open, not a second instance over the same directory whose in-memory open
 state would be its own; `tests/accounts_stub_daemon_acceptance.rs` opens a stub user's vault through

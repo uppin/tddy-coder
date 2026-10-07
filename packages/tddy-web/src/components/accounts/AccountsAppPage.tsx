@@ -1,13 +1,15 @@
 /**
- * Data container for the Accounts screen: one `ListAccounts` call against the selected daemon.
+ * Data container for the Accounts screen: one `ListAccounts` call against the selected daemon, plus
+ * the `BeginLinkAccount` / `PollLinkAccount` pair behind the add-account control.
  *
- * One RPC, deliberately — a vault's contents change only when somebody links, renames or removes an
- * account, and each of those is an action this screen already knows it took. A rename answers with
- * the account as it now stands and a removal with what remains, so neither re-reads.
+ * One read per visit — a vault's contents change only when somebody renames, removes or links an
+ * account, and the screen knows which it did. A rename answers with the account as it now stands and
+ * a removal with what remains, so neither re-reads. Linking is the exception: the daemon stores the
+ * account while the person is away at the provider, so a completed link re-reads the listing once.
+ * The add-account flow itself lives in `useLinkFlow`, which signs nobody in.
  */
 
 import { useEffect, useState } from "react";
-import { ConnectError } from "@connectrpc/connect";
 import {
   AccountsService,
   SyncStatus,
@@ -17,6 +19,8 @@ import {
 } from "../../gen/accounts_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
+import { reasonOf } from "./rpcReason";
+import { useLinkFlow } from "./useLinkFlow";
 import { AppShell } from "../shell/AppShell";
 import {
   AccountsScreen,
@@ -67,12 +71,14 @@ function groupsFromRpc(providers: ProviderAccounts[]): ProviderGroup[] {
 function outcomeFromRpc(res: ListAccountsResponse): AccountsOutcome {
   if (res.vaultUninitialized) return { kind: "uninitialized" };
   if (res.vaultLocked) return { kind: "locked" };
-  return { kind: "listed", providers: groupsFromRpc(res.providers) };
-}
-
-/** The daemon's reason, verbatim — without the transport's `[code]` prefix. */
-function reasonOf(error: unknown): string {
-  return ConnectError.from(error).rawMessage;
+  return {
+    kind: "listed",
+    providers: groupsFromRpc(res.providers),
+    sessionAccount: res.sessionAccount && {
+      provider: res.sessionAccount.provider,
+      accountId: res.sessionAccount.accountId,
+    },
+  };
 }
 
 /** `providers` with one account's row replaced by `renamed`. */
@@ -118,6 +124,21 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     };
   }, [client, sessionToken]);
 
+  const reread = () => {
+    if (!client) return;
+    client
+      .listAccounts({ sessionToken: sessionToken ?? "" })
+      .then((res) => setOutcome(outcomeFromRpc(res)))
+      .catch((e: unknown) => setActionError(reasonOf(e)));
+  };
+
+  const { linkAttempt, addAccount } = useLinkFlow({
+    client,
+    sessionToken: sessionToken ?? "",
+    onLinked: reread,
+    onError: setActionError,
+  });
+
   const rename = (provider: string, accountId: string, label: string) => {
     if (!client) return;
     client
@@ -129,7 +150,7 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         setOutcome((previous) =>
           previous?.kind === "listed"
             ? {
-                kind: "listed",
+                ...previous,
                 providers: withRenamed(previous.providers, provider, rowFromRpc(renamed)),
               }
             : previous,
@@ -144,7 +165,12 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
       .removeAccount({ sessionToken: sessionToken ?? "", provider, accountId })
       .then((res) => {
         setActionError(null);
-        setOutcome({ kind: "listed", providers: groupsFromRpc(res.providers) });
+        // The response carries what remains, not who the session is — and removal never changes that.
+        setOutcome((previous) => ({
+          kind: "listed",
+          providers: groupsFromRpc(res.providers),
+          sessionAccount: previous?.kind === "listed" ? previous.sessionAccount : undefined,
+        }));
       })
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };
@@ -156,7 +182,15 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
           {actionError}
         </p>
       ) : null}
-      {outcome ? <AccountsScreen outcome={outcome} onRename={rename} onRemove={remove} /> : null}
+      {outcome ? (
+        <AccountsScreen
+          outcome={outcome}
+          onRename={rename}
+          onRemove={remove}
+          linkAttempt={linkAttempt}
+          onAddAccount={addAccount}
+        />
+      ) : null}
     </AppShell>
   );
 }
