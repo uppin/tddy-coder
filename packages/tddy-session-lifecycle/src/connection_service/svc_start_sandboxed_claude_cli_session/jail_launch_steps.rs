@@ -1,7 +1,7 @@
 use crate::connection_service::service_util;
 use std::sync::Mutex as StdMutex;
 
-use super::DaemonSessionHost;
+use super::super::launch_ports::LaunchSessions;
 
 use tddy_task::TerminalCapture;
 
@@ -21,7 +21,7 @@ use super::JailSession;
 
 use tddy_rpc::Status;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) async fn warm_up_jail_agents(
         &self,
         specialized_agents: &[String],
@@ -32,10 +32,14 @@ impl DaemonSessionHost {
         ),
         Status,
     > {
-        let started_agents = self.seeded_roster_records(specialized_agents).await?;
+        let started_agents = self
+            .agent_roster
+            .seeded_roster_records(specialized_agents)
+            .await?;
         // The defs behind those records, which the jail env can only carry for agents this host
         // holds — the records above are what carries the rest.
         let specialized_defs = self
+            .agent_roster
             .resolve_specialized_agent_defs(specialized_agents)
             .await?;
 
@@ -190,8 +194,8 @@ impl DaemonSessionHost {
             stdin_rx,
             Arc::new(session_env),
             session_dir.to_path_buf(),
-            self.agent_activity_hub(),
-            self.sandbox_rpc_handler(session_id, session_dir),
+            Arc::clone(&self.agent_activity_hub),
+            self.host.sandbox_rpc_handler(session_id, session_dir),
         )
         .await
         .map_err(Status::internal)?;

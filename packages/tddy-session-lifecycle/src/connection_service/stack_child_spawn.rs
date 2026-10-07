@@ -2,9 +2,9 @@ use crate::{cli_session_manager::CliSessionManager, connection_service::StackPar
 
 use std::path::PathBuf;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ pub(crate) struct StackChildSpawnHandler {
     /// mutable field is behind an `Arc`), exactly as [`DaemonSeedCloneClaimant`] holds one: the
     /// documents go through [`DaemonSessionHost::prepare_session_attachments`], the same
     /// materializer `StartSession` uses, so a child cannot differ by how it was started.
-    pub(crate) service: DaemonSessionHost,
+    pub(crate) service: LaunchSessions,
     pub(crate) config: DaemonConfig,
     pub(crate) tddy_data_dir: PathBuf,
     pub(crate) claude_cli_manager: Arc<CliSessionManager>,

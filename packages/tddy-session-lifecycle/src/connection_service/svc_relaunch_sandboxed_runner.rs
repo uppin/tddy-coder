@@ -8,7 +8,7 @@ use tddy_rpc::Status;
 
 use std::sync::Arc;
 
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
 /// What the relaunched runner's env is built from.
 struct RelaunchJailEnv<'a> {
@@ -54,7 +54,7 @@ type RelaunchManagedEnv = (
     Vec<(String, String)>,
 );
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// Spawn sandbox-runner + SessionChannel bridge for an existing session directory.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn relaunch_sandboxed_runner(
@@ -80,6 +80,7 @@ impl DaemonSessionHost {
         // wake and a registry to start from. What the main agent loses comes from the roster below,
         // never from these: a def edited since the attach must not change a running session's tools.
         let specialized_defs = self
+            .agent_roster
             .resolve_specialized_agent_defs(&agent_roster::roster_agent_ids(agents))
             .await?;
 

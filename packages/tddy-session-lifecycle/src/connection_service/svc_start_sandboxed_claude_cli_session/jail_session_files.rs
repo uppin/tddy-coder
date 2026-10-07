@@ -67,7 +67,7 @@ pub(super) fn prepare_jail_context_dir(
     let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
         worktree_path,
         &replacements,
-        crate::context_files::context_globs_for_session_type("claude-cli"),
+        tddy_session_files::context_files::context_globs_for_session_type("claude-cli"),
     )
     .map_err(Status::internal)?;
     tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), context_dir)

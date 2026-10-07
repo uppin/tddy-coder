@@ -166,8 +166,8 @@ impl Orchestrator {
         StackChildSpawnHandler {
             // Same clone production passes: the orchestrator is a session of this daemon, so
             // resolving a child's base never leaves the host.
-            stack_parent_host: Arc::new(self.service.clone()),
-            service: self.service.clone(),
+            stack_parent_host: Arc::new(self.service.launch_sessions()),
+            service: self.service.launch_sessions(),
             config: self.config.clone(),
             tddy_data_dir: self.sessions_base().to_path_buf(),
             claude_cli_manager: Arc::clone(&self.service.claude_cli_manager),

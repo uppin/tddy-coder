@@ -20,15 +20,15 @@ use tddy_service::proto::pr_stack::ResolveStackBaseRequest;
 
 use tddy_rpc::Request;
 
-use crate::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
 use std::path::Path;
 
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// Resolve what a spawn's worktree is cut from, on the daemon that owns its `stack_parent`.
     ///
     /// The parent's base is read out of the parent's own `changeset.yaml` — its stack, or its
@@ -66,8 +66,8 @@ impl DaemonSessionHost {
             .map_err(Status::failed_precondition),
             tddy_core::StackParentRoute::OwnedByPeer { daemon_instance_id } => {
                 let base_ref = self
-                    .rpc_families()?
-                    .pr_stack_handler()
+                    .host
+                    .pr_stack()?
                     .resolve_stack_base(Request::direct(ResolveStackBaseRequest {
                         session_token: lookup.session_token.to_string(),
                         daemon_instance_id,
@@ -172,8 +172,8 @@ impl DaemonSessionHost {
                 link.child_session_id,
             );
         }
-        self.rpc_families()?
-            .pr_stack_handler()
+        self.host
+            .pr_stack()?
             .link_stack_node(Request::direct(LinkStackNodeRequest {
                 session_token: link.session_token.to_string(),
                 daemon_instance_id: link.orchestrator_daemon_instance_id.trim().to_string(),
@@ -277,16 +277,18 @@ impl DaemonSessionHost {
             return Ok(None);
         }
 
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_session_activity::user_sessions_path::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let branch_for_scan = branch.clone();
         let owner = service_util::spawn_blocking_with_timeout(
             self.config.spawn_worker_request_timeout(),
             "StartSession: scan sessions by branch",
             move || {
-                crate::branch_owner::find_session_owning_branch(
-                    &crate::session_reader::DaemonSessionListing,
+                tddy_worktree_service::branch_owner::find_session_owning_branch(
+                    &tddy_session_activity::session_reader::DaemonSessionListing,
                     &sessions_base,
                     &branch_for_scan,
                 )

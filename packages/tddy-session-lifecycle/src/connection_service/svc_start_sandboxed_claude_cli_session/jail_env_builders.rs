@@ -1,9 +1,9 @@
-use super::super::DaemonSessionHost;
+use super::super::launch_ports::LaunchSessions;
 
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_rpc::Status;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// Build the `TDDY_SUBAGENT`/`TDDY_SUBAGENTS_JSON` jail env pair for already-resolved
     /// specialized-agent defs (see [`Self::resolve_specialized_agent_defs`]). Empty input produces
     /// no env pairs.

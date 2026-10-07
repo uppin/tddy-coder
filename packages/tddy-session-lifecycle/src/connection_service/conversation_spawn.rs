@@ -2,7 +2,7 @@ use crate::{cli_session_manager::CliSessionManager, connection_service::StackPar
 
 use std::path::PathBuf;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 use std::sync::Arc;
 

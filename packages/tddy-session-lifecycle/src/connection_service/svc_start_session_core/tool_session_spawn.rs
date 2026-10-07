@@ -74,6 +74,7 @@ impl DaemonSessionHost {
             if enable_conversation_spawn {
                 let sid = Uuid::now_v7().to_string();
                 let sock = self
+                    .launch_sessions()
                     .spawn_host_session_socket(
                         &sid,
                         &os_user,

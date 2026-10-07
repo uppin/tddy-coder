@@ -1,4 +1,4 @@
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
 use tddy_rpc::Status;
 
@@ -244,7 +244,7 @@ impl<'a> SpawnStackParent<'a> {
 }
 
 #[async_trait::async_trait]
-impl StackParentHost for DaemonSessionHost {
+impl StackParentHost for LaunchSessions {
     async fn chain_base_ref(&self, lookup: &StackBaseLookup<'_>) -> Result<Option<String>, Status> {
         self.resolve_chain_base_ref_status(lookup).await
     }

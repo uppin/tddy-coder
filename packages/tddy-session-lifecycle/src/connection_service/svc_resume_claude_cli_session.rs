@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use crate::connection_service::hooks_and_urls;
 
+use super::launch_ports::LaunchSessions;
 use super::DaemonSessionHost;
 
 impl DaemonSessionHost {
@@ -29,6 +30,7 @@ impl DaemonSessionHost {
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         if meta.sandbox == Some(true) {
             return self
+                .launch_sessions()
                 .resume_sandboxed_claude_cli_session(os_user, session_id, session_dir, meta)
                 .await;
         }
@@ -71,14 +73,14 @@ impl DaemonSessionHost {
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
-            let resume_goal = Self::managed_resume_goal(&session_dir, &recipe);
+            let resume_goal = LaunchSessions::managed_resume_goal(&session_dir, &recipe);
             let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
                 self.config
                     .claude_cli
                     .as_ref()
                     .and_then(|c| c.tddy_tools_path.as_deref()),
             );
-            let launch = self.prepare_managed_workflow(
+            let launch = self.launch_sessions().prepare_managed_workflow(
                 &session_id_owned,
                 recipe,
                 &session_dir,

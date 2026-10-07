@@ -4,12 +4,10 @@ use super::WorktreeSource;
 
 use super::session_worktree_source;
 
-use crate::{
-    branch_intent::BranchIntentPolicy,
-    connection_service::{seed_codebase, service_util},
-};
+use crate::connection_service::{seed_codebase, service_util};
+use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
-use crate::branch_intent::BranchIntentRequest;
+use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 
@@ -23,7 +21,7 @@ use std::sync::Arc;
 
 use std::path::{Path, PathBuf};
 
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
 /// The session a sandboxed start is building a jail for: who it is and where it lives on the host.
 struct JailSession<'a> {
@@ -90,7 +88,7 @@ struct JailRunnerEnv<'a> {
     tool_ipc_socket: &'a Path,
 }
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// Handle `StartSession` for sandboxed `claude-cli` sessions (darwin Seatbelt, local gRPC).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_sandboxed_claude_cli_session(
@@ -250,7 +248,7 @@ impl DaemonSessionHost {
         // is launched. Where an agent runs decides how the session is split across hosts, never
         // whether it can be seeded — the same placements the split start takes, this one takes.
         let seeded_clones = self
-            .agent_roster()
+            .agent_roster
             .claim_co_located_seed_clones(
                 session_id,
                 &seed_codebase::SeedCodebase::of_a_starting_session(
@@ -308,12 +306,12 @@ impl DaemonSessionHost {
         // Resolve the real `claude` to an absolute path (skipping wrapper shims). Overridable via
         // TDDY_CLAUDE_BINARY or `claude_cli.binary_path`. A bare name would give binary_exec_reads
         // an empty parent → `(subpath "")` → macOS sandbox-exec rejects the profile.
-        let claude_binary = crate::config::resolve_claude_binary_path(&self.config);
+        let claude_binary = tddy_daemon_kernel::config::resolve_claude_binary_path(&self.config);
         let claude_binary = claude_binary.as_str();
 
         // Persistent daemon-wide jail $HOME: reused across sessions and mounted read-write below, so
         // refreshed OAuth tokens, session history, and settings survive. Seeded non-clobbering.
-        let claude_home_dir = crate::config::resolve_claude_home_dir(&self.config);
+        let claude_home_dir = tddy_daemon_kernel::config::resolve_claude_home_dir(&self.config);
         let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_claude_home(
             &claude_home_dir,
             claude_binary,
