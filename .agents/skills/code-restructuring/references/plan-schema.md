@@ -141,6 +141,7 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `remove_call_arg` | same | `variant` = `first` \| `last` \| one-based index | — | ✅ |
 | `change_call_arg` | same | `variant` = position, `expr` | — | ✅ |
 | `reorder_call_args` | same | `order` (every argument position, once) | — | ✅ |
+| `repoint_call` | `item` + relative range over one call (single form), or `item` on a method with no range (bulk form) | `callee` (the new callee, or a `$receiver<hops>.<method>` template) | — | ✅ |
 | `organize_imports` | symbol | — | ✅ | — |
 | `add_missing_imports` | symbol | — | ✅ | — |
 
@@ -323,6 +324,42 @@ stays in its file (run `move_item` over `<New>` afterwards to move it). The forw
 (`variant: "leave_delegator"` with `expr`) is named by the schema and **refused** by the engine; it is a
 follow-up. See
 [`docs/retarget-impl.md`](../../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
+
+### `repoint_call`
+
+```jsonl
+{"op":"repoint_call","anchor":{"kind":"item","item":"app::host::Host::roster_work","file":"src/host.rs","start":{"line":3,"col":9},"end":{"line":3,"col":38},"fingerprint":"sha256:…"},"callee":"self.peer_routing.common_room_slot"}
+{"op":"repoint_call","group":"retarget","anchor":{"kind":"item","item":"app::host::Host::common_room_slot","file":"src/host.rs","fingerprint":"sha256:…"},"callee":"$receiver.agent_roster().common_room_slot"}
+```
+
+| Field | Meaning |
+|---|---|
+| `anchor` | **Single form**: one `item` anchor with a relative range over **exactly one call** (`callee(args)` or `receiver.method(args)`) — the anchor the argument operations take. **Bulk form**: one `item` anchor on a **method** (an associated function with a `self` receiver) with **neither** `start` nor `end`; it lowers to a zero-width range at the name |
+| `callee` | Single form: the complete new callee, one path or field/method chain (`self.peer.f`, `a::b::f::<T>`, `<Host as Tr>::f`), with no `$receiver`. Bulk form: a template `$receiver` + one or more hops + `.` + the method's own name (`$receiver.agent_roster().slot`) |
+
+The form is read from the anchor's shape; there is no `variant`, and `callee` is required. The single
+form replaces everything before the argument list's `(` — the original callee, including a turbofish —
+and leaves the arguments byte for byte. The bulk form **inserts** the template's hops after the
+receiver of every call of the method the server knows, in every package, so nested and chained calls
+compose without overlapping edits.
+
+**Refused before a server starts** (`plan is malformed:`, from the plan alone): `callee` missing, not
+one chain, or on another operation; `$receiver` in a single form, or missing, repeated or not leftmost
+in a bulk form; a bulk template that does not end in the method's own name; a single anchor without a
+range or a bulk anchor with one; a `variant`, `name`, `to`, `reexport`, `type`, `expr`, `order`,
+`also`, `to_file` or `with_private_deps`; and a `symbol` or `items` anchor.
+
+**Refused by `check`/`check --deep`/`apply` before anything is written** (`this seam cannot be cut
+here:`): a range that is not exactly one call; an old callee that contains a call (its arguments would
+be lost); a method-call turbofish a field-chain callee cannot restate; a callee equal to the current
+one; a bulk anchor that is not a method; and, listed all at once, every reference the bulk form cannot
+re-point (a path call, a function pointer, an import).
+
+**Not done.** No argument is added, removed or reordered (compose with `add_call_arg` and its
+siblings); no method is renamed (`rename_symbol`); a reference inside a comment is left alone and
+counted in the note; a method nothing calls is a no-op with a note. `self.<field>` -> `state.<field>`
+is a **field** read and stays the separate open capability. See
+[`docs/repoint-call.md`](../../../../packages/tddy-code-restructuring/docs/repoint-call.md).
 
 ### Notes that matter when planning
 

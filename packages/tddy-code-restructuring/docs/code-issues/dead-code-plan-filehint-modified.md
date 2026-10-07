@@ -17,6 +17,7 @@
 | 2026-10-05 | 0 | the same-crate moves added kinds to `plan.rs` and rules to `plan/codec.rs`; the field is still at `plan.rs:133`, and the write site, `hint_of`, is now at `plan/codec.rs:219` (it was `:217`). Re-ran the `grep` below: still one write site and no read site outside tests. Unchanged |
 | 2026-10-06 | 0 | `#sharpen` 1/8 (`feature/sharpen/tidy-engine-files`) moved `hint_of` into `plan/codec/file_hint.rs` behind the facade at `plan/codec.rs:213`; the write site is now `file_hint.rs:8,13`, the field still at `plan.rs:133`. Re-ran the `grep` below: still one write site and no read site outside tests. Unchanged |
 | 2026-10-07 | 0 | `#sharpen` 5/8 (`feature/sharpen/plan-header`) writes a header for a headerless plan through the existing `hint_of` (`headerless.rs`), adding **no second writer of `modified`**; the write site stays `file_hint.rs:8,13` and the field `plan.rs:133`. Re-ran the `grep` below: still one write site and no read site outside tests. Unchanged |
+| 2026-10-07 | 0 | `#sharpen` 7/8 (`feature/sharpen/repoint-call`) adds a `callee` field to `RefactorOp` in `plan.rs`, below `FileHint`; the field stays at `plan.rs:133` and the write site stays `file_hint.rs:8,13`. Re-ran the `grep` below: still one write site and no read site outside tests. Unchanged — the PR touched the file but not this field |
 
 ## What the tool found
 
