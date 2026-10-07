@@ -150,15 +150,15 @@ None.
 
 ## Scope
 
-- [ ] **Plan surface**: variant, `facade_imports_fields.rs`, anchors, refused fields
-- [ ] **Resolution**: `scope.rs` (files), `rewrite.rs` (which paths, preconditions), `refusals.rs`
-- [ ] **Edits**: body paths, plain `use`, Rule P, Rule S, nested groups, `as` names
-- [ ] **`check --deep` list**: `Rehearsed.notes`, printed by check and apply
-- [ ] **Registration**: one live binary in `.config/rust-e2e.filterset` and the `rust-analyzer` group
-- [ ] **`verify` pinned** by tests (and F3's rule if chosen)
+- [x] **Plan surface**: variant, `facade_imports_fields.rs`, anchors, refused fields
+- [x] **Resolution**: `scope.rs` (files), `rewrite.rs` (which paths, preconditions), `refusals.rs`
+- [x] **Edits**: body paths, plain `use`, Rule P, Rule S, nested groups, `as` names
+- [x] **`check --deep` list**: `Rehearsed.notes`, printed by check and apply
+- [x] **Registration**: one live binary in `.config/rust-e2e.filterset` and the `rust-analyzer` group
+- [x] **`verify` pinned** by tests (and F3's rule if chosen)
 - [ ] **Package documentation** at wrap (list under Affected Packages)
-- [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
-- [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, clippy `-D warnings`, `cargo fmt`; the three engine files <= 500
+- [x] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
+- [x] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, clippy `-D warnings`, `cargo fmt`; the three engine files <= 500
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -187,14 +187,14 @@ An op exists that applies the survey's answer to one file or module, by the rule
 
 ## Implementation milestones
 
-- [ ] **M1** plan surface; tests 1-6
-- [ ] **M2** resolution and refusals (library level over `fake_lsp`); tests 7-12, 20-24
-- [ ] **M3** edits: bodies, plain uses, Rule P; tests 13-16
-- [ ] **M4** Rule S, nested groups, attributes; tests 17-19
-- [ ] **M5** deep-check notes; tests 25-27
-- [ ] **M6** thin live binary and registration in both files; tests 28-30
-- [ ] **M7** `verify` pins; tests 31-32
-- [ ] **M8** docs staged, scoped gate, length gate
+- [x] **M1** plan surface; tests 1-6
+- [x] **M2** resolution and refusals (library level over `fake_lsp`); tests 7-12, 20-24
+- [x] **M3** edits: bodies, plain uses, Rule P; tests 13-16
+- [x] **M4** Rule S, nested groups, attributes; tests 17-19
+- [x] **M5** deep-check notes; tests 25-27
+- [x] **M6** thin live binary and registration in both files; tests 28-30
+- [x] **M7** `verify` pins; tests 31-32
+- [~] **M8** scoped gate and length gate done; package docs staged at wrap
 
 ## Testing plan
 
@@ -345,8 +345,8 @@ Decisions taken by this plan: no `RefactorOp` field; the op starts no server; no
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
 - [ ] Validate changes (/validate-changes)
