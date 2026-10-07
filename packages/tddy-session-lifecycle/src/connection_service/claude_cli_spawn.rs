@@ -1,9 +1,7 @@
-use crate::{
-    branch_intent::BranchIntentPolicy,
-    connection_service::{hooks_and_urls, service_util, stack_parent},
-};
+use crate::connection_service::{hooks_and_urls, service_util, stack_parent};
+use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
-use crate::branch_intent::BranchIntentRequest;
+use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 
@@ -23,7 +21,7 @@ use std::sync::Arc;
 
 use std::path::Path;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 use super::AttachmentProgressSink;
 

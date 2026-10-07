@@ -1,4 +1,4 @@
-use super::DaemonSessionHost;
+use super::super::launch_ports::LaunchSessions;
 
 use tddy_projects::project_storage;
 use tddy_rpc::Status;
@@ -9,12 +9,10 @@ use std::path::Path;
 
 use super::JailBranch;
 
-use crate::{
-    connection_service::{hooks_and_urls, service_util, stack_parent},
-    user_sessions_path::projects_path_for_user,
-};
+use crate::connection_service::{hooks_and_urls, service_util, stack_parent};
+use tddy_session_activity::user_sessions_path::projects_path_for_user;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) fn project_default_branch_ref(
         &self,
         os_user: &str,

@@ -58,7 +58,7 @@ pub(super) fn refresh_relaunch_context_dir(
         &replacements,
         // The relaunch path serves `claude-cli` alone (`resume_sandboxed_claude_cli_session` is
         // its only caller), so the agent's allow-list is that backend's.
-        crate::context_files::context_globs_for_session_type("claude-cli"),
+        tddy_session_files::context_files::context_globs_for_session_type("claude-cli"),
     )
     .map_err(|e| Status::internal(format!("prepare context dir: {e}")))?;
     if context_dir.exists() {

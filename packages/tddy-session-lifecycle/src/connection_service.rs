@@ -235,6 +235,10 @@ mod agent_host_callbacks;
 
 mod split_ports;
 
+mod launch_ports;
+
+mod svc_launch_delegators;
+
 mod attached_initial_prompt;
 
 mod svc_agent_host_ports;
@@ -564,3 +568,4 @@ pub(crate) mod peer_session_answer;
 mod session_dir_lookup;
 mod svc_agent_roster_wiring;
 mod svc_host_builders;
+mod svc_resume_sandboxed_claude_cli_session;

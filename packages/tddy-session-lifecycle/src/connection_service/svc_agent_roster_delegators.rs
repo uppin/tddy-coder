@@ -60,6 +60,7 @@ impl DaemonSessionHost {
     }
 
     /// [`AgentRoster::resolve_specialized_agent_defs`](super::agent_host_callbacks::AgentRoster::resolve_specialized_agent_defs).
+    #[cfg(test)]
     pub(crate) async fn resolve_specialized_agent_defs(
         &self,
         specialized_agents: &[String],

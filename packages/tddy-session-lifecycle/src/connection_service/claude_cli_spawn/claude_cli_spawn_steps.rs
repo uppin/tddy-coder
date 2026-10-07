@@ -17,7 +17,7 @@ use std::path::PathBuf;
 
 use std::path::Path;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 

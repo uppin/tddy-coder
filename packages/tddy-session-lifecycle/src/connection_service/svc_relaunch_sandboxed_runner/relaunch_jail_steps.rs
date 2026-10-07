@@ -1,4 +1,4 @@
-use super::DaemonSessionHost;
+use super::super::launch_ports::LaunchSessions;
 use std::sync::Mutex as StdMutex;
 
 use tddy_task::TerminalCapture;
@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use std::path::Path;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) fn relaunch_managed_workflow(
         &self,
         session_id: &str,
@@ -69,11 +69,11 @@ impl DaemonSessionHost {
             canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
         // See the sibling call site above: resolve the real `claude` (overridable via
         // TDDY_CLAUDE_BINARY / `claude_cli.binary_path`); a bare name breaks the sandbox profile.
-        let claude_binary = crate::config::resolve_claude_binary_path(&self.config);
+        let claude_binary = tddy_daemon_kernel::config::resolve_claude_binary_path(&self.config);
 
         // Persistent daemon-wide jail $HOME (see sibling site above): mounted read-write, seeded
         // non-clobbering, so auth/history persist across sessions.
-        let claude_home_dir = crate::config::resolve_claude_home_dir(&self.config);
+        let claude_home_dir = tddy_daemon_kernel::config::resolve_claude_home_dir(&self.config);
         let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_claude_home(
             &claude_home_dir,
             &claude_binary,
@@ -196,8 +196,8 @@ impl DaemonSessionHost {
             stdin_rx,
             Arc::new(session_env),
             session_dir.to_path_buf(),
-            self.agent_activity_hub(),
-            self.sandbox_rpc_handler(session_id, session_dir),
+            Arc::clone(&self.agent_activity_hub),
+            self.host.sandbox_rpc_handler(session_id, session_dir),
         )
         .await
         .map_err(|e| {

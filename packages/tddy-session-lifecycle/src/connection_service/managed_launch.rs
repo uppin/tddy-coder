@@ -7,7 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// Launch inputs for a managed claude-cli session, produced by
-/// [`DaemonSessionHost::prepare_managed_workflow`]: the workflow wiring (whose listener must be
+/// [`LaunchSessions::prepare_managed_workflow`](super::launch_ports::LaunchSessions::prepare_managed_workflow): the workflow wiring (whose listener must be
 /// kept alive for the session's lifetime), the orchestration-prompt file to append to claude's
 /// system prompt, and the per-session env (`TDDY_SOCKET` + `PATH`) for host-side `tddy-tools`.
 pub(crate) struct ManagedLaunch {
@@ -16,7 +16,7 @@ pub(crate) struct ManagedLaunch {
     pub(crate) env: Vec<(String, String)>,
 }
 
-/// Free-function form of [`DaemonSessionHost::prepare_managed_workflow`] so the shared
+/// Free-function form of [`LaunchSessions::prepare_managed_workflow`](super::launch_ports::LaunchSessions::prepare_managed_workflow) so the shared
 /// claude-cli spawn logic ([`spawn_claude_cli_session_inner`]) — which has no `self` — can reuse it.
 /// `child_spawn_handler`, when present, is bound to the managed session's toolcall listener so the
 /// agent's `pr_spawn_child` relay reaches a spawner (used for PR-stack orchestrators).

@@ -1,6 +1,7 @@
 use tddy_core::write_session_metadata;
 
-use crate::{config::resolve_cursor_binary_path, cursor_cli_spawn::chat};
+use crate::cursor_cli_spawn::chat;
+use tddy_daemon_kernel::config::resolve_cursor_binary_path;
 
 use std::path::PathBuf;
 
@@ -14,7 +15,7 @@ use tddy_core::SessionMetadata;
 
 use std::path::Path;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 use crate::cli_session_manager::CliSessionManager;
 

@@ -4,12 +4,10 @@ use tddy_task::TerminalCapture;
 
 use super::roster_replacement_pairs;
 
-use crate::{
-    branch_intent::BranchIntentPolicy,
-    connection_service::{agent_roster, seed_codebase, service_util, stack_parent},
-};
+use crate::connection_service::{agent_roster, seed_codebase, service_util, stack_parent};
+use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
-use crate::branch_intent::BranchIntentRequest;
+use tddy_worktree_service::branch_intent::BranchIntentRequest;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 
@@ -23,9 +21,12 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
-impl DaemonSessionHost {
+// TODO(crap-svc-start-sandboxed-cursor-cli-session): converted onto `LaunchSessions` by a header-only
+// edit (no logic touched), which that code-issue record's "tests first" rule forbids; the
+// characterisation tests it asks for are deferred. Linux CI's sandboxed suites are the evidence.
+impl LaunchSessions {
     /// Handle `StartSession` for sandboxed `cursor-cli` sessions (darwin Seatbelt / Linux cgroups).
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_sandboxed_cursor_cli_session(
@@ -71,8 +72,12 @@ impl DaemonSessionHost {
         }
         // As on the sandboxed claude-cli path: the roster is resolved before anything is created,
         // and the defs it holds locally are what the jail env can carry.
-        let mut started_agents = self.seeded_roster_records(specialized_agents).await?;
+        let mut started_agents = self
+            .agent_roster
+            .seeded_roster_records(specialized_agents)
+            .await?;
         let specialized_defs = self
+            .agent_roster
             .resolve_specialized_agent_defs(specialized_agents)
             .await?;
 
@@ -156,7 +161,7 @@ impl DaemonSessionHost {
         // is launched. Where an agent runs decides how the session is split across hosts, never
         // whether it can be seeded — the same placements the split start takes, this one takes.
         let seeded_clones = self
-            .agent_roster()
+            .agent_roster
             .claim_co_located_seed_clones(
                 session_id,
                 &seed_codebase::SeedCodebase::of_a_starting_session(
@@ -206,14 +211,14 @@ impl DaemonSessionHost {
         let ctx = tddy_daemon_sandbox::sandbox_session::prepare_context_dir_with_subagent(
             &worktree_path,
             &replacements,
-            crate::context_files::context_globs_for_session_type("cursor-cli"),
+            tddy_session_files::context_files::context_globs_for_session_type("cursor-cli"),
         )
         .map_err(Status::internal)?;
         tddy_daemon_sandbox::sandbox_session::copy_dir_all(ctx.path(), &context_dir)
             .map_err(Status::internal)?;
 
         let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
-            crate::config::resolve_cursor_cli_tddy_tools_path(&self.config).as_deref(),
+            tddy_daemon_kernel::config::resolve_cursor_cli_tddy_tools_path(&self.config).as_deref(),
         );
 
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
@@ -250,9 +255,10 @@ impl DaemonSessionHost {
         let tddy_tools_path = canonicalize_exec(&tddy_tools_path);
         let sandbox_runner_path =
             canonicalize_exec(&tddy_daemon_sandbox::sandbox_session::resolve_sandbox_runner_path());
-        let cursor_binary =
-            canonicalize_exec(&crate::config::resolve_cursor_binary_path(&self.config));
-        let cursor_home_dir = crate::config::resolve_cursor_home_dir(&self.config);
+        let cursor_binary = canonicalize_exec(
+            &tddy_daemon_kernel::config::resolve_cursor_binary_path(&self.config),
+        );
+        let cursor_home_dir = tddy_daemon_kernel::config::resolve_cursor_home_dir(&self.config);
         let scratch_home = tddy_daemon_sandbox::sandbox_session::prepare_persistent_cursor_home(
             &cursor_home_dir,
             &cursor_binary,
@@ -381,8 +387,8 @@ impl DaemonSessionHost {
             stdin_rx,
             Arc::new(session_env),
             session_dir.clone(),
-            self.agent_activity_hub(),
-            self.sandbox_rpc_handler(session_id, &session_dir),
+            Arc::clone(&self.agent_activity_hub),
+            self.host.sandbox_rpc_handler(session_id, &session_dir),
         )
         .await
         .map_err(Status::internal)?;

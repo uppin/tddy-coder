@@ -201,7 +201,11 @@ impl DaemonSessionHost {
         // A requested new branch another session already owns is refused here, before the
         // session-type dispatch — so one check covers tool, claude-cli, cursor-cli and workspace, and
         // so nothing has been created yet when it fires.
-        if let Some(conflict) = self.owned_branch_conflict(os_user, &req).await? {
+        if let Some(conflict) = self
+            .launch_sessions()
+            .owned_branch_conflict(os_user, &req)
+            .await?
+        {
             log::info!(
                 "StartSession: refusing branch {:?} owned by session {}",
                 conflict.branch,

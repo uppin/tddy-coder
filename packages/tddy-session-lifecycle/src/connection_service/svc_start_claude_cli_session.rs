@@ -24,9 +24,9 @@ use std::path::PathBuf;
 
 use super::AttachmentProgressSink;
 
-use super::DaemonSessionHost;
+use super::launch_ports::LaunchSessions;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn start_claude_cli_session(
         &self,
@@ -164,7 +164,7 @@ impl DaemonSessionHost {
     }
 
     /// Bind a per-session unix socket hosting
-    /// [`HostSessionService`](crate::host_session_service::HostSessionService) and return its path,
+    /// [`HostSessionService`](tddy_host_service::host_session_service::HostSessionService) and return its path,
     /// to be passed to the spawned grill-me coder as `--host-session-socket`. The coder connects and
     /// relays `spawn_conversation` back over it. The orchestrator context (this session) is baked
     /// into the handler, and the path is unique per session and handed only to that session's coder,
@@ -208,7 +208,7 @@ impl DaemonSessionHost {
             orchestrator_session_dir,
             model_override: model,
         });
-        let service = crate::host_session_service::HostSessionService::new(handler);
+        let service = tddy_host_service::host_session_service::HostSessionService::new(handler);
         let session_stdio = Arc::clone(&self.session_stdio);
         let sid = session_id.to_string();
         // Accept the coder's single connection, then run the reverse RPC endpoint over it.

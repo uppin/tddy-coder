@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use std::path::Path;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 /// Write `.cursor/hooks.json` under `worktree_path` for a cursor-cli session.
 ///
@@ -18,12 +18,12 @@ pub fn install_cursor_hooks_in_worktree(
     os_user: &str,
 ) -> String {
     let tddy_tools_path = tddy_daemon_sandbox::sandbox_session::resolve_tddy_tools_path(
-        crate::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
+        tddy_daemon_kernel::config::resolve_cursor_cli_tddy_tools_path(config).as_deref(),
     );
 
     // `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener —
     // the same last resort every hook URL falls back to.
-    let daemon_url = crate::config::resolve_cursor_cli_daemon_url(config)
+    let daemon_url = tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
         .unwrap_or_else(|| crate::connection_service::daemon_urls::local_daemon_hook_url(config));
 
     let hook_token = Uuid::new_v4().to_string();

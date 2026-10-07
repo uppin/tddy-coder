@@ -1,4 +1,4 @@
-//! Cursor Agent CLI session spawn/resume helpers for `DaemonSessionHost`.
+//! Cursor Agent CLI session spawn/resume helpers for the launch topic (`LaunchSessions`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,15 +8,15 @@ use tddy_core::{write_session_metadata, SessionMetadata};
 use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::StartSessionResponse;
 
-use crate::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 use crate::cli_session_manager::CliSessionManager;
-use crate::config::{resolve_cursor_binary_path, DaemonConfig};
 use crate::connection_service::AttachmentProgressSink;
 use crate::connection_service::{
     effective_spawn_branch, session_worktree_source, spawned_branch_of_session, WorktreeSource,
 };
-use crate::project_storage;
+use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
+use tddy_projects::project_storage;
 use tddy_service::proto::session::start_phase::Step as StartStep;
+use tddy_worktree_service::branch_intent::{BranchIntentPolicy, BranchIntentRequest};
 
 mod chat;
 pub use chat::*;

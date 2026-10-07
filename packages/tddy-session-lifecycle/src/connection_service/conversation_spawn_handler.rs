@@ -1,6 +1,5 @@
-use crate::{
-    connection_service::stack_parent, livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::stack_parent;
+use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use super::spawn_claude_cli_session_inner;
 

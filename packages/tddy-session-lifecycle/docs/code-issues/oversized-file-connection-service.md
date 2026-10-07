@@ -3,8 +3,8 @@
 **Location:** `packages/tddy-session-lifecycle/src/connection_service.rs`
 **Category:** oversized-file
 **Detected:** 2026-10-07 — `/pr-wrap` step 3.5 on `#carve` 18/21 (#533), re-measured with the change history's `loc.py`
-**Metrics:** **503 production lines** · budget 500 (the inline-test-block rule; the naive count to the first `#[cfg(test)]` reads 18)
-**Thresholds breached:** length 503 > 500
+**Metrics:** **508 production lines** (503 at #533) · budget 500 (the inline-test-block rule; the naive count to the first `#[cfg(test)]` reads 18)
+**Thresholds breached:** length 508 > 500
 **Restructure:** none planned; wait for #536 (the moves that leave this crate a wiring crate), then re-measure
 **Status:** Open — deferred by the developer 2026-10-07 (stack branch: #534, #535 and #536 also edit this file) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
@@ -15,6 +15,7 @@
 |---|---:|---|
 | 2026-10-07 | 497 | `origin/master` (`480c8448`), before `#carve` 18/21 |
 | 2026-10-07 | 503 | `#carve` 18/21: **+6**, three `mod` declarations (`split_ports`, `attached_initial_prompt`, `svc_split_delegators`) and their blank lines. **Crossed 500** |
+| 2026-10-07 | 508 | `#carve` 19/21 (#534): **+5** over 503 — three `mod` lines (`launch_ports`, `svc_launch_delegators`, `svc_resume_sandboxed_claude_cli_session`) and their blank lines. Already over 500; growth deferred again, unchanged reason: #535 and #536 also edit this file. (A re-count at `/pr-wrap` step 3.5 with the inline-test-block rule read 504 → 509 on the same two trees; the +5 agrees, the base differs by one) |
 
 ## What grew it
 
