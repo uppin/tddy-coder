@@ -4,7 +4,7 @@ use super::ToolSpawnPurpose;
 
 use super::ToolSpawnPlan;
 
-use super::super::AttachmentMaterialization;
+use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
 use tddy_projects::project_storage;
 use tddy_spawn::{spawn_worker, spawner};
@@ -88,7 +88,7 @@ impl LaunchSessions {
             .clone()
             .unwrap_or_else(|| Uuid::now_v7().to_string());
         if enable_conversation_spawn || !req.attachments.is_empty() {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+            let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 &os_user,
                 Some(&self.tddy_data_dir),
             )

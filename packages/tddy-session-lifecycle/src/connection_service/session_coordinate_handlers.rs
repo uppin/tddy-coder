@@ -5,13 +5,13 @@ use std::sync::Arc;
 
 use super::peer_session_answer::resolve_exec_tool_worktree;
 use super::svc_resolve_os_user::resolve_os_user;
-use super::{service_util, AttachmentProgressSink, MpscResultStream};
+use super::{service_util, AttachmentProgressSink};
 use crate::connection_service::launch_ports::LaunchSessions;
-use crate::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
-use crate::{session_list_enrichment, session_reader};
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
@@ -23,7 +23,9 @@ use tddy_service::proto::session::{
     GetWorktreeSnapshotResponse, ListSessionsRequest, ListSessionsResponse, ResumeSessionResponse,
     SessionEntry, StartSessionEvent, StartSessionRequest, StartSessionResponse,
 };
+use tddy_session_activity::{session_list_enrichment, session_reader};
 use tddy_spawn::spawner;
+use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
 const SESSION_SERVICE: &str = "session.SessionService";
@@ -49,9 +51,11 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let timeout = self.config.spawn_worker_request_timeout();
         let sessions_base_blocking = sessions_base.clone();
         let local_daemon_id = local_instance_id_for_config(&self.config);
@@ -108,9 +112,11 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -234,7 +240,7 @@ impl LaunchSessions {
 
         let session_dir =
             tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, &req.session_id);
-        let attachments = crate::session_attachments::list_session_attachments(&session_dir)
+        let attachments = tddy_workflow::artifact_paths::list_session_attachments(&session_dir)
             .into_iter()
             .map(|a| a.basename)
             .collect();
@@ -428,15 +434,16 @@ fn session_entry_from_listing(
     // and would spend a subscription and a file read to conclude UNSPECIFIED.
     if matches!(entry.session_type.as_str(), "claude-cli" | "cursor-cli") {
         session_agent_inference.ensure_tailing(agent_activity_hub, &entry.session_id, &session_dir);
-        let inferred = crate::session_agent_inference::inferred_activity(
+        let inferred = tddy_session_agents::session_agent_inference::inferred_activity(
             tddy_core::SessionActivityStatus::from_wire(&entry.activity_status),
             session_agent_inference.latest(&entry.session_id).as_ref(),
         );
         entry.agent_status =
-            crate::session_agent_inference::session_agent_status(inferred.as_ref()) as i32;
+            tddy_session_agents::session_agent_inference::session_agent_status(inferred.as_ref())
+                as i32;
         entry.last_activity = inferred
             .as_ref()
-            .and_then(crate::session_agent_status::AgentActivity::to_proto);
+            .and_then(tddy_session_agents::session_agent_status::AgentActivity::to_proto);
     }
     Ok(entry)
 }

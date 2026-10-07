@@ -1,4 +1,5 @@
-use crate::{session_deletion, user_sessions_path::projects_path_for_user};
+use tddy_daemon_kernel::user_paths::projects_path_for_user;
+use tddy_session_activity::session_deletion;
 
 use tddy_service::proto::session::DeleteSessionResponse;
 
@@ -39,9 +40,11 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
 
@@ -126,9 +129,11 @@ impl LaunchSessions {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         log::debug!(
             "DeleteSession: resolved sessions_base={:?} for os_user={}",
             sessions_base,

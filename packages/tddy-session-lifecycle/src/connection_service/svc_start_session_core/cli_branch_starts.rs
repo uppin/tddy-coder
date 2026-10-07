@@ -98,9 +98,11 @@ impl LaunchSessions {
         progress: &AttachmentProgressSink,
         os_user: &str,
     ) -> Result<CliStart, Status> {
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
         let initial_prompt = attached_initial_prompt(
             &self.attachment_state(),

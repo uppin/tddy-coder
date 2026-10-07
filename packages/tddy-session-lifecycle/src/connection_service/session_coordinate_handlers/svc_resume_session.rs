@@ -37,9 +37,11 @@ impl DaemonSessionHost {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);

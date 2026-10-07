@@ -3,7 +3,7 @@ use tddy_spawn::spawner;
 
 use std::sync::Arc;
 
-use super::AttachmentMaterialization;
+use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
 use uuid::Uuid;
 
@@ -185,7 +185,7 @@ impl LaunchSessions {
         // and before anything is created, so the new-session form can show the reason in its error
         // strip rather than navigating away from a session that came up unseeded.
         if !req.pr_stack_base_session_id.trim().is_empty() {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+            let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 os_user,
                 Some(&self.tddy_data_dir),
             )
@@ -224,7 +224,7 @@ impl LaunchSessions {
 
         // --- workspace branch: no LiveKit, no PTY; resolves project, creates a git worktree ---
         if req.session_type.trim() == "workspace" {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+            let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 os_user,
                 Some(&self.tddy_data_dir),
             )
