@@ -18,6 +18,8 @@ use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FI
 
 const GITHUB: &str = "github";
 const WHEN_THE_LINK_COMPLETED: u64 = 1_758_240_000;
+/// When the account the vault already holds was first linked — earlier than the link under test.
+const WHEN_THE_FIRST_LINK_COMPLETED: u64 = 1_726_700_000;
 
 // ---------------------------------------------------------------------------------------------
 // Builders
@@ -63,7 +65,7 @@ fn a_held_account(identity: &LinkedIdentity, account: &str, label: &str) -> Cred
         label: label.to_string(),
         secret: SecretString::new("the-token-from-the-first-link"),
         metadata,
-        updated_at: 1_726_700_000,
+        updated_at: WHEN_THE_FIRST_LINK_COMPLETED,
         version: FIRST_VERSION,
     }
 }

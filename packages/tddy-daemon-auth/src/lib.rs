@@ -28,6 +28,7 @@
 //! `host_tooling ⇄ ssh_agent` cycle. The boundary is real rather than convenient: **what is left
 //! here signs and verifies; what left with node 1 unlocks and loads.**
 
+pub mod account_linking_provider;
 pub mod auth;
 mod codex_oauth_participant_metadata;
 pub mod codex_oauth_relay;
@@ -39,6 +40,7 @@ pub mod signing_key;
 pub mod token_provider;
 pub mod vault_lifetimes;
 
+pub use account_linking_provider::github_account_linking_provider;
 /// The crate's own surface, at the crate root, so a caller writes `tddy_daemon_auth::…` for the
 /// four things the daemon's wiring layer needs and reaches into a module for nothing else.
 ///
@@ -48,8 +50,8 @@ pub mod vault_lifetimes;
 /// **no session services at all**, which is a deliberate refusal rather than an oversight.
 pub use auth::{
     build_auth_entries, build_auth_entries_admitting, build_auth_entries_with,
-    build_token_service_entry, github_account_linking_provider, session_token_authenticator,
-    AuthBuildResult, LiveKitTokenServiceImpl,
+    build_token_service_entry, session_token_authenticator, AuthBuildResult,
+    LiveKitTokenServiceImpl,
 };
 pub use first_login_admission::FirstLoginEnrolment;
 pub use local_token::{build_local_token_entry, mint_local_token, LocalTokenError};

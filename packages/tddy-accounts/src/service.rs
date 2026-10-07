@@ -1,8 +1,7 @@
 //! `accounts.AccountsService` over an [`AccountStore`].
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use tddy_credential_sync::AccountSyncSummary;
@@ -15,15 +14,16 @@ use tddy_service::proto::accounts::{
     SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
 };
 
+use crate::attempts::{Attempts, PollAdmission};
 use crate::linking::{
     record_for_link, removal_allowed, AccountLinker, LinkError, LinkProgress, LinkedAccountStore,
+    LinkedIdentity, META_SUBJECT,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
 
-/// The metadata key a record's provider-side identifier is read from — a GitHub login, a
-/// Cloudflare account id. Shown beside the label; never a credential.
-const SUBJECT_METADATA_KEY: &str = "subject";
+/// A source of the current instant. See [`AccountsServiceImpl::with_clock`].
+pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
 
 /// The two ports adding an account needs, wired together.
 ///
@@ -33,34 +33,17 @@ const SUBJECT_METADATA_KEY: &str = "subject";
 struct Linking {
     linker: Arc<dyn AccountLinker>,
     store: Arc<dyn LinkedAccountStore>,
-    /// Attempts begun and not yet finished, by `link_id`. A poll presents only the `link_id`, and a
-    /// link belongs to the session that began it.
-    ///
-    /// Bounded in time: an attempt nobody polls to a terminal answer would otherwise stay for the
-    /// daemon's life. Each carries the deadline its challenge gave, and is dropped past it — see
-    /// [`Attempt::deadline`].
-    attempts: Mutex<HashMap<String, Attempt>>,
-}
-
-/// One link in progress.
-struct Attempt {
-    session_token: String,
-    provider: ProviderId,
-    /// When the provider's code stops being redeemable, as the challenge said at begin. Past it the
-    /// attempt can only end `LINK_EXPIRED`, so it is not kept.
-    deadline: Instant,
-}
-
-impl Attempt {
-    fn is_over(&self, now: Instant) -> bool {
-        now >= self.deadline
-    }
+    /// Attempts begun and not yet finished, and when each may next be polled.
+    attempts: Attempts,
 }
 
 /// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`], and — when the
 /// linking half is wired — by adding accounts to it.
 pub struct AccountsServiceImpl<S> {
     store: Arc<S>,
+    /// Where "now" comes from for attempt deadlines and poll pacing. [`Instant::now`] unless a test
+    /// substitutes its own.
+    clock: Clock,
     /// `#keyring` 6/9's aggregate sync standing per account. `None` when no sync engine is wired
     /// on this daemon — the common case — in which case every account reports
     /// `SYNC_STATUS_UNSPECIFIED`, exactly as it did before this port existed.
@@ -73,6 +56,7 @@ impl<S> AccountsServiceImpl<S> {
     pub fn new(store: Arc<S>) -> Self {
         Self {
             store,
+            clock: Arc::new(Instant::now),
             sync_status: None,
             linking: None,
         }
@@ -103,8 +87,16 @@ impl<S> AccountsServiceImpl<S> {
         self.linking = Some(Linking {
             linker,
             store,
-            attempts: Mutex::new(HashMap::new()),
+            attempts: Attempts::default(),
         });
+        self
+    }
+
+    /// Replace the clock attempt deadlines and poll pacing are read from. For tests, which would
+    /// otherwise sleep to cross a window or an interval.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Clock) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -217,25 +209,10 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             Err(refusal) => return Err(link_status_for(refusal)),
         }
         let challenge = linking.linker.begin(&provider).map_err(link_status_for)?;
-        let now = Instant::now();
-        let mut attempts = linking
+        linking
             .attempts
-            .lock()
-            .map_err(|_| Status::internal("link attempts are unavailable"))?;
-        attempts.retain(|_, attempt| !attempt.is_over(now));
-        attempts.insert(
-            challenge.link_id.clone(),
-            Attempt {
-                session_token: request.session_token,
-                provider,
-                // `checked_add` fails only for a window longer than the clock can represent, which
-                // no provider issues; an attempt that cannot be dated is refused, not kept forever.
-                deadline: now
-                    .checked_add(Duration::from_secs(challenge.expires_in_seconds))
-                    .ok_or_else(|| Status::internal("the link window is not representable"))?,
-            },
-        );
-        drop(attempts);
+            .register(&challenge, request.session_token, provider, (self.clock)())
+            .map_err(link_status_for)?;
         Ok(Response::new(BeginLinkAccountResponse {
             link_id: challenge.link_id,
             user_code: challenge.user_code,
@@ -251,72 +228,24 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
     ) -> Result<Response<PollLinkAccountResponse>, Status> {
         let linking = self.require_linking()?;
         let request = request.into_inner();
-        let provider = {
-            let mut attempts = linking
-                .attempts
-                .lock()
-                .map_err(|_| Status::internal("link attempts are unavailable"))?;
-            let now = Instant::now();
-            let provider = match attempts.get(&request.link_id) {
-                Some(attempt) if attempt.session_token == request.session_token => {
-                    if attempt.is_over(now) {
-                        attempts.remove(&request.link_id);
-                        return Ok(Response::new(PollLinkAccountResponse {
-                            state: LinkState::LinkExpired as i32,
-                            ..PollLinkAccountResponse::default()
-                        }));
-                    }
-                    attempt.provider.clone()
-                }
-                _ => return Err(link_status_for(LinkError::NoSuchLink)),
-            };
-            attempts.retain(|_, attempt| !attempt.is_over(now));
-            provider
+        let admission = linking
+            .attempts
+            .admit_poll(&request.link_id, &request.session_token, (self.clock)())
+            .map_err(link_status_for)?;
+        let provider = match admission {
+            PollAdmission::Go { provider } => provider,
+            PollAdmission::TooSoon { interval_seconds } => {
+                return Ok(Response::new(pending(interval_seconds)));
+            }
+            PollAdmission::Expired => {
+                return Ok(Response::new(state_only(LinkState::LinkExpired)));
+            }
         };
         let progress = linking
             .linker
             .poll(&request.link_id)
             .map_err(link_status_for)?;
-        let state_only = |state: LinkState| PollLinkAccountResponse {
-            state: state as i32,
-            ..PollLinkAccountResponse::default()
-        };
-        let response = match progress {
-            LinkProgress::Pending { interval_seconds } => PollLinkAccountResponse {
-                state: LinkState::LinkPending as i32,
-                interval_seconds: saturating_i64(interval_seconds),
-                ..PollLinkAccountResponse::default()
-            },
-            LinkProgress::Denied => {
-                self.finish_attempt(linking, &request.link_id)?;
-                state_only(LinkState::LinkDenied)
-            }
-            LinkProgress::Expired => {
-                self.finish_attempt(linking, &request.link_id)?;
-                state_only(LinkState::LinkExpired)
-            }
-            LinkProgress::Approved {
-                identity,
-                access_token,
-            } => {
-                self.finish_attempt(linking, &request.link_id)?;
-                match store_link(
-                    linking,
-                    &request.session_token,
-                    &provider,
-                    &identity,
-                    &access_token,
-                ) {
-                    Ok(record) => PollLinkAccountResponse {
-                        state: LinkState::LinkLinked as i32,
-                        account: Some(summary_of(&record, self.sync_status.as_deref())),
-                        ..PollLinkAccountResponse::default()
-                    },
-                    Err(LinkError::Locked) => state_only(LinkState::LinkVaultLocked),
-                    Err(refusal) => return Err(link_status_for(refusal)),
-                }
-            }
-        };
+        let response = self.answer_for(linking, &request, &provider, progress)?;
         Ok(Response::new(response))
     }
 }
@@ -336,13 +265,70 @@ impl<S> AccountsServiceImpl<S> {
         })
     }
 
-    fn finish_attempt(&self, linking: &Linking, link_id: &str) -> Result<(), Status> {
-        linking
-            .attempts
-            .lock()
-            .map_err(|_| Status::internal("link attempts are unavailable"))?
-            .remove(link_id);
-        Ok(())
+    /// What the person is told about `progress`, finishing the attempt when it is terminal.
+    fn answer_for(
+        &self,
+        linking: &Linking,
+        request: &PollLinkAccountRequest,
+        provider: &ProviderId,
+        progress: LinkProgress,
+    ) -> Result<PollLinkAccountResponse, Status> {
+        let finish = || {
+            linking
+                .attempts
+                .finish(&request.link_id)
+                .map_err(link_status_for)
+        };
+        match progress {
+            LinkProgress::Pending { interval_seconds } => {
+                linking
+                    .attempts
+                    .reschedule(&request.link_id, interval_seconds, (self.clock)())
+                    .map_err(link_status_for)?;
+                Ok(pending(interval_seconds))
+            }
+            LinkProgress::Denied => {
+                finish()?;
+                Ok(state_only(LinkState::LinkDenied))
+            }
+            LinkProgress::Expired => {
+                finish()?;
+                Ok(state_only(LinkState::LinkExpired))
+            }
+            LinkProgress::Approved {
+                identity,
+                access_token,
+            } => {
+                finish()?;
+                self.linked(
+                    linking,
+                    &request.session_token,
+                    provider,
+                    &identity,
+                    &access_token,
+                )
+            }
+        }
+    }
+
+    /// Store an approved link and report it. A closed vault is an answer, not an error.
+    fn linked(
+        &self,
+        linking: &Linking,
+        session_token: &str,
+        provider: &ProviderId,
+        identity: &LinkedIdentity,
+        access_token: &str,
+    ) -> Result<PollLinkAccountResponse, Status> {
+        match store_link(linking, session_token, provider, identity, access_token) {
+            Ok(record) => Ok(PollLinkAccountResponse {
+                state: LinkState::LinkLinked as i32,
+                account: Some(summary_of(&record, self.sync_status.as_deref())),
+                ..PollLinkAccountResponse::default()
+            }),
+            Err(LinkError::Locked) => Ok(state_only(LinkState::LinkVaultLocked)),
+            Err(refusal) => Err(link_status_for(refusal)),
+        }
     }
 }
 
@@ -351,7 +337,7 @@ fn store_link(
     linking: &Linking,
     session_token: &str,
     provider: &ProviderId,
-    identity: &crate::linking::LinkedIdentity,
+    identity: &LinkedIdentity,
     access_token: &str,
 ) -> Result<CredentialRecord, LinkError> {
     let held = linking.store.held(session_token, provider)?;
@@ -362,6 +348,21 @@ fn store_link(
     let record = record_for_link(&held, provider, identity, access_token, linked_at);
     linking.store.put(session_token, record.clone())?;
     Ok(record)
+}
+
+fn state_only(state: LinkState) -> PollLinkAccountResponse {
+    PollLinkAccountResponse {
+        state: state as i32,
+        ..PollLinkAccountResponse::default()
+    }
+}
+
+fn pending(interval_seconds: u64) -> PollLinkAccountResponse {
+    PollLinkAccountResponse {
+        state: LinkState::LinkPending as i32,
+        interval_seconds: saturating_i64(interval_seconds),
+        ..PollLinkAccountResponse::default()
+    }
 }
 
 fn saturating_i64(value: u64) -> i64 {
@@ -421,7 +422,7 @@ fn summary_of(
         label: record.label.clone(),
         subject: record
             .metadata
-            .get(SUBJECT_METADATA_KEY)
+            .get(META_SUBJECT)
             .cloned()
             .unwrap_or_default(),
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),

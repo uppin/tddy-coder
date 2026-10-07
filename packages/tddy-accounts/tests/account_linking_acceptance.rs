@@ -20,8 +20,9 @@ use std::sync::{Arc, Mutex};
 use pretty_assertions::assert_eq;
 use prost::Message;
 use tddy_accounts::{
-    AccountLinker, AccountStore, AccountsError, AccountsServiceImpl, LinkChallenge, LinkError,
-    LinkProgress, LinkedAccountStore, LinkedIdentity, META_SUBJECT, META_SUBJECT_ID,
+    resolve_account, AccountLinker, AccountResolution, AccountStore, AccountsError,
+    AccountsServiceImpl, LinkChallenge, LinkError, LinkProgress, LinkedAccountStore,
+    LinkedIdentity, META_SUBJECT, META_SUBJECT_ID,
 };
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SecretString, FIRST_VERSION};
 use tddy_rpc::{Request, Status};
@@ -33,6 +34,20 @@ use tddy_service::proto::accounts::{
 
 const ADAS_SESSION: &str = "session-token-for-ada";
 const GITHUB: &str = "github";
+const ADA_ACCOUNT: &str = "account-ada";
+const GRACE_ACCOUNT: &str = "account-grace";
+/// The id the service mints for a person it has never seen: the provider and their subject id.
+const GRACES_NEWLY_MINTED_ACCOUNT: &str = "github-2048";
+/// The token Ada's own account was created with, when she signed in.
+const ADAS_SIGN_IN_TOKEN: &str = "the-token-ada-signed-in-with";
+/// The token a re-link of Ada's account brings back, replacing the one above.
+const ADAS_FRESH_TOKEN: &str = "ada-s-fresh-token";
+/// The token GitHub hands over when Grace approves a link.
+const GRACES_LINK_TOKEN: &str = "grace-s-token";
+/// The token already stored on Grace's account in a vault that holds it.
+const GRACES_STORED_TOKEN: &str = "the-token-grace-linked-with";
+/// When the accounts the vault already holds were last written — long before the link under test.
+const WHEN_THE_VAULT_WAS_LAST_WRITTEN: u64 = 1_726_700_000;
 
 // ---------------------------------------------------------------------------------------------
 // Builders
@@ -63,11 +78,11 @@ fn adas_own_account() -> CredentialRecord {
 
     CredentialRecord {
         provider: github(),
-        account: AccountId::new("account-ada"),
+        account: AccountId::new(ADA_ACCOUNT),
         label: "Ada".to_string(),
-        secret: SecretString::new("the-token-ada-signed-in-with"),
+        secret: SecretString::new(ADAS_SIGN_IN_TOKEN),
         metadata,
-        updated_at: 1_726_700_000,
+        updated_at: WHEN_THE_VAULT_WAS_LAST_WRITTEN,
         version: FIRST_VERSION,
     }
 }
@@ -80,11 +95,11 @@ fn graces_linked_account() -> CredentialRecord {
 
     CredentialRecord {
         provider: github(),
-        account: AccountId::new("account-grace"),
+        account: AccountId::new(GRACE_ACCOUNT),
         label: "Grace".to_string(),
-        secret: SecretString::new("the-token-grace-linked-with"),
+        secret: SecretString::new(GRACES_STORED_TOKEN),
         metadata,
-        updated_at: 1_726_700_000,
+        updated_at: WHEN_THE_VAULT_WAS_LAST_WRITTEN,
         version: FIRST_VERSION,
     }
 }
@@ -183,6 +198,19 @@ impl AVaultAdaCanOpen {
             .collect();
         ids.sort();
         ids
+    }
+
+    fn secret_stored_for(&self, account: &str) -> Option<String> {
+        self.records
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|record| record.account.as_str() == account)
+            .map(|record| record.secret.expose().to_string())
+    }
+
+    fn records_it_holds(&self) -> Vec<CredentialRecord> {
+        self.records.lock().unwrap().clone()
     }
 
     fn admits(&self, session_token: &str) -> Result<(), LinkError> {
@@ -356,50 +384,81 @@ async fn removing(
 // The reason this node exists
 
 #[tokio::test]
-async fn linking_leaves_the_caller_signed_in_as_who_they_already_were() {
+async fn linking_leaves_the_session_established_with_the_account_it_already_had() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
-    let linked = a_completed_link(&service).await;
+    a_completed_link(&service).await.expect("a completed link");
 
     // Then
+    let session_account = vault
+        .session_account(ADAS_SESSION)
+        .expect("the session's account");
     assert_eq!(
-        linked
-            .map_err(|status| status.message)
-            .map(|response| response.state)
-            .map(|state| (
-                state,
-                vault
-                    .session_account(ADAS_SESSION)
-                    .expect("the session's account")
-            )),
-        Ok((
-            LinkState::LinkLinked as i32,
-            Some((github(), AccountId::new("account-ada")))
-        ))
+        session_account,
+        Some((github(), AccountId::new(ADA_ACCOUNT)))
     );
 }
 
 #[tokio::test]
-async fn a_completed_link_hands_back_no_token_of_any_kind() {
+async fn a_completed_link_is_reported_as_linked() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
     let linked = a_completed_link(&service).await.expect("a completed link");
 
     // Then
-    let on_the_wire = String::from_utf8_lossy(&linked.encode_to_vec()).to_string();
+    assert_eq!(linked.state, LinkState::LinkLinked as i32);
+}
+
+/// Whether `needle` appears anywhere in `haystack`, byte for byte — no lossy decoding in between.
+fn the_bytes_contain(haystack: &[u8], needle: &str) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle.as_bytes())
+}
+
+#[tokio::test]
+async fn a_completed_link_names_the_account_and_carries_no_token_of_any_kind() {
+    // Given
+    let vault = Arc::new(a_vault_holding(adas_own_account()));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
+
+    // When
+    let linked = a_completed_link(&service).await.expect("a completed link");
+
+    // Then the decoded response says which account was linked, and nothing else
+    let decoded = PollLinkAccountResponse::decode(linked.encode_to_vec().as_slice())
+        .expect("the response decodes");
+    let account = decoded.account.as_ref().expect("the linked account");
     assert_eq!(
         (
-            on_the_wire.contains("grace-s-token"),
-            on_the_wire.contains("the-token-ada-signed-in-with")
+            decoded.state,
+            account.account_id.as_str(),
+            account.subject.as_str()
         ),
-        (false, false)
+        (
+            LinkState::LinkLinked as i32,
+            GRACES_NEWLY_MINTED_ACCOUNT,
+            "grace"
+        )
     );
+
+    // and no byte of either token is anywhere in the response or in the account it carries
+    let response_bytes = decoded.encode_to_vec();
+    let summary_bytes = account.encode_to_vec();
+    let tokens = [GRACES_LINK_TOKEN, ADAS_SIGN_IN_TOKEN];
+    let leaks: Vec<&str> = tokens
+        .into_iter()
+        .filter(|token| {
+            the_bytes_contain(&response_bytes, token) || the_bytes_contain(&summary_bytes, token)
+        })
+        .collect();
+    assert_eq!(leaks, Vec::<&str>::new());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -409,20 +468,19 @@ async fn a_completed_link_hands_back_no_token_of_any_kind() {
 async fn beginning_a_link_shows_the_operator_a_code_and_where_to_type_it() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
     let begun = a_link_begun_by(&service, ADAS_SESSION).await;
 
     // Then
+    let begun = begun.expect("a begun link");
     assert_eq!(
-        begun
-            .map_err(|status| status.message)
-            .map(|response| (response.user_code, response.verification_uri)),
-        Ok((
+        (begun.user_code, begun.verification_uri),
+        (
             "WXYZ-1234".to_string(),
             "https://github.com/login/device".to_string()
-        ))
+        )
     );
 }
 
@@ -441,11 +499,10 @@ async fn a_link_nobody_has_approved_yet_is_reported_as_pending() {
     let polled = a_completed_link(&service).await;
 
     // Then
+    let polled = polled.expect("a poll answer");
     assert_eq!(
-        polled
-            .map_err(|status| status.message)
-            .map(|response| (response.state, response.interval_seconds)),
-        Ok((LinkState::LinkPending as i32, 10))
+        (polled.state, polled.interval_seconds),
+        (LinkState::LinkPending as i32, 10)
     );
 }
 
@@ -459,12 +516,8 @@ async fn a_refused_link_is_reported_as_refused_rather_than_as_a_failure() {
     let polled = a_completed_link(&service).await;
 
     // Then
-    assert_eq!(
-        polled
-            .map_err(|status| status.message)
-            .map(|response| response.state),
-        Ok(LinkState::LinkDenied as i32)
-    );
+    let polled = polled.expect("a poll answer");
+    assert_eq!(polled.state, LinkState::LinkDenied as i32);
 }
 
 #[tokio::test]
@@ -477,82 +530,78 @@ async fn a_code_that_outlived_its_window_is_reported_as_expired() {
     let polled = a_completed_link(&service).await;
 
     // Then
-    assert_eq!(
-        polled
-            .map_err(|status| status.message)
-            .map(|response| response.state),
-        Ok(LinkState::LinkExpired as i32)
-    );
+    let polled = polled.expect("a poll answer");
+    assert_eq!(polled.state, LinkState::LinkExpired as i32);
 }
 
 #[tokio::test]
 async fn an_approval_with_nowhere_to_put_it_is_reported_as_locked_and_not_as_refused() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()).sealed_under_another_login());
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
     let polled = a_completed_link(&service).await;
 
     // Then
-    assert_eq!(
-        polled
-            .map_err(|status| status.message)
-            .map(|response| response.state),
-        Ok(LinkState::LinkVaultLocked as i32)
-    );
+    let polled = polled.expect("a poll answer");
+    assert_eq!(polled.state, LinkState::LinkVaultLocked as i32);
 }
 
 #[tokio::test]
 async fn a_token_naming_no_session_cannot_begin_a_link() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
     let begun = a_link_begun_by(&service, "a-token-for-nobody").await;
 
     // Then
-    assert_eq!(
-        begun.map(|_| ()).map_err(|status| status.code),
-        Err(tddy_rpc::Code::Unauthenticated)
-    );
+    let refusal = begun.expect_err("a refused begin");
+    assert_eq!(refusal.code, tddy_rpc::Code::Unauthenticated);
 }
 
 // ---------------------------------------------------------------------------------------------
 // Two accounts, one session
 
 #[tokio::test]
-async fn the_linked_account_joins_the_one_the_session_was_established_with() {
+async fn once_linked_both_accounts_appear_in_the_listing() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
-    let _ = a_completed_link(&service).await;
+    a_completed_link(&service).await.expect("a completed link");
+    let listing = the_listing_from(&service).await.expect("a listing");
 
     // Then
-    assert_eq!(vault.accounts_it_holds().len(), 2);
+    let listed: Vec<&str> = listing
+        .providers
+        .iter()
+        .flat_map(|provider| provider.accounts.iter())
+        .map(|account| account.account_id.as_str())
+        .collect();
+    assert_eq!(listed, vec![ADA_ACCOUNT, GRACES_NEWLY_MINTED_ACCOUNT]);
 }
 
 #[tokio::test]
 async fn the_listing_says_which_account_the_session_belongs_to() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
     let listing = the_listing_from(&service).await;
 
     // Then
+    let listing = listing.expect("a listing");
     assert_eq!(
-        listing
-            .map_err(|status| status.message)
-            .map(|response| response.session_account),
-        Ok(Some(tddy_service::proto::accounts::SessionAccount {
+        listing.session_account,
+        Some(tddy_service::proto::accounts::SessionAccount {
             provider: GITHUB.to_string(),
-            account_id: "account-ada".to_string(),
-        }))
+            account_id: ADA_ACCOUNT.to_string(),
+        })
     );
 }
 
@@ -560,13 +609,47 @@ async fn the_listing_says_which_account_the_session_belongs_to() {
 async fn re_linking_an_account_keeps_the_account_id_a_project_was_assigned_to() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(ada(), "ada-s-fresh-token"));
+    let service = a_service(&vault, a_provider_that_approves(ada(), ADAS_FRESH_TOKEN));
 
     // When
-    let _ = a_completed_link(&service).await;
+    a_completed_link(&service).await.expect("a completed link");
 
     // Then
-    assert_eq!(vault.accounts_it_holds(), vec!["account-ada".to_string()]);
+    assert_eq!(vault.accounts_it_holds(), vec![ADA_ACCOUNT.to_string()]);
+}
+
+#[tokio::test]
+async fn re_linking_an_account_replaces_the_secret_it_holds() {
+    // Given
+    let vault = Arc::new(a_vault_holding(adas_own_account()));
+    let service = a_service(&vault, a_provider_that_approves(ada(), ADAS_FRESH_TOKEN));
+
+    // When
+    a_completed_link(&service).await.expect("a completed link");
+
+    // Then
+    assert_eq!(
+        vault.secret_stored_for(ADA_ACCOUNT),
+        Some(ADAS_FRESH_TOKEN.to_string())
+    );
+}
+
+#[tokio::test]
+async fn a_project_assigned_to_a_re_linked_account_still_resolves_to_it() {
+    // Given a project assigned to Ada's account before it is re-linked
+    let vault = Arc::new(a_vault_holding(adas_own_account()));
+    let service = a_service(&vault, a_provider_that_approves(ada(), ADAS_FRESH_TOKEN));
+    let assignments = vec![(github(), AccountId::new(ADA_ACCOUNT))];
+
+    // When
+    a_completed_link(&service).await.expect("a completed link");
+    let resolution = resolve_account(&assignments, &github(), &vault.records_it_holds());
+
+    // Then
+    assert_eq!(
+        resolution,
+        AccountResolution::Assigned(AccountId::new(ADA_ACCOUNT))
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -576,17 +659,31 @@ async fn re_linking_an_account_keeps_the_account_id_a_project_was_assigned_to() 
 async fn removing_the_account_the_session_was_established_with_is_refused_with_the_reason() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
-    let removal = removing(&service, "account-ada").await;
+    let removal = removing(&service, ADA_ACCOUNT).await;
 
     // Then
-    assert_eq!(
-        removal
-            .map(|_| ())
-            .map_err(|status| (status.code, status.message.contains("session"))),
-        Err((tddy_rpc::Code::FailedPrecondition, true))
+    let refusal = removal.expect_err("a refused removal");
+    assert_eq!(refusal.code, tddy_rpc::Code::FailedPrecondition);
+}
+
+#[tokio::test]
+async fn the_refusal_to_remove_the_sessions_own_account_says_why() {
+    // Given
+    let vault = Arc::new(a_vault_holding(adas_own_account()));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
+
+    // When
+    let removal = removing(&service, ADA_ACCOUNT).await;
+
+    // Then
+    let refusal = removal.expect_err("a refused removal");
+    assert!(
+        refusal.message.contains("session"),
+        "the refusal does not name the session: {}",
+        refusal.message
     );
 }
 
@@ -594,11 +691,11 @@ async fn removing_the_account_the_session_was_established_with_is_refused_with_t
 async fn removing_any_other_linked_account_succeeds() {
     // Given
     let vault = Arc::new(a_vault_holding(adas_own_account()).also_holding(graces_linked_account()));
-    let service = a_service(&vault, a_provider_that_approves(grace(), "grace-s-token"));
+    let service = a_service(&vault, a_provider_that_approves(grace(), GRACES_LINK_TOKEN));
 
     // When
-    let removal = removing(&service, "account-grace").await;
+    let removal = removing(&service, GRACE_ACCOUNT).await;
 
     // Then
-    assert_eq!(removal.map(|_| ()).map_err(|status| status.message), Ok(()));
+    assert!(removal.is_ok(), "removal refused: {:?}", removal.err());
 }

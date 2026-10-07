@@ -15,6 +15,8 @@
 //! [`AccountSummary::has_secret`]: tddy_service::proto::accounts::AccountSummary::has_secret
 //! [`linking`]: crate::linking
 
+mod attempts;
+mod deadline;
 mod linking;
 mod resolver;
 mod service;
@@ -22,12 +24,13 @@ mod store;
 mod sync_status;
 mod vault_store;
 
+pub use deadline::{deadline_after, forget_expired, is_past};
 pub use linking::{
     record_for_link, removal_allowed, AccountLinker, LinkChallenge, LinkError, LinkProgress,
     LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
 };
 pub use resolver::{resolve_account, AccountResolution};
-pub use service::{build_accounts_entry, AccountsServiceImpl};
+pub use service::{build_accounts_entry, AccountsServiceImpl, Clock};
 pub use store::{AccountStore, AccountsError};
 pub use sync_status::SyncStatusSource;
 pub use vault_store::{SessionSubjectResolver, SessionVaultAccountStore};

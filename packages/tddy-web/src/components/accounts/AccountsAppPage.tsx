@@ -2,20 +2,16 @@
  * Data container for the Accounts screen: one `ListAccounts` call against the selected daemon, plus
  * the `BeginLinkAccount` / `PollLinkAccount` pair behind the add-account control.
  *
- * One RPC, deliberately — a vault's contents change only when somebody links, renames or removes an
- * account, and each of those is an action this screen already knows it took. A rename answers with
- * the account as it now stands and a removal with what remains, so neither re-reads.
- *
- * **Nothing here signs anybody in.** The link pair is on `AccountsService` rather than
- * `AuthService`, and neither response has a token field, so completing a link cannot replace the
- * session this page is already reading the vault with.
+ * One read per visit — a vault's contents change only when somebody renames, removes or links an
+ * account, and the screen knows which it did. A rename answers with the account as it now stands and
+ * a removal with what remains, so neither re-reads. Linking is the exception: the daemon stores the
+ * account while the person is away at the provider, so a completed link re-reads the listing once.
+ * The add-account flow itself lives in `useLinkFlow`, which signs nobody in.
  */
 
-import { useEffect, useRef, useState } from "react";
-import { ConnectError } from "@connectrpc/connect";
+import { useEffect, useState } from "react";
 import {
   AccountsService,
-  LinkState,
   SyncStatus,
   type AccountSummary,
   type ListAccountsResponse,
@@ -23,13 +19,14 @@ import {
 } from "../../gen/accounts_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useDaemonClient } from "../../rpc/selectedDaemon";
+import { reasonOf } from "./rpcReason";
+import { useLinkFlow } from "./useLinkFlow";
 import { AppShell } from "../shell/AppShell";
 import {
   AccountsScreen,
   type AccountRow,
   type AccountSyncStatus,
   type AccountsOutcome,
-  type LinkAttempt,
   type ProviderGroup,
 } from "./AccountsScreen";
 
@@ -84,11 +81,6 @@ function outcomeFromRpc(res: ListAccountsResponse): AccountsOutcome {
   };
 }
 
-/** The daemon's reason, verbatim — without the transport's `[code]` prefix. */
-function reasonOf(error: unknown): string {
-  return ConnectError.from(error).rawMessage;
-}
-
 /** `providers` with one account's row replaced by `renamed`. */
 function withRenamed(providers: ProviderGroup[], provider: string, renamed: AccountRow) {
   return providers.map((group) =>
@@ -112,11 +104,6 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
   // person was looking at is still what the vault holds.
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const [linkAttempt, setLinkAttempt] = useState<LinkAttempt | undefined>(undefined);
-  // The pending poll timer, so leaving the page or starting another attempt stops it.
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(pollTimer.current), []);
-
   // One read per visit; it re-fires only when the selected daemon or the session token changes,
   // and each of those genuinely invalidates the answer (see `HostsAppPage`).
   useEffect(() => {
@@ -137,6 +124,21 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     };
   }, [client, sessionToken]);
 
+  const reread = () => {
+    if (!client) return;
+    client
+      .listAccounts({ sessionToken: sessionToken ?? "" })
+      .then((res) => setOutcome(outcomeFromRpc(res)))
+      .catch((e: unknown) => setActionError(reasonOf(e)));
+  };
+
+  const { linkAttempt, addAccount } = useLinkFlow({
+    client,
+    sessionToken: sessionToken ?? "",
+    onLinked: reread,
+    onError: setActionError,
+  });
+
   const rename = (provider: string, accountId: string, label: string) => {
     if (!client) return;
     client
@@ -153,73 +155,6 @@ export function AccountsAppPage({ onNavigate }: { onNavigate: (path: string) => 
               }
             : previous,
         );
-      })
-      .catch((e: unknown) => setActionError(reasonOf(e)));
-  };
-
-  const reread = () => {
-    if (!client) return;
-    client
-      .listAccounts({ sessionToken: sessionToken ?? "" })
-      .then((res) => setOutcome(outcomeFromRpc(res)))
-      .catch((e: unknown) => setActionError(reasonOf(e)));
-  };
-
-  // Every poll, the first included, waits the interval the daemon last named: GitHub's device
-  // flow answers `slow_down` to a poll that comes sooner than that.
-  const schedulePoll = (linkId: string, intervalSeconds: number) => {
-    pollTimer.current = setTimeout(() => pollLink(linkId, intervalSeconds), intervalSeconds * 1000);
-  };
-
-  const pollLink = (linkId: string, intervalSeconds: number) => {
-    if (!client) return;
-    client
-      .pollLinkAccount({ sessionToken: sessionToken ?? "", linkId })
-      .then((res) => {
-        switch (res.state) {
-          case LinkState.LINK_PENDING: {
-            const next = res.intervalSeconds > 0n ? Number(res.intervalSeconds) : intervalSeconds;
-            schedulePoll(linkId, next);
-            return;
-          }
-          case LinkState.LINK_LINKED:
-            setLinkAttempt(undefined);
-            reread();
-            return;
-          case LinkState.LINK_DENIED:
-            setLinkAttempt({ kind: "denied" });
-            return;
-          case LinkState.LINK_EXPIRED:
-            setLinkAttempt({ kind: "expired" });
-            return;
-          case LinkState.LINK_VAULT_LOCKED:
-            setLinkAttempt({ kind: "locked" });
-            return;
-          default:
-            setLinkAttempt(undefined);
-            setActionError("the daemon answered a link poll with an unknown state");
-        }
-      })
-      .catch((e: unknown) => {
-        setLinkAttempt(undefined);
-        setActionError(reasonOf(e));
-      });
-  };
-
-  const addAccount = (provider: string) => {
-    if (!client) return;
-    clearTimeout(pollTimer.current);
-    setActionError(null);
-    client
-      .beginLinkAccount({ sessionToken: sessionToken ?? "", provider })
-      .then((res) => {
-        setLinkAttempt({
-          kind: "awaiting",
-          provider,
-          userCode: res.userCode,
-          verificationUri: res.verificationUri,
-        });
-        schedulePoll(res.linkId, Number(res.intervalSeconds));
       })
       .catch((e: unknown) => setActionError(reasonOf(e)));
   };

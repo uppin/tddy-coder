@@ -69,3 +69,11 @@ interval the daemon last returned.
   `tokio::task::block_in_place`; it needs the daemon's multi-thread runtime.
 
 Using a linked account for git and API operations is not part of linking.
+
+## Poll pacing
+
+The provider's interval is enforced server-side, not left to the client. Each attempt records when
+the provider may next be asked; a poll arriving earlier is answered `LINK_PENDING` (carrying the
+interval) without calling the provider. The first poll after a begin is not held back. "Now" comes
+from `AccountsServiceImpl::with_clock`, so tests cross an interval or a window without sleeping.
+Attempt deadlines are dated and forgotten by `deadline.rs`, shared with the daemon's linker.

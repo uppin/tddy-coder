@@ -1548,26 +1548,11 @@ pub async fn build(
         // token resolves to the GitHub login, which is the vault's subject. Not registered without
         // `auth_storage`: there is no vault to show, and nothing stands in for one.
         if let Some(vaults) = auth_result.credential_vaults.clone() {
-            let linked_accounts = crate::account_linking::VaultLinkedAccountStore::new(
-                Arc::clone(&vaults),
-                accounts_user_resolver.clone(),
+            let mut accounts_service = crate::account_linking::accounts_service_over(
+                &vaults,
+                accounts_user_resolver,
+                &auth_config,
             );
-            let mut accounts_service = tddy_accounts::AccountsServiceImpl::new(Arc::new(
-                tddy_accounts::SessionVaultAccountStore::new(
-                    Arc::clone(&vaults),
-                    accounts_user_resolver,
-                ),
-            ));
-            // `#keyring` 8/9: adding an account. Wired only where GitHub can serve a real device
-            // flow; otherwise the two link RPCs stay unwired and answer FAILED_PRECONDITION rather
-            // than linking a credential that could never work (a stub's token is synthetic).
-            if let Some(provider) = tddy_daemon_auth::github_account_linking_provider(&auth_config)
-            {
-                accounts_service = accounts_service.with_linking(
-                    Arc::new(crate::account_linking::GitHubAccountLinker::new(provider)),
-                    Arc::new(linked_accounts),
-                );
-            }
 
             // `#keyring` 6/9's sync engine: journaled credential propagation to this daemon's
             // admitted peers, over the same common room as every other LiveKit-dependent service

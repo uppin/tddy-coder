@@ -14,15 +14,17 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use tddy_accounts::{
-    AccountLinker, LinkChallenge, LinkError, LinkProgress, LinkedAccountStore, LinkedIdentity,
-    SessionSubjectResolver, META_SUBJECT_ID,
+    deadline_after, forget_expired, AccountLinker, AccountsServiceImpl, LinkChallenge, LinkError,
+    LinkProgress, LinkedAccountStore, LinkedIdentity, SessionSubjectResolver,
+    SessionVaultAccountStore, META_SUBJECT_ID,
 };
 use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
+use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_github::provider::{DeviceLoginPoll, DeviceLoginStart};
 use tddy_github::{GitHubOAuthProvider, GITHUB_ID_METADATA, GITHUB_PROVIDER};
 
@@ -35,7 +37,7 @@ const STORE_UNREADABLE: &str = "the credential store could not be read or writte
 /// ports are called from inside an RPC handler on the daemon's multi-thread runtime.
 /// `block_in_place` hands the worker's other tasks to another thread for the duration, which is
 /// what makes blocking here safe; it panics on a current-thread runtime, which no daemon host uses.
-fn block_on<F: Future>(future: F) -> F::Output {
+fn block_in_runtime<F: Future>(future: F) -> F::Output {
     tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
 }
 
@@ -84,17 +86,15 @@ impl AccountLinker for GitHubAccountLinker {
             verification_uri,
             expires_in_seconds,
             interval_seconds,
-        } = block_on(self.provider.start_device_login()).map_err(LinkError::Unavailable)?;
+        } = block_in_runtime(self.provider.start_device_login()).map_err(LinkError::Unavailable)?;
 
         let now = Instant::now();
-        let deadline = now
-            .checked_add(Duration::from_secs(expires_in_seconds))
-            .ok_or_else(|| LinkError::Unavailable("the link window is not representable".into()))?;
+        let deadline = deadline_after(now, expires_in_seconds)?;
         let link_id = uuid::Uuid::new_v4().to_string();
         let mut attempts = self.attempts()?;
         // The service forgets an attempt at its deadline; this keeps the same promise for the
         // device codes it holds, so an abandoned attempt costs neither side memory for long.
-        attempts.retain(|_, attempt| attempt.deadline > now);
+        forget_expired(&mut attempts, now, |attempt| attempt.deadline);
         attempts.insert(
             link_id.clone(),
             DeviceAttempt {
@@ -118,7 +118,7 @@ impl AccountLinker for GitHubAccountLinker {
             let attempt = attempts.get(link_id).ok_or(LinkError::NoSuchLink)?;
             (attempt.device_code.clone(), attempt.interval_seconds)
         };
-        let polled = block_on(self.provider.poll_device_login(&device_code))
+        let polled = block_in_runtime(self.provider.poll_device_login(&device_code))
             .map_err(LinkError::Unavailable)?;
         let mut attempts = self.attempts()?;
         match polled {
@@ -235,10 +235,44 @@ impl LinkedAccountStore for VaultLinkedAccountStore {
         session_token: &str,
     ) -> Result<Option<(ProviderId, AccountId)>, LinkError> {
         let subject = self.subject(session_token)?;
-        Ok(Some((
-            ProviderId::new(GITHUB_PROVIDER),
-            AccountId::new(subject),
-        )))
+        let provider = ProviderId::new(GITHUB_PROVIDER);
+        let account = AccountId::new(subject.clone());
+        // Derived from the session, but only *true* while the vault holds the record: a session
+        // whose own account was never stored (or has been removed) is not one this guard protects.
+        let holds_it = self
+            .open_vault(&subject)?
+            .list(Some(&provider))
+            .map_err(|error| refusal_of(&subject, error))?
+            .iter()
+            .any(|record| record.account == account);
+        Ok(holds_it.then_some((provider, account)))
+    }
+}
+
+/// The accounts service over the vaults this daemon keeps, able to link a GitHub account where
+/// GitHub can serve a real device flow.
+///
+/// Linking is wired only then; otherwise the two link RPCs stay unwired and answer
+/// `FAILED_PRECONDITION` rather than linking a credential that could never work (a stub's token is
+/// synthetic). Nothing is substituted for the missing provider.
+///
+/// The session token resolves to the GitHub login, which is the vault's subject.
+pub fn accounts_service_over(
+    vaults: &Arc<SessionVaults>,
+    subject_of: SessionSubjectResolver,
+    config: &DaemonConfig,
+) -> AccountsServiceImpl<SessionVaultAccountStore> {
+    let linking_provider = tddy_daemon_auth::github_account_linking_provider(config);
+    let service = AccountsServiceImpl::new(Arc::new(SessionVaultAccountStore::new(
+        Arc::clone(vaults),
+        subject_of.clone(),
+    )));
+    match linking_provider {
+        Some(provider) => service.with_linking(
+            Arc::new(GitHubAccountLinker::new(provider)),
+            Arc::new(VaultLinkedAccountStore::new(Arc::clone(vaults), subject_of)),
+        ),
+        None => service,
     }
 }
 
@@ -252,9 +286,12 @@ mod tests {
     use tddy_credentials::{CredentialStore, SecretString, FIRST_VERSION};
     use tddy_github::GitHubUser;
 
+    use tddy_accounts::record_for_link;
+
     use super::*;
 
     const ADA: &str = "ada";
+    const ADAS_GITHUB_ID: &str = "1024";
     const ADAS_SESSION: &str = "session-token-for-ada";
     const ADAS_PASSPHRASE: &str = "correct horse battery staple";
 
@@ -263,11 +300,25 @@ mod tests {
     /// GitHub's device flow, scripted: polls answer `answers` in order, then `Pending`.
     struct AGitHubThatAnswers {
         answers: Mutex<Vec<DeviceLoginPoll>>,
+        window_seconds: u64,
     }
 
+    const GITHUBS_DEVICE_CODE: &str = "github-device-code";
+    const GITHUBS_USER_CODE: &str = "WXYZ-1234";
+    const A_QUARTER_OF_AN_HOUR: u64 = 900;
+    const GITHUBS_POLL_INTERVAL: u64 = 5;
+
     fn a_github_that_answers(answers: Vec<DeviceLoginPoll>) -> Arc<AGitHubThatAnswers> {
+        a_github_whose_codes_last(A_QUARTER_OF_AN_HOUR, answers)
+    }
+
+    fn a_github_whose_codes_last(
+        window_seconds: u64,
+        answers: Vec<DeviceLoginPoll>,
+    ) -> Arc<AGitHubThatAnswers> {
         Arc::new(AGitHubThatAnswers {
             answers: Mutex::new(answers.into_iter().rev().collect()),
+            window_seconds,
         })
     }
 
@@ -287,11 +338,11 @@ mod tests {
 
         async fn start_device_login(&self) -> Result<DeviceLoginStart, String> {
             Ok(DeviceLoginStart {
-                device_code: "github-device-code".to_string(),
-                user_code: "WXYZ-1234".to_string(),
+                device_code: GITHUBS_DEVICE_CODE.to_string(),
+                user_code: GITHUBS_USER_CODE.to_string(),
                 verification_uri: "https://github.com/login/device".to_string(),
-                expires_in_seconds: 900,
-                interval_seconds: 5,
+                expires_in_seconds: self.window_seconds,
+                interval_seconds: GITHUBS_POLL_INTERVAL,
             })
         }
 
@@ -338,14 +389,31 @@ mod tests {
         let challenge = linker.begin(&github()).expect("the link begins");
 
         // Then
-        assert_eq!(
-            (
-                challenge.link_id != "github-device-code",
-                challenge.user_code,
-                challenge.interval_seconds
-            ),
-            (true, "WXYZ-1234".to_string(), 5)
-        );
+        assert_ne!(challenge.link_id, GITHUBS_DEVICE_CODE);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn beginning_shows_the_operator_githubs_user_code() {
+        // Given
+        let linker = a_linker_over(vec![]);
+
+        // When
+        let challenge = linker.begin(&github()).expect("the link begins");
+
+        // Then
+        assert_eq!(challenge.user_code, GITHUBS_USER_CODE);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn beginning_reports_githubs_minimum_poll_interval() {
+        // Given
+        let linker = a_linker_over(vec![]);
+
+        // When
+        let challenge = linker.begin(&github()).expect("the link begins");
+
+        // Then
+        assert_eq!(challenge.interval_seconds, GITHUBS_POLL_INTERVAL);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -407,7 +475,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_finished_attempt_is_forgotten() {
+    async fn a_denied_attempt_is_forgotten() {
         // Given
         let linker = a_linker_over(vec![DeviceLoginPoll::Denied]);
         let link_id = linker.begin(&github()).expect("begun").link_id;
@@ -420,6 +488,47 @@ mod tests {
         assert_eq!(polled, Err(LinkError::NoSuchLink));
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_expired_attempt_is_forgotten() {
+        // Given
+        let linker = a_linker_over(vec![DeviceLoginPoll::Expired]);
+        let link_id = linker.begin(&github()).expect("begun").link_id;
+        linker.poll(&link_id).expect("the expiry");
+
+        // When
+        let polled = linker.poll(&link_id);
+
+        // Then
+        assert_eq!(polled, Err(LinkError::NoSuchLink));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_completed_attempt_is_forgotten() {
+        // Given
+        let linker = a_linker_over(vec![grace_approved_it()]);
+        let link_id = linker.begin(&github()).expect("begun").link_id;
+        linker.poll(&link_id).expect("the approval");
+
+        // When
+        let polled = linker.poll(&link_id);
+
+        // Then
+        assert_eq!(polled, Err(LinkError::NoSuchLink));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn beginning_another_link_prunes_an_attempt_whose_code_has_run_out() {
+        // Given an attempt whose code lasted no time at all
+        let linker = GitHubAccountLinker::new(a_github_whose_codes_last(0, vec![]));
+        let abandoned = linker.begin(&github()).expect("begun").link_id;
+
+        // When another begins
+        linker.begin(&github()).expect("the next begins");
+
+        // Then the abandoned one is no longer known
+        assert_eq!(linker.poll(&abandoned), Err(LinkError::NoSuchLink));
+    }
+
     // ---- the store --------------------------------------------------------------------------
 
     fn a_login_created_record() -> CredentialRecord {
@@ -428,7 +537,10 @@ mod tests {
             account: AccountId::new(ADA),
             label: "Ada".to_string(),
             secret: SecretString::new("gho_ada"),
-            metadata: BTreeMap::from([(GITHUB_ID_METADATA.to_string(), "1024".to_string())]),
+            metadata: BTreeMap::from([(
+                GITHUB_ID_METADATA.to_string(),
+                ADAS_GITHUB_ID.to_string(),
+            )]),
             updated_at: 1_726_700_000,
             version: FIRST_VERSION,
         }
@@ -479,7 +591,7 @@ mod tests {
             held.iter()
                 .map(|record| record.metadata.get(META_SUBJECT_ID).cloned())
                 .collect::<Vec<_>>(),
-            vec![Some("1024".to_string())]
+            vec![Some(ADAS_GITHUB_ID.to_string())]
         );
     }
 
@@ -529,6 +641,85 @@ mod tests {
 
         // Then
         assert_eq!(held, Err(LinkError::NoSuchSession));
+    }
+
+    #[test]
+    fn a_vault_that_does_not_exist_yet_is_locked_to_a_link() {
+        // Given a daemon where Ada never created a vault
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let (_vaults, store) = a_store_over(dir.path());
+
+        // When
+        let put = store.put(ADAS_SESSION, a_login_created_record());
+
+        // Then
+        assert_eq!(put, Err(LinkError::Locked));
+    }
+
+    #[test]
+    fn a_vault_that_cannot_be_read_or_written_is_unavailable_without_naming_a_path() {
+        // When
+        let refusal = refusal_of(
+            ADA,
+            VaultError::Io("/var/tddy/ada.vault: disk full".to_string()),
+        );
+
+        // Then
+        assert_eq!(
+            refusal,
+            LinkError::Unavailable(STORE_UNREADABLE.to_string())
+        );
+    }
+
+    #[test]
+    fn linking_the_account_a_login_created_updates_that_record_in_place() {
+        // Given Ada's login-created record, keyed by `github_id` rather than `subject_id`
+        let (_dir, store) = a_daemon_where_ada_unlocked_her_vault();
+        let ada_again = LinkedIdentity {
+            subject_id: ADAS_GITHUB_ID.to_string(),
+            login: ADA.to_string(),
+        };
+        let held = store.held(ADAS_SESSION, &github()).expect("reads");
+
+        // When she links the same GitHub account
+        let relinked =
+            record_for_link(&held, &github(), &ada_again, "gho_ada_fresh", 1_726_800_000);
+        store
+            .put(ADAS_SESSION, relinked)
+            .expect("the record is put");
+
+        // Then the vault holds one record for her, not two
+        assert_eq!(
+            store
+                .held(ADAS_SESSION, &github())
+                .expect("reads")
+                .iter()
+                .map(|record| record.account.as_str().to_string())
+                .collect::<Vec<_>>(),
+            vec![ADA.to_string()]
+        );
+    }
+
+    #[test]
+    fn the_session_account_is_none_when_the_vault_does_not_hold_it() {
+        // Given Ada's vault is open and holds nothing
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        CredentialStore::create(
+            &CredentialStore::path_in(dir.path(), ADA),
+            &SecretString::new(ADAS_PASSPHRASE),
+            ADA,
+        )
+        .expect("Ada's vault is created");
+        let (vaults, store) = a_store_over(dir.path());
+        vaults
+            .unlock(ADA, &SecretString::new(ADAS_PASSPHRASE))
+            .expect("the passphrase opens the vault");
+
+        // When
+        let account = store.session_account(ADAS_SESSION);
+
+        // Then
+        assert_eq!(account, Ok(None));
     }
 
     #[test]
