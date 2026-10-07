@@ -19,9 +19,10 @@ use tddy_subagent_worktree::{run_in_conversation, ConversationId, ConversationWo
 use tddy_task::TaskRegistry;
 
 use super::agent_roster;
-use super::jail_relaunch::{self, JailRelaunch};
+use super::jail_relaunch::JailRelaunch;
 use crate::session_agent_clone::{HostedAgentClones, HostedClone};
 use crate::tool_engine;
+use crate::workspace_session;
 
 /// The three places this daemon runs a tool, and the registry every run is recorded in.
 ///
@@ -249,19 +250,20 @@ impl LocalExecTools {
         dead: &Arc<dyn WorkspaceSandbox>,
         reason: &str,
     ) -> ExecuteToolResponse {
-        let rebuilt = match jail_relaunch::workspace_sandbox_spec(sessions_base, &req.session_id) {
-            Ok(spec) => {
-                self.jail_relaunch
-                    .rebuild(
-                        &self.workspace_sandboxes,
-                        self.workspace_sandbox_provisioner.as_ref(),
-                        &spec,
-                        dead,
-                    )
-                    .await
-            }
-            Err(status) => Err(status.message().to_string()),
-        };
+        let rebuilt =
+            match workspace_session::workspace_sandbox_spec(sessions_base, &req.session_id) {
+                Ok(spec) => {
+                    self.jail_relaunch
+                        .rebuild(
+                            &self.workspace_sandboxes,
+                            self.workspace_sandbox_provisioner.as_ref(),
+                            &spec,
+                            dead,
+                        )
+                        .await
+                }
+                Err(status) => Err(status.message().to_string()),
+            };
         let rebuilt = match rebuilt {
             Ok(jail) => jail,
             Err(e) => {

@@ -16,7 +16,7 @@ impl SplitSessions {
         sessions_base: &Path,
         session_id: &str,
     ) -> Result<(), Status> {
-        let spec = super::super::jail_relaunch::workspace_sandbox_spec(sessions_base, session_id)?;
+        let spec = crate::workspace_session::workspace_sandbox_spec(sessions_base, session_id)?;
         let jail = self
             .workspace_sandbox_provisioner
             .provision(&spec)
