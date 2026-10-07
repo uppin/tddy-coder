@@ -49,6 +49,7 @@ fn method_for(request: &serde_json::Value) -> Result<&'static str, String> {
         "build-list" => "BuildList",
         "spawn-child" => "SpawnChild",
         "spawn-conversation" => "SpawnConversation",
+        "github-token" => "GithubToken",
         other => return Err(format!("unknown toolcall request type: {other}")),
     })
 }

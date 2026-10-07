@@ -745,7 +745,11 @@ impl PermissionServer {
             base: p.base,
             body: p.body,
         };
-        match create_pull_request_via_rest_api(&params, &github_token_for_agent()) {
+        let token = match github_token_for_agent() {
+            Ok(token) => token,
+            Err(reason) => return serde_json::json!({ "error": reason }).to_string(),
+        };
+        match create_pull_request_via_rest_api(&params, &token) {
             Ok(n) => {
                 log::debug!(
                     target: "tddy_tools::server",
@@ -788,7 +792,11 @@ impl PermissionServer {
             body: p.body,
             draft: p.draft,
         };
-        match update_pull_request_via_rest_api(&params, &github_token_for_agent()) {
+        let token = match github_token_for_agent() {
+            Ok(token) => token,
+            Err(reason) => return serde_json::json!({ "error": reason }).to_string(),
+        };
+        match update_pull_request_via_rest_api(&params, &token) {
             Ok(()) => {
                 log::debug!(
                     target: "tddy_tools::server",
@@ -1039,24 +1047,19 @@ fn repo_slug() -> Result<String, String> {
         .ok_or_else(|| format!("could not parse owner/repo from remote url: {}", url.trim()))
 }
 
-/// The GitHub credential the agent's PR tools authenticate with: none.
+/// The GitHub credential the agent's PR tools authenticate with: the token of the account the
+/// session's project acts as, asked of the session's host over `TDDY_SOCKET` at call time.
 ///
-/// TODO(keyring 9/9): the project's resolved account does not reach `tddy-tools` yet, and the
-/// process environment is no longer a credential, so the PR tools refuse
-/// (`AuthenticationRequired`) until `ActingIdentity::token` is delivered here by something other
-/// than an exported variable.
-fn github_token_for_agent() -> String {
-    String::new()
+/// Not an environment variable and not a file — see [`crate::github_credential`]. `Err` is the
+/// host's own refusal (or the absence of a host), returned to the agent as the tool's error.
+fn github_token_for_agent() -> Result<String, String> {
+    crate::github_credential::github_token_from(permission_relay_socket_path().as_deref())
 }
 
 fn real_gh() -> Result<tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi, String> {
-    // TODO(keyring 9/9): no resolved GitHub account reaches the agent's process yet, and the
-    // process environment is no longer a credential, so every authenticated call refuses. Thread
-    // the project's `ActingIdentity::token` here.
-    Ok(
-        tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::without_credential(
-            repo_slug()?,
-        ),
+    crate::github_credential::github_api_for(
+        repo_slug()?,
+        permission_relay_socket_path().as_deref(),
     )
 }
 
@@ -1322,12 +1325,10 @@ fn pr_search_impl(p: PrSearchInput) -> Result<serde_json::Value, String> {
     let repo = repo_slug()?;
     // Built from the slug already resolved above rather than through `real_gh()`, which would run
     // `git remote get-url origin` a second time for the same answer.
-    // TODO(keyring 9/9): no resolved GitHub account reaches the agent's process yet, and the
-    // process environment is no longer a credential, so every authenticated call refuses. Thread
-    // the project's `ActingIdentity::token` here.
-    let gh = tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi::without_credential(
+    let gh = crate::github_credential::github_api_for(
         repo.clone(),
-    );
+        permission_relay_socket_path().as_deref(),
+    )?;
     let hits = pr_insight::search_repository_prs(
         &gh,
         &repo,
@@ -3285,6 +3286,81 @@ mod tests {
                 .contains("TDDY_SOCKET"),
             "expected a TDDY_SOCKET error, got: {result}"
         );
+    }
+
+    /// The PR tool relays the session host's refusal to the agent instead of a generic
+    /// authentication failure: the host's words name what to change.
+    #[test]
+    #[serial]
+    fn github_create_pull_request_returns_the_session_hosts_refusal_to_the_agent() {
+        // Given a session host whose project assigns no account, reached over TDDY_SOCKET
+        let reason = "this project has no github account assigned; assign one in its settings";
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("host.sock");
+        serve_github_refusal(&socket, reason);
+        std::env::set_var("TDDY_TOOLS_TEST_ALLOW_SOCKET", "1");
+        std::env::set_var("TDDY_SOCKET", &socket);
+        std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
+
+        // When the agent calls the create-pull-request tool
+        let result = PermissionServer::new().github_create_pull_request(Parameters(
+            GithubCreatePullRequestToolInput {
+                owner: "acme".to_string(),
+                repo: "repo".to_string(),
+                title: "t".to_string(),
+                head: "h".to_string(),
+                base: "b".to_string(),
+                body: "b".to_string(),
+            },
+        ));
+        std::env::remove_var("TDDY_TOOLS_TEST_ALLOW_SOCKET");
+        std::env::remove_var("TDDY_SOCKET");
+
+        // Then the agent reads the host's reason
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["error"], reason);
+    }
+
+    /// Serve a refusal of `github-token` on `socket` from a thread of its own.
+    fn serve_github_refusal(socket: &std::path::Path, reason: &'static str) {
+        struct Refusing(&'static str);
+        #[async_trait::async_trait]
+        impl tddy_core::toolcall::GithubCredentialHandler for Refusing {
+            async fn github_token(&self) -> Result<String, String> {
+                Err(self.0.to_string())
+            }
+        }
+        let bound = socket.to_path_buf();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(async move {
+                    let listener = tokio::net::UnixListener::bind(&bound).unwrap();
+                    ready_tx.send(()).ok();
+                    let (tx, _rx) = std::sync::mpsc::sync_channel(1);
+                    while let Ok((stream, _)) = listener.accept().await {
+                        let service = tddy_core::toolcall::ToolcallRpcService::new(
+                            tx.clone(),
+                            std::sync::Arc::new(None),
+                            std::sync::Arc::new(None),
+                            std::sync::Arc::new(std::env::temp_dir()),
+                        )
+                        .with_github_credential_handler(Some(std::sync::Arc::new(Refusing(
+                            reason,
+                        ))));
+                        let (reader, writer) = stream.into_split();
+                        let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                            reader,
+                            writer,
+                            service,
+                            tddy_rpc::RequestTransport::UnixSocket,
+                        );
+                        tokio::spawn(endpoint.run());
+                    }
+                });
+        });
+        ready_rx.recv().unwrap();
     }
 
     /// `call_tool_by_name` (the web Inspector invoke path) dispatches a side-effect-free MCP tool

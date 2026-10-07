@@ -88,6 +88,14 @@ impl LaunchSessions {
                 tddy_tools_path,
                 None,
                 conversation_spawn_handler,
+                // The host-side `tddy-tools` the jail's Shell relay runs reaches this listener, so
+                // the token is asked of the host per call, as in a co-located session.
+                self.session_github_credential(
+                    os_user,
+                    jail.session_id,
+                    jail.project_id,
+                    jail.session_token,
+                ),
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             session_env = launch.env;

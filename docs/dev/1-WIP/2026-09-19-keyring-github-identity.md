@@ -13,7 +13,12 @@
   - `src/session_room.rs` — the session's git environment
 - **tddy-daemon-auth**: [auth-service.md](../../../packages/tddy-daemon-auth/docs/auth-service.md)
   - `FileGitHubTokenStore`'s remaining readers retired
-- **tddy-tools**: no code change; its PR tools become correctly scoped by consequence
+- **tddy-tools**: the PR tools ask the session's host for the project account's token per call
+  (`src/github_credential.rs`) — see *Token delivery to the agent's tools*
+- **tddy-toolcall**: the `github-token` verb on the session toolcall socket
+  (`GithubCredentialHandler`, per-instance, like `ChildSpawnHandler`)
+- **tddy-session-lifecycle**: `SessionGithubCredential` answers it from `acting_identity`; bound on the
+  co-located claude-cli start and resume, and the sandboxed claude-cli start
 
 ## Related Feature Documentation
 
@@ -273,7 +278,8 @@ and refuse a blank one.
 **Not done — refused with a `TODO(keyring 9/9)` rather than given a fallback.** No resolved account
 reaches these callers, and the process environment is no longer a credential, so each now refuses:
 
-- `tddy-tools` — the two PR MCP tools (`github_token_for_agent`) and `real_gh` / `pr_search_impl`;
+- ~~`tddy-tools` — the two PR MCP tools (`github_token_for_agent`) and `real_gh` / `pr_search_impl`~~ —
+  **done**, see *Token delivery to the agent's tools*;
 - `tddy-workflow-recipes` — `orchestrate_pr_stack/actions.rs` (merge and repoint tasks);
 - `tddy-pr-stack` — `assess.rs`;
 - `tddy-daemon-rpc` — `RepointPlannedPr` (`pr_stack/ports.rs`). ⚠ This one runs in the **daemon**, which
@@ -318,7 +324,79 @@ any path, so a push still cannot succeed as the wrong GitHub account through thi
   supervisor/worker wire) starts — they keep the checkout's identity;
 - children spawned by an agent (`child_spawn_handler`, `conversation_spawn_handler`): the
   orchestrator's session token is not held there, so they resolve nothing and log the refusal;
-- delivering a token to the agent (`github_token_for_agent` in `tddy-tools` is unchanged).
+- ~~delivering a token to the agent~~ — done for the tools, see the next section.
+
+## Token delivery to the agent's tools
+
+**Decision (developer, explicit): the token is asked for, never delivered.** `tddy-tools` sends a
+`github-token` request over the session's own toolcall socket (`TDDY_SOCKET`) at the moment a PR tool
+runs; the daemon resolves the session's project account and answers that one call. The token is in no
+environment variable and no file, on any path.
+
+**How the session is identified.** The toolcall socket is bound **per session** and carries its
+handlers per instance (as `spawn-child` and `spawn-conversation` already do), so the socket *is* the
+identity — the request names no session, project or account, and a tool can only ask about its own.
+
+**How the daemon obtains the token.** `SessionGithubCredential` (in
+`tddy-session-lifecycle/src/connection_service/session_acting_identity.rs`) is built at session start
+or resume from the project's `accounts` assignments and the *start's session token*. Per call it reads
+the owner's vault through `SessionVaultAccountStore::list(session_token)` and runs the same
+`acting_identity` the commit identity came from — one resolution function, `ActingIdentity::token`
+returned and kept nowhere. The daemon recovers the owner's vault from the session token held by the
+handler (`SessionSubjectResolver` maps it to the subject, `SessionVaults` opens by subject); nothing is
+read from session metadata and nothing was missing.
+
+**Consequences, stated rather than hidden**
+
+- The assignments are a **snapshot taken at session start/resume** (the commit identity's snapshot, so
+  a commit and a push in one session cannot come from two accounts because the project was reassigned
+  between them). A reassignment takes effect on the next start or resume. The vault is read **per
+  call**, so a vault locked since, or an owner whose session token expired, refuses at the call.
+- The handler holds the start's session token in daemon memory for the session's life. When it
+  expires, tools refuse with `NoSuchSession` until the session is resumed with a live token.
+- **Refusals are distinct and verbatim.** `NotAssigned`, `UnknownOnThisHost`, `Ambiguous`,
+  `Unusable` (the `IdentityError` messages) and the vault refusals (`NoSuchSession`, `Locked`,
+  `Uninitialized`, `Unavailable`, no vaults configured) travel as `{"status":"error","message":…}`
+  and the PR tool returns `{"error": <that message>}` to the agent — not a generic authentication
+  failure. No `TDDY_SOCKET` is also an error naming it; there is no environment fallback anywhere.
+- The token is kept out of logs: `ToolCallResponse::GithubTokenOk` holds a `RedactedToken` (its `Debug`
+  is fixed text) and the listener's `[send]` log line withholds it.
+- The daemon's own `GITHUB_TOKEN` / `GH_TOKEN` changes nothing — pinned in the lifecycle unit tests and
+  in `tddy-tools`.
+- No proto change: `github-token` is a JSON verb on the existing toolcall service, so
+  `scripts/generated-code.sh` has nothing to regenerate and the `unbundle_service_split` closed-world
+  RPC list is untouched.
+
+**Alternatives considered**
+
+- *A secret file in the jail.* Rejected: a file is on disk and readable by the agent and everything in
+  its jail; it outlives the call; rotation and revocation need cleanup; the developer ruled out any
+  on-disk token.
+- *An environment variable (`GITHUB_TOKEN` on the agent's process).* Rejected: visible to every
+  process in the session and printable by the agent — exactly the exposure this changeset's earlier
+  *Decision recorded with its alternative* flagged — and it reintroduces the variable this node deleted.
+- *A credential helper for `git`.* Still deferred: it does not cover the REST calls the tools make.
+
+**Where it is wired**: co-located claude-cli **start** and **resume**, and the sandboxed claude-cli
+**start** (the jail's Shell relay runs host-side `tddy-tools` with the per-session `TDDY_SOCKET`).
+
+**Not done — kept as `TODO(keyring 9/9)` at the seam**
+
+- sandboxed claude-cli **relaunch**, sandboxed cursor-cli, split-agent and tool-session (`tddy-coder`
+  via the supervisor/worker wire) sessions pass no handler, so their tools are refused with *"its
+  listener has no credential handler"*;
+- children spawned by an agent (`child_spawn_handler`, `conversation_spawn_handler`) hold no session
+  token, so a child's tools are refused with `NoVaultsConfigured`;
+- an in-jail `tddy-tools` that cannot reach the host listener was **not exercised**: the jail path is
+  verified by the shared code path and the doc comment above, not by a running jail (the sandbox RPC
+  bridge acceptance suite is unavailable here);
+- the in-workflow GitHub callers (`orchestrate_pr_stack/actions.rs`, `tddy-pr-stack` `assess.rs`,
+  `tddy-daemon-rpc` `RepointPlannedPr`) and the prompt-awareness gates still refuse or stay off —
+  they are not tool calls over this socket;
+- `tddy-tools` is verified against a real socket and a real `ToolcallRpcService`, but the *token's use
+  at GitHub* is not: `RealGithubPrApi` shells out to `api.github.com`, so the tests prove the token is
+  asked for, the refusal surfaces, and a client is built from the answer — not that the REST call
+  carries it.
 
 ### Intended content of `packages/tddy-accounts/docs/github-identity-resolution.md`
 
@@ -412,7 +490,7 @@ two above. **"Not measured" is not "clean"**; this node claims nothing about the
       and the REST half of the contract is deferred to this node's green phase
 - [x] **Draft PR contract**: surface + failing tests (wave 2, commit 2) — ⚠ **partly**: the REST
       half is deferred, see **As published** under `## Draft PR contract`
-- [ ] **Resolution**: one call, token and identity from one answer
+- [ ] **Resolution**: one call, token and identity from one answer — ✅ for the tools' token (per call, same `acting_identity`); ⚠ the commit identity and the token are two resolutions over one assignment snapshot
 - [ ] **Outcomes**: a distinct failure per `AccountResolution` variant
 - [ ] **Deletion**: the environment resolution path; `FileGitHubTokenStore`'s readers
 - [ ] **Testing**: unit + acceptance, scoped

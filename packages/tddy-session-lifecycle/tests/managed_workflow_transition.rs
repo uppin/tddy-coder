@@ -48,6 +48,7 @@ fn a_managed_workflow(recipe_name: &str) -> Harness {
         socket_dir.path(),
         None,
         None,
+        None,
     )
     .expect("set_up_managed_workflow must succeed");
 

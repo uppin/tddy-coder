@@ -2,19 +2,24 @@
 //!
 //! The pure half ([`git_environment_for`]) turns a project's assignments and what the session's
 //! vault holds into the `GIT_*` pairs; the thin half ([`SessionAccountAccess`]) reads the vault.
-//! Both the token and the identity come from one `acting_identity` call, and only the identity half
-//! is delivered here: the token is never put in the agent's environment, and nothing in this module
-//! reads `GITHUB_TOKEN` or `GH_TOKEN`.
+//! Both the token and the identity come from one `acting_identity` call. The identity half is
+//! delivered as the agent's `GIT_*` environment at start; the token is **never** put in an
+//! environment variable or a file — [`SessionGithubCredential`] hands it to the agent's tools over
+//! the session's own toolcall socket, per call. Nothing in this module reads `GITHUB_TOKEN` or
+//! `GH_TOKEN`.
 
 use std::sync::Arc;
 
 use tddy_accounts::{
-    acting_identity, AccountStore, AccountsError, IdentityError, SessionSubjectResolver,
-    SessionVaultAccountStore, PROVIDER_GITHUB,
+    acting_identity, AccountStore, AccountsError, ActingIdentity, IdentityError,
+    SessionSubjectResolver, SessionVaultAccountStore, PROVIDER_GITHUB,
 };
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SessionVaults};
 use tddy_daemon_livekit::session_git::session_git_environment;
 use tddy_projects::project_storage::AccountAssignment;
+
+/// A session's answer to its tools' `github-token`, shared between the listener's connections.
+pub(crate) type SharedGithubCredential = Arc<dyn tddy_core::toolcall::GithubCredentialHandler>;
 
 /// Why a session has no account identity to commit under.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,18 +66,29 @@ pub(crate) fn assignments_of(accounts: &[AccountAssignment]) -> Vec<(ProviderId,
         .collect()
 }
 
+/// The GitHub account `assignments` name, resolved once over `held` — token and identity together.
+pub(crate) fn acting_identity_for(
+    assignments: &[(ProviderId, AccountId)],
+    held: &[CredentialRecord],
+) -> Result<ActingIdentity, IdentityError> {
+    acting_identity(assignments, &ProviderId::new(PROVIDER_GITHUB), held)
+}
+
 /// The `GIT_*` pairs of the GitHub account `assignments` name, from one `acting_identity`
 /// resolution over `held`.
 pub(crate) fn git_environment_for(
     assignments: &[(ProviderId, AccountId)],
     held: &[CredentialRecord],
 ) -> Result<Vec<(String, String)>, IdentityError> {
-    let acting = acting_identity(assignments, &ProviderId::new(PROVIDER_GITHUB), held)?;
-    Ok(session_git_environment(&acting))
+    Ok(session_git_environment(&acting_identity_for(
+        assignments,
+        held,
+    )?))
 }
 
 /// What a session start may read to learn who it acts as: the daemon's vaults, how a session token
 /// names its owner, and the token itself.
+#[derive(Clone)]
 pub(crate) struct SessionAccountAccess {
     vaults: Option<Arc<SessionVaults>>,
     subject_of: SessionSubjectResolver,
@@ -102,6 +118,22 @@ impl SessionAccountAccess {
         &self,
         accounts: &[AccountAssignment],
     ) -> Result<Vec<(String, String)>, SessionIdentityRefusal> {
+        git_environment_for(&assignments_of(accounts), &self.held_github_accounts()?)
+            .map_err(SessionIdentityRefusal::Identity)
+    }
+
+    /// The account `accounts` name — one `acting_identity` resolution over what the session's vault
+    /// holds right now, or the reason there is none.
+    pub(crate) fn acting_identity(
+        &self,
+        accounts: &[AccountAssignment],
+    ) -> Result<ActingIdentity, SessionIdentityRefusal> {
+        acting_identity_for(&assignments_of(accounts), &self.held_github_accounts()?)
+            .map_err(SessionIdentityRefusal::Identity)
+    }
+
+    /// The GitHub records the session's vault holds right now.
+    fn held_github_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
         let vaults = self
             .vaults
             .as_ref()
@@ -110,12 +142,10 @@ impl SessionAccountAccess {
         let held = SessionVaultAccountStore::new(Arc::clone(vaults), Arc::clone(&self.subject_of))
             .list(&self.session_token)
             .map_err(SessionIdentityRefusal::Vault)?;
-        let held: Vec<CredentialRecord> = held
+        Ok(held
             .into_iter()
             .filter(|record| record.provider.as_str() == PROVIDER_GITHUB)
-            .collect();
-        git_environment_for(&assignments_of(accounts), &held)
-            .map_err(SessionIdentityRefusal::Identity)
+            .collect())
     }
 
     /// [`Self::git_environment`], where a refusal leaves the session starting with no `GIT_*`
@@ -135,5 +165,94 @@ impl SessionAccountAccess {
             );
             Vec::new()
         })
+    }
+}
+
+/// The token half of a session's resolution, answered to the agent's tools over the session's own
+/// toolcall socket.
+///
+/// Holds the project's assignments **as they were when the session started** — the same snapshot
+/// the commit identity was resolved from, so a commit and a push in one session cannot come from
+/// two accounts because someone reassigned the project in between — and the start's session token,
+/// so the vault is read **per call**: a vault locked since, or a signed-out owner, refuses rather
+/// than being served from a copy. The token is returned to the caller and kept nowhere.
+pub(crate) struct SessionGithubCredential {
+    access: SessionAccountAccess,
+    assignments: Vec<AccountAssignment>,
+}
+
+impl SessionGithubCredential {
+    pub(crate) fn new(access: SessionAccountAccess, assignments: &[AccountAssignment]) -> Self {
+        Self {
+            access,
+            assignments: assignments.to_vec(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl tddy_core::toolcall::GithubCredentialHandler for SessionGithubCredential {
+    async fn github_token(&self) -> Result<String, String> {
+        self.access
+            .acting_identity(&self.assignments)
+            .map(|acting| acting.token)
+            .map_err(|refusal| {
+                // The refusal is the agent's to read; the token never reaches a log line.
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "a session's GitHub token was refused: {refusal}"
+                );
+                refusal.to_string()
+            })
+    }
+}
+
+impl super::DaemonSessionHost {
+    /// The accounts `project_id` assigns, or `None` — logged — when its row cannot be read.
+    pub(crate) fn project_account_assignments(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+    ) -> Option<Vec<AccountAssignment>> {
+        match super::service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id)
+        {
+            Ok((_, project)) => Some(project.accounts),
+            Err(status) => {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "session {session_id} has no account identity: its project could not be \
+                     read: {}",
+                    status.message()
+                );
+                None
+            }
+        }
+    }
+
+    /// What the session's vault reads go through: this daemon's vaults, how a session token names
+    /// its owner, and the token the session was started with.
+    pub(crate) fn session_account_access(&self, session_token: &str) -> SessionAccountAccess {
+        SessionAccountAccess::new(
+            self.credential_vaults(),
+            self.user_resolver(),
+            session_token,
+        )
+    }
+
+    /// The handler that answers a session's tools' `github-token`, over `project_id`'s assignments
+    /// as they stand now. `None` when the project cannot be read.
+    pub(crate) fn session_github_credential(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> Option<SharedGithubCredential> {
+        let accounts = self.project_account_assignments(os_user, session_id, project_id)?;
+        Some(Arc::new(SessionGithubCredential::new(
+            self.session_account_access(session_token),
+            &accounts,
+        )))
     }
 }

@@ -32,6 +32,7 @@ pub(crate) fn prepare_managed_workflow_inner(
     resume_at: Option<tddy_core::workflow::ids::GoalId>,
     child_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
+    github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
 ) -> Result<ManagedLaunch, Status> {
     let mw = match resume_at {
         Some(goal) => crate::session_toolcall::resume_managed_workflow(
@@ -44,6 +45,7 @@ pub(crate) fn prepare_managed_workflow_inner(
             goal,
             child_spawn_handler,
             conversation_spawn_handler,
+            github_credential_handler,
         ),
         None => crate::session_toolcall::set_up_managed_workflow(
             session_id,
@@ -54,6 +56,7 @@ pub(crate) fn prepare_managed_workflow_inner(
             &std::env::temp_dir(),
             child_spawn_handler,
             conversation_spawn_handler,
+            github_credential_handler,
         ),
     }
     .map_err(Status::internal)?;

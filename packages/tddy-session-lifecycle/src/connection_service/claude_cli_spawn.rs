@@ -25,7 +25,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use super::AttachmentProgressSink;
 
-use super::session_acting_identity::SessionAccountAccess;
+use super::session_acting_identity::{SessionAccountAccess, SessionGithubCredential};
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
@@ -89,6 +89,11 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // commit under the checkout's inherited one.
     let git_environment =
         account_access.git_environment_or_inherited(session_id, &project.accounts);
+    // The token half of the same assignments goes to the agent's tools over the session's toolcall
+    // socket, per call — never into `git_environment` or any file.
+    let github_credential_handler: Arc<dyn tddy_core::toolcall::GithubCredentialHandler> = Arc::new(
+        SessionGithubCredential::new(account_access.clone(), &project.accounts),
+    );
 
     // Create session directory under sessions_base/sessions/<id>/.
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
@@ -208,6 +213,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
                 worktree_path: &worktree_path,
                 tddy_tools_path,
                 git_environment,
+                github_credential_handler: Some(github_credential_handler),
             },
         )
         .await?;

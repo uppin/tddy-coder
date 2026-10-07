@@ -15,9 +15,7 @@ use crate::connection_service::hooks_and_urls;
 use super::launch_ports::LaunchSessions;
 use super::DaemonSessionHost;
 
-use super::session_acting_identity::SessionAccountAccess;
-
-use super::service_util;
+use super::session_acting_identity::{SessionGithubCredential, SharedGithubCredential};
 
 impl DaemonSessionHost {
     /// Handle `ResumeSession` for `session_type = "claude-cli"` sessions.
@@ -76,8 +74,9 @@ impl DaemonSessionHost {
         // One resolution for the project this session belongs to; a refusal (or a project that can no
         // longer be read) resumes the agent under the checkout's own identity, with the reason logged.
         // TODO(keyring 9/9): split-agent resumes are not given an identity here either.
-        let mut env_extra: Vec<(String, String)> =
-            self.resumed_git_environment(os_user, session_id, &meta.project_id, session_token);
+        let (git_environment, github_credential_handler) =
+            self.resumed_session_identity(os_user, session_id, &meta.project_id, session_token);
+        let mut env_extra: Vec<(String, String)> = git_environment;
         env_extra.extend(split_env);
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
@@ -98,6 +97,7 @@ impl DaemonSessionHost {
                 &tddy_tools_path,
                 Some(resume_goal),
                 None,
+                github_credential_handler,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             env_extra.extend(launch.env);
@@ -150,32 +150,27 @@ impl DaemonSessionHost {
 }
 
 impl DaemonSessionHost {
-    fn resumed_git_environment(
+    /// The commit identity a resumed session is launched with and the handler that answers its
+    /// tools' `github-token` — both from the project's assignments, read once here. A project that
+    /// can no longer be read yields neither: the agent keeps the checkout's identity and its tools'
+    /// token requests are refused.
+    fn resumed_session_identity(
         &self,
         os_user: &str,
         session_id: &str,
         project_id: &str,
         session_token: &str,
-    ) -> Vec<(String, String)> {
-        let accounts =
-            match service_util::find_registered_project(&self.tddy_data_dir, os_user, project_id) {
-                Ok((_, project)) => project.accounts,
-                Err(status) => {
-                    log::warn!(
-                        target: "tddy_daemon::connection_service",
-                        "session {session_id} resumes without an account identity: its project \
-                         could not be read: {}",
-                        status.message()
-                    );
-                    return Vec::new();
-                }
-            };
-        SessionAccountAccess::new(
-            self.credential_vaults(),
-            self.user_resolver(),
-            session_token,
+    ) -> (Vec<(String, String)>, Option<SharedGithubCredential>) {
+        let Some(accounts) = self.project_account_assignments(os_user, session_id, project_id)
+        else {
+            return (Vec::new(), None);
+        };
+        let access = self.session_account_access(session_token);
+        let git_environment = access.git_environment_or_inherited(session_id, &accounts);
+        (
+            git_environment,
+            Some(Arc::new(SessionGithubCredential::new(access, &accounts))),
         )
-        .git_environment_or_inherited(session_id, &accounts)
     }
 }
 

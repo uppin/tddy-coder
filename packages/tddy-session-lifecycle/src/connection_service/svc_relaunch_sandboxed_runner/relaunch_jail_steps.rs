@@ -43,6 +43,8 @@ impl LaunchSessions {
                 tddy_tools_path,
                 Some(resume_goal),
                 None,
+                // TODO(keyring 9/9): a relaunched jail's listener has no account to ask yet.
+                None,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             session_env = launch.env;

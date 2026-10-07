@@ -29,6 +29,7 @@ async fn the_launch_environment_with(
         worktree_path: dir.path(),
         tddy_tools_path: String::new(),
         git_environment,
+        github_credential_handler: None,
     })
     .await
     .expect("a launch with nothing to prepare succeeds");

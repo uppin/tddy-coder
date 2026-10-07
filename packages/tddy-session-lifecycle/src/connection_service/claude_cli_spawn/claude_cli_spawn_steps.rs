@@ -166,6 +166,9 @@ pub(super) struct ManagedClaudeCliLaunch<'a> {
     pub(super) tddy_tools_path: String,
     /// The `GIT_*` pairs of the account the project resolved to; empty when it resolved none.
     pub(super) git_environment: Vec<(String, String)>,
+    /// Answers the agent's tools' `github-token` over the session's toolcall socket.
+    pub(super) github_credential_handler:
+        Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler + 'static>>,
 }
 
 pub(super) async fn managed_claude_cli_launch(
@@ -191,6 +194,7 @@ pub(super) async fn managed_claude_cli_launch(
         worktree_path,
         tddy_tools_path,
         git_environment,
+        github_credential_handler,
     } = launch;
     let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
     let mut append_system_prompt_file: Option<PathBuf> = None;
@@ -207,6 +211,7 @@ pub(super) async fn managed_claude_cli_launch(
             None,
             child_spawn_handler.clone(),
             conversation_spawn_handler.clone(),
+            github_credential_handler,
         )?;
         append_system_prompt_file = Some(launch.prompt_file);
         env_extra.extend(launch.env);

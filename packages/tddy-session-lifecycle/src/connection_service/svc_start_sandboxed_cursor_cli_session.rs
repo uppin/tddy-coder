@@ -233,6 +233,8 @@ impl LaunchSessions {
                 &tddy_tools_path,
                 None,
                 None,
+                // TODO(keyring 9/9): a cursor-cli session's listener has no account to ask yet.
+                None,
             )?;
             if let Ok(prompt) = std::fs::read_to_string(&launch.prompt_file) {
                 let rules_dir = worktree_path.join(".cursor").join("rules");

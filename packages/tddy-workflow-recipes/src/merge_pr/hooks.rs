@@ -224,10 +224,11 @@ fn system_prompt_for_task(
     target_branch: Option<&str>,
 ) -> Option<String> {
     // TODO(keyring 9/9): the GitHub PR tools awareness is not appended. It used to be gated on
-    // `GITHUB_TOKEN` being exported to the process, which is no longer a credential anywhere; the
-    // agent's process receives no resolved token, so its PR tools refuse and advertising them
-    // would be wrong. Append `merge_pr_github_tools_awareness_line(true)` once a project's
-    // resolved account reaches the agent.
+    // `GITHUB_TOKEN` being exported to the process, which is no longer a credential anywhere. The
+    // agent's PR tools now ask the session host for the project's account per call, but whether a
+    // given session has one is only known at call time, so advertising them here would still
+    // promise what a refusal may withhold. Append `merge_pr_github_tools_awareness_line(true)`
+    // once the prompt can know the session resolves an account.
     let base = match task_id {
         TASK_ANALYZE => Some(analyze_system_prompt(git_block, target_branch)),
         TASK_SYNC_MAIN => Some(sync_main_system_prompt(git_block)),

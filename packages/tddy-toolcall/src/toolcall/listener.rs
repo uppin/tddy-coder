@@ -3,9 +3,10 @@
 use super::build::BuildListQuery;
 use super::{
     build_executor, store_submit_result, transition_handler, ApproveRequestWire, AskRequestWire,
-    BuildListRequestWire, BuildOptions, BuildRequestWire, InvokeActionRequestWire,
-    ListActionsRequestWire, SpawnChildRequestWire, SpawnConversationRequestWire, SubmitRequestWire,
-    ToolCallRequest, ToolCallResponse, TransitionRelayOutcome, TransitionRequestWire,
+    BuildListRequestWire, BuildOptions, BuildRequestWire, GithubTokenRequestWire,
+    InvokeActionRequestWire, ListActionsRequestWire, SpawnChildRequestWire,
+    SpawnConversationRequestWire, SubmitRequestWire, ToolCallRequest, ToolCallResponse,
+    TransitionRelayOutcome, TransitionRequestWire,
 };
 use crate::session_actions::{
     classify_session_actions_exit_code, derive_repo_key, invoke_action_core, list_action_summaries,
@@ -48,6 +49,18 @@ pub trait ConversationSpawnHandler: Send + Sync {
         branch: Option<&str>,
         base_ref: Option<&str>,
     ) -> Result<String, String>;
+}
+
+/// Per-session capability to hand the agent the GitHub token of the account its project acts as.
+///
+/// Bound per instance on a managed session's listener, so a call is unambiguously that session's:
+/// the socket is the identity. The token is resolved **per call** and goes back over the socket only
+/// — never into an environment variable or a file. `github_token` returns the token, or the reason
+/// there is none, surfaced verbatim to the agent (no account assigned, account unknown on this
+/// host, …). There is no environment fallback behind it.
+#[async_trait]
+pub trait GithubCredentialHandler: Send + Sync {
+    async fn github_token(&self) -> Result<String, String>;
 }
 
 static TOOLCALL_LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
@@ -222,6 +235,9 @@ pub struct ToolcallRpcService {
     /// Per-instance `spawn-conversation` handler. Present only on a managed session's listener
     /// (e.g. grill-me).
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
+    /// Per-instance `github-token` handler. Present only where the session's project account can
+    /// be resolved.
+    github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 }
 
 impl ToolcallRpcService {
@@ -251,6 +267,7 @@ impl ToolcallRpcService {
             transition_handler,
             child_spawn_handler: None,
             conversation_spawn_handler: None,
+            github_credential_handler: None,
         }
     }
 
@@ -273,6 +290,15 @@ impl ToolcallRpcService {
         self
     }
 
+    /// Bind a per-instance `github-token` handler (builder-style).
+    pub fn with_github_credential_handler(
+        mut self,
+        github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
+    ) -> Self {
+        self.github_credential_handler = github_credential_handler;
+        self
+    }
+
     async fn dispatch(&self, method: &str, payload: &[u8]) -> Result<ToolCallResponse, Status> {
         if !matches!(
             method,
@@ -286,6 +312,7 @@ impl ToolcallRpcService {
                 | "Transition"
                 | "SpawnChild"
                 | "SpawnConversation"
+                | "GithubToken"
         ) {
             toolcall_log(&format!("[error] unknown method: {}", method));
             return Err(Status::not_found(format!(
@@ -307,6 +334,7 @@ impl ToolcallRpcService {
             "Transition" => self.handle_transition(request),
             "SpawnChild" => self.handle_spawn_child(request).await,
             "SpawnConversation" => self.handle_spawn_conversation(request).await,
+            "GithubToken" => self.handle_github_token(request).await,
             _ => unreachable!("checked above"),
         }
     }
@@ -402,6 +430,31 @@ impl ToolcallRpcService {
                 Err(message) => ToolCallResponse::Error { message },
             },
         )
+    }
+
+    /// github-token: the token of the account this session's project acts as, resolved by the
+    /// per-instance [`GithubCredentialHandler`] at call time. Without a handler the verb is
+    /// refused — there is nothing to fall back to, by design.
+    async fn handle_github_token(
+        &self,
+        request: serde_json::Value,
+    ) -> Result<ToolCallResponse, Status> {
+        let _: GithubTokenRequestWire = serde_json::from_value(request)
+            .map_err(|e| Status::invalid_argument(format!("invalid github-token request: {e}")))?;
+        toolcall_log("[github-token]");
+        let Some(handler) = self.github_credential_handler.clone() else {
+            return Ok(ToolCallResponse::Error {
+                message: "no GitHub account can be resolved for this session: its listener has no \
+                          credential handler"
+                    .to_string(),
+            });
+        };
+        Ok(match handler.github_token().await {
+            Ok(token) => ToolCallResponse::GithubTokenOk {
+                token: token.into(),
+            },
+            Err(message) => ToolCallResponse::Error { message },
+        })
     }
 
     fn handle_submit(&self, request: serde_json::Value) -> Result<ToolCallResponse, Status> {
@@ -619,7 +672,7 @@ impl RpcService for ToolcallRpcService {
         let result = match self.dispatch(method, &message.payload).await {
             Ok(response) => {
                 let response_line = response.to_json_line();
-                toolcall_log(&format!("[send] {}", response_line));
+                toolcall_log(&format!("[send] {}", response.loggable_line()));
                 Ok(response_line.into_bytes())
             }
             Err(status) => Err(status),
@@ -1063,5 +1116,112 @@ mod tests {
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["status"], "ok");
         assert_eq!(v["session_id"], "child-from-listener");
+    }
+    /// A handler that answers `github-token` with a fixed outcome.
+    struct FixedGithubCredential(Result<String, String>);
+
+    #[async_trait]
+    impl GithubCredentialHandler for FixedGithubCredential {
+        async fn github_token(&self) -> Result<String, String> {
+            self.0.clone()
+        }
+    }
+
+    async fn github_token_response(service: &ToolcallRpcService) -> serde_json::Value {
+        let request = RpcMessage::new(
+            serde_json::to_vec(&json!({"type":"github-token"})).unwrap(),
+            tddy_rpc::RequestMetadata::over(tddy_rpc::RequestTransport::Direct),
+        );
+        let RpcResult::Unary(Ok(bytes)) = service
+            .handle_rpc("tddy.toolcall.ToolcallService", "GithubToken", &request)
+            .await
+        else {
+            panic!("expected a unary response");
+        };
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    /// A `github-token` request routes through the per-instance [`GithubCredentialHandler`] and
+    /// carries the token it resolved.
+    #[tokio::test]
+    async fn github_token_is_returned_by_a_bound_handler() {
+        // Given a toolcall service whose session resolves to a token
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let service = service.with_github_credential_handler(Some(Arc::new(
+            FixedGithubCredential(Ok("ghp_assigned".to_string())),
+        )));
+
+        // When the agent asks for its GitHub token
+        let response = github_token_response(&service).await;
+
+        // Then the resolved token comes back
+        assert_eq!(response["status"], "ok");
+        assert_eq!(response["token"], "ghp_assigned");
+    }
+
+    /// A refusal reaches the agent as an error carrying the handler's own words.
+    #[tokio::test]
+    async fn a_refused_github_token_reaches_the_client_as_an_error_with_the_reason() {
+        // Given a session whose project assigns no account
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let service =
+            service.with_github_credential_handler(Some(Arc::new(FixedGithubCredential(Err(
+                "this project has no github account assigned".to_string(),
+            )))));
+
+        // When the agent asks for its GitHub token
+        let response = github_token_response(&service).await;
+
+        // Then it is an error naming the reason, with no token
+        assert_eq!(response["status"], "error");
+        assert_eq!(
+            response["message"],
+            "this project has no github account assigned"
+        );
+        assert!(response.get("token").is_none());
+    }
+
+    /// Without a bound handler the verb is refused rather than answered with a blank token.
+    #[tokio::test]
+    async fn github_token_is_refused_when_no_handler_is_bound() {
+        // Given a toolcall service with no credential handler
+        let (service, _rx, _repo_root) = a_toolcall_service();
+
+        // When the agent asks for its GitHub token
+        let response = github_token_response(&service).await;
+
+        // Then it is an error with a message
+        assert_eq!(response["status"], "error");
+        assert!(!response["message"].as_str().unwrap_or_default().is_empty());
+    }
+
+    /// The token is never written to the toolcall log nor shown by a response's `Debug`.
+    #[tokio::test]
+    async fn the_github_token_is_not_logged_or_debug_printed() {
+        // Given a log directory and a session that resolves to a token
+        let log_dir = tempfile::tempdir().unwrap();
+        set_toolcall_log_dir(log_dir.path());
+        let (service, _rx, _repo_root) = a_toolcall_service();
+        let service = service.with_github_credential_handler(Some(Arc::new(
+            FixedGithubCredential(Ok("ghp_must_not_leak".to_string())),
+        )));
+
+        // When the token is delivered
+        let response = github_token_response(&service).await;
+        assert_eq!(response["token"], "ghp_must_not_leak");
+
+        // Then neither the log nor a Debug rendering of the response holds it
+        let log = std::fs::read_to_string(log_dir.path().join("toolcall.log")).unwrap_or_default();
+        assert!(!log.contains("ghp_must_not_leak"), "log leaked: {log}");
+        let debug = format!(
+            "{:?}",
+            ToolCallResponse::GithubTokenOk {
+                token: "ghp_must_not_leak".into()
+            }
+        );
+        assert!(
+            !debug.contains("ghp_must_not_leak"),
+            "debug leaked: {debug}"
+        );
     }
 }

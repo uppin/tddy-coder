@@ -54,8 +54,9 @@ pub(crate) fn before_merged_red(
         &ctx_artifacts,
     );
     context.set_sync("prompt", prompt);
-    // TODO(keyring 9/9): `false` until the project's resolved GitHub account reaches the agent's
-    // process — its PR tools carry no credential today, so the prompt must not promise them.
+    // TODO(keyring 9/9): `false` until the prompt can know the session resolves an account — the PR
+    // tools ask the session host for the token per call and may be refused, so the prompt must not
+    // promise them.
     context.set_sync("system_prompt", merged_red_system_prompt(false));
     let session_id = uuid::Uuid::now_v7().to_string();
     context.set_sync("session_id", session_id);

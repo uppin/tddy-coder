@@ -26,7 +26,7 @@ pub use client_wire::{
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
     start_toolcall_listener_with_conversation_handler, ChildSpawnHandler, ConversationSpawnHandler,
-    ToolcallRpcService,
+    GithubCredentialHandler, ToolcallRpcService,
 };
 pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
 pub use restructure::{register_restructure_executor, restructure_executor, RestructureExecutor};
@@ -205,9 +205,54 @@ pub enum ToolCallResponse {
     SpawnChildOk {
         session_id: String,
     },
+    /// A `github-token` relay succeeded; carries the token the session's project account resolved
+    /// to. A refusal travels as [`ToolCallResponse::Error`] with the resolver's own message.
+    GithubTokenOk {
+        token: RedactedToken,
+    },
+}
+
+/// A credential that cannot be printed by accident: its `Debug` is fixed text, so a response
+/// holding one can be logged or `{:?}`-formatted without disclosing it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RedactedToken(String);
+
+impl RedactedToken {
+    /// The token itself — for the one place that puts it on the wire.
+    fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for RedactedToken {
+    fn from(token: String) -> Self {
+        Self(token)
+    }
+}
+
+impl From<&str> for RedactedToken {
+    fn from(token: &str) -> Self {
+        Self(token.to_string())
+    }
+}
+
+impl std::fmt::Debug for RedactedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RedactedToken(<redacted>)")
+    }
 }
 
 impl ToolCallResponse {
+    /// The line to write to the toolcall log: the wire line, except that a credential is withheld.
+    pub(crate) fn loggable_line(&self) -> String {
+        match self {
+            ToolCallResponse::GithubTokenOk { .. } => {
+                serde_json::json!({"status":"ok","token":"<withheld>"}).to_string()
+            }
+            other => other.to_json_line(),
+        }
+    }
+
     pub fn to_json_line(&self) -> String {
         let wire = match self {
             ToolCallResponse::SubmitOk { goal } => {
@@ -258,6 +303,9 @@ impl ToolCallResponse {
             }
             ToolCallResponse::SpawnChildOk { session_id } => {
                 serde_json::json!({"status":"ok","session_id":session_id})
+            }
+            ToolCallResponse::GithubTokenOk { token } => {
+                serde_json::json!({"status":"ok","token":token.expose()})
             }
         };
         wire.to_string()
@@ -336,6 +384,13 @@ pub struct SpawnConversationRequestWire {
     /// Optional base ref to root the new worktree on; defaults to the session's base when absent.
     #[serde(default)]
     pub base_ref: Option<String>,
+}
+
+/// Wire format for `github-token` request (from tddy-tools). It names no session and no project:
+/// the listener is bound per session, so which account answers is decided by who holds the socket.
+#[derive(Debug, Deserialize)]
+pub struct GithubTokenRequestWire {
+    pub r#type: String,
 }
 
 /// RPC service name a tddy-coder session addresses to relay `spawn_conversation` back to the daemon
