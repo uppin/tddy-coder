@@ -164,8 +164,6 @@ impl AgentRoster {
     }
 }
 
-mod svc_provision_workspace_tool_sandbox;
-
 impl AgentRoster {
     /// Record a session's seeded roster, giving every agent that is not co-located with this
     /// daemon's worktree the clone it reads.

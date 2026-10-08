@@ -577,4 +577,5 @@ mod svc_agent_roster_wiring;
 mod svc_ensure_project_available_for_start;
 mod svc_host_builders;
 mod svc_index_workspace_worktree;
+mod svc_provision_workspace_tool_sandbox;
 mod svc_resume_sandboxed_claude_cli_session;
