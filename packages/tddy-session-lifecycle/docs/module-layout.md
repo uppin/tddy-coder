@@ -7,8 +7,8 @@ the test suites are [test-suites.md](test-suites.md).
 
 ## Sizes, and how they are counted
 
-130 non-test `src/*.rs` files hold about **21,600 production lines**. Two files are over 500
-production lines, `cursor_cli_spawn.rs` (532) and `connection_service.rs` (about 510, in
+127 non-test `src/*.rs` files hold about **21,400 production lines**. Two files are over 500
+production lines, `cursor_cli_spawn.rs` (548) and `connection_service.rs` (about 513, in
 [`code-issues/`](code-issues/oversized-file-connection-service.md)); the next largest are
 `connection_service/svc_start_sandboxed_claude_cli_session.rs` (494) and
 `connection_service/svc_start_session_core.rs` (494). Six production functions are over 150
@@ -118,7 +118,7 @@ and the `LaunchHost` callback port. The host builds the handle (`launch_sessions
 
 | File | Holds |
 |---|---|
-| `launch_ports.rs` | `LaunchSessions` (`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `claude_cli_manager`, `sandbox_manager`, `task_registry`, `session_stdio`, `agent_activity_hub`, `user_resolver`, `spawn_client`, `workspace_sandboxes`, `rpc_activity`, `session_agent_inference`, `session_rooms`, `hosted_agent_clones`, `session_admissions`, `worktree_observer`, the agent topic's `AgentRoster` handle, the split topic's `SplitSessions` handle, `PresenterObserverDeps` and `host: Arc<dyn LaunchHost>`) and `trait LaunchHost`. `LaunchSessions::attachment_state()` lends `AttachmentState`, and `prepare_session_attachments` forwards to it |
+| `launch_ports.rs` | `LaunchSessions` (`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `claude_cli_manager`, `sandbox_manager`, `task_registry`, `session_stdio`, `agent_activity_hub`, `user_resolver`, `spawn_client`, `workspace_sandboxes`, `rpc_activity`, `session_agent_inference`, `session_rooms`, `hosted_agent_clones`, `session_admissions`, `worktree_observer`, `host_session_sockets`, the agent topic's `AgentRoster` handle, the split topic's `SplitSessions` handle, `PresenterObserverDeps` and `host: Arc<dyn LaunchHost>`) and `trait LaunchHost`. `LaunchSessions::attachment_state()` lends `AttachmentState`, and `prepare_session_attachments` forwards to it |
 | `svc_resume_sandboxed_claude_cli_session.rs` | `resume_sandboxed_claude_cli_session`, moved out of `svc_split_context_from_codebase_host.rs`; it relaunches through `relaunch_sandboxed_runner` |
 | `svc_launch_delegators.rs` | the two launch methods a test outside the topic still calls on the host, `specialized_subagent_env` and `link_stack_node_to_spawned_branch`, as `#[cfg(test)]` forwards to the handle |
 
@@ -137,9 +137,11 @@ The free files (`claude_cli_spawn`, `cursor_cli_spawn`, `managed_launch`, `workt
 `conversation_spawn`, `jail_session_files`, `relaunch_jail_dirs`) were only re-pointed to name foundations by their
 defining crate.
 
-`trait LaunchHost` has two methods, both implemented once on the host in `svc_agent_host_ports.rs`:
-`sandbox_rpc_handler` (the dispatch a jail relays family B to, bound to a session) and `pr_stack` (the PR-stack
-handler, or `FAILED_PRECONDITION` when the host has no RPC families). The seed-clone claimant is not a callback: it
+`trait LaunchHost` has four methods, all implemented once on the host in `svc_agent_host_ports.rs`:
+`sandbox_rpc_handler` (the dispatch a jail relays family B to, bound to a session), `pr_stack` (the PR-stack
+handler, or `FAILED_PRECONDITION` when the host has no RPC families), `session_account_access` (what a session's
+vault reads go through) and `session_identity` (the commit pairs and the `github-token` handler a session is
+launched with). The seed-clone claimant is not a callback: it
 holds the roster handle.
 
 ### Split sessions

@@ -48,8 +48,8 @@ Durable description: [`module-layout.md`](../module-layout.md#launch-sessions).
   `svc_agent_roster_wiring.rs`, `terminal_bridge_impl.rs`, the three `*_delegators.rs`, `svc_resolve_os_user.rs`,
   `local_exec_tool_dispatch.rs`, `rpc_families.rs`, `svc_shut_down_children.rs`), plus two older exceptions that are not
   in the wiring set: `conversation_worktree_op.rs` and the builder half of `session_worktree_observer.rs`.
-- `LaunchHost`, `SplitHost` and `AgentHostCallbacks` are unchanged: each is defined once and implemented once, on the
-  host, in wiring.
+- `SplitHost` and `AgentHostCallbacks` are unchanged, and `LaunchHost` gains no method from this node (the four it has
+  after `#keyring` 9/9 (#516) are #516's): each is defined once and implemented once, on the host, in wiring.
 
 ## Decisions
 
@@ -86,7 +86,7 @@ Durable description: [`module-layout.md`](../module-layout.md#launch-sessions).
 | `ensure_project_available_for_start` | 99 | 99 (moved to `svc_ensure_project_available_for_start.rs`) |
 | `svc_start_session_core.rs` production lines | 488 | 494 |
 | `session_coordinate_handlers.rs` production lines | 424 | 453 |
-| `connection_service.rs` | 571 lines by `wc -l` | 573 `wc -l`; 510 production lines (`loc.py` reads 511 on the wrap head) |
+| `connection_service.rs` | 578 lines by `wc -l` (`origin/master`, after #516) | 581 `wc -l`; about 513 production lines |
 
 The function growth is rustfmt re-wrapping calls the re-points lengthened; no control flow was added. Gates:
 `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon` and
@@ -135,7 +135,7 @@ each record carries its row.
 | `complexity-svc-resume-claude-cli-session-resume-claude-cli-session` | 121 | 120 | unchanged; no parameter added under Recipe B |
 | `complexity-svc-resume-session-resume-session-at-session-coordinate` | 138 | 141 | rustfmt wraps, kept open |
 | `complexity-svc-resolve-listed-worktree-ensure-project-available-for-start` | 99 | 99 | unchanged; Location now `svc_ensure_project_available_for_start.rs` |
-| `oversized-file-connection-service` | 571 `wc -l` | 573 (510 production) | regressed by two `mod` lines, deferred |
+| `oversized-file-connection-service` | 578 `wc -l` (`origin/master`, after #516) | 581 (about 513 production) | regressed by three `mod` lines, deferred |
 
 ## Backlog
 
@@ -151,7 +151,7 @@ each record carries its row.
 ## Open items for the move node
 
 - `session_coordinate_handlers.rs` (453) and `svc_start_session_core.rs` (494) move with the launch topic; none may reach
-  500 before then. `connection_service.rs` (about 510) is re-measured after the stack lands; if it is at or under 500,
+  500 before then. `connection_service.rs` (about 513) is re-measured after the stack lands; if it is at or under 500,
   its record is deleted.
 - Move the topics with the engine only; a refusal means stop and ask. Edges that leave with the launch topic: the free
   files' `hooks_and_urls` calls, and `daemon_hook_urls.rs`, which the split and launch topics both name.
