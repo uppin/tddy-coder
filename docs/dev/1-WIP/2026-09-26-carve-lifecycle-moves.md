@@ -219,7 +219,7 @@ per-crate baseline → B-checks for that receiver.
 - [x] **R2 `tddy-daemon-livekit`**: T7 (the admission-token module, the `resolve_os_user` module; each
   moved individually, nested under wiring's builders) and `placement` (`move_module_to_crate`); zero new edges
 - [x] **R3 `tddy-session-files`**: T8's two modules; new edge `tddy-session-files` → `tddy-daemon-livekit`
-- [ ] **R4 `tddy-session-activity`**: T10 cluster (`presenter_observer_spawn`, `presenter_observer_task`,
+- [x] **R4 `tddy-session-activity`**: T10 cluster (`presenter_observer_spawn`, `presenter_observer_task`,
   `presenter_intent_client`), `session_notification_publishing`, `remote_git_pack_execution`; `tonic`
   (approved)
 - [ ] **R5 `tddy-demo-runner`** (D12): T11 cluster (`demo_vm_coordinate_handlers`, `activity_hub`,
@@ -809,6 +809,24 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md).
 - **After:** lifecycle 658 passed / the same 22 failed / 1 ignored; `tddy-session-files` 160 passed; sum 818 as before.
   clippy `--all-targets -D warnings`, fmt clean; `cargo check --all-targets` clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty.
+
+### R4: `tddy-session-activity` (done)
+
+- **Hand edit before the move (own commit, visibility only):** `presenter_observer_task.rs:8` and `session_notifications.rs:14`,
+  `pub(crate) mod` → `pub mod` (the engine does not read a restricted declaration). Filed:
+  [`2026-10-08-hand-widened-mod-declarations-before-engine-moves`](../todo/2026-10-08-hand-widened-mod-declarations-before-engine-moves.md).
+- **Engine:** one `move_cluster_to_crate` (anchor `presenter_observer_task`; `also`: its child `presenter_observer_spawn`, `presenter_intent_client`,
+  `session_notification_publishing`) and one `move_module_to_crate` (`remote_git_pack_execution`), `reexport: glob`. The approved external edge
+  `tonic` was written to `tddy-session-activity/Cargo.toml` by the engine. The cluster flattened the child to a root sibling (as in R3).
+- **Hand edits after the move (build corrections only):**
+  1. `tddy-session-activity/src/presenter_observer_task.rs:8`: `pub use tddy_session_activity::presenter_observer_spawn;` → `pub use crate::presenter_observer_spawn;`
+     (the engine's self-referencing re-export; kept so `crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps` in lifecycle still resolves).
+  2. `pub(crate)` → `pub`: `PresenterObserverDeps`, its four fields and `maybe_spawn_presenter_observer` (`presenter_observer_spawn.rs:6-10,23`).
+  3. `cargo fmt` (the facade line in lifecycle's `lib.rs`).
+  Filed (appended to the R3 todos): the dangling-self-reexport file and the `pub(crate)` items file.
+- **After:** lifecycle **656** passed / the same 22 failed / 1 ignored, `tddy-session-activity` **47** passed: the 2 tests that moved are
+  `remote_git_pack_execution`'s inline tests; sum 703 = 658 + 45 as before. clippy `--all-targets -D warnings`, fmt clean; `cargo check --all-targets`
+  clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty. Doc tests ran (1 ignored, as before).
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 

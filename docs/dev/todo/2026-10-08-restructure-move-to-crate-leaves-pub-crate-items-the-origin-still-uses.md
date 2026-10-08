@@ -20,3 +20,8 @@ as `pub(crate)`, so `split_ports.rs`, `launch_ports.rs` and `attached_initial_pr
 
 Widen every item the survey lists as reached from outside, and the fields and methods of a reached type that the origin's
 remaining code names (the second half is also in [2026-10-04-restructure-move-item-does-not-widen-fields-or-impl-members](2026-10-04-restructure-move-item-does-not-widen-fields-or-impl-members.md)).
+
+## Seen again in R4 (`tddy-session-activity`)
+
+`presenter_observer_spawn.rs`: `PresenterObserverDeps` and its four fields (lines 6-10) and `maybe_spawn_presenter_observer` (line 23),
+`pub(crate)` → `pub` (`E0603`, from `handler_state.rs` and `launch_ports.rs`, which stay in lifecycle).

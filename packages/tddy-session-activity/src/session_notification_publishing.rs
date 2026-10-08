@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use std::path::Path;
 
+use crate::session_notifications::{SessionNotification, SessionNotificationBus};
 use tddy_core::session_label::session_display_label;
-use tddy_session_activity::session_notifications::{SessionNotification, SessionNotificationBus};
 
 /// A session's display label, read from the same values `ListSessions` reports to the drawer:
 /// `repo_path` from `.session.yaml` and `workflow_goal` from the session-list enrichment.
@@ -36,17 +36,15 @@ pub fn resolve_session_label(sessions_base: &Path, session_id: &str) -> String {
     }
 
     let workflow_goal =
-        tddy_session_activity::session_list_enrichment::session_list_status_from_session_dir(
-            &session_dir,
-        )
-        .map(|status| status.workflow_goal)
-        .unwrap_or_else(|e| {
-            log::debug!(
-                target: "tddy_daemon::session_notifications",
-                "resolve_session_label: could not enrich session {session_id}: {e}"
-            );
-            String::new()
-        });
+        crate::session_list_enrichment::session_list_status_from_session_dir(&session_dir)
+            .map(|status| status.workflow_goal)
+            .unwrap_or_else(|e| {
+                log::debug!(
+                    target: "tddy_daemon::session_notifications",
+                    "resolve_session_label: could not enrich session {session_id}: {e}"
+                );
+                String::new()
+            });
 
     session_display_label(&repo_path, &workflow_goal, session_id)
 }

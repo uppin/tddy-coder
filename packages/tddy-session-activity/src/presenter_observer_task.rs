@@ -5,7 +5,7 @@
 //! [`PresenterObserver`]: tddy_service::gen::presenter_observer_client::PresenterObserverClient
 //! [`PresenterEventSink`]: tddy_daemon_kernel::presenter_observer::PresenterEventSink
 
-pub mod presenter_observer_spawn;
+pub use crate::presenter_observer_spawn;
 
 use std::time::Duration;
 
@@ -15,8 +15,8 @@ use tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink;
 use tddy_service::gen::presenter_observer_client::PresenterObserverClient;
 use tddy_service::gen::ObserveRequest;
 
-use crate::session_notifications::session_notification_publishing::SessionNotificationPublishing;
-use tddy_session_activity::session_notifications::notification_for_presenter_event;
+use crate::session_notification_publishing::SessionNotificationPublishing;
+use crate::session_notifications::notification_for_presenter_event;
 
 const OBSERVER_CONNECT_MAX_ATTEMPTS: u32 = 90;
 const OBSERVER_RETRY_DELAY_MS: u64 = 100;

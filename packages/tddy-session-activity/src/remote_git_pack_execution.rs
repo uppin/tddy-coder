@@ -10,7 +10,7 @@ use tddy_worktree_service::remote_git_service::{
     SessionsBaseResolver,
 };
 
-use tddy_session_activity::session_reader::{list_sessions_in_dir, SessionEntry};
+use crate::session_reader::{list_sessions_in_dir, SessionEntry};
 
 /// Production resolver: when a project has an SSH-backed session, pack verbs run on that target.
 pub fn pack_execution_resolver_from_sessions(

@@ -27,3 +27,8 @@ does not survive; it only exists in the pre-move commit.
 
 No node of the `#carve` stack owns the engine; the developer ruled that a hand workaround, filed and kept in its own
 commit, is acceptable to keep #536 moving.
+
+R4 added two rows (commit "widen two mod declarations to pub mod …"):
+
+| `presenter_observer_spawn` | `packages/tddy-session-lifecycle/src/presenter_observer_task.rs:8` | `pub(crate) mod` → `pub mod` | R4 pre-move commit |
+| `session_notification_publishing` | `packages/tddy-session-lifecycle/src/session_notifications.rs:14` | `pub(crate) mod` → `pub mod` | R4 pre-move commit |

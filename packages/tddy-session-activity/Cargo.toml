@@ -51,6 +51,7 @@ tddy-projects = { path = "../tddy-projects" }
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

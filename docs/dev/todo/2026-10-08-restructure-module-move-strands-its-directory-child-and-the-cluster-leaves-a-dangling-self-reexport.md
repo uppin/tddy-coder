@@ -30,3 +30,12 @@ facade for a `mod` line whose target is moving into the same crate as the declar
 ## Why deferred
 
 The engine is not owned by this stack; the developer's 2026-10-08 ruling accepts a filed hand correction.
+
+## Seen again in R4 (`tddy-session-activity`)
+
+`move_cluster_to_crate` anchored on `presenter_observer_task` with its child `presenter_observer_spawn`, `presenter_intent_client` and
+`session_notification_publishing` in `also` (the child must be named, or it is stranded, as in R3) flattened the child to a
+root-level sibling and left `pub use tddy_session_activity::presenter_observer_spawn;` at line 8 of the moved parent
+(`E0432`). **Hand fix: `tddy_session_activity::` → `crate::` on that line** (kept rather than deleted: lifecycle's
+`handler_state.rs:23` and `launch_ports.rs:41` name `crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps`,
+and the re-export keeps that path resolving without editing them).

@@ -98,15 +98,26 @@ pub use tddy_host_service::{
     host_prompts, host_registry, host_session_service, host_stats, host_tooling, multi_host,
     remote_desktop_probe, ssh_agent, ssh_agent_add,
 };
-pub mod presenter_intent_client;
 /// The per-session presenter observer: one gRPC stream feeding the notification bus and, through the
 /// kernel's `PresenterEventSink` port, whichever chat surface the daemon injected.
-pub mod presenter_observer_task;
 pub use tddy_terminal_rpc::{pty_runtime, tddy_user_config};
 /// Where a clone's checkout is on this host, plus a re-export of the clone store and the mirror
 /// that moved to `tddy-session-agents` with `#unbundle` node 7. All are reached as
 /// `crate::session_agent_clone::X`, as before.
 pub mod session_agent_clone;
+/// The stream subscriber `tddy-web` reads, which moved to `tddy-session-activity` with `#unbundle`
+/// node 7 and is still reached as `crate::session_notification_subscribers::X`. The Telegram
+/// subscriber that used to sit beside it left with the control plane for `tddy-telegram-control`.
+pub use tddy_session_activity::{
+    presenter_intent_client, presenter_observer_task, remote_git_pack_execution,
+    session_notification_subscribers,
+};
+/// The session catalog's daemon side — listing with enrichment, reading and deletion — which now
+/// lives in `tddy-session-activity`. Named one by one, not globbed, for the reason the facades above
+/// give; every module keeps its name, so `crate::session_reader::X` goes on resolving here.
+pub use tddy_session_activity::{
+    session_deletion, session_list_enrichment, session_reader, user_sessions_path,
+};
 /// The other three session-agent modules, which now live in `tddy-session-agents`.
 ///
 /// Named one by one rather than globbed, for the reason the worktree, host, LiveKit and
@@ -115,17 +126,6 @@ pub mod session_agent_clone;
 /// `session_agent_clone` is absent because a fragment of it stays — see the module above.
 pub use tddy_session_agents::{
     session_agent_inference, session_agent_roster, session_agent_status,
-};
-pub mod remote_git_pack_execution;
-/// The stream subscriber `tddy-web` reads, which moved to `tddy-session-activity` with `#unbundle`
-/// node 7 and is still reached as `crate::session_notification_subscribers::X`. The Telegram
-/// subscriber that used to sit beside it left with the control plane for `tddy-telegram-control`.
-pub use tddy_session_activity::session_notification_subscribers;
-/// The session catalog's daemon side — listing with enrichment, reading and deletion — which now
-/// lives in `tddy-session-activity`. Named one by one, not globbed, for the reason the facades above
-/// give; every module keeps its name, so `crate::session_reader::X` goes on resolving here.
-pub use tddy_session_activity::{
-    session_deletion, session_list_enrichment, session_reader, user_sessions_path,
 };
 /// A session's display label and the publish context built on it, plus a re-export of the
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`

@@ -3,12 +3,11 @@ use std::sync::Arc;
 /// What the presenter observer reads of the host that starts it: the data root a session's
 /// sessions base is resolved from, the injected presenter-event sink and the notification bus.
 #[derive(Clone)]
-pub(crate) struct PresenterObserverDeps {
-    pub(crate) tddy_data_dir: std::path::PathBuf,
-    pub(crate) presenter_event_sink:
+pub struct PresenterObserverDeps {
+    pub tddy_data_dir: std::path::PathBuf,
+    pub presenter_event_sink:
         Option<tddy_daemon_kernel::presenter_observer::SharedPresenterEventSink>,
-    pub(crate) session_notification_bus:
-        Option<Arc<tddy_session_activity::session_notifications::SessionNotificationBus>>,
+    pub session_notification_bus: Option<Arc<crate::session_notifications::SessionNotificationBus>>,
 }
 
 impl PresenterObserverDeps {
@@ -20,19 +19,14 @@ impl PresenterObserverDeps {
     /// The two are independent. Gating the observer on Telegram would leave a workflow session's
     /// drawer dot permanently still on every daemon without a `telegram:` block, which is most of
     /// them; `spawn_presenter_observer_task` declines only when *neither* sink exists.
-    pub(crate) fn maybe_spawn_presenter_observer(
-        &self,
-        os_user: &str,
-        session_id: &str,
-        grpc_port: u16,
-    ) {
+    pub fn maybe_spawn_presenter_observer(&self, os_user: &str, session_id: &str, grpc_port: u16) {
         let publishing = self.session_notification_bus.as_ref().and_then(|bus| {
-                    match tddy_session_activity::user_sessions_path::sessions_base_for_user(
+                    match crate::user_sessions_path::sessions_base_for_user(
                         os_user,
                         Some(&self.tddy_data_dir),
                     ) {
                         Some(sessions_base) => {
-                            Some(crate::session_notifications::session_notification_publishing::SessionNotificationPublishing {
+                            Some(crate::session_notification_publishing::SessionNotificationPublishing {
                                 bus: Arc::clone(bus),
                                 sessions_base,
                                 os_user: os_user.to_string(),
