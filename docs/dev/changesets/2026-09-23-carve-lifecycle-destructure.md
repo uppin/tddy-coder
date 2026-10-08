@@ -69,7 +69,7 @@ examples and what would close it:
 | [shared sandboxed jail launch](../todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md) | DRY #1, the staged `jail_*` and `relaunch_jail_*` helpers, and the characterisation tests no seam here needed | missing coverage (sandbox RPC bridge never installed) |
 | [modules to re-parent by hand](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) | plan `11`'s nine modules, `svc_host_builders`, `cli_spawn/{claude,cursor}.rs`, `ManagedWorkflow`, the non-contiguous exec-tool siblings | consent (the engine cannot move under a different parent) |
 | [topic files to fold into siblings](../todo/2026-09-24-lifecycle-topic-files-to-fold-into-existing-siblings.md) | plan `01`'s four files that belong in existing siblings | consent (name-collision refusal) |
-| [`session_entry_from_listing`](../todo/2026-09-24-lifecycle-session-entry-from-listing-not-started.md) | the `ListSessions` entry mapping | not started |
+| `session_entry_from_listing` | the `ListSessions` entry mapping | not started |
 | [files over the 400-line target](../todo/2026-09-24-lifecycle-files-over-the-400-line-target.md) | the 14 files between 400 and 493 | not planned |
 
 The engine gaps the run found are in this PR's other 2026-09-24 TODOs:
@@ -491,7 +491,7 @@ Each item is now filed: 1–3 and the function half of 7 in the functions TODO, 
 - [x] `cli_session_manager` → directory module (7 files); DRY #12 resize decoder → `tddy-pty`. ✅ directory module, 9 files (`02`, `2ceaaa51`); DRY #12 (`2c70f1ab`)
 - [x] `split_session` → `agent_argv.rs` + `agent_credentials.rs` (`04`)
 - [ ] ⏭️ Deferred — E4 refuses the guards; a hand extract needs consent → [functions TODO](../todo/2026-09-24-lifecycle-functions-still-over-150-lines.md). `start_session_core` extract-method; DRY #2 `spawn_tddy_coder`, DRY #4 prelude. ✅ `10a`, `10b` (857 → 358), file split (`12`), DRY #2 (`9a097b86`) and #4 (`daf583c5`); the guards that remain are refused (E4, consent list)
-- [ ] ⏭️ Deferred — not started → [`session_entry_from_listing` TODO](../todo/2026-09-24-lifecycle-session-entry-from-listing-not-started.md). `session_coordinate_handlers` split; `session_entry_from_listing`. ✅ split (`08`); `session_entry_from_listing` open
+- [ ] ⏭️ Deferred — not started → `session_entry_from_listing` (done in `#carve` 20/21; see [`2026-10-08-carve-launch-start-handlers`](../../packages/tddy-session-lifecycle/docs/changesets/2026-10-08-carve-launch-start-handlers.md)). `session_coordinate_handlers` split; `session_entry_from_listing`. ✅ split (`08`); `session_entry_from_listing` open
 - [ ] ⏭️ Deferred — missing coverage (the three callers' suites are red on the sandbox RPC bridge) → [jail-launch TODO](../todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md). DRY #1 `svc_sandboxed_jail_launch`: Claude, then Cursor, then relaunch. ✅ Claude's steps (`09b`, `09c`, `13`, `18`) and relaunch's (`16`, `21`) are in modules; the merge waits on coverage (consent list)
 - [x] Ports files split; DRY #9. ✅ split (`06`, `c918f155`); DRY #9 (`50137df1`)
 - [x] `svc_spawn_split_agent` teardown split + extract-method; `svc_host_builders.rs`. ✅ `svc_host_builders.rs` (`07`, `aa4ec8f9`); ✅ `svc_paired_codebase_teardown.rs` and 4 extract-methods (`05`, `90260f04`)

@@ -1,7 +1,5 @@
 use crate::connection_service::service_util;
 
-use super::DaemonSessionHost;
-
 use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
 
 use crate::connection_service::svc_start_session_core::{ToolSpawnPlan, ToolSpawnPurpose};
@@ -24,10 +22,11 @@ use tddy_rpc::Response;
 
 use tddy_service::proto::session::ResumeSessionRequest;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_rpc::Request;
 use tddy_spawn::spawner;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(crate) async fn resume_session_at_session_coordinate(
         &self,
         request: Request<ResumeSessionRequest>,
@@ -39,9 +38,11 @@ impl DaemonSessionHost {
             .config
             .os_user_for_github(&github_user)
             .ok_or_else(|| Status::permission_denied("user not mapped to OS user"))?;
-        let sessions_base =
-            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&self.tddy_data_dir))
-                .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
+        let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
+            os_user,
+            Some(&self.tddy_data_dir),
+        )
+        .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         validate_session_id_segment(&req.session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
         let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
@@ -65,7 +66,7 @@ impl DaemonSessionHost {
 
         // --- cursor-cli branch: resume without LiveKit ---
         if metadata.session_type.as_deref() == Some("cursor-cli") {
-            let identity = self.session_identity(
+            let identity = self.host.session_identity(
                 os_user,
                 &req.session_id,
                 &metadata.project_id,
@@ -93,7 +94,7 @@ impl DaemonSessionHost {
                     .await
                     .is_none()
             {
-                self.split_sessions()
+                self.split_sessions
                     .provision_workspace_tool_sandbox(&sessions_base, &req.session_id)
                     .await?;
             }
@@ -130,6 +131,7 @@ impl DaemonSessionHost {
         // this daemon defined still reaches the child as a def it can build a backend from.
         let resume_agent_def: Option<String> = match resume_agent.as_deref() {
             Some(name) => self
+                .agent_roster
                 .agent_def_for_spawn(name, &github_user)
                 .await?
                 .as_ref()
@@ -141,7 +143,7 @@ impl DaemonSessionHost {
         // One resolution for the project this session belongs to, as on start; a project that no
         // longer resolves resumes the session under the checkout's own identity, with the reason
         // logged. Only the commit pairs go to the child — never the account's token.
-        let identity = self.session_identity(
+        let identity = self.host.session_identity(
             &os_user,
             &req.session_id,
             &metadata.project_id,
@@ -151,14 +153,13 @@ impl DaemonSessionHost {
         // The session registers again on its user's host-session socket — the same socket it used
         // before — so it answers from the refreshed assignments and the token this resume carries.
         let host_session_socket = self
-            .launch_sessions()
             .register_tool_session_on_host_socket(ToolSessionHostRegistration {
                 os_user: &os_user,
                 session_id: &req.session_id,
                 project_id: &metadata.project_id,
                 recipe: resume_recipe.as_deref(),
                 model: None,
-                account_access: self.session_account_access(&req.session_token),
+                account_access: self.host.session_account_access(&req.session_token),
                 github_credential: identity.github_credential,
             })
             .await;
@@ -185,8 +186,7 @@ impl DaemonSessionHost {
                 git_environment,
             })
             .await;
-        self.launch_sessions()
-            .tool_session_spawned(&req.session_id, &spawned);
+        self.tool_session_spawned(&req.session_id, &spawned);
         let result = spawned?;
         self.maybe_spawn_presenter_observer(
             &observer_os_user,

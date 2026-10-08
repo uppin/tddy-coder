@@ -11,21 +11,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tddy_model_registry::ModelRegistryStore;
-use tddy_rpc::Status;
 use tddy_spawn::spawn_worker::SpawnClient;
 
 use super::agent_host_callbacks::AgentRoster;
 use super::launch_ports::LaunchSessions;
 use super::split_ports::SplitSessions;
-use super::svc_materialize_staged_attachment::AttachmentState;
-use super::AttachmentMaterialization;
 use super::{DaemonSessionHost, LocalExecTools};
 use crate::config::DaemonConfig;
 use crate::multi_host::EligibleDaemonSource;
 use crate::peer_routing::PeerRouting;
 use crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps;
 use crate::relay_idle::RpcActivity;
-use tddy_service::proto::session::SessionAttachment;
 
 impl DaemonSessionHost {
     /// The daemon's configuration.
@@ -132,39 +128,6 @@ impl DaemonSessionHost {
         }
     }
 
-    /// Start the presenter observer for a freshly spawned workflow session (see
-    /// [`PresenterObserverDeps::maybe_spawn_presenter_observer`]), over this host's sinks.
-    pub(crate) fn maybe_spawn_presenter_observer(
-        &self,
-        os_user: &str,
-        session_id: &str,
-        grpc_port: u16,
-    ) {
-        self.presenter_observer_deps()
-            .maybe_spawn_presenter_observer(os_user, session_id, grpc_port);
-    }
-
-    /// The fields attachment materialization reads, lent to it for the length of one call.
-    pub(crate) fn attachment_state(&self) -> AttachmentState<'_> {
-        AttachmentState {
-            config: &self.config,
-            tddy_data_dir: &self.tddy_data_dir,
-            staging_base_dir: &self.staging_base_dir,
-            peer_routing: &self.peer_routing,
-        }
-    }
-
-    /// Pre-creates `session_dir` when needed and materializes the request's attachments before
-    /// spawn (see [`AttachmentState::prepare_session_attachments`]), over this host's state.
-    pub(crate) async fn prepare_session_attachments(
-        &self,
-        ctx: &AttachmentMaterialization<'_>,
-    ) -> Result<Vec<SessionAttachment>, Status> {
-        self.attachment_state()
-            .prepare_session_attachments(ctx)
-            .await
-    }
-
     /// The same fields, owned, plus this host's callbacks: the handle the agent topic's methods
     /// live on, for the places a borrowed state cannot go (a task, a `'static` closure).
     ///
@@ -226,6 +189,17 @@ impl DaemonSessionHost {
             host_session_sockets: Arc::clone(&self.host_session_sockets),
             agent_activity_hub: Arc::clone(&self.agent_activity_hub),
             agent_roster: self.agent_roster(),
+            split_sessions: self.split_sessions(),
+            presenter_observer_deps: self.presenter_observer_deps(),
+            user_resolver: self.user_resolver.clone(),
+            spawn_client: self.spawn_client.clone(),
+            workspace_sandboxes: Arc::clone(&self.workspace_sandboxes),
+            rpc_activity: self.rpc_activity.clone(),
+            session_agent_inference: Arc::clone(&self.session_agent_inference),
+            session_rooms: Arc::clone(&self.session_rooms),
+            hosted_agent_clones: Arc::clone(&self.hosted_agent_clones),
+            session_admissions: Arc::clone(&self.session_admissions),
+            worktree_observer: self.worktree_observer.clone(),
             host: Arc::new(self.clone()),
         }
     }

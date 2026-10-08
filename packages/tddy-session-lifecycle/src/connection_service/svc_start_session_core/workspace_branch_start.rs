@@ -1,5 +1,3 @@
-use super::DaemonSessionHost;
-
 use crate::{
     connection_service::seed_codebase, session_deletion,
     user_sessions_path::projects_path_for_user, workspace_session,
@@ -15,9 +13,10 @@ use tddy_rpc::Response;
 
 use std::path::Path;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_service::proto::session::StartSessionRequest;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) async fn seed_and_start_workspace_session(
         &self,
         req: &StartSessionRequest,
@@ -34,7 +33,10 @@ impl DaemonSessionHost {
         ),
         Status,
     > {
-        let seed = self.seeded_roster_records(&req.specialized_agents).await?;
+        let seed = self
+            .agent_roster
+            .seeded_roster_records(&req.specialized_agents)
+            .await?;
         let started = workspace_session::start_workspace_session(
             os_user,
             session_id,
@@ -61,7 +63,7 @@ impl DaemonSessionHost {
         let session_dir = unified_session_dir_path(sessions_base, session_id);
         let codebase = seed_codebase::SeedCodebase::read(session_id, &session_dir)?;
         let seeded = self
-            .agent_roster()
+            .agent_roster
             .seed_session_agent_roster(session_id, &codebase, &req.session_token, seed)
             .await?;
         Ok((started, codebase, seeded))
@@ -76,7 +78,7 @@ impl DaemonSessionHost {
         codebase: super::super::SeedCodebase,
         seeded: Vec<super::super::SeededAgent>,
     ) {
-        self.agent_roster()
+        self.agent_roster
             .unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)
             .await;
         let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir));
@@ -111,7 +113,7 @@ impl DaemonSessionHost {
             timeout,
         )
         .await?;
-        self.agent_roster()
+        self.agent_roster
             .start_hosted_agent_clone(
                 &placement,
                 &sessions_base,

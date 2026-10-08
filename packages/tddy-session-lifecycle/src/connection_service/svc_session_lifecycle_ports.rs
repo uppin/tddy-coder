@@ -19,14 +19,18 @@ impl SessionHandler for DaemonSessionHost {
         &self,
         request: Request<tddy_service::proto::session::ListSessionsRequest>,
     ) -> Result<Response<tddy_service::proto::session::ListSessionsResponse>, Status> {
-        self.list_sessions_at_session_coordinate(request).await
+        self.launch_sessions()
+            .list_sessions_at_session_coordinate(request)
+            .await
     }
 
     async fn start_session(
         &self,
         request: Request<tddy_service::proto::session::StartSessionRequest>,
     ) -> Result<Response<tddy_service::proto::session::StartSessionResponse>, Status> {
-        self.start_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .start_session_at_session_coordinate(request)
+            .await
     }
 
     async fn stream_start_session(
@@ -36,6 +40,7 @@ impl SessionHandler for DaemonSessionHost {
         use super::family_proto_bridge::wire_same;
 
         let response = self
+            .launch_sessions()
             .stream_start_session_at_session_coordinate(request)
             .await?;
         let rx = response.into_inner().into_receiver();
@@ -56,35 +61,44 @@ impl SessionHandler for DaemonSessionHost {
         &self,
         request: Request<tddy_service::proto::session::ConnectSessionRequest>,
     ) -> Result<Response<tddy_service::proto::session::ConnectSessionResponse>, Status> {
-        self.connect_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .connect_session_at_session_coordinate(request)
+            .await
     }
 
     async fn resume_session(
         &self,
         request: Request<tddy_service::proto::session::ResumeSessionRequest>,
     ) -> Result<Response<tddy_service::proto::session::ResumeSessionResponse>, Status> {
-        self.resume_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .resume_session_at_session_coordinate(request)
+            .await
     }
 
     async fn signal_session(
         &self,
         request: Request<tddy_service::proto::session::SignalSessionRequest>,
     ) -> Result<Response<tddy_service::proto::session::SignalSessionResponse>, Status> {
-        self.signal_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .signal_session_at_session_coordinate(request)
+            .await
     }
 
     async fn delete_session(
         &self,
         request: Request<tddy_service::proto::session::DeleteSessionRequest>,
     ) -> Result<Response<tddy_service::proto::session::DeleteSessionResponse>, Status> {
-        self.delete_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .delete_session_at_session_coordinate(request)
+            .await
     }
 
     async fn get_worktree_snapshot(
         &self,
         request: Request<tddy_service::proto::session::GetWorktreeSnapshotRequest>,
     ) -> Result<Response<tddy_service::proto::session::GetWorktreeSnapshotResponse>, Status> {
-        self.get_worktree_snapshot_at_session_coordinate(request)
+        self.launch_sessions()
+            .get_worktree_snapshot_at_session_coordinate(request)
             .await
     }
 }

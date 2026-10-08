@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use super::DaemonSessionHost;
+use crate::connection_service::launch_ports::LaunchSessions;
 
 /// Hears that a session's worktree now exists on this host.
 ///
@@ -18,7 +19,7 @@ pub trait SessionWorktreeObserver: Send + Sync {
     fn worktree_ready(&self, session_id: &str, worktree: &Path);
 }
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     /// Report the worktree of the session `session_id`, which has just started under
     /// `sessions_base`, to the installed observer. Nothing happens when none is installed.
     ///
@@ -40,7 +41,8 @@ impl DaemonSessionHost {
             ),
         }
     }
-
+}
+impl DaemonSessionHost {
     /// Install the observer told of every started session's worktree (builder).
     #[must_use]
     pub fn with_worktree_observer(

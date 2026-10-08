@@ -1,10 +1,5 @@
 use tddy_daemon_kernel::config::DaemonConfig;
 
-/// The web port a hook URL assumes when `listen.web_port` is unset. `startup` refuses to serve
-/// without that setting, so this only covers a config the daemon would not have started from — but
-/// building the URL is not the place to discover it.
-const DEFAULT_WEB_PORT: u16 = 8899;
-
 /// Where a hook command reaches this daemon when nothing is configured: its own web listener on
 /// loopback.
 ///
@@ -47,3 +42,8 @@ pub fn claude_hook_daemon_url(config: &DaemonConfig) -> String {
         .map(str::to_string)
         .unwrap_or_else(|| local_daemon_hook_url(config))
 }
+
+/// The web port a hook URL assumes when `listen.web_port` is unset. `startup` refuses to serve
+/// without that setting, so this only covers a config the daemon would not have started from — but
+/// building the URL is not the place to discover it.
+pub(super) const DEFAULT_WEB_PORT: u16 = 8899;

@@ -1,14 +1,12 @@
 use crate::connection_service::service_util;
 
-use super::DaemonSessionHost;
-
 use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
 
 use super::ToolSpawnPurpose;
 
 use super::ToolSpawnPlan;
 
-use super::super::AttachmentMaterialization;
+use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
 use tddy_projects::project_storage;
 use tddy_spawn::{spawn_worker, spawner};
@@ -24,9 +22,10 @@ use tddy_rpc::Status;
 
 use super::super::AttachmentProgressSink;
 
+use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_service::proto::session::StartSessionRequest;
 
-impl DaemonSessionHost {
+impl LaunchSessions {
     pub(super) async fn spawn_tool_session(
         &self,
         req: StartSessionRequest,
@@ -74,7 +73,7 @@ impl DaemonSessionHost {
             .map(recipe_enables_conversation_spawn)
             .unwrap_or(false);
         if enable_conversation_spawn || !req.attachments.is_empty() {
-            let sessions_base = crate::user_sessions_path::sessions_base_for_user(
+            let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 &os_user,
                 Some(&self.tddy_data_dir),
             )
@@ -95,7 +94,7 @@ impl DaemonSessionHost {
         // still starts under the checkout's own identity; its token requests are refused with the
         // resolver's words. Only the pairs reach the child's environment: the account's token never
         // does — it is asked for, per call, over the host-session socket.
-        let identity = self.session_identity(
+        let identity = self.host.session_identity(
             &os_user,
             &tool_session_id,
             &pid_for_spawn,
@@ -103,14 +102,13 @@ impl DaemonSessionHost {
         );
         let git_environment = identity.git_environment;
         let host_session_socket = self
-            .launch_sessions()
             .register_tool_session_on_host_socket(ToolSessionHostRegistration {
                 os_user: &os_user,
                 session_id: &tool_session_id,
                 project_id: &pid_for_spawn,
                 recipe: recipe_for_spawn.as_deref(),
                 model: model_for_spawn.clone(),
-                account_access: self.session_account_access(&req.session_token),
+                account_access: self.host.session_account_access(&req.session_token),
                 github_credential: identity.github_credential,
             })
             .await;
@@ -136,8 +134,7 @@ impl DaemonSessionHost {
                 git_environment,
             })
             .await;
-        self.launch_sessions()
-            .tool_session_spawned(&tool_session_id, &spawned);
+        self.tool_session_spawned(&tool_session_id, &spawned);
         let result = spawned?;
         log::debug!(
             "StartSession: spawn returned, session_id={}",

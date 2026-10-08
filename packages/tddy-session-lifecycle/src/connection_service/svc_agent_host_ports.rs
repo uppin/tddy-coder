@@ -84,14 +84,18 @@ impl SplitHost for DaemonSessionHost {
         req: StartSessionRequest,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
-        self.start_session_core(req, progress).await
+        self.launch_sessions()
+            .start_session_core(req, progress)
+            .await
     }
 
     async fn delete_session(
         &self,
         request: Request<DeleteSessionRequest>,
     ) -> Result<Response<DeleteSessionResponse>, Status> {
-        self.delete_session_at_session_coordinate(request).await
+        self.launch_sessions()
+            .delete_session_at_session_coordinate(request)
+            .await
     }
 
     fn session_files(&self) -> Arc<SplitSessionFiles> {

@@ -1,6 +1,6 @@
 # complexity: ensure_project_available_for_start
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_resolve_listed_worktree.rs:30` — `ensure_project_available_for_start`
+**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_ensure_project_available_for_start.rs:123` — `ensure_project_available_for_start`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **157 lines** · **nesting depth 8** · 1 parameters · 9 branch/match lines · 2 early exits
@@ -19,6 +19,7 @@
 | 2026-09-26 | 99 | — | — | — | touched by #526 (`#carve` 15/21) and **unchanged by it**: its file gained the `agent_def_for_spawn` delegation to `tddy_session_agents::spawn_agent_def`; this function is identical at `2688227f` and `22787218` (fn line to closing brace), still at `:30` |
 | 2026-10-05 | 99 | — | — | — | touched by the same-crate moves and **unchanged by them**: its file lost the `mod session_room_opening;` line when that module was re-parented under `svc_ensure_session_room_for_agents`; this function is identical at `origin/master` and HEAD (fn line to closing brace), still at `:30` |
 | 2026-10-05 | 99 | — | — | — | touched by #532 (`#carve` 17/21) and **unchanged by it**: the file's agent-def functions became `impl AgentRoster` and `session_dir_lookup` left its `mod` list; this function is 99 lines at `origin/master` and at HEAD (fn line to closing brace), now at `:31` |
+| 2026-10-08 | 99 | — | — | — | `#carve` 20/21: **moved** by the engine (`move_item`) to `svc_ensure_project_available_for_start.rs:123` and converted to `impl LaunchSessions`; 99 lines at `origin/master` and at HEAD (fn line to closing brace), unchanged. Nesting not re-derived. Over the 60-line budget: **kept open**; **Location** line below updated |
 
 ## What the tool found
 

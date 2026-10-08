@@ -12,7 +12,6 @@ use crate::connection_service::peer_session_answer::peer_has_no_such_session;
 
 use tddy_service::proto::session::DeleteSessionRequest;
 
-use crate::connection_service::daemon_urls;
 use crate::connection_service::first_admission_token;
 use crate::connection_service::seed_codebase;
 use crate::connection_service::session_dir_lookup;
@@ -87,7 +86,7 @@ impl AgentRoster {
             agent_clone: Some(tddy_service::proto::session::AgentClonePlacement {
                 session_id: session_id.to_string(),
                 facilitating_daemon_instance_id: local_instance_id_for_config(&self.config),
-                facilitating_daemon_url: daemon_urls::advertise_daemon_url(&self.config),
+                facilitating_daemon_url: daemon_hook_urls::advertise_daemon_url(&self.config),
                 first_admission_token,
                 first_admission_url,
                 first_admission_room,
@@ -386,4 +385,5 @@ use tddy_session_agents::session_room_participants;
 
 use tddy_session_agents::agent_clone_worktree;
 
+use crate::connection_service::daemon_hook_urls;
 use tddy_session_agents::agent_clone_lookup;

@@ -1,11 +1,8 @@
 use crate::connection_service::stack_parent;
 
-use crate::config::DaemonConfig;
+use tddy_daemon_kernel::config::DaemonConfig;
 
 use std::path::Path;
-
-pub(crate) mod daemon_urls;
-pub use daemon_urls::*;
 
 /// The branch a spawn actually operates on: the branch it creates, or — under
 /// `work_on_selected_branch` — the existing branch it resumes.
@@ -147,5 +144,5 @@ pub fn spawned_branch_of_session(session_dir: &Path, requested_branch: &str) -> 
 /// StartSession, so an explicitly configured path is honored and a bare name is resolved to a host
 /// path instead of being spawned against the daemon's minimal systemd PATH.
 pub fn resolve_resume_session_claude_binary(config: &DaemonConfig) -> String {
-    crate::config::resolve_claude_binary_path(config)
+    tddy_daemon_kernel::config::resolve_claude_binary_path(config)
 }

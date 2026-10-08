@@ -32,7 +32,7 @@ The naive count, to the first `#[cfg(test)]`, is in brackets where it differs.
 | 9 | `connection_service.rs` | 434 [18] | — the struct, `mod` / `pub use` lines, and what folding would take out |
 | 10 | `connection_service/svc_ensure_session_room_for_agents.rs` | 429 | — never planned |
 | 11 | `connection_service/svc_start_hosted_agent_clone.rs` | 425 | — never planned |
-| 12 | `connection_service/session_coordinate_handlers.rs` | 414 | `session_entry_from_listing`, not started |
+| 12 | `connection_service/session_coordinate_handlers.rs` | 453 | `session_entry_from_listing` is lifted as a free function in the file (`#carve` 20/21); moving it into `session_coordinate_handlers/session_list_entries.rs` is not done |
 | 13 | `connection_service/svc_provision_agent_clone.rs` | 414 | — never planned |
 | 14 | `split_session.rs` | 409 [382] | — never planned |
 
@@ -48,15 +48,15 @@ streamed start) and their helpers:
 ```text
 session_coordinate_handlers.rs      414
   list_sessions_at_session_coordinate   :38    ~128 lines, of which the SessionEntry literal is ~65
-  → session_entry_from_listing into session_coordinate_handlers/session_list_entries.rs: ~300
+  → session_entry_from_listing into session_coordinate_handlers/session_list_entries.rs: ~300   (the function is lifted; the module move is open)
 ```
 
 ## What would close it
 
 - **Rows 1, 4, 5, 7, 12** close when their functions do: the
   [functions TODO](./2026-09-24-lifecycle-functions-still-over-150-lines.md), the
-  [jail-launch TODO](./2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md) and the
-  [`session_entry_from_listing` TODO](./2026-09-24-lifecycle-session-entry-from-listing-not-started.md).
+  [jail-launch TODO](./2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md), and, for row 12,
+  an `extract_module` of the lifted `session_entry_from_listing` into `session_list_entries.rs`.
   Row 9 shrinks with the [folding](./2026-09-24-lifecycle-topic-files-to-fold-into-existing-siblings.md)
   and [re-parenting](./2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) moves.
 - **The other eight** need a discovery pass for their seams, then `extract_module` plans proven

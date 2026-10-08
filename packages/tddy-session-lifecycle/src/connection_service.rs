@@ -565,6 +565,7 @@ mod workspace_sandbox_roster_dispatch_unit_tests;
 #[cfg(test)]
 mod conversation_worktree_jail_route_unit_tests;
 
+pub(crate) mod daemon_hook_urls;
 mod first_admission_token;
 /// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
 /// failure is not mistaken for one. Driven through the same private
@@ -574,5 +575,7 @@ mod jail_relaunch_unit_tests;
 pub(crate) mod peer_session_answer;
 mod session_dir_lookup;
 mod svc_agent_roster_wiring;
+mod svc_ensure_project_available_for_start;
 mod svc_host_builders;
+mod svc_index_workspace_worktree;
 mod svc_resume_sandboxed_claude_cli_session;

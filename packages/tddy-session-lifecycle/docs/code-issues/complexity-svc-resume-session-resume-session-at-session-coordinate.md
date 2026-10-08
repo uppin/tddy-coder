@@ -19,6 +19,7 @@
 | 2026-09-24 | 241 | 6 | 9 | 12 | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count, nesting, branches and exits; still at `session_coordinate_handlers.rs:271`. Hand structural scan (fn line to closing brace; nesting by indentation; `return`/`?` count), identical method on the merge-base with `origin/master` (`4e7157d2`) and HEAD. CRAP not re-run |
 | 2026-09-24 | 137 | — | — | — | #524: moved by plan `08`; DRY #2 folded its inline `tddy-coder` spawn into `spawn_tddy_coder(ToolSpawnPlan)` (242 → 137 by the plan's count). Nesting, branches and exits not re-derived |
 | 2026-10-07 | 138 | — | — | — | touched by `#carve` 18/21: +1 (137 → 138, rustfmt wrap of a re-pointed call). No control flow added |
+| 2026-10-08 | 141 | — | — | — | `#carve` 20/21: converted to `impl LaunchSessions`; +3 against `origin/master` (138 -> 141, fn line to closing brace) from rustfmt re-wraps of re-pointed calls (`self.agent_roster.…`, `self.split_sessions.…`). No control flow added. Over the 60-line budget: **kept open** |
 
 ## What the tool found
 
