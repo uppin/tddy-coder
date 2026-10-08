@@ -10,11 +10,11 @@ use tddy_rpc::Status;
 use tddy_service::proto::session::StartSessionRequest;
 use tddy_session_files::attachment_progress::{AttachmentMaterialization, AttachmentProgressSink};
 
-use super::svc_materialize_staged_attachment::AttachmentState;
+use tddy_session_files::svc_materialize_staged_attachment::AttachmentState;
 
 /// Materialize the request's attachments into the session, and return its first prompt with a
 /// line naming the attached changeset when one materialized.
-pub(in crate::connection_service) async fn attached_initial_prompt(
+pub async fn attached_initial_prompt(
     attachments: &AttachmentState<'_>,
     req: &StartSessionRequest,
     os_user: &str,

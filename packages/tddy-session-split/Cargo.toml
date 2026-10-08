@@ -1,0 +1,7 @@
+[package]
+name = "tddy-session-split"
+version = "0.1.0"
+edition = "2021"
+description = "Split and sandboxed-codebase sessions: the paired agent/codebase start, resume and teardown"
+
+[dependencies]

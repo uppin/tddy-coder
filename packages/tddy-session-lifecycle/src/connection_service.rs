@@ -40,7 +40,7 @@ use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionReq
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
-mod service_util;
+pub mod service_util;
 pub(crate) use service_util::*;
 /// The deadlines every clone and supervised spawn runs under — shared with the project handlers in
 /// `tddy-daemon-rpc`, which clone repositories the way session starts do.

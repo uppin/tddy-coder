@@ -15,7 +15,8 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use uuid::Uuid;
 
-use super::{agent_roster, AttachmentProgressSink};
+use super::agent_roster;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use crate::connection_service::split_ports::SplitSessions;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::{projects_path_for_user, sessions_base_for_user};

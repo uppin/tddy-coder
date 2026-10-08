@@ -12,7 +12,7 @@ use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
-use super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use tddy_service::proto::session::StartSessionRequest;
 
