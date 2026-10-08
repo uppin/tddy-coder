@@ -1,6 +1,5 @@
 use uuid::Uuid;
 
-use crate::connection_service::hooks_and_urls;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use std::sync::Arc;
@@ -20,6 +19,7 @@ use tddy_service::proto::session::StartSessionRequest;
 use std::path::Path;
 
 use super::attached_initial_prompt::attached_initial_prompt;
+use crate::connection_service::daemon_hook_urls;
 use crate::connection_service::split_ports::SplitSessions;
 
 /// What the split agent's claude-cli process is spawned with: its context dir, its tools' route
@@ -198,7 +198,7 @@ impl SplitSessions {
             // [`crate::split_session::colocated_jail_tool_env`], which inverts the split builder's
             // reasoning field by field.
             None => crate::split_session::colocated_jail_tool_env(
-                &hooks_and_urls::local_daemon_hook_url(&self.config),
+                &daemon_hook_urls::local_daemon_hook_url(&self.config),
                 codebase_session_id,
                 &self.agent_session_token_for(&req.session_token)?,
                 self.agent_tool_socket_for_embedded_host(),
@@ -244,7 +244,7 @@ impl SplitSessions {
             &context_dir,
             &tddy_core::HookCommandParams {
                 tddy_tools_path: &tddy_tools_path.to_string_lossy(),
-                daemon_url: &hooks_and_urls::claude_hook_daemon_url(&self.config),
+                daemon_url: &daemon_hook_urls::claude_hook_daemon_url(&self.config),
                 session_id,
                 os_user,
                 hook_token: &hook_token,

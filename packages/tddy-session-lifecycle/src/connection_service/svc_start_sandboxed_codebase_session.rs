@@ -226,7 +226,7 @@ impl SplitSessions {
             .await?;
 
         let remote = crate::split_session::colocated_jail_tool_env(
-            &super::hooks_and_urls::local_daemon_hook_url(&self.config),
+            &crate::connection_service::daemon_hook_urls::local_daemon_hook_url(&self.config),
             checkout_session_id,
             &self.agent_session_token_for(session_token)?,
             self.agent_tool_socket_for_embedded_host(),

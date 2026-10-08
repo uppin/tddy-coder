@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle`'s session start, resume and coordinate handlers run over the launch ports, completing the in-place conversion
 
 **Date**: 2026-09-26
-**Status**: ✅ Implemented (2026-10-08). The refused resume pair was converted after the developer consented to respelling one `use` by hand (see Validation results). Open: A3 finds two T4 → `hooks_and_urls` edges that node 17 must resolve
+**Status**: ✅ Implemented (2026-10-08). The refused resume pair was converted after the developer consented to respelling one `use` by hand (see Validation results). All acceptance checks A1–A9 are met
 **Type**: Refactor (in-place port restructure; no crate moves; no behaviour change)
 **Stack**: `#carve` 20/21, branch `feature/carve/lifecycle-ports-launch-start`, on top of `#carve` 19
 (`feature/carve/lifecycle-ports-launch-spawns`). Plan label **16e** (M7b + M8)
@@ -209,8 +209,8 @@ T1c.
 - [x] **Baseline** after each of M7b and M8: 575 / 22 / 1, the same 22 by name; `tddy-session-agents`
   at its count. clippy and fmt clean on lifecycle. `cargo check --all-targets` clean on lifecycle,
   `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`
-- [~] **Acceptance checks** A1–A9 over every topic (all met except A3's two `hooks_and_urls` edges and A4's one out-of-scope hit; see Validation results)
-- [ ] `restructure verify --against <16d tip>`: every statement accounted for (cannot exit zero over hand edits; see Validation results)
+- [x] **Acceptance checks** A1–A9 over every topic (see Validation results)
+- [x] `restructure verify --against <16d tip>`: every statement accounted for **by hand** (it cannot exit zero over hand edits; every unaccounted statement maps to a listed edit, see Validation results)
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -590,8 +590,8 @@ handle. Hand edits after the move: `self.split_sessions()` / `self.launch_sessio
 |---|---|
 | A1 | Met. `grep` over topic files (comments excluded) is empty |
 | A2 | Met. No topic file names `svc_agent_roster_wiring`, `handler_state`, `svc_host_builders`, a `svc_*_ports`, `PeerRouted*`, `DaemonRpcHandler`, `rpc_families` or `test_util` |
-| A3 | Scripted rank check (`CLI/leaves < T3 < T4/SU/WS < T1/T9/T1c`, 65 modules ranked by the inventory, `super::` and `crate::connection_service::` targets, test modules cut): **2 upward edges**, `svc_spawn_split_agent.rs` and `svc_start_sandboxed_codebase_session.rs` (T4) naming `hooks_and_urls` (T1) for `local_daemon_hook_url` and `claude_hook_daemon_url`. Both predate this node (16c). They are pure URL helpers, so node 17 should place them in a leaf rather than leave T4 depending on T1 |
-| A4 | Met for every M7b and M8 file and `hooks_and_urls.rs`. One hit left, `local_exec_tools.rs:23` (`use crate::session_agent_clone::{HostedAgentClones, HostedClone}`), a file this node does not own |
+| A3 | Met. Scripted rank check (`a3.py`: CLI/leaves < T3 < T4/SU/WS < T1/T9/T1c; 66 modules ranked by the inventory; `super::` and `crate::connection_service::` targets of non-test code): **0 upward edges**. The two T4 → `hooks_and_urls` edges (`svc_spawn_split_agent.rs`, `svc_start_sandboxed_codebase_session.rs`) were removed by moving `local_daemon_hook_url`, `advertise_daemon_url`, `claude_hook_daemon_url` and `DEFAULT_WEB_PORT` with `move_item` (two runs) into the new leaf `connection_service/daemon_hook_urls.rs`; callers were re-pointed by the engine. The ranking is this node's reading of the inventory, not an authoritative map |
+| A4 | Met. The grep over all topic files is empty: `local_exec_tools.rs` was re-pointed by `repoint_facade_imports` (`tddy_session_agents::session_agent_clone`, `tddy_tool_engine as tool_engine`) |
 | A5 | The grep matches exactly the three 16d Recipe B lines in `svc_start_claude_cli_session.rs` (72, 153, 200), each cloning `LaunchSessions` |
 | A6 | One `trait` and one `impl ... for DaemonSessionHost` each; no trait block changed vs `befc94163` |
 | A7 | `git diff befc94163 -- packages/tddy-daemon-rpc packages/tddy-daemon packages/tddy-telegram-control packages/tddy-desktop` is empty; `cargo check --all-targets` clean on the five packages (`tddy-desktop` on CI) |
@@ -601,6 +601,17 @@ handle. Hand edits after the move: `self.split_sessions()` / `self.launch_sessio
 Final baseline run (after the resume pair and the claimant move): 574 passed, 23 failed, 1 ignored. The extra failure,
 `session_room_acceptance::a_commit_reaches_both_agent_participants_from_a_single_publish`, is `LiveKit testkit … container startup
 timeout` (Docker), and passes alone (`session_room_acceptance`: 21 passed). The other 22 are the same names, so the suite is 575 / 22 / 1.
+
+### Closing the open items (2026-10-08)
+
+- **A3.** `reparent_module` of `hooks_and_urls/daemon_urls.rs` to `connection_service` was **refused** by `check --deep` (`daemon_urls` starts a path inside the `use` `pub use daemon_urls::*;` in `hooks_and_urls.rs`, which cannot be re-pointed). It was not worked around. The other engine route, `move_item` over the module's items, was used instead. It left `hooks_and_urls/daemon_urls.rs` **empty**. One hand edit followed: the dead `pub use daemon_urls::*;` re-export was removed from `hooks_and_urls.rs` (clippy `unused_imports`), with `TODO(carve-20-daemon-urls)` on the remaining `mod` line. Deleting the empty module and its file needs the developer's consent and is not done. The helpers are not used outside `tddy-session-lifecycle` (no consumer edit; A7 stays empty), so no facade was kept.
+- **A4.** `repoint_facade_imports` over `local_exec_tools.rs`: 3 paths, no hand edit.
+- **D1.** Ticked: settled as Recipe B by #534.
+- **`restructure verify --against befc94163 --retarget DaemonSessionHost=LaunchSessions`.** Reports 363,816 statements before, 363,838 after; 14 re-pointed through a module qualifier, 3 visibility-normalised, 84 `cfg(test)` gate lines excused; **100 lost and 122 gained** statements, exit non-zero. It cannot exit zero because it counts a hand re-point as one lost and one gained statement. Every one maps to an edit listed in the commit messages: the `self.<m>()` -> `self.<field>.<m>()` and `self.launch_sessions().<m>()` -> `self.<m>()` re-points (`agent_roster()`, `split_sessions()`, `launch_sessions()` and the long `start_*_cli_session` calls); the host-to-handle re-points of the nine `SessionHandler` entries, `SplitHost::delete_session`, `start_session_core` and the stream task; the `rpc_served_by_peer`, `classify_daemon_route`, `common_room_slot`, `record_rpc_activity`, `resolve_os_user`, `resolve_exec_tool_worktree` and `ensure_session_room` re-points (with the `ExecuteToolRequest` field lines they span); the removed dead host methods (`attachment_state`, `prepare_session_attachments`, `seed_clone_claimant`, `maybe_spawn_presenter_observer`) and their doc lines; the `DaemonSeedCloneClaimant` construction; the new `LaunchSessions` fields, builder lines and docs; the two clippy signature fixes after the extract; the `#[cfg(test)]` on the `seeded_roster_records` delegator; and lines the engine re-flowed (`repoint_facade_imports` wrapping six `let sessions_base =` statements, `extract_method` re-indenting the `ListSessions` closure and its `?` returns, `move_item` re-pointing to `daemon_hook_urls`). No statement is unmapped.
+
+### Final gates (once, at the end)
+
+`cargo fmt --check -p tddy-session-lifecycle` and `cargo clippy -p tddy-session-lifecycle --all-targets -- -D warnings` clean; `cargo check --all-targets` clean on the five packages; `tddy-session-lifecycle` suite **575 passed, 22 failed, 1 ignored, the same 22 by name** (no LiveKit flake in this run).
 
 ### Size
 
@@ -630,7 +641,7 @@ None is clean by number, so none is deleted.
 ## TODO
 
 - [x] Create changeset: this document
-- [ ] USER REVIEW: D1
+- [x] USER REVIEW: D1 — settled as Recipe B by #534 (commit `befc94163`, [`2026-10-07-carve-launch-sessions-handle`](../changesets/2026-10-07-carve-launch-sessions-handle.md))
 - [x] Rebase onto 16d once it is green
 - [x] Record the baseline on 16d's tip (575 / 22 / 1)
 - [x] Implementation M7b.1–M7b.4, then M8.1–M8.3
@@ -645,8 +656,8 @@ Tasks executed at wrap:
 **16e acceptance (the whole conversion)**
 - [x] A1: no topic module names `DaemonSessionHost` (grep empty)
 - [x] A2: no topic module names a wiring module (grep empty; `DaemonSeedCloneClaimant` moved into `agent_host_callbacks` by the engine)
-- [~] A3: no upward topic edge anywhere (scripted rank check: two edges, `svc_spawn_split_agent` and `svc_start_sandboxed_codebase_session` → `hooks_and_urls`; for node 17)
-- [~] A4: every topic module names foundations and receivers by their defining crate (grep empty except `local_exec_tools.rs:23`, a file this node does not own)
+- [x] A3: no upward topic edge anywhere (scripted rank check, 0 violations)
+- [x] A4: every topic module names foundations and receivers by their defining crate (grep empty)
 - [x] A5: no host clone in any topic module; the hand-offs clone the launch handle (the grep matches exactly the three 16d Recipe B lines, each cloning `LaunchSessions`)
 - [x] A6: the three callback traits defined once and implemented once on the host in wiring, approved methods only
 - [x] A7: no consumer edit (`git diff` empty); `cargo check --all-targets` clean on lifecycle, `tddy-session-agents`, `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`

@@ -4,8 +4,9 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use std::path::Path;
 
+// TODO(carve-20-daemon-urls): empty since its helpers moved to `daemon_hook_urls`; delete this module and
+// `hooks_and_urls/daemon_urls.rs` (a file deletion, which needs the developer's consent).
 pub(crate) mod daemon_urls;
-pub use daemon_urls::*;
 
 /// The branch a spawn actually operates on: the branch it creates, or — under
 /// `work_on_selected_branch` — the existing branch it resumes.

@@ -24,7 +24,9 @@ pub fn install_cursor_hooks_in_worktree(
     // `cursor_cli.daemon_url`, then `claude_cli.daemon_url`, then this daemon's own web listener —
     // the same last resort every hook URL falls back to.
     let daemon_url = tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
-        .unwrap_or_else(|| crate::connection_service::daemon_urls::local_daemon_hook_url(config));
+        .unwrap_or_else(|| {
+            crate::connection_service::daemon_hook_urls::local_daemon_hook_url(config)
+        });
 
     let hook_token = Uuid::new_v4().to_string();
     let hooks_settings = build_cursor_hooks_settings(&HookCommandParams {

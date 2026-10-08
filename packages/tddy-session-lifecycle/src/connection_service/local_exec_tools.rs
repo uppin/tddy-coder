@@ -20,9 +20,9 @@ use tddy_task::TaskRegistry;
 
 use super::agent_roster;
 use super::jail_relaunch::JailRelaunch;
-use crate::session_agent_clone::{HostedAgentClones, HostedClone};
-use crate::tool_engine;
 use crate::workspace_session;
+use tddy_session_agents::session_agent_clone::{HostedAgentClones, HostedClone};
+use tddy_tool_engine as tool_engine;
 
 /// The three places this daemon runs a tool, and the registry every run is recorded in.
 ///

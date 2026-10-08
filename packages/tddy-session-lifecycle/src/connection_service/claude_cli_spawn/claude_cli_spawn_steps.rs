@@ -19,6 +19,7 @@ use std::path::Path;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
+use crate::connection_service::daemon_hook_urls;
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
 /// What cutting a claude-cli session's worktree reads: the checkout, the base, and where it goes.
@@ -129,7 +130,7 @@ pub(super) fn install_claude_cli_hooks(
             .and_then(|c| c.tddy_tools_path.as_deref()),
     );
 
-    let daemon_url = hooks_and_urls::claude_hook_daemon_url(config);
+    let daemon_url = daemon_hook_urls::claude_hook_daemon_url(config);
 
     // Generate a per-session hook token and write .claude/settings.local.json into the
     // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.

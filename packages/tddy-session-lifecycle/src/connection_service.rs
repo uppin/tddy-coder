@@ -558,6 +558,7 @@ mod workspace_sandbox_roster_dispatch_unit_tests;
 #[cfg(test)]
 mod conversation_worktree_jail_route_unit_tests;
 
+pub(crate) mod daemon_hook_urls;
 mod first_admission_token;
 /// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
 /// failure is not mistaken for one. Driven through the same private
