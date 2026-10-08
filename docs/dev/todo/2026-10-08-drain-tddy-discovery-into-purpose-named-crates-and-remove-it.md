@@ -4,8 +4,9 @@
 **Source:** #carve 21/21 (PR #536) — LoC and responsibility survey of `packages/`, 2026-10-08
 
 `tddy-discovery` began as a one-shot codebase-exploration agent. It is now the home of the whole
-specialized-subagent runtime: ~11.6k raw lines in `src/` (inline tests included), 14 dependent
-packages. Only ~3 % of it (the citation parser) is what the name describes. The developer's direction
+specialized-subagent runtime: ~11.6k raw lines in `src/` (inline tests included), **~9.1k production
+lines** (brace-depth strip), 14 dependent packages. It is already under the 10k target, so the case
+for draining it is its **responsibility spread**, not its size. Only ~3 % of it (the citation parser) is what the name describes. The developer's direction
 (2026-10-08): treat it as a package to **drain**, and remove it once empty — it can be removed fully,
 because nothing in it needs to stay under that name.
 
@@ -44,7 +45,8 @@ mid-drain. Moves go through the `tddy-tools restructure` engine; refusals stop a
   `session-agents` is daemon-side, so merging them would put in-jail code on the daemon's side of the
   graph: keep them apart unless the dependency check says otherwise.
 - **Does `subagent` + `roster` + `subagent_runtime` fit under 10k production lines?** ~8.6k raw; the
-  production figure is lower, not yet measured.
+  per-module production figures are not yet measured (the first attempt at measuring them failed on a
+  quoting error in the counting loop; only the crate total, ~9.1k, is valid).
 - **`tddy-core` and `tddy-service` dependencies** (the crate's own edges): which destination crates
   inherit them.
 
