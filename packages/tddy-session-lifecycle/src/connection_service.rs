@@ -348,7 +348,7 @@ pub use conversation_worktree_op::run_conversation_worktree_op;
 mod local_exec_tools;
 pub use local_exec_tools::LocalExecTools;
 
-mod svc_materialize_staged_attachment;
+pub use tddy_session_files::svc_materialize_staged_attachment;
 
 mod svc_spawn_split_agent;
 

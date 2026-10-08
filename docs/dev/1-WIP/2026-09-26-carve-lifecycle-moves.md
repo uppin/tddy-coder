@@ -218,7 +218,7 @@ per-crate baseline → B-checks for that receiver.
 - [x] **R1 `tddy-daemon-kernel`** (`daemon_hook_urls` after a hand pre-move widening, see Validation results): `agent_list_mapping`, `daemon_urls` (`move_module_to_crate`); zero new edges
 - [x] **R2 `tddy-daemon-livekit`**: T7 (the admission-token module, the `resolve_os_user` module; each
   moved individually, nested under wiring's builders) and `placement` (`move_module_to_crate`); zero new edges
-- [ ] **R3 `tddy-session-files`**: T8's two modules; new edge `tddy-session-files` → `tddy-daemon-livekit`
+- [x] **R3 `tddy-session-files`**: T8's two modules; new edge `tddy-session-files` → `tddy-daemon-livekit`
 - [ ] **R4 `tddy-session-activity`**: T10 cluster (`presenter_observer_spawn`, `presenter_observer_task`,
   `presenter_intent_client`), `session_notification_publishing`, `remote_git_pack_execution`; `tonic`
   (approved)
@@ -793,6 +793,22 @@ first are what the jail suites need; without them 13 more tests fail with a jail
 - **After:** lifecycle 658 passed / the same 22 failed / 1 ignored; `tddy-daemon-livekit` 178 passed; sum 836 as before (no test moved).
   `cargo clippy -p tddy-daemon-livekit -p tddy-session-lifecycle --all-targets -D warnings` clean; fmt clean; consumers
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-model-registry`) `cargo check --all-targets` clean; their diff is empty.
+
+### R3: `tddy-session-files` (done)
+
+- **Engine:** the new edge `tddy-session-files` → `tddy-daemon-livekit` (approved) was written to the manifest by the engine (and `Cargo.lock`).
+  1. One `move_module_to_crate` of `svc_materialize_staged_attachment` (preflight: `no findings`) stranded the directory child
+     `session_attachment_materialization` (`E0583`). Rolled back. 2. The same module and its child as one `move_cluster_to_crate`
+     moved both (as siblings at the destination's root) and left a dangling self re-export at line 1 of the moved parent.
+- **Hand edits after the move (build corrections only):**
+  1. `tddy-session-files/src/svc_materialize_staged_attachment.rs`: deleted lines 1-2 (`pub use tddy_session_files::session_attachment_materialization;`).
+  2. `pub(crate)` → `pub`: `AttachmentState` and its four fields (`svc_materialize_staged_attachment.rs:29-33`), and the methods
+     `prepare_session_attachments` / `materialize_session_attachments` (`session_attachment_materialization.rs:25,38`).
+  3. `cargo fmt` over the two moved files.
+  Filed: [`…module-move-strands-its-directory-child-and-the-cluster-leaves-a-dangling-self-reexport`](../todo/2026-10-08-restructure-module-move-strands-its-directory-child-and-the-cluster-leaves-a-dangling-self-reexport.md),
+  [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md).
+- **After:** lifecycle 658 passed / the same 22 failed / 1 ignored; `tddy-session-files` 160 passed; sum 818 as before.
+  clippy `--all-targets -D warnings`, fmt clean; `cargo check --all-targets` clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 

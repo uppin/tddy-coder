@@ -1,20 +1,20 @@
-use super::super::svc_materialize_staged_attachment::AttachmentState;
+use crate::svc_materialize_staged_attachment::AttachmentState;
 use tddy_service::proto::session::session_attachment::Source as AttachmentSource;
 
-use tddy_session_files::attachment_progress::cleanup_materialized_attachments;
+use crate::attachment_progress::cleanup_materialized_attachments;
 
-use tddy_session_files::attachment_progress::attachment_size_bytes;
+use crate::attachment_progress::attachment_size_bytes;
 
-use tddy_session_files::attachment_progress::AttachmentProgressReporter;
+use crate::attachment_progress::AttachmentProgressReporter;
 
-use tddy_session_files::session_attachments::validate_attachment_basename;
+use crate::session_attachments::validate_attachment_basename;
 
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 use tddy_service::proto::session::SessionAttachment;
 
-use tddy_session_files::attachment_progress::AttachmentMaterialization;
+use crate::attachment_progress::AttachmentMaterialization;
 
 impl AttachmentState<'_> {
     /// Pre-creates `session_dir` when needed and materializes the request's attachments before spawn.
@@ -22,7 +22,7 @@ impl AttachmentState<'_> {
     /// Answers with the attachments that reached the session's store, which is what a caller
     /// deriving anything from them — the pr-stack changeset the child's prompt names, say — must
     /// read: the request says what was asked for, this says what the child actually holds.
-    pub(crate) async fn prepare_session_attachments(
+    pub async fn prepare_session_attachments(
         &self,
         ctx: &AttachmentMaterialization<'_>,
     ) -> Result<Vec<SessionAttachment>, Status> {
@@ -35,7 +35,7 @@ impl AttachmentState<'_> {
         self.materialize_session_attachments(ctx).await
     }
 
-    pub(crate) async fn materialize_session_attachments(
+    pub async fn materialize_session_attachments(
         &self,
         ctx: &AttachmentMaterialization<'_>,
     ) -> Result<Vec<SessionAttachment>, Status> {
@@ -55,10 +55,8 @@ impl AttachmentState<'_> {
             }
         }
 
-        let staging_root = tddy_session_files::session_attachment_staging::staging_root_for(
-            ctx.os_user,
-            self.staging_base_dir,
-        );
+        let staging_root =
+            crate::session_attachment_staging::staging_root_for(ctx.os_user, self.staging_base_dir);
         let mut written: Vec<SessionAttachment> = Vec::new();
         let attachment_count = ctx.attachments.len() as u32;
 
