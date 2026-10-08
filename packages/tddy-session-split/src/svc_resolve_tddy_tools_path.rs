@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use tddy_rpc::Status;
 
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessions;
 
 impl SplitSessions {
     /// Resolve the `tddy-tools` binary from this deployment's **toolchain** — the directory its

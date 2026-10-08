@@ -40,7 +40,6 @@ use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionReq
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
-pub mod service_util;
 pub(crate) use service_util::*;
 /// The deadlines every clone and supervised spawn runs under — shared with the project handlers in
 /// `tddy-daemon-rpc`, which clone repositories the way session starts do.
@@ -211,7 +210,6 @@ pub use stack_parent::*;
 
 pub use seeded_clone_guard::*;
 
-mod svc_resolve_tddy_tools_path;
 pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 
 mod svc_pr_status_for_caller;
@@ -234,13 +232,16 @@ pub use tddy_session_agents::{
     svc_turn_end_reporter,
 };
 
-mod split_ports;
+pub use tddy_session_split::{
+    attached_initial_prompt, service_util, split_ports, split_start,
+    svc_provision_workspace_tool_sandbox, svc_resolve_tddy_tools_path, svc_resume_split_wiring,
+    svc_spawn_split_agent, svc_split_context_from_codebase_host,
+    svc_start_sandboxed_codebase_session,
+};
 
 mod launch_ports;
 
 mod svc_launch_delegators;
-
-mod attached_initial_prompt;
 
 mod svc_agent_host_ports;
 
@@ -264,8 +265,6 @@ mod svc_start_sandboxed_claude_cli_session;
 mod svc_start_sandboxed_cursor_cli_session;
 
 mod svc_resume_claude_cli_session;
-
-mod svc_split_context_from_codebase_host;
 
 mod svc_relaunch_sandboxed_runner;
 
@@ -321,7 +320,6 @@ pub(crate) use tddy_session_files::attachment_progress::*;
 
 pub use placement::*;
 
-mod split_start;
 pub use split_start::*;
 
 mod svc_resolve_os_user;
@@ -342,11 +340,7 @@ pub use local_exec_tools::LocalExecTools;
 
 pub use tddy_session_files::svc_materialize_staged_attachment;
 
-mod svc_spawn_split_agent;
-
 mod svc_shut_down_children;
-
-mod svc_start_sandboxed_codebase_session;
 
 mod svc_start_session_core;
 
@@ -567,6 +561,4 @@ mod svc_agent_roster_wiring;
 mod svc_ensure_project_available_for_start;
 mod svc_host_builders;
 mod svc_index_workspace_worktree;
-mod svc_provision_workspace_tool_sandbox;
 mod svc_resume_sandboxed_claude_cli_session;
-mod svc_resume_split_wiring;

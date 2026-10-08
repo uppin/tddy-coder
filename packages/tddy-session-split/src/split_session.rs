@@ -20,7 +20,7 @@ use tddy_rpc::Status;
 /// enough that a working day of tool calls never re-authenticates, short enough that a leaked token
 /// expires. A resumed session mints a fresh one rather than reusing what was persisted, so this is a
 /// ceiling on one agent process's life, not on the session's.
-const SPLIT_AGENT_TOKEN_TTL: Duration = Duration::from_secs(86_400);
+pub const SPLIT_AGENT_TOKEN_TTL: Duration = Duration::from_secs(86_400);
 
 /// Claude's own filesystem and shell tools, hard-disabled for a split session.
 ///
@@ -29,7 +29,7 @@ const SPLIT_AGENT_TOKEN_TTL: Duration = Duration::from_secs(86_400);
 /// which is not the codebase — so every one of them is named in `--disallowedTools`, which takes
 /// precedence and removes them outright. This is the enforcement the PRD's "claude-cli only"
 /// restriction rests on (§ Why claude-cli only).
-const NATIVE_FILESYSTEM_TOOLS: &[&str] = &[
+pub const NATIVE_FILESYSTEM_TOOLS: &[&str] = &[
     "Read",
     "Write",
     "Edit",
@@ -145,10 +145,9 @@ pub fn build_split_context_dir(
     Ok(context_dir)
 }
 
-mod agent_argv;
+pub use crate::{agent_argv, agent_credentials};
 pub use agent_argv::*;
 
-mod agent_credentials;
 pub use agent_credentials::*;
 
 /// Mint the agent's scoped LiveKit join token and build the `TDDY_REMOTE_*` environment around it.

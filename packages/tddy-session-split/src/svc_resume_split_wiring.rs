@@ -5,7 +5,7 @@ use tddy_service::proto::session_agents_svc::ListSessionAgentsRequest;
 
 use std::path::Path;
 
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessions;
 
 impl SplitSessions {
     /// Rebuild the remote-tool wiring for a split session being resumed, or `None` for a co-located
@@ -22,7 +22,7 @@ impl SplitSessions {
     /// relaunch honour a withdrawal (PRD AC25): the flags Claude is spawned with are fixed for the
     /// life of the process, so a relaunch that assumed an empty roster would hand the main agent
     /// back, pre-approved, exactly the tools the operator took away from it.
-    pub(crate) async fn resume_split_wiring(
+    pub async fn resume_split_wiring(
         &self,
         meta: &tddy_core::SessionMetadata,
         sessions_base: &Path,
@@ -31,7 +31,7 @@ impl SplitSessions {
         session_token: &str,
     ) -> Result<Option<crate::split_session::SplitAgentWiring>, Status> {
         let Some((codebase_daemon, codebase_session)) =
-            crate::connection_service::peer_session_answer::split_pairing(meta)
+            tddy_session_agents::peer_session_answer::split_pairing(meta)
         else {
             return Ok(None);
         };

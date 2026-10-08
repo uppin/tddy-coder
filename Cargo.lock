@@ -13421,6 +13421,7 @@ dependencies = [
  "tddy-session-activity",
  "tddy-session-agents",
  "tddy-session-files",
+ "tddy-session-split",
  "tddy-session-sync",
  "tddy-session-tool-client",
  "tddy-spawn",
@@ -13443,6 +13444,42 @@ dependencies = [
  "tonic 0.12.3",
  "tower 0.5.3",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-session-split"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "log",
+ "pretty_assertions",
+ "serde_json",
+ "tddy-cli-sessions",
+ "tddy-core",
+ "tddy-daemon-auth",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-daemon-sandbox",
+ "tddy-discovery",
+ "tddy-github",
+ "tddy-livekit",
+ "tddy-projects",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-sandbox-recipes",
+ "tddy-semantic-index",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-session-agents",
+ "tddy-session-files",
+ "tddy-task",
+ "tddy-worktree-service",
+ "tempfile",
+ "tokio",
  "uuid",
 ]
 

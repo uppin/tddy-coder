@@ -32,13 +32,13 @@ use tddy_service::proto::session_files::{
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use tddy_worktree_service::stream::MpscResultStream;
 
-use super::agent_host_callbacks::{AgentHostCallbacks, AgentRoster};
-use super::svc_materialize_staged_attachment::AttachmentState;
-use crate::cli_session_manager::CliSessionManager;
+use tddy_cli_sessions::cli_session_manager::CliSessionManager;
+use tddy_session_agents::agent_host_callbacks::{AgentHostCallbacks, AgentRoster};
+use tddy_session_files::svc_materialize_staged_attachment::AttachmentState;
 
 /// This daemon's `session_files.SessionFilesService` surface, as the split topic reads context
 /// through it: routed, so a read naming another daemon is served by that daemon.
-pub(crate) type SplitSessionFiles = dyn SessionFilesService<
+pub type SplitSessionFiles = dyn SessionFilesService<
     StreamContextManifestStream = MpscResultStream<ContextManifestEntry>,
     StreamReadContextFileStream = MpscResultStream<ContextFileChunk>,
     StreamReadContextFileBatchStream = MpscResultStream<ContextFileBatchChunk>,
@@ -47,7 +47,7 @@ pub(crate) type SplitSessionFiles = dyn SessionFilesService<
 
 /// This daemon's `session_agents.SessionAgentService` surface, as the split topic reads a roster
 /// through it.
-pub(crate) type SplitSessionAgents = dyn SessionAgentService<
+pub type SplitSessionAgents = dyn SessionAgentService<
     StreamSessionAgentsStream = MpscResultStream<SessionAgentRoster>,
     PromptAgentConversationStream = MpscResultStream<AgentConversationChunk>,
     ResumeAgentConversationStream = MpscResultStream<AgentConversationChunk>,
@@ -57,7 +57,7 @@ pub(crate) type SplitSessionAgents = dyn SessionAgentService<
 ///
 /// Implemented once, on the host, in wiring (`svc_agent_host_ports`).
 #[async_trait::async_trait]
-pub(crate) trait SplitHost: AgentHostCallbacks {
+pub trait SplitHost: AgentHostCallbacks {
     /// Start the `workspace` session that holds a sandboxed codebase's checkout: the host's own
     /// session start, reached from here because the launch topic sits above this one.
     async fn start_workspace_session(
@@ -89,22 +89,22 @@ pub(crate) trait SplitHost: AgentHostCallbacks {
 /// Built per call by the host (`DaemonSessionHost::split_sessions`). Every shared field is the
 /// `Arc` the host holds, so a clone of this talks to the registries, rooms and peers the host does.
 #[derive(Clone)]
-pub(crate) struct SplitSessions {
-    pub(crate) config: DaemonConfig,
-    pub(crate) tddy_data_dir: std::path::PathBuf,
-    pub(crate) staging_base_dir: std::path::PathBuf,
-    pub(crate) peer_routing: PeerRouting,
-    pub(crate) session_rooms: Arc<SessionRoomRegistry>,
-    pub(crate) workspace_sandboxes:
+pub struct SplitSessions {
+    pub config: DaemonConfig,
+    pub tddy_data_dir: std::path::PathBuf,
+    pub staging_base_dir: std::path::PathBuf,
+    pub peer_routing: PeerRouting,
+    pub session_rooms: Arc<SessionRoomRegistry>,
+    pub workspace_sandboxes:
         Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
-    pub(crate) workspace_sandbox_provisioner:
+    pub workspace_sandbox_provisioner:
         Arc<dyn tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxProvisioner>,
-    pub(crate) claude_cli_manager: Arc<CliSessionManager>,
-    pub(crate) session_tokens: Option<tddy_daemon_auth::SessionTokens>,
+    pub claude_cli_manager: Arc<CliSessionManager>,
+    pub session_tokens: Option<tddy_daemon_auth::SessionTokens>,
     /// The agent topic's handle: the split start resolves the request's agent defs through it.
-    pub(crate) agent_roster: AgentRoster,
+    pub agent_roster: AgentRoster,
     /// The host's capabilities that are not fields.
-    pub(crate) host: Arc<dyn SplitHost>,
+    pub host: Arc<dyn SplitHost>,
 }
 
 impl SplitSessions {

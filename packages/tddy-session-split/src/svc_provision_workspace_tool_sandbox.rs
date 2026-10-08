@@ -2,7 +2,7 @@ use tddy_rpc::Status;
 
 use std::path::Path;
 
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessions;
 
 impl SplitSessions {
     /// Build the jail a sandboxed `workspace` session runs its tools in, and register it under the
@@ -11,7 +11,7 @@ impl SplitSessions {
     ///
     /// A host with no sandbox backend, or a jail that will not come up, is an error — never a start
     /// that succeeds unconfined.
-    pub(crate) async fn provision_workspace_tool_sandbox(
+    pub async fn provision_workspace_tool_sandbox(
         &self,
         sessions_base: &Path,
         session_id: &str,

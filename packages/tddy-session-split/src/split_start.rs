@@ -1,4 +1,4 @@
-mod split_claude_cli_start;
+pub use crate::split_claude_cli_start;
 
 use tddy_core::session_lifecycle::validate_session_id_segment;
 
@@ -21,7 +21,7 @@ use crate::workspace_session;
 /// The distinction is not cosmetic: it decides whether the codebase daemon answering "I have no
 /// such session" proves the session was never created, or only that it did not exist yet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SplitStartFailure {
+pub enum SplitStartFailure {
     /// A verdict was reached within the deadline — the peer refused, answered something
     /// unusable, or the agent spawn on this host failed. Whatever the peer holds now is final.
     PeerAnswered,
@@ -33,7 +33,7 @@ pub(crate) enum SplitStartFailure {
 impl SplitStartFailure {
     /// Classify the error a forwarded start came back with. Only [`Code::DeadlineExceeded`] leaves
     /// the peer still working — every other status means it answered.
-    pub(crate) fn from_forward_error(status: &Status) -> Self {
+    pub fn from_forward_error(status: &Status) -> Self {
         if status.code == tddy_rpc::Code::DeadlineExceeded {
             Self::ForwardDeadline
         } else {
@@ -58,7 +58,7 @@ impl SplitStartFailure {
 /// Both halves of the placement are required. A daemon named with no session on it names a host but
 /// nothing that works in the checkout — see [`tddy_core::paired_agent`], which reads back
 /// what this writes and applies the same rule.
-pub(crate) fn resolve_split_agent_placement(
+pub fn resolve_split_agent_placement(
     split_agent: Option<&SplitAgentPlacement>,
     session_type: &str,
     is_agent_clone: bool,

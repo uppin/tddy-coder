@@ -41,3 +41,14 @@ About 35 items were widened `pub(crate)` → `pub`, all in `packages/tddy-sessio
   `seed_session_agent_roster`, `seeded_roster_records`, `start_hosted_agent_clone`, `tear_down_agent_clone`, `tear_down_every_agent_clone`,
   `unwind_agent_clone_claim`, `unwind_seeded_roster`, and fields `codebase_session_id`, `commissioned` of the moved records.
 The name-based rewrite also widened same-named `pub(crate)` fields/functions elsewhere in the receiver (`config`, `host`, `peer_routing` were already `pub`); check the diff for those.
+
+## Seen again in R8 (`tddy-session-split`, 16 modules)
+
+Widened by hand after the move, all `pub(crate)`/private → `pub` in `packages/tddy-session-split/src/` (plus `tddy-cli-sessions`), found by the same `cargo check` loop:
+- Types and aliases: `SplitSessions` and its 11 fields (`split_ports.rs`), `SplitHost`, `SplitSessionFiles`, `SplitSessionAgents`, `SplitStartFailure` (+ `from_forward_error`),
+  consts `NATIVE_FILESYSTEM_TOOLS` and `SPLIT_AGENT_TOKEN_TTL` (`split_session.rs`, plain private).
+- Functions and methods lifecycle still calls: `create_session_worktree`, `find_registered_project`, `project_repo_root`, `starting_session_metadata`, `index_session_worktree`,
+  `push_new_branch_to_origin_if_requested`, `resume_agent_and_recipe`, `workspace_sandbox_spec`, `write_claude_hooks_settings`, `write_initial_changeset`,
+  `resolve_split_agent_placement`, `delete_paired_codebase_session`, `provision_workspace_tool_sandbox`, `resume_split_wiring`, `split_context_from_codebase_host`,
+  `start_sandboxed_codebase_session`, `start_split_claude_cli_session`.
+- `tddy-cli-sessions/src/cli_session_manager.rs`: `mod pty_handle;` → `pub mod pty_handle;` (split names `cli_session_manager::pty_handle::PtyHandle`).

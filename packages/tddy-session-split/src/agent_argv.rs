@@ -2,7 +2,7 @@
 // the codebase daemon.
 use tddy_sandbox_recipes::PERMISSION_PROMPT_TOOL;
 
-use super::NATIVE_FILESYSTEM_TOOLS;
+use crate::split_session::NATIVE_FILESYSTEM_TOOLS;
 
 use std::collections::BTreeMap;
 

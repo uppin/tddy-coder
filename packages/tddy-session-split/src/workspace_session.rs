@@ -71,8 +71,8 @@ pub async fn start_workspace_session(
 
     // Resolve project registry.
     let (_, project) =
-        crate::connection_service::service_util::find_registered_project(tddy_data_dir, os_user, project_id)?;
-    let repo_root = crate::connection_service::service_util::project_repo_root(&project)?;
+        crate::service_util::find_registered_project(tddy_data_dir, os_user, project_id)?;
+    let repo_root = crate::service_util::project_repo_root(&project)?;
 
     // Resolved before anything is created: a branch intent this daemon cannot honour is a malformed
     // request, and a request refused after a session directory exists leaves the caller — which for
@@ -137,7 +137,7 @@ pub async fn start_workspace_session(
         // with and refuse the very withdrawal this placement exists to enforce.
         agent_daemon_instance_id: paired_agent.map(|a| a.daemon_instance_id.clone()),
         agent_session_id: paired_agent.map(|a| a.session_id.clone()),
-        ..crate::connection_service::service_util::starting_session_metadata(session_id, project_id, "workspace")
+        ..crate::service_util::starting_session_metadata(session_id, project_id, "workspace")
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;
@@ -195,8 +195,8 @@ pub async fn start_agent_clone_session(
         ));
     }
     let (_, project) =
-        crate::connection_service::service_util::find_registered_project(tddy_data_dir, os_user, project_id)?;
-    let repo_root = crate::connection_service::service_util::project_repo_root(&project)?;
+        crate::service_util::find_registered_project(tddy_data_dir, os_user, project_id)?;
+    let repo_root = crate::service_util::project_repo_root(&project)?;
 
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
@@ -241,7 +241,7 @@ pub async fn start_agent_clone_session(
 
     let meta = tddy_core::SessionMetadata {
         repo_path: Some(worktree_path.to_string_lossy().to_string()),
-        ..crate::connection_service::service_util::starting_session_metadata(session_id, project_id, "workspace")
+        ..crate::service_util::starting_session_metadata(session_id, project_id, "workspace")
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;
@@ -263,9 +263,9 @@ pub async fn start_agent_clone_session(
     }))
 }
 
-pub use crate::connection_service::peer_session_answer::resolve_worktree_root_for_session;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxSpec;
+pub use tddy_session_agents::peer_session_answer::resolve_worktree_root_for_session;
 
 /// What `session_id`'s jail is built over: the session's own directory, and the checkout that is
 /// the only part of this host inside it.
@@ -274,17 +274,16 @@ use tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxSpec;
 /// so a replacement confines exactly what the original did. Read from `.session.yaml` rather than
 /// taken from the caller, for the same reason every other routing decision about a jailed session
 /// is.
-pub(crate) fn workspace_sandbox_spec(
+pub fn workspace_sandbox_spec(
     sessions_base: &Path,
     session_id: &str,
 ) -> Result<WorkspaceSandboxSpec, Status> {
     Ok(WorkspaceSandboxSpec {
         session_id: session_id.to_string(),
         session_dir: unified_session_dir_path(sessions_base, session_id),
-        worktree_path:
-            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
-                sessions_base,
-                session_id,
-            )?,
+        worktree_path: tddy_session_agents::peer_session_answer::resolve_worktree_root_for_session(
+            sessions_base,
+            session_id,
+        )?,
     })
 }

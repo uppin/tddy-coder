@@ -18,9 +18,9 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use std::path::Path;
 
-use super::attached_initial_prompt::attached_initial_prompt;
-use crate::connection_service::daemon_hook_urls;
-use crate::connection_service::split_ports::SplitSessions;
+use crate::attached_initial_prompt::attached_initial_prompt;
+use crate::split_ports::SplitSessions;
+use tddy_daemon_kernel::daemon_hook_urls;
 
 /// What the split agent's claude-cli process is spawned with: its context dir, its tools' route
 /// back, and the request's model and prompt.
@@ -227,7 +227,13 @@ impl SplitSessions {
     async fn spawn_split_agent_process(
         &self,
         launch: SplitAgentProcess<'_>,
-    ) -> Result<(String, Arc<crate::claude_cli_session::PtyHandle>), Status> {
+    ) -> Result<
+        (
+            String,
+            Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>,
+        ),
+        Status,
+    > {
         let SplitAgentProcess {
             os_user,
             session_id,
@@ -240,7 +246,7 @@ impl SplitSessions {
             extra_args,
         } = launch;
         let hook_token = Uuid::new_v4().to_string();
-        crate::connection_service::service_util::write_claude_hooks_settings(
+        crate::service_util::write_claude_hooks_settings(
             &context_dir,
             &tddy_core::HookCommandParams {
                 tddy_tools_path: &tddy_tools_path.to_string_lossy(),
@@ -256,9 +262,7 @@ impl SplitSessions {
                 session_id,
                 context_dir,
                 req.model.trim(),
-                &crate::connection_service::service_util::resolve_start_session_claude_binary(
-                    &self.config,
-                ),
+                &crate::service_util::resolve_start_session_claude_binary(&self.config),
                 Some(initial_prompt.trim()).filter(|p| !p.is_empty()),
                 Some(req.permission_mode.trim()).filter(|m| !m.is_empty()),
                 req.dangerously_skip_permissions,
@@ -410,7 +414,7 @@ fn write_split_agent_metadata(
     req: &StartSessionRequest,
     session_dir: std::path::PathBuf,
     hook_token: String,
-    handle: &Arc<crate::claude_cli_session::PtyHandle>,
+    handle: &Arc<tddy_cli_sessions::cli_session_manager::pty_handle::PtyHandle>,
 ) -> Result<(), Status> {
     let meta = tddy_core::SessionMetadata {
         // No repository on this host — the pairing below is how the worktree is found.
@@ -420,7 +424,7 @@ fn write_split_agent_metadata(
         hook_token: Some(hook_token),
         codebase_daemon_instance_id: Some(codebase_instance_id.to_string()),
         codebase_session_id: Some(codebase_session_id.to_string()),
-        ..crate::connection_service::starting_session_metadata(
+        ..crate::service_util::starting_session_metadata(
             session_id,
             req.project_id.trim(),
             "claude-cli",
@@ -431,4 +435,4 @@ fn write_split_agent_metadata(
     Ok(())
 }
 
-mod svc_paired_codebase_teardown;
+pub use crate::svc_paired_codebase_teardown;

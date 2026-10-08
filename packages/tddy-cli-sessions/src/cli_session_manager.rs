@@ -21,7 +21,7 @@ use tddy_pty::PtyRegistry;
 /// always addressable under this id, while started shell terminals receive fresh unique ids.
 pub const MAIN_TERMINAL_ID: &str = "main";
 
-mod pty_handle;
+pub mod pty_handle;
 pub use pty_handle::*;
 
 /// The outcome of a [`CliSessionManager::claim_control`] call.

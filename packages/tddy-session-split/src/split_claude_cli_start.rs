@@ -1,7 +1,7 @@
-use crate::connection_service::split_start::SplitStartFailure;
+use crate::split_start::SplitStartFailure;
 
-use crate::connection_service::agent_roster;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_session_agents::agent_roster;
 
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ use tddy_rpc::Response;
 
 use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessions;
 use tddy_service::proto::session::StartSessionRequest;
 
 impl SplitSessions {
@@ -27,7 +27,7 @@ impl SplitSessions {
     /// is asked to create anything, and any failure after it has done so tears its session back down.
     /// A half-built split session would strand a worktree on a host with no session left to reclaim
     /// it.
-    pub(crate) async fn start_split_claude_cli_session(
+    pub async fn start_split_claude_cli_session(
         &self,
         os_user: &str,
         codebase_instance_id: &str,

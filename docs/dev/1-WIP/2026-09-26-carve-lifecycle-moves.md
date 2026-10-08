@@ -229,7 +229,7 @@ per-crate baseline → B-checks for that receiver.
 - [x] **R7 `tddy-cli-sessions`** (new, D4): `cli_session_manager` (anchor) with its 9 children and
   `session_toolcall` (`move_cluster_to_crate`); facade for `tddy-desktop`'s
   `tddy_session_lifecycle::cli_session_manager::CliSessionManager`
-- [ ] **R8 `tddy-session-split`** (new): `split_ports`, the T4 cluster, `service_util`, `workspace_session`;
+- [x] **R8 `tddy-session-split`** (new): `split_ports`, the T4 cluster, `service_util`, `workspace_session`;
   facades for `resolve_tddy_tools_path`, `service_util`'s two `pub use`, `workspace_session`
 - [ ] **R9 `tddy-agent-launch`** (new): `launch_ports`, the T1/T9/T1c cluster; facades for
   `effective_spawn_branch`, `connection_service::*` and the rest daemon-rpc names
@@ -856,6 +856,22 @@ first are what the jail suites need; without them 13 more tests fail with a jail
 - **After:** lifecycle **647** passed / the same 22 failed / 1 ignored, `tddy-cli-sessions` **9** passed (the PTY runtime's inline tests moved): sum 656 = lifecycle before 656. clippy `--all-targets -D warnings`
   and fmt clean; `cargo check --all-targets` clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty (`tddy-desktop` resolves `cli_session_manager::CliSessionManager` through the facade; it builds on CI only).
   The crate's edges are the approved ten plus the external crates; none reaches lifecycle.
+
+### R8: `tddy-session-split` (done; new crate)
+
+- **By hand (needed by the engine):** the crate skeleton (`Cargo.toml`, `src/lib.rs`, a `members` line).
+- **Engine, own commit:** `reparent_module` (`reexport: outside`) of `svc_resume_split_wiring` out of the T1 module `svc_resume_claude_cli_session/`. No hand edit.
+- **Hand edits before the move (own commit; imports and visibility only):** itemised in the section "R8" of [`…hand-split-grouped-use-lines-before-the-agents-cluster-move`](../todo/2026-10-08-hand-split-grouped-use-lines-before-the-agents-cluster-move.md):
+  one `use` per path in `svc_start_sandboxed_codebase_session.rs`; `AttachmentProgressSink`, `SplitStartFailure`, `AttachmentState` and `service_util` items named through their defining crate or module;
+  `attached_initial_prompt`: `pub(in crate::connection_service)` → `pub`; `mod service_util;` → `pub mod service_util;`.
+- **Plan correction (not a hand edit):** `hooks_and_urls` was **left out**. The changeset assigns it to T4, but every user of it is a launch (T1) module and `StartingClaudeCliSession` names `stack_parent::SpawnStackParent` (T9), so it moves with R9; moving it here would make split name launch.
+- **Engine, the cluster:** one `move_cluster_to_crate` of 17 modules (anchor `split_ports`; `svc_spawn_split_agent` + `svc_paired_codebase_teardown`, `split_start` + `split_claude_cli_start`, `svc_split_context_from_codebase_host`,
+  `svc_start_sandboxed_codebase_session`, `svc_resolve_tddy_tools_path`, `attached_initial_prompt`, `service_util`, `svc_provision_workspace_tool_sandbox`, `svc_resume_split_wiring`, `split_session` + `agent_argv` + `agent_credentials`,
+  `workspace_session`), `reexport: glob`, 37 files; children named in `also` were flattened to root siblings. The manifest gained exactly the approved edges (cli-sessions, agents, files, activity, livekit, kernel, daemon-sandbox, daemon-auth, github, livekit, core, projects, worktree-service, semantic-index, sandbox, sandbox-recipes, discovery, task, rpc, service); no launch, no lifecycle.
+- **Hand edits after the move (build corrections):** the three self-referencing re-exports `tddy_session_split::` → `crate::`; three body paths `crate::connection_service::…starting_session_metadata` → `crate::service_util::…`; about 35 items `pub(crate)`/private → `pub` and `mod pty_handle;` → `pub mod pty_handle;` in `tddy-cli-sessions`; `cargo fmt`.
+  Filed: [`…cluster-move-misses-body-paths-and-writes-self-referencing-test-reexports`](../todo/2026-10-08-restructure-cluster-move-misses-body-paths-and-writes-self-referencing-test-reexports.md), [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md).
+- **After:** lifecycle **610** passed / the same 22 failed / 1 ignored, `tddy-session-split` **37**, `tddy-cli-sessions` 9: sum 656 as before (647 + 9). clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean, diff empty;
+  `cargo tree -p tddy-session-split`: no `tddy-agent-launch`, no lifecycle.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 

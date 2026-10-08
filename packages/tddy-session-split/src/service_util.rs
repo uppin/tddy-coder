@@ -15,7 +15,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 /// A missing embedder or a failed index is an error — no unindexed fallback — so a start that asked
 /// for the index fails rather than coming up without it. The index's env pair, when a caller needs
 /// one, is `tddy_semantic_index::semantic_index::semantic_index_env(session_dir)`.
-pub(crate) async fn index_session_worktree(
+pub async fn index_session_worktree(
     tddy_data_dir: &Path,
     task_registry: &tddy_task::TaskRegistry,
     session_id: &str,
@@ -40,7 +40,7 @@ pub(crate) async fn index_session_worktree(
 }
 
 /// A project registered for `os_user`, and the projects directory it was found in.
-pub(crate) fn find_registered_project(
+pub fn find_registered_project(
     tddy_data_dir: &Path,
     os_user: &str,
     project_id: &str,
@@ -61,7 +61,7 @@ pub(crate) fn find_registered_project(
 }
 
 /// A registered project's main checkout, which must exist on this host.
-pub(crate) fn project_repo_root(
+pub fn project_repo_root(
     project: &tddy_projects::project_storage::ProjectData,
 ) -> Result<std::path::PathBuf, Status> {
     let repo_root = std::path::PathBuf::from(&project.main_repo_path);
@@ -76,7 +76,7 @@ pub(crate) fn project_repo_root(
 /// The `.session.yaml` of a session that is starting now: active, created and updated this instant,
 /// and every optional field unset. A caller names what its session type records on top, with struct
 /// update syntax, so the fields that differ between session types are the only ones it spells out.
-pub(crate) fn starting_session_metadata(
+pub fn starting_session_metadata(
     session_id: &str,
     project_id: &str,
     session_type: &str,
@@ -119,7 +119,7 @@ pub(crate) fn starting_session_metadata(
 /// recipe. A managed session also seeds the recipe's start goal, so `changeset.yaml` reflects the
 /// workflow position immediately; the per-session controller advances it from there on
 /// `transition`. Returns the intent, which decides whether the new branch is pushed.
-pub(crate) fn write_initial_changeset(
+pub fn write_initial_changeset(
     session_id: &str,
     branch: &tddy_worktree_service::branch_intent::BranchIntentRequest<'_>,
     policy: tddy_worktree_service::branch_intent::BranchIntentPolicy,
@@ -154,7 +154,7 @@ pub(crate) fn write_initial_changeset(
 
 /// Cut a session's git worktree from `repo_root` into `session_dir` (blocking: a fetch plus
 /// `git worktree add`), based on `base_ref` when there is one, under the spawn deadline.
-pub(crate) async fn create_session_worktree(
+pub async fn create_session_worktree(
     timeout: Duration,
     op_label: &'static str,
     repo_root: &Path,
@@ -240,7 +240,7 @@ pub async fn await_supervised_with_timeout<T>(
 /// (`<remote>/<branch>`) — falling back to main-worktree detection then `origin` — runs
 /// `git push -u <remote> <branch>` from the worktree, and records `Changeset.remote_pushed = true`.
 /// A push failure fails the session start — no silent fallback.
-pub(crate) async fn push_new_branch_to_origin_if_requested(
+pub async fn push_new_branch_to_origin_if_requested(
     create_remote_branch: bool,
     intent: BranchWorktreeIntent,
     session_dir: &Path,
@@ -284,7 +284,7 @@ pub(crate) async fn push_new_branch_to_origin_if_requested(
 /// Derives the agent and recipe to relaunch a resumed session with, from its persisted
 /// `.session.yaml`. Empty/whitespace-only values are treated as absent (`None`), mirroring the
 /// spawner's trimming, so a legacy session with no persisted agent/recipe restores as `None`.
-pub(crate) fn resume_agent_and_recipe(
+pub fn resume_agent_and_recipe(
     metadata: &tddy_core::SessionMetadata,
 ) -> (Option<String>, Option<String>) {
     (
@@ -298,7 +298,7 @@ pub(crate) fn resume_agent_and_recipe(
 ///
 /// Warn-and-continue: a session without hooks reports no status, which is worse than a session that
 /// never started only if the operator cannot see it at all, and it still can.
-pub(crate) fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCommandParams<'_>) {
+pub fn write_claude_hooks_settings(cwd: &Path, params: &tddy_core::HookCommandParams<'_>) {
     let settings = tddy_core::build_claude_hooks_settings(params);
     let claude_dir = cwd.join(".claude");
     if let Err(e) = std::fs::create_dir_all(&claude_dir).and_then(|_| {

@@ -15,12 +15,12 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::{StartSessionRequest, StartSessionResponse};
 use uuid::Uuid;
 
-use super::agent_roster;
-use tddy_session_files::attachment_progress::AttachmentProgressSink;
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessions;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::user_paths::{projects_path_for_user, sessions_base_for_user};
 use tddy_session_activity::session_deletion;
+use tddy_session_agents::agent_roster;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 impl SplitSessions {
     /// Start a session whose **codebase** is jailed on this daemon and whose **agent** is not.
@@ -34,7 +34,7 @@ impl SplitSessions {
     /// before anything is created, and a failed agent spawn tears the workspace session — and with
     /// it the jail and the worktree — back down. A half-built session strands a jailed checkout
     /// with no agent left to reclaim it, and a `tddy-sandbox-runner` holding it open.
-    pub(crate) async fn start_sandboxed_codebase_session(
+    pub async fn start_sandboxed_codebase_session(
         &self,
         os_user: &str,
         req: &StartSessionRequest,
@@ -227,7 +227,7 @@ impl SplitSessions {
             .await?;
 
         let remote = crate::split_session::colocated_jail_tool_env(
-            &crate::connection_service::daemon_hook_urls::local_daemon_hook_url(&self.config),
+            &tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(&self.config),
             checkout_session_id,
             &self.agent_session_token_for(session_token)?,
             self.agent_tool_socket_for_embedded_host(),

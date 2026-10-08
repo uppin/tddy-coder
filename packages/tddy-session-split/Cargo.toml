@@ -5,3 +5,35 @@ edition = "2021"
 description = "Split and sandboxed-codebase sessions: the paired agent/codebase start, resume and teardown"
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+futures-util = "0.3"
+log = "0.4"
+serde_json = "1"
+tddy-cli-sessions = { path = "../tddy-cli-sessions" }
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-auth = { path = "../tddy-daemon-auth" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-discovery = { path = "../tddy-discovery" }
+tddy-github = { path = "../tddy-github" }
+tddy-livekit = { path = "../tddy-livekit" }
+tddy-projects = { path = "../tddy-projects" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
+tddy-semantic-index = { path = "../tddy-semantic-index" }
+tddy-service = { path = "../tddy-service" }
+tddy-session-activity = { path = "../tddy-session-activity" }
+tddy-session-agents = { path = "../tddy-session-agents" }
+tddy-session-files = { path = "../tddy-session-files" }
+tddy-task = { path = "../tddy-task" }
+tddy-worktree-service = { path = "../tddy-worktree-service" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = "3"

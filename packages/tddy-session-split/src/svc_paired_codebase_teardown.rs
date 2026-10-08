@@ -8,12 +8,12 @@ use tddy_rpc::Status;
 
 use std::path::Path;
 
-use crate::connection_service::peer_session_answer::peer_has_no_such_session;
+use tddy_session_agents::peer_session_answer::peer_has_no_such_session;
 
 use tddy_service::proto::session::DeleteSessionRequest;
 
-use crate::connection_service::split_start::SplitStartFailure;
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessions;
+use crate::split_start::SplitStartFailure;
 
 impl SplitSessions {
     /// Delete the `workspace` session holding a split session's worktree on `codebase_instance_id`.
@@ -75,7 +75,7 @@ impl SplitSessions {
     /// Unlike the failed-start teardown, a failure here is returned: `DeleteSession` succeeding
     /// while the worktree survives on another host is exactly the silent leak this pairing exists to
     /// prevent, so the message names the session left behind and where.
-    pub(crate) async fn delete_paired_codebase_session(
+    pub async fn delete_paired_codebase_session(
         &self,
         sessions_base: &Path,
         session_id: &str,
@@ -86,7 +86,7 @@ impl SplitSessions {
             return Ok(());
         };
         let Some((codebase_daemon, codebase_session)) =
-            crate::connection_service::peer_session_answer::split_pairing(&meta)
+            tddy_session_agents::peer_session_answer::split_pairing(&meta)
         else {
             return Ok(());
         };

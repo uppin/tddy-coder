@@ -4,7 +4,7 @@ use tddy_github::SessionTokenError;
 
 use tddy_github::GitHubUser;
 
-use super::SPLIT_AGENT_TOKEN_TTL;
+use crate::split_session::SPLIT_AGENT_TOKEN_TTL;
 
 use tddy_rpc::Status;
 

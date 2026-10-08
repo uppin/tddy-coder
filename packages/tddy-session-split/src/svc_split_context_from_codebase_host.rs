@@ -12,8 +12,8 @@ use tddy_worktree_service::stream::MpscResultStream;
 
 use tddy_rpc::Status;
 
-use super::split_ports::SplitSessionFiles;
-use crate::connection_service::split_ports::SplitSessions;
+use crate::split_ports::SplitSessionFiles;
+use crate::split_ports::SplitSessions;
 
 /// Every frame of one served context read, as the single value the split path below needs.
 ///
@@ -237,7 +237,7 @@ impl SplitSessions {
             .into_inner())
     }
 
-    pub(crate) async fn split_context_from_codebase_host(
+    pub async fn split_context_from_codebase_host(
         &self,
         session_token: &str,
         codebase_session: &str,

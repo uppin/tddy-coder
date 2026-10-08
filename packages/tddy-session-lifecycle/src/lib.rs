@@ -131,7 +131,7 @@ pub use tddy_session_agents::{
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
-pub mod split_session;
+pub use tddy_session_split::{split_session, workspace_session};
 pub use tddy_telegram::telegram_github_link;
 pub use tddy_telegram::telegram_tracked_session;
 pub mod terminal_session_adapter;
@@ -140,7 +140,6 @@ pub mod pr_stack_rpc;
 pub use pr_stack_rpc::{build_pr_stack_entry, PrStackHandler, PrStackServiceImpl};
 pub mod rpc_families;
 pub use rpc_families::DaemonRpcFamilies;
-pub mod workspace_session;
 
 // Re-export the shared tool engine so legacy `crate::tool_engine::...` references inside the
 // daemon keep resolving after the extraction into the `tddy-tool-engine` crate.
