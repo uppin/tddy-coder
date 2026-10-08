@@ -1,4 +1,4 @@
-use tddy_daemon_kernel::config::DaemonConfig;
+use crate::config::DaemonConfig;
 
 /// Where a hook command reaches this daemon when nothing is configured: its own web listener on
 /// loopback.
@@ -28,7 +28,7 @@ pub fn advertise_daemon_url(config: &DaemonConfig) -> String {
         .listen
         .advertise_url
         .as_deref()
-        .and_then(tddy_daemon_kernel::trim_to_option)
+        .and_then(crate::trim_to_option)
         .unwrap_or_else(|| local_daemon_hook_url(config))
 }
 

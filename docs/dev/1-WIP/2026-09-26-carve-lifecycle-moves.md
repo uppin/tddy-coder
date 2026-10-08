@@ -215,7 +215,7 @@ per-crate baseline → B-checks for that receiver.
 
 - [x] **R0 approvals**: the edge table, D4, D5, D7, D12, D13, D14 and `test_util` decided; baselines
   recorded on 16e's tip for lifecycle and every receiver
-- [~] **R1 `tddy-daemon-kernel`** (`agent_list_mapping` done; `daemon_hook_urls` refused, see Validation results): `agent_list_mapping`, `daemon_urls` (`move_module_to_crate`); zero new edges
+- [x] **R1 `tddy-daemon-kernel`** (`daemon_hook_urls` after a hand pre-move widening, see Validation results): `agent_list_mapping`, `daemon_urls` (`move_module_to_crate`); zero new edges
 - [ ] **R2 `tddy-daemon-livekit`**: T7 (the admission-token module, the `resolve_os_user` module; each
   moved individually, nested under wiring's builders) and `placement` (`move_module_to_crate`); zero new edges
 - [ ] **R3 `tddy-session-files`**: T8's two modules; new edge `tddy-session-files` → `tddy-daemon-livekit`
@@ -754,7 +754,7 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   (M0.4, engine `reparent_module`, #584). `daemon_urls` is `connection_service/daemon_hook_urls.rs` and is declared
   `pub(crate)`.
 
-### R1: `tddy-daemon-kernel` (partly applied; stopped on an engine refusal)
+### R1: `tddy-daemon-kernel` (done; second module after a hand pre-move edit)
 
 - **Applied:** `agent_list_mapping` (`move_module_to_crate`, `reexport: glob`, one operation). Lifecycle's `lib.rs` now has
   `pub use tddy_daemon_kernel::{agent_list_mapping, config};`; no consumer is edited (`git diff` over `tddy-daemon-rpc`,
@@ -768,6 +768,13 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   both is 784, as before. `cargo check -p tddy-daemon-rpc -p tddy-daemon -p tddy-telegram-control -p tddy-model-registry
   --all-targets` clean; `cargo clippy -p tddy-daemon-kernel -p tddy-session-lifecycle -- -D warnings` clean; `cargo fmt --check`
   clean. Zero new crate edges (`tddy-daemon-kernel` already depends on `tddy-discovery` and `tddy-service`).
+- **Second module, after the developer's 2026-10-08 ruling allowing hand workarounds:** `daemon_hook_urls`.
+  **Hand edit (own commit, before the move):** `connection_service.rs:568` `pub(crate) mod daemon_hook_urls;` →
+  `pub mod daemon_hook_urls;` (visibility only). Filed: [`2026-10-08-hand-widened-mod-declarations-before-engine-moves`](../todo/2026-10-08-hand-widened-mod-declarations-before-engine-moves.md).
+  Then the engine move (`glob`): facade `pub use tddy_daemon_kernel::daemon_hook_urls;`, two re-rooted paths in the moved file,
+  **no build correction needed**. After: `tddy-session-lifecycle` 658 passed / the same 22 failed / 1 ignored (doc), `tddy-daemon-kernel`
+  126 passed; sum 784 as before; doc tests ran (R1's earlier doc-test gap closed); clippy `--all-targets -D warnings` and fmt clean;
+  consumers' diff empty.
 - **Engine output worth a reviewer's eye:** the apply's `rustfmt` pass also reordered unrelated `pub use` lines in
   lifecycle's `lib.rs` (17-line diff for one facade line). Filed:
   [`2026-10-08-restructure-apply-rustfmt-reorders-unrelated-reexports-in-the-origin-root`](../todo/2026-10-08-restructure-apply-rustfmt-reorders-unrelated-reexports-in-the-origin-root.md).

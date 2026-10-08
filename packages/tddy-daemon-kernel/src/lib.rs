@@ -62,6 +62,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 pub mod agent_list_mapping;
 pub mod agent_tool_socket;
 pub mod config;
+pub mod daemon_hook_urls;
 pub mod daemon_identity;
 pub mod first_login_enrolment;
 pub mod live_users;
