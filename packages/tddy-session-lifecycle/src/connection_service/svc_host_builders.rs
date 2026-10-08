@@ -237,6 +237,18 @@ impl DaemonSessionHost {
         self
     }
 
+    /// Serve the per-OS-user host-session sockets `tddy-supervisor` created and handed this daemon
+    /// (builder), instead of binding them here: an unprivileged daemon cannot give a socket to
+    /// another OS user. Call it after [`Self::with_host_session_stop_watch_interval`], which
+    /// replaces the sockets.
+    pub fn with_inherited_host_session_sockets(
+        self,
+        sockets: Vec<super::inherited_host_sockets::InheritedHostSocket>,
+    ) -> Self {
+        self.host_session_sockets.adopt_inherited(sockets);
+        self
+    }
+
     /// Sign agents' credentials with this daemon's key and verify callers' through its key
     /// directory (builder). Pass the very value the daemon's auth entries were built with, so the
     /// credentials minted here are ones every gate on the fleet already trusts.

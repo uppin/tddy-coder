@@ -699,26 +699,42 @@ refuse. Telegram never wired `spawn_conversation`, so it is not a regression.
 
 ### Still open
 
-- **A daemon that cannot `chown` to the session's OS user gets no socket for that user — NOT FIXED, blocked on a design
-  decision** (D3). That is the documented production topology: `tddy-supervisor` (root) runs `tddy-daemon` as an
-  **unprivileged** child and sessions run as other users, so the daemon cannot give a socket to them; its sessions start
-  with no `--host-session-socket` — no token and no `spawn_conversation`, which worked over the old `0o777` socket. The
-  per-session precedent does not transfer: `agent_tool_socket` (embedded daemon) applies **no** permissions at all, and
-  `write_agent_def_file` is written by the *spawning* process, which is the privileged one under the supervisor. The two
-  supervisor precedents that do exist are (a) the supervisor binds a service socket **as root** and hands it to the
-  daemon as fd 3 with a `group`/`mode` grant, declared per service in `supervisor.yaml` — one socket per service, not per
-  OS user, and fd passing is not part of the spawn request surface; and (b) `SpawnSession` carries a path/`env` the
-  supervisor already gates by `spawn_policy`. A directory the supervisor creates *user-owned 0700* (the shape the brief
-  suggested) would be unusable: the unprivileged daemon could not bind inside it. Every safe shape needs the root
-  supervisor to perform a **new privileged filesystem operation on a path the daemon names** (e.g. a `SpawnSession`
-  field asking it to `fchown` a daemon-created `0600` socket to the session user, gated by `allowed_session_users` and a
-  socket-owned-by-caller check), or per-OS-user sockets declared in `supervisor.yaml`. Either widens what a compromised
-  daemon can ask root for — the line `supervisor.yaml` calls *the ENTIRE privilege surface of the host* — and is the
-  maintainer's decision, so nothing was added. What *was* done: the refusal now says exactly this (*not privileged … as
-  when it runs as tddy-supervisor's unprivileged child*) and still removes everything it created; no wider mode is ever
-  used. **Who can connect today:** a daemon able to `chown` (root, or the session user itself): only that OS user and the
-  daemon (`0700` directory, `0600` socket, both owned by the user; root can always connect). A daemon that cannot: nobody —
-  there is no socket.
+- **A daemon that cannot `chown` to the session's OS user — per-OS-user sockets declared in `supervisor.yaml` (D3, option 2;
+  built, not proven under a real root supervisor).** Under `tddy-supervisor` the daemon is an unprivileged child and cannot
+  give a socket to a session user. `supervisor.yaml` now declares them: a service lists `host_sockets: [{user, path}]` (needs
+  the service's own `socket:` — fd 3 stays that), each `user` must be in `spawn_policy.allowed_session_users` (rejected at
+  load otherwise), not `root`, one per user, one directory per socket that nothing else shares or lives inside, at most 15.
+  At startup the root supervisor makes each socket (`tddy-supervisor/src/host_socket.rs`): every directory above must be
+  writable by root alone (checked); the user's directory is opened `O_NOFOLLOW|O_DIRECTORY`, taken back to root `0700`, the
+  stale socket removed (only a socket ever is), the socket bound, set `0600`, `lchown`ed to the user, and **only then** the
+  directory `fchown`ed to the user — so nothing the user controls is in the path while root works. It then hands the
+  listeners to the daemon after its own: fd 3 is the service socket, fd 4… the host sockets in declaration order, announced as
+  `LISTEN_FDS=<n>` and `LISTEN_FDNAMES=connection:host-session.<user>:…` (`tddy-supervisor/src/handover.rs`; each listener is
+  copied above the slots before any is placed, so one listener's descriptor can never be another's slot; the supervisor keeps
+  descriptors 3–18 occupied so nothing it opens lands on one). The daemon reads the names **before** adopting its own listener
+  clears `LISTEN_*` (`runtime.rs`), and adopts a descriptor only if it is an open, listening (Linux) unix socket bound to a
+  path whose file is a socket **owned by the user it is named for and with no group/other bits**; it sets close-on-exec and
+  serves it where it is (`inherited_host_sockets.rs`, `HostSessionSockets::adopt_inherited`). It never binds, replaces or
+  removes an inherited socket: if its file vanishes it says the supervisor must be restarted. An OS user **not** declared
+  keeps the explicit refusal, reworded to name `host_sockets:` in `supervisor.yaml`; the self-binding path is unchanged for
+  a daemon that *can* chown (root, same user, embedded, desktop).
+  **Who can connect:** the declared OS user, and root — the socket and its directory are owned by that user, `0600` and
+  `0700`; connecting needs search on the directory and write on the socket. The daemon is **not** among them and does not
+  need to be: a file's mode is checked at `connect`, never at `accept`, so the process holding the listener is unaffected.
+  Another session user, the daemon's own account, and other groups are all refused by the kernel; within the user's socket,
+  `HostSessionService` still refuses a session registered for a different OS user.
+  **Not provable here (macOS, no root, no second account):** every test runs as the current user, so the `chown`/`fchown`
+  to a *different* uid, the daemon (a different uid) accepting on a socket it does not own, and the real fork/exec fd handover
+  through a root supervisor were not exercised. The "directory handed to the user last" step survives a mutation
+  (removing it fails no test) for exactly that reason. `tests/supervisor_socket_handoff.rs` carries three
+  Linux-only integration tests (socket owner/mode, fd 4 + `LISTEN_FDNAMES` seen by a real child, no host socket → no fd 4);
+  they compile (checked with the Linux gate lifted) but were **not run** — spawning a managed service needs Linux
+  (`PR_SET_PDEATHSIG`). Needs one run of a root supervisor with two accounts before this is called done.
+  **Operator consequences:** a supervised host must list each session user under `host_sockets:` (and
+  `allowed_session_users`) — see `supervisor.yaml.production`; a user left out still gets no host-session socket (no token,
+  no `spawn_conversation`) and the refusal says which setting to add. The socket path comes from the supervisor, not the
+  daemon's data dir, and must sit under directories only root can write (e.g. `/run/tddy-host-sessions/<user>/host.sock`); a
+  tool session running in a sandbox that does not bind-mount that path cannot reach it (unverified).
 - **The socket path lives under the data dir** (`<data dir>/run/<os user>/host.sock`), not under the session's own
   directory: that nests too deep for AF_UNIX's ~104-byte limit on a real checkout path (the overflow
   `agent_tool_socket_path` was digested to avoid). A data dir deep enough that the path exceeds 100 bytes is refused
@@ -1071,7 +1087,7 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 
 - [x] A commit carries the assigned account's name and email — `a_commit_made_in_a_session_is_authored_by_the_account_the_project_assigns`, `a_commit_made_in_a_session_is_committed_by_the_same_account_that_authored_it` (`session_git_identity_acceptance.rs`), and `an_assigned_project_gives_the_session_its_pairs_and_a_handler_for_the_same_account` / `tool_session_git_identity.rs` for the pairs reaching the agent's env; ⚠ no test runs a real `git commit` under them
 - [x] A tool session's agent obtains the assigned account's token — `a_tools_token_request_reaches_the_assigned_account_through_the_coder_and_the_host_socket`
-- [x] Tool-session sockets are owner-only (0600 in 0700) and per OS user — `the_socket_a_session_is_given_is_owner_only_in_an_owner_only_directory`, `host_session_socket_tests`; ⚠ **only where the daemon can `chown`** — under `tddy-supervisor` it cannot and there is no socket (see *Still open*)
+- [x] Tool-session sockets are owner-only (0600 in 0700) and per OS user — `the_socket_a_session_is_given_is_owner_only_in_an_owner_only_directory`, `host_session_socket_tests`; where the daemon cannot `chown` (`tddy-supervisor`) the supervisor makes the user's socket the same shape (`host_socket::tests::creates_a_socket_owned_by_the_user_and_closed_to_everybody_else`) — ⚠ ownership by a *different* uid is unproven here (see *Still open*)
 - [x] A GitHub API call uses the assigned account's token — `a_rest_call_carries_the_token_the_session_host_returned` (the request's `Authorization: Bearer` is the token `request_github_token_from_session()` returned from a fake host over a real socket), with `a_refusing_host_means_no_request_reaches_the_api`; that the host answers the *assigned* account's token is `a_tools_token_request_reaches_the_assigned_account_through_the_coder_and_the_host_socket`
 - [x] Two projects assigned different accounts act as different GitHub users — `two_projects_on_one_daemon_act_as_different_github_users`
 - [x] Token and identity always come from **one** resolution — `the_commit_pairs_and_the_token_derive_from_one_record`, `a_start_refused_because_the_vault_was_locked_keeps_refusing_after_it_is_unlocked`, `a_start_refused_for_an_unheld_account_keeps_refusing_once_the_account_arrives`, `the_token_stays_the_started_accounts_when_a_second_account_appears`, `the_started_accounts_token_is_never_replaced_by_another_accounts_when_it_is_removed`; `the_token_and_the_git_identity_name_the_same_account` pins the one function
@@ -1084,7 +1100,7 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 - [x] WIP snapshot commits are still authored by `tddy-daemon` — `a_work_in_progress_snapshot_is_still_signed_by_the_daemon_itself`
 - [x] `FileGitHubTokenStore` has no readers left — `login_time_token_store_is_retired.rs` (`the_session_path_no_longer_reaches_for_the_operator_s_login_time_github_token`, `the_authentication_service_no_longer_retains_a_github_token_beside_the_vault`, `nothing_in_the_tree_still_declares_a_login_keyed_github_token_store`)
 - [x] A stopped session stops being answered, a restarted daemon's running session is told to resume — `a_tool_session_whose_process_has_stopped_is_no_longer_answered`, `after_a_daemon_restart_a_running_session_is_told_to_resume_and_then_is_answered`
-- [ ] A session of an OS user the daemon cannot `chown` to has the host-session socket — **not met**: blocked on a supervisor design decision, see *Still open*
+- [ ] A session of an OS user the daemon cannot `chown` to has the host-session socket — **built and unit-proven with the current user standing in, not met until run under a root supervisor** (an inherited socket is adopted, served and answers a token; an undeclared user is refused naming `host_sockets:`; see *Still open* for exactly what is unprovable here)
 
 ## TODO
 

@@ -15,6 +15,12 @@
 //! socket is created inside it, so whatever mode the socket is born with, nobody else can reach it;
 //! ownership moves last, directory after socket.
 //!
+//! **Under `tddy-supervisor`** the daemon is unprivileged and cannot make that `chown`. A user listed
+//! under `host_sockets:` in `supervisor.yaml` instead has their socket created by the root supervisor
+//! and handed to the daemon as an inherited listener (see [`super::inherited_host_sockets`]): the
+//! daemon serves it where it is, and never binds, replaces or removes it. A user who is not listed
+//! gets the refusal below, which names the setting to add.
+//!
 //! **Lifetime.** Bound lazily by the first session that needs it, kept for the daemon's lifetime and
 //! bound again by the next session after a restart. A stale file a dead daemon left is replaced only
 //! after checking it is a socket, ours (or the target user's), and that nothing listens on it; a
@@ -33,6 +39,8 @@ use tddy_host_service::host_session_service::{
     HostSessionRegistry, HostSessionService, SessionProbe,
 };
 use tokio::task::JoinHandle;
+
+use super::inherited_host_sockets::InheritedHostSocket;
 
 /// Longest socket path accepted. `sun_path` is 104 bytes on macOS and 108 on Linux, NUL included.
 const MAX_SOCKET_PATH_BYTES: usize = 100;
@@ -85,6 +93,9 @@ const DEFAULT_STOP_WATCH_INTERVAL: std::time::Duration = std::time::Duration::fr
 pub(crate) struct HostSessionSockets {
     registry: Arc<HostSessionRegistry>,
     servers: tokio::sync::Mutex<HashMap<String, BoundServer>>,
+    /// Sockets the supervisor created, by OS user: `Some` until first served, `None` after — the
+    /// key stays so a user the supervisor serves is never bound by this daemon itself.
+    inherited: std::sync::Mutex<HashMap<String, Option<InheritedHostSocket>>>,
     stop_watch_interval: std::time::Duration,
 }
 
@@ -100,6 +111,7 @@ impl HostSessionSockets {
         Self {
             registry: Arc::default(),
             servers: tokio::sync::Mutex::default(),
+            inherited: std::sync::Mutex::default(),
             stop_watch_interval,
         }
     }
@@ -138,6 +150,14 @@ impl HostSessionSockets {
         });
     }
 
+    /// Serve these supervisor-created sockets for their users from now on (served on first use).
+    pub(crate) fn adopt_inherited(&self, sockets: Vec<InheritedHostSocket>) {
+        let mut inherited = self.inherited.lock().expect("inherited sockets lock");
+        for socket in sockets {
+            inherited.insert(socket.os_user.clone(), Some(socket));
+        }
+    }
+
     /// The sessions answered on these sockets: registered at a session's start or resume, removed
     /// when it is deleted.
     pub(crate) fn registry(&self) -> &Arc<HostSessionRegistry> {
@@ -166,8 +186,28 @@ impl HostSessionSockets {
             stale.task.abort();
             let _ = (&mut stale.task).await;
         }
-        let path = host_session_socket_path(data_dir, os_user)?;
-        let listener = bind_owner_only(&path, os_user)?;
+        let inherited = {
+            let mut inherited = self.inherited.lock().expect("inherited sockets lock");
+            inherited.get_mut(os_user).map(Option::take)
+        };
+        let (path, listener) = match inherited {
+            Some(Some(socket)) => {
+                socket
+                    .listener
+                    .set_nonblocking(true)
+                    .context("make the inherited socket non-blocking")?;
+                (socket.path, socket.listener)
+            }
+            // The supervisor made this socket and only it can make another.
+            Some(None) => bail!(
+                "the host-session socket tddy-supervisor created for {os_user} is gone or no longer                  accepting; it can only be recreated by restarting tddy-supervisor"
+            ),
+            None => {
+                let path = host_session_socket_path(data_dir, os_user)?;
+                let listener = bind_owner_only(&path, os_user)?;
+                (path, listener)
+            }
+        };
         let meta = std::fs::symlink_metadata(&path).context("stat the bound socket")?;
         let listener = tokio::net::UnixListener::from_std(listener)
             .context("hand the socket to the runtime")?;
@@ -292,9 +332,11 @@ fn bind_owner_only(path: &Path, os_user: &str) -> anyhow::Result<std::os::unix::
                 format!(
                     "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
                      (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
-                     cannot chown; a session of that user gets no host-session socket until the \
-                     daemon can give it to them (see \
-                     docs/dev/1-WIP/2026-09-19-keyring-github-identity.md)",
+                     cannot chown. Under the supervisor, list {os_user} under `host_sockets:` for \
+                     this daemon's service in supervisor.yaml (and in \
+                     spawn_policy.allowed_session_users): the supervisor then creates their socket \
+                     and hands it over. Until then a session of that user gets no host-session \
+                     socket",
                     target.uid
                 )
             };

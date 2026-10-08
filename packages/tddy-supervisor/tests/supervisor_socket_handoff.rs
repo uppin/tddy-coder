@@ -15,7 +15,7 @@
 
 mod support;
 
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 
 use support::{a_service, a_supervisor};
 use tddy_supervisor::ServiceState;
@@ -153,4 +153,76 @@ async fn rebinds_the_declared_socket_when_the_service_is_restarted() {
     // start would make every restart a silent outage.
     let report = supervisor.await_handoff_report("tddy-daemon").await;
     assert_eq!(report.get("fd3").map(String::as_str), Some("socket"));
+}
+
+#[tokio::test]
+async fn creates_a_declared_host_socket_owned_by_its_user_and_closed_to_everybody_else() {
+    // Given a service declaring a host socket for the account running the supervisor
+    let supervisor = a_supervisor()
+        .allowing_the_current_user()
+        .managing(
+            a_service("tddy-daemon")
+                .with_a_listening_socket()
+                .with_a_host_socket_for_the_current_user(),
+        )
+        .start()
+        .await;
+    supervisor
+        .await_service_state("tddy-daemon", ServiceState::Running)
+        .await;
+
+    // When
+    let socket = supervisor.declared_host_socket_path("tddy-daemon");
+    let file = std::fs::symlink_metadata(&socket)
+        .unwrap_or_else(|error| panic!("stat {}: {error}", socket.display()));
+    let directory = std::fs::metadata(socket.parent().expect("a directory")).expect("stat it");
+
+    // Then — the user's, and only the user's: the whole access grant is owner plus mode
+    assert!(file.file_type().is_socket());
+    assert_eq!(file.permissions().mode() & 0o777, 0o600);
+    assert_eq!(directory.permissions().mode() & 0o777, 0o700);
+    assert_eq!(file.uid(), directory.uid());
+}
+
+#[tokio::test]
+async fn passes_each_host_socket_to_the_service_after_its_own_listener_and_names_it() {
+    // Given
+    let supervisor = a_supervisor()
+        .allowing_the_current_user()
+        .managing(
+            a_service("tddy-daemon")
+                .with_a_listening_socket()
+                .with_a_host_socket_for_the_current_user(),
+        )
+        .start()
+        .await;
+
+    // When
+    let report = supervisor.await_handoff_report("tddy-daemon").await;
+
+    // Then — fd 3 is still the service's own, fd 4 the user's, and the names say which is which
+    assert_eq!(report.get("fd3").map(String::as_str), Some("socket"));
+    assert_eq!(report.get("fd4").map(String::as_str), Some("socket"));
+    assert_eq!(report.get("listen_fds").map(String::as_str), Some("2"));
+    let user = report.get("listen_fdnames").expect("fd names reported");
+    assert!(
+        user.starts_with("connection:host-session."),
+        "unexpected descriptor names {user}"
+    );
+}
+
+#[tokio::test]
+async fn hands_a_service_with_no_host_socket_only_its_own_listener() {
+    // Given
+    let supervisor = a_supervisor()
+        .managing(a_service("tddy-daemon").with_a_listening_socket())
+        .start()
+        .await;
+
+    // When
+    let report = supervisor.await_handoff_report("tddy-daemon").await;
+
+    // Then
+    assert_eq!(report.get("fd4").map(String::as_str), Some("absent"));
+    assert_eq!(report.get("listen_fds").map(String::as_str), Some("1"));
 }

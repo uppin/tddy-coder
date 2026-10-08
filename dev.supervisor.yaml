@@ -40,6 +40,13 @@ services:
     socket:
       path: REPO_ROOT/dev.tddy-daemon.sock
       mode: "0660"
+    # Uncomment (together with spawn_policy below, which must list the same user) to have the
+    # supervisor create your own host-session socket and hand it to the daemon at fd 4, as a root
+    # supervisor does for each OS user listed. Owner and mode are real (you; 0700 directory, 0600
+    # socket) but only your own account can be exercised without root. Every directory above `path`
+    # must be writable by you alone, so keep it under the checkout's tmp/.
+    # host_sockets:
+    #   - {user: CURRENT_USER, path: REPO_ROOT/tmp/host-sessions/CURRENT_USER/host.sock}
     restart:
       max_retries: 3
       initial_backoff_ms: 250

@@ -70,6 +70,15 @@ supervisor:
 local:
   socket_path: "__DAEMON_SOCKET_PATH__"
 
+# Per-OS-user host-session sockets (what a tool session's `tddy-coder` reaches the daemon over for its
+# GitHub token and conversation spawns) have NO setting here. On a supervised host they are declared
+# under `host_sockets:` of the tddy-daemon service in supervisor.yaml: the root supervisor creates
+# each one owned by its user (0700 directory, 0600 socket) and hands the listener to the daemon at
+# fd 4 onward, because this unprivileged daemon cannot chown a socket to another user. The daemon
+# serves whatever it is handed and refuses an OS user that was not declared. Without a supervisor
+# the daemon binds `<data dir>/run/<os user>/host.sock` itself — which works only when it can chown
+# to that user (root, or the sessions run as the daemon's own user).
+
 # Linux rootless cgroups sandbox delegation, used for sandboxes the daemon builds itself. On a
 # supervised host the supervisor owns the delegated cgroup subtree and creates per-session scopes, so
 # this section is not needed. Without a supervisor, defaults derive the delegated cgroup base from

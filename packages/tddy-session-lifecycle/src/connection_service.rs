@@ -221,6 +221,7 @@ mod svc_pr_status_for_caller;
 mod svc_start_claude_cli_session;
 
 pub(crate) mod host_session_socket;
+pub mod inherited_host_sockets;
 
 pub(crate) mod session_acting_identity;
 pub use session_acting_identity::project_github_token;
@@ -506,6 +507,9 @@ mod session_acting_identity_tests;
 
 #[cfg(test)]
 mod host_session_socket_tests;
+
+#[cfg(test)]
+mod inherited_host_sockets_tests;
 
 #[cfg(test)]
 mod seeded_roster_records_unit_tests;

@@ -43,6 +43,22 @@ services:
       path: __DAEMON_SOCKET_PATH__
       group: __SOCKET_GROUP__
       mode: "0660"
+    # One socket per OS user, for that user's tool sessions to reach the daemon (`github_token`,
+    # `spawn_conversation`). The daemon is unprivileged and cannot chown a socket to somebody else,
+    # so the supervisor makes each one as root — directory and socket owned by `user`, modes 0700 and
+    # 0600, so ONLY that user (and root) can connect — and hands the listeners to the daemon after
+    # its own (fd 3): fd 4, 5, ... in the order written here, announced in LISTEN_FDNAMES as
+    # `connection:host-session.<user>:...`. The daemon serves them where they are; it never binds,
+    # replaces or removes them. An OS user NOT listed here gets no host-session socket (the daemon
+    # refuses, naming this setting) and so no GitHub token or conversation spawn inside its tool
+    # sessions. Each `user` must also be in spawn_policy.allowed_session_users (rejected at load
+    # otherwise), may not be `root`, and needs a directory of its own: `path`'s directory is handed
+    # to that user, so nothing else may live in it. Every directory above it must be writable by root
+    # alone (checked at startup), which is why these sit under /run rather than in the daemon's data
+    # dir. At most 15 entries; paths must fit a unix socket (about 100 bytes).
+    # host_sockets:
+    #   - {user: alice, path: /run/tddy-host-sessions/alice/host.sock}
+    #   - {user: bob, path: /run/tddy-host-sessions/bob/host.sock}
     restart:
       max_retries: 5
       initial_backoff_ms: 500
