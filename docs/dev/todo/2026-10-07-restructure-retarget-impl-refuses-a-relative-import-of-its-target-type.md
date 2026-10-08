@@ -1,7 +1,7 @@
 # 2026-10-07 — `retarget_impl` refuses a file that already imports its target type by a `super::` path
 
 **Category:** Restructure engine defect (worked around once, with the developer's consent; the engine is not fixed)
-**Source:** `#carve` 20/21, [`2026-09-26-carve-lifecycle-ports-launch-start`](../1-WIP/2026-09-26-carve-lifecycle-ports-launch-start.md), M7b.3
+**Source:** `#carve` 20/21, [`2026-10-08-carve-launch-start-handlers`](../../packages/tddy-session-lifecycle/docs/changesets/2026-10-08-carve-launch-start-handlers.md), M7b.3
 
 ## What happened
 
