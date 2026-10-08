@@ -11,5 +11,5 @@
 
 pub use tddy_session_activity::session_notifications::*;
 
-pub(crate) mod session_notification_publishing;
+pub mod session_notification_publishing;
 pub use session_notification_publishing::*;
