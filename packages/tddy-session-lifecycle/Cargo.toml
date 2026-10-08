@@ -132,6 +132,7 @@ tddy-session-activity = { path = "../tddy-session-activity" }
 tddy-session-agents = { path = "../tddy-session-agents" }
 tddy-projects = { path = "../tddy-projects" }
 thiserror = "2"
+tddy-cli-sessions = { path = "../tddy-cli-sessions" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

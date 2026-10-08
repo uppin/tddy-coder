@@ -1,0 +1,18 @@
+[package]
+name = "tddy-cli-sessions"
+version = "0.1.0"
+edition = "2021"
+description = "The daemon's CLI session PTY runtime: PTY-hosted claude/cursor sessions and their terminals"
+
+[dependencies]
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-pty = { path = "../tddy-pty" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-stdio = { path = "../tddy-stdio" }
+tddy-task = { path = "../tddy-task" }
+tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"

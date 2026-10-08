@@ -47,7 +47,7 @@ pub use tddy_worktree_service::{
     base_sync_cache, branch_intent, branch_owner, remote_git_service, worktree_files, worktrees,
 };
 pub mod claude_cli_session;
-pub mod cli_session_manager;
+pub use tddy_cli_sessions::{cli_session_manager, session_toolcall};
 pub use tddy_daemon_kernel::{agent_list_mapping, config};
 pub mod connection_service;
 pub use tddy_daemon_kernel::*;
@@ -131,7 +131,6 @@ pub use tddy_session_agents::{
 /// notification bus, its event and its subscriber trait, which moved to `tddy-session-activity`
 /// with `#unbundle` node 7. All are reached as `crate::session_notifications::X`, as before.
 pub mod session_notifications;
-pub mod session_toolcall;
 pub mod split_session;
 pub use tddy_telegram::telegram_github_link;
 pub use tddy_telegram::telegram_tracked_session;
