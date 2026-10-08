@@ -1,0 +1,70 @@
+use crate::stack_parent::StackParentHost;
+use tddy_cli_sessions::cli_session_manager::CliSessionManager;
+
+use std::path::PathBuf;
+
+use tddy_daemon_kernel::config::DaemonConfig;
+
+use std::sync::Arc;
+
+use crate::session_acting_identity::SessionAccountAccess;
+
+/// Whether a managed session running `recipe_name` binds a `spawn-conversation` handler on its
+/// toolcall listener. Only the grill-me recipe does — a plain TDD session has nothing to hand off,
+/// and the PR-stack orchestrator uses `spawn-child` (resolving a planned node) instead.
+pub(crate) fn recipe_enables_conversation_spawn(recipe_name: &str) -> bool {
+    recipe_name == "grill-me"
+}
+
+/// Derive a git-friendly branch slug from a free-form conversation prompt when the agent did not
+/// supply an explicit `branch`. Lowercased, non-alphanumeric runs collapsed to a single `-`, and
+/// truncated so the worktree branch name stays reasonable. Falls back to a stable label when the
+/// prompt has no usable characters.
+pub(crate) fn conversation_branch_slug(prompt: &str) -> String {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in prompt.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+            last_dash = false;
+        } else if !last_dash && !slug.is_empty() {
+            slug.push('-');
+            last_dash = true;
+        }
+        if slug.len() >= 40 {
+            break;
+        }
+    }
+    let trimmed = slug.trim_matches('-');
+    if trimmed.is_empty() {
+        "spawned-conversation".to_string()
+    } else {
+        format!("conversation/{trimmed}")
+    }
+}
+
+/// Per-session [`ConversationSpawnHandler`] for a managed session (grill-me): spawns a brand-new
+/// interactive claude-cli conversation on a fresh worktree, tagged with the calling session as its
+/// orchestrator, reusing the same [`spawn_claude_cli_session_inner`] the `StartSession` RPC uses.
+/// The generic sibling of [`StackChildSpawnHandler`] — it takes a free-form prompt instead of
+/// resolving a planned PR-stack node id, and the spawned conversation is itself unmanaged.
+pub struct GrillMeConversationSpawnHandler {
+    /// Resolves each spawned conversation's base off the orchestrator, which is a session of *this*
+    /// daemon. Held for the same reason [`StackChildSpawnHandler::stack_parent_host`] is.
+    pub stack_parent_host: Arc<dyn StackParentHost>,
+    pub config: DaemonConfig,
+    pub tddy_data_dir: PathBuf,
+    pub claude_cli_manager: Arc<CliSessionManager>,
+    pub os_user: String,
+    pub project_id: String,
+    pub sessions_base: PathBuf,
+    pub orchestrator_session_id: String,
+    pub orchestrator_session_dir: PathBuf,
+    /// Fallback model when the orchestrator session's metadata has none (a tddy-coder *tool*
+    /// session writes `model: None` to its metadata, unlike a claude-cli session). The daemon knows
+    /// the model at spawn time and supplies it here so `spawn_conversation` can still inherit one.
+    pub model_override: Option<String>,
+    /// What the orchestrator's own start read its owner's vault with — the same owner and project
+    /// as the conversation it spawns, see [`StackChildSpawnHandler::account_access`].
+    pub account_access: SessionAccountAccess,
+}

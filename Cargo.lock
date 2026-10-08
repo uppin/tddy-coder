@@ -11803,6 +11803,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-agent-launch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "libc",
+ "log",
+ "prost 0.13.5",
+ "serde_json",
+ "tddy-accounts",
+ "tddy-cli-sessions",
+ "tddy-core",
+ "tddy-credentials",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-daemon-sandbox",
+ "tddy-discovery",
+ "tddy-host-service",
+ "tddy-pr-stack",
+ "tddy-projects",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-sandbox-runner",
+ "tddy-semantic-index",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-session-agents",
+ "tddy-session-files",
+ "tddy-session-split",
+ "tddy-spawn",
+ "tddy-stdio",
+ "tddy-subagent-worktree",
+ "tddy-task",
+ "tddy-workflow",
+ "tddy-workflow-recipes",
+ "tddy-worktree-service",
+ "tempfile",
+ "tokio",
+ "tonic 0.12.3",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-agent-skills"
 version = "0.1.0"
 dependencies = [
@@ -12462,6 +12506,7 @@ dependencies = [
 name = "tddy-demo-vm-service"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "log",
  "tddy-core",
  "tddy-daemon-kernel",
@@ -13403,6 +13448,7 @@ dependencies = [
  "serial_test",
  "tddy-accounts",
  "tddy-actions",
+ "tddy-agent-launch",
  "tddy-bsp",
  "tddy-cli-sessions",
  "tddy-coder",

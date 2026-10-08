@@ -59,3 +59,11 @@ Widened by hand after the move, all `pub(crate)`/private → `pub` in `packages/
 `demo_vm_coordinate_handlers.rs`: `start_demo_vm_at_coordinate`, `stop_demo_vm_at_coordinate`, `get_demo_vm_status_at_coordinate` — `pub(crate)` → `pub`
 (`E0603`/`E0624`/`E0451`, from `handler_state.rs`, `svc_demo_vm_ports.rs` and `connection_service.rs`, which stay in lifecycle). The crate skeleton was again created by hand
 (see [2026-10-08-restructure-move-cluster-ignores-also-members-that-are-directory-children-and-their-crates](2026-10-08-restructure-move-cluster-ignores-also-members-that-are-directory-children-and-their-crates.md), "New crate skeleton by hand").
+
+## Seen again in R9 (`tddy-agent-launch`, 46 modules)
+
+Widened by hand after the move by a `cargo check` loop (about 140 items and fields, all in `packages/tddy-agent-launch/src/`): the children's types in the jail/relaunch/start modules (`JailLaunch`, `JailDirs`, `JailSession`, `JailBranch`, `ManagedJailEnv`,
+`RelaunchJailEnv`, `RelaunchedRunnerSpawn`, `RelaunchedJailBridge`, `RelaunchManagedEnv`, `CliStart`) and their fields, `bridge_conn_resume_response`, `LaunchHost`, `LaunchSessions` and its 22 fields, `SessionIdentity`, `SessionAccountAccess`, `SessionIdentityRefusal`,
+`HostSessionSockets`, `JailRelaunch`, `InheritedHostSocket` fields, about 20 `LaunchSessions`/`SessionAccountAccess` methods, `StackChildSpawnHandler`, `GrillMeConversationSpawnHandler` and their fields. Two loop mistakes were corrected: a
+name-based rewrite that also widened same-named function parameters (discarded and redone), and a `pub` written onto a trait method (`E0449`, removed).
+The module declarations that the moves rewrote to `pub use` facades were widened earlier (see the hand-split todo, section R9). New manifest lines by hand: `libc = "0.2"` (named only in bodies).

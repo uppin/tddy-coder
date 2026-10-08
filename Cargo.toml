@@ -64,6 +64,7 @@ members = [
     "packages/tddy-session-files",
     "packages/tddy-cli-sessions",
     "packages/tddy-session-split",
+    "packages/tddy-agent-launch",
     "packages/tddy-demo-vm-service",
     "packages/tddy-session-agents",
     "packages/tddy-session-activity",

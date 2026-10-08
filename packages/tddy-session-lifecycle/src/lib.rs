@@ -50,6 +50,7 @@ pub mod claude_cli_session;
 pub use tddy_cli_sessions::{cli_session_manager, session_toolcall};
 pub use tddy_daemon_kernel::{agent_list_mapping, config};
 pub mod connection_service;
+pub use tddy_agent_launch::cursor_cli_spawn;
 pub use tddy_daemon_kernel::*;
 /// The ten session-file-I/O modules, which now live in `tddy-session-files`.
 ///
@@ -65,7 +66,6 @@ pub use tddy_session_files::{
     session_context_docs, session_file_upload, session_uploads, session_workflow_files,
     stack_doc_attachments,
 };
-pub mod cursor_cli_spawn;
 /// Presenter-gate classification, which now lives in `tddy-telegram`.
 ///
 /// `session_list_enrichment` and `session_notifications` are its callers and stay here; that edge
