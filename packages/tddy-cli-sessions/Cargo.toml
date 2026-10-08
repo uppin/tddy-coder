@@ -5,10 +5,21 @@ edition = "2021"
 description = "The daemon's CLI session PTY runtime: PTY-hosted claude/cursor sessions and their terminals"
 
 [dependencies]
+anyhow = "1"
+async-trait = "0.1"
+bytes = "1"
+libc = "0.2"
+log = "0.4"
+portable-pty = "0.9"
+prost = "0.13"
+uuid = { version = "1", features = ["v4", "v7"] }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-livekit = { path = "../tddy-livekit" }
 tddy-pty = { path = "../tddy-pty" }
 tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+tddy-session-activity = { path = "../tddy-session-activity" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-task = { path = "../tddy-task" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }

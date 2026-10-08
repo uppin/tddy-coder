@@ -224,9 +224,9 @@ per-crate baseline → B-checks for that receiver.
   (approved)
 - [ ] **R5 `tddy-demo-runner`** (D12): T11 cluster (`demo_vm_coordinate_handlers`, `activity_hub`,
   `DemoVmServiceImpl`); `demo_vm_entry` stays; new edges → kernel, core, rpc, service
-- [ ] **R6 `tddy-session-agents`**: T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
+- [~] **R6 `tddy-session-agents`** (prepared; blocked on two unapproved edges, see Validation results): T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
   `ExecToolRoute` under D7-B, with their four edges)
-- [ ] **R7 `tddy-cli-sessions`** (new, D4): `cli_session_manager` (anchor) with its 9 children and
+- [x] **R7 `tddy-cli-sessions`** (new, D4): `cli_session_manager` (anchor) with its 9 children and
   `session_toolcall` (`move_cluster_to_crate`); facade for `tddy-desktop`'s
   `tddy_session_lifecycle::cli_session_manager::CliSessionManager`
 - [ ] **R8 `tddy-session-split`** (new): `split_ports`, the T4 cluster, `service_util`, `workspace_session`;
@@ -827,6 +827,36 @@ first are what the jail suites need; without them 13 more tests fail with a jail
 - **After:** lifecycle **656** passed / the same 22 failed / 1 ignored, `tddy-session-activity` **47** passed: the 2 tests that moved are
   `remote_git_pack_execution`'s inline tests; sum 703 = 658 + 45 as before. clippy `--all-targets -D warnings`, fmt clean; `cargo check --all-targets`
   clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty. Doc tests ran (1 ignored, as before).
+
+### R6: `tddy-session-agents` (NOT applied; stopped on two unapproved edges)
+
+Under the developer's later 2026-10-08 ruling (hand workarounds allowed, each filed), R6 was prepared and attempted:
+
+- **Hand edits before the move (own commit, imports and visibility only):** `agent_host_callbacks.rs:19`, `svc_ensure_session_room_for_agents.rs:1` and
+  `svc_start_hosted_agent_clone.rs:7` split into one `use` per path; `SeededAgentClones` named through its defining module in `agent_host_callbacks.rs:21`
+  (through the glob facade `check --deep` read it as staying behind although `seed_codebase` was in the cluster); `connection_service.rs`
+  `pub(crate) mod peer_session_answer;` → `pub mod`. Filed: [`…hand-split-grouped-use-lines-before-the-agents-cluster-move`](../todo/2026-10-08-hand-split-grouped-use-lines-before-the-agents-cluster-move.md),
+  [`…hand-widened-mod-declarations-before-engine-moves`](../todo/2026-10-08-hand-widened-mod-declarations-before-engine-moves.md).
+- **Engine, own commit:** `reparent_module` (`reexport: outside`) of the T4 child `svc_provision_workspace_tool_sandbox` out of
+  `svc_ensure_session_room_for_agents/` to `connection_service`. No hand edit.
+- **Engine, the cluster (12 modules, one `move_cluster_to_crate`):** `check --deep` `no findings`; `apply` moved 27 files and the compile gate failed. After the
+  visibility widening it needed (about 35 items: `AgentRoster`, `AgentHostCallbacks`, `DaemonSeedCloneClaimant` and their fields, 20 methods, 8 functions) the tree compiled, **but the
+  engine had written two edges into `tddy-session-agents/Cargo.toml` that the approved table does not list:** `tddy-sandbox-runner`
+  (`agent_host_callbacks.rs:30`, `ExecuteToolResponse` in the `AgentHostCallbacks::run_exec_tool_locally` signature; it is on the table only under D7-B)
+  and `tddy-subagent-worktree` (`agent_roster.rs:84`, `ToolEffect`; `peer_session_answer.rs:58`, `ConversationId`). No cycle. **The attempt was rolled back** (the hand pre-move
+  commits and the reparent stay); the full attempt is not kept. Needs the developer's approval of these two edges before R6 (and so R8, R9, which name the agents' types) can apply.
+
+### R7: `tddy-cli-sessions` (done; new crate, one hand move)
+
+- **By hand (needed by the engine):** the crate skeleton (`Cargo.toml`, `src/lib.rs`, a `members` line in the root `Cargo.toml`): a plan whose `to` is not a crate is refused.
+- **Engine, own commit:** one `move_cluster_to_crate` (anchor `cli_session_manager`, `also` `session_toolcall` and the nine children, `reexport: glob`); edge lifecycle → `tddy-cli-sessions`
+  (approved) and the destination's dependencies on the parent's crates were written. **It moved only the parent and `session_toolcall`**; the nine children named in `also` stayed behind (`E0583` ×9). That commit does not build alone.
+- **Hand move, own commit (build correction):** `git mv packages/tddy-session-lifecycle/src/cli_session_manager packages/tddy-cli-sessions/src/cli_session_manager`
+  (nine files, nesting kept, no path edits); and the manifest lines the engine missed because it never read the children (`anyhow`, `async-trait`, `bytes`, `libc`, `log`, `portable-pty`, `prost`, `uuid`
+  and the approved `tddy-livekit`, `tddy-service`, `tddy-session-activity`). `cargo fmt` over the moved files. Filed: [`…move-cluster-ignores-also-members-that-are-directory-children-and-their-crates`](../todo/2026-10-08-restructure-move-cluster-ignores-also-members-that-are-directory-children-and-their-crates.md).
+- **After:** lifecycle **647** passed / the same 22 failed / 1 ignored, `tddy-cli-sessions` **9** passed (the PTY runtime's inline tests moved): sum 656 = lifecycle before 656. clippy `--all-targets -D warnings`
+  and fmt clean; `cargo check --all-targets` clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty (`tddy-desktop` resolves `cli_session_manager::CliSessionManager` through the facade; it builds on CI only).
+  The crate's edges are the approved ten plus the external crates; none reaches lifecycle.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 

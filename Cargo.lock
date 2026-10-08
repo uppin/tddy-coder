@@ -11952,6 +11952,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-cli-sessions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "libc",
+ "log",
+ "portable-pty 0.9.0",
+ "prost 0.13.5",
+ "tddy-core",
+ "tddy-daemon-sandbox",
+ "tddy-livekit",
+ "tddy-pty",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-stdio",
+ "tddy-task",
+ "tddy-terminal-rpc",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-code-analysis"
 version = "0.1.0"
 dependencies = [
@@ -13362,6 +13388,7 @@ dependencies = [
  "tddy-accounts",
  "tddy-actions",
  "tddy-bsp",
+ "tddy-cli-sessions",
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
