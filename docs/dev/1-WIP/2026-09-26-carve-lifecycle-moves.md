@@ -216,7 +216,7 @@ per-crate baseline → B-checks for that receiver.
 - [x] **R0 approvals**: the edge table, D4, D5, D7, D12, D13, D14 and `test_util` decided; baselines
   recorded on 16e's tip for lifecycle and every receiver
 - [x] **R1 `tddy-daemon-kernel`** (`daemon_hook_urls` after a hand pre-move widening, see Validation results): `agent_list_mapping`, `daemon_urls` (`move_module_to_crate`); zero new edges
-- [ ] **R2 `tddy-daemon-livekit`**: T7 (the admission-token module, the `resolve_os_user` module; each
+- [x] **R2 `tddy-daemon-livekit`**: T7 (the admission-token module, the `resolve_os_user` module; each
   moved individually, nested under wiring's builders) and `placement` (`move_module_to_crate`); zero new edges
 - [ ] **R3 `tddy-session-files`**: T8's two modules; new edge `tddy-session-files` → `tddy-daemon-livekit`
 - [ ] **R4 `tddy-session-activity`**: T10 cluster (`presenter_observer_spawn`, `presenter_observer_task`,
@@ -778,6 +778,21 @@ first are what the jail suites need; without them 13 more tests fail with a jail
 - **Engine output worth a reviewer's eye:** the apply's `rustfmt` pass also reordered unrelated `pub use` lines in
   lifecycle's `lib.rs` (17-line diff for one facade line). Filed:
   [`2026-10-08-restructure-apply-rustfmt-reorders-unrelated-reexports-in-the-origin-root`](../todo/2026-10-08-restructure-apply-rustfmt-reorders-unrelated-reexports-in-the-origin-root.md).
+
+### R2: `tddy-daemon-livekit` (done)
+
+- **Engine:** one plan, three `move_module_to_crate` (`reexport: glob`): `first_admission_token`, `os_user_resolution` (the child of the
+  wiring file `svc_resolve_os_user`, which stays), `placement`. Facades: `pub use tddy_daemon_livekit::{first_admission_token, placement};`
+  in `connection_service.rs`, `pub use tddy_daemon_livekit::os_user_resolution;` in `svc_resolve_os_user.rs`. Zero new crate edges.
+- **Engine failure (the compile gate):** `3 of 3 operation(s) were applied, and the tree no longer compiles` (`E0603`). Cause: below.
+- **Hand edits after the move (build corrections only):**
+  1. `packages/tddy-daemon-livekit/src/first_admission_token.rs:9`: `pub(crate) fn mint_first_admission_token` → `pub fn` (its caller
+     `svc_provision_agent_clone.rs:60` stayed). Filed: [`2026-10-08-restructure-move-to-crate-leaves-a-pub-crate-fn-the-facade-caller-needs`](../todo/2026-10-08-restructure-move-to-crate-leaves-a-pub-crate-fn-the-facade-caller-needs.md).
+  2. `cargo fmt -p tddy-daemon-livekit` over the moved `first_admission_token.rs` (whitespace in one `use` group): the apply's own `rustfmt`
+     pass does not run when the compile gate fails. Recorded in the same todo.
+- **After:** lifecycle 658 passed / the same 22 failed / 1 ignored; `tddy-daemon-livekit` 178 passed; sum 836 as before (no test moved).
+  `cargo clippy -p tddy-daemon-livekit -p tddy-session-lifecycle --all-targets -D warnings` clean; fmt clean; consumers
+  (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-model-registry`) `cargo check --all-targets` clean; their diff is empty.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 

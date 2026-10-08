@@ -6,17 +6,15 @@
 /// Returns `None` when this daemon cannot admit (LiveKit not configured), so a caller can skip
 /// the handshake and fall back to the owning daemon self-minting — never silently, but as a
 /// recorded deviation. `Some(token, url, room, ttl)` is what the caller forwards.
-pub(crate) fn mint_first_admission_token(
+pub fn mint_first_admission_token(
     config: &tddy_daemon_kernel::config::DaemonConfig,
-    session_admissions: &tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry,
+    session_admissions: &crate::session_admission_service::SessionAdmissionRegistry,
     session_id: &str,
     owning_daemon_instance_id: &str,
 ) -> Option<(String, String, String, u64)> {
-    use tddy_daemon_livekit::livekit_peer_discovery::{
-        daemon_rpc_identity, livekit_common_room_connect_strings,
-    };
-    use tddy_daemon_livekit::session_admission_service::ADMISSION_TOKEN_TTL;
-    use tddy_daemon_livekit::session_room::session_room_name;
+    use crate::livekit_peer_discovery::{daemon_rpc_identity, livekit_common_room_connect_strings};
+    use crate::session_admission_service::ADMISSION_TOKEN_TTL;
+    use crate::session_room::session_room_name;
     use tddy_livekit::TokenGenerator;
 
     let (_common_room, url, api_key, api_secret) =

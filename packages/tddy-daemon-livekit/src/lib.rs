@@ -36,11 +36,14 @@
 //! ([`peer_signing_public_keys`]), and parses none of them.
 
 pub mod common_room_supervisor;
+pub mod first_admission_token;
 pub mod livekit_peer_discovery;
 pub mod livekit_peer_transport;
 pub mod livekit_rooms_stream;
 pub mod livekit_service;
+pub mod os_user_resolution;
 pub mod peer_routing;
+pub mod placement;
 pub mod session_admission_service;
 pub mod session_git;
 pub mod session_room;
