@@ -569,3 +569,4 @@ mod svc_host_builders;
 mod svc_index_workspace_worktree;
 mod svc_provision_workspace_tool_sandbox;
 mod svc_resume_sandboxed_claude_cli_session;
+mod svc_resume_split_wiring;
