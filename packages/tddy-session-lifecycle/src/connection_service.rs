@@ -74,7 +74,7 @@ const _: () = assert!(
      forwarded subscription"
 );
 
-mod activity_hub;
+pub use tddy_demo_vm_service::{activity_hub, demo_vm_coordinate_handlers};
 
 /// ConnectionService implementation.
 ///
@@ -417,7 +417,6 @@ impl DaemonRpcHandler {
 
 mod daemon_rpc_handler;
 
-mod demo_vm_coordinate_handlers;
 mod svc_demo_vm_ports;
 pub use svc_demo_vm_ports::DemoVmServiceImpl;
 

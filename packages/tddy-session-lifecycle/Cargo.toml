@@ -134,6 +134,7 @@ tddy-projects = { path = "../tddy-projects" }
 thiserror = "2"
 tddy-cli-sessions = { path = "../tddy-cli-sessions" }
 tddy-session-split = { path = "../tddy-session-split" }
+tddy-demo-vm-service = { path = "../tddy-demo-vm-service" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

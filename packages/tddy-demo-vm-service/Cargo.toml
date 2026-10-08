@@ -1,0 +1,16 @@
+[package]
+name = "tddy-demo-vm-service"
+version = "0.1.0"
+edition = "2021"
+description = "The demo_vm.DemoVmService handlers: per-session demo VM start, stop and status"
+
+[dependencies]
+log = "0.4"
+tddy-core = { path = "../tddy-core" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-service = { path = "../tddy-service" }
+tddy-session-activity = { path = "../tddy-session-activity" }
+tddy-vm = { path = "../tddy-vm" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }

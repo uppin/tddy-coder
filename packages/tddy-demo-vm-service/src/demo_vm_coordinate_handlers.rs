@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::activity_hub;
+use crate::activity_hub;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::demo_vm::{
@@ -11,7 +11,7 @@ use tddy_service::proto::demo_vm::{
 };
 
 impl activity_hub::DemoVmState {
-    pub(crate) async fn start_demo_vm_at_coordinate(
+    pub async fn start_demo_vm_at_coordinate(
         &self,
         request: Request<StartDemoVmRequest>,
     ) -> Result<Response<StartDemoVmResponse>, Status> {
@@ -144,7 +144,7 @@ impl activity_hub::DemoVmState {
         }))
     }
 
-    pub(crate) async fn stop_demo_vm_at_coordinate(
+    pub async fn stop_demo_vm_at_coordinate(
         &self,
         request: Request<StopDemoVmRequest>,
     ) -> Result<Response<StopDemoVmResponse>, Status> {
@@ -193,7 +193,7 @@ impl activity_hub::DemoVmState {
         }
     }
 
-    pub(crate) async fn get_demo_vm_status_at_coordinate(
+    pub async fn get_demo_vm_status_at_coordinate(
         &self,
         request: Request<GetDemoVmStatusRequest>,
     ) -> Result<Response<GetDemoVmStatusResponse>, Status> {

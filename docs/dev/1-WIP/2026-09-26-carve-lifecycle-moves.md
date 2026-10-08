@@ -55,7 +55,7 @@ under 10k production lines.
 | T10 presenter, `session_notification_publishing`, `remote_git_pack_execution` | 265 + ~70 + 86 | `tddy-session-activity` |
 | T7 admission token, `resolve_os_user`; `placement` | 58 + 155 | `tddy-daemon-livekit` |
 | `agent_list_mapping`, `daemon_urls` | 48 | `tddy-daemon-kernel` |
-| T11 demo VM | 313 | `tddy-demo-runner` (D12) |
+| T11 demo VM | 313 | `tddy-demo-vm-service` (new; D12 as changed 2026-10-08) |
 | `test_util` | 366 | gated behind a feature, or moved to a testkit (open item) |
 | Wiring | ~4,400 | **stays** |
 
@@ -121,6 +121,13 @@ cut is cheap: moves review faster than conversions.
 - **No deduplication, no functional refactor, no signature change** beyond visibility.
 - **`PeerRouted*`, the port adapters, the terminal adapter and bridge stay** in lifecycle (the
   developer's 2026-09-25 ruling); moving them is a later node (D13).
+
+### Developer overrides, 2026-10-08
+
+The developer lifted three of the Boundaries above, for exactly what is listed, and kept everything in this PR (#536), with no inserted node and no split:
+- **Hand workarounds are allowed** when the engine refuses or mis-applies a move: pre-move edits of `use` lines, `mod` declarations and visibility, and post-move build corrections, each filed as a `docs/dev/todo/2026-10-08-*` entry and listed here; a hand **move** goes in its own commit.
+- **"No conversion here" is lifted** for the host-block moves only: each `impl DaemonSessionHost` block still sitting in a launch-topic module (`session_worktree_observer.rs`, `session_acting_identity.rs`, `conversation_worktree_op.rs`, plus any other the R9 check finds) moves with the engine's `move_item` into a wiring module in lifecycle (behaviour-preserving, own commit).
+- **"No signature change" is lifted** for exactly one signature: `DemoVmServiceImpl::new(state: DemoVmState)` (R5b).
 
 ## Dependencies
 
@@ -222,8 +229,8 @@ per-crate baseline → B-checks for that receiver.
 - [x] **R4 `tddy-session-activity`**: T10 cluster (`presenter_observer_spawn`, `presenter_observer_task`,
   `presenter_intent_client`), `session_notification_publishing`, `remote_git_pack_execution`; `tonic`
   (approved)
-- [ ] **R5 `tddy-demo-runner`** (skipped: the `tddy-demo-runner` → `tddy-session-activity` edge and `DemoVmServiceImpl::new(host)` await the developer) (D12): T11 cluster (`demo_vm_coordinate_handlers`, `activity_hub`,
-  `DemoVmServiceImpl`); `demo_vm_entry` stays; new edges → kernel, core, rpc, service
+- [x] **R5a `tddy-demo-vm-service`** (new, D12 as changed): `activity_hub`, `demo_vm_coordinate_handlers` (`move_cluster_to_crate`)
+- [ ] **R5b**: `DemoVmServiceImpl` after the constructor fix `new(state)` (developer-approved signature exception), in this PR
 - [x] **R6 `tddy-session-agents`**: T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
   `ExecToolRoute` under D7-B, with their four edges)
 - [x] **R7 `tddy-cli-sessions`** (new, D4): `cli_session_manager` (anchor) with its 9 children and
@@ -300,7 +307,7 @@ definitions. `#carve` 15's whole-module moves came in at ~1:1 (T5 −960/+968, l
 | `tddy-session-activity` | 2,541 | ~421 | ~15 | **~3.0k** | ✅ |
 | `tddy-daemon-livekit` | 5,863 | 213 | 0 | **~6.1k** | ✅ |
 | `tddy-daemon-kernel` | 3,409 | ~53 (48 + `split_forward_deadline` if it follows `PEER_FORWARD_TIMEOUT`) | 0 | **~3.5k** | ✅ |
-| `tddy-demo-runner` | 156 | 313 | ~20 | **~0.5k** | ✅ |
+| `tddy-demo-vm-service` (new; replaces `tddy-demo-runner` as T11's receiver, which stays at 156) | 0 | 313 | ~20 | **~0.35k** | ✅ |
 | `tddy-vm` (the alternative for T11) | 7,233 | 313 | ~20 | ~7.6k | ✅, but not recommended (D12) |
 
 **If D4 is declined and the PTY runtime folds into split,** split becomes ~4.9k (✅). Folding it into
@@ -342,7 +349,7 @@ none has its target reaching its source. Re-run at R0 on 16e's tip.
 | `tddy-session-split` | `tddy-cli-sessions`, `tddy-session-agents`, `tddy-session-files`, `tddy-session-activity`, `tddy-daemon-livekit`, `tddy-daemon-kernel`, `tddy-daemon-sandbox`, `tddy-daemon-auth` (`SessionTokens`), `tddy-github`, `tddy-livekit`, `tddy-core`, `tddy-projects`, `tddy-worktree-service`, `tddy-semantic-index` (`service_util`), `tddy-sandbox`, `tddy-sandbox-recipes`, `tddy-discovery`, `tddy-workflow-recipes`, `tddy-task`, `tddy-rpc`, `tddy-service` (21) | **needs approval** |
 | `tddy-cli-sessions` | `tddy-terminal-rpc`, `tddy-session-activity` (`signal_pid`), `tddy-daemon-sandbox` (`SessionScopedResource`), `tddy-stdio`, `tddy-pty`, `tddy-livekit`, `tddy-core`, `tddy-task`, `tddy-rpc`, `tddy-service` (10) | **needs approval** |
 | `tddy-session-files` | `tddy-daemon-livekit` | **needs approval** |
-| `tddy-demo-runner` | `tddy-daemon-kernel`, `tddy-core`, `tddy-rpc`, `tddy-service` | **needs approval** (D12) |
+| `tddy-demo-vm-service` (new) and lifecycle → it | `tddy-daemon-kernel`, `tddy-core`, `tddy-rpc`, `tddy-service`, `tddy-session-activity`, `tddy-vm`, `tddy-workflow-recipes` | ✅ approved 2026-10-08 (D12, as changed). Replaces the `tddy-demo-runner` row |
 | `tddy-session-agents` | `tddy-daemon-sandbox`, `tddy-sandbox-runner`, `tddy-tool-engine`, `tddy-task` | **needs approval, only under D7-B** |
 | `tddy-session-activity` | `tonic` (external) | ✅ approved (2026-09-25, for T10) |
 | `tddy-session-agents` | none for T3: `tddy-spawn`, the pilot's blocker, is not needed (`ensure_project_available_for_start` is T1) | — |
@@ -662,7 +669,7 @@ treat the recommended option as approved. That settles:
 | D5 | **`service_util` and `workspace_session` → `tddy-session-split`** |
 | D7 | **A: `LocalExecTools` stays in lifecycle** (so `tddy-session-agents` gains no `tddy-daemon-sandbox`, `tddy-sandbox-runner`, `tddy-tool-engine`, `tddy-task` edges) |
 | D11 | Shape tests: not now; a `cargo tree`-based CI check for B1 is a follow-up todo |
-| D12 | **T11 → `tddy-demo-runner`** |
+| D12 | **Changed by a later ruling (2026-10-08): T11 → a NEW crate `tddy-demo-vm-service`** (`tddy-demo-runner` keeps the QEMU orchestration and is untouched). Approved edges: `tddy-daemon-kernel`, `tddy-core`, `tddy-rpc`, `tddy-service`, `tddy-session-activity`, `tddy-vm`, `tddy-workflow-recipes`, and lifecycle → `tddy-demo-vm-service`; nothing else, no edge to lifecycle |
 | D13 | **Accept ~4.5k** as this node's target (B5) |
 | D14 | **Drop lifecycle's unused dependencies here** (R10) |
 | `test_util` | **A `test-util` feature** |
@@ -884,6 +891,15 @@ Preflighted (`check --deep`, nothing written; the hand pre-move edits and the `t
 - After those, `check --deep` reports 24 findings of the known kind (a path through the origin's glob facade to a member), **and one real one**: `launch_ports.rs` names `session_worktree_observer::SessionWorktreeObserver`, a module that also holds
   `impl DaemonSessionHost { with_worktree_observer }`. Two more launch modules hold host impls: `session_acting_identity.rs:271` and `conversation_worktree_op.rs:198`. **Per the Boundaries (a topic module that names the host is a parent defect) the node stopped.** Filed:
   [`2026-10-08-launch-topic-modules-still-carry-host-impls`](../todo/2026-10-08-launch-topic-modules-still-carry-host-impls.md), with the fix (an engine `move_item` of each `<DaemonSessionHost>` block into a wiring module).
+
+### R5a: `tddy-demo-vm-service` (done; new crate)
+
+- **By hand:** the crate skeleton (`Cargo.toml`, `src/lib.rs`, a `members` line in the root `Cargo.toml`).
+- **Engine:** one `move_cluster_to_crate` (anchor `activity_hub`, also `demo_vm_coordinate_handlers`, `reexport: glob`); `check --deep` `no findings`. Facade `pub use tddy_demo_vm_service::{activity_hub, demo_vm_coordinate_handlers};`
+  in `connection_service.rs`; edge lifecycle → `tddy-demo-vm-service`. The manifest gained exactly the approved seven (`tddy-daemon-kernel`, `tddy-core`, `tddy-rpc`, `tddy-service`, `tddy-session-activity`, `tddy-vm`, `tddy-workflow-recipes`) plus `log` and `tokio`; no lifecycle, no `tddy-demo-runner`.
+- **Hand edits after the move (build corrections, visibility only):** `DemoVmHandle`, `DemoVmState` and its 5 fields, and the three `*_demo_vm_at_coordinate` methods `pub(crate)` → `pub`; `cargo fmt`. Filed (appended): [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md); note: [`2026-10-08-demo-vm-service-impl-constructor-ruling-update`](../todo/2026-10-08-demo-vm-service-impl-constructor-ruling-update.md).
+- **`DemoVmServiceImpl` and `demo_vm_entry` stay in lifecycle for now** (R5b follows the constructor fix).
+- **After:** lifecycle **610** passed / the same 22 failed / 1 ignored; `tddy-demo-vm-service` 0 (no test moved): sum 610 as before. clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 

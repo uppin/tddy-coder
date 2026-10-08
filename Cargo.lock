@@ -12459,6 +12459,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-demo-vm-service"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-vm",
+ "tddy-workflow-recipes",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-desktop"
 version = "0.1.0"
 dependencies = [
@@ -13399,6 +13414,7 @@ dependencies = [
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
  "tddy-demo-runner",
+ "tddy-demo-vm-service",
  "tddy-discovery",
  "tddy-github",
  "tddy-host-service",

@@ -52,3 +52,10 @@ Widened by hand after the move, all `pub(crate)`/private → `pub` in `packages/
   `resolve_split_agent_placement`, `delete_paired_codebase_session`, `provision_workspace_tool_sandbox`, `resume_split_wiring`, `split_context_from_codebase_host`,
   `start_sandboxed_codebase_session`, `start_split_claude_cli_session`.
 - `tddy-cli-sessions/src/cli_session_manager.rs`: `mod pty_handle;` → `pub mod pty_handle;` (split names `cli_session_manager::pty_handle::PtyHandle`).
+
+## Seen again in R5a (`tddy-demo-vm-service`)
+
+`activity_hub.rs`: `DemoVmHandle` and `DemoVmState` and the five fields of `DemoVmState` (`demo_vm_state`, `tddy_data_dir`, `user_resolver`, `rpc_activity`, `config`);
+`demo_vm_coordinate_handlers.rs`: `start_demo_vm_at_coordinate`, `stop_demo_vm_at_coordinate`, `get_demo_vm_status_at_coordinate` — `pub(crate)` → `pub`
+(`E0603`/`E0624`/`E0451`, from `handler_state.rs`, `svc_demo_vm_ports.rs` and `connection_service.rs`, which stay in lifecycle). The crate skeleton was again created by hand
+(see [2026-10-08-restructure-move-cluster-ignores-also-members-that-are-directory-children-and-their-crates](2026-10-08-restructure-move-cluster-ignores-also-members-that-are-directory-children-and-their-crates.md), "New crate skeleton by hand").
