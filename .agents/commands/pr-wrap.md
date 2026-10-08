@@ -352,7 +352,14 @@ gh pr edit <N> --title "<type>(<package>): <what it delivers> (#<stack-slug> K/N
 | Own temporary markers resolved | `TODO` / `FIXME` **this PR added** are implemented or deferred with a reason in the changeset |
 | `/pr-stack-rebase` ran and the leak check passed | `origin/<base>..HEAD` is this PR's commits only |
 | No unplanned deletions | every deleted path maps to this PR's changeset; no parent-owned file removed |
-| Build and tests green | step 6 passed on the rebased tree |
+| Build and tests green | step 6 — the **scoped local** fmt/clippy/test of the touched packages — passed on the rebased tree. **CI is not part of this gate**: it is a post-wrap action (see below) |
+
+**Wrap on scope, not on CI.** Steps 7 and 8 run once the planned scope is developed and every gap or
+deferral has been **approved by the user** — not once CI is green. The CI build and full test run
+are **post-wrap**: push, read them with `scripts/ci-status.sh`, and fix failures with `/fix-pr` in new
+commits. A red CI run does not reverse or delay the wrap, and never blocks `gh pr ready` on its own
+account; report its state in the summary instead. (A required check that stays red still blocks the
+*merge*, which is `/squash-pr`'s and `/merge-pr-stack`'s gate, not this command's.)
 
 **Parent-owned code, files and `TODO`/`FIXME` markers are NOT this PR's WIP** — they belong to the PR
 that owns them and stay exactly as they are. Only what this PR added counts against the gate.

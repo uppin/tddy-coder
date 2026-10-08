@@ -21,6 +21,12 @@ The reactions are the status protocol reviewers see, so they are not optional de
 A comment can accumulate 👍 then 🚀 (agreed, then fixed). A 👍 is a promise — never 👍 a comment and
 then silently drop the fix; if implementation proves the comment wrong after all, reply saying so.
 
+**Relation to the wrap.** `/fix-pr` is a **post-wrap** command. The PR's docs were wrapped when its
+planned scope was developed and every gap/deferral approved by the user (`/wrap-context-docs` §
+*When to wrap*); CI results are read afterwards and never gate or reverse that wrap. Fix failures in
+code and tests in new commits. If a fix changes what the wrapped permanent docs state, correct those
+docs in the same commit — never re-open or recreate the changeset.
+
 ## Step 0: Resolve the PR
 
 - Default: the PR of the **current branch**. `$ARGUMENTS` may name a PR number or branch instead.
