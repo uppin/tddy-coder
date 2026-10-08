@@ -890,7 +890,7 @@ Preflighted (`check --deep`, nothing written; the hand pre-move edits and the `t
 - Grouped `use` lines (14 flat, 1 nested) and the `pub(crate) mod` declarations of `host_session_socket` and `session_acting_identity` were the first refusals; split/widened by hand and compiled (then reverted with the rest).
 - After those, `check --deep` reports 24 findings of the known kind (a path through the origin's glob facade to a member), **and one real one**: `launch_ports.rs` names `session_worktree_observer::SessionWorktreeObserver`, a module that also holds
   `impl DaemonSessionHost { with_worktree_observer }`. Two more launch modules hold host impls: `session_acting_identity.rs:271` and `conversation_worktree_op.rs:198`. **Per the Boundaries (a topic module that names the host is a parent defect) the node stopped.** Filed:
-  [`2026-10-08-launch-topic-modules-still-carry-host-impls`](../todo/2026-10-08-launch-topic-modules-still-carry-host-impls.md), with the fix (an engine `move_item` of each `<DaemonSessionHost>` block into a wiring module).
+  a todo that was never written because the host-block node (above) fixed it in this PR, with the fix (an engine `move_item` of each `<DaemonSessionHost>` block into a wiring module).
 
 ### R5a: `tddy-demo-vm-service` (done; new crate)
 
@@ -907,7 +907,7 @@ Preflighted (`check --deep`, nothing written; the hand pre-move edits and the `t
   `session_acting_identity.rs` → `svc_session_identity_wiring` (`project_account_assignments`, `session_account_access`, `session_identity`), `conversation_worktree_op.rs` → `svc_conversation_worktree_wiring` (`conversation_worktree_from_jail`).
   A grep of `^impl.*DaemonSessionHost` finds no other host block in a launch-topic module (the others are the wiring files).
 - **Hand edits after the move (build corrections):** `svc_session_identity_wiring.rs`: `super::tddy_session_split::service_util::` → `super::service_util::` (the engine mis-spelled a facade path); the 17 unused imports it left in the three source modules and the new modules removed by `cargo fix` (not hand-typed), `cargo fmt`.
-  Filed: [`2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block`](../todo/2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block.md); the todo [`launch-topic-modules-still-carry-host-impls`](../todo/2026-10-08-launch-topic-modules-still-carry-host-impls.md) is closed by this commit.
+  Filed: [`2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block`](../todo/2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block.md); this fixes the host-naming launch modules the R9 preflight found (no todo needed).
 - **After:** lifecycle **610** passed / the same 22 failed / 1 ignored (unchanged); clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
