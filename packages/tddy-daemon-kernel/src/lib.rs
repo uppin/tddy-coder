@@ -59,6 +59,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 // single ~100-field struct that four moving modules and every handler in both new services take by
 // reference and read disjointly, so the symbol *is* the file. See the changeset's
 // `## Decisions & Trade-offs`.
+pub mod agent_list_mapping;
 pub mod agent_tool_socket;
 pub mod config;
 pub mod daemon_identity;

@@ -20,14 +20,6 @@ pub enum SessionError {
     StartFailed { reason: String },
 }
 
-pub use tddy_daemon_sandbox::*;
-/// The per-chat active-elicitation lease, which now lives in `tddy-telegram`.
-///
-/// Re-exported under its own name so `crate::active_elicitation::X` — and
-/// `tddy_daemon::active_elicitation::X` in the four acceptance suites that stay here — goes on
-/// resolving unchanged. No caller moved with it.
-pub use tddy_telegram::active_elicitation;
-pub mod agent_list_mapping;
 /// The three modules of `tddy-daemon-auth` this crate still names, out of the seven that moved
 /// there.
 ///
@@ -37,6 +29,7 @@ pub mod agent_list_mapping;
 /// `codex_oauth_relay`'s only caller was `tddy-integration-tests`, which now depends on the auth
 /// crate directly. A re-export kept for nobody is an edge that reads as real.
 pub use tddy_daemon_auth::{auth, github_pr_credentials, oauth_loopback_tunnel};
+pub use tddy_daemon_sandbox::*;
 /// The eight git/worktree modules, which now live in `tddy-worktree-service`.
 ///
 /// Named one by one rather than globbed: both new crates carry a `service` and a `stream`
@@ -44,12 +37,18 @@ pub use tddy_daemon_auth::{auth, github_pr_credentials, oauth_loopback_tunnel};
 /// own name in the crate it moved to, so `crate::worktrees::X` goes on resolving here and no
 /// caller in this crate changed.
 pub use tddy_projects::{project_provision, project_storage};
+/// The per-chat active-elicitation lease, which now lives in `tddy-telegram`.
+///
+/// Re-exported under its own name so `crate::active_elicitation::X` — and
+/// `tddy_daemon::active_elicitation::X` in the four acceptance suites that stay here — goes on
+/// resolving unchanged. No caller moved with it.
+pub use tddy_telegram::active_elicitation;
 pub use tddy_worktree_service::{
     base_sync_cache, branch_intent, branch_owner, remote_git_service, worktree_files, worktrees,
 };
 pub mod claude_cli_session;
 pub mod cli_session_manager;
-pub use tddy_daemon_kernel::config;
+pub use tddy_daemon_kernel::{agent_list_mapping, config};
 pub mod connection_service;
 pub use tddy_daemon_kernel::*;
 /// The ten session-file-I/O modules, which now live in `tddy-session-files`.

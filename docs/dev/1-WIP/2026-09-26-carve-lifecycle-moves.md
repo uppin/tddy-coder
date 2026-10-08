@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle` becomes a wiring crate: every converted topic moves into its receiver with the restructure engine
 
 **Date**: 2026-09-26
-**Status**: 📋 Planned. Awaiting the developer's review of the edge approvals, D4, D5, D7, D12, D13, D14 and the `test_util` item
+**Status**: 🚧 In progress. The developer ruled on 2026-10-08 to take every recommendation of this changeset (see "Developer's ruling, 2026-10-08"); R1 is partly applied and the run is stopped on an engine refusal (see "Validation results")
 **Type**: Refactor (crate extraction by engine moves; no behaviour change)
 **Stack**: `#carve` 21/21, branch `feature/carve/lifecycle-moves`, on top of `#carve` 20
 (`feature/carve/lifecycle-ports-launch-start`). Plan label **17**, the move node
@@ -213,9 +213,9 @@ The scan followed `deferred-work/references/planning-cross-check.md`. No record 
 Bottom-up, one receiver per milestone. Each: engine plan → `check` → `apply` → build corrections →
 per-crate baseline → B-checks for that receiver.
 
-- [ ] **R0 approvals**: the edge table, D4, D5, D7, D12, D13, D14 and `test_util` decided; baselines
+- [x] **R0 approvals**: the edge table, D4, D5, D7, D12, D13, D14 and `test_util` decided; baselines
   recorded on 16e's tip for lifecycle and every receiver
-- [ ] **R1 `tddy-daemon-kernel`**: `agent_list_mapping`, `daemon_urls` (`move_module_to_crate`); zero new edges
+- [~] **R1 `tddy-daemon-kernel`** (`agent_list_mapping` done; `daemon_hook_urls` refused, see Validation results): `agent_list_mapping`, `daemon_urls` (`move_module_to_crate`); zero new edges
 - [ ] **R2 `tddy-daemon-livekit`**: T7 (the admission-token module, the `resolve_os_user` module; each
   moved individually, nested under wiring's builders) and `placement` (`move_module_to_crate`); zero new edges
 - [ ] **R3 `tddy-session-files`**: T8's two modules; new edge `tddy-session-files` → `tddy-daemon-livekit`
@@ -650,7 +650,29 @@ Settled by the developer (2026-09-26), carried here:
 - `PeerRouted*` stays.
 - `tddy-session-activity` → `tonic` is approved (2026-09-25).
 
-### Open decisions this node needs
+### Developer's ruling, 2026-10-08
+
+The developer said, on 2026-10-08: **take the changeset's recommendations for every open decision**, and
+treat the recommended option as approved. That settles:
+
+| Decision | Ruling (the recommended option) |
+|---|---|
+| Edge approvals (the "New crate edges" table, all rows marked "needs approval") | **Approved**, except the rows marked "only under D7-B", which fall with D7-A. An edge the table does not name is still a stop-and-ask |
+| D4 | **A new crate `tddy-cli-sessions`** for the PTY runtime |
+| D5 | **`service_util` and `workspace_session` → `tddy-session-split`** |
+| D7 | **A: `LocalExecTools` stays in lifecycle** (so `tddy-session-agents` gains no `tddy-daemon-sandbox`, `tddy-sandbox-runner`, `tddy-tool-engine`, `tddy-task` edges) |
+| D11 | Shape tests: not now; a `cargo tree`-based CI check for B1 is a follow-up todo |
+| D12 | **T11 → `tddy-demo-runner`** |
+| D13 | **Accept ~4.5k** as this node's target (B5) |
+| D14 | **Drop lifecycle's unused dependencies here** (R10) |
+| `test_util` | **A `test-util` feature** |
+| D8 | **Re-parent the four mixed files with the engine's `reparent_module`** (it exists now) |
+
+This is the developer's ruling on this date. It does not widen the Boundaries: moves are the engine's only,
+a refusal still means stop and report, and hand edits after a move are build corrections only, each filed as
+a todo.
+
+### Open decisions this node needs (all ruled on 2026-10-08, above)
 
 - **Edge approvals (all of them).** Every row marked "needs approval" in "New crate edges":
   lifecycle → agent-launch, split, cli-sessions; agent-launch's 22; split's 21; cli-sessions' 10;
@@ -699,14 +721,77 @@ Settled by the developer (2026-09-26), carried here:
 
 ## Validation results
 
-(Empty. Filled per receiver milestone during `/green`.)
+Filled per receiver milestone during `/green`. Counts below are from `cargo test --no-fail-fast … -- --test-threads=1
+--skip sandboxed_bash_pty_action_streams_output` in the same environment `./test` builds (the binaries it builds
+first are what the jail suites need; without them 13 more tests fail with a jailed child exiting 127).
+
+### R0: cycle check and baselines (2026-10-08, on 16e's tip `27288bcb1`)
+
+- **Cycle check.** `cargo metadata --offline --no-deps` over the workspace's normal-dependency graph, with every row
+  of "New crate edges" added: **61 edges checked, 0 cycles.** Dependents of lifecycle: `tddy-daemon`, `tddy-daemon-rpc`,
+  `tddy-desktop`, `tddy-telegram-control`; dev dependents: `tddy-model-registry`, `tddy-tool-engine`,
+  `tddy-worktree-service` (the B1 expected set).
+- **Baseline, before R1** (`tddy-session-lifecycle`, `-daemon-kernel`, `-daemon-livekit`, `-session-files`,
+  `-session-activity`, `-demo-runner`, `-session-agents`):
+
+  | Crate | passed | failed | ignored |
+  |---|---:|---:|---:|
+  | `tddy-session-lifecycle` | **658** | **22** | 1 (doc) |
+  | `tddy-daemon-kernel` | 126 | 0 | 0 |
+  | `tddy-daemon-livekit` | 178 | 0 | 0 |
+  | `tddy-session-files` | 160 | 0 | 0 |
+  | `tddy-session-activity` | 45 | 0 | 0 |
+  | `tddy-demo-runner` | 15 | 0 | 0 |
+  | `tddy-session-agents` | 75 | 0 | 0 |
+  | **sum** | **1,257** | **22** | **1** |
+
+  The 22 failures are the 22 known ones **by name** (the table in "Baseline"). **The figure in "Baseline" above,
+  575 passed, does not reproduce on this tree: 658 do, with the same 22 failures and 1 ignored.** The 22 and the 1
+  are the contract; this document's counts after R0 use 658.
+- **State on 16e's tip differs from the plan in three places, all in the plan's favour.** `peer_session_answer`
+  exists with the four items (M0.1 delivered), `seeded_clone_guard.rs` no longer holds `ExecToolRoute` (M0.6
+  delivered), and `session_dir_lookup` and `first_admission_token` already sit directly under `connection_service`
+  (M0.4, engine `reparent_module`, #584). `daemon_urls` is `connection_service/daemon_hook_urls.rs` and is declared
+  `pub(crate)`.
+
+### R1: `tddy-daemon-kernel` (partly applied; stopped on an engine refusal)
+
+- **Applied:** `agent_list_mapping` (`move_module_to_crate`, `reexport: glob`, one operation). Lifecycle's `lib.rs` now has
+  `pub use tddy_daemon_kernel::{agent_list_mapping, config};`; no consumer is edited (`git diff` over `tddy-daemon-rpc`,
+  `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop` is empty). The engine wrote `use crate::config::DaemonConfig;`
+  in the moved file (the origin's `tddy_daemon_kernel::config` path re-rooted); no hand edit was needed.
+- **Refused, not applied:** `daemon_hook_urls` (`pub(crate) mod daemon_hook_urls;`): `plan is malformed:
+  packages/tddy-session-lifecycle/src/connection_service.rs declares no `mod daemon_hook_urls``. The engine reads
+  only `mod x;` and `pub mod x;`. Filed: [`2026-10-08-restructure-move-to-crate-does-not-read-a-restricted-mod-declaration`](../todo/2026-10-08-restructure-move-to-crate-does-not-read-a-restricted-mod-declaration.md).
+  No workaround was made.
+- **After:** `tddy-session-lifecycle` 658 passed / 22 failed (same names) and `tddy-daemon-kernel` 126 passed: the sum of
+  both is 784, as before. `cargo check -p tddy-daemon-rpc -p tddy-daemon -p tddy-telegram-control -p tddy-model-registry
+  --all-targets` clean; `cargo clippy -p tddy-daemon-kernel -p tddy-session-lifecycle -- -D warnings` clean; `cargo fmt --check`
+  clean. Zero new crate edges (`tddy-daemon-kernel` already depends on `tddy-discovery` and `tddy-service`).
+- **Engine output worth a reviewer's eye:** the apply's `rustfmt` pass also reordered unrelated `pub use` lines in
+  lifecycle's `lib.rs` (17-line diff for one facade line). Filed:
+  [`2026-10-08-restructure-apply-rustfmt-reorders-unrelated-reexports-in-the-origin-root`](../todo/2026-10-08-restructure-apply-rustfmt-reorders-unrelated-reexports-in-the-origin-root.md).
+
+### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
+
+Run on the tree after R1's `agent_list_mapping`, to learn every refusal in one go. **No milestone after R1 was applied**
+(the rule: stop at the first refusal).
+
+| Milestone | Result |
+|---|---|
+| R2 `tddy-daemon-livekit`: `first_admission_token`, `os_user_resolution` (the child module, anchored on `svc_resolve_os_user/os_user_resolution.rs`; the parent `svc_resolve_os_user` is wiring and stays), `placement` | `no findings` |
+| R3 `tddy-session-files`: `svc_materialize_staged_attachment` (takes `session_attachment_materialization`) | `no findings` |
+| R4 `tddy-session-activity`: `presenter_observer_task` + `presenter_intent_client` (cluster), `session_notification_publishing`, `remote_git_pack_execution` | **Refused**: `session_notification_publishing` and `presenter_observer_spawn` are declared `pub(crate) mod` (same defect as R1); and the order must change: `presenter_observer_task` names `session_notification_publishing`, so it must go in the same cluster |
+| R5 `tddy-demo-runner`: `activity_hub` + `demo_vm_coordinate_handlers` (cluster) | `no findings`; but `DemoVmServiceImpl::new(host)` still names the host ([todo](../todo/2026-10-08-demo-vm-service-impl-constructor-still-names-the-host.md)), and the cluster names `tddy_session_activity::user_sessions_path`, an edge (`tddy-demo-runner` → `tddy-session-activity`) that the D12 row does not list |
+| R6 `tddy-session-agents`: the 12-module T3 cluster | **Refused**: one `use` writes several paths that need different qualifiers (`agent_host_callbacks.rs:19`); `peer_session_answer` is declared `pub(crate) mod`; `svc_ensure_session_room_for_agents` still carries a T4 child (`svc_provision_workspace_tool_sandbox`, `impl SplitSessions`) that must be re-parented first ([todo](../todo/2026-10-08-restructure-move-cluster-refuses-a-grouped-use-the-conversion-nodes-left.md)) |
+| R7–R9 | not preflighted: `tddy-cli-sessions`, `tddy-session-split` and `tddy-agent-launch` do not exist yet (a plan that names a destination that is not a crate is refused) |
 
 ## TODO
 
 - [x] Create changeset: this document
-- [ ] USER REVIEW: the edge approvals, D4, D5, D7, D12, D13, D14, `test_util`
-- [ ] Rebase onto 16e once it is green
-- [ ] R0: re-run the cycle check on 16e's tip; record the per-crate baselines
+- [x] USER REVIEW: the edge approvals, D4, D5, D7, D12, D13, D14, `test_util` (developer's ruling, 2026-10-08: the recommendations)
+- [x] Rebase onto 16e once it is green
+- [x] R0: re-run the cycle check on 16e's tip; record the per-crate baselines
 - [ ] R1–R10
 - [ ] `/analyze-code-issues` on every receiver that gained code
 - [ ] `/validate-changes`
