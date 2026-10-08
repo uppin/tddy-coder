@@ -193,6 +193,22 @@ async fn an_unregistered_session_is_refused() {
     assert!(outcome.unwrap_err().contains("no session `gone`"));
 }
 
+/// A hard link removed when dropped.
+struct KeptLink(std::path::PathBuf);
+
+impl KeptLink {
+    fn to(target: &std::path::Path, link: &std::path::Path) -> Self {
+        std::fs::hard_link(target, link).expect("a second name for the stale socket file");
+        Self(link.to_path_buf())
+    }
+}
+
+impl Drop for KeptLink {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 #[tokio::test]
 async fn a_stale_socket_file_is_replaced_and_keeps_its_permissions() {
     // Given the file a daemon that died left behind: a real socket nothing listens on
@@ -201,6 +217,9 @@ async fn a_stale_socket_file_is_replaced_and_keeps_its_permissions() {
     let path = host_session_socket_path(data.path(), &user).unwrap();
     drop(a_dead_daemons_socket_at(&path));
     let stale_inode = std::fs::metadata(&path).unwrap().ino();
+    // a second name keeps the stale inode allocated, so a replacement cannot be handed the same
+    // number (Linux reuses a freed inode at once)
+    let _keeps_the_inode = KeptLink::to(&path, &data.path().join("stale-socket-link"));
 
     // When a daemon binds the user's socket
     let sockets = HostSessionSockets::default();
