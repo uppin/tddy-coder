@@ -17,7 +17,7 @@ pull requests.
 
 | Module | Owns |
 |---|---|
-| `github_rest_common.rs` | shared REST constants (`Accept`, API version, user agents) and token resolution from the environment — a pure leaf |
+| `github_rest_common.rs` | shared REST constants (`Accept`, API version, user agents) and the token-taking `curl_github_*_with_token` entry points (the API root is a parameter) — a pure leaf; nothing reads a token from the environment |
 | `github_pr.rs` | the PR helpers `tddy-tools` exposes over MCP |
 | `pr_api.rs` | the `GithubPrApi` / `GithubPrInsightApi` traits and their DTOs — `PrState`, `PrDetail`, `PrFile`, `PrReview`, `CheckRun`, `PrLookupOutcome`, … — plus the live REST implementation |
 
@@ -47,3 +47,9 @@ here, so an edge back would make the pair mutually dependent.
 > `tddy-workflow-recipes`, which with `recipes → github → service` became a package cycle. Since
 > `tddy-service`'s only use of recipes is inside a `#[cfg(test)]` module, that dependency is now a
 > **dev-dependency** — Cargo permits cycles through those.
+
+## Documentation
+
+- [docs/rest-token.md](docs/rest-token.md) — how a REST call gets its token; no environment read
+- [docs/device-flow.md](docs/device-flow.md), [docs/session-token.md](docs/session-token.md)
+- [docs/changesets/](docs/changesets/) — change history; [docs/code-issues/](docs/code-issues/) — open findings

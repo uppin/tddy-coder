@@ -60,3 +60,12 @@ Input → Workflow::plan() → Backend::invoke() → stream::process_ndjson_stre
          └── ClarificationNeeded (questions) ← AskUserQuestion tool events
          └── On success: write changeset.yaml (initial_prompt, clarification_qa, sessions)
 ```
+
+## GitHub PR tools flag
+
+`Presenter::set_github_pr_tools_available(bool)` records whether the host of the run can answer the
+agent's GitHub token requests, and every run's context is seeded with it as
+`tddy_workflow::context_keys::GITHUB_PR_TOOLS_AVAILABLE_KEY` (`workflow_runner.rs`, the run's start).
+The recipes' prompt hooks read it; the presenter neither probes the environment nor decides the value.
+`tddy-coder` sets it exactly when it binds a credential handler
+([host-session wiring](../../tddy-coder/docs/host-session-wiring.md)).

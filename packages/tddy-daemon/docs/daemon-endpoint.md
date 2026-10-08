@@ -216,6 +216,19 @@ daemon issued, so the handler's own first check is what answers, without dependi
 or project existing. `local_socket_reachability_acceptance.rs` reads `local_socket_server.rs` as text,
 and `local_token_uds.rs` mounts services it builds for itself; neither sees `runtime.rs`'s wiring.
 
+## Host-session sockets
+
+A tool session reaches the daemon over one unix socket per OS user (`github_token`,
+`spawn_conversation`); the host binds them lazily
+([session identity](../../tddy-session-lifecycle/docs/session-identity.md)). Under `tddy-supervisor` the
+daemon cannot `chown` a socket to a session user, so the supervisor makes each declared socket and hands
+the listener to the daemon after the service socket (descriptor 3): `runtime::build` reads
+`LISTEN_FDNAMES` through `inherited_host_sockets::adopt_from_environment()` **before** the local socket
+server adopts its own listener, because adopting it clears the `LISTEN_*` variables, and passes the
+result to the host with `with_inherited_host_session_sockets`. The daemon serves an inherited socket where
+it is and never binds, replaces or removes it. See
+[host sockets](../../tddy-supervisor/docs/host-sockets.md).
+
 ## Where subsystems live
 
 | Coordinate | Crate / doc |

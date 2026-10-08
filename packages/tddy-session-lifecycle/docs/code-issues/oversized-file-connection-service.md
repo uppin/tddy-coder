@@ -16,6 +16,7 @@
 | 2026-10-07 | 497 | `origin/master` (`480c8448`), before `#carve` 18/21 |
 | 2026-10-07 | 503 | `#carve` 18/21: **+6**, three `mod` declarations (`split_ports`, `attached_initial_prompt`, `svc_split_delegators`) and their blank lines. **Crossed 500** |
 | 2026-10-07 | 508 | `#carve` 19/21 (#534): **+5** over 503 — three `mod` lines (`launch_ports`, `svc_launch_delegators`, `svc_resume_sandboxed_claude_cli_session`) and their blank lines. Already over 500; growth deferred again, unchanged reason: #535 and #536 also edit this file. (A re-count at `/pr-wrap` step 3.5 with the inline-test-block rule read 504 → 509 on the same two trees; the +5 agrees, the base differs by one) |
+| 2026-10-08 | 510 | 509 on `origin/master` → 510 after `#keyring` 9/9 (#516): **+1**, a `mod` line for the new host-session modules (inline-test-block rule). Already over 500; growth is incidental and the split stays with this record's own follow-up |
 
 ## What grew it
 

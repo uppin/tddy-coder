@@ -25,5 +25,6 @@ CLI binary with goals: `plan`, `acceptance-tests`, `red`, `green`. Backends: `--
 
 ## Documentation
 
+- [Host-session wiring](./docs/host-session-wiring.md) — how a tool session reaches the daemon for `github-token` and `spawn_conversation`
 - [Changesets](./docs/changesets/) — Applied changeset history
 - [Feature: agent skills / feature prompt](../../docs/ft/coder/feature-prompt-agent-skills.md) — **`.agents/skills`**, composed prompts, **`/recipe`** presenter hook
