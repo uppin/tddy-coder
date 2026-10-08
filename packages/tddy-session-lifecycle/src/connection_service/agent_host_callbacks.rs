@@ -27,7 +27,7 @@ use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
 use tddy_daemon_livekit::session_room::{OpenedSessionRoom, SessionRoomRegistry, WorktreeSnapshot};
 use tddy_model_registry::ModelRegistryStore;
 use tddy_rpc::Status;
-use tddy_sandbox_runner::ExecuteToolResponse;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_session_agents::session_agent_clone::{
     HostedAgentClones, HostedClone, SessionAgentCloneStore,
