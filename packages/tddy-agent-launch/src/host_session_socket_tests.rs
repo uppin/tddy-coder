@@ -16,7 +16,7 @@ use tddy_rpc::{RpcClientTransport, RpcMessage, Status};
 
 /// The account this test process runs as — the one OS user a test can serve without privilege.
 fn this_os_user() -> String {
-    crate::user_sessions_path::username_for_uid(unsafe { libc::geteuid() })
+    tddy_session_activity::user_sessions_path::username_for_uid(unsafe { libc::geteuid() })
         .expect("the test process's account has a passwd entry")
 }
 

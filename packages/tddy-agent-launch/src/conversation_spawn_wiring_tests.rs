@@ -1,4 +1,4 @@
-use super::recipe_enables_conversation_spawn;
+use crate::conversation_spawn::recipe_enables_conversation_spawn;
 
 /// Only the grill-me recipe binds a conversation-spawn handler on its managed session; other
 /// recipes (a plain TDD session, or the PR-stack orchestrator which uses `spawn-child` instead)

@@ -13,7 +13,7 @@ fn the_accounts_git_pairs() -> Vec<(String, String)> {
 async fn the_launch_environment_with(
     git_environment: Vec<(String, String)>,
 ) -> Vec<(String, String)> {
-    let progress = crate::connection_service::AttachmentProgressSink::discarding();
+    let progress = tddy_session_files::attachment_progress::AttachmentProgressSink::discarding();
     let registry = TaskRegistry::new();
     let dir = tempfile::tempdir().expect("a temporary directory");
     let (_, _, env_extra) = managed_claude_cli_launch(ManagedClaudeCliLaunch {
