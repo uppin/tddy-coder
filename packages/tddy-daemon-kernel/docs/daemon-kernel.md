@@ -233,6 +233,18 @@ clear. It is one of two independent checks a peer must pass before it receives a
 is `#keyring` 1/9's Ed25519 signature — and this crate carries only the configuration value; the
 checks themselves live in `tddy-credential-sync`, which this crate does not depend on.
 
+## `agent_list_mapping` and `daemon_hook_urls` — two daemon-wide helpers with no session state
+
+`agent_list_mapping` is the daemon-facing adapter over `tddy_discovery::agent_list_mapping`: it maps the
+daemon's `DaemonConfig` agent definitions to the `AssistantEntry` list a client reads.
+
+`daemon_hook_urls` holds `advertise_daemon_url`, `local_daemon_hook_url`, `claude_hook_daemon_url` and
+`DEFAULT_WEB_PORT`: where a hook command reaches this daemon (its own web listener on loopback when nothing
+is configured) and the URL it advertises to peers. The port default is defined here and nowhere else, since
+a hook posting to the wrong port fails silently. Each is a function of the config alone.
+
+Both are re-exported at their old `tddy_session_lifecycle::…` paths.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)
