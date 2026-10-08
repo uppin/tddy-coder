@@ -277,7 +277,10 @@ async fn a_started_tool_session_commits_as_the_account_its_project_acts_as() {
     world.start_a_tool_session().await;
 
     // Then its child started with her four pairs, exactly
-    assert_eq!(world.child_environment().await.commit_identity(), ADA_IDENTITY);
+    assert_eq!(
+        world.child_environment().await.commit_identity(),
+        ADA_IDENTITY
+    );
 }
 
 #[tokio::test]
@@ -289,7 +292,10 @@ async fn a_resumed_tool_session_commits_as_the_account_its_project_acts_as() {
     world.resume_a_tool_session().await;
 
     // Then its child started with her four pairs, exactly
-    assert_eq!(world.child_environment().await.commit_identity(), ADA_IDENTITY);
+    assert_eq!(
+        world.child_environment().await.commit_identity(),
+        ADA_IDENTITY
+    );
 }
 
 #[tokio::test]
@@ -308,7 +314,8 @@ async fn a_tool_session_whose_project_assigns_no_account_still_starts_with_no_id
 }
 
 #[tokio::test]
-async fn a_tool_session_whose_account_this_host_does_not_hold_still_starts_with_no_identity_added() {
+async fn a_tool_session_whose_account_this_host_does_not_hold_still_starts_with_no_identity_added()
+{
     // Given a project assigned to an account the owner's vault does not hold
     let world = a_world_where_the_project_assigns(&["acct-unknown"]);
 

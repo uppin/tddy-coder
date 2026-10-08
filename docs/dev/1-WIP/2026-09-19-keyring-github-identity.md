@@ -898,6 +898,24 @@ a wrong token in the REST `Authorization` header → `a_rest_call_carries_the_to
 `a_github_token_in_the_environment_authenticates_no_call` fail. Not mutation-checked: `unregister_stopped`'s pid condition (covered by its
 unit test and `a_resumed_session_stays_answered_when_its_earlier_process_stops`, not by a deliberate break).
 
+## Validation Results
+
+`/validate-changes` run 2026-10-08 on `b669c2f92` (base `master`, current; `origin/master..HEAD` is this PR's 14 commits).
+
+| Check | Result |
+|---|---|
+| Stack gate | current on `master`, no leaked commits |
+| Unplanned deletions | none (no path deleted relative to `master`) |
+| `## Dependencies` implemented here | none; the resolver (5/9) is called, not changed |
+| Environment fallback | none: no `github_token_from_env` or process-env `GITHUB_TOKEN`/`GH_TOKEN` read outside tests |
+| `cargo check --all-targets`, 19 touched packages | no warnings, no errors |
+| New `TODO`/`FIXME` | one open marker, `TODO(stdio-relay)` in `telegram_session_control/workflow_spawn.rs` (named under Telegram above) |
+| New `println!`/`eprintln!` in `src` | none |
+| Added non-test `unwrap`/`expect` | two `Mutex` lock `expect`s in `inherited_host_sockets.rs` (poisoned lock only) |
+| CI | pending on `b669c2f92` at the time of writing; not yet read |
+
+Files crossing or growing past 500 production lines, to be handled by the wrap's file-length gate: `tddy-toolcall/.../listener.rs` 676 to 766, `tddy-daemon-rpc/.../pr_stack/ports.rs` 775 to 808, `tddy-presenter/.../workflow_runner.rs` 1015 to 1036, `tddy-supervisor/src/supervisor.rs` 948 to 965, `tddy-daemon/src/runtime.rs` 1776 to 1781, `tddy-session-lifecycle/.../cursor_cli_spawn.rs` 532 to 548, and two telegram files by 1 to 2 lines.
+
 ## Green wave
 
 **Wave 5 of 5** — alone.
@@ -1100,7 +1118,7 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 - [x] WIP snapshot commits are still authored by `tddy-daemon` — `a_work_in_progress_snapshot_is_still_signed_by_the_daemon_itself`
 - [x] `FileGitHubTokenStore` has no readers left — `login_time_token_store_is_retired.rs` (`the_session_path_no_longer_reaches_for_the_operator_s_login_time_github_token`, `the_authentication_service_no_longer_retains_a_github_token_beside_the_vault`, `nothing_in_the_tree_still_declares_a_login_keyed_github_token_store`)
 - [x] A stopped session stops being answered, a restarted daemon's running session is told to resume — `a_tool_session_whose_process_has_stopped_is_no_longer_answered`, `after_a_daemon_restart_a_running_session_is_told_to_resume_and_then_is_answered`
-- [ ] A session of an OS user the daemon cannot `chown` to has the host-session socket — **built and unit-proven with the current user standing in, not met until run under a root supervisor** (an inherited socket is adopted, served and answers a token; an undeclared user is refused naming `host_sockets:`; see *Still open* for exactly what is unprovable here)
+- [~] A session of an OS user the daemon cannot `chown` to has the host-session socket — **DEFERRED (developer consent, 2026-10-08): the real run under a root supervisor with two accounts is not possible in this environment; tracked in `docs/dev/todo/2026-10-08-keyring-supervisor-host-socket-real-run.md`.** Built and unit-proven with the current user standing in, not met until run under a root supervisor** (an inherited socket is adopted, served and answers a token; an undeclared user is refused naming `host_sockets:`; see *Still open* for exactly what is unprovable here)
 
 ## TODO
 

@@ -145,8 +145,12 @@ fn repoint_context(session_dir: &Path, dependents: &[&str]) -> Context {
 }
 
 /// What a task's run reports, as the text of its refusal when it failed.
-fn failure_of(result: Result<impl std::fmt::Debug, Box<dyn std::error::Error + Send + Sync>>) -> String {
-    result.expect_err("the task should have been refused").to_string()
+fn failure_of(
+    result: Result<impl std::fmt::Debug, Box<dyn std::error::Error + Send + Sync>>,
+) -> String {
+    result
+        .expect_err("the task should have been refused")
+        .to_string()
 }
 
 #[test]
@@ -156,9 +160,8 @@ fn building_the_recipe_asks_the_host_for_nothing() {
     let host = a_session_host_refusing_every_request();
 
     // When the recipe's graph is built
-    let _graph = OrchestratePrStackRecipe.build_graph(Arc::new(
-        tddy_core::backend::StubBackend::new(),
-    ));
+    let _graph =
+        OrchestratePrStackRecipe.build_graph(Arc::new(tddy_core::backend::StubBackend::new()));
 
     // Then the host was never asked
     assert_eq!(host.requests(), 0);
@@ -172,10 +175,15 @@ async fn assessing_a_stack_whose_nodes_own_no_branch_asks_the_host_for_nothing()
     let orchestrator = an_orchestrator_with(vec![a_node("n1", None), a_node("n2", None)]);
 
     // When it is assessed
-    let assessed = AssessTask::new().run(assess_context(orchestrator.path())).await;
+    let assessed = AssessTask::new()
+        .run(assess_context(orchestrator.path()))
+        .await;
 
     // Then it completes, and the host was never asked
-    assert_eq!(assessed.expect("assess completes").response, "assess → spawn");
+    assert_eq!(
+        assessed.expect("assess completes").response,
+        "assess → spawn"
+    );
     assert_eq!(host.requests(), 0);
 }
 
@@ -187,7 +195,11 @@ async fn assessing_a_stack_with_a_branch_asks_once_and_surfaces_the_hosts_refusa
     let orchestrator = an_orchestrator_with(vec![a_node("n1", Some("feature/auth-store"))]);
 
     // When it is assessed
-    let refusal = failure_of(AssessTask::new().run(assess_context(orchestrator.path())).await);
+    let refusal = failure_of(
+        AssessTask::new()
+            .run(assess_context(orchestrator.path()))
+            .await,
+    );
 
     // Then the host was asked once, and its words reach the caller
     assert_eq!(host.requests(), 1);
@@ -199,7 +211,8 @@ async fn assessing_a_stack_with_a_branch_asks_once_and_surfaces_the_hosts_refusa
 async fn repointing_dependents_that_own_no_branch_asks_the_host_for_nothing() {
     // Given a merged node whose dependent owns no branch yet, and a host that would refuse
     let host = a_session_host_refusing_every_request();
-    let orchestrator = an_orchestrator_with(vec![a_node("n1", Some("feature/a")), a_node("n2", None)]);
+    let orchestrator =
+        an_orchestrator_with(vec![a_node("n1", Some("feature/a")), a_node("n2", None)]);
 
     // When the dependents are repointed
     let repointed = RepointTask::new()
@@ -244,7 +257,11 @@ async fn merging_asks_once_and_surfaces_the_hosts_refusal_before_anything_is_jou
     let orchestrator = an_orchestrator_with(vec![a_node("n1", Some("feature/a"))]);
 
     // When the merge runs
-    let refusal = failure_of(MergeTask::new().run(merge_context(orchestrator.path())).await);
+    let refusal = failure_of(
+        MergeTask::new()
+            .run(merge_context(orchestrator.path()))
+            .await,
+    );
 
     // Then the host was asked once, its words reach the caller, and no in-flight merge was recorded
     assert_eq!(host.requests(), 1);
@@ -262,7 +279,11 @@ async fn a_github_token_in_the_environment_rescues_no_refused_merge() {
     let orchestrator = an_orchestrator_with(vec![a_node("n1", Some("feature/a"))]);
 
     // When the merge runs
-    let refusal = failure_of(MergeTask::new().run(merge_context(orchestrator.path())).await);
+    let refusal = failure_of(
+        MergeTask::new()
+            .run(merge_context(orchestrator.path()))
+            .await,
+    );
 
     // Then the environment rescued nothing: the host was asked and refused
     assert_eq!(host.requests(), 1);
@@ -279,7 +300,11 @@ async fn a_github_token_in_the_environment_rescues_no_refused_assess() {
     let orchestrator = an_orchestrator_with(vec![a_node("n1", Some("feature/auth-store"))]);
 
     // When it is assessed
-    let refusal = failure_of(AssessTask::new().run(assess_context(orchestrator.path())).await);
+    let refusal = failure_of(
+        AssessTask::new()
+            .run(assess_context(orchestrator.path()))
+            .await,
+    );
 
     // Then the environment rescued nothing: the host was asked and refused
     assert_eq!(host.requests(), 1);

@@ -45,6 +45,8 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, OsStr, OsString};
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::os::fd::{OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
@@ -492,7 +494,7 @@ impl ForkBroker {
 
     /// Fork, drop privilege, and exec the plan on the fork thread. Returns the child's pid.
     ///
-    /// `handover` is the listening socket the child should find at [`SD_LISTEN_FDS_START`]. It is
+    /// `handover` is the listening socket the child should find at [`crate::socket::SD_LISTEN_FDS_START`]. It is
     /// not part of the [`SpawnPlan`] because it is a live descriptor the supervisor owns, not a
     /// decision about the child.
     pub async fn spawn(
@@ -542,7 +544,7 @@ struct PreExecSteps {
     supervisor_pid: libc::pid_t,
     /// The environment the child execs with, ready but for its own pid.
     environment: ChildEnvironment,
-    /// The listeners to place at [`SD_LISTEN_FDS_START`] and after, in order — none for a child that
+    /// The listeners to place at [`crate::socket::SD_LISTEN_FDS_START`] and after, in order — none for a child that
     /// is handed nothing. Owned by the supervisor, not by the plan.
     handover: Vec<RawFd>,
     /// [`pre_exec_plan`]'s output, compiled. Executed in this order and no other.
