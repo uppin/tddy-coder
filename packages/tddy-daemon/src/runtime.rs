@@ -1246,7 +1246,7 @@ pub async fn build(
                     demo_vm: tddy_service::proto::demo_vm::DemoVmServiceTonicAdapter::new(
                         Arc::new(
                             tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(
-                                connection_arc.clone(),
+                                connection_arc.demo_vm_service_state(),
                             ),
                         ),
                     ),

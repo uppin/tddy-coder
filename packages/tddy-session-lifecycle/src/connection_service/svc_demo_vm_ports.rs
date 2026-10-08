@@ -19,10 +19,8 @@ pub struct DemoVmServiceImpl {
 
 impl DemoVmServiceImpl {
     #[must_use]
-    pub fn new(host: Arc<DaemonSessionHost>) -> Self {
-        Self {
-            state: host.demo_vm_service_state(),
-        }
+    pub fn new(state: activity_hub::DemoVmState) -> Self {
+        Self { state }
     }
 }
 
@@ -56,7 +54,7 @@ impl DaemonSessionHost {
         tddy_rpc::ServiceEntry {
             name: "demo_vm.DemoVmService",
             service: Arc::new(DemoVmServiceServer::new(DemoVmServiceImpl::new(
-                Arc::clone(self),
+                self.demo_vm_service_state(),
             ))) as Arc<dyn tddy_rpc::RpcService>,
         }
     }

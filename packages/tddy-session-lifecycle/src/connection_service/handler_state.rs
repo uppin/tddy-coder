@@ -108,7 +108,7 @@ impl DaemonSessionHost {
 
     /// The fields the demo-VM RPCs read, shared with this host (the VM table and idle tracker are
     /// the same handles) so a service built from them acts on the host's own VMs.
-    pub(crate) fn demo_vm_service_state(&self) -> super::activity_hub::DemoVmState {
+    pub fn demo_vm_service_state(&self) -> super::activity_hub::DemoVmState {
         super::activity_hub::DemoVmState {
             demo_vm_state: Arc::clone(&self.demo_vm_state),
             tddy_data_dir: self.tddy_data_dir.clone(),
