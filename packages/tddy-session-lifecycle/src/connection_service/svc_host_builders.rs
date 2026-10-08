@@ -50,7 +50,8 @@ impl DaemonSessionHost {
         };
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-        let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let host_session_sockets =
+            Arc::new(super::host_session_socket::HostSessionSockets::default());
         let room_roster = room_roster_from_config(config.livekit.as_ref());
         // Built here rather than inline below because the roster store reads it: an entry's
         // `clone_state` is the state of the checkout serving it, and two stores would let a roster
@@ -86,7 +87,7 @@ impl DaemonSessionHost {
             room_roster,
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
-            session_stdio,
+            host_session_sockets,
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),

@@ -15,6 +15,12 @@ use crate::toolcall::ToolCallRequest;
 use crate::SharedBackend;
 
 impl Presenter {
+    /// Tell the presenter whether the agent's host answers its GitHub token requests, so each
+    /// workflow run it starts seeds that into its context. Call before [`Self::start_workflow`].
+    pub fn set_github_pr_tools_available(&mut self, available: bool) {
+        self.workflow.github_pr_tools_available = available;
+    }
+
     /// Start the workflow with the given backend.
     #[allow(clippy::too_many_arguments)]
     pub fn start_workflow(
@@ -115,6 +121,7 @@ impl Presenter {
         let model_for_workflow = self.state.model.clone();
         let recipe = self.backend.recipe.clone();
         let tddy_data_dir = self.tddy_data_dir.clone();
+        let github_pr_tools_available = self.workflow.github_pr_tools_available;
         let handle = thread::spawn(move || {
             workflow_runner::run_workflow(
                 recipe,
@@ -132,6 +139,7 @@ impl Presenter {
                 socket_path,
                 worktree_dir,
                 tddy_data_dir,
+                github_pr_tools_available,
             );
         });
 

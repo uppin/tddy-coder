@@ -17,6 +17,7 @@ use crate::{
 };
 
 use super::{WorkflowCompletePayload, WorkflowEvent};
+use tddy_workflow::context_keys::GITHUB_PR_TOOLS_AVAILABLE_KEY;
 
 /// Context for elicitation (plan approval, refinement). Groups parameters passed to handle_elicitation.
 struct ElicitationContext<'a> {
@@ -30,9 +31,11 @@ struct ElicitationContext<'a> {
     conversation_output_path: &'a Option<PathBuf>,
     debug: bool,
     socket_path: Option<&'a PathBuf>,
+    github_pr_tools_available: bool,
 }
 
 /// Model, agent I/O, logging, optional `run_demo`, and optional socket — shared across plan/start/refine contexts.
+#[allow(clippy::too_many_arguments)] // one seeding point for every context a run starts with
 fn insert_engine_io_and_demo_flags(
     ctx: &mut std::collections::HashMap<String, serde_json::Value>,
     model: &Option<String>,
@@ -41,6 +44,7 @@ fn insert_engine_io_and_demo_flags(
     debug: bool,
     run_demo: Option<bool>,
     socket_path: Option<&PathBuf>,
+    github_pr_tools_available: bool,
 ) {
     ctx.insert(
         "model".to_string(),
@@ -62,6 +66,12 @@ fn insert_engine_io_and_demo_flags(
     if let Some(p) = socket_path {
         ctx.insert("socket_path".to_string(), serde_json::to_value(p).unwrap());
     }
+    // Whether this process's session host can answer the agent's GitHub token requests — what the
+    // recipes' prompts read before advertising the PR tools (see `GITHUB_PR_TOOLS_AVAILABLE_KEY`).
+    ctx.insert(
+        GITHUB_PR_TOOLS_AVAILABLE_KEY.to_string(),
+        serde_json::json!(github_pr_tools_available),
+    );
 }
 
 /// Loop on WaitingForInput until status is Completed, Paused, or ElicitationNeeded.
@@ -292,6 +302,7 @@ fn handle_elicitation(
                     ctx.debug,
                     None,
                     ctx.socket_path,
+                    ctx.github_pr_tools_available,
                 );
                 if let Some(sid) = session_id_for_refine {
                     refine_ctx.insert("session_id".to_string(), serde_json::json!(sid));
@@ -366,6 +377,7 @@ fn run_start_goal_without_output_dir(
     debug_output_path: Option<&Path>,
     debug: bool,
     socket_path: Option<&PathBuf>,
+    github_pr_tools_available: bool,
     tddy_data_dir: &Path,
 ) -> Option<PathBuf> {
     let inherit_stdin = false;
@@ -522,6 +534,7 @@ fn run_start_goal_without_output_dir(
         debug,
         Some(false),
         socket_path,
+        github_pr_tools_available,
     );
     context_values.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
@@ -620,6 +633,7 @@ fn run_start_goal_without_output_dir(
             conversation_output_path: &conversation_output_resolved,
             debug,
             socket_path,
+            github_pr_tools_available,
         };
         if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
             return None;
@@ -647,6 +661,7 @@ pub fn run_workflow(
     socket_path: Option<PathBuf>,
     worktree_dir: Option<PathBuf>,
     tddy_data_dir: PathBuf,
+    github_pr_tools_available: bool,
 ) {
     let inherit_stdin = false;
     let initial_prompt_for_ctx = initial_prompt.clone();
@@ -693,6 +708,7 @@ pub fn run_workflow(
                 debug_output_path.as_deref(),
                 debug,
                 socket_path.as_ref(),
+                github_pr_tools_available,
                 &tddy_data_dir,
             ) {
                 Some(p) => p,
@@ -797,6 +813,7 @@ pub fn run_workflow(
                 debug,
                 None,
                 socket_path.as_ref(),
+                github_pr_tools_available,
             );
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -828,6 +845,7 @@ pub fn run_workflow(
                     conversation_output_path: &conversation_output_path,
                     debug,
                     socket_path: socket_path.as_ref(),
+                    github_pr_tools_available,
                 };
                 if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
                     return;
@@ -913,6 +931,7 @@ pub fn run_workflow(
         debug,
         Some(false),
         socket_path.as_ref(),
+        github_pr_tools_available,
     );
     context_values.insert("run_optional_step_x".to_string(), serde_json::json!(false));
 
@@ -973,6 +992,7 @@ pub fn run_workflow(
                     conversation_output_path: &conversation_output_path,
                     debug,
                     socket_path: socket_path.as_ref(),
+                    github_pr_tools_available,
                 };
                 if !handle_elicitation(event, &session_dir, &elicitation_ctx) {
                     return;
@@ -1011,5 +1031,54 @@ pub fn run_workflow(
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// The context a run is seeded with, for a driver whose host can (or cannot) answer GitHub
+    /// token requests.
+    fn seeded_context(github_pr_tools_available: bool) -> HashMap<String, serde_json::Value> {
+        let mut ctx = HashMap::new();
+        insert_engine_io_and_demo_flags(
+            &mut ctx,
+            &None,
+            false,
+            &None,
+            false,
+            None,
+            None,
+            github_pr_tools_available,
+        );
+        ctx
+    }
+
+    #[test]
+    fn a_run_whose_host_answers_token_requests_is_seeded_with_the_pr_tools_available() {
+        // Given a driver whose host answers GitHub token requests
+        // When a run's context is seeded
+        let ctx = seeded_context(true);
+
+        // Then the key the recipes' prompts read is true
+        assert_eq!(
+            ctx.get(GITHUB_PR_TOOLS_AVAILABLE_KEY),
+            Some(&serde_json::json!(true))
+        );
+    }
+
+    #[test]
+    fn a_run_whose_host_cannot_answer_is_seeded_with_the_pr_tools_unavailable() {
+        // Given a driver with no such host
+        // When a run's context is seeded
+        let ctx = seeded_context(false);
+
+        // Then the key is false, so the prompts stay silent about tools every call would refuse
+        assert_eq!(
+            ctx.get(GITHUB_PR_TOOLS_AVAILABLE_KEY),
+            Some(&serde_json::json!(false))
+        );
     }
 }

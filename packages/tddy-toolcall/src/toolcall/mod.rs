@@ -27,8 +27,9 @@ pub use client_wire::{
 pub use github_token_client::{request_github_token, request_github_token_from_session};
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
-    start_toolcall_listener_with_conversation_handler, ChildSpawnHandler, ConversationSpawnHandler,
-    GithubCredentialHandler, ToolcallRpcService,
+    start_toolcall_listener_with_conversation_handler, start_toolcall_listener_with_handlers,
+    ChildSpawnHandler, ConversationSpawnHandler, GithubCredentialHandler, ListenerHandlers,
+    ToolcallRpcService,
 };
 pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
 pub use restructure::{register_restructure_executor, restructure_executor, RestructureExecutor};
@@ -402,6 +403,10 @@ pub struct GithubTokenRequestWire {
 pub const HOST_SESSION_SERVICE: &str = "tddy.host.HostSessionService";
 /// Unary method on [`HOST_SESSION_SERVICE`]: spawn a new conversation for the calling session.
 pub const SPAWN_CONVERSATION_METHOD: &str = "SpawnConversation";
+/// Unary method on [`HOST_SESSION_SERVICE`]: the GitHub token of the account the **named** session's
+/// project acts as. Like every request on that service it carries the caller's `session_id`, because
+/// the socket it arrives on serves every tool session of one OS user.
+pub const GITHUB_TOKEN_METHOD: &str = "GithubToken";
 
 /// Wire format for `list-actions` request (from tddy-tools).
 #[derive(Debug, Deserialize)]

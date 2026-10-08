@@ -112,6 +112,15 @@ pub fn start_toolcall_listener(
     start_toolcall_listener_with_conversation_handler(session_dir, repo_root, tddy_data_dir, None)
 }
 
+/// The per-instance handlers a self-hosted toolcall listener binds onto every connection.
+#[derive(Clone, Default)]
+pub struct ListenerHandlers {
+    /// Answers `spawn-conversation`; absent, the verb is rejected.
+    pub conversation_spawn: Option<Arc<dyn ConversationSpawnHandler>>,
+    /// Answers `github-token`; absent, the verb is refused — there is no environment fallback.
+    pub github_credential: Option<Arc<dyn GithubCredentialHandler>>,
+}
+
 /// Like [`start_toolcall_listener`], but binds a per-instance [`ConversationSpawnHandler`] onto
 /// every accepted connection's [`ToolcallRpcService`]. This is how a session that hosts its **own**
 /// toolcall socket (a `tddy-coder --daemon` process) makes `spawn-conversation` work: the plain
@@ -130,6 +139,33 @@ pub fn start_toolcall_listener_with_conversation_handler(
     ),
     std::io::Error,
 > {
+    start_toolcall_listener_with_handlers(
+        session_dir,
+        repo_root,
+        tddy_data_dir,
+        ListenerHandlers {
+            conversation_spawn: conversation_spawn_handler,
+            github_credential: None,
+        },
+    )
+}
+
+/// Like [`start_toolcall_listener_with_conversation_handler`], binding every per-instance handler
+/// in [`ListenerHandlers`] — including the [`GithubCredentialHandler`] that makes the agent's
+/// `github-token` request answerable from a process that holds no credential itself.
+#[cfg(unix)]
+pub fn start_toolcall_listener_with_handlers(
+    session_dir: Option<PathBuf>,
+    repo_root: Option<PathBuf>,
+    tddy_data_dir: PathBuf,
+    handlers: ListenerHandlers,
+) -> Result<
+    (
+        std::path::PathBuf,
+        std::sync::mpsc::Receiver<ToolCallRequest>,
+    ),
+    std::io::Error,
+> {
     let dir = std::env::temp_dir();
     let socket_path = dir.join(format!("tddy-toolcall-{}.sock", std::process::id()));
     let _ = std::fs::remove_file(&socket_path);
@@ -140,7 +176,7 @@ pub fn start_toolcall_listener_with_conversation_handler(
     let session_dir = Arc::new(session_dir);
     let repo_root = Arc::new(repo_root);
     let tddy_data_dir = Arc::new(tddy_data_dir);
-    let conversation_spawn_handler = Arc::new(conversation_spawn_handler);
+    let handlers = Arc::new(handlers);
 
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
@@ -153,7 +189,7 @@ pub fn start_toolcall_listener_with_conversation_handler(
                 session_dir,
                 repo_root,
                 tddy_data_dir,
-                conversation_spawn_handler,
+                handlers,
             )
             .await;
         });
@@ -191,7 +227,7 @@ async fn accept_loop(
     session_dir: Arc<Option<PathBuf>>,
     repo_root: Arc<Option<PathBuf>>,
     tddy_data_dir: Arc<PathBuf>,
-    conversation_spawn_handler: Arc<Option<Arc<dyn ConversationSpawnHandler>>>,
+    handlers: Arc<ListenerHandlers>,
 ) {
     loop {
         let (stream, _) = match listener.accept().await {
@@ -204,7 +240,8 @@ async fn accept_loop(
             Arc::clone(&repo_root),
             Arc::clone(&tddy_data_dir),
         )
-        .with_conversation_spawn_handler((*conversation_spawn_handler).clone());
+        .with_conversation_spawn_handler(handlers.conversation_spawn.clone())
+        .with_github_credential_handler(handlers.github_credential.clone());
         let (reader, writer) = stream.into_split();
         let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
             reader,

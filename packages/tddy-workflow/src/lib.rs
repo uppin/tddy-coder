@@ -6,6 +6,7 @@
 //! without naming each other.
 
 pub mod artifact_paths;
+pub mod context_keys;
 pub mod events;
 pub mod hints;
 pub mod ids;

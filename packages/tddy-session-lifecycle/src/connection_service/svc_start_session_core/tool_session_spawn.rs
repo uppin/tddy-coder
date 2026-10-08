@@ -2,6 +2,8 @@ use crate::connection_service::service_util;
 
 use super::DaemonSessionHost;
 
+use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
+
 use super::ToolSpawnPurpose;
 
 use super::ToolSpawnPlan;
@@ -62,34 +64,15 @@ impl DaemonSessionHost {
         // the session that owns a `changeset.yaml` is the process that writes it.
         let stack_seed_base_session_for_spawn = trim_to_option(&req.pr_stack_base_session_id);
         let model_for_spawn = trim_to_option(&req.model);
-        // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
-        // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
-        // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
-        // the session id BEFORE the spawn, so both the worker and direct paths carry it identically.
+        // Every tool session reaches the daemon over its OS user's host-session socket, whatever its
+        // recipe — that is how its agent's PR tools get the project account's token. The coder
+        // names itself to the socket by its `--session-id`, which is therefore fixed before the
+        // spawn, so the registration below and the flag the child is given agree on it.
+        let tool_session_id = Uuid::now_v7().to_string();
         let enable_conversation_spawn = recipe_for_spawn
             .as_deref()
             .map(recipe_enables_conversation_spawn)
             .unwrap_or(false);
-        let (mut pre_session_id, host_session_socket): (Option<String>, Option<String>) =
-            if enable_conversation_spawn {
-                let sid = Uuid::now_v7().to_string();
-                let sock = self
-                    .launch_sessions()
-                    .spawn_host_session_socket(
-                        &sid,
-                        &os_user,
-                        &pid_for_spawn,
-                        model_for_spawn.clone(),
-                        self.session_account_access(&req.session_token),
-                    )
-                    .await;
-                (Some(sid), sock)
-            } else {
-                (None, None)
-            };
-        let tool_session_id = pre_session_id
-            .clone()
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
         if enable_conversation_spawn || !req.attachments.is_empty() {
             let sessions_base = crate::user_sessions_path::sessions_base_for_user(
                 &os_user,
@@ -105,31 +88,33 @@ impl DaemonSessionHost {
                 progress,
             })
             .await?;
-            pre_session_id = Some(tool_session_id);
         }
-        // The commit identity of the account this project acts as: one lookup over the project's
-        // assignments, the same one every other session path makes. A project that does not resolve
-        // adds no pairs (logged) and the session still starts under the checkout's own identity.
-        // Only the pairs reach the child: the account's token is never in its environment, argv or
-        // files — see the `TODO(keyring 9/9)` below for why its tools cannot ask for it yet.
-        let git_environment = self
-            .session_identity(
-                &os_user,
-                pre_session_id.as_deref().unwrap_or("new"),
-                &pid_for_spawn,
-                &req.session_token,
-            )
-            .git_environment;
-        // TODO(keyring 9/9): a tool session's agent cannot reach the project account's token, so its
-        // PR tools are refused ("its listener has no credential handler"). The channel back to this
-        // daemon's `SessionGithubCredential` is the per-session `--host-session-socket`, which
-        // (1) is bound only for grill-me recipes, (2) is created with mode 0o777 (its own
-        // `TODO(stdio-relay)`), so serving a token over it would let any local user fetch the
-        // owner's token, and (3) hosts `HostSessionService`, which has one method
-        // (`spawn_conversation`). Handing the token over needs a decision on the transport
-        // (socket ownership/permissions, binding it for every tool session) and a new relay verb on
-        // both ends; it is not an edit. Until then the child's tools are refused with that reason —
-        // never given an environment fallback.
+        // The commit identity of the account this project acts as, and the handler that answers its
+        // tools' token requests: one lookup over the project's assignments, the same one every other
+        // session path makes. A project that does not resolve adds no pairs (logged) and the session
+        // still starts under the checkout's own identity; its token requests are refused with the
+        // resolver's words. Only the pairs reach the child's environment: the account's token never
+        // does — it is asked for, per call, over the host-session socket.
+        let identity = self.session_identity(
+            &os_user,
+            &tool_session_id,
+            &pid_for_spawn,
+            &req.session_token,
+        );
+        let git_environment = identity.git_environment;
+        let host_session_socket = self
+            .launch_sessions()
+            .register_tool_session_on_host_socket(ToolSessionHostRegistration {
+                os_user: &os_user,
+                session_id: &tool_session_id,
+                project_id: &pid_for_spawn,
+                recipe: recipe_for_spawn.as_deref(),
+                model: model_for_spawn.clone(),
+                account_access: self.session_account_access(&req.session_token),
+                github_credential: identity.github_credential,
+            })
+            .await;
+        let pre_session_id = Some(tool_session_id);
         let result = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Start,

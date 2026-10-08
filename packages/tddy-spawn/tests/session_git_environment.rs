@@ -53,10 +53,27 @@ fn a_tool_that_dumps_its_environment(dir: &Path, dump: &Path) -> PathBuf {
     path
 }
 
+/// The environment the child recorded. The spawn returns once the child outlived its startup watch,
+/// not once it wrote anything, and the child is another process — there is no event to subscribe to —
+/// so this waits for the record up to a deadline.
+fn recorded_environment(dump: &Path) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match std::fs::read_to_string(dump) {
+            Ok(recorded) if recorded.contains("HOME=") => return recorded,
+            other => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the child never recorded its environment: {other:?}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        }
+    }
+}
+
 /// The plan for a new session spawned with `git_environment`.
-fn plan_with(
-    git_environment: &[(String, String)],
-) -> anyhow::Result<spawner::SessionChildPlan> {
+fn plan_with(git_environment: &[(String, String)]) -> anyhow::Result<spawner::SessionChildPlan> {
     let repo = tempfile::tempdir().unwrap();
     let data_dir = tempfile::tempdir().unwrap();
     let tools = tempfile::tempdir().unwrap();
@@ -161,7 +178,7 @@ fn a_spawned_child_starts_with_the_commit_identity_in_its_environment() {
     .expect("spawn the session child");
 
     // Then the commit identity it started with is her four pairs, exactly
-    let started_with = std::fs::read_to_string(&dump).expect("the child recorded its environment");
+    let started_with = recorded_environment(&dump);
     let mut identity_lines: Vec<&str> = started_with
         .lines()
         .filter(|line| line.starts_with("GIT_AUTHOR_") || line.starts_with("GIT_COMMITTER_"))
@@ -176,4 +193,42 @@ fn a_spawned_child_starts_with_the_commit_identity_in_its_environment() {
             "GIT_COMMITTER_NAME=ada",
         ]
     );
+}
+
+#[test]
+fn a_spawned_child_is_not_handed_the_daemons_github_token_by_inheritance() {
+    // Given a daemon with GITHUB_TOKEN and GH_TOKEN exported, and a tool that records its environment
+    std::env::set_var("GITHUB_TOKEN", "ghp_exported_to_the_daemon");
+    std::env::set_var("GH_TOKEN", "ghp_exported_to_the_daemon");
+    let repo = tempfile::tempdir().unwrap();
+    let data_dir = tempfile::tempdir().unwrap();
+    let tools = tempfile::tempdir().unwrap();
+    let dump = tools.path().join("env");
+    let tool = a_tool_that_dumps_its_environment(tools.path(), &dump);
+
+    // When a session child is spawned
+    spawner::spawn_as_user(
+        &current_username(),
+        tool.to_str().unwrap(),
+        data_dir.path(),
+        repo.path(),
+        &a_livekit(),
+        SpawnOptions {
+            new_session_id: Some("session-env"),
+            ..Default::default()
+        },
+        "info",
+        spawner::CHILD_LOG_FORMAT_FALLBACK,
+        None,
+        StartupWatch::from_millis(300, 10),
+    )
+    .expect("spawn the session child");
+
+    // Then neither variable reached it: the environment is never a credential
+    let started_with = recorded_environment(&dump);
+    let token_lines: Vec<&str> = started_with
+        .lines()
+        .filter(|line| line.starts_with("GITHUB_TOKEN=") || line.starts_with("GH_TOKEN="))
+        .collect();
+    assert_eq!(token_lines, Vec::<&str>::new());
 }

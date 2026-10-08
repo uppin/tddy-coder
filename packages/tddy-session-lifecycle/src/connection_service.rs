@@ -127,17 +127,9 @@ pub struct DaemonSessionHost {
     /// Per-session demo VM state — keyed by session_id.
     demo_vm_state:
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, activity_hub::DemoVmHandle>>>,
-    /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
-    /// session_id. Hosts [`crate::host_session_service::HostSessionService`] so the coder can relay
-    /// `spawn_conversation` back to the daemon over the pipe. Kept alive for the session's lifetime.
-    session_stdio: Arc<
-        tokio::sync::Mutex<
-            std::collections::HashMap<
-                String,
-                crate::connection_service::svc_start_claude_cli_session::SessionStdioEndpoint,
-            >,
-        >,
-    >,
+    /// The per-OS-user host-session sockets this daemon serves and the tool sessions they answer
+    /// (`spawn_conversation`, `github_token`). Shared with every [`LaunchSessions`] built from it.
+    host_session_sockets: Arc<host_session_socket::HostSessionSockets>,
     /// Live pub/sub hub for agent-activity records (StreamSessionActivity) plus the PreToolUse /
     /// PostToolUse pending-call pairing state. Shared with the sandbox tool handler so both the
     /// hook path and the in-jail tool path publish through the same channel.
@@ -227,6 +219,8 @@ pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 mod svc_pr_status_for_caller;
 
 mod svc_start_claude_cli_session;
+
+pub(crate) mod host_session_socket;
 
 pub(crate) mod session_acting_identity;
 pub use session_acting_identity::project_github_token;
@@ -509,6 +503,9 @@ mod specialized_subagent_env_unit_tests;
 
 #[cfg(test)]
 mod session_acting_identity_tests;
+
+#[cfg(test)]
+mod host_session_socket_tests;
 
 #[cfg(test)]
 mod seeded_roster_records_unit_tests;

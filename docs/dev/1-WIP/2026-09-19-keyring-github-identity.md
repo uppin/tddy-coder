@@ -28,6 +28,13 @@
   instead of a hardcoded `false`
 - **tddy-github**: `RealGithubPrApi::asking` / `asking_the_session_host` — a client that asks for its token the
   first time an operation needs one
+- **tddy-host-service**: `HostSessionService` gains the `GithubToken` method and a `HostSessionRegistry`
+  (session id → handlers); see *Tool sessions: the token over the per-OS-user host-session socket*
+- **tddy-coder**: `conversation_spawn_relay.rs` (`HostSessionClient`, `DaemonRelayGithubCredential`) and
+  `tool_host_wiring.rs`; its toolcall listener binds a `GithubCredentialHandler` exactly when it was given
+  `--host-session-socket`
+- **tddy-presenter** / **tddy-workflow**: the run's context is seeded with `github_pr_tools_available`
+  (`context_keys::GITHUB_PR_TOOLS_AVAILABLE_KEY`, moved down so the presenter and the recipes name one string)
 - **tddy-spawn**: the commit-identity pairs ride the supervisor/worker wire (`SpawnRequest::git_environment`,
   `SpawnOptions::git_environment`) — see *Tool sessions: the commit identity over the spawn wire*
 
@@ -330,7 +337,7 @@ any path, so a push still cannot succeed as the wrong GitHub account through thi
 
 ### Follow-ups
 
-Closed — see *Closing the remaining seams*. The tool-session (`tddy-coder`) commit identity is closed too (*Tool sessions: the commit identity over the spawn wire*); its token delivery is not, see *Still open*.
+Closed — see *Closing the remaining seams*. The tool-session (`tddy-coder`) commit identity is closed too (*Tool sessions: the commit identity over the spawn wire*); its token delivery is closed too (*Tool sessions: the token over the per-OS-user host-session socket*).
 
 ## Token delivery to the agent's tools
 
@@ -394,7 +401,8 @@ read from session metadata and nothing was missing.
   at GitHub* is not: `RealGithubPrApi` shells out to `api.github.com`, so the tests prove the token is
   asked for, the refusal surfaces, and a client is built from the answer — not that the REST call
   carries it;
-- tool-session (`tddy-coder`) token delivery and the engine-driven prompt flag — see *Still open*.
+- tool-session (`tddy-coder`) token delivery and the engine-driven prompt flag — closed, see *Tool sessions: the token over
+  the per-OS-user host-session socket*.
 
 ## Closing the remaining seams
 
@@ -415,7 +423,7 @@ request with the resolver's own message.
 | sandboxed cursor-cli start | yes (new) | yes (new) | `session_env` |
 | plain cursor-cli start / resume | yes (new) | none — a cursor-cli session runs no toolcall listener | the cursor process env |
 | agent-spawned children (`spawn-child`, `spawn-conversation`) | yes (new) | yes (new, via the child's own start) | as the claude-cli start |
-| **tool session (`tddy-coder`) start / resume** | **yes (new)** | **none — a decision is open, see *Still open*** | the child's process environment, over the spawn wire |
+| **tool session (`tddy-coder`) start / resume** | yes | **yes — over the per-OS-user host-session socket**, see below | the child's process environment, over the spawn wire |
 | split-agent | **not applicable** | none | — |
 
 **Why the jail's pairs go in `session_env`.** The jailed agent never mounts the checkout; it edits and
@@ -515,10 +523,8 @@ account's token reaches a session's tools only by being *asked for*, per call, o
 (`github-token` → `SessionGithubCredential`), on every path that has a handler; `a_planned_child_is_given_exactly_the_four_commit_identity_pairs`
 and `the_accounts_token_is_in_no_variable_the_tool_session_starts_with` pin the environment, and `GITHUB_TOKEN` in the
 daemon's environment resolves no identity (`a_github_token_in_the_daemons_environment_gives_an_unassigned_project_no_identity`).
-⚠ A *daemon* that itself has `GITHUB_TOKEN` exported hands it to its children by ordinary process-environment
-inheritance — no code here adds it, and nothing reads it (the REST client takes a parameter only), but the variable
-is in the child's environment. That is the operator's configuration, not this change; `spawn_as_user` does not
-`env_clear`.
+A *daemon* that itself has `GITHUB_TOKEN` exported used to hand it to its children by ordinary process-environment
+inheritance; `spawn_as_user` now removes both `GITHUB_TOKEN` and `GH_TOKEN` (see *Inherited environment* below).
 
 **⚠ Operator consequence, supervised hosts.** The supervisor's `spawn_policy.allowed_env_keys` is a *deny*, not a
 filter: a request naming a key it does not list is refused outright. A project that resolves to an account now sends
@@ -528,33 +534,101 @@ degraded. That fails loudly rather than silently starting under the machine's id
 also a behaviour change an upgrade must be told about. A project that resolves to nothing sends no key and spawns
 exactly as before.
 
+## Tool sessions: the token over the per-OS-user host-session socket
+
+**Decisions (developer, explicit).**
+
+1. **`--host-session-socket` is decoupled from recipes.** Every tool session the daemon starts or resumes gets it,
+   whichever recipe (it used to be bound for grill-me only, and never on resume). What stays recipe-specific is the
+   *handler*: only a grill-me session registers a `spawn_conversation` handler, so any other recipe's request is refused
+   (`this session's recipe does not spawn conversations`) rather than silently spawning. `tddy-coder` tolerates the flag
+   for every recipe; nothing keys off its presence to mean grill-me.
+2. **One long-lived socket per OS user, not per session or per spawn.** Bound lazily by the first session that needs it,
+   kept for the daemon's lifetime, bound again by the next session after a restart. Re-used by every tool call and every
+   tool session of that user.
+3. **`HostSessionService` gains `github_token`**, answered by the same `SessionGithubCredential` the claude-cli paths bind
+   (`github_credential_handler`), built per tool session at start/resume from `session_identity`.
+
+**Path scheme.** `<data dir>/run/<os user>/host.sock` — `tddy-session-lifecycle/src/connection_service/host_session_socket.rs`
+(`host_session_socket_path`). The data dir is the daemon's configured one (what `sessions_base_for_user` resolves). `run/`
+is `0o711` (traversable, not listable); `<os user>/` is `0o700`; `host.sock` is `0o600`.
+
+**Permission model.** The directory is narrowed to `0o700` **before** the socket is created in it, so whatever mode the
+socket is born with nobody else can reach it — there is no window with wider permissions. Ownership moves last (socket,
+then directory) to the session's OS user when the daemon runs as someone else. A `chown` the daemon is not privileged to
+make **refuses the bind and removes what it created** instead of widening anything (the rule `write_agent_def_file`
+follows); the session then starts without the flag, logged. A stale file left by a dead daemon is replaced only after
+checking it is a socket, owned by this daemon or the target user, and that **nothing is listening** on it; a live socket
+is never taken over and a non-socket file is never removed. The `TODO(stdio-relay)` on the `0o777` is gone with it.
+
+**Authentication and trust — stated plainly.** The socket's **filesystem permissions are the authentication boundary.**
+Because one socket serves many sessions, **every request names its session** (`session_id`), but that id is **a label, not
+a secret**: nothing proves the caller *is* that session. The daemon looks the id up in the registry, refuses an unknown or
+deleted one (`not_found`), refuses one registered for a different OS user than the socket's owner (`permission_denied`,
+naming neither user, no token), and otherwise answers from **that session's** handler — its assignment snapshot and the
+token it was started with — so session A's token is never returned for session B's id. **The residual trust:** any process
+running as the socket's OS user can ask for the token of any of *that user's* registered sessions. That is the same
+boundary as the user's own vault (an agent already runs as that user), and it is why the directory is owner-only. Not
+defended: a hostile process of the same OS user.
+
+**Proto.** None, so nothing to regenerate and nothing for the `unbundle_service_split` closed-world list. `HostSessionService`
+is JSON over `tddy-stdio` (`tddy.host.HostSessionService`, constants in `tddy-toolcall`), not a `.proto` service; the new
+method is `GithubToken` (`GITHUB_TOKEN_METHOD`) beside `SpawnConversation`. **Additive:** a host that predates a method
+answers `unimplemented` (pinned: `an_unknown_method_is_unimplemented_so_an_older_host_is_additive`). A request now carries
+`session_id`; an old coder that does not send one is refused (`a_request_that_names_no_session_is_refused`) — coder and
+daemon are one release, and the previous per-session socket is gone.
+
+**Registry.** `HostSessionRegistry` (`tddy-host-service`): session id → `RegisteredSession { os_user, conversation handler,
+github credential handler }`. `HostSessionSockets` (`tddy-session-lifecycle`) holds the registry and a map of per-user
+servers; `ensure_bound` reuses a server whose task is alive and whose socket file is still the inode it bound, and otherwise
+stops it and binds again. A session registers at start **and again at resume** (replacing the entry with the refreshed
+assignments and token) and is unregistered at `DeleteSession`.
+
+**How the coder reaches the token.** The coder already knows its session id (`--session-id`, or `--resume-from`, which
+`run.rs` copies into `args.session_id`), so no new flag. `tool_host_wiring::ToolHostHandlers::from_flags(socket, session_id)`
+binds `DaemonRelayConversationSpawnHandler` and `DaemonRelayGithubCredential` on the coder's toolcall listener
+(`start_toolcall_listener_with_handlers`) **exactly when both are present**; absent socket → no handler → the existing *no
+credential handler* refusal, no fallback. `HostSessionClient` connects on first use and again after the connection is lost
+(a daemon restart), repeating only an idempotent request (the token), never a spawn. `tddy-tools` (child of the coder, via
+`TDDY_SOCKET`) and the workflow actions' `request_github_token_from_session()` therefore work as in a claude-cli session.
+
+**The prompt flag.** The same fact sets `github_pr_tools_available`: `run.rs` calls
+`presenter.set_github_pr_tools_available(tool_host.github_pr_tools_available())`, the presenter seeds it into every run's
+context, and the recipes' hooks read it. The key moved to `tddy-workflow::context_keys` so seeder and reader name one string.
+Both `TODO(keyring 9/9)` markers (`tool_session_spawn.rs`, `github_pr_tools.rs`) are removed.
+
+**Inherited environment.** Verified, not assumed: a daemon with `GITHUB_TOKEN` / `GH_TOKEN` exported **did** hand them to
+a spawned tool-session child by ordinary inheritance (`spawn_as_user` does not `env_clear`) — the test below failed with both
+lines present before the fix. `spawn_as_user` now `env_remove`s both keys, and the forked worker goes through the same
+function. **Not covered:** the supervisor path starts the child from the *supervisor's* environment plus the request's `env`
+(which `plan_session_child` already restricts to the four commit-identity keys); the supervisor's own environment is the
+operator's configuration and is not touched here.
+
 ### Still open
 
-- **A tool session's PR tools still cannot reach the token.** A `tddy-coder` child's own toolcall listener has no
-  `GithubCredentialHandler` (`start_toolcall_listener_with_conversation_handler` has no such parameter), so its
-  agent's `github-token` is refused ("its listener has no credential handler") — truthful, and never an environment
-  fallback. **Stopped on purpose, because a real channel does not exist yet.** The only channel from that process
-  back to the daemon is `--host-session-socket` (`spawn_host_session_socket`), and it is unfit for a token:
-  1. it is bound **only for grill-me recipes** (`recipe_enables_conversation_spawn`), not for every tool session;
-  2. it is created **mode `0o777`** — its own `TODO(stdio-relay)` says to tighten it before cross-user production — so
-     serving a token on it would let any local user connect and fetch the owner's token;
-  3. it hosts `HostSessionService`, which has exactly one method (`spawn_conversation`); the token needs a new relay
-     verb on both ends (daemon `HostSessionService`, coder `DaemonRelayConversationSpawnHandler` sibling) plus a
-     `GithubCredentialHandler` on the coder's listener that forwards to it.
-  Done right it is: bind a per-session socket for *every* tool session with owner-only permissions (or a
-  credential-checked connect), add a `github-token` verb to `HostSessionService` answered by the session's
-  `SessionGithubCredential`, and a coder-side forwarding handler passed to the listener. That is a transport and
-  permissions decision, not an edit — left as one `TODO(keyring 9/9)` at `tool_session_spawn.rs` (the spawn site).
-- **The prompt flag has no production setter, and cannot honestly have one yet.** The hooks that read
-  `github_pr_tools_available` run in that same `tddy-coder` process, and its listener has no handler, so the flag
-  would be `false` on every path: a setter would be dead code asserting a constant. When a handler exists on that
-  listener, the process that builds it sets the flag from its presence (the condition the claude-cli paths bind their
-  handler under); until then the prompts truthfully stay silent. `TODO(keyring 9/9)` in
-  `tddy-workflow-recipes/src/github_pr_tools.rs` reworded to say exactly this. A daemon-managed claude-cli session
-  never runs those hooks, so there is no other site.
-- **Telegram-started tool sessions get no commit identity.** No session token — hence no vault — reaches
-  `telegram_spawn_options`, so nothing can resolve the project's account; they start under the checkout's own
-  identity. `TODO(keyring 9/9)` in `tddy-telegram-control/src/telegram_session_control/workflow_spawn.rs`.
+- ~~A tool session's PR tools cannot reach the token~~ and ~~the prompt flag has no production setter~~ — **closed**,
+  see *Tool sessions: the token over the per-OS-user host-session socket* below.
+- **Telegram-started tool sessions get no commit identity and no host socket.** No session token — hence no vault —
+  reaches `telegram_spawn_options`, so nothing can resolve the project's account; they start under the checkout's
+  own identity with `host_session_socket: None`, so their agent's token request is refused as having no credential
+  handler. `TODO(keyring 9/9)` and `TODO(stdio-relay)` in
+  `tddy-telegram-control/src/telegram_session_control/workflow_spawn.rs`, deliberately untouched: nothing there can
+  reach a vault.
+- **A running tool session is not re-registered after a daemon restart, and a stopped one is not unregistered.**
+  The registry is daemon memory. There is no stop hook for a tool session (the daemon does not track a spawned
+  `tddy-coder` after the spawn; `CliSessionManager::stop_session` belongs to the claude-cli manager) and no startup
+  re-attach (a session comes back only through `ResumeSession`, which registers again). So after a restart a
+  still-running coder is refused (*no session … registered*) until it is resumed, and a stopped-but-not-deleted
+  session keeps its entry — and with it the start's session token, **in daemon memory only** — until it is resumed
+  (replaced), deleted (removed) or the daemon restarts. Persisting the token so startup could re-register was **not**
+  done: the decision that a token is never in a file stands.
+- **A daemon that cannot `chown` to the session's OS user gets no socket for that user** (see the permission model
+  below): its sessions start with no `--host-session-socket`, hence no token and no `spawn_conversation` — which used
+  to work over a `0o777` socket. Logged per session at `warn`.
+- **The socket path lives under the data dir** (`<data dir>/run/<os user>/host.sock`), not under the session's own
+  directory: that nests too deep for AF_UNIX's ~104-byte limit on a real checkout path (the overflow
+  `agent_tool_socket_path` was digested to avoid). A data dir deep enough that the path exceeds 100 bytes is refused
+  with that reason.
 - **Plain cursor-cli: no PR-tool token.** It has no toolcall listener at all, so there is nothing to answer.
 - **Sandboxed cursor-cli resume is not implemented** (`resume_cursor_cli_session` ignores `sandbox`), so there
   is no relaunch to carry an identity.
@@ -637,6 +711,43 @@ Scoped `cargo check --all-targets` over `tddy-spawn`, `tddy-session-lifecycle`, 
 `tddy-toolcall`, `tddy-tools` (every consumer of `SpawnOptions` / `SpawnRequest`): clean. `cargo clippy -D warnings
 --all-targets` and `cargo fmt` over the six packages with source changes (`tddy-spawn`, `tddy-session-lifecycle`,
 `tddy-workflow-recipes`, `tddy-pr-stack`, `tddy-github`, `tddy-telegram-control`): clean.
+
+### Verification — tool-session token over the host-session socket (measured 2026-10-08)
+
+Scoped, not whole-workspace. `./test -p tddy-toolcall -p tddy-host-service -p tddy-session-lifecycle -p tddy-coder
+-p tddy-workflow -p tddy-workflow-recipes -p tddy-presenter -p tddy-spawn -p tddy-daemon -p tddy-tools -p tddy-accounts
+-p tddy-daemon-livekit -p tddy-daemon-auth -p tddy-daemon-rpc -p tddy-github -p tddy-pr-stack`: **3204 passed, 24 failed**
+(`./test` exits 0 regardless; the failures were read from the log). The 24: the 16 *sandbox RPC bridge not installed*
+(`sandboxed_session_*` ×5, `sandboxed_claude_cli_*` ×5, `sandboxed_cursor_cli_*` ×4, `resume/delete_sandbox_session_*` ×2),
+the 6 `session_sync_livekit_acceptance`, `pr_stack_artifact_paths_acceptance::a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent`
+— all as before — and **one not in the earlier list**: `tddy-daemon-livekit` `session_room_livekit_acceptance::a_recorded_call_is_broadcast_into_the_room_stamped_with_the_tick_it_ran_in`,
+which fails in the LiveKit testkit with *container startup timeout* (no Docker container here); that crate and its behaviour
+are untouched by this change, but it was not re-run on a clean tree. `tddy-integration-tests --test workflow_runner_debug_log`
+(call site of the new `run_workflow` parameter): 1 passed. Scoped `cargo clippy --all-targets -- -D warnings` over
+`tddy-toolcall`, `tddy-host-service`, `tddy-session-lifecycle`, `tddy-coder`, `tddy-workflow`, `tddy-workflow-recipes`,
+`tddy-presenter`, `tddy-integration-tests`, `tddy-spawn`, `tddy-daemon`, `tddy-tools`: clean; `cargo fmt --check`: clean for every
+file this change touches (two untouched test files carry older format drift and were left as they were).
+
+New tests: `tddy-host-service` 11 (`host_session_service`); `tddy-session-lifecycle` 13 lib (`host_session_socket_tests`: mode and
+owner of the real socket and directory, path scheme, two sessions on one socket, wrong-user and unknown-session refusal, stale
+socket replaced with modes kept, wider directory narrowed, live socket not stolen, non-socket never removed, removed file rebound,
+unprivileged chown refused and nothing left, over-long path refused, unsafe user name refused) and 11 integration
+(`tool_session_host_socket.rs`: every recipe gets the flag, owner-only socket, resume gets the same path, token over the real
+socket, two sessions two accounts, no cross-session token, distinct verbatim refusals, `GITHUB_TOKEN` rescues nothing, delete
+unregisters, **real coder listener → forwarding handler → real user socket → registry → account token**, and no socket → *no
+credential handler*); `tddy-coder` 10 lib (`conversation_spawn_relay`, `tool_host_wiring`: request names the session, token and
+refusal verbatim, unreachable socket named, reconnect after the host restarts and rebinds, a spawn never repeated, flag true
+exactly when a handler is bound); `tddy-presenter` 2 (context seeded with the flag); `tddy-spawn` 1 (`GITHUB_TOKEN`/`GH_TOKEN` not
+inherited — it **failed first**, with both lines present — and the existing environment-record test was made to wait for the
+child's record, the race that made it fail intermittently).
+
+Mutation-checked, each restored afterwards: skip the OS-user check → `…another_os_user…` fails (host-service and lifecycle unit;
+**not** the integration file, which has one OS user); ignore the session id when looking up → 3 host-service, 1 socket unit and 4
+integration tests fail; socket mode `0o666` → 2 unit and the integration owner-only test fail; directory mode `0o755` → 3 unit and
+the integration owner-only test fail; steal a live socket → `a_live_socket_is_not_stolen` fails (unit only); skip `unregister` on
+delete → `a_deleted_session_is_no_longer_answered` fails (integration only); start passes no socket → 10 of 11 integration tests
+fail. Not every test of this change was written before its code: the host-service module and the wiring were implemented first and
+their tests written against them (the socket module and the inheritance fix were red first).
 
 ## Green wave
 
@@ -778,7 +889,7 @@ resolution this node builds.
 ✅ **M1 is not gated on #492 merging** — #492 is this stack's base, so its move is already in the tree.
 
 - [x] **M1** — REST entry points take a token; environment resolution deleted
-- [x] **M2** — one resolution at the session edge; token + identity from it — every session path this daemon owns (see *Closing the remaining seams*), and the commit identity now reaches tool sessions (`tddy-coder`) over the spawn wire; ⚠ their agent's *token* does not — see *Still open*
+- [x] **M2** — one resolution at the session edge; token + identity from it — every session path this daemon owns (see *Closing the remaining seams*), and the commit identity now reaches tool sessions (`tddy-coder`) over the spawn wire; their agent's *token* too, over the per-OS-user host-session socket
 - [x] **M3** — a distinct failure per outcome
 - [x] **M4** — retire `FileGitHubTokenStore`'s readers — already true on the base (`#keyring` 3/9–8/9); the three structural tests were green before this node's green phase touched anything
 - [x] **M5** — acceptance: two projects, two accounts, one daemon — `project_resolved_identity_acceptance.rs`
@@ -826,6 +937,8 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 ## Acceptance Criteria
 
 - [x] A commit carries the assigned account's name and email — `session_git_identity_acceptance.rs` (author and committer pairs), and the lifecycle tests that the pairs reach the agent's env; ⚠ no test runs a real `git commit` under them
+- [x] A tool session's agent obtains the assigned account's token — `a_tools_token_request_reaches_the_assigned_account_through_the_coder_and_the_host_socket`
+- [x] Tool-session sockets are owner-only (0600 in 0700) and per OS user — `the_socket_a_session_is_given_is_owner_only_in_an_owner_only_directory`, `host_session_socket_tests`
 - [ ] A GitHub API call uses the assigned account's token — ⚠ open: proven as far as the token being asked for and a client built from it; no test asserts the REST call carries it (`RealGithubPrApi` shells out to `api.github.com`)
 - [x] Two projects assigned different accounts act as different GitHub users — `two_projects_on_one_daemon_act_as_different_github_users`
 - [ ] Token and identity always come from **one** resolution — ⚠ open, same reason as *Resolution* in Scope; `the_token_and_the_git_identity_name_the_same_account` pins the one function

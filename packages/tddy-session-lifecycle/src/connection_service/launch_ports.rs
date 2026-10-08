@@ -14,7 +14,6 @@
 //! follows [`AgentRoster`](super::agent_host_callbacks::AgentRoster) and
 //! [`SplitSessions`](super::split_ports::SplitSessions) exactly.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -25,8 +24,8 @@ use tddy_service::proto::session::SessionAttachment;
 use tddy_task::TaskRegistry;
 
 use super::agent_host_callbacks::AgentRoster;
+use super::host_session_socket::HostSessionSockets;
 use super::svc_materialize_staged_attachment::AttachmentState;
-use super::svc_start_claude_cli_session::SessionStdioEndpoint;
 use super::AttachmentMaterialization;
 use crate::cli_session_manager::CliSessionManager;
 use crate::PrStackHandler;
@@ -80,9 +79,8 @@ pub(crate) struct LaunchSessions {
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     pub(crate) sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     pub(crate) task_registry: TaskRegistry,
-    /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
-    /// session_id.
-    pub(crate) session_stdio: Arc<tokio::sync::Mutex<HashMap<String, SessionStdioEndpoint>>>,
+    /// The per-OS-user host-session sockets and the tool sessions they answer.
+    pub(crate) host_session_sockets: Arc<HostSessionSockets>,
     pub(crate) agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     /// The agent topic's handle: a jail start claims its seeded clones and resolves its agent defs
     /// through it.

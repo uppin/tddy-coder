@@ -1148,6 +1148,11 @@ pub fn spawn_as_user(
         .stderr(Stdio::from(logs.stderr))
         .env("HOME", &home_dir)
         .env("PATH", &child_path)
+        // The environment is never a credential: a daemon that has either variable exported must
+        // not hand it to a session's process by inheritance. The session's tools ask the daemon for
+        // the project account's token instead (`github-token`).
+        .env_remove("GITHUB_TOKEN")
+        .env_remove("GH_TOKEN")
         .envs(env.iter().map(|(key, value)| (key, value)))
         .args(&args);
 

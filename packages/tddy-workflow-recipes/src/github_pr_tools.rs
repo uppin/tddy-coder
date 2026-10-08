@@ -8,23 +8,18 @@
 //! instead of assuming either answer. It is a context value the driver of the workflow sets, never
 //! a probe of the process environment: the environment is not a source of GitHub credentials.
 
-// TODO(keyring 9/9): nothing sets this key in production, and nothing can truthfully do so yet. The
-// workflows whose hooks read it run in a `tddy-coder` process, whose own toolcall listener has no
-// `GithubCredentialHandler`: the credential lives in the daemon, and the only channel from that
-// process back to it — `--host-session-socket` — is bound for grill-me recipes alone, is created
-// world-writable (so it cannot yet carry a token), and hosts one relay verb (`spawn_conversation`).
-// The commit identity does reach a tool session (`ToolSpawnPlan::git_environment`); the token does
-// not. When a handler exists on that listener, the process that builds it is the one to set this
-// key, from the handler's presence — the same condition the claude-cli paths bind their handler
-// under — so the prompts name the PR tools exactly when a call can succeed. Until then they stay
-// silent, which is true. A daemon-managed claude-cli session never runs these hooks: its prompt is
+// The driver that sets this key is the `tddy-coder` process: it seeds `true` exactly when it binds a
+// `GithubCredentialHandler` on its own toolcall listener — i.e. when the daemon gave it a
+// `--host-session-socket` and the session's id to name itself with (see `tddy-coder`'s
+// `tool_host_wiring`). A daemon-managed claude-cli session never runs these hooks: its prompt is
 // the recipe's orchestration prompt, and its tools are answered by `SessionGithubCredential`.
 
 use tddy_core::workflow::context::Context;
 
 /// The context key a workflow's driver sets to `true` when the agent's host answers its tools'
-/// GitHub token requests.
-pub const GITHUB_PR_TOOLS_AVAILABLE_KEY: &str = "github_pr_tools_available";
+/// GitHub token requests. Defined beside the workflow vocabulary so the presenter that seeds it and
+/// the hooks that read it name one string.
+pub use tddy_workflow::context_keys::GITHUB_PR_TOOLS_AVAILABLE_KEY;
 
 /// Whether the context says the agent's PR tools can authenticate. `false` when it says nothing.
 #[must_use]

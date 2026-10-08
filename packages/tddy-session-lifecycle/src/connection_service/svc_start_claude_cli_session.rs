@@ -173,92 +173,83 @@ impl LaunchSessions {
         }))
     }
 
-    /// Bind a per-session unix socket hosting
-    /// [`HostSessionService`](tddy_host_service::host_session_service::HostSessionService) and return its path,
-    /// to be passed to the spawned grill-me coder as `--host-session-socket`. The coder connects and
-    /// relays `spawn_conversation` back over it. The orchestrator context (this session) is baked
-    /// into the handler, and the path is unique per session and handed only to that session's coder,
-    /// so a call arriving here is unambiguously that session — no auth token or caller id needed.
+    /// Put a starting or resuming tool session on its OS user's host-session socket and return the
+    /// path to hand its coder as `--host-session-socket`.
     ///
-    /// A socket **path** (unlike the child's stdio fds) crosses the forked `spawn_worker` boundary as
-    /// a plain string, so this works for both the worker-spawned and direct spawn paths. Binding
-    /// happens before the spawn, so the coder's later `connect()` finds the listener ready.
-    pub(crate) async fn spawn_host_session_socket(
+    /// The socket is the user's (see [`super::host_session_socket`]): bound here if this daemon is
+    /// not already serving it, shared by every tool session of that user. What is per-session is the
+    /// registration: the session's id maps to the handlers its requests are answered by — the
+    /// `github-token` handler built from its assignment snapshot and start token, and, for a recipe
+    /// that spawns conversations (grill-me), the conversation handler. A resume registers again and
+    /// replaces the entry, so it answers from the refreshed assignments and token.
+    ///
+    /// `None` when the socket cannot be bound with owner-only access for that user (logged with the
+    /// reason): the session then starts without the flag, and its tools refuse a token request as
+    /// having no credential handler — there is no wider-permission or environment fallback.
+    pub(crate) async fn register_tool_session_on_host_socket(
         &self,
-        session_id: &str,
-        os_user: &str,
-        project_id: &str,
-        model: Option<String>,
-        account_access: SessionAccountAccess,
+        session: ToolSessionHostRegistration<'_>,
     ) -> Option<String> {
-        let path = std::env::temp_dir().join(format!("tddy-host-{session_id}.sock"));
-        let _ = std::fs::remove_file(&path); // clear any stale socket from a prior run
-        let listener = match tokio::net::UnixListener::bind(&path) {
-            Ok(l) => l,
+        let path = match self
+            .host_session_sockets
+            .ensure_bound(session.os_user, &self.tddy_data_dir)
+            .await
+        {
+            Ok(path) => path,
             Err(e) => {
-                log::warn!("spawn_host_session_socket({session_id}): bind {path:?}: {e}");
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "session {} starts without a host-session socket: {e:#}",
+                    session.session_id
+                );
                 return None;
             }
         };
-        // Dev runs the coder as the same OS user; loosen perms so a cross-user child can still
-        // connect. TODO(stdio-relay): tighten perms / socket ownership for cross-user production.
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777));
-
-        let sessions_base = self.tddy_data_dir.clone();
-        let orchestrator_session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
-        let handler = Arc::new(GrillMeConversationSpawnHandler {
-            stack_parent_host: Arc::new(self.clone()),
-            config: self.config.clone(),
-            tddy_data_dir: self.tddy_data_dir.clone(),
-            claude_cli_manager: Arc::clone(&self.claude_cli_manager),
-            os_user: os_user.to_string(),
-            project_id: project_id.to_string(),
-            sessions_base,
-            orchestrator_session_id: session_id.to_string(),
-            orchestrator_session_dir,
-            model_override: model,
-            account_access,
-        });
-        let service = tddy_host_service::host_session_service::HostSessionService::new(handler);
-        let session_stdio = Arc::clone(&self.session_stdio);
-        let sid = session_id.to_string();
-        // Accept the coder's single connection, then run the reverse RPC endpoint over it.
-        tokio::spawn(async move {
-            let stream = match listener.accept().await {
-                Ok((stream, _addr)) => stream,
-                Err(e) => {
-                    log::warn!("spawn_host_session_socket({sid}): accept: {e}");
-                    return;
-                }
-            };
-            let (reader, writer) = tokio::io::split(stream);
-            let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
-                reader,
-                writer,
-                service,
-                tddy_rpc::RequestTransport::UnixSocket,
-            );
-            let task = tokio::spawn(endpoint.run());
-            session_stdio.lock().await.insert(
-                sid.clone(),
-                crate::connection_service::svc_start_claude_cli_session::SessionStdioEndpoint {
-                    client,
-                    task,
-                },
-            );
-            log::info!("spawn_host_session_socket({sid}): reverse endpoint connected + ready");
-        });
-        log::info!("spawn_host_session_socket({session_id}): listening at {path:?}");
+        let conversation_spawn_handler: Option<
+            Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>,
+        > = session
+            .recipe
+            .filter(|recipe| recipe_enables_conversation_spawn(recipe))
+            .map(|_| {
+                let sessions_base = self.tddy_data_dir.clone();
+                Arc::new(GrillMeConversationSpawnHandler {
+                    stack_parent_host: Arc::new(self.clone()),
+                    config: self.config.clone(),
+                    tddy_data_dir: self.tddy_data_dir.clone(),
+                    claude_cli_manager: Arc::clone(&self.claude_cli_manager),
+                    os_user: session.os_user.to_string(),
+                    project_id: session.project_id.to_string(),
+                    orchestrator_session_dir: sessions_base
+                        .join(SESSIONS_SUBDIR)
+                        .join(session.session_id),
+                    sessions_base,
+                    orchestrator_session_id: session.session_id.to_string(),
+                    model_override: session.model,
+                    account_access: session.account_access,
+                }) as Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>
+            });
+        self.host_session_sockets.registry().register(
+            session.session_id,
+            tddy_host_service::host_session_service::RegisteredSession {
+                os_user: session.os_user.to_string(),
+                conversation_spawn_handler,
+                github_credential_handler: session.github_credential,
+            },
+        );
         Some(path.to_string_lossy().into_owned())
     }
 }
 
-/// A live reverse stdio endpoint to one spawned tddy-coder session. Holding it keeps the pipe's
-/// read/dispatch loop running; dropping it (on session teardown) ends the loop.
-pub(crate) struct SessionStdioEndpoint {
-    #[allow(dead_code)]
-    pub(crate) client: Arc<tddy_stdio::StdioRpcClient>,
-    #[allow(dead_code)]
-    pub(crate) task: tokio::task::JoinHandle<()>,
+/// What a tool session registers on its OS user's host-session socket.
+pub(crate) struct ToolSessionHostRegistration<'a> {
+    pub(crate) os_user: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) project_id: &'a str,
+    /// The session's recipe; decides whether it may spawn conversations.
+    pub(crate) recipe: Option<&'a str>,
+    pub(crate) model: Option<String>,
+    /// The owner's vault access a conversation this session spawns resolves its account through.
+    pub(crate) account_access: SessionAccountAccess,
+    /// Answers the session's `github_token` request; `None` when its project could not be read.
+    pub(crate) github_credential: Option<super::session_acting_identity::SharedGithubCredential>,
 }
