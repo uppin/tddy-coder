@@ -367,3 +367,11 @@ cargo test -p tddy-daemon-auth
 - [`connection-service.md`](../../tddy-daemon/docs/connection-service.md) — what authenticates with the resolver
 - [Codex OAuth relay (product)](../../../docs/ft/daemon/codex-oauth-relay.md)
 - [changesets/](./changesets/)
+
+## No retained GitHub token
+
+A login's GitHub access token is not retained beside the credential vault: nothing declares a login-keyed
+GitHub token store, the session path does not reach for the operator's login-time token, and no crate
+resolves a GitHub token from the process environment. Which token a GitHub operation uses is decided by
+the account the project is assigned ([resolution](../../tddy-accounts/docs/github-identity-resolution.md)).
+Pinned by `tests/login_time_token_store_is_retired.rs`.

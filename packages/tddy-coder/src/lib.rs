@@ -10,6 +10,7 @@ pub mod recipe;
 pub mod remote;
 pub mod run;
 pub mod session_participant;
+pub mod tool_host_wiring;
 mod tty;
 pub mod web_server;
 

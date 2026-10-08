@@ -1,4 +1,5 @@
 use super::super::launch_ports::LaunchSessions;
+use super::super::session_acting_identity::SessionIdentity;
 use std::sync::Mutex as StdMutex;
 
 use tddy_task::TerminalCapture;
@@ -20,6 +21,7 @@ use std::sync::Arc;
 use std::path::Path;
 
 impl LaunchSessions {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn relaunch_managed_workflow(
         &self,
         session_id: &str,
@@ -28,10 +30,13 @@ impl LaunchSessions {
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
         context_dir: &Path,
         tddy_tools_path: &str,
+        identity: SessionIdentity,
     ) -> Result<RelaunchManagedEnv, Status> {
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
         let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut session_env: Vec<(String, String)> = Vec::new();
+        // As at the start: the relayed host-side commands run under the project's account
+        // identity whether or not the session is managed.
+        let mut session_env: Vec<(String, String)> = identity.git_environment;
         if let Some(recipe) = managed_recipe {
             let resume_goal = Self::managed_resume_goal(session_dir, &recipe);
             let launch = self.prepare_managed_workflow(
@@ -43,9 +48,10 @@ impl LaunchSessions {
                 tddy_tools_path,
                 Some(resume_goal),
                 None,
+                identity.github_credential,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
-            session_env = launch.env;
+            session_env.extend(launch.env);
             managed = Some(launch.workflow);
         }
         Ok((managed, append_system_prompt_file, session_env))

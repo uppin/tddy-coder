@@ -513,6 +513,107 @@ async fn start_claude_uses_shared_manager() {
 }
 
 // ---------------------------------------------------------------------------
+// A project that acts as a GitHub account: Telegram cannot open its vault
+// ---------------------------------------------------------------------------
+
+/// Like [`register_project`], with the project assigned a GitHub account.
+fn register_project_assigned_to(
+    projects_dir: &std::path::Path,
+    repo_path: &std::path::Path,
+    account: &str,
+) {
+    std::fs::create_dir_all(projects_dir).unwrap();
+    let yaml = format!(
+        "projects:\n  - project_id: {}\n    name: tg-test-project\n    git_url: \"\"\n    main_repo_path: {}\n    main_branch_ref: origin/main\n    accounts:\n      - provider: github\n        account_id: {account}\n",
+        TEST_PROJECT_ID,
+        repo_path.to_str().unwrap()
+    );
+    std::fs::write(projects_dir.join("projects.yaml"), yaml).unwrap();
+}
+
+/// Run `/start-claude` through the model callback and return everything the chat was told.
+async fn texts_sent_while_starting_claude(
+    register: impl FnOnce(&std::path::Path, &std::path::Path),
+) -> Vec<String> {
+    let sessions_tmp = tempfile::tempdir().unwrap();
+    let repo_dir = tempfile::tempdir().unwrap();
+    create_test_repo_with_origin(repo_dir.path());
+    let projects_tmp = tempfile::tempdir().unwrap();
+    register(projects_tmp.path(), repo_dir.path());
+    let stub_dir = tempfile::tempdir().unwrap();
+    let stub_path = write_echo_argv_script(stub_dir.path());
+    let (mut harness, sender) = build_harness(
+        sessions_tmp.path().to_path_buf(),
+        stub_path.to_str().unwrap(),
+        projects_tmp.path().to_path_buf(),
+        Arc::new(ClaudeCliSessionManager::new()),
+    );
+    let outcome = harness
+        .handle_start_claude(StartClaudeCommand {
+            chat_id: AUTHORIZED_CHAT,
+            user_id: TEST_USER_ID,
+            prompt: "add feature X".to_string(),
+        })
+        .await
+        .expect("handle_start_claude must succeed");
+    let session_id = outcome.session_id;
+    harness
+        .handle_telegram_project_callback(AUTHORIZED_CHAT, 0, &session_id)
+        .await
+        .expect("project callback must succeed");
+    harness
+        .handle_telegram_branch_callback(AUTHORIZED_CHAT, 0, 0, 0, &session_id)
+        .await
+        .expect("branch callback must succeed");
+    harness
+        .handle_telegram_claude_model_callback(AUTHORIZED_CHAT, 0, 0, &session_id)
+        .await
+        .expect("model callback must succeed");
+    collect_outbound_messages(&sender, AUTHORIZED_CHAT)
+        .into_iter()
+        .map(|message| message.text)
+        .collect()
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_telegram_started_session_on_a_project_that_acts_as_an_account_says_the_account_is_unavailable(
+) {
+    // Given a project assigned a GitHub account
+    // When a session is started from Telegram on it
+    let texts = texts_sent_while_starting_claude(|projects, repo| {
+        register_project_assigned_to(projects, repo, "acct-ada")
+    })
+    .await;
+
+    // Then the chat is told, once, that the account's identity and tools are unavailable from Telegram and why
+    let notices: Vec<&String> = texts
+        .iter()
+        .filter(|text| text.contains("GitHub account") && text.contains("Telegram"))
+        .collect();
+    assert_eq!(notices.len(), 1, "{texts:?}");
+    assert!(
+        notices[0].contains("signed-in") && notices[0].contains("web"),
+        "the notice must say why and where to start instead: {}",
+        notices[0]
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn a_telegram_started_session_on_a_project_with_no_account_says_nothing_about_accounts() {
+    // Given a project that assigns no account
+    // When a session is started from Telegram on it
+    let texts = texts_sent_while_starting_claude(register_project).await;
+
+    // Then nothing was lost, so nothing is said
+    assert!(
+        texts.iter().all(|text| !text.contains("GitHub account")),
+        "{texts:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Model picker catalog — one source of truth with the web dropdown
 // ---------------------------------------------------------------------------
 

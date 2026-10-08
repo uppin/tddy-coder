@@ -6,7 +6,7 @@
 **Metrics:** **676 production lines** (2026-09-24; 671 at detection, `#[cfg(test)]` at line 672 then) · budget 500 · **1.35× over**
 **Thresholds breached:** length 676 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-09-24 (671 → 676 in #509, `#keyring` 2/9, transport stamping; deferred with consent) — **unclaimed**
+**Status:** Open — regressed 2026-10-08 (676 → 766 in #516, `#keyring` 9/9, the `github-token` verb; deferred with consent) — **unclaimed**
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/toolcall/listener.rs` by `#carve` 12/14 (PR #522), with `git mv`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
@@ -16,6 +16,7 @@
 |---|---|---|
 | 2026-09-23 | 671 | first detection, at the file's new home. The size is inherited from `tddy-core`, not grown: no line of the file changed |
 | 2026-09-24 | 676 | 671 on the merge-base with `origin/master` (`4e7157d2`) → 676 after #509 (`#keyring` 2/9): the `RequestTransport::UnixSocket` stamp at the listener's `from_duplex` call, wrapped by rustfmt. Grown; decomposition deferred with the developer's consent (`docs/dev/todo/2026-09-24-keyring-desktop-login-grew-thirteen-over-budget-files.md`). First `#[cfg(test)]` now at L677 |
+| 2026-10-08 | 766 | 676 on `origin/master` → 766 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +90, the `github-token` verb's request and response dispatch in `impl ToolcallRpcService` (seam B above). Count: production lines to the first `#[cfg(test)]` |
 
 ## What would close it — candidate seams (not proven)
 

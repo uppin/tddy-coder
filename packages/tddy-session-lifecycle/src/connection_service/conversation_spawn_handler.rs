@@ -77,6 +77,8 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             // Child conversations are spawned by the orchestrator, never pushing a remote branch.
             false,
             "",
+            // The orchestrator's owner's vault: a child is the same owner's, on the same project.
+            &self.account_access,
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
             &super::AttachmentProgressSink::discarding(),

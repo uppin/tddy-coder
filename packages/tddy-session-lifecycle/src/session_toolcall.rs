@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use tddy_core::backend::CodingBackend;
 use tddy_core::presenter::WorkflowEvent;
 use tddy_core::toolcall::{
-    ChildSpawnHandler, ConversationSpawnHandler, ToolCallRequest, ToolcallRpcService,
-    TransitionHandler,
+    ChildSpawnHandler, ConversationSpawnHandler, GithubCredentialHandler, ToolCallRequest,
+    ToolcallRpcService, TransitionHandler,
 };
 use tddy_core::workflow::controller::WorkflowController;
 use tddy_core::workflow::ids::GoalId;
@@ -89,6 +89,7 @@ pub fn start_session_toolcall_listener(
     controller: Arc<WorkflowController>,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
+    github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> std::io::Result<SessionToolcallListener> {
     let socket_path = socket_dir.join(format!("tddy-wf-{session_id}.sock"));
     let _ = std::fs::remove_file(&socket_path);
@@ -114,7 +115,8 @@ pub fn start_session_toolcall_listener(
                 Some(Arc::clone(&handler)),
             )
             .with_child_spawn_handler(child_spawn_handler.clone())
-            .with_conversation_spawn_handler(conversation_spawn_handler.clone());
+            .with_conversation_spawn_handler(conversation_spawn_handler.clone())
+            .with_github_credential_handler(github_credential_handler.clone());
             let (reader, writer) = stream.into_split();
             let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
                 reader,
@@ -147,6 +149,7 @@ pub fn set_up_managed_workflow(
     socket_dir: &Path,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
+    github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     let start = recipe.start_goal();
     build_managed_workflow(
@@ -159,6 +162,7 @@ pub fn set_up_managed_workflow(
         start,
         child_spawn_handler,
         conversation_spawn_handler,
+        github_credential_handler,
     )
 }
 
@@ -177,6 +181,7 @@ pub fn resume_managed_workflow(
     resume_at: GoalId,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
+    github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     build_managed_workflow(
         session_id,
@@ -188,6 +193,7 @@ pub fn resume_managed_workflow(
         resume_at,
         child_spawn_handler,
         conversation_spawn_handler,
+        github_credential_handler,
     )
 }
 
@@ -204,6 +210,7 @@ fn build_managed_workflow(
     start: GoalId,
     child_spawn_handler: Option<Arc<dyn ChildSpawnHandler>>,
     conversation_spawn_handler: Option<Arc<dyn ConversationSpawnHandler>>,
+    github_credential_handler: Option<Arc<dyn GithubCredentialHandler>>,
 ) -> Result<ManagedWorkflow, String> {
     // The controller only reads the graph's topology (`successors`); tasks are never executed, so a
     // stub backend is sufficient for graph construction.
@@ -229,6 +236,7 @@ fn build_managed_workflow(
         controller.clone(),
         child_spawn_handler,
         conversation_spawn_handler,
+        github_credential_handler,
     )
     .map_err(|e| format!("failed to start session toolcall listener: {e}"))?;
 

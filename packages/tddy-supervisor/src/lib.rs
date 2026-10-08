@@ -33,6 +33,9 @@ pub mod cgroup_broker;
 pub mod client;
 pub mod config;
 pub mod error;
+mod handover;
+pub mod host_socket;
+mod host_socket_config;
 pub mod policy;
 pub mod protocol;
 pub mod reaper;
@@ -53,7 +56,8 @@ pub use authz::{Authorizer, PeerIdentity};
 pub use cgroup_broker::CgroupBroker;
 pub use client::SupervisorClient;
 pub use config::{
-    CgroupPolicy, ManagedService, RestartPolicy, SocketConfig, SpawnPolicy, SupervisorConfig,
+    CgroupPolicy, HostSocket, ManagedService, RestartPolicy, SocketConfig, SpawnPolicy,
+    SupervisorConfig,
 };
 pub use error::{ConfigError, SupervisorError};
 pub use request::{
@@ -63,7 +67,10 @@ pub use request::{
 pub use restart::{BackoffState, RestartDecision};
 pub use service::{ServiceState, ServiceStatus};
 pub use services::{ExitOutcome, ServiceRuntime};
-pub use socket::{SocketSource, SD_LISTEN_FDS_START};
+pub use socket::{
+    host_session_fd_name, resolve_host_session_fds, SocketSource, HOST_SESSION_FD_NAME_PREFIX,
+    MAX_HANDED_OVER_LISTENERS, SD_LISTEN_FDS_START, SERVICE_SOCKET_FD_NAME,
+};
 pub use supervisor::Supervisor;
 
 /// Run the supervisor: load config, start declared services, serve the privileged socket, and

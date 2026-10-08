@@ -233,6 +233,7 @@ impl LaunchSessions {
         tddy_tools_path: &str,
         resume_at: Option<tddy_core::workflow::ids::GoalId>,
         conversation_spawn_handler: Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>>,
+        github_credential_handler: Option<Arc<dyn tddy_core::toolcall::GithubCredentialHandler>>,
     ) -> Result<ManagedLaunch, Status> {
         prepare_managed_workflow_inner(
             &self.tddy_data_dir,
@@ -245,6 +246,7 @@ impl LaunchSessions {
             resume_at,
             None,
             conversation_spawn_handler,
+            github_credential_handler,
         )
     }
 

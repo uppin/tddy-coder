@@ -40,6 +40,13 @@ services:
     socket:
       path: REPO_ROOT/dev.tddy-daemon.sock
       mode: "0660"
+    # Uncomment (together with spawn_policy below, which must list the same user) to have the
+    # supervisor create your own host-session socket and hand it to the daemon at fd 4, as a root
+    # supervisor does for each OS user listed. Owner and mode are real (you; 0700 directory, 0600
+    # socket) but only your own account can be exercised without root. Every directory above `path`
+    # must be writable by you alone, so keep it under the checkout's tmp/.
+    # host_sockets:
+    #   - {user: CURRENT_USER, path: REPO_ROOT/tmp/host-sessions/CURRENT_USER/host.sock}
     restart:
       max_retries: 3
       initial_backoff_ms: 250
@@ -60,7 +67,10 @@ shutdown_grace_secs: 5
 #   # a daemon at this supervisor and it sends any env, list every key it sends. LD_*/MALLOC_* and
 #   # friends can never be listed (rejected at load: LD_PRELOAD on an allowlisted tool is code
 #   # execution as the session user).
-#   allowed_env_keys: [RUST_LOG]
+#   # A project assigned a GitHub account also has its tool sessions spawned with GIT_AUTHOR_NAME,
+#   # GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL (its commit identity; never a
+#   # token) — list them too, or those spawns are refused.
+#   allowed_env_keys: [RUST_LOG, GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL]
 
 # ACTIVE, not commented out, and it has to be for a dev run to start at all. At startup the supervisor
 # moves itself into `<base>/<supervisor_leaf>` and delegates `controllers` into the base's

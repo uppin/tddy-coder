@@ -106,7 +106,7 @@ fn tdd_small_merged_submit_schema_round_trip() {
 #[test]
 fn tdd_small_hooks_merged_red_and_single_submit() {
     // When
-    let merged = merged_red_system_prompt();
+    let merged = merged_red_system_prompt(false);
 
     // Then
     assert!(

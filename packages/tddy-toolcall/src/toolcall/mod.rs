@@ -9,6 +9,7 @@
 pub mod build;
 mod client;
 mod client_wire;
+mod github_token_client;
 mod listener;
 pub mod lsp;
 pub mod restructure;
@@ -23,9 +24,11 @@ pub use client_wire::{
     ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest, SubmitResponse,
     TransitionRequest,
 };
+pub use github_token_client::{request_github_token, request_github_token_from_session};
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
-    start_toolcall_listener_with_conversation_handler, ChildSpawnHandler, ConversationSpawnHandler,
+    start_toolcall_listener_with_conversation_handler, start_toolcall_listener_with_handlers,
+    ChildSpawnHandler, ConversationSpawnHandler, GithubCredentialHandler, ListenerHandlers,
     ToolcallRpcService,
 };
 pub use lsp::{lsp_executor, register_lsp_executor, LspExecutor, LspQuery};
@@ -205,9 +208,54 @@ pub enum ToolCallResponse {
     SpawnChildOk {
         session_id: String,
     },
+    /// A `github-token` relay succeeded; carries the token the session's project account resolved
+    /// to. A refusal travels as [`ToolCallResponse::Error`] with the resolver's own message.
+    GithubTokenOk {
+        token: RedactedToken,
+    },
+}
+
+/// A credential that cannot be printed by accident: its `Debug` is fixed text, so a response
+/// holding one can be logged or `{:?}`-formatted without disclosing it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct RedactedToken(String);
+
+impl RedactedToken {
+    /// The token itself — for the one place that puts it on the wire.
+    fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for RedactedToken {
+    fn from(token: String) -> Self {
+        Self(token)
+    }
+}
+
+impl From<&str> for RedactedToken {
+    fn from(token: &str) -> Self {
+        Self(token.to_string())
+    }
+}
+
+impl std::fmt::Debug for RedactedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("RedactedToken(<redacted>)")
+    }
 }
 
 impl ToolCallResponse {
+    /// The line to write to the toolcall log: the wire line, except that a credential is withheld.
+    pub(crate) fn loggable_line(&self) -> String {
+        match self {
+            ToolCallResponse::GithubTokenOk { .. } => {
+                serde_json::json!({"status":"ok","token":"<withheld>"}).to_string()
+            }
+            other => other.to_json_line(),
+        }
+    }
+
     pub fn to_json_line(&self) -> String {
         let wire = match self {
             ToolCallResponse::SubmitOk { goal } => {
@@ -258,6 +306,9 @@ impl ToolCallResponse {
             }
             ToolCallResponse::SpawnChildOk { session_id } => {
                 serde_json::json!({"status":"ok","session_id":session_id})
+            }
+            ToolCallResponse::GithubTokenOk { token } => {
+                serde_json::json!({"status":"ok","token":token.expose()})
             }
         };
         wire.to_string()
@@ -338,6 +389,13 @@ pub struct SpawnConversationRequestWire {
     pub base_ref: Option<String>,
 }
 
+/// Wire format for `github-token` request (from tddy-tools). It names no session and no project:
+/// the listener is bound per session, so which account answers is decided by who holds the socket.
+#[derive(Debug, Deserialize)]
+pub struct GithubTokenRequestWire {
+    pub r#type: String,
+}
+
 /// RPC service name a tddy-coder session addresses to relay `spawn_conversation` back to the daemon
 /// over its **stdio** pipe (the daemon hosts this service; the coder is the client). Shared here so
 /// the daemon-hosted service and the coder-side relay client agree on the address without either
@@ -345,6 +403,10 @@ pub struct SpawnConversationRequestWire {
 pub const HOST_SESSION_SERVICE: &str = "tddy.host.HostSessionService";
 /// Unary method on [`HOST_SESSION_SERVICE`]: spawn a new conversation for the calling session.
 pub const SPAWN_CONVERSATION_METHOD: &str = "SpawnConversation";
+/// Unary method on [`HOST_SESSION_SERVICE`]: the GitHub token of the account the **named** session's
+/// project acts as. Like every request on that service it carries the caller's `session_id`, because
+/// the socket it arrives on serves every tool session of one OS user.
+pub const GITHUB_TOKEN_METHOD: &str = "GithubToken";
 
 /// Wire format for `list-actions` request (from tddy-tools).
 #[derive(Debug, Deserialize)]

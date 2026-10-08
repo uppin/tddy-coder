@@ -53,6 +53,9 @@ pub struct WorkflowRun {
     pub socket_path: Option<PathBuf>,
     /// Pre-set, to skip git fetch and worktree creation in hooks.
     pub worktree_dir: Option<PathBuf>,
+    /// Whether this process's session host answers the agent's GitHub token requests; seeded into
+    /// every run's context for the recipes' prompts. `false` unless the driver says otherwise.
+    pub github_pr_tools_available: bool,
 }
 
 /// The clarification questions awaiting an operator, and the answers collected so far.

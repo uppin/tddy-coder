@@ -46,6 +46,7 @@ pub struct ServiceFixture {
     initial_backoff_ms: u64,
     stability_threshold_ms: u64,
     declares_socket: bool,
+    declares_host_socket: bool,
 }
 
 /// A managed service that stays alive until something kills it.
@@ -57,6 +58,7 @@ pub fn a_service(name: &str) -> ServiceFixture {
         initial_backoff_ms: 20,
         stability_threshold_ms: 10_000,
         declares_socket: false,
+        declares_host_socket: false,
     }
 }
 
@@ -78,6 +80,13 @@ impl ServiceFixture {
     pub fn with_a_listening_socket(mut self) -> Self {
         self.declares_socket = true;
         self.body = HANDOFF_REPORT_BODY.to_string();
+        self
+    }
+
+    /// Also declares a host socket for the account running the tests, at descriptor 4. The
+    /// supervisor's `allowed_session_users` must list that account (`allowing_the_current_user`).
+    pub fn with_a_host_socket_for_the_current_user(mut self) -> Self {
+        self.declares_host_socket = true;
         self
     }
 
@@ -198,7 +207,7 @@ impl SupervisorFixture {
                     "      initial_backoff_ms: {initial_backoff_ms}\n",
                     "      max_backoff_ms: 1000\n",
                     "      stability_threshold_ms: {stability_threshold_ms}\n",
-                    "{socket}",
+                    "{socket}{host_sockets}",
                 ),
                 name = service.name,
                 script = script.display(),
@@ -210,6 +219,14 @@ impl SupervisorFixture {
                     format!(
                         "    socket:\n      path: {}\n      mode: \"0660\"\n",
                         service_socket_path(&root, &service.name).display()
+                    )
+                } else {
+                    String::new()
+                },
+                host_sockets = if service.declares_host_socket {
+                    format!(
+                        "    host_sockets:\n      - user: {user}\n        path: {}\n",
+                        host_socket_path(&root, &service.name, &user).display()
                     )
                 } else {
                     String::new()
@@ -380,6 +397,11 @@ impl RunningSupervisor {
     /// Path the named service's declared socket should have been bound at.
     pub fn declared_socket_path(&self, service: &str) -> PathBuf {
         service_socket_path(self.workspace.path(), service)
+    }
+
+    /// Path the named service's host socket for the current user should have been bound at.
+    pub fn declared_host_socket_path(&self, service: &str) -> PathBuf {
+        host_socket_path(self.workspace.path(), service, &current_username())
     }
 
     /// Every pid the named service's script has recorded across all of its starts, in order.
@@ -829,6 +851,13 @@ fn handoff_report_path(root: &Path, service: &str) -> PathBuf {
     root.join(format!("{service}.handoff"))
 }
 
+/// `<root>/<service>-host-sockets/<user>/host.sock`: a directory per user, as the supervisor requires.
+fn host_socket_path(root: &Path, service: &str, user: &str) -> PathBuf {
+    root.join(format!("{service}-host-sockets"))
+        .join(user)
+        .join("host.sock")
+}
+
 fn service_socket_path(root: &Path, service: &str) -> PathBuf {
     root.join(format!("{service}.sock"))
 }
@@ -842,6 +871,8 @@ const HANDOFF_REPORT_BODY: &str = "\
   echo \"listen_fds=${LISTEN_FDS:-unset}\"
   echo \"listen_pid=${LISTEN_PID:-unset}\"
   echo \"own_pid=$$\"
+  echo \"listen_fdnames=${LISTEN_FDNAMES:-unset}\"
+  if [ -S /proc/self/fd/4 ]; then echo \"fd4=socket\"; else echo \"fd4=absent\"; fi
   if [ -S /proc/self/fd/3 ]; then echo \"fd3=socket\"; else echo \"fd3=absent\"; fi
 } > __REPORT__
 exec sleep 600";

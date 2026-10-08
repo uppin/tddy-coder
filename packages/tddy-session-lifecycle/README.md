@@ -58,6 +58,7 @@ never get a sandbox RPC bridge, and the `session_sync` suite needs `tddy-remote-
 | Doc | What it covers |
 |---|---|
 | [docs/session-service.md](docs/session-service.md) | the eight `session.SessionService` RPCs, the start's phases, the worktree observer port, `TaskRegistry` ownership, the `DaemonRpcFamilies` port, the shared components the RPC handlers above this crate use, the presenter observer, the transports |
+| [docs/session-identity.md](docs/session-identity.md) | the project's account at session start: one resolution for the commit pairs and the token handler, pinned at start, per path; the per-OS-user host-session socket, stop and restart handling |
 | [docs/module-layout.md](docs/module-layout.md) | how `src/` is organised: `connection_service`'s topic files and step modules, the sandboxed launch steps, the ports and peer-routed wrappers, the host builders, the `service_util` helpers, the facades over the modules below this crate, the definitions taken from lower crates, the topics and the coupling |
 | [docs/test-suites.md](docs/test-suites.md) | the 56 integration suites, and where a new one goes |
 | [docs/code-issues/](docs/code-issues/) | the open analyzer and structural findings, one file each |

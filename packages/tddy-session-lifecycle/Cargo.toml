@@ -113,6 +113,11 @@ tddy-telegram = { path = "../tddy-telegram" }
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+# Which GitHub account a project acts as: one `acting_identity` resolution at the session edge, whose
+# commit identity `tddy-daemon-livekit::session_git_environment` turns into the agent's `GIT_*`
+# variables. `tddy-credentials` names the vault records the resolution reads.
+tddy-accounts = { path = "../tddy-accounts" }
+tddy-credentials = { path = "../tddy-credentials" }
 # The moved session-file-I/O subsystem: the ten modules `connection_service` and eight of its
 # submodules read and write session files through. The edge runs this way round because none of the
 # ten names `connection_service` — the coupling was always daemon → session files.

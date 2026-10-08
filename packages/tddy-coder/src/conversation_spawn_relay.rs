@@ -1,47 +1,154 @@
-//! Coder-side `spawn_conversation` relay for a daemon-spawned tddy-coder session.
+//! Coder-side client of the daemon's host-session socket, and the two relays built on it.
 //!
-//! A tddy-coder tool session (e.g. a `cursor` grill-me session) serves its own toolcall socket, so
-//! the agent's `spawn_conversation` request lands on *this process's* listener — which cannot create
-//! a new worktree/session (daemon-owned work). This handler relays the request back to the daemon as
-//! a reverse RPC over the **stdio pipe** the daemon opened when it spawned us (`--stdio`). The daemon
-//! hosts `HostSessionService` on the other end; because the pipe is bound 1:1 to this child, the
-//! daemon already knows which session is calling — no auth token or caller id is sent.
+//! A tddy-coder tool session serves its own toolcall socket, so the agent's `spawn_conversation` and
+//! `github-token` requests land on *this process's* listener — which can neither create a worktree
+//! nor read the owner's vault (daemon-owned work). The handlers here forward them to the daemon over
+//! the per-OS-user unix socket it handed us as `--host-session-socket`.
 //!
-//! The stdio endpoint (and thus its `StdioRpcClient`) is created later than the toolcall listener
-//! that owns this handler, so the client is delivered through a `watch` channel the handler
-//! `await`s on first use.
+//! That socket serves every tool session of our OS user, so **each request names this session**
+//! (`--session-id`, which the process already knows). The daemon refuses an id it does not know or
+//! one that belongs to another OS user. The socket's filesystem permissions are the authentication
+//! boundary; the id is a label, not a secret.
+//!
+//! The connection is made on first use and made again when it has gone — the daemon may have been
+//! restarted and rebound the socket since — so a tool call never depends on a connection opened at
+//! startup. With no socket, or no session id to name, there is **no handler at all**: the toolcall
+//! listener then refuses a token request as having no credential handler. There is no fallback.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_core::toolcall::{
-    ConversationSpawnHandler, HOST_SESSION_SERVICE, SPAWN_CONVERSATION_METHOD,
+    ConversationSpawnHandler, GithubCredentialHandler, GITHUB_TOKEN_METHOD, HOST_SESSION_SERVICE,
+    SPAWN_CONVERSATION_METHOD,
 };
 use tddy_rpc::bridge::{RpcResult, RpcService};
 use tddy_rpc::{RpcClientTransport, RpcMessage, Status};
 use tddy_stdio::StdioRpcClient;
-use tokio::sync::watch;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
-/// The run_daemon stdio setup publishes the reverse client here once its endpoint is up; the handler
-/// awaits it. `watch` (not `OnceCell`) because the handler must *block until set* — tokio's
-/// `OnceCell` has no async "wait until initialized" — and the value is read on every tool call.
-pub type ReverseClientTx = watch::Sender<Option<Arc<StdioRpcClient>>>;
-pub type ReverseClientRx = watch::Receiver<Option<Arc<StdioRpcClient>>>;
-
-/// Create the channel bridging the (later-created) stdio endpoint's client to the (earlier-created)
-/// relay handler bound on the toolcall listener.
-pub fn reverse_client_channel() -> (ReverseClientTx, ReverseClientRx) {
-    watch::channel(None)
+/// A connection to the host: the client and the task running its read/dispatch loop, which ends
+/// when the daemon's end closes.
+struct HostConnection {
+    client: Arc<StdioRpcClient>,
+    task: JoinHandle<()>,
 }
 
-/// Relays `spawn_conversation` to the daemon's `HostSessionService` over the stdio reverse channel.
+/// This session's lazily-made, remade-when-lost connection to the daemon's host-session socket.
+pub struct HostSessionClient {
+    socket: PathBuf,
+    session_id: String,
+    connection: Mutex<Option<HostConnection>>,
+}
+
+impl HostSessionClient {
+    /// A client for `socket` that names `session_id` in every request. Nothing is connected yet.
+    pub fn new(socket: impl Into<PathBuf>, session_id: impl Into<String>) -> Arc<Self> {
+        Arc::new(Self {
+            socket: socket.into(),
+            session_id: session_id.into(),
+            connection: Mutex::new(None),
+        })
+    }
+
+    async fn client(&self) -> Result<Arc<StdioRpcClient>, String> {
+        let mut connection = self.connection.lock().await;
+        if let Some(live) = connection.as_ref() {
+            if !live.task.is_finished() {
+                return Ok(Arc::clone(&live.client));
+            }
+        }
+        let stream = tokio::net::UnixStream::connect(&self.socket)
+            .await
+            .map_err(|e| {
+                format!(
+                    "the daemon's host-session socket {} could not be reached: {e} (if the daemon \
+                     restarted since this session started, resume the session to re-enable GitHub \
+                     tools)",
+                    self.socket.display()
+                )
+            })?;
+        let (reader, writer) = tokio::io::split(stream);
+        let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+            reader,
+            writer,
+            NoopRpcService,
+            tddy_rpc::RequestTransport::UnixSocket,
+        );
+        let task = tokio::spawn(endpoint.run());
+        *connection = Some(HostConnection {
+            client: Arc::clone(&client),
+            task,
+        });
+        Ok(client)
+    }
+
+    /// Whether the connection that just failed a call is gone (the daemon closed it), as opposed to
+    /// the daemon having answered with a refusal.
+    async fn connection_is_gone(&self) -> bool {
+        let connection = self.connection.lock().await;
+        let Some(live) = connection.as_ref() else {
+            return true;
+        };
+        if live.task.is_finished() {
+            return true;
+        }
+        drop(connection);
+        // The loop ends a moment after the failure that reported it.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        self.connection
+            .lock()
+            .await
+            .as_ref()
+            .is_none_or(|live| live.task.is_finished())
+    }
+
+    /// Call `method` on the host service with this session's id added to `body`. `Err` carries the
+    /// host's own words when it refused, or why it could not be reached.
+    ///
+    /// A call is repeated on a fresh connection, once, only when `repeatable` **and** the first
+    /// connection turned out to be gone: a request that may have been acted on must not be sent twice.
+    async fn call(
+        &self,
+        method: &str,
+        mut body: serde_json::Value,
+        repeatable: bool,
+    ) -> Result<serde_json::Value, String> {
+        body["session_id"] = serde_json::json!(self.session_id);
+        let payload = serde_json::to_vec(&body).map_err(|e| format!("encode {method}: {e}"))?;
+        let mut attempts_left = if repeatable { 2 } else { 1 };
+        loop {
+            attempts_left -= 1;
+            let client = self.client().await?;
+            match client
+                .call_unary(HOST_SESSION_SERVICE, method, payload.clone())
+                .await
+            {
+                Ok(bytes) => {
+                    return serde_json::from_slice(&bytes)
+                        .map_err(|e| format!("decode the host's {method} answer: {e}"))
+                }
+                Err(status) => {
+                    if attempts_left > 0 && self.connection_is_gone().await {
+                        continue;
+                    }
+                    return Err(status.message().to_string());
+                }
+            }
+        }
+    }
+}
+
+/// Relays `spawn_conversation` to the daemon's host-session socket.
 pub struct DaemonRelayConversationSpawnHandler {
-    client_rx: ReverseClientRx,
+    host: Arc<HostSessionClient>,
 }
 
 impl DaemonRelayConversationSpawnHandler {
-    pub fn new(client_rx: ReverseClientRx) -> Self {
-        Self { client_rx }
+    pub fn new(host: Arc<HostSessionClient>) -> Self {
+        Self { host }
     }
 }
 
@@ -53,34 +160,54 @@ impl ConversationSpawnHandler for DaemonRelayConversationSpawnHandler {
         branch: Option<&str>,
         base_ref: Option<&str>,
     ) -> Result<String, String> {
-        // Block until the daemon's stdio endpoint has been wired (normally already set by the time
-        // the agent can invoke a tool).
-        let mut rx = self.client_rx.clone();
-        let client = loop {
-            if let Some(c) = rx.borrow().clone() {
-                break c;
-            }
-            rx.changed().await.map_err(|_| {
-                "daemon stdio endpoint closed before spawn-conversation was ready".to_string()
-            })?;
-        };
-        let payload = serde_json::to_vec(&serde_json::json!({
-            "type": "spawn-conversation",
-            "prompt": prompt,
-            "branch": branch,
-            "base_ref": base_ref,
-        }))
-        .map_err(|e| format!("encode spawn-conversation request: {e}"))?;
-        let resp = client
-            .call_unary(HOST_SESSION_SERVICE, SPAWN_CONVERSATION_METHOD, payload)
+        let answer = self
+            .host
+            .call(
+                SPAWN_CONVERSATION_METHOD,
+                serde_json::json!({
+                    "type": "spawn-conversation",
+                    "prompt": prompt,
+                    "branch": branch,
+                    "base_ref": base_ref,
+                }),
+                // A spawn may have happened when the connection dropped; never send it twice.
+                false,
+            )
             .await
-            .map_err(|s| format!("daemon spawn-conversation relay failed: {s}"))?;
-        let v: serde_json::Value = serde_json::from_slice(&resp)
-            .map_err(|e| format!("decode spawn-conversation response: {e}"))?;
-        v["session_id"]
+            .map_err(|e| format!("daemon spawn-conversation relay failed: {e}"))?;
+        answer["session_id"]
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| "daemon spawn-conversation response missing session_id".to_string())
+    }
+}
+
+/// Asks the daemon, over the host-session socket, for the GitHub token of the account this
+/// session's project acts as — answering the agent's `github-token` request without this process
+/// ever holding a credential of its own. The token is returned to the caller and kept nowhere.
+pub struct DaemonRelayGithubCredential {
+    host: Arc<HostSessionClient>,
+}
+
+impl DaemonRelayGithubCredential {
+    pub fn new(host: Arc<HostSessionClient>) -> Self {
+        Self { host }
+    }
+}
+
+#[async_trait]
+impl GithubCredentialHandler for DaemonRelayGithubCredential {
+    async fn github_token(&self) -> Result<String, String> {
+        // Asking is read-only, so a connection lost to a daemon restart is simply made again.
+        let answer = self
+            .host
+            .call(GITHUB_TOKEN_METHOD, serde_json::json!({}), true)
+            .await?;
+        answer["token"]
+            .as_str()
+            .filter(|token| !token.trim().is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| "the daemon's host answered with no GitHub token".to_string())
     }
 }
 
@@ -101,132 +228,243 @@ impl RpcService for NoopRpcService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-    use tddy_stdio::StdioEndpoint;
-    use tokio::io::split;
+    use std::path::Path;
+    use std::sync::Mutex as StdMutex;
 
-    type Seen = Arc<Mutex<Option<(String, Option<String>, Option<String>)>>>;
-
-    /// Stands in for the daemon's `HostSessionService` on the far end of the pipe, mirroring its
-    /// exact wire contract: decode the JSON `spawn-conversation` request, record it, and answer
-    /// `{"session_id": ...}`. Keeps this test free of a `tddy-daemon` dependency while still pinning
-    /// the coder↔daemon wire format (service/method names + JSON shape) end to end.
-    struct FakeHostService {
-        session_id: String,
-        seen: Seen,
+    /// Stands in for the daemon's host service on a real unix socket, mirroring its wire contract:
+    /// every request names `session_id`; `GithubToken` answers `{"token"}` or refuses with a status;
+    /// `SpawnConversation` answers `{"session_id"}`. Records every request it receives.
+    struct FakeHost {
+        token: Result<String, String>,
+        requests: Arc<StdMutex<Vec<(String, serde_json::Value)>>>,
     }
 
     #[async_trait]
-    impl RpcService for FakeHostService {
+    impl RpcService for FakeHost {
         async fn handle_rpc(&self, service: &str, method: &str, message: &RpcMessage) -> RpcResult {
-            assert_eq!(
-                service, HOST_SESSION_SERVICE,
-                "relay addressed wrong service"
-            );
-            assert_eq!(method, SPAWN_CONVERSATION_METHOD, "relay used wrong method");
-            let v: serde_json::Value = serde_json::from_slice(&message.payload).unwrap();
-            *self.seen.lock().unwrap() = Some((
-                v["prompt"].as_str().unwrap_or_default().to_string(),
-                v["branch"].as_str().map(str::to_string),
-                v["base_ref"].as_str().map(str::to_string),
-            ));
-            let resp =
-                serde_json::to_vec(&serde_json::json!({ "session_id": self.session_id })).unwrap();
-            RpcResult::Unary(Ok(resp))
+            assert_eq!(service, HOST_SESSION_SERVICE, "addressed the wrong service");
+            let body: serde_json::Value = serde_json::from_slice(&message.payload).unwrap();
+            self.requests
+                .lock()
+                .unwrap()
+                .push((method.to_string(), body));
+            RpcResult::Unary(match method {
+                GITHUB_TOKEN_METHOD => match &self.token {
+                    Ok(token) => {
+                        Ok(serde_json::to_vec(&serde_json::json!({ "token": token })).unwrap())
+                    }
+                    Err(refusal) => Err(Status::failed_precondition(refusal.clone())),
+                },
+                SPAWN_CONVERSATION_METHOD => Ok(serde_json::to_vec(
+                    &serde_json::json!({ "session_id": "child-777" }),
+                )
+                .unwrap()),
+                other => Err(Status::unimplemented(other.to_string())),
+            })
         }
     }
 
-    /// Wire a coder relay handler to a fake host service over a real in-process stdio duplex.
-    fn wired_relay(
-        session_id: &str,
-    ) -> (DaemonRelayConversationSpawnHandler, ReverseClientTx, Seen) {
-        let (daemon_side, coder_side) = tokio::io::duplex(8192);
-        let (d_read, d_write) = split(daemon_side);
-        let (c_read, c_write) = split(coder_side);
-        let seen: Seen = Arc::new(Mutex::new(None));
-        let (_daemon_client, daemon_endpoint) = StdioEndpoint::from_duplex(
-            d_read,
-            d_write,
-            FakeHostService {
-                session_id: session_id.to_string(),
-                seen: seen.clone(),
+    /// A host listening at `path`; dropping the returned handle stops accepting (connections
+    /// already made stay open until aborted too, via `stop`).
+    struct RunningHost {
+        accept: JoinHandle<()>,
+        connections: Arc<StdMutex<Vec<JoinHandle<()>>>>,
+    }
+
+    impl RunningHost {
+        /// What a daemon restart does to the socket: every connection and the listener go away.
+        fn stop(self) {
+            self.accept.abort();
+            for connection in self.connections.lock().unwrap().drain(..) {
+                connection.abort();
+            }
+        }
+    }
+
+    type Requests = Arc<StdMutex<Vec<(String, serde_json::Value)>>>;
+
+    fn a_host_at(path: &Path, token: Result<&str, &str>) -> (RunningHost, Requests) {
+        let _ = std::fs::remove_file(path);
+        let listener = tokio::net::UnixListener::bind(path).unwrap();
+        let requests: Requests = Arc::default();
+        let connections: Arc<StdMutex<Vec<JoinHandle<()>>>> = Arc::default();
+        let token = token.map(str::to_string).map_err(str::to_string);
+        let (seen, conns) = (requests.clone(), connections.clone());
+        let accept = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let (reader, writer) = tokio::io::split(stream);
+                let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                    reader,
+                    writer,
+                    FakeHost {
+                        token: token.clone(),
+                        requests: seen.clone(),
+                    },
+                    tddy_rpc::RequestTransport::UnixSocket,
+                );
+                conns.lock().unwrap().push(tokio::spawn(endpoint.run()));
+            }
+        });
+        (
+            RunningHost {
+                accept,
+                connections,
             },
-            tddy_rpc::RequestTransport::UnixSocket,
-        );
-        let (coder_client, coder_endpoint) = StdioEndpoint::from_duplex(
-            c_read,
-            c_write,
-            NoopRpcService,
-            tddy_rpc::RequestTransport::UnixSocket,
-        );
-        tokio::spawn(daemon_endpoint.run());
-        tokio::spawn(coder_endpoint.run());
-        let (tx, rx) = reverse_client_channel();
-        // Publish the client (as run_daemon does once its endpoint is up).
-        tx.send(Some(coder_client)).unwrap();
-        (DaemonRelayConversationSpawnHandler::new(rx), tx, seen)
+            requests,
+        )
+    }
+
+    fn a_socket_path() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("host.sock");
+        (dir, path)
     }
 
     #[tokio::test]
-    async fn relays_spawn_conversation_over_stdio_and_returns_the_child_session_id() {
-        // Given a relay wired to a host service that yields "child-777"
-        let (handler, _tx, seen) = wired_relay("child-777");
+    async fn the_forwarded_token_request_names_the_session_and_returns_the_hosts_token() {
+        // Given a host that answers ada's session with her token
+        let (_dir, path) = a_socket_path();
+        let (_host, requests) = a_host_at(&path, Ok("ghp_ada_token"));
+        let credential =
+            DaemonRelayGithubCredential::new(HostSessionClient::new(&path, "session-ada"));
 
-        // When the agent's spawn_conversation is relayed over the pipe
-        let session_id = handler
+        // When the agent's token request is forwarded
+        let token = credential.github_token().await;
+
+        // Then the host's token comes back, and the request named this session
+        assert_eq!(token, Ok("ghp_ada_token".to_string()));
+        let requests = requests.lock().unwrap();
+        assert_eq!(
+            *requests,
+            vec![(
+                GITHUB_TOKEN_METHOD.to_string(),
+                serde_json::json!({ "session_id": "session-ada" })
+            )]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_hosts_refusal_is_returned_verbatim() {
+        // Given a host that refuses with the resolver's words
+        let (_dir, path) = a_socket_path();
+        let (_host, _requests) =
+            a_host_at(&path, Err("this project has no github account assigned"));
+        let credential = DaemonRelayGithubCredential::new(HostSessionClient::new(&path, "s"));
+
+        // When the request is forwarded
+        let outcome = credential.github_token().await;
+
+        // Then the agent reads exactly those words
+        assert_eq!(
+            outcome,
+            Err("this project has no github account assigned".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_socket_is_an_error_that_names_it() {
+        // Given a socket path nothing listens on
+        let (_dir, path) = a_socket_path();
+        let credential = DaemonRelayGithubCredential::new(HostSessionClient::new(&path, "s"));
+
+        // When the request is forwarded
+        let refusal = credential.github_token().await.unwrap_err();
+
+        // Then it fails naming the socket — there is nowhere else to ask
+        assert!(
+            refusal.contains("could not be reached") && refusal.contains("host.sock"),
+            "{refusal}"
+        );
+        // And says what a person can do: a restarted daemon binds the socket again only when a
+        // session of this user is started or resumed
+        assert!(refusal.contains("resume"), "{refusal}");
+    }
+
+    #[tokio::test]
+    async fn the_connection_is_made_again_after_the_host_restarts_and_rebinds() {
+        // Given a handler that has already fetched a token over a first connection
+        let (_dir, path) = a_socket_path();
+        let (host, _) = a_host_at(&path, Ok("ghp_before_restart"));
+        let credential = DaemonRelayGithubCredential::new(HostSessionClient::new(&path, "s"));
+        assert_eq!(
+            credential.github_token().await,
+            Ok("ghp_before_restart".to_string())
+        );
+
+        // When the daemon restarts: the old listener and connections go, a new host binds the path
+        host.stop();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let (_restarted, _) = a_host_at(&path, Ok("ghp_after_restart"));
+
+        // Then the next request reconnects and is answered by the new host
+        assert_eq!(
+            credential.github_token().await,
+            Ok("ghp_after_restart".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn one_connection_serves_many_requests() {
+        // Given a handler and a host that counts connections' requests
+        let (_dir, path) = a_socket_path();
+        let (_host, requests) = a_host_at(&path, Ok("ghp_ada_token"));
+        let credential = DaemonRelayGithubCredential::new(HostSessionClient::new(&path, "s"));
+
+        // When three requests are forwarded
+        for _ in 0..3 {
+            credential.github_token().await.unwrap();
+        }
+
+        // Then all three were answered
+        assert_eq!(requests.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn spawn_conversation_is_relayed_naming_the_session_and_returns_the_child_id() {
+        // Given a host that yields "child-777"
+        let (_dir, path) = a_socket_path();
+        let (_host, requests) = a_host_at(&path, Ok("unused"));
+        let handler =
+            DaemonRelayConversationSpawnHandler::new(HostSessionClient::new(&path, "orch-1"));
+
+        // When the agent's spawn_conversation is relayed
+        let child = handler
             .spawn_conversation("build the thing", Some("feat-y"), None)
-            .await
-            .expect("relay should succeed");
+            .await;
 
-        // Then the child id round-trips back and the host saw the exact prompt/branch (base_ref None)
-        assert_eq!(session_id, "child-777");
-        let seen = seen
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("host service was called");
-        assert_eq!(seen.0, "build the thing");
-        assert_eq!(seen.1.as_deref(), Some("feat-y"));
-        assert_eq!(seen.2, None, "base_ref must be null when omitted");
+        // Then the child id round-trips and the host saw the session, prompt and branch
+        assert_eq!(child, Ok("child-777".to_string()));
+        let (method, body) = requests.lock().unwrap()[0].clone();
+        assert_eq!(method, SPAWN_CONVERSATION_METHOD);
+        assert_eq!(
+            (
+                body["session_id"].clone(),
+                body["prompt"].clone(),
+                body["branch"].clone()
+            ),
+            (
+                serde_json::json!("orch-1"),
+                serde_json::json!("build the thing"),
+                serde_json::json!("feat-y")
+            )
+        );
     }
 
     #[tokio::test]
-    async fn relay_blocks_until_the_client_is_published_then_resolves() {
-        // Given a handler whose client is published only AFTER the call has started
-        let (daemon_side, coder_side) = tokio::io::duplex(8192);
-        let (d_read, d_write) = split(daemon_side);
-        let (c_read, c_write) = split(coder_side);
-        let seen: Seen = Arc::new(Mutex::new(None));
-        let (_dc, de) = StdioEndpoint::from_duplex(
-            d_read,
-            d_write,
-            FakeHostService {
-                session_id: "c2".to_string(),
-                seen: seen.clone(),
-            },
-            tddy_rpc::RequestTransport::UnixSocket,
-        );
-        let (cc, ce) = StdioEndpoint::from_duplex(
-            c_read,
-            c_write,
-            NoopRpcService,
-            tddy_rpc::RequestTransport::UnixSocket,
-        );
-        tokio::spawn(de.run());
-        tokio::spawn(ce.run());
-        let (tx, rx) = reverse_client_channel();
-        let handler = DaemonRelayConversationSpawnHandler::new(rx);
+    async fn a_spawn_is_not_sent_twice_when_the_connection_was_lost() {
+        // Given a handler whose host went away after its first answer
+        let (_dir, path) = a_socket_path();
+        let (host, requests) = a_host_at(&path, Ok("unused"));
+        let handler = DaemonRelayConversationSpawnHandler::new(HostSessionClient::new(&path, "o"));
+        handler.spawn_conversation("one", None, None).await.unwrap();
+        host.stop();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
-        // When the call starts before the client exists, then the client is published
-        let call = tokio::spawn(async move { handler.spawn_conversation("x", None, None).await });
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        tx.send(Some(cc)).unwrap();
+        // When the next spawn is attempted with no host to receive it
+        let outcome = handler.spawn_conversation("two", None, None).await;
 
-        // Then it resolves rather than erroring on the missing client
-        let out = call
-            .await
-            .unwrap()
-            .expect("resolves once the client is published");
-        assert_eq!(out, "c2");
+        // Then it fails rather than being repeated, and only the first request was ever received
+        assert!(outcome.is_err());
+        assert_eq!(requests.lock().unwrap().len(), 1);
     }
 }

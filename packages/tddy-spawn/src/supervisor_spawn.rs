@@ -68,6 +68,23 @@ pub fn spawn_session_request(
     }
 }
 
+/// `request` with the commit identity a session is spawned under ([`SpawnOptions::git_environment`])
+/// added to its `env`.
+///
+/// Like `PATH`, every one of these keys must be listed in the supervisor's
+/// `spawn_policy.allowed_env_keys` or the spawn is refused outright — which is the point: a session
+/// that silently started under the machine's identity instead of its project's account is the
+/// failure this exists to prevent. A project that resolves to no account adds no key, so the shipped
+/// empty policy still permits its spawn. Only [`spawner::SESSION_GIT_ENVIRONMENT_KEYS`] ever get
+/// here ([`spawner::plan_session_child`] refuses the rest), so no token can ride this wire.
+pub fn with_commit_identity(
+    mut request: SpawnSessionRequest,
+    git_environment: &[(String, String)],
+) -> SpawnSessionRequest {
+    request.env.extend(git_environment.iter().cloned());
+    request
+}
+
 /// The `SpawnSession` request that clones a repository as the target user.
 ///
 /// `git` itself, not a shell running a `git` command line: a shell on
@@ -185,6 +202,7 @@ pub async fn spawn_session_via_supervisor(
             stack_seed_base_session: req.stack_seed_base_session.as_deref(),
             model: req.model.as_deref(),
             host_session_socket: req.host_session_socket.as_deref(),
+            git_environment: &req.git_environment,
         },
         &req.child_log_level,
         &req.child_log_format,
@@ -192,12 +210,15 @@ pub async fn spawn_session_via_supervisor(
     )?;
 
     let client = connect_supervisor(socket_path).await?;
-    let request = spawn_session_request(
-        &req.os_user,
-        &plan.program,
-        &plan.args,
-        &plan.working_dir,
-        plan.path_extra.as_deref(),
+    let request = with_commit_identity(
+        spawn_session_request(
+            &req.os_user,
+            &plan.program,
+            &plan.args,
+            &plan.working_dir,
+            plan.path_extra.as_deref(),
+        ),
+        &plan.env,
     );
     log::info!(
         "supervisor_spawn: asking {} to spawn session_id={} tool={} os_user={} grpc_port={}",

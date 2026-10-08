@@ -121,6 +121,8 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             // never push a remote branch here.
             false,
             "",
+            // The orchestrator's owner's vault: a child is the same owner's, on the same project.
+            &self.account_access,
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
             &super::AttachmentProgressSink::discarding(),

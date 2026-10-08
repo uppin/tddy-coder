@@ -79,6 +79,7 @@ pub fn a_managed_service() -> ManagedServiceBuilder {
             working_dir: None,
             env: BTreeMap::new(),
             restart: a_restart_policy().build(),
+            host_sockets: Vec::new(),
             socket: None,
         },
     }

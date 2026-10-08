@@ -25,6 +25,8 @@ use tddy_daemon_kernel::config::DaemonConfig;
 
 use super::AttachmentProgressSink;
 
+use super::session_acting_identity::SessionAccountAccess;
+
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
 #[allow(clippy::too_many_arguments)]
@@ -55,6 +57,9 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // at session start; a push failure fails the start.
     create_remote_branch: bool,
     ssh_config_host: &str,
+    // What the session's vault says about the project's GitHub account — read once, here, for the
+    // commit identity the agent is launched with.
+    account_access: &SessionAccountAccess,
     task_registry: &TaskRegistry,
     // Where the start's phases (worktree, semantic index, agent) are announced; discarding for a
     // caller with nobody watching.
@@ -76,6 +81,13 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     let (projects_dir, project) =
         service_util::find_registered_project(tddy_data_dir, os_user, project_id)?;
     let repo_root = service_util::project_repo_root(&project)?;
+    // One resolution, before `project` moves into the worktree cut. A refusal does not stop the
+    // start: the agent then commits under the checkout's own identity, and the reason is logged.
+    // The token half of the same assignments goes to the agent's tools over the session's toolcall
+    // socket, per call — never into the commit pairs or any file.
+    let identity = account_access.session_identity(session_id, Some(&project.accounts));
+    let git_environment = identity.git_environment;
+    let github_credential_handler = identity.github_credential;
 
     // Create session directory under sessions_base/sessions/<id>/.
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
@@ -194,6 +206,8 @@ pub(crate) async fn spawn_claude_cli_session_inner(
                 session_dir: &session_dir,
                 worktree_path: &worktree_path,
                 tddy_tools_path,
+                git_environment,
+                github_credential_handler,
             },
         )
         .await?;

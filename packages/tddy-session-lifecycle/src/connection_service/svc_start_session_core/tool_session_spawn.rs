@@ -1,5 +1,7 @@
 use crate::connection_service::service_util;
 
+use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
+
 use super::ToolSpawnPurpose;
 
 use super::ToolSpawnPlan;
@@ -61,32 +63,15 @@ impl LaunchSessions {
         // the session that owns a `changeset.yaml` is the process that writes it.
         let stack_seed_base_session_for_spawn = trim_to_option(&req.pr_stack_base_session_id);
         let model_for_spawn = trim_to_option(&req.model);
-        // Grill-me tool sessions relay `spawn_conversation` back over a per-session unix socket.
-        // Because the coder needs the socket path (and orchestrator id) at spawn time — and the
-        // socket path is what crosses the forked `spawn_worker` boundary — bind it and pre-generate
-        // the session id BEFORE the spawn, so both the worker and direct paths carry it identically.
+        // Every tool session reaches the daemon over its OS user's host-session socket, whatever its
+        // recipe — that is how its agent's PR tools get the project account's token. The coder
+        // names itself to the socket by its `--session-id`, which is therefore fixed before the
+        // spawn, so the registration below and the flag the child is given agree on it.
+        let tool_session_id = Uuid::now_v7().to_string();
         let enable_conversation_spawn = recipe_for_spawn
             .as_deref()
             .map(recipe_enables_conversation_spawn)
             .unwrap_or(false);
-        let (mut pre_session_id, host_session_socket): (Option<String>, Option<String>) =
-            if enable_conversation_spawn {
-                let sid = Uuid::now_v7().to_string();
-                let sock = self
-                    .spawn_host_session_socket(
-                        &sid,
-                        &os_user,
-                        &pid_for_spawn,
-                        model_for_spawn.clone(),
-                    )
-                    .await;
-                (Some(sid), sock)
-            } else {
-                (None, None)
-            };
-        let tool_session_id = pre_session_id
-            .clone()
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
         if enable_conversation_spawn || !req.attachments.is_empty() {
             let sessions_base = tddy_daemon_kernel::user_paths::sessions_base_for_user(
                 &os_user,
@@ -102,9 +87,33 @@ impl LaunchSessions {
                 progress,
             })
             .await?;
-            pre_session_id = Some(tool_session_id);
         }
-        let result = self
+        // The commit identity of the account this project acts as, and the handler that answers its
+        // tools' token requests: one lookup over the project's assignments, the same one every other
+        // session path makes. A project that does not resolve adds no pairs (logged) and the session
+        // still starts under the checkout's own identity; its token requests are refused with the
+        // resolver's words. Only the pairs reach the child's environment: the account's token never
+        // does — it is asked for, per call, over the host-session socket.
+        let identity = self.host.session_identity(
+            &os_user,
+            &tool_session_id,
+            &pid_for_spawn,
+            &req.session_token,
+        );
+        let git_environment = identity.git_environment;
+        let host_session_socket = self
+            .register_tool_session_on_host_socket(ToolSessionHostRegistration {
+                os_user: &os_user,
+                session_id: &tool_session_id,
+                project_id: &pid_for_spawn,
+                recipe: recipe_for_spawn.as_deref(),
+                model: model_for_spawn.clone(),
+                account_access: self.host.session_account_access(&req.session_token),
+                github_credential: identity.github_credential,
+            })
+            .await;
+        let pre_session_id = Some(tool_session_id.clone());
+        let spawned = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Start,
                 os_user,
@@ -122,8 +131,11 @@ impl LaunchSessions {
                 stack_seed_base_session: stack_seed_base_session_for_spawn,
                 model: model_for_spawn,
                 host_session_socket,
+                git_environment,
             })
-            .await?;
+            .await;
+        self.tool_session_spawned(&tool_session_id, &spawned);
+        let result = spawned?;
         log::debug!(
             "StartSession: spawn returned, session_id={}",
             result.session_id

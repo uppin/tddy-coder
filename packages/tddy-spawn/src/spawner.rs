@@ -419,6 +419,40 @@ pub struct SpawnOptions<'a> {
     /// `--host-session-socket <path>`. A plain string, so it crosses the `spawn_worker` JSON-IPC
     /// boundary trivially (unlike OS fds). `None` keeps the legacy wiring with no reverse channel.
     pub host_session_socket: Option<&'a str>,
+    /// The commit identity the child's agent authors under: the `GIT_AUTHOR_*` /
+    /// `GIT_COMMITTER_*` pairs of the account the session's project acts as, resolved by the daemon
+    /// (empty when the project resolves to none, which leaves the checkout's own identity in force).
+    ///
+    /// **Never a credential.** Only [`SESSION_GIT_ENVIRONMENT_KEYS`] are accepted
+    /// ([`plan_session_child`] refuses anything else), because this rides the supervisor wire,
+    /// whose `env` carries arbitrary variables. The account's token reaches a session's tools per
+    /// call, over the toolcall socket — never through the child's environment.
+    pub git_environment: &'a [(String, String)],
+}
+
+/// The only environment variables a session spawn may be given beyond its fixed `HOME` and `PATH`:
+/// the commit identity ([`SpawnOptions::git_environment`]).
+pub const SESSION_GIT_ENVIRONMENT_KEYS: [&str; 4] = [
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+];
+
+/// Refuse a spawn environment that carries anything but commit identity. The key is named; the
+/// value never is, since a refused value is exactly the kind of thing that must not reach a log.
+fn require_commit_identity_only(git_environment: &[(String, String)]) -> anyhow::Result<()> {
+    match git_environment
+        .iter()
+        .find(|(key, _)| !SESSION_GIT_ENVIRONMENT_KEYS.contains(&key.as_str()))
+    {
+        Some((key, _)) => anyhow::bail!(
+            "a session spawn's environment may carry only the commit identity variables \
+             ({}); refusing `{key}`",
+            SESSION_GIT_ENVIRONMENT_KEYS.join(", ")
+        ),
+        None => Ok(()),
+    }
 }
 
 /// The PR-stack flags a spawned `tddy-coder` is given, as a flat argument vector.
@@ -799,6 +833,9 @@ pub struct SessionChildPlan {
     /// `spawn_path_extra` from the target user's `~/.tddy/config.yaml`, when they set one. The
     /// child's full `PATH` is [`merge_spawn_child_path`] of this.
     pub path_extra: Option<String>,
+    /// The commit identity pairs the child is started with ([`SpawnOptions::git_environment`]),
+    /// on top of `HOME` and `PATH`. Both backends apply exactly these.
+    pub env: Vec<(String, String)>,
     /// Resolved passwd identity, used by the forking backend's `pre_exec`.
     target: TargetAccount,
     /// The child's `--config` document (named in `args`, so both backends route the session's logs
@@ -895,6 +932,7 @@ pub fn plan_session_child(
     child_log_format: &str,
     coder_log_config_yaml: Option<&str>,
 ) -> anyhow::Result<SessionChildPlan> {
+    require_commit_identity_only(opts.git_environment)?;
     let target = resolve_target_account(os_user)?;
 
     if opts.resume_session_id.is_some() && opts.new_session_id.is_some() {
@@ -1043,6 +1081,7 @@ pub fn plan_session_child(
         livekit_server_identity: identity,
         grpc_port,
         path_extra,
+        env: opts.git_environment.to_vec(),
         target,
         logs,
     })
@@ -1074,6 +1113,7 @@ pub fn spawn_as_user(
         livekit_server_identity: identity,
         grpc_port,
         path_extra,
+        env,
         target,
         logs,
     } = plan_session_child(
@@ -1108,6 +1148,12 @@ pub fn spawn_as_user(
         .stderr(Stdio::from(logs.stderr))
         .env("HOME", &home_dir)
         .env("PATH", &child_path)
+        // The environment is never a credential: a daemon that has either variable exported must
+        // not hand it to a session's process by inheritance. The session's tools ask the daemon for
+        // the project account's token instead (`github-token`).
+        .env_remove("GITHUB_TOKEN")
+        .env_remove("GH_TOKEN")
+        .envs(env.iter().map(|(key, value)| (key, value)))
         .args(&args);
 
     let cfg_abs = logs

@@ -169,6 +169,10 @@ impl LaunchSessions {
         // the next record rather than holding a subscription for the daemon's life, and a session id
         // reused later starts from nothing observed instead of the deleted session's last call.
         self.session_agent_inference.forget(session_id);
+        // Its tool session (if it ran one) stops being answered on its user's host-session socket:
+        // a token request naming it is refused from here on, and the daemon stops holding the
+        // start's session token for it.
+        self.host_session_sockets.registry().unregister(session_id);
         if let Some(sandbox) = self.sandbox_manager.get(session_id).await {
             sandbox.stop();
         }

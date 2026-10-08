@@ -155,3 +155,8 @@ stays free of proto and RPC, and the crates that depend on the store do not pay 
 `tddy-credential-sync` is a lightweight addition — it depends on `tddy-credentials` alone, nothing
 LiveKit or daemon-auth shaped — reached only for `AccountSyncSummary`, the type
 `SyncStatusSource` is expressed over.
+
+## Acting as an account
+
+Which account a project acts as, for the token and the commit identity a session uses, is answered by
+`acting_identity`, not by this service: [github-identity-resolution.md](github-identity-resolution.md).

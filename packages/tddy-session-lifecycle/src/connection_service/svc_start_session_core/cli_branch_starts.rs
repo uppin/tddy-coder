@@ -195,6 +195,7 @@ impl LaunchSessions {
             req.create_remote_branch,
             &self.task_registry,
             &clones,
+            &self.host.session_account_access(&req.session_token),
             progress,
         )
         .await

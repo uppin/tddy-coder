@@ -46,6 +46,7 @@ fn debug_log_written_to_session_dir_when_plan_fails() {
         None,
         None,
         tmp.clone(),
+        false,
     );
 
     let mut got_error = false;

@@ -700,6 +700,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             result.grpc_port, result.livekit_room
         );
         self.sender.send_message(chat_id, &done).await?;
-        Ok(())
+        self.notify_account_identity_unavailable(chat_id, &result.session_id, &project)
+            .await
     }
 }

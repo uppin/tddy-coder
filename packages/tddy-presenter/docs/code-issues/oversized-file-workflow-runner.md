@@ -6,7 +6,7 @@
 **Metrics:** **1,015 production lines** of 1,015 total (no `#[cfg(test)]`) · budget 500 · **2.0× over**
 **Thresholds breached:** length 1015 > 500
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-08 (1,015 → 1,036 in #516, `#keyring` 9/9, the PR-tools context flag; deferred with consent) — **unclaimed**
 **Moved:** 2026-09-23 — from `packages/tddy-core/src/presenter/workflow_runner.rs` by `#carve` 12/14 (PR #522), with `git mv`
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
@@ -15,6 +15,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-23 | 1015 | first detection, at the file's new home. The size is inherited from `tddy-core`, not grown: one line changed: the Cut 2 call path `crate::changeset::start_goal_for_session_continue` → `crate::workflow::…` |
+| 2026-10-08 | 1036 | 1,015 on `origin/master` → 1,036 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +21, seeding `github_pr_tools_available` into each run's context |
 
 ## What would close it — candidate seams (not proven)
 

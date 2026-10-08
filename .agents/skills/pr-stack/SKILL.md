@@ -78,6 +78,11 @@ gh stack link --base master <pr> <pr> <pr> ...
 - **never `--open`** on a stack of drafts: it marks every PR ready for review, and in this repo
   readying a PR is what triggers its documents to be wrapped.
 
+**When a node's documents are wrapped.** Once its planned scope is developed and every gap or
+deferral is approved by the user — never gated on CI. The CI build and full test run are post-wrap
+actions: their result is read after the push, a failure is fixed in a new commit (`/fix-pr`), and a
+red run neither postpones nor reverses the wrap. See `/wrap-context-docs` § *When to wrap*.
+
 | Command | What it does | When |
 |---|---|---|
 | `gh stack link` | register existing PRs as a stack on GitHub, no local state | **the default here** |

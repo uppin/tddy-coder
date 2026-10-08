@@ -240,6 +240,7 @@ The suites travelled with the code they exercise:
 - [host-registry.md](./host-registry.md) — the durable record, and the routing-id/durable-id split
 - [host-tooling-probe.md](./host-tooling-probe.md) — the capability probe and its outcomes
 - [host-add-key.md](./host-add-key.md) — the encrypted prompt channel end to end
+- [host-session-service.md](./host-session-service.md) — the per-OS-user socket a tool session's `github_token` and `spawn_conversation` requests reach
 - Sibling service: [`tddy-worktree-service`](../../tddy-worktree-service/docs/worktree-service.md)
 - What stayed: [connection-service.md](../../tddy-daemon/docs/connection-service.md)
 - Feature: [docs/ft/web/hosts-screen.md](../../../docs/ft/web/hosts-screen.md)

@@ -36,3 +36,9 @@ Product contract for attachments: [session-attachments.md](../../../docs/ft/code
 
 - **`tddy-workflow-engine`** (re-exported by `tddy-core`): `WorkflowRecipe` trait (`uses_primary_session_document`, `read_primary_session_document_utf8`).
 - **`tddy-workflow-recipes`**: `SessionArtifactManifest`, `TddRecipe`, hook implementations.
+
+## `context_keys`
+
+`context_keys::GITHUB_PR_TOOLS_AVAILABLE_KEY` names the workflow-context value (`bool`) that says
+whether the agent's GitHub PR tools can authenticate. It is defined here, beside the workflow
+vocabulary, so the presenter that seeds it and the recipes' hooks that read it name one string.

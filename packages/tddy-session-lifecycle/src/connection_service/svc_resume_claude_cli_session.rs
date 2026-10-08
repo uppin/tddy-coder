@@ -31,7 +31,13 @@ impl LaunchSessions {
     ) -> Result<Response<ResumeSessionResponse>, Status> {
         if meta.sandbox == Some(true) {
             return self
-                .resume_sandboxed_claude_cli_session(os_user, session_id, session_dir, meta)
+                .resume_sandboxed_claude_cli_session(
+                    os_user,
+                    session_id,
+                    session_token,
+                    session_dir,
+                    meta,
+                )
                 .await;
         }
         let model = meta.model.clone().unwrap_or_default();
@@ -55,6 +61,7 @@ impl LaunchSessions {
             .map(|w| w.context_dir.clone())
             .or_else(|| meta.repo_path.as_ref().map(PathBuf::from))
             .unwrap_or_else(|| session_dir.clone());
+        let is_split = split.is_some();
         let (split_args, split_env) = match split {
             Some(w) => (w.extra_args, w.env),
             None => (Vec::new(), Vec::new()),
@@ -69,7 +76,21 @@ impl LaunchSessions {
         // changeset.yaml so the workflow continues from where it left off, not from the start goal.
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
         let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut env_extra: Vec<(String, String)> = split_env;
+        // One resolution for the project this session belongs to; a refusal (or a project that can no
+        // longer be read) resumes the agent under the checkout's own identity, with the reason logged.
+        // A split agent gets no commit pairs: it has no checkout (its working directory is a context
+        // dir) and commits are made by the tools running on the codebase daemon, never by this
+        // process's environment.
+        let identity =
+            self.host
+                .session_identity(os_user, session_id, &meta.project_id, session_token);
+        let github_credential_handler = identity.github_credential;
+        let mut env_extra: Vec<(String, String)> = if is_split {
+            Vec::new()
+        } else {
+            identity.git_environment
+        };
+        env_extra.extend(split_env);
         if let Some(recipe_name) = meta.recipe.as_deref().filter(|s| !s.trim().is_empty()) {
             let recipe = tddy_workflow_recipes::resolve_workflow_recipe_from_cli_name(recipe_name)
                 .map_err(Status::invalid_argument)?;
@@ -89,6 +110,7 @@ impl LaunchSessions {
                 &tddy_tools_path,
                 Some(resume_goal),
                 None,
+                github_credential_handler,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             env_extra.extend(launch.env);
@@ -139,4 +161,5 @@ impl LaunchSessions {
         }))
     }
 }
+
 mod svc_resume_split_wiring;

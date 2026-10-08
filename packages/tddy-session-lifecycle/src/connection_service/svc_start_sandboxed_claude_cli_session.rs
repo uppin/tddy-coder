@@ -27,6 +27,8 @@ use super::launch_ports::LaunchSessions;
 struct JailSession<'a> {
     session_id: &'a str,
     project_id: &'a str,
+    /// The caller's session token — what the session's tools' account lookups read the vault with.
+    session_token: &'a str,
     session_dir: &'a Path,
     worktree_path: &'a Path,
 }
@@ -268,6 +270,7 @@ impl LaunchSessions {
         let jail = JailSession {
             session_id,
             project_id,
+            session_token,
             session_dir: &session_dir,
             worktree_path: &worktree_path,
         };

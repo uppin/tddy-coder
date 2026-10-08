@@ -259,15 +259,38 @@ pub trait GithubPrInsightApi: Send + Sync {
     ) -> Result<(), tddy_core::WorkflowError>;
 }
 
-/// Where a [`RealGithubPrApi`] gets its credential. Explicit never falls back to the environment:
-/// a caller acting for a specific operator must not silently authenticate as the host's ambient
-/// token.
+/// Where a [`RealGithubPrApi`] gets its credential. There is no environment variant, and there must
+/// never be one: a caller acting for a project must not silently authenticate as whoever exported
+/// the host's `GITHUB_TOKEN`.
 enum TokenSource {
-    /// `GITHUB_TOKEN` / `GH_TOKEN` of the running process — correct for the recipe and CLI callers,
-    /// which run as the operator.
-    ProcessEnv,
-    /// A token supplied by the caller (e.g. the daemon, acting for a logged-in web operator).
+    /// A token supplied by the caller — the one resolved for the account the project is assigned.
     Explicit(String),
+    /// No account is resolved for this caller. Every authenticated operation refuses.
+    Absent,
+    /// Asked of the session's host the first time an operation needs it, so a caller whose work
+    /// turns out to reach no GitHub call never asks. A refusal is the host's own message and is not
+    /// remembered: the next operation asks again. A token the host did hand over is kept for this
+    /// client's life, as an [`Explicit`](Self::Explicit) one is.
+    Asked {
+        ask: Box<dyn Fn() -> Result<String, String> + Send + Sync>,
+        answered: std::sync::OnceLock<String>,
+    },
+}
+
+/// `tddy_core::toolcall::request_github_token_from_session`, from a synchronous caller.
+fn ask_the_session_host() -> Result<String, String> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| format!("could not ask the session host for a GitHub token: {e}"))?
+                    .block_on(tddy_core::toolcall::request_github_token_from_session())
+            })
+            .join()
+            .map_err(|_| "asking the session host for a GitHub token panicked".to_string())?
+    })
 }
 
 /// Real implementation using GitHub REST API via `curl`.
@@ -275,34 +298,89 @@ enum TokenSource {
 pub struct RealGithubPrApi {
     pub repo: String,
     token: TokenSource,
+    /// Root of the REST API — [`GITHUB_API_BASE`](crate::github_rest_common::GITHUB_API_BASE) unless
+    /// [`Self::with_api_base`] names another. A value, never an environment variable.
+    api_base: String,
 }
 
 impl RealGithubPrApi {
-    /// Authenticate with the process environment (`GITHUB_TOKEN` / `GH_TOKEN`) — the recipe and CLI
-    /// callers, which run as the operator.
-    pub fn new(repo: impl Into<String>) -> Self {
-        Self {
-            repo: repo.into(),
-            token: TokenSource::ProcessEnv,
-        }
-    }
-
-    /// Authenticate with an explicitly supplied token — a server acting for one operator, whose own
-    /// credential must be used instead of the host's ambient environment.
+    /// Authenticate with an explicitly supplied token — the one resolved for the account the
+    /// project is assigned (`tddy_accounts::acting_identity`).
     pub fn with_token(repo: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
             repo: repo.into(),
             token: TokenSource::Explicit(token.into()),
+            api_base: crate::github_rest_common::GITHUB_API_BASE.to_string(),
         }
+    }
+
+    /// A client for a caller that holds **no** resolved account, because the operation it runs
+    /// reaches no GitHub call (a plan-only repoint). It exists so such a caller can still hold a
+    /// `GithubPrApi`, and so that if it does reach one anyway, every authenticated operation
+    /// returns an error naming that no account is resolved instead of reaching for an ambient
+    /// credential.
+    pub fn without_credential(repo: impl Into<String>) -> Self {
+        Self {
+            repo: repo.into(),
+            token: TokenSource::Absent,
+            api_base: crate::github_rest_common::GITHUB_API_BASE.to_string(),
+        }
+    }
+
+    /// Authenticate with the token `ask` returns, called the first time an operation needs one. The
+    /// reason `ask` fails with reaches the caller verbatim, prefixed by the operation that needed
+    /// it. There is no environment behind it.
+    pub fn asking(
+        repo: impl Into<String>,
+        ask: impl Fn() -> Result<String, String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            repo: repo.into(),
+            token: TokenSource::Asked {
+                ask: Box::new(ask),
+                answered: std::sync::OnceLock::new(),
+            },
+            api_base: crate::github_rest_common::GITHUB_API_BASE.to_string(),
+        }
+    }
+
+    /// Send this client's requests to `api_base` instead of `https://api.github.com` — a GitHub
+    /// Enterprise host, or a local listener standing in for GitHub. The token is sent there as it
+    /// would be to GitHub, so name only a host the account's token may be shown to.
+    pub fn with_api_base(mut self, api_base: impl Into<String>) -> Self {
+        self.api_base = api_base.into();
+        self
+    }
+
+    /// [`Self::asking`] the host of the calling process's own session — the `github-token` request
+    /// over the socket `TDDY_SOCKET` names, the one `tddy-tools` makes.
+    ///
+    /// The ask is sync, so it runs on a thread and runtime of its own: it is safe to be reached from
+    /// an async task (and from a runtime thread), and it never depends on the caller's runtime
+    /// making progress while the caller waits.
+    pub fn asking_the_session_host(repo: impl Into<String>) -> Self {
+        Self::asking(repo, ask_the_session_host)
     }
 
     /// Resolve the credential for one call, or an operator-facing reason why there is none.
     fn resolve_token(&self) -> Result<String, String> {
         match &self.token {
-            TokenSource::ProcessEnv => crate::github_rest_common::github_token_from_env()
-                .ok_or_else(|| "no GitHub token set (GITHUB_TOKEN / GH_TOKEN)".to_string()),
+            TokenSource::Asked { ask, answered } => {
+                if let Some(token) = answered.get() {
+                    return Ok(token.clone());
+                }
+                let token = ask()?;
+                if token.trim().is_empty() {
+                    return Err("the session host answered with a blank GitHub token".to_string());
+                }
+                Ok(answered.get_or_init(|| token).clone())
+            }
             TokenSource::Explicit(t) if !t.trim().is_empty() => Ok(t.clone()),
             TokenSource::Explicit(_) => Err("the supplied GitHub token is blank".to_string()),
+            TokenSource::Absent => Err(
+                "no GitHub account is resolved for this operation; assign one to the project"
+                    .to_string(),
+            ),
         }
     }
 
@@ -656,62 +734,102 @@ pub fn owner_repo_from_remote_url(remote_url: &str) -> Option<String> {
 mod real_impl_tests {
     use super::*;
 
-    /// `real_github_get_open_pr_errors_without_token` — when no GitHub token is set,
-    /// `RealGithubPrApi::get_open_pr` must return `Err` immediately (token gating) rather
-    /// than calling curl with an empty Authorization header.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A client that asks `asked` and is refused in `reason`'s words.
+    fn a_client_refused_with(reason: &'static str, asked: &Arc<AtomicUsize>) -> RealGithubPrApi {
+        let asked = Arc::clone(asked);
+        RealGithubPrApi::asking("owner/repo", move || {
+            asked.fetch_add(1, Ordering::SeqCst);
+            Err(reason.to_string())
+        })
+    }
+
     #[test]
-    fn real_github_get_open_pr_errors_without_token() {
-        let token_backup = (
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
+    fn a_client_that_asks_for_its_token_asks_nothing_until_an_operation_needs_one() {
+        // Given a client built to ask
+        let asked = Arc::new(AtomicUsize::new(0));
 
-        let api = RealGithubPrApi::new("owner/repo");
-        let result = api.get_open_pr("owner:feature/branch");
+        // When it is constructed and used for nothing
+        let _client = a_client_refused_with("no account", &asked);
 
-        if let Some(t) = token_backup.0 {
-            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
-        }
-        if let Some(t) = token_backup.1 {
-            unsafe { std::env::set_var("GH_TOKEN", t) };
-        }
+        // Then nothing was asked
+        assert_eq!(asked.load(Ordering::SeqCst), 0);
+    }
 
+    #[test]
+    fn an_operation_that_needs_a_token_fails_with_the_reason_it_was_refused_for() {
+        // Given a client whose ask is refused
+        let asked = Arc::new(AtomicUsize::new(0));
+        let api = a_client_refused_with("this project has no github account assigned", &asked);
+
+        // When an operation needs a token
+        let error = api.merge_pr(7).expect_err("a refused ask is a failure");
+
+        // Then it asked once and the host's words are the failure's
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
         assert!(
-            result.is_err(),
-            "get_open_pr must return Err when no GitHub token is set; got: {result:?}"
+            error
+                .to_string()
+                .contains("this project has no github account assigned"),
+            "got: {error}"
         );
     }
 
-    /// `real_github_close_pr_errors_without_token` — `close_pr` must fail closed when no GitHub
-    /// token is configured, never issuing a curl PATCH with an empty Authorization header.
     #[test]
-    fn real_github_close_pr_errors_without_token() {
-        let token_backup = (
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        unsafe {
-            std::env::remove_var("GITHUB_TOKEN");
-            std::env::remove_var("GH_TOKEN");
-        }
+    fn a_refusal_is_asked_again_by_the_next_operation_rather_than_remembered() {
+        // Given a client whose ask is refused
+        let asked = Arc::new(AtomicUsize::new(0));
+        let api = a_client_refused_with("no account", &asked);
 
-        let api = RealGithubPrApi::new("owner/repo");
-        let result = api.close_pr(7);
+        // When two operations need a token
+        let _ = api.merge_pr(7);
+        let _ = api.close_pr(8);
 
-        if let Some(t) = token_backup.0 {
-            unsafe { std::env::set_var("GITHUB_TOKEN", t) };
-        }
-        if let Some(t) = token_backup.1 {
-            unsafe { std::env::set_var("GH_TOKEN", t) };
-        }
+        // Then each asked: a project assigned an account in between is not stuck refused
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
+    }
 
+    #[test]
+    fn a_blank_answer_is_refused_rather_than_sent_as_a_credential() {
+        // Given a client whose host answers with a blank token
+        let api = RealGithubPrApi::asking("owner/repo", || Ok("  ".to_string()));
+
+        // When an operation needs a token
+        let error = api.merge_pr(7).expect_err("a blank token is no credential");
+
+        // Then it is refused as blank
+        assert!(error.to_string().contains("blank"), "got: {error}");
+    }
+
+    #[test]
+    fn real_github_get_open_pr_errors_without_a_credential() {
+        // Given a client with no resolved account
+        let api = RealGithubPrApi::without_credential("owner/repo");
+
+        // When it looks a PR up
+        let result = api.get_open_pr("owner:feature/branch");
+
+        // Then it fails before reaching curl
         assert!(
             result.is_err(),
-            "close_pr must return Err when no GitHub token is set; got: {result:?}"
+            "get_open_pr must return Err when no account is resolved; got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn real_github_close_pr_errors_with_a_blank_token() {
+        // Given a client holding a blank token
+        let api = RealGithubPrApi::with_token("owner/repo", "  ");
+
+        // When it closes a PR
+        let result = api.close_pr(7);
+
+        // Then it fails closed, never issuing a PATCH with an empty Authorization header
+        assert!(
+            result.is_err(),
+            "close_pr must return Err when the token is blank; got: {result:?}"
         );
     }
 }
@@ -723,6 +841,7 @@ impl GithubPrApi for RealGithubPrApi {
         // would then repoint or merge an arbitrary PR.
         let head = qualified_head(&self.repo, head_branch);
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             "pulls",
             &[("state", "open"), ("head", head.as_str())],
@@ -773,6 +892,7 @@ impl GithubPrApi for RealGithubPrApi {
         // Unqualified, GitHub ignores the filter and returns the whole PR list.
         let head = qualified_head(&self.repo, head_branch);
         let body = match crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             "pulls",
             &[("state", "all"), ("head", head.as_str())],
@@ -818,6 +938,7 @@ impl GithubPrApi for RealGithubPrApi {
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError> {
         let token = self.require_token("RealGithubPrApi::merge_pr")?;
         let body = crate::github_rest_common::curl_github_put_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/merge"),
             r#"{"merge_method":"merge"}"#,
@@ -836,6 +957,7 @@ impl GithubPrApi for RealGithubPrApi {
         let token = self.require_token("RealGithubPrApi::patch_pr_base")?;
         let body = serde_json::json!({ "base": new_base }).to_string();
         crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &body,
@@ -860,7 +982,11 @@ impl GithubPrApi for RealGithubPrApi {
         .to_string();
         let token = self.require_token("RealGithubPrApi::create_pr")?;
         let resp = crate::github_rest_common::curl_github_post_json_with_token(
-            &self.repo, "pulls", &payload, &token,
+            &self.api_base,
+            &self.repo,
+            "pulls",
+            &payload,
+            &token,
         )?;
         let v: serde_json::Value = serde_json::from_str(&resp).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("create_pr: JSON parse: {e}"))
@@ -880,6 +1006,7 @@ impl GithubPrApi for RealGithubPrApi {
         let token = self.require_token("RealGithubPrApi::disable_auto_merge")?;
         let body = serde_json::json!({ "auto_merge": null }).to_string();
         let _ = crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &body,
@@ -892,6 +1019,7 @@ impl GithubPrApi for RealGithubPrApi {
         let token = self.require_token("RealGithubPrApi::close_pr")?;
         let body = serde_json::json!({ "state": "closed" }).to_string();
         crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &body,
@@ -951,6 +1079,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::get_pr";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &[],
@@ -999,6 +1128,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_pr_files";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/files"),
             &[("per_page", PER_PAGE)],
@@ -1017,6 +1147,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_check_runs";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("commits/{head_sha}/check-runs"),
             &[("per_page", PER_PAGE)],
@@ -1043,6 +1174,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_reviews";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/reviews"),
             &[("per_page", PER_PAGE)],
@@ -1066,6 +1198,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_review_comments";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/comments"),
             &[("per_page", PER_PAGE)],
@@ -1103,6 +1236,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         let token = self.require_token(OP)?;
         // A PR's conversation comments live on its issue, not on the pull resource.
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("issues/{number}/comments"),
             &[("per_page", PER_PAGE)],
@@ -1129,6 +1263,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         // `/search/issues` is not under `/repos/{owner}/{repo}/` — the repository is a `repo:`
         // qualifier inside `q`, which is why this call needs the absolute-path helper.
         let body = crate::github_rest_common::curl_github_get_json_absolute_path(
+            &self.api_base,
             "search/issues",
             &[("q", q.as_str()), ("per_page", per_page.as_str())],
             &token,
@@ -1204,6 +1339,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
 
         let token = self.require_token(OP)?;
         crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &serde_json::Value::Object(payload).to_string(),

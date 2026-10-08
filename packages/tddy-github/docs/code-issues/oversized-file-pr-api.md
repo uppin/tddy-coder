@@ -5,7 +5,7 @@
 **Detected:** 2026-09-22 by `/pr-wrap` step 3.5 on #492, measured by hand
 **Metrics:** **≈ 915 production lines** of 1,292 total · the budget gate reports **315** · 2 test modules, 379 lines
 **Restructure:** required — split by trait, `/code-restructuring` territory
-**Status:** Open
+**Status:** Open — regressed 2026-10-08 (+96 in #516, `#keyring` 9/9)
 **Moved:** was `packages/tddy-workflow-recipes/src/orchestrate_pr_stack/github.rs` — relocated byte-identical by #492 (`#carve` 6/11)
 
 ## Measurement history
@@ -13,6 +13,7 @@
 | Run | Production lines | Gate count | Note |
 |---|---|---|---|
 | 2026-09-22 | ≈ 915 | 315 | first detection, at the file's new home; unchanged by the move |
+| 2026-10-08 | 1,018 | 393 | 922 on `origin/master` → 1,018 production lines by the inline-test-block rule (the gate's naive count 315 → 393) after `#keyring` 9/9 (#516): +96, `RealGithubPrApi::asking`, `asking_the_session_host`, `with_api_base`, the per-call token resolution and the `TokenSource` enum. Deferred: the file is already the subject of this record |
 
 ## What the tool found
 

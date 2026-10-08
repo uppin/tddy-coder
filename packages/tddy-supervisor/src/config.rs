@@ -109,6 +109,33 @@ pub struct ManagedService {
     /// already implements the receiving half (`SocketSource::Activated`).
     #[serde(default)]
     pub socket: Option<ServiceSocket>,
+    /// Per-OS-user sockets the supervisor creates as root, owned by that user, and hands to the
+    /// service next to its [`socket`](Self::socket). Needs `socket`: descriptor 3 stays the
+    /// service's main listener, and these follow it.
+    ///
+    /// This is how an *unprivileged* service serves a socket only one OS user can reach: it cannot
+    /// `chown` a socket to somebody else, but it can hold a listener root already gave them. See
+    /// [`HostSocket`].
+    #[serde(default)]
+    pub host_sockets: Vec<HostSocket>,
+}
+
+/// A socket for one OS user, created by the supervisor and handed to a managed service.
+///
+/// The supervisor makes the socket's directory (`path`'s parent) and the socket owned by `user`,
+/// `0700` and `0600`, binds it, and passes the listener to the service. Whoever holds the listener
+/// accepts on it whatever the file's mode says — a file's mode is checked at `connect`, not at
+/// `accept` — so the service need not be `user`, and `user` alone (and root) can connect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostSocket {
+    /// The OS user that owns the socket and is the only one who can connect. Must also be listed
+    /// in `spawn_policy.allowed_session_users`: a user the supervisor would not run a session as
+    /// has no session to give a socket to.
+    pub user: String,
+    /// Absolute path to bind. Its directory is created for, and handed to, `user`, so it must be
+    /// used by this socket alone.
+    pub path: PathBuf,
 }
 
 /// A listening socket created on a managed service's behalf, before it starts.
@@ -345,6 +372,8 @@ impl SupervisorConfig {
             }
         }
 
+        crate::host_socket_config::validate(self)?;
+
         if self
             .spawn_policy
             .allowed_session_users
@@ -458,7 +487,7 @@ const GROUP_OR_OTHER_WRITE: u32 = 0o022;
 /// A relative path in this config is never usable: it would resolve against whatever directory
 /// systemd happened to start the supervisor in, so an allowlist entry would be a silently dead
 /// grant rather than a working one.
-fn require_absolute(label: &str, path: &Path) -> Result<(), ConfigError> {
+pub(crate) fn require_absolute(label: &str, path: &Path) -> Result<(), ConfigError> {
     if path.is_absolute() {
         return Ok(());
     }
@@ -987,5 +1016,174 @@ spawn_policy:
 
         // When / Then
         assert_rejected_because(SupervisorConfig::from_yaml(yaml), "absolute");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Per-OS-user host sockets
+    // -----------------------------------------------------------------------------------------
+
+    /// A daemon service with a socket, `host_sockets` as given, and alice and bob allowed.
+    fn a_config_with_host_sockets(host_sockets: &str) -> String {
+        format!(
+            "\
+socket:
+  path: /run/tddy-supervisor.sock
+services:
+  - name: tddy-daemon
+    exec_start: /usr/local/bin/tddy-daemon
+    user: tddy
+    socket:
+      path: /run/tddy-daemon.sock
+    host_sockets:
+{host_sockets}
+spawn_policy:
+  allowed_session_users: [alice, bob]
+"
+        )
+    }
+
+    #[test]
+    fn parses_the_host_sockets_a_service_declares() {
+        // Given
+        let yaml = a_config_with_host_sockets(
+            "      - {user: alice, path: /run/tddy/alice/host.sock}\n      - {user: bob, path: /run/tddy/bob/host.sock}",
+        );
+
+        // When
+        let config = SupervisorConfig::from_yaml(&yaml).expect("parse config");
+
+        // Then
+        assert_eq!(
+            config.services[0].host_sockets,
+            vec![
+                HostSocket {
+                    user: "alice".to_string(),
+                    path: PathBuf::from("/run/tddy/alice/host.sock")
+                },
+                HostSocket {
+                    user: "bob".to_string(),
+                    path: PathBuf::from("/run/tddy/bob/host.sock")
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn declares_no_host_sockets_by_default() {
+        // Given / When
+        let config = SupervisorConfig::from_yaml(
+            "socket:\n  path: /run/s.sock\nservices:\n  - {name: d, exec_start: /bin/d, user: tddy}\n",
+        )
+        .expect("parse config");
+
+        // Then
+        assert_eq!(config.services[0].host_sockets, Vec::new());
+    }
+
+    #[test]
+    fn rejects_a_host_socket_for_a_user_the_policy_does_not_allow_sessions_as() {
+        // Given carol is not in allowed_session_users
+        let yaml =
+            a_config_with_host_sockets("      - {user: carol, path: /run/tddy/carol/host.sock}");
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "allowed_session_users");
+    }
+
+    #[test]
+    fn rejects_a_host_socket_for_root() {
+        // Given
+        let yaml =
+            a_config_with_host_sockets("      - {user: root, path: /run/tddy/root/host.sock}");
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "root");
+    }
+
+    #[test]
+    fn rejects_host_sockets_on_a_service_that_has_no_socket_of_its_own() {
+        // Given descriptor 3 would then be a host socket the service takes for its own listener
+        let yaml = "\
+socket:
+  path: /run/tddy-supervisor.sock
+services:
+  - name: tddy-daemon
+    exec_start: /usr/local/bin/tddy-daemon
+    user: tddy
+    host_sockets:
+      - {user: alice, path: /run/tddy/alice/host.sock}
+spawn_policy:
+  allowed_session_users: [alice]
+";
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "no socket");
+    }
+
+    #[test]
+    fn rejects_a_relative_host_socket_path() {
+        // Given
+        let yaml = a_config_with_host_sockets("      - {user: alice, path: alice/host.sock}");
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "absolute");
+    }
+
+    #[test]
+    fn rejects_two_host_sockets_for_one_user() {
+        // Given
+        let yaml = a_config_with_host_sockets(
+            "      - {user: alice, path: /run/tddy/a1/host.sock}\n      - {user: alice, path: /run/tddy/a2/host.sock}",
+        );
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(&yaml), "two host sockets");
+    }
+
+    #[test]
+    fn rejects_two_users_sharing_a_socket_directory() {
+        // Given a directory that would be handed to alice and to bob
+        let yaml = a_config_with_host_sockets(
+            "      - {user: alice, path: /run/tddy/shared/alice.sock}\n      - {user: bob, path: /run/tddy/shared/bob.sock}",
+        );
+
+        // When / Then
+        assert_rejected_because(
+            SupervisorConfig::from_yaml(&yaml),
+            "shares a path or directory",
+        );
+    }
+
+    #[test]
+    fn rejects_a_host_socket_directory_that_holds_another_declared_socket() {
+        // Given the daemon's own socket would end up behind alice's 0700 directory
+        let yaml = a_config_with_host_sockets("      - {user: alice, path: /run/host.sock}");
+
+        // When / Then
+        assert_rejected_because(
+            SupervisorConfig::from_yaml(&yaml),
+            "shares a path or directory",
+        );
+    }
+
+    #[test]
+    fn rejects_a_host_socket_user_that_is_not_a_plain_account_name() {
+        // Given a name that would split the colon-separated descriptor names
+        let yaml = "\
+socket:
+  path: /run/tddy-supervisor.sock
+services:
+  - name: tddy-daemon
+    exec_start: /usr/local/bin/tddy-daemon
+    user: tddy
+    socket: {path: /run/tddy-daemon.sock}
+    host_sockets:
+      - {user: \"a:b\", path: /run/tddy/ab/host.sock}
+spawn_policy:
+  allowed_session_users: [\"a:b\"]
+";
+
+        // When / Then
+        assert_rejected_because(SupervisorConfig::from_yaml(yaml), "plain account name");
     }
 }

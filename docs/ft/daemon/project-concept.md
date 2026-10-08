@@ -68,6 +68,7 @@ The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bund
 
 ## Related
 
+- [Per-project GitHub identity](github-identity.md) — what a session does with the account its project assigns.
 - [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
 - [gRPC remote control](../coder/grpc-remote-control.md) — daemon and transport roles.
 - [Web terminal](../web/web-terminal.md) — Connection screen UI.
