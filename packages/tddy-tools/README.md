@@ -145,6 +145,7 @@ which crate now implements it, which is why they stayed here when their implemen
 ## Documentation
 
 ### Technical implementation (how)
+- [GitHub credential](./docs/github-credential.md) — how the PR tools ask the session's host for the project account's token
 - [Changesets](./docs/changesets/) — applied changeset history
 - [JSON Schema embedding and validation](../tddy-workflow-recipes/docs/json-schema.md) — the schema library behind `submit` / `get-schema` / `list-schemas`
 

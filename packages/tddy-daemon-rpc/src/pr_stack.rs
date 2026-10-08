@@ -52,3 +52,6 @@ fn wire_same_anyhow<Src: Message, Dst: Message + Default>(src: &Src) -> anyhow::
 
 #[cfg(test)]
 mod add_planned_pr_unit_tests;
+
+#[cfg(test)]
+mod repoint_github_token_unit_tests;

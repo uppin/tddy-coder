@@ -45,6 +45,9 @@ pub(in crate::connection_service) struct ToolSpawnPlan {
     pub(in crate::connection_service) stack_seed_base_session: Option<String>,
     pub(in crate::connection_service) model: Option<String>,
     pub(in crate::connection_service) host_session_socket: Option<String>,
+    /// The commit identity pairs the child's agent authors under — the project's account, from
+    /// `SessionAccountAccess::session_identity`. Empty when it resolves to none. Never a token.
+    pub(in crate::connection_service) git_environment: Vec<(String, String)>,
 }
 
 impl ToolSpawnPlan {
@@ -62,6 +65,7 @@ impl ToolSpawnPlan {
             stack_seed_base_session: self.stack_seed_base_session.as_deref(),
             model: self.model.as_deref(),
             host_session_socket: self.host_session_socket.as_deref(),
+            git_environment: &self.git_environment,
         }
     }
 }

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use crate::cgroup_broker::{self, ScopeRemoval};
 use crate::config::{ManagedService, ServiceSocket, SupervisorConfig};
 use crate::error::SupervisorError;
+use crate::host_socket;
 use crate::reaper;
 use crate::request::{SessionState, SessionStatus};
 use crate::service::ServiceStatus;
@@ -60,6 +61,9 @@ struct Slot {
     /// The listener created for a service that declared a socket, held for as long as the supervisor
     /// runs so every start — including every restart — is handed the same one.
     listener: Option<Arc<UnixListener>>,
+    /// The per-OS-user host sockets this service declared, as `(os user, listener)`, created once
+    /// and handed to every start like [`Self::listener`].
+    host_listeners: Vec<(String, Arc<UnixListener>)>,
 }
 
 /// What became of one session the supervisor spawned on a caller's behalf.
@@ -302,12 +306,21 @@ impl Supervisor {
                 Some(socket) => Some(Arc::new(bind_service_listener(service, socket)?)),
                 None => None,
             };
+            let host_listeners = service
+                .host_sockets
+                .iter()
+                .map(|host| {
+                    let listener = host_socket::bind_host_socket(&service.name, host)?;
+                    Ok((host.user.clone(), Arc::new(listener)))
+                })
+                .collect::<anyhow::Result<Vec<_>>>()?;
             slots.push(Slot {
                 runtime: ServiceRuntime::new(service),
                 service: service.clone(),
                 target,
                 started_at: None,
                 listener,
+                host_listeners,
             });
         }
         Ok(Arc::new(Supervisor {
@@ -860,7 +873,11 @@ impl Slot {
 
     /// The listener this service's socket declaration created, ready to hand to the next start.
     fn socket_handover(&self) -> Option<SocketHandover> {
-        self.listener.clone().map(SocketHandover::new)
+        let mut handover = SocketHandover::new(self.listener.clone()?);
+        for (user, listener) in &self.host_listeners {
+            handover = handover.with_host_session_socket(user, Arc::clone(listener));
+        }
+        Some(handover)
     }
 }
 
@@ -1392,6 +1409,117 @@ mod tests {
                 .to_string(),
             "service `tddy-daemon` declares user `root`: account `root` resolves to uid 0; the \
              supervisor is the only privileged process on the host"
+        );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Per-OS-user host sockets
+    // -----------------------------------------------------------------------------------------
+
+    /// The account this test process runs as.
+    fn this_account() -> String {
+        // SAFETY: `getpwuid` points into static storage that is read at once.
+        unsafe {
+            let entry = libc::getpwuid(libc::geteuid());
+            assert!(!entry.is_null(), "the test account has a passwd entry");
+            std::ffi::CStr::from_ptr((*entry).pw_name)
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
+    /// A supervisor config whose one service, running as this account, declares `host_sockets`.
+    fn a_config_declaring_host_sockets(
+        directory: &Path,
+        host_sockets: Vec<crate::config::HostSocket>,
+    ) -> SupervisorConfig {
+        let service = ManagedService {
+            user: this_account(),
+            socket: Some(ServiceSocket {
+                path: directory.join("daemon.sock"),
+                group: None,
+                mode: "0660".to_string(),
+            }),
+            host_sockets,
+            ..a_managed_service().build()
+        };
+        SupervisorConfig {
+            socket: SocketConfig {
+                path: directory.join("supervisor.sock"),
+                group: None,
+                mode: "0660".to_string(),
+            },
+            services: vec![service],
+            spawn_policy: SpawnPolicy::default(),
+            cgroup: crate::config::CgroupPolicy::default(),
+            shutdown_grace_secs: 1,
+        }
+    }
+
+    #[test]
+    fn creates_every_declared_host_socket_when_it_is_built() {
+        // Given a service declaring a host socket for the account running the test
+        let directory = tempfile::TempDir::new().expect("create a workspace");
+        let path = directory.path().join("run/user/host.sock");
+        let config = a_config_declaring_host_sockets(
+            directory.path(),
+            vec![crate::config::HostSocket {
+                user: this_account(),
+                path: path.clone(),
+            }],
+        );
+        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+
+        // When the supervisor is built
+        let _supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
+
+        // Then the socket exists, before anything has been started
+        assert!(path.exists(), "{} was not created", path.display());
+    }
+
+    #[test]
+    fn refuses_to_be_built_when_a_host_socket_cannot_be_created() {
+        // Given a host socket for an account the host does not have
+        let directory = tempfile::TempDir::new().expect("create a workspace");
+        let config = a_config_declaring_host_sockets(
+            directory.path(),
+            vec![crate::config::HostSocket {
+                user: "no-such-account-tddy".to_string(),
+                path: directory.path().join("run/ghost/host.sock"),
+            }],
+        );
+        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+
+        // When / Then — a service started without a socket it declared would serve nobody
+        let error = Supervisor::new(&config, forks).err().expect("refused");
+        assert!(
+            format!("{error:#}").contains("no-such-account-tddy"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn hands_the_service_its_own_socket_first_and_every_host_socket_after_it() {
+        // Given a built supervisor with a host socket declared for this account
+        let directory = tempfile::TempDir::new().expect("create a workspace");
+        let account = this_account();
+        let config = a_config_declaring_host_sockets(
+            directory.path(),
+            vec![crate::config::HostSocket {
+                user: account.clone(),
+                path: directory.path().join("run/user/host.sock"),
+            }],
+        );
+        let forks = Arc::new(spawn_broker::ForkBroker::start().expect("start the fork thread"));
+        let supervisor = Supervisor::new(&config, forks).expect("build the supervisor");
+
+        // When the handover for the service's next start is taken
+        let handover = supervisor.lock()[0].socket_handover().expect("a handover");
+
+        // Then
+        assert_eq!(
+            handover.fd_names(),
+            format!("connection:host-session.{account}")
         );
     }
 }

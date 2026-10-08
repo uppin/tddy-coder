@@ -159,3 +159,11 @@ The crate's unit tests live beside the code (63 in total, in `stack_ops/{nodes,a
 `docs.rs`, `assess.rs`, `git_ops.rs`, `pr_insight.rs`), sharing fixtures from `stack_ops/mod.rs`'s
 test module. The seam tests above live in `tddy-workflow-recipes`, alongside the recipe-side
 acceptance suites that exercise these operations through the re-exported paths.
+
+## GitHub credential
+
+`AssessTask` builds its client with `RealGithubPrApi::asking_the_session_host`, which asks the session
+host for the token the first time a node that owns a branch has its PR looked up; a stack none of whose
+nodes owns a branch asks for nothing, and a refusal fails the task with the host's reason
+([workflow-recipes](../../tddy-workflow-recipes/docs/github-on-demand.md)). Nothing here reads a token
+from the environment.

@@ -222,7 +222,14 @@ impl LaunchSessions {
         );
 
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
-        let mut session_env: Vec<(String, String)> = Vec::new();
+        // The jailed agent edits and commits through the host-side tool relay, which runs under
+        // this env, so the project's account identity goes here whether or not the session is
+        // managed. The token does not: the agent's tools ask the host for it over the session's
+        // own socket.
+        let identity = self
+            .host
+            .session_identity(os_user, session_id, project_id, session_token);
+        let mut session_env: Vec<(String, String)> = identity.git_environment;
         if let Some(recipe) = managed_recipe.clone() {
             let launch = self.prepare_managed_workflow(
                 session_id,
@@ -233,13 +240,14 @@ impl LaunchSessions {
                 &tddy_tools_path,
                 None,
                 None,
+                identity.github_credential,
             )?;
             if let Ok(prompt) = std::fs::read_to_string(&launch.prompt_file) {
                 let rules_dir = worktree_path.join(".cursor").join("rules");
                 let _ = std::fs::create_dir_all(&rules_dir);
                 let _ = std::fs::write(rules_dir.join("tddy-managed-workflow.mdc"), prompt);
             }
-            session_env = launch.env;
+            session_env.extend(launch.env);
             managed = Some(launch.workflow);
         }
 

@@ -214,6 +214,10 @@ PTY output is not streamed into Telegram; attach via web terminal or `pty-relay`
 - **`/start-claude` acceptance** (`project → branch → model → PTY spawn`) lives in **`packages/tddy-telegram-control/tests/telegram_start_claude_acceptance.rs`**: `start_claude_creates_session_with_initial_prompt_and_marker`, `start_claude_project_then_branch_routes_to_model_keyboard`, `start_claude_model_callback_launches_claude_cli`, `start_claude_uses_shared_manager`.
 - **`/start-cursor` acceptance** lives in **`packages/tddy-telegram-control/tests/telegram_start_cursor_acceptance.rs`**: project/branch routing to `tcur:` keyboard, model callback spawn, hooks installed in worktree.
 
+## GitHub account in Telegram-started sessions
+
+A Telegram start has an OS user and a Telegram-to-GitHub-login link, but **no session token**, and a vault opens only by an owner's session token. A Telegram-started session therefore starts under the checkout's own identity and **no GitHub token is ever available to it**. When the project assigns an account, the session's chat is told, after the start message on the workflow, Claude and Cursor paths, that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account is told nothing. See [per-project GitHub identity](github-identity.md).
+
 ## Related documentation
 
 - **[telegram-notifications.md](telegram-notifications.md)** — outbound Telegram notifications and **`TelegramSessionWatcher`**.

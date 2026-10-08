@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tddy_daemon_kernel::config::DaemonConfig;
 
 use super::launch_ports::LaunchSessions;
+use super::session_acting_identity::SessionAccountAccess;
 
 use std::sync::Arc;
 
@@ -32,4 +33,10 @@ pub(crate) struct StackChildSpawnHandler {
     pub(crate) sessions_base: PathBuf,
     pub(crate) orchestrator_session_id: String,
     pub(crate) orchestrator_session_dir: PathBuf,
+    /// What the orchestrator's own start read its owner's vault with. A child is a session of the
+    /// **same owner** on the **same project** (`os_user`, `project_id` above), so it resolves the
+    /// account the project assigns over that owner's vault, as the orchestrator did; the child's
+    /// own start never gets a token of its own to read one with. The token stays in daemon memory
+    /// and is never handed to the child.
+    pub(crate) account_access: SessionAccountAccess,
 }

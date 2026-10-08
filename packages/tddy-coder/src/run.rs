@@ -1729,8 +1729,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
     // `HostSessionService` over our stdin/stdout so we can relay `spawn_conversation` back to it.
     // The toolcall listener that owns the relay handler is created below, before the tokio runtime
     // that sets up the stdio endpoint — so the endpoint's client is handed over via this slot.
-    let (stdio_client_tx, stdio_client_rx) =
-        crate::conversation_spawn_relay::reverse_client_channel();
     let agent_str = args.agent.as_deref().unwrap_or("claude");
     if args.agent.is_none() {
         verify_tddy_tools_available(agent_str)?;
@@ -1818,26 +1816,22 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             agent_activity_source_for(agent_str),
         );
 
-        // When the daemon gave us a `--host-session-socket`, bind the daemon-relay
-        // `spawn_conversation` handler so the agent's `spawn_conversation` tool call is forwarded to
-        // the daemon over the reverse channel. Without it, the plain listener rejects it.
-        let conversation_spawn_handler: Option<
-            Arc<dyn tddy_core::toolcall::ConversationSpawnHandler>,
-        > = if args.host_session_socket.is_some() {
-            Some(Arc::new(
-                crate::conversation_spawn_relay::DaemonRelayConversationSpawnHandler::new(
-                    stdio_client_rx.clone(),
-                ),
-            ))
-        } else {
-            None
-        };
+        // When the daemon gave us a `--host-session-socket`, bind the relays that forward the
+        // agent's `spawn_conversation` and `github-token` requests to it, naming this session. Without
+        // it nothing is bound: the plain listener rejects the first and refuses the second. The
+        // prompt flag is derived from the same fact, so the PR tools are advertised exactly when a
+        // call to them can succeed.
+        let tool_host = crate::tool_host_wiring::ToolHostHandlers::from_flags(
+            args.host_session_socket.as_deref(),
+            args.session_id.as_deref(),
+        );
+        presenter.set_github_pr_tools_available(tool_host.github_pr_tools_available());
         let (toolcall_socket_path, tool_call_rx) =
-            match tddy_core::toolcall::start_toolcall_listener_with_conversation_handler(
+            match tddy_core::toolcall::start_toolcall_listener_with_handlers(
                 Some(session_artifact_dir.clone()),
                 std::env::current_dir().ok(),
                 tddy_data_dir.clone(),
-                conversation_spawn_handler,
+                tool_host.into_listener_handlers(),
             ) {
                 Ok((path, rx)) => (Some(path), Some(rx)),
                 Err(_) => (None, None),
@@ -1940,34 +1934,6 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
             .await
             .context("bind gRPC port")?;
         log::info!("tddy-coder daemon listening on port {}", port);
-
-        // `--host-session-socket`: connect to the daemon's per-session unix socket and publish the
-        // reverse client — which calls the daemon's `HostSessionService` — to the
-        // `spawn_conversation` relay handler bound on the toolcall listener above. We host a no-op
-        // service on our side (the daemon reaches us over gRPC/LiveKit, not this socket). A socket
-        // path (unlike stdio fds) survives the daemon's forked `spawn_worker`, which is why the
-        // channel is a socket rather than our stdin/stdout.
-        if let Some(sock_path) = args.host_session_socket.clone() {
-            match tokio::net::UnixStream::connect(&sock_path).await {
-                Ok(stream) => {
-                    let (reader, writer) = tokio::io::split(stream);
-                    let (client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
-                        reader,
-                        writer,
-                        crate::conversation_spawn_relay::NoopRpcService,
-                        tddy_rpc::RequestTransport::UnixSocket,
-                    );
-                    let _ = stdio_client_tx.send(Some(client));
-                    tokio::spawn(endpoint.run());
-                    log::info!(
-                        "tddy-coder daemon: reverse spawn_conversation endpoint connected ({sock_path})"
-                    );
-                }
-                Err(e) => log::warn!(
-                    "tddy-coder daemon: connect host-session-socket {sock_path} failed: {e}"
-                ),
-            }
-        }
 
         // The chat stream (`tddy.v1.TddyRemote/Stream`) is served by the Presenter — the single
         // source of truth — via its `connect_view` `view_factory`, on both the gRPC port (here)

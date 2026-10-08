@@ -2,6 +2,8 @@ use crate::connection_service::service_util;
 
 use super::DaemonSessionHost;
 
+use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
+
 use crate::connection_service::svc_start_session_core::{ToolSpawnPlan, ToolSpawnPurpose};
 
 use std::path::PathBuf;
@@ -63,6 +65,12 @@ impl DaemonSessionHost {
 
         // --- cursor-cli branch: resume without LiveKit ---
         if metadata.session_type.as_deref() == Some("cursor-cli") {
+            let identity = self.session_identity(
+                os_user,
+                &req.session_id,
+                &metadata.project_id,
+                &req.session_token,
+            );
             return bridge_conn_resume_response(
                 crate::cursor_cli_spawn::resume_cursor_cli_session(
                     &self.claude_cli_manager,
@@ -70,6 +78,7 @@ impl DaemonSessionHost {
                     &req.session_id,
                     &session_dir,
                     metadata,
+                    identity.git_environment,
                 )
                 .await,
             );
@@ -129,7 +138,31 @@ impl DaemonSessionHost {
                 .map_err(|e| Status::internal(format!("failed to serialize agent def: {e}")))?,
             None => None,
         };
-        let result = self
+        // One resolution for the project this session belongs to, as on start; a project that no
+        // longer resolves resumes the session under the checkout's own identity, with the reason
+        // logged. Only the commit pairs go to the child — never the account's token.
+        let identity = self.session_identity(
+            &os_user,
+            &req.session_id,
+            &metadata.project_id,
+            &req.session_token,
+        );
+        let git_environment = identity.git_environment;
+        // The session registers again on its user's host-session socket — the same socket it used
+        // before — so it answers from the refreshed assignments and the token this resume carries.
+        let host_session_socket = self
+            .launch_sessions()
+            .register_tool_session_on_host_socket(ToolSessionHostRegistration {
+                os_user: &os_user,
+                session_id: &req.session_id,
+                project_id: &metadata.project_id,
+                recipe: resume_recipe.as_deref(),
+                model: None,
+                account_access: self.session_account_access(&req.session_token),
+                github_credential: identity.github_credential,
+            })
+            .await;
+        let spawned = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Resume,
                 os_user,
@@ -148,10 +181,13 @@ impl DaemonSessionHost {
                 // whatever stack it was created with.
                 stack_seed_base_session: None,
                 model: None,
-                // TODO(stdio-relay): wire the resume path's reverse channel too.
-                host_session_socket: None,
+                host_session_socket,
+                git_environment,
             })
-            .await?;
+            .await;
+        self.launch_sessions()
+            .tool_session_spawned(&req.session_id, &spawned);
+        let result = spawned?;
         self.maybe_spawn_presenter_observer(
             &observer_os_user,
             &result.session_id,

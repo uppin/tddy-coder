@@ -2,12 +2,10 @@
 //!
 //! Prompts are recipe-owned and must not track [`crate::tdd::red::system_prompt`] verbatim.
 
-use crate::github_rest_common::github_env_token_present;
-
 /// Sentence surfaced to agents when GitHub credentials are available (paired with **tddy-tools** MCP PR tools).
-pub const TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS: &str = "With an authenticated GitHub session (**GITHUB_TOKEN** or **GH_TOKEN**), use **tddy-tools** MCP GitHub PR tools to create or update pull requests instead of ad-hoc shell scripts.";
+pub const TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS: &str = "With an authenticated GitHub session, use **tddy-tools** MCP GitHub PR tools to create or update pull requests instead of ad-hoc shell scripts.";
 
-/// Single sentence used when appending GitHub PR tooling guidance (same condition as merge-pr hooks: token set).
+/// Single sentence used when appending GitHub PR tooling guidance (same condition as merge-pr hooks: an authenticated account).
 #[must_use]
 pub fn tdd_small_github_pr_tools_awareness_sentence() -> &'static str {
     log::debug!(
@@ -17,7 +15,11 @@ pub fn tdd_small_github_pr_tools_awareness_sentence() -> &'static str {
 }
 
 /// System prompt for the merged `red` step on the `tdd-small` recipe.
-pub fn merged_red_system_prompt() -> String {
+///
+/// `github_pr_tools_available` says whether the agent can authenticate its GitHub PR tools as the
+/// project's account. It is a parameter rather than a probe of the process environment, because the
+/// environment is no longer a source of GitHub credentials.
+pub fn merged_red_system_prompt(github_pr_tools_available: bool) -> String {
     log::debug!("merged_red_system_prompt: building tdd-small merged red system prompt");
     let mut s = String::from(
         r#"You are a **tdd-small merged red** assistant: one backend turn that both captures acceptance-style intent from the PRD and produces skeleton code with failing tests.
@@ -37,7 +39,7 @@ If you need clarification, use `tddy-tools ask` with structured questions.
 **Logging markers**: At production skeleton entry points, emit a single-line JSON marker with a `"tddy"` key so runs can be grepped; never place such markers in test-only files."#,
     );
 
-    if github_env_token_present() {
+    if github_pr_tools_available {
         let awareness = tdd_small_github_pr_tools_awareness_sentence();
         s.push_str("\n\n## GitHub PR tools\n\n");
         s.push_str(awareness);
@@ -48,7 +50,7 @@ If you need clarification, use `tddy-tools ask` with structured questions.
         );
     } else {
         log::debug!(
-            "merged_red_system_prompt: no GITHUB_TOKEN/GH_TOKEN — omitting GitHub PR tools section"
+            "merged_red_system_prompt: GitHub PR tools unavailable — omitting GitHub PR tools section"
         );
     }
     s
@@ -91,12 +93,11 @@ Continue the **tdd-small merged red** step: update acceptance understanding if n
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     #[test]
     fn merged_red_system_prompt_identifies_recipe() {
         // When
-        let p = merged_red_system_prompt();
+        let p = merged_red_system_prompt(false);
 
         // Then
         assert!(
@@ -106,74 +107,31 @@ mod tests {
     }
 
     #[test]
-    #[serial]
-    fn merged_red_omits_github_section_without_token() {
-        // Given
-        struct Restore(Option<String>, Option<String>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                match &self.0 {
-                    Some(v) => std::env::set_var("GITHUB_TOKEN", v),
-                    None => std::env::remove_var("GITHUB_TOKEN"),
-                }
-                match &self.1 {
-                    Some(v) => std::env::set_var("GH_TOKEN", v),
-                    None => std::env::remove_var("GH_TOKEN"),
-                }
-            }
-        }
-        let _r = Restore(
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        std::env::remove_var("GITHUB_TOKEN");
-        std::env::remove_var("GH_TOKEN");
-
+    fn merged_red_omits_github_section_without_authenticated_tools() {
         // When
-        let p = merged_red_system_prompt();
+        let p = merged_red_system_prompt(false);
 
         // Then
         assert!(
             !p.contains("## GitHub PR tools"),
-            "without token, merged red must not claim GitHub PR tools section; got: {p}"
+            "without authenticated tools, merged red must not claim a GitHub PR tools section; got: {p}"
         );
     }
 
     #[test]
-    #[serial]
-    fn merged_red_includes_github_section_with_token() {
-        // Given
-        struct Restore(Option<String>, Option<String>);
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                match &self.0 {
-                    Some(v) => std::env::set_var("GITHUB_TOKEN", v),
-                    None => std::env::remove_var("GITHUB_TOKEN"),
-                }
-                match &self.1 {
-                    Some(v) => std::env::set_var("GH_TOKEN", v),
-                    None => std::env::remove_var("GH_TOKEN"),
-                }
-            }
-        }
-        let _r = Restore(
-            std::env::var("GITHUB_TOKEN").ok(),
-            std::env::var("GH_TOKEN").ok(),
-        );
-        std::env::set_var("GITHUB_TOKEN", "ghp_test_not_real");
-
+    fn merged_red_includes_github_section_with_authenticated_tools() {
         // When
-        let p = merged_red_system_prompt();
+        let p = merged_red_system_prompt(true);
 
         // Then
         assert!(
             p.contains("## GitHub PR tools"),
-            "with token, merged red must include GitHub PR tools section; got len {}",
+            "with authenticated tools, merged red must include GitHub PR tools section; got len {}",
             p.len()
         );
         assert!(
             p.contains(TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS),
-            "with token, merged red must include awareness text; got len {}",
+            "with authenticated tools, merged red must include awareness text; got len {}",
             p.len()
         );
     }

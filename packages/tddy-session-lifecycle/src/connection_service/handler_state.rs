@@ -223,7 +223,7 @@ impl DaemonSessionHost {
             claude_cli_manager: Arc::clone(&self.claude_cli_manager),
             sandbox_manager: Arc::clone(&self.sandbox_manager),
             task_registry: self.task_registry.clone(),
-            session_stdio: Arc::clone(&self.session_stdio),
+            host_session_sockets: Arc::clone(&self.host_session_sockets),
             agent_activity_hub: Arc::clone(&self.agent_activity_hub),
             agent_roster: self.agent_roster(),
             host: Arc::new(self.clone()),

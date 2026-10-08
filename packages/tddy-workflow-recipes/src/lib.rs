@@ -5,6 +5,7 @@ pub mod bugfix;
 pub mod feature_start_slash;
 pub mod free_prompting;
 pub mod github_pr;
+pub mod github_pr_tools;
 pub mod github_rest_common;
 pub mod grill_me;
 pub mod merge_pr;
@@ -31,8 +32,7 @@ pub use feature_start_slash::{
 };
 pub use free_prompting::FreePromptingRecipe;
 pub use github_rest_common::{
-    github_env_token_present, github_token_from_env, GITHUB_ACCEPT, GITHUB_API_VERSION,
-    USER_AGENT_MERGE_PR, USER_AGENT_TDDY_TOOLS,
+    GITHUB_ACCEPT, GITHUB_API_VERSION, USER_AGENT_MERGE_PR, USER_AGENT_TDDY_TOOLS,
 };
 pub use grill_me::GrillMeRecipe;
 pub use merge_pr::merge_pr_github_tools_awareness_line;

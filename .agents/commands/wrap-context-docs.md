@@ -52,11 +52,31 @@ file** in each; it never opens an existing one.
   `docs/dev/changesets/`, `../../../docs/ft/coder/x.md` from `packages/<pkg>/docs/changesets/`.
 - **Slug collision** on the same day: append `-2`.
 
+## When to wrap — scope developed, gaps approved; never CI
+
+**The trigger is the plan, not the pipeline.** A changeset is wrapped as soon as:
+
+1. **The planned scope is developed** — every Scope item and acceptance criterion is `[x]`, **or**
+2. **each one that is not has been explicitly approved by the user as a gap or deferral** — recorded
+   in the changeset as `[~]`/deferred with the reason, and as a `docs/dev/todo/` entry when it is
+   work that remains. An unapproved gap blocks the wrap; an approved one does not.
+
+**CI is not a precondition of the wrap.** The CI build and the full-workspace test run are
+**post-wrap actions**: they run against the pushed result, and their outcome is read afterwards
+(`scripts/ci-status.sh`, `/fix-pr`). A CI failure — even one that stays red — does **not** un-wrap the
+PR, does **not** postpone the wrap, and is never a reason to wait. A failure found after the wrap is a
+code or test fix in a new commit; if it changes what the permanent docs state, the correction is its
+own follow-up commit to those docs (never a re-opened changeset). The local, **scoped** gate of
+`/pr-wrap` step 6 is the only verification the wrap itself depends on.
+
+Do not tick or leave a box unticked "pending CI": a box is proven by a named test or a measured local
+result, or it is a user-approved deferral.
+
 ## Decision Logic
 
 Prerequisites for wrapping — **all** must be true:
-- Every Scope checkbox marked `[x]`
-- All acceptance criteria met
+- Every Scope checkbox marked `[x]` — or deferred with the user's approval (see above)
+- All acceptance criteria met — or deferred with the user's approval
 - Document status is Complete
 - **On a stack branch**: this PR is being set ready for review, its parent has already wrapped, and the
   document being wrapped is one this PR owns — see [Stack Mode](#stack-mode--wrapping-one-pr-of-a-stack)

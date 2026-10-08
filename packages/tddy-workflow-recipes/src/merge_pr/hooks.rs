@@ -12,7 +12,7 @@ use tddy_core::workflow::hooks::RunnerHooks;
 use tddy_core::workflow::task::TaskResult;
 use tddy_core::workflow::{clear_sinks, set_sinks};
 
-use crate::github_rest_common::github_env_token_present;
+use crate::github_pr_tools::github_pr_tools_available;
 use crate::review::{
     format_diff_context_for_prompt, merge_base_commit_for_review, resolve_git_repo_root,
 };
@@ -93,8 +93,12 @@ impl RunnerHooks for MergePrWorkflowHooks {
                 .to_string()
         };
 
-        if let Some(prompt) = system_prompt_for_task(task_id, &git_block, target_branch.as_deref())
-        {
+        if let Some(prompt) = system_prompt_for_task(
+            task_id,
+            &git_block,
+            target_branch.as_deref(),
+            github_pr_tools_available(context),
+        ) {
             context.set_sync("system_prompt", prompt);
         }
 
@@ -215,38 +219,30 @@ pub fn merge_pr_github_tools_awareness_line(has_github_token: bool) -> &'static 
     MERGE_PR_GITHUB_TOOLS_AWARENESS_AUTHENTICATED
 }
 
-/// Static copy for merge-pr when `GITHUB_TOKEN` / `GH_TOKEN` is set (see [`merge_pr_github_tools_awareness_line`]).
-const MERGE_PR_GITHUB_TOOLS_AWARENESS_AUTHENTICATED: &str = "When authenticated (**GITHUB_TOKEN** or **GH_TOKEN**), **tddy-tools** exposes GitHub pull request MCP tools (**github_create_pull_request**, **github_update_pull_request**) in addition to this workflow’s automated merge path—use them to open or update PR metadata without ad-hoc shell **curl**.";
+/// Static copy for merge-pr when an authenticated GitHub account is available (see [`merge_pr_github_tools_awareness_line`]).
+const MERGE_PR_GITHUB_TOOLS_AWARENESS_AUTHENTICATED: &str = "When authenticated as the project's GitHub account, **tddy-tools** exposes GitHub pull request MCP tools (**github_create_pull_request**, **github_update_pull_request**) in addition to this workflow’s automated merge path—use them to open or update PR metadata without ad-hoc shell **curl**.";
 
 #[must_use]
 fn system_prompt_for_task(
     task_id: &str,
     git_block: &str,
     target_branch: Option<&str>,
+    github_pr_tools_available: bool,
 ) -> Option<String> {
-    let mut base = match task_id {
+    let base = match task_id {
         TASK_ANALYZE => Some(analyze_system_prompt(git_block, target_branch)),
         TASK_SYNC_MAIN => Some(sync_main_system_prompt(git_block)),
         TASK_FINALIZE => Some(finalize_system_prompt()),
         _ => None,
     }?;
 
-    if github_env_token_present() {
-        let line = merge_pr_github_tools_awareness_line(true);
-        if !line.is_empty() {
-            log::info!(
-                "[merge-pr hooks] appending GitHub PR tools awareness to task_id={task_id} system prompt"
-            );
-            base.push_str("\n\n## GitHub PR tools (**tddy-tools**)\n\n");
-            base.push_str(line);
-        }
-    } else {
-        log::debug!(
-            "[merge-pr hooks] no GitHub token in environment — omitting GitHub PR tools awareness"
-        );
+    // The PR tools are advertised only when this session's host answers their token requests; the
+    // driver of the workflow says so in the context (see `crate::github_pr_tools`).
+    let awareness = merge_pr_github_tools_awareness_line(github_pr_tools_available);
+    if awareness.is_empty() {
+        return Some(base);
     }
-
-    Some(base)
+    Some(format!("{base}\n\n{awareness}\n"))
 }
 
 #[cfg(test)]
@@ -317,14 +313,14 @@ mod tests {
     #[test]
     fn system_prompt_for_task_unknown_returns_none() {
         // When / Then
-        assert!(super::system_prompt_for_task("end", "x", None).is_none());
+        assert!(super::system_prompt_for_task("end", "x", None, false).is_none());
     }
 
     #[test]
     fn system_prompt_for_task_all_known_goals() {
         // When / Then — all known goal prompts must be non-None
-        assert!(super::system_prompt_for_task(TASK_ANALYZE, "g", None).is_some());
-        assert!(super::system_prompt_for_task(TASK_SYNC_MAIN, "g", None).is_some());
-        assert!(super::system_prompt_for_task(TASK_FINALIZE, "g", None).is_some());
+        assert!(super::system_prompt_for_task(TASK_ANALYZE, "g", None, false).is_some());
+        assert!(super::system_prompt_for_task(TASK_SYNC_MAIN, "g", None, false).is_some());
+        assert!(super::system_prompt_for_task(TASK_FINALIZE, "g", None, false).is_some());
     }
 }

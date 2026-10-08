@@ -1,67 +1,15 @@
 //! PRD Testing Plan: GitHub PR tools acceptance (auth, REST payload shape, MCP discovery).
 
 use serde_json::json;
-use serial_test::serial;
 use tddy_workflow_recipes::github_pr::{
     create_pull_request, registered_github_pr_mcp_tool_names, update_pull_request,
     CreatePullRequestParams, MockGithubTransport, UpdatePullRequestParams,
     GITHUB_CREATE_PULL_REQUEST_MCP_NAME, GITHUB_UPDATE_PULL_REQUEST_MCP_NAME,
 };
-use tddy_workflow_recipes::github_rest_common::github_token_from_env;
-
-struct EnvUnsetGithubTokens {
-    had_gh: bool,
-    had_github: bool,
-    previous_gh: Option<String>,
-    previous_github: Option<String>,
-}
-
-impl EnvUnsetGithubTokens {
-    fn new() -> Self {
-        let previous_gh = std::env::var("GH_TOKEN").ok();
-        let previous_github = std::env::var("GITHUB_TOKEN").ok();
-        let had_gh = previous_gh.is_some();
-        let had_github = previous_github.is_some();
-        std::env::remove_var("GH_TOKEN");
-        std::env::remove_var("GITHUB_TOKEN");
-        Self {
-            had_gh,
-            had_github,
-            previous_gh,
-            previous_github,
-        }
-    }
-}
-
-impl Drop for EnvUnsetGithubTokens {
-    fn drop(&mut self) {
-        if self.had_github {
-            if let Some(ref v) = self.previous_github {
-                std::env::set_var("GITHUB_TOKEN", v);
-            }
-        } else {
-            std::env::remove_var("GITHUB_TOKEN");
-        }
-        if self.had_gh {
-            if let Some(ref v) = self.previous_gh {
-                std::env::set_var("GH_TOKEN", v);
-            }
-        } else {
-            std::env::remove_var("GH_TOKEN");
-        }
-    }
-}
 
 #[test]
-#[serial]
 fn github_tools_reject_when_token_missing() {
-    // Given
-    let _env = EnvUnsetGithubTokens::new();
-    assert!(
-        github_token_from_env().is_none(),
-        "test requires both GITHUB_TOKEN and GH_TOKEN unset"
-    );
-
+    // Given no token is passed
     let mut transport = MockGithubTransport::new();
     let params = CreatePullRequestParams {
         owner: "o".into(),
@@ -73,7 +21,7 @@ fn github_tools_reject_when_token_missing() {
     };
 
     // When
-    let result = create_pull_request(&mut transport, &params);
+    let result = create_pull_request(&mut transport, &params, "");
 
     // Then
     assert!(
@@ -93,11 +41,8 @@ fn github_tools_reject_when_token_missing() {
 }
 
 #[test]
-#[serial]
 fn github_tools_create_pr_sends_expected_rest_payload() {
     // Given
-    std::env::set_var("GITHUB_TOKEN", "ghp_testtoken_not_real");
-    let _clear = ClearEnvOnDrop;
     let mut transport = MockGithubTransport::new();
     let params = CreatePullRequestParams {
         owner: "acme".into(),
@@ -109,7 +54,8 @@ fn github_tools_create_pr_sends_expected_rest_payload() {
     };
 
     // When
-    create_pull_request(&mut transport, &params).expect("create PR with token");
+    create_pull_request(&mut transport, &params, "ghp_testtoken_not_real")
+        .expect("create PR with token");
 
     // Then
     assert_eq!(transport.requests.len(), 1);
@@ -128,11 +74,8 @@ fn github_tools_create_pr_sends_expected_rest_payload() {
 }
 
 #[test]
-#[serial]
 fn github_tools_update_pr_sends_expected_rest_payload() {
     // Given
-    std::env::set_var("GITHUB_TOKEN", "ghp_testtoken_not_real");
-    let _clear = ClearEnvOnDrop;
     let mut transport = MockGithubTransport::new();
     let params = UpdatePullRequestParams {
         owner: "acme".into(),
@@ -144,7 +87,8 @@ fn github_tools_update_pr_sends_expected_rest_payload() {
     };
 
     // When
-    update_pull_request(&mut transport, &params).expect("update PR with token");
+    update_pull_request(&mut transport, &params, "ghp_testtoken_not_real")
+        .expect("update PR with token");
 
     // Then
     assert_eq!(transport.requests.len(), 1);
@@ -160,17 +104,7 @@ fn github_tools_update_pr_sends_expected_rest_payload() {
     );
 }
 
-struct ClearEnvOnDrop;
-
-impl Drop for ClearEnvOnDrop {
-    fn drop(&mut self) {
-        std::env::remove_var("GITHUB_TOKEN");
-        std::env::remove_var("GH_TOKEN");
-    }
-}
-
 #[test]
-#[serial]
 fn mcp_server_lists_github_pr_tools() {
     // When / Then
     let names = registered_github_pr_mcp_tool_names();

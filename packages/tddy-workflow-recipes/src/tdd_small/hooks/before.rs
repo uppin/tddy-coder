@@ -11,6 +11,7 @@ use tddy_core::workflow::ids::WorkflowState;
 use tddy_core::workflow::prepend_context_header;
 use tddy_core::workflow::recipe::WorkflowRecipe;
 
+use crate::github_pr_tools::github_pr_tools_available;
 use crate::tdd::{hooks_common, refactor, update_docs};
 use crate::tdd_small::{
     post_green_review,
@@ -54,7 +55,12 @@ pub(crate) fn before_merged_red(
         &ctx_artifacts,
     );
     context.set_sync("prompt", prompt);
-    context.set_sync("system_prompt", merged_red_system_prompt());
+    // The PR tools are advertised only when this session's host answers their token requests; the
+    // driver of the workflow says so in the context.
+    context.set_sync(
+        "system_prompt",
+        merged_red_system_prompt(github_pr_tools_available(context)),
+    );
     let session_id = uuid::Uuid::now_v7().to_string();
     context.set_sync("session_id", session_id);
     context.set_sync("is_resume", false);
@@ -176,4 +182,56 @@ pub(crate) fn before_update_docs(
         hooks_common::write_changeset_logged(session_dir, &cs, "before_update_docs UpdatingDocs");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::github_pr_tools::GITHUB_PR_TOOLS_AVAILABLE_KEY;
+    use crate::tdd_small::red::TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS;
+    use crate::TddSmallRecipe;
+    use tddy_core::changeset::{write_changeset, Changeset};
+
+    /// A session directory holding the planning document merged red reads.
+    fn a_session_with_a_prd() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        std::fs::write(dir.path().join("PRD.md"), "# PRD\n\nDo the thing.\n").expect("a PRD");
+        write_changeset(dir.path(), &Changeset::default()).expect("a changeset");
+        dir
+    }
+
+    fn the_merged_red_system_prompt(session_dir: &Path, context: &Context) -> String {
+        before_merged_red(session_dir, context, &TddSmallRecipe, &TddSmallRecipe)
+            .expect("merged red is prepared");
+        context
+            .get_sync::<String>("system_prompt")
+            .expect("a system prompt")
+    }
+
+    #[test]
+    fn merged_red_does_not_advertise_the_pr_tools_when_the_session_cannot_authenticate_them() {
+        // Given a session whose context says nothing about a credential
+        let dir = a_session_with_a_prd();
+        let context = Context::new();
+
+        // When merged red is prepared
+        let prompt = the_merged_red_system_prompt(dir.path(), &context);
+
+        // Then the prompt does not promise tools a refusal would withhold
+        assert!(!prompt.contains(TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS));
+    }
+
+    #[test]
+    fn merged_red_advertises_the_pr_tools_when_the_session_can_authenticate_them() {
+        // Given a session whose host answers the tools' token requests
+        let dir = a_session_with_a_prd();
+        let context = Context::new();
+        context.set_sync(GITHUB_PR_TOOLS_AVAILABLE_KEY, true);
+
+        // When merged red is prepared
+        let prompt = the_merged_red_system_prompt(dir.path(), &context);
+
+        // Then the prompt names them
+        assert!(prompt.contains(TDD_SMALL_GITHUB_PR_TOOLS_AWARENESS));
+    }
 }

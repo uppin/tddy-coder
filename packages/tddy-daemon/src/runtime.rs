@@ -1138,7 +1138,12 @@ pub async fn build(
             .with_session_rooms(Arc::clone(&shared_session_rooms))
             .with_model_registry(Arc::clone(&model_registry))
             .with_session_notification_bus(session_notification_bus)
-            .with_session_tokens(session_tokens.clone());
+            .with_session_tokens(session_tokens.clone())
+            // Read here, before the local socket server is spawned: adopting its own listener
+            // clears the `LISTEN_*` variables the host sockets are announced in.
+            .with_inherited_host_session_sockets(
+                tddy_session_lifecycle::connection_service::inherited_host_sockets::adopt_from_environment(),
+            );
         // A started session's worktree starts its warm-up in the background; the host cannot name
         // this crate, so it is told through its observer port. Without an index daemon there is
         // nothing to warm, so nothing is installed.

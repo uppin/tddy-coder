@@ -543,7 +543,8 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         };
         let done = format!("Claude Code CLI session started ({sid_short}…). {attach_hint}");
         self.sender.send_message(chat_id, &done).await?;
-        Ok(())
+        self.notify_account_identity_unavailable(chat_id, session_id, &project)
+            .await
     }
 
     pub async fn handle_telegram_cursor_model_callback(
@@ -706,6 +707,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             "Cursor Agent CLI session started ({sid_short}…). Attach via the web UI or `tddy-tools pty-relay`."
         );
         self.sender.send_message(chat_id, &done).await?;
-        Ok(())
+        self.notify_account_identity_unavailable(chat_id, session_id, &project)
+            .await
     }
 }

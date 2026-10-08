@@ -45,18 +45,19 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, OsStr, OsString};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::net::UnixListener;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Arc;
 
 use tokio::sync::{mpsc, oneshot};
 
 use crate::config::{ROOT_GID, ROOT_UID};
-use crate::socket::SD_LISTEN_FDS_START;
+pub use crate::handover::SocketHandover;
+use crate::handover::{hand_over_listeners, reserve_handover_slots};
 
 extern "C" {
     /// POSIX's environment array, which `execvp` reads at exec time. Writing it is how the child
@@ -478,12 +479,12 @@ impl ForkBroker {
     /// the supervisor is on its way out.
     pub fn start() -> std::io::Result<ForkBroker> {
         // Taken before the thread exists and held for as long as it does — see the function's docs.
-        let handover_slot = reserve_handover_slot()?;
+        let handover_slots = reserve_handover_slots()?;
         let (jobs, mut queue) = mpsc::unbounded_channel::<Job>();
         std::thread::Builder::new()
             .name("tddy-supervisor-fork".to_string())
             .spawn(move || {
-                let _handover_slot = handover_slot;
+                let _handover_slots = handover_slots;
                 while let Some((plan, handover, reply)) = queue.blocking_recv() {
                     let _ = reply.send(spawn_now(plan, handover));
                 }
@@ -493,7 +494,7 @@ impl ForkBroker {
 
     /// Fork, drop privilege, and exec the plan on the fork thread. Returns the child's pid.
     ///
-    /// `handover` is the listening socket the child should find at [`SD_LISTEN_FDS_START`]. It is
+    /// `handover` is the listening socket the child should find at [`crate::socket::SD_LISTEN_FDS_START`]. It is
     /// not part of the [`SpawnPlan`] because it is a live descriptor the supervisor owns, not a
     /// decision about the child.
     pub async fn spawn(
@@ -509,55 +510,6 @@ impl ForkBroker {
             .await
             .map_err(|_| std::io::Error::other("the fork thread dropped the request"))?
     }
-}
-
-/// A listening socket the supervisor created for a managed service, ready to be handed over.
-///
-/// The supervisor keeps the listener for as long as it runs, so a restarted service is handed the
-/// same one. Rebinding per start would unlink and recreate the socket node, and a client that
-/// connected in that gap would get `ECONNREFUSED` on a path that is about to work again; holding the
-/// listener keeps the kernel's accept queue instead, so those connections simply wait. It is the
-/// same bargain systemd's socket activation makes.
-#[derive(Debug, Clone)]
-pub struct SocketHandover {
-    listener: Arc<UnixListener>,
-}
-
-impl SocketHandover {
-    pub fn new(listener: Arc<UnixListener>) -> SocketHandover {
-        SocketHandover { listener }
-    }
-
-    /// The descriptor to place at [`SD_LISTEN_FDS_START`] in the child. Borrowed, never owned: the
-    /// listener outlives every child that is handed it.
-    fn raw_fd(&self) -> RawFd {
-        self.listener.as_raw_fd()
-    }
-}
-
-/// Make sure descriptor [`SD_LISTEN_FDS_START`] is occupied, so nothing the standard library opens
-/// can land on it.
-///
-/// A declared listener reaches the child with `dup2`, which silently replaces whatever is already
-/// there. `Command::spawn` reports exec failures over a socket pair it opens just before the fork,
-/// and if that descriptor were the handover slot then an exec that failed would look to the
-/// supervisor like one that succeeded. The kernel hands out the lowest free descriptor, so occupying
-/// the slot from startup is what makes that impossible.
-///
-/// Returns `None` when something already occupies it — the tokio runtime's epoll descriptor normally
-/// does — because the invariant is then already satisfied.
-fn reserve_handover_slot() -> std::io::Result<Option<OwnedFd>> {
-    // SAFETY: `F_GETFD` only reads a descriptor's flags, and reports `EBADF` for a free one.
-    if unsafe { libc::fcntl(SD_LISTEN_FDS_START, libc::F_GETFD) } >= 0 {
-        return Ok(None);
-    }
-    // SAFETY: the path is a literal C string; the call returns a descriptor nothing else owns.
-    let opened = unsafe { libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
-    if opened < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // SAFETY: `opened` was just returned by `open` and is not owned by anything else.
-    Ok(Some(unsafe { OwnedFd::from_raw_fd(opened) }))
 }
 
 fn spawn_now(plan: SpawnPlan, handover: Option<SocketHandover>) -> std::io::Result<u32> {
@@ -592,8 +544,9 @@ struct PreExecSteps {
     supervisor_pid: libc::pid_t,
     /// The environment the child execs with, ready but for its own pid.
     environment: ChildEnvironment,
-    /// A listener to place at [`SD_LISTEN_FDS_START`]. Owned by the supervisor, not by the plan.
-    handover: Option<RawFd>,
+    /// The listeners to place at [`crate::socket::SD_LISTEN_FDS_START`] and after, in order — none for a child that
+    /// is handed nothing. Owned by the supervisor, not by the plan.
+    handover: Vec<RawFd>,
     /// [`pre_exec_plan`]'s output, compiled. Executed in this order and no other.
     steps: Vec<CompiledStep>,
 }
@@ -611,8 +564,8 @@ impl PreExecSteps {
         Ok(PreExecSteps {
             // SAFETY: reads this process's own pid.
             supervisor_pid: unsafe { libc::getpid() },
-            environment: ChildEnvironment::build(plan, handover.is_some())?,
-            handover: handover.map(SocketHandover::raw_fd),
+            environment: ChildEnvironment::build(plan, handover)?,
+            handover: handover.map(SocketHandover::raw_fds).unwrap_or_default(),
             steps,
         })
     }
@@ -625,9 +578,9 @@ impl PreExecSteps {
         //
         // SAFETY: writes only into memory this struct owns, plus one pointer store into `environ`.
         unsafe { self.environment.install() };
-        if let Some(listener) = self.handover {
-            // SAFETY: `listener` is open in this child, inherited across the fork.
-            unsafe { hand_over_listener(listener) }?;
+        if !self.handover.is_empty() {
+            // SAFETY: every descriptor is open in this child, inherited across the fork.
+            unsafe { hand_over_listeners(&self.handover) }?;
         }
 
         for step in &self.steps {
@@ -1346,29 +1299,6 @@ unsafe fn bring_loopback_up() -> std::io::Result<()> {
     Err(only_on_linux("a network namespace's loopback"))
 }
 
-/// Put a listener the supervisor created where an activated service looks for it.
-///
-/// # Safety
-///
-/// Runs after `fork`. `listener` must be an open descriptor in this process. Only this process's own
-/// descriptor table is touched.
-unsafe fn hand_over_listener(listener: RawFd) -> std::io::Result<()> {
-    if listener == SD_LISTEN_FDS_START {
-        // `dup2` onto the same descriptor is a no-op that would leave `FD_CLOEXEC` set, closing the
-        // listener at exec. This is the one case that needs the flag cleared by hand.
-        if libc::fcntl(listener, libc::F_SETFD, 0) != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        return Ok(());
-    }
-    // `dup2` leaves `FD_CLOEXEC` clear on the new descriptor, which is what carries the listener
-    // through the exec; the inherited copy keeps the flag and closes itself.
-    if libc::dup2(listener, SD_LISTEN_FDS_START) < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
 /// `LISTEN_PID=`, the one variable whose value the child has to fill in for itself.
 const LISTEN_PID_PREFIX: &[u8] = b"LISTEN_PID=";
 
@@ -1405,7 +1335,11 @@ unsafe impl Send for ChildEnvironment {}
 unsafe impl Sync for ChildEnvironment {}
 
 impl ChildEnvironment {
-    fn build(plan: &SpawnPlan, hands_over_listener: bool) -> std::io::Result<ChildEnvironment> {
+    fn build(
+        plan: &SpawnPlan,
+        handover: Option<&SocketHandover>,
+    ) -> std::io::Result<ChildEnvironment> {
+        let hands_over_listener = handover.is_some();
         let mut values: BTreeMap<OsString, OsString> = match plan.environment {
             EnvironmentBase::Inherited => std::env::vars_os().collect(),
             EnvironmentBase::Minimal => minimal_environment(),
@@ -1431,8 +1365,15 @@ impl ChildEnvironment {
         for variable in ACTIVATION_VARIABLES {
             values.remove(OsStr::new(variable));
         }
-        if hands_over_listener {
-            values.insert(OsString::from("LISTEN_FDS"), OsString::from("1"));
+        if let Some(handover) = handover {
+            values.insert(
+                OsString::from("LISTEN_FDS"),
+                OsString::from(handover.count().to_string()),
+            );
+            values.insert(
+                OsString::from("LISTEN_FDNAMES"),
+                OsString::from(handover.fd_names()),
+            );
         }
 
         let mut variables = Vec::with_capacity(values.len());
@@ -2326,7 +2267,7 @@ mod tests {
 
     /// The environment a child would exec with, read back out of the array built for it.
     fn environment_of(plan: &SpawnPlan) -> BTreeMap<String, String> {
-        ChildEnvironment::build(plan, false)
+        ChildEnvironment::build(plan, None)
             .expect("build the child environment")
             .variables
             .iter()
@@ -2445,5 +2386,60 @@ mod tests {
                 .any(|step| matches!(step, PreExecStep::DropPrivilege { .. })),
             "there is no privilege to drop, got: {steps:#?}"
         );
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Handing several listeners to a child
+    // -----------------------------------------------------------------------------------------
+
+    /// A bound listener at `name` in `directory`.
+    fn a_listener_at(
+        directory: &Path,
+        name: &str,
+    ) -> std::sync::Arc<std::os::unix::net::UnixListener> {
+        std::sync::Arc::new(
+            std::os::unix::net::UnixListener::bind(directory.join(name))
+                .expect("bind a test listener"),
+        )
+    }
+
+    #[test]
+    fn announces_every_handed_over_listener_and_names_each_one() {
+        // Given a service socket and two host sockets
+        let directory = tempfile::TempDir::new().expect("create a directory");
+        let handover = SocketHandover::new(a_listener_at(directory.path(), "svc.sock"))
+            .with_host_session_socket("alice", a_listener_at(directory.path(), "a.sock"))
+            .with_host_session_socket("bob", a_listener_at(directory.path(), "b.sock"));
+
+        // When
+        let environment = ChildEnvironment::build(&a_spawn_plan().build(), Some(&handover))
+            .expect("build the child environment");
+        let variables: Vec<&str> = environment
+            .variables
+            .iter()
+            .map(|entry| entry.to_str().expect("utf-8"))
+            .collect();
+
+        // Then — the count covers every descriptor and the names say whose each one is
+        assert!(variables.contains(&"LISTEN_FDS=3"), "{variables:?}");
+        assert!(
+            variables.contains(&"LISTEN_FDNAMES=connection:host-session.alice:host-session.bob"),
+            "{variables:?}"
+        );
+    }
+
+    #[test]
+    fn announces_no_names_to_a_child_that_is_handed_nothing() {
+        // Given a stale announcement in the supervisor's own environment, asked for by the caller
+        let plan = a_spawn_plan()
+            .with_requested_env("LISTEN_FDNAMES", "connection")
+            .build();
+
+        // When
+        let environment = environment_of(&plan);
+
+        // Then
+        assert_eq!(environment.get("LISTEN_FDNAMES"), None);
+        assert_eq!(environment.get("LISTEN_FDS"), None);
     }
 }

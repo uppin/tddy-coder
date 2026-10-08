@@ -9,8 +9,10 @@ impl LaunchSessions {
     /// Re-spawn and re-dial a sandboxed claude-cli session.
     pub(crate) async fn resume_sandboxed_claude_cli_session(
         &self,
-        _os_user: &str,
+        os_user: &str,
         session_id: &str,
+        // The caller's token: what the resumed jail's tools' account lookups read the vault with.
+        session_token: &str,
         session_dir: PathBuf,
         meta: tddy_core::SessionMetadata,
     ) -> Result<Response<ResumeSessionResponse>, Status> {
@@ -37,6 +39,9 @@ impl LaunchSessions {
             None => None,
         };
 
+        let identity =
+            self.host
+                .session_identity(os_user, session_id, &meta.project_id, session_token);
         let pid = self
             .relaunch_sandboxed_runner(
                 session_id,
@@ -49,6 +54,7 @@ impl LaunchSessions {
                 // Resume path: the transcript already exists under the persistent sandbox claude
                 // HOME, so the runner must launch `claude --resume <id>`, not `--session-id <id>`.
                 true,
+                identity,
             )
             .await?;
 

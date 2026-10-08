@@ -39,6 +39,27 @@ the production half of `callbacks.rs`) cannot reach 500 by moving items alone, b
 is in long functions: two CLI spawns of 217 and 137 lines, and the 177-line
 `handle_telegram_branch_callback`.
 
+## GitHub account of a Telegram-started session
+
+A Telegram start has an OS user and a Telegram-to-GitHub-login link but **no session token**, and the
+credential vault opens only by an owner's session token. Reaching an already-open vault *by login*
+would let a Telegram chat bypass that gate, so no mechanism exists: a session started here starts under
+the checkout's own identity (no `GIT_*` pairs) and **no GitHub token is available to it**. The
+harness's `notify_account_identity_unavailable` makes that visible: when the project assigns an
+account, the chat is told, after the start message on the workflow, claude-cli and cursor-cli paths,
+that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from
+the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account
+is told nothing, since nothing is lost. Product view:
+[per-project GitHub identity](../../../docs/ft/daemon/github-identity.md).
+
+A Telegram-started *tool* session is also started with **no host-session socket**: the socket answers
+from a registration the daemon's own session host makes at start, and this crate does not hold that
+host. Without a registration the socket would only refuse, so the flag is left off and the agent's
+request is refused as having no credential handler. The refusal is explicit rather than silent, and
+the open work is marked `TODO(stdio-relay)` in `workflow_spawn.rs` (the daemon's session host and its
+sockets would have to be handed to this crate). Telegram never wired `spawn_conversation`, so this is
+not a regression.
+
 ## Telegram's two sinks
 
 A workflow session's presenter events reach Telegram through a port, and its activity-status

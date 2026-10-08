@@ -6,7 +6,7 @@
 **Metrics:** **775 production lines** of 775 total (no `#[cfg(test)]`; 0 test lines) · budget 500 · **1.6× over**
 **Thresholds breached:** length 775 > 500
 **Restructure:** not designed
-**Status:** Open — **unclaimed**
+**Status:** Open — regressed 2026-10-08 (775 → 808 in #516, `#keyring` 9/9, `RepointPlannedPr` resolves the project's account; deferred with consent) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -14,6 +14,7 @@
 | Run | Production lines | Note |
 |---|---|---|
 | 2026-09-24 | 775 | first detection. The size predates #509 (775 at merge-base `4e7157d2`). #509 changed 12 lines (6+/6−), all of them the `os_user_for_github` binding (`let os_user = self…` → `&self…`, for the account-identity return type). It did not grow the file |
+| 2026-10-08 | 808 | 775 on `origin/master` → 808 after `#keyring` 9/9 (#516); split deferred with the developer's consent — see the backlog entry "`#keyring` 9/9 left files over the 500-production-line budget" (2026-10-08): +33, `repoint_planned_pr` resolving the project's account (`token_for_repoint`, `project_github_token`). File has no `#[cfg(test)]` module |
 
 ## What would close it — candidate seams (not proven)
 

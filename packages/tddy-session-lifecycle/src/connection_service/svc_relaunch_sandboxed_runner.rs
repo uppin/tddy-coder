@@ -9,6 +9,7 @@ use tddy_rpc::Status;
 use std::sync::Arc;
 
 use super::launch_ports::LaunchSessions;
+use super::session_acting_identity::SessionIdentity;
 
 /// What the relaunched runner's env is built from.
 struct RelaunchJailEnv<'a> {
@@ -75,6 +76,9 @@ impl LaunchSessions {
         // (`--session-id <id>`). The persistent sandbox claude HOME keeps the transcript across
         // daemon restarts, so a fresh `--session-id` would abort with "Session ID already in use".
         resume: bool,
+        // The project's account identity the relaunched jail's host-side commands and tools run
+        // under, resolved by the caller from the session's own start token.
+        identity: SessionIdentity,
     ) -> Result<u32, Status> {
         // The defs are re-resolved for what the jail's *seed* and the warm-up need — an endpoint to
         // wake and a registry to start from. What the main agent loses comes from the roster below,
@@ -118,6 +122,7 @@ impl LaunchSessions {
             managed_recipe,
             &context_dir,
             &tddy_tools_path,
+            identity,
         )?;
 
         let (tddy_tools_path, sandbox_runner_path, claude_binary, scratch_home) =

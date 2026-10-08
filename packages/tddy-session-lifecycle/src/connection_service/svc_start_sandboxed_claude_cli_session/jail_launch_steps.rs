@@ -67,7 +67,16 @@ impl LaunchSessions {
     ) -> Result<ManagedJailEnv, Status> {
         let mut managed: Option<crate::session_toolcall::ManagedWorkflow> = None;
         let mut append_system_prompt_file: Option<PathBuf> = None;
-        let mut session_env: Vec<(String, String)> = Vec::new();
+        // The agent in the jail edits and commits through the host-side Shell relay, which runs
+        // under this env — so the project's account identity belongs here, managed or not. The
+        // token does not: the agent's tools ask the host for it over the session's own socket.
+        let identity = self.host.session_identity(
+            os_user,
+            jail.session_id,
+            jail.project_id,
+            jail.session_token,
+        );
+        let mut session_env: Vec<(String, String)> = identity.git_environment;
         if let Some(recipe) = managed_recipe.clone() {
             // A grill-me session gets a conversation-spawn handler bound to its toolcall listener so
             // the agent's `spawn_conversation` relay can start a fresh implementation conversation.
@@ -78,6 +87,7 @@ impl LaunchSessions {
                 jail.project_id,
                 sessions_base,
                 jail.session_dir,
+                self.host.session_account_access(jail.session_token),
             );
             let launch = self.prepare_managed_workflow(
                 jail.session_id,
@@ -88,9 +98,12 @@ impl LaunchSessions {
                 tddy_tools_path,
                 None,
                 conversation_spawn_handler,
+                // The host-side `tddy-tools` the jail's Shell relay runs reaches this listener, so
+                // the token is asked of the host per call, as in a co-located session.
+                identity.github_credential,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
-            session_env = launch.env;
+            session_env.extend(launch.env);
             managed = Some(launch.workflow);
         }
         Ok((managed, append_system_prompt_file, session_env))

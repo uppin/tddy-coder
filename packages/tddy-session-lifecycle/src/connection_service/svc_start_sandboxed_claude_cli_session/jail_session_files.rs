@@ -87,6 +87,7 @@ pub(super) fn write_jail_session_metadata(
         project_id,
         session_dir,
         worktree_path,
+        ..
     } = *jail;
     let meta = tddy_core::SessionMetadata {
         repo_path: Some(worktree_path.to_string_lossy().to_string()),

@@ -17,6 +17,7 @@
 
 mod attempts;
 mod deadline;
+mod identity;
 mod linking;
 mod resolver;
 mod service;
@@ -25,6 +26,7 @@ mod sync_status;
 mod vault_store;
 
 pub use deadline::{deadline_after, forget_expired, is_past};
+pub use identity::{acting_identity, ActingIdentity, GitIdentity, IdentityError, PROVIDER_GITHUB};
 pub use linking::{
     record_for_link, removal_allowed, AccountLinker, LinkChallenge, LinkError, LinkProgress,
     LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,

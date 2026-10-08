@@ -22,6 +22,25 @@ pub(crate) fn require_pr_stack_orchestrator(session_dir: &std::path::Path) -> Re
     Ok(())
 }
 
+/// The GitHub token a repoint runs with: `Ok(None)` when the repoint touches no GitHub state,
+/// `Ok(Some(token))` when it does and `resolve` yields one, and a precondition failure carrying
+/// `resolve`'s reason when it does and there is none.
+///
+/// Only a node that owns a branch has a pull request to re-target; a plan-only repoint rewrites the
+/// plan and nothing else, so it is never refused for want of an account — and never asks the vault
+/// for one. The refusal comes **before** the plan is rewritten, so a refused repoint changes
+/// nothing. `resolve` is the project's account (`tddy_accounts::acting_identity`); there is no
+/// other source, the process environment included.
+pub(crate) fn token_for_repoint(
+    node_owns_branch: bool,
+    resolve: impl FnOnce() -> Result<String, String>,
+) -> Result<Option<String>, Status> {
+    if !node_owns_branch {
+        return Ok(None);
+    }
+    resolve().map(Some).map_err(Status::failed_precondition)
+}
+
 /// The repoint target a client may act on: `Ok(None)` for "no target named", `Ok(Some(target))`
 /// for an accepted one, `Err(reason)` for a target the daemon refuses.
 ///

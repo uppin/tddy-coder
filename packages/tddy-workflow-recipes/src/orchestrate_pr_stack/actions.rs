@@ -101,7 +101,10 @@ impl Task for MergeTask {
             .get_sync::<u64>("merge_pr_number")
             .ok_or("MergeTask: merge_pr_number not in context")?;
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
-        let gh = super::github::RealGithubPrApi::new(&repo);
+        // The project's account, asked of the session's host per call — never read from the
+        // environment. With no host to ask, or a refusal, the task fails with the host's reason.
+        let token = tddy_core::toolcall::request_github_token_from_session().await?;
+        let gh = super::github::RealGithubPrApi::with_token(&repo, token);
 
         let _sha = super::bridge::execute_stack_merge(&session_dir, &node_id, pr_number, &gh)?;
 
@@ -157,7 +160,18 @@ impl Task for RepointTask {
             .get_sync::<String>("default_branch")
             .unwrap_or_else(|| "master".to_string());
         let repo = context.get_sync::<String>("repo").unwrap_or_default();
-        let gh = super::github::RealGithubPrApi::new(&repo);
+        // The project's account, asked of the session's host — and only when a dependent owns a
+        // branch, because only then is there a PR to re-target. A plan-only repoint reaches no
+        // GitHub call and never asks. Asked up front rather than at the first call, because the
+        // repoint treats a failed GitHub call as a warning: a refusal has to stop the task, not be
+        // logged while the dependents' PRs keep their old base. Never read from the environment;
+        // with no host to ask, or a refusal, the task fails with the host's reason.
+        let gh = if super::bridge::repoint_reaches_github(&session_dir, &dependents)? {
+            let token = tddy_core::toolcall::request_github_token_from_session().await?;
+            super::github::RealGithubPrApi::with_token(&repo, token)
+        } else {
+            super::github::RealGithubPrApi::without_credential(&repo)
+        };
 
         super::bridge::execute_stack_repoint(
             &session_dir,

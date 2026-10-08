@@ -9,6 +9,7 @@ use tddy_rpc::{Response, Status};
 use tddy_service::proto::session::StartSessionResponse;
 
 use crate::cli_session_manager::CliSessionManager;
+use crate::connection_service::session_acting_identity::SessionAccountAccess;
 use crate::connection_service::AttachmentProgressSink;
 use crate::connection_service::{
     effective_spawn_branch, session_worktree_source, spawned_branch_of_session, WorktreeSource,
@@ -91,6 +92,9 @@ pub async fn spawn_cursor_cli_session_inner(
         create_remote_branch,
         task_registry,
         agent_clones,
+        // A caller of this entry point holds no vault to read an account with, so the session
+        // starts under the checkout's own identity.
+        &SessionAccountAccess::none(),
         &AttachmentProgressSink::discarding(),
     )
     .await
@@ -140,6 +144,9 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // naming the concrete daemon type would drag it through every caller of a function that
     // otherwise mentions nothing of the kind.
     agent_clones: &dyn crate::connection_service::SeededAgentClones,
+    // What the start reads its owner's vault with, for the account identity the agent's commits
+    // carry. A cursor-cli session runs no toolcall listener, so there is no token to answer.
+    account_access: &SessionAccountAccess,
     // Where the start's phases (worktree, semantic index, agent) are announced.
     progress: &AttachmentProgressSink,
 ) -> Result<Response<StartSessionResponse>, Status> {
@@ -173,7 +180,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     )?;
 
     let timeout = config.spawn_worker_request_timeout();
-    let worktree_path = match session_worktree_source(repo_path, project_id) {
+    let (worktree_path, project_accounts) = match session_worktree_source(repo_path, project_id) {
         WorktreeSource::Project(pid) => {
             if pid.is_empty() {
                 return Err(Status::invalid_argument(
@@ -183,6 +190,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
             let (projects_dir, project) =
                 crate::connection_service::find_registered_project(tddy_data_dir, os_user, &pid)?;
             let repo_root = crate::connection_service::project_repo_root(&project)?;
+            let project_accounts = project.accounts.clone();
             let chain_base_ref = stack_parent
                 .chain_base_ref(
                     &pid,
@@ -229,7 +237,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
                     session_id,
                 )
                 .await;
-            wt
+            (wt, Some(project_accounts))
         }
         WorktreeSource::RepoPath(path) => {
             let canonical = std::fs::canonicalize(&path).map_err(|e| {
@@ -249,7 +257,8 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
                 "spawn_cursor_cli_session_inner {session_id}: using client-supplied repo_path {} directly as worktree (not daemon-managed; not removed on session end)",
                 canonical.display()
             );
-            canonical
+            // A client-supplied checkout belongs to no project, so no account is assigned to it.
+            (canonical, None)
         }
     };
 
@@ -287,7 +296,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // Semantic index: index the worktree into the session dir before launch (blocking; a missing
     // embedder or a failed index aborts the start — no unindexed fallback), and point the
     // `SemanticSearch` tool at the per-session index DB via the process env.
-    let session_env = cursor_cli_semantic_env(
+    let mut session_env = cursor_cli_semantic_env(
         tddy_data_dir,
         session_id,
         semantic_index,
@@ -297,6 +306,13 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
         progress,
     )
     .await?;
+    // The agent's commits carry the project's account identity; a refusal starts the session
+    // under the checkout's own, with the reason logged.
+    session_env.extend(
+        account_access
+            .session_identity(session_id, project_accounts.as_deref())
+            .git_environment,
+    );
 
     // The Cursor chat this session owns for its whole lifetime: minted here, persisted in
     // `.session.yaml` below, and passed as `--resume <id>` on every later spawn so a resume

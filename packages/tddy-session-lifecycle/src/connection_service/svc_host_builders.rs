@@ -50,7 +50,8 @@ impl DaemonSessionHost {
         };
         let task_registry = claude_cli_manager.task_registry();
         let demo_vm_state = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
-        let session_stdio = Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+        let host_session_sockets =
+            Arc::new(super::host_session_socket::HostSessionSockets::default());
         let room_roster = room_roster_from_config(config.livekit.as_ref());
         // Built here rather than inline below because the roster store reads it: an entry's
         // `clone_state` is the state of the checkout serving it, and two stores would let a roster
@@ -86,7 +87,7 @@ impl DaemonSessionHost {
             room_roster,
             roster_keepalive_interval: ROSTER_KEEPALIVE_INTERVAL,
             demo_vm_state,
-            session_stdio,
+            host_session_sockets,
             agent_activity_hub: Arc::new(tddy_daemon_kernel::AgentActivityHub::default()),
             session_agent_inference: Arc::new(
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
@@ -223,6 +224,28 @@ impl DaemonSessionHost {
     pub fn with_credential_vaults(mut self, vaults: Arc<tddy_daemon_auth::SessionVaults>) -> Self {
         self.debug_assert_rpc_families_not_installed("with_credential_vaults");
         self.credential_vaults = Some(vaults);
+        self
+    }
+
+    /// How often the process of a registered tool session is looked at to see whether it has stopped
+    /// (builder); a stopped session is no longer answered on its host-session socket. Replaces the
+    /// daemon's sockets, so call it before any session starts.
+    pub fn with_host_session_stop_watch_interval(mut self, interval: std::time::Duration) -> Self {
+        self.host_session_sockets = Arc::new(
+            super::host_session_socket::HostSessionSockets::with_stop_watch_interval(interval),
+        );
+        self
+    }
+
+    /// Serve the per-OS-user host-session sockets `tddy-supervisor` created and handed this daemon
+    /// (builder), instead of binding them here: an unprivileged daemon cannot give a socket to
+    /// another OS user. Call it after [`Self::with_host_session_stop_watch_interval`], which
+    /// replaces the sockets.
+    pub fn with_inherited_host_session_sockets(
+        self,
+        sockets: Vec<super::inherited_host_sockets::InheritedHostSocket>,
+    ) -> Self {
+        self.host_session_sockets.adopt_inherited(sockets);
         self
     }
 

@@ -78,28 +78,18 @@ fn merge_pr_git_clean_tempdir_has_no_unmerged_paths() {
 
 #[test]
 fn merge_pr_github_merge_errors_when_token_missing() {
-    // Given
-    let prev_github = std::env::var("GITHUB_TOKEN").ok();
-    let prev_gh = std::env::var("GH_TOKEN").ok();
-    std::env::remove_var("GITHUB_TOKEN");
-    std::env::remove_var("GH_TOKEN");
+    // Given no token is passed
+    let token = "";
 
     // When
-    let r = github::merge_open_pr_for_branch(MergePrGithubParams::default());
+    let r = github::merge_open_pr_for_branch(MergePrGithubParams::default(), token);
     let err = r.unwrap_err();
 
     // Then
     assert!(
-        err.contains("GITHUB_TOKEN") || err.contains("GH_TOKEN") || err.contains("credential"),
+        err.contains("credential"),
         "expected missing credential message; got {err}"
     );
-
-    if let Some(v) = prev_github {
-        std::env::set_var("GITHUB_TOKEN", v);
-    }
-    if let Some(v) = prev_gh {
-        std::env::set_var("GH_TOKEN", v);
-    }
 }
 
 #[test]
@@ -195,5 +185,48 @@ fn merge_pr_analyze_reads_changeset_branch_intent() {
         prompt.contains("feature/other"),
         "analyze system prompt must reference the intended branch from changeset \
          (feature/other), not the currently checked-out branch (master); got:\n{prompt}"
+    );
+}
+
+#[test]
+fn merge_pr_prompt_advertises_the_github_pr_tools_when_the_session_can_authenticate_them() {
+    // Given a session whose host answers the tools' token requests
+    let h = MergePrWorkflowHooks::new(None);
+    let ctx = Context::new();
+    ctx.set_sync(
+        tddy_workflow_recipes::github_pr_tools::GITHUB_PR_TOOLS_AVAILABLE_KEY,
+        true,
+    );
+
+    // When the analyze task is prepared
+    h.before_task("analyze", &ctx).expect("before_task");
+
+    // Then the prompt carries the awareness line
+    let prompt = ctx
+        .get_sync::<String>("system_prompt")
+        .expect("system_prompt");
+    assert!(
+        prompt
+            .contains(tddy_workflow_recipes::merge_pr::merge_pr_github_tools_awareness_line(true)),
+        "the PR tools awareness must be appended; got: {prompt}"
+    );
+}
+
+#[test]
+fn merge_pr_prompt_does_not_advertise_the_github_pr_tools_without_a_credential_to_ask_for() {
+    // Given a session whose context says nothing about a credential
+    let h = MergePrWorkflowHooks::new(None);
+    let ctx = Context::new();
+
+    // When the analyze task is prepared
+    h.before_task("analyze", &ctx).expect("before_task");
+
+    // Then the prompt makes no promise of PR tools
+    let prompt = ctx
+        .get_sync::<String>("system_prompt")
+        .expect("system_prompt");
+    assert!(
+        !prompt.contains("github_create_pull_request"),
+        "no awareness without a credential; got: {prompt}"
     );
 }

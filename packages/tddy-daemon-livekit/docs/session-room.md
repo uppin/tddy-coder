@@ -227,3 +227,15 @@ an absent `/var/run/docker.sock` makes these suites *fail*, loudly, naming
 - [`tddy-session-sync`](../../tddy-session-sync/docs/mirroring.md) — the client that consumes them
 - [LiveKit service (this crate)](./livekit-service.md) — the crate this module belongs to
 - [changesets/](./changesets/)
+
+## The session's git identity
+
+`session_git_environment(&ActingIdentity) -> Vec<(String, String)>` (`src/session_git.rs`) renders the
+four `GIT_AUTHOR_*` / `GIT_COMMITTER_*` pairs of the account a project acts as
+([resolution](../../tddy-accounts/docs/github-identity-resolution.md)). It returns pairs rather than
+applying them to a `Command` — the caller that spawns the process knows which process they belong on —
+and **excludes the token**, which reaches a session's tools only by being asked for. This crate has a
+path dependency on `tddy-accounts`; the reverse edge does not exist.
+
+The WIP snapshot above is **not** signed with it: `WIP_COMMIT_IDENTITY_NAME` / `_EMAIL` (`tddy-daemon`)
+stay fixed, because the snapshot is machine-made, not the agent's work.

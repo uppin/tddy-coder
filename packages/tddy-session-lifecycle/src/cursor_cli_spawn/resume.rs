@@ -27,6 +27,9 @@ pub async fn resume_cursor_cli_session(
     session_id: &str,
     session_dir: &Path,
     meta: SessionMetadata,
+    // The project's account identity pairs the resumed agent's commits carry (empty keeps the
+    // checkout's own).
+    git_environment: Vec<(String, String)>,
 ) -> Result<Response<ResumeSessionResponse>, Status> {
     let model = meta.model.clone().unwrap_or_default();
     let worktree_path = meta
@@ -75,6 +78,7 @@ pub async fn resume_cursor_cli_session(
             &model,
             &binary_path,
             Some(&chat_id),
+            git_environment,
         )
         .await
         .map_err(|e| Status::internal(format!("failed to resume cursor-cli: {}", e)))?;

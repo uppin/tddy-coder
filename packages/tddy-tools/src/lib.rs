@@ -12,6 +12,7 @@
 //! implements them.
 
 pub mod action_tools;
+mod github_credential;
 pub mod list_models;
 pub mod mcp_primitives;
 mod pull_ledger;

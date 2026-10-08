@@ -1,6 +1,5 @@
 //! PRD Testing Plan: merge-pr and tdd-small prompts mention **tddy-tools** GitHub PR tools when authenticated.
 
-use serial_test::serial;
 use tddy_workflow_recipes::merge_pr::merge_pr_github_tools_awareness_line;
 use tddy_workflow_recipes::{
     merged_red_system_prompt, tdd_small_github_pr_tools_awareness_sentence,
@@ -31,20 +30,10 @@ fn merge_pr_hooks_prompt_mentions_github_pr_tools_when_authenticated() {
 }
 
 #[test]
-#[serial]
 fn tdd_small_system_prompt_includes_github_pr_tools_awareness() {
-    // Given
-    std::env::set_var("GITHUB_TOKEN", "ghp_acceptance_test_not_real");
-    struct Clear;
-    impl Drop for Clear {
-        fn drop(&mut self) {
-            std::env::remove_var("GITHUB_TOKEN");
-        }
-    }
-    let _clear = Clear;
-
+    // Given an agent whose GitHub PR tools can authenticate
     // When — build merged prompt first so logging markers for both helpers are exercised before assertions
-    let prompt = merged_red_system_prompt();
+    let prompt = merged_red_system_prompt(true);
     let awareness = tdd_small_github_pr_tools_awareness_sentence();
 
     // Then

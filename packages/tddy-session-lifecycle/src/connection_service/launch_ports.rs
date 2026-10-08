@@ -14,7 +14,6 @@
 //! follows [`AgentRoster`](super::agent_host_callbacks::AgentRoster) and
 //! [`SplitSessions`](super::split_ports::SplitSessions) exactly.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -25,11 +24,13 @@ use tddy_service::proto::session::SessionAttachment;
 use tddy_task::TaskRegistry;
 
 use super::agent_host_callbacks::AgentRoster;
+use super::host_session_socket::HostSessionSockets;
 use super::svc_materialize_staged_attachment::AttachmentState;
-use super::svc_start_claude_cli_session::SessionStdioEndpoint;
 use super::AttachmentMaterialization;
 use crate::cli_session_manager::CliSessionManager;
 use crate::PrStackHandler;
+
+use super::session_acting_identity::{SessionAccountAccess, SessionIdentity};
 
 /// The capabilities of the session host the launch topic calls and does not own.
 ///
@@ -46,6 +47,21 @@ pub(crate) trait LaunchHost: Send + Sync {
     /// This daemon's PR-stack handler, which a stack base or a stack link owned by a peer is asked
     /// of, or `FAILED_PRECONDITION` when the host was never given the RPC families.
     fn pr_stack(&self) -> Result<Arc<dyn PrStackHandler>, Status>;
+
+    /// What a session's vault reads go through: this daemon's vaults, how a session token names
+    /// its owner, and the token the session was started with.
+    fn session_account_access(&self, session_token: &str) -> SessionAccountAccess;
+
+    /// The identity a session of `project_id` is launched with — its commit pairs and the handler
+    /// that answers its tools' `github-token` — over the project's assignments as they stand now.
+    /// Neither when the project cannot be read (logged by the host).
+    fn session_identity(
+        &self,
+        os_user: &str,
+        session_id: &str,
+        project_id: &str,
+        session_token: &str,
+    ) -> SessionIdentity;
 }
 
 /// The session host's launch fields, owned, plus its callbacks.
@@ -63,9 +79,8 @@ pub(crate) struct LaunchSessions {
     /// Sandboxed claude-cli sessions (darwin Seatbelt).
     pub(crate) sandbox_manager: Arc<tddy_daemon_sandbox::sandbox_session::SandboxSessionManager>,
     pub(crate) task_registry: TaskRegistry,
-    /// Per-session reverse stdio RPC endpoint to a spawned tddy-coder child (grill-me), keyed by
-    /// session_id.
-    pub(crate) session_stdio: Arc<tokio::sync::Mutex<HashMap<String, SessionStdioEndpoint>>>,
+    /// The per-OS-user host-session sockets and the tool sessions they answer.
+    pub(crate) host_session_sockets: Arc<HostSessionSockets>,
     pub(crate) agent_activity_hub: Arc<tddy_daemon_kernel::AgentActivityHub>,
     /// The agent topic's handle: a jail start claims its seeded clones and resolves its agent defs
     /// through it.
