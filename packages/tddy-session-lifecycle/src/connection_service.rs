@@ -418,7 +418,7 @@ impl DaemonRpcHandler {
 mod daemon_rpc_handler;
 
 mod svc_demo_vm_ports;
-pub use svc_demo_vm_ports::DemoVmServiceImpl;
+pub use crate::connection_service::demo_vm_service::DemoVmServiceImpl;
 
 /// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
 /// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
@@ -551,6 +551,7 @@ mod conversation_worktree_jail_route_unit_tests;
 
 pub use tddy_daemon_kernel::daemon_hook_urls;
 pub use tddy_daemon_livekit::{first_admission_token, placement};
+pub mod demo_vm_service;
 /// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
 /// failure is not mistaken for one. Driven through the same private
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
