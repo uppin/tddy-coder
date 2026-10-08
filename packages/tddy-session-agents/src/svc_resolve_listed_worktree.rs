@@ -1,4 +1,4 @@
-use crate::connection_service::agent_roster;
+use crate::agent_roster;
 
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
@@ -6,7 +6,7 @@ use tddy_rpc::Status;
 
 use std::path::PathBuf;
 
-use super::agent_host_callbacks::AgentRoster;
+use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
     /// Report — once per `(agents dir, name)` per process — that a registry assistant is shadowing
@@ -85,7 +85,7 @@ impl AgentRoster {
     /// [`Self::seeded_roster_records`] and reaches the main agent through the live roster
     /// `tddy-tools` reads, exactly as an agent attached after the start does
     /// (docs/ft/daemon/session-agent-roster.md § Remote agents).
-    pub(crate) async fn resolve_specialized_agent_defs(
+    pub async fn resolve_specialized_agent_defs(
         &self,
         specialized_agents: &[String],
     ) -> Result<Vec<tddy_discovery::agent_def::SpecializedAgentDef>, Status> {
@@ -129,7 +129,7 @@ impl AgentRoster {
     /// The records name no clone yet — `codebase_session_id` is filled in by
     /// [`Self::seed_session_agent_roster`], which is the only place that knows which session they
     /// are being recorded on.
-    pub(crate) async fn seeded_roster_records(
+    pub async fn seeded_roster_records(
         &self,
         specialized_agents: &[String],
     ) -> Result<Vec<tddy_core::SessionAgentRecord>, Status> {
@@ -147,7 +147,7 @@ impl AgentRoster {
     /// Auth first is load-bearing rather than tidy: attaching an agent owned by another daemon
     /// contacts that peer and provisions a checkout on it, so a check that ran afterwards would let
     /// an unauthenticated caller build a clone on another host (PRD AC12).
-    pub(crate) fn roster_session_dir(
+    pub fn roster_session_dir(
         &self,
         session_token: &str,
         session_id: &str,
@@ -168,8 +168,8 @@ impl AgentRoster {
     // docs/ft/daemon/session-agent-roster.md § Remote agents, § Clones.
 }
 
-use crate::connection_service::session_dir_lookup;
-use tddy_session_agents::spawn_agent_def;
+use crate::session_dir_lookup;
+use crate::spawn_agent_def;
 
 /// [`DaemonSessionHost::resolvable_agent_defs`] over the two fields it reads: the YAML defs under
 /// `<tddy_data_dir>/agents` and `model_registry`'s assistants, the registry winning a name tie.

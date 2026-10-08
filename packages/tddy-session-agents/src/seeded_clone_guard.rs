@@ -1,12 +1,12 @@
-use crate::connection_service::seed_codebase;
+use crate::seed_codebase;
 
-use super::agent_host_callbacks::AgentRoster;
+use crate::agent_host_callbacks::AgentRoster;
 
 /// One agent a start has already put on a session's roster, as its unwind needs to name it.
 ///
 /// The clone is carried rather than looked up again: only the entry that *commissioned* a checkout
 /// may delete it, and that fact lives nowhere but in the claim this seed made.
-pub(crate) struct SeededAgent {
+pub struct SeededAgent {
     pub(crate) agent_id: String,
     pub(crate) daemon_instance_id: String,
     pub(crate) clone: Option<seed_codebase::ClaimedAgentClone>,

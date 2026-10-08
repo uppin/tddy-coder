@@ -1,6 +1,6 @@
-use super::seeded_clone_guard::SeededCloneGuard;
+use crate::seeded_clone_guard::SeededCloneGuard;
 
-use super::agent_roster::session_enforces_a_withdrawal;
+use crate::agent_roster::session_enforces_a_withdrawal;
 
 use tddy_rpc::Status;
 
@@ -13,9 +13,9 @@ use std::path::PathBuf;
 /// `commissioned` is what makes a failed attach unwindable without taking a checkout away from an
 /// agent that is still using it: two agents on one host share one clone, and only the attach that
 /// minted it may delete it.
-pub(crate) struct ClaimedAgentClone {
-    pub(crate) codebase_session_id: String,
-    pub(crate) commissioned: bool,
+pub struct ClaimedAgentClone {
+    pub codebase_session_id: String,
+    pub commissioned: bool,
 }
 
 /// What a seed needs to know about the session's codebase.
@@ -59,7 +59,7 @@ impl SeedCodebase {
 
     /// The codebase of a session already on disk — every path but a co-located start, which has no
     /// `.session.yaml` to read at the point it seeds.
-    pub(crate) fn read(session_id: &str, session_dir: &Path) -> Result<Self, Status> {
+    pub fn read(session_id: &str, session_dir: &Path) -> Result<Self, Status> {
         let meta = tddy_core::read_session_metadata(session_dir).map_err(|e| {
             Status::not_found(format!(
                 "session '{session_id}' has no readable metadata at {}: {e}",

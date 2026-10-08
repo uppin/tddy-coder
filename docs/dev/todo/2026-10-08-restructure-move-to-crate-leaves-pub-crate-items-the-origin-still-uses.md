@@ -25,3 +25,19 @@ remaining code names (the second half is also in [2026-10-04-restructure-move-it
 
 `presenter_observer_spawn.rs`: `PresenterObserverDeps` and its four fields (lines 6-10) and `maybe_spawn_presenter_observer` (line 23),
 `pub(crate)` → `pub` (`E0603`, from `handler_state.rs` and `launch_ports.rs`, which stay in lifecycle).
+
+## Seen again in R6 (`tddy-session-agents`, the 12-module T3 cluster)
+
+The cluster move left every item lifecycle's remaining code names as `pub(crate)` or private, and the glob facade `pub use … ::*` re-exports only `pub`
+items (so `started_roster_rev`, `SeededAgent` and others read as "not found in `connection_service`", `E0425`, besides `E0603`/`E0624`/`E0451`).
+About 35 items were widened `pub(crate)` → `pub`, all in `packages/tddy-session-agents/src/`, found by a loop of `cargo check` and a name-based rewrite:
+- `agent_host_callbacks.rs`: `AgentRoster` and its 12 fields, `AgentHostCallbacks`, `DaemonSeedCloneClaimant` and its `service` field.
+- `agent_roster.rs`: `workspace_start_request`, `started_roster_rev`, `roster_agent_ids`, `refuse_unenforceable_withdrawal`, `agent_tool_reads_the_clone`.
+- `peer_session_answer.rs`: `peer_has_no_such_session`, `resolve_worktree_root_in_session_dir`. `seeded_clone_guard.rs`: `SeededAgent` (+ fields).
+  `seed_codebase.rs`: `ClaimedAgentClone`.
+- Methods of `AgentRoster` the origin calls: `broadcast_roster`, `claim_agent_clone`, `claim_co_located_seed_clones`, `forward_cancel_agent_conversation`,
+  `forward_open_agent_conversation`, `hosted_clone_for`, `local_agent_codebase_access`, `open_local_agent_session`, `open_owned_agent_session`, `read`,
+  `refuse_departed_daemon`, `refuse_unready_clone`, `resolve_specialized_agent_defs`, `roster_record_for_agent_id`, `roster_session_dir`,
+  `seed_session_agent_roster`, `seeded_roster_records`, `start_hosted_agent_clone`, `tear_down_agent_clone`, `tear_down_every_agent_clone`,
+  `unwind_agent_clone_claim`, `unwind_seeded_roster`, and fields `codebase_session_id`, `commissioned` of the moved records.
+The name-based rewrite also widened same-named `pub(crate)` fields/functions elsewhere in the receiver (`config`, `host`, `peer_routing` were already `pub`); check the diff for those.

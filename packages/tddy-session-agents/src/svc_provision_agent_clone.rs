@@ -8,20 +8,20 @@ use std::path::PathBuf;
 
 use tddy_service::proto::session_agents_svc::SessionAgentRoster;
 
-use crate::connection_service::peer_session_answer::peer_has_no_such_session;
+use crate::peer_session_answer::peer_has_no_such_session;
 
 use tddy_service::proto::session::DeleteSessionRequest;
 
-use crate::connection_service::first_admission_token;
-use crate::connection_service::seed_codebase;
-use crate::connection_service::session_dir_lookup;
+use crate::seed_codebase;
+use crate::session_dir_lookup;
+use tddy_daemon_livekit::first_admission_token;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_service::proto::session::StartSessionRequest;
 
 use tddy_rpc::Status;
 
-use super::agent_host_callbacks::AgentRoster;
+use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
     /// Ask `daemon_instance_id` for the checkout this session's agents on it will read.
@@ -101,7 +101,7 @@ impl AgentRoster {
                 &slot,
                 daemon_instance_id,
                 &request,
-                crate::connection_service::agent_roster::split_forward_deadline(&self.config),
+                crate::agent_roster::split_forward_deadline(&self.config),
             )
             .await?;
         let created = answered.session_id.trim();
@@ -180,7 +180,7 @@ impl AgentRoster {
     /// callers differ: `DetachSessionAgent` has removed and persisted the entry before it gets here,
     /// while `DeleteSession` has deleted nothing yet and is refused outright. Each adds that half
     /// itself.
-    pub(crate) async fn tear_down_agent_clone(
+    pub async fn tear_down_agent_clone(
         &self,
         session_id: &str,
         daemon_instance_id: &str,
@@ -251,7 +251,7 @@ impl AgentRoster {
     /// Called by `DeleteSession`. One failure fails the deletion naming the orphan, for the same
     /// reason a split session's paired workspace does: a delete that succeeded locally while a
     /// checkout survived on another host is exactly the silent leak the pairing exists to prevent.
-    pub(crate) async fn tear_down_every_agent_clone(
+    pub async fn tear_down_every_agent_clone(
         &self,
         session_id: &str,
         session_token: &str,
@@ -298,7 +298,7 @@ impl AgentRoster {
     /// participant of the session is entitled to, and addressing it would mean the publisher
     /// deciding who is interested, which it cannot know: a browser tab or a newly admitted owning
     /// daemon joins at any time.
-    pub(crate) async fn broadcast_roster(&self, session_id: &str, roster: &SessionAgentRoster) {
+    pub async fn broadcast_roster(&self, session_id: &str, roster: &SessionAgentRoster) {
         let Some(publisher) = self.session_rooms.agents_publisher(session_id) else {
             return;
         };
@@ -353,7 +353,7 @@ impl AgentRoster {
         &self,
         session_id: &str,
         agent_id: &str,
-    ) -> Result<tddy_session_agents::session_agent_clone::AgentClone, Status> {
+    ) -> Result<crate::session_agent_clone::AgentClone, Status> {
         let session_dir = session_dir_lookup::session_dir_for(&self.tddy_data_dir, session_id)?;
         let state = self.state();
         agent_clone_lookup::agent_clone_for(session_id, agent_id, session_dir, state)
@@ -361,10 +361,10 @@ impl AgentRoster {
 
     /// [`LocalExecTools::hosted_clone_for`](super::LocalExecTools::hosted_clone_for) over this
     /// host's hosted clones.
-    pub(crate) fn hosted_clone_for(
+    pub fn hosted_clone_for(
         &self,
         session_id: &str,
-    ) -> Option<Arc<tddy_session_agents::session_agent_clone::HostedClone>> {
+    ) -> Option<Arc<crate::session_agent_clone::HostedClone>> {
         self.host.hosted_clone_for(session_id)
     }
 
@@ -373,17 +373,17 @@ impl AgentRoster {
     pub(crate) async fn run_hosted_clone_tool(
         &self,
         req: &ExecuteToolRequest,
-        clone: &tddy_session_agents::session_agent_clone::HostedClone,
+        clone: &crate::session_agent_clone::HostedClone,
     ) -> ExecuteToolResponse {
         self.host.run_hosted_clone_tool(req, clone).await
     }
 }
 
-use tddy_session_agents::roster_broadcast;
+use crate::roster_broadcast;
 
-use tddy_session_agents::session_room_participants;
+use crate::session_room_participants;
 
-use tddy_session_agents::agent_clone_worktree;
+use crate::agent_clone_worktree;
 
-use crate::connection_service::daemon_hook_urls;
-use tddy_session_agents::agent_clone_lookup;
+use crate::agent_clone_lookup;
+use tddy_daemon_kernel::daemon_hook_urls;

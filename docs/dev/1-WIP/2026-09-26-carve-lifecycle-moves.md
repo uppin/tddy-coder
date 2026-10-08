@@ -224,7 +224,7 @@ per-crate baseline → B-checks for that receiver.
   (approved)
 - [ ] **R5 `tddy-demo-runner`** (D12): T11 cluster (`demo_vm_coordinate_handlers`, `activity_hub`,
   `DemoVmServiceImpl`); `demo_vm_entry` stays; new edges → kernel, core, rpc, service
-- [~] **R6 `tddy-session-agents`** (prepared; blocked on two unapproved edges, see Validation results): T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
+- [x] **R6 `tddy-session-agents`**: T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
   `ExecToolRoute` under D7-B, with their four edges)
 - [x] **R7 `tddy-cli-sessions`** (new, D4): `cli_session_manager` (anchor) with its 9 children and
   `session_toolcall` (`move_cluster_to_crate`); facade for `tddy-desktop`'s
@@ -828,23 +828,22 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   `remote_git_pack_execution`'s inline tests; sum 703 = 658 + 45 as before. clippy `--all-targets -D warnings`, fmt clean; `cargo check --all-targets`
   clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty. Doc tests ran (1 ignored, as before).
 
-### R6: `tddy-session-agents` (NOT applied; stopped on two unapproved edges)
+### R6: `tddy-session-agents` (done; D7-A kept, one approved edge)
 
-Under the developer's later 2026-10-08 ruling (hand workarounds allowed, each filed), R6 was prepared and attempted:
-
-- **Hand edits before the move (own commit, imports and visibility only):** `agent_host_callbacks.rs:19`, `svc_ensure_session_room_for_agents.rs:1` and
-  `svc_start_hosted_agent_clone.rs:7` split into one `use` per path; `SeededAgentClones` named through its defining module in `agent_host_callbacks.rs:21`
-  (through the glob facade `check --deep` read it as staying behind although `seed_codebase` was in the cluster); `connection_service.rs`
-  `pub(crate) mod peer_session_answer;` → `pub mod`. Filed: [`…hand-split-grouped-use-lines-before-the-agents-cluster-move`](../todo/2026-10-08-hand-split-grouped-use-lines-before-the-agents-cluster-move.md),
-  [`…hand-widened-mod-declarations-before-engine-moves`](../todo/2026-10-08-hand-widened-mod-declarations-before-engine-moves.md).
-- **Engine, own commit:** `reparent_module` (`reexport: outside`) of the T4 child `svc_provision_workspace_tool_sandbox` out of
-  `svc_ensure_session_room_for_agents/` to `connection_service`. No hand edit.
-- **Engine, the cluster (12 modules, one `move_cluster_to_crate`):** `check --deep` `no findings`; `apply` moved 27 files and the compile gate failed. After the
-  visibility widening it needed (about 35 items: `AgentRoster`, `AgentHostCallbacks`, `DaemonSeedCloneClaimant` and their fields, 20 methods, 8 functions) the tree compiled, **but the
-  engine had written two edges into `tddy-session-agents/Cargo.toml` that the approved table does not list:** `tddy-sandbox-runner`
-  (`agent_host_callbacks.rs:30`, `ExecuteToolResponse` in the `AgentHostCallbacks::run_exec_tool_locally` signature; it is on the table only under D7-B)
-  and `tddy-subagent-worktree` (`agent_roster.rs:84`, `ToolEffect`; `peer_session_answer.rs:58`, `ConversationId`). No cycle. **The attempt was rolled back** (the hand pre-move
-  commits and the reparent stay); the full attempt is not kept. Needs the developer's approval of these two edges before R6 (and so R8, R9, which name the agents' types) can apply.
+- **Developer's ruling, 2026-10-08:** `tddy-session-agents` → `tddy-subagent-worktree` approved (leaf crate, no cycle); `tddy-sandbox-runner` **not** approved (D7-A: it falls).
+- **Hand edits before the move (own commits, imports and visibility only):** `agent_host_callbacks.rs:19`, `svc_ensure_session_room_for_agents.rs:1`, `svc_start_hosted_agent_clone.rs:7` split into one `use` per
+  path; `SeededAgentClones` named through its defining module (`agent_host_callbacks.rs:21`; through the glob facade `check --deep` read it as staying behind although `seed_codebase` was in the cluster);
+  `connection_service.rs` `pub(crate) mod peer_session_answer;` → `pub mod`; and `agent_host_callbacks.rs:30` `use tddy_sandbox_runner::ExecuteToolResponse;` →
+  `use tddy_service::proto::exec_tools::ExecuteToolResponse;` (`tddy_sandbox_runner` re-exports that very type, `tddy-sandbox-runner/src/lib.rs:28`; the trait signature is unchanged, and without the edit the engine wrote the
+  unapproved `tddy-session-agents → tddy-sandbox-runner` edge). Filed: [`…hand-split-grouped-use-lines-before-the-agents-cluster-move`](../todo/2026-10-08-hand-split-grouped-use-lines-before-the-agents-cluster-move.md), [`…hand-widened-mod-declarations-before-engine-moves`](../todo/2026-10-08-hand-widened-mod-declarations-before-engine-moves.md).
+- **Engine, own commit:** `reparent_module` (`reexport: outside`) of the T4 child `svc_provision_workspace_tool_sandbox` out of `svc_ensure_session_room_for_agents/` to `connection_service`. No hand edit.
+- **Engine, the cluster:** one `move_cluster_to_crate` of 12 modules (`agent_host_callbacks` anchor; `svc_provision_agent_clone`, `svc_start_hosted_agent_clone`, `svc_turn_end_reporter`, `agent_roster`,
+  `seeded_clone_guard`, `seed_codebase`, `roster_replacement`, `peer_session_answer`, `svc_resolve_listed_worktree`, `session_dir_lookup`, `svc_ensure_session_room_for_agents`), `reexport: glob`; 27 files; `check --deep` `no findings`.
+  The manifest gained **only** `tddy-subagent-worktree`. The compile gate failed on visibility, below.
+- **Hand edits after the move (build corrections, visibility only):** about 35 items `pub(crate)` → `pub` in `tddy-session-agents/src/` (`AgentRoster` and its fields, `AgentHostCallbacks`, `DaemonSeedCloneClaimant`, 5 functions in `agent_roster.rs`,
+  2 in `peer_session_answer.rs`, `SeededAgent`, `ClaimedAgentClone`, 22 `AgentRoster` methods); `cargo fmt`. Itemised in the todo [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md).
+- **After:** lifecycle **647** passed / the same 22 failed / 1 ignored; `tddy-session-agents` **75** passed; sum 722 as before (no test moved). clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean, diff empty.
+  `cargo tree -p tddy-session-agents -e normal`: no `tddy-sandbox-runner`, no lifecycle.
 
 ### R7: `tddy-cli-sessions` (done; new crate, one hand move)
 

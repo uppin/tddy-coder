@@ -26,3 +26,10 @@ a path written through the module.)
 
 Split a grouped `use` whose leaves need different qualifiers (`repoint_facade_imports` Rule S already does), and treat a path
 that reaches a co-moving member through a glob facade as co-moving. Delete this file with that fix.
+
+## A third hand edit, to avoid an unapproved edge (R6)
+
+`connection_service/agent_host_callbacks.rs:30`: `use tddy_sandbox_runner::ExecuteToolResponse;` → `use tddy_service::proto::exec_tools::ExecuteToolResponse;`.
+`tddy_sandbox_runner` re-exports that very type (`tddy-sandbox-runner/src/lib.rs:28`), so the trait signature is unchanged. Without this the engine wrote
+`tddy-session-agents → tddy-sandbox-runner` into the manifest, an edge the developer did not approve (D7-A). The engine should prefer the defining crate
+of a re-exported name when it chooses which crate the destination gains (it already does in the path survey for `use` of facades of the same crate).

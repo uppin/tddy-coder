@@ -4,16 +4,16 @@ use prost::Message as _;
 
 use tddy_service::proto::catalog::{ListSubagentsRequest, ListSubagentsResponse};
 
-use crate::connection_service::agent_roster;
+use crate::agent_roster;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_rpc::Status;
 
-use super::agent_host_callbacks::AgentRoster;
+use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
     /// Ask `daemon_instance_id` to cancel a conversation its own turn loop is running.
-    pub(crate) async fn forward_cancel_agent_conversation(
+    pub async fn forward_cancel_agent_conversation(
         &self,
         session_token: &str,
         session_id: &str,
@@ -38,7 +38,7 @@ impl AgentRoster {
     /// The id must be qualified: there is deliberately no "assume the local daemon" reading, which
     /// is the reading that silently picks the wrong host the moment two daemons offer a def of the
     /// same name.
-    pub(crate) async fn roster_record_for_agent_id(
+    pub async fn roster_record_for_agent_id(
         &self,
         agent_id: &str,
     ) -> Result<tddy_core::SessionAgentRecord, Status> {
@@ -155,4 +155,4 @@ impl AgentRoster {
     }
 }
 
-use tddy_session_agents::conversation_cancel_forward;
+use crate::conversation_cancel_forward;

@@ -1,13 +1,13 @@
-use crate::connection_service::agent_roster;
-use crate::connection_service::seed_codebase;
-use crate::connection_service::seeded_clone_guard;
+use crate::agent_roster;
+use crate::seed_codebase;
+use crate::seeded_clone_guard;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use uuid::Uuid;
 
 use tddy_rpc::Status;
 
-use super::agent_host_callbacks::AgentRoster;
+use crate::agent_host_callbacks::AgentRoster;
 
 impl AgentRoster {
     /// [`Self::ensure_session_room`] for the attach path, so an owning daemon has something to be
@@ -48,7 +48,7 @@ impl AgentRoster {
     /// **before** the peer is contacted and travels in the request as `requested_session_id`, so a
     /// forward that never answers still leaves this daemon able to name — and therefore tear down —
     /// whatever the peer built.
-    pub(crate) async fn claim_agent_clone(
+    pub async fn claim_agent_clone(
         &self,
         session_id: &str,
         codebase: &seed_codebase::SeedCodebase,
@@ -143,7 +143,7 @@ impl AgentRoster {
     ///
     /// The claim is dropped before the peer is asked, so a checkout the peer creates after this ran
     /// is deleted by the provisioning task that created it rather than left orphaned.
-    pub(crate) async fn unwind_agent_clone_claim(
+    pub async fn unwind_agent_clone_claim(
         &self,
         session_id: &str,
         daemon_instance_id: &str,
@@ -185,7 +185,7 @@ impl AgentRoster {
     /// On success the artifacts are handed back rather than dropped: a start can still fail at a
     /// step *after* the seed, and only this list says what to take away. The caller owns them from
     /// here — see [`Self::unwind_seeded_roster`].
-    pub(crate) async fn seed_session_agent_roster(
+    pub async fn seed_session_agent_roster(
         &self,
         session_id: &str,
         codebase: &seed_codebase::SeedCodebase,
@@ -263,7 +263,7 @@ impl AgentRoster {
     /// Each record is stamped with the checkout its agent will read, so the roster the metadata
     /// write persists names it. A record of this daemon's own agent reads the authoritative
     /// worktree and names no clone, exactly as on every other path.
-    pub(crate) async fn claim_co_located_seed_clones(
+    pub async fn claim_co_located_seed_clones(
         &self,
         session_id: &str,
         codebase: &seed_codebase::SeedCodebase,
@@ -305,7 +305,7 @@ impl AgentRoster {
     /// that brought it here, and replacing that with "the unwind also failed" would send an
     /// operator after the wrong problem. The last agent in `seeded` may never have reached the
     /// roster, which is why a detach that finds nothing is not treated as an error either.
-    pub(crate) async fn unwind_seeded_roster(
+    pub async fn unwind_seeded_roster(
         &self,
         session_id: &str,
         codebase: &seed_codebase::SeedCodebase,
@@ -338,4 +338,4 @@ impl AgentRoster {
     }
 }
 
-use tddy_session_agents::opened_session_room;
+use crate::opened_session_room;

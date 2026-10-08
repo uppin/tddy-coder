@@ -13306,6 +13306,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-session-sync",
+ "tddy-subagent-worktree",
  "tddy-testing-commons",
  "tddy-worktree-service",
  "tempfile",

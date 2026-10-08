@@ -204,13 +204,11 @@ pub struct DaemonSessionHost {
 mod session_worktree_observer;
 pub use session_worktree_observer::SessionWorktreeObserver;
 
-mod seed_codebase;
 pub use seed_codebase::*;
 
 mod stack_parent;
 pub use stack_parent::*;
 
-mod seeded_clone_guard;
 pub use seeded_clone_guard::*;
 
 mod svc_resolve_tddy_tools_path;
@@ -229,7 +227,12 @@ pub use session_acting_identity::project_github_token;
 mod hooks_and_urls;
 pub use hooks_and_urls::*;
 
-mod agent_host_callbacks;
+pub use tddy_session_agents::{
+    agent_host_callbacks, agent_roster, peer_session_answer, roster_replacement, seed_codebase,
+    seeded_clone_guard, session_dir_lookup, svc_ensure_session_room_for_agents,
+    svc_provision_agent_clone, svc_resolve_listed_worktree, svc_start_hosted_agent_clone,
+    svc_turn_end_reporter,
+};
 
 mod split_ports;
 
@@ -245,7 +248,6 @@ mod svc_agent_roster_delegators;
 
 mod svc_split_delegators;
 
-mod agent_roster;
 pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
 pub use agent_roster::{def_tool_names, qualified_agent_id};
@@ -253,18 +255,9 @@ pub use agent_roster::{def_tool_names, qualified_agent_id};
 mod claude_cli_spawn;
 pub(crate) use claude_cli_spawn::*;
 
-mod svc_resolve_listed_worktree;
 pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 
 mod terminal_bridge_impl;
-
-mod svc_ensure_session_room_for_agents;
-
-mod svc_provision_agent_clone;
-
-mod svc_start_hosted_agent_clone;
-
-mod svc_turn_end_reporter;
 
 mod svc_start_sandboxed_claude_cli_session;
 
@@ -322,7 +315,6 @@ pub(crate) use conversation_spawn::*;
 
 mod conversation_spawn_handler;
 
-mod roster_replacement;
 pub use roster_replacement::*;
 
 pub(crate) use tddy_session_files::attachment_progress::*;
@@ -571,8 +563,6 @@ pub use tddy_daemon_livekit::{first_admission_token, placement};
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
-pub mod peer_session_answer;
-mod session_dir_lookup;
 mod svc_agent_roster_wiring;
 mod svc_ensure_project_available_for_start;
 mod svc_host_builders;

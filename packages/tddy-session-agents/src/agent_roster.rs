@@ -6,11 +6,11 @@ use tddy_service::proto::session::StartSessionRequest;
 
 use tddy_rpc::Status;
 
-use crate::connection_service::seed_codebase;
+use crate::seed_codebase;
 
+use crate::agent_records;
+pub use crate::agent_records::*;
 use std::time::Duration;
-use tddy_session_agents::agent_records;
-pub use tddy_session_agents::agent_records::*;
 
 /// The `workspace` start a split placement forwards to the daemon holding the codebase.
 ///
@@ -36,7 +36,7 @@ pub use tddy_session_agents::agent_records::*;
 ///
 /// Everything else rides along, `semantic_index` included: the index is built where the worktree is,
 /// and on a split placement that is the host this request is going to.
-pub(crate) fn workspace_start_request(
+pub fn workspace_start_request(
     req: &StartSessionRequest,
     agent_instance_id: &str,
     agent_session_id: &str,
@@ -66,7 +66,7 @@ pub(crate) fn workspace_start_request(
 
 /// The revision a freshly started session's roster is at: 1 when it was seeded with agents, 0
 /// when it was started with none (PRD § Revision, not diff).
-pub(crate) fn started_roster_rev(agents: &[tddy_core::SessionAgentRecord]) -> u64 {
+pub fn started_roster_rev(agents: &[tddy_core::SessionAgentRecord]) -> u64 {
     u64::from(!agents.is_empty())
 }
 
@@ -80,7 +80,7 @@ pub(crate) fn started_roster_rev(agents: &[tddy_core::SessionAgentRecord]) -> u6
 /// A name outside the catalog is **not** read-only. The split has to fail closed: a tool this list
 /// has never heard of is one nobody has decided about, and running it against a mirror is the
 /// outcome that loses work silently.
-pub(crate) fn agent_tool_reads_the_clone(tool_name: &str) -> bool {
+pub fn agent_tool_reads_the_clone(tool_name: &str) -> bool {
     tddy_subagent_worktree::ToolEffect::of(tool_name)
         == tddy_subagent_worktree::ToolEffect::ReadOnly
 }
@@ -110,7 +110,7 @@ pub(crate) fn dispatch_envelope(response: ExecuteToolResponse) -> String {
 /// (PRD § Enforced at two layers, AC24).
 ///
 /// An agent that replaces nothing has nothing to enforce and attaches to either kind of session.
-pub(crate) fn refuse_unenforceable_withdrawal(
+pub fn refuse_unenforceable_withdrawal(
     session_id: &str,
     codebase: &seed_codebase::SeedCodebase,
     record: &tddy_core::SessionAgentRecord,
@@ -154,7 +154,7 @@ pub(crate) fn refuse_unenforceable_withdrawal(
 /// ([`tddy_core::paired_agent`]), so only the half that has an agent qualifies.
 pub(crate) fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -> bool {
     meta.sandbox == Some(true)
-        || crate::connection_service::peer_session_answer::split_pairing(meta).is_some()
+        || crate::peer_session_answer::split_pairing(meta).is_some()
         || tddy_core::paired_agent(meta).is_some()
 }
 
@@ -164,7 +164,7 @@ pub(crate) fn session_enforces_a_withdrawal(meta: &tddy_core::SessionMetadata) -
 /// Qualified rather than bare: a resume that resolved `explorer` locally would run *this* daemon's
 /// `explorer` for an entry the operator attached from another host, and report it under the id they
 /// picked. An id naming a peer is refused by resolution instead.
-pub(crate) fn roster_agent_ids(agents: &[tddy_core::SessionAgentRecord]) -> Vec<String> {
+pub fn roster_agent_ids(agents: &[tddy_core::SessionAgentRecord]) -> Vec<String> {
     agents.iter().map(|a| a.agent_id.clone()).collect()
 }
 

@@ -16,9 +16,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::connection_service::seed_codebase;
-use crate::connection_service::seed_codebase::SeededAgentClones;
-use crate::connection_service::seeded_clone_guard;
+use crate::seed_codebase;
+use crate::seed_codebase::SeededAgentClones;
+use crate::seeded_clone_guard;
+use crate::session_agent_clone::{HostedAgentClones, HostedClone, SessionAgentCloneStore};
+use crate::session_agent_roster::SessionAgentRosterStore;
+use crate::AgentRosterState;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;
@@ -27,19 +30,14 @@ use tddy_daemon_livekit::session_admission_service::SessionAdmissionRegistry;
 use tddy_daemon_livekit::session_room::{OpenedSessionRoom, SessionRoomRegistry, WorktreeSnapshot};
 use tddy_model_registry::ModelRegistryStore;
 use tddy_rpc::Status;
-use tddy_service::proto::exec_tools::ExecuteToolResponse;
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
-use tddy_session_agents::session_agent_clone::{
-    HostedAgentClones, HostedClone, SessionAgentCloneStore,
-};
-use tddy_session_agents::session_agent_roster::SessionAgentRosterStore;
-use tddy_session_agents::AgentRosterState;
+use tddy_service::proto::exec_tools::ExecuteToolResponse;
 
 /// The capabilities of the session host the agent topic calls and does not own.
 ///
 /// Implemented once, on the host, in wiring (`svc_agent_host_ports`).
 #[async_trait::async_trait]
-pub(crate) trait AgentHostCallbacks: Send + Sync {
+pub trait AgentHostCallbacks: Send + Sync {
     /// Measure a checkout that lives on a peer: the same answer a caller's own
     /// `GetWorktreeSnapshot` gets, peer routing and blocking-pool budget included.
     async fn worktree_snapshot(
@@ -86,21 +84,21 @@ pub(crate) trait AgentHostCallbacks: Send + Sync {
 /// Built per call by the host (`DaemonSessionHost::agent_roster`). Every shared field is the `Arc`
 /// the host holds, so a clone of this talks to the stores, rooms and peers the host does.
 #[derive(Clone)]
-pub(crate) struct AgentRoster {
-    pub(crate) config: DaemonConfig,
-    pub(crate) tddy_data_dir: std::path::PathBuf,
-    pub(crate) user_resolver: SessionUserResolver,
-    pub(crate) peer_routing: PeerRouting,
-    pub(crate) room_roster: Arc<dyn RoomRoster>,
-    pub(crate) session_rooms: Arc<SessionRoomRegistry>,
-    pub(crate) session_agent_rosters: Arc<SessionAgentRosterStore>,
-    pub(crate) session_agent_clones: Arc<SessionAgentCloneStore>,
-    pub(crate) hosted_agent_clones: Arc<HostedAgentClones>,
-    pub(crate) roster_keepalive_interval: Duration,
-    pub(crate) session_admissions: Arc<SessionAdmissionRegistry>,
-    pub(crate) model_registry: Option<Arc<ModelRegistryStore>>,
+pub struct AgentRoster {
+    pub config: DaemonConfig,
+    pub tddy_data_dir: std::path::PathBuf,
+    pub user_resolver: SessionUserResolver,
+    pub peer_routing: PeerRouting,
+    pub room_roster: Arc<dyn RoomRoster>,
+    pub session_rooms: Arc<SessionRoomRegistry>,
+    pub session_agent_rosters: Arc<SessionAgentRosterStore>,
+    pub session_agent_clones: Arc<SessionAgentCloneStore>,
+    pub hosted_agent_clones: Arc<HostedAgentClones>,
+    pub roster_keepalive_interval: Duration,
+    pub session_admissions: Arc<SessionAdmissionRegistry>,
+    pub model_registry: Option<Arc<ModelRegistryStore>>,
     /// The host's capabilities that are not fields.
-    pub(crate) host: Arc<dyn AgentHostCallbacks>,
+    pub host: Arc<dyn AgentHostCallbacks>,
 }
 
 impl AgentRoster {
@@ -128,8 +126,8 @@ impl AgentRoster {
 /// A shallow clone of the service (every mutable field is behind an `Arc`) rather than the service
 /// itself, so the free spawn functions can be handed the one collaborator they need without naming
 /// the concrete daemon type in their signatures.
-pub(crate) struct DaemonSeedCloneClaimant {
-    pub(crate) service: AgentRoster,
+pub struct DaemonSeedCloneClaimant {
+    pub service: AgentRoster,
 }
 
 #[async_trait::async_trait]

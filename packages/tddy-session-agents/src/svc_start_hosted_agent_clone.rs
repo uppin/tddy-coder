@@ -4,15 +4,15 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use std::{path::Path, sync::Arc};
 
-use crate::connection_service::agent_roster;
-use crate::connection_service::peer_session_answer;
+use crate::agent_roster;
+use crate::peer_session_answer;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 
 use tddy_rpc::Status;
 
-use super::agent_host_callbacks::AgentRoster;
+use crate::agent_host_callbacks::AgentRoster;
 
 /// The system prompt one conversation opens under: the caller's override where it sent one, the
 /// def's own where it did not.
@@ -44,7 +44,7 @@ impl AgentRoster {
     /// would push it past a deadline that is already generous for a `git clone`. The mirror reports
     /// its own readiness afterwards (`ReportAgentCloneState`), which is the only account of it that
     /// can be trusted — nothing on the facilitating daemon can see this checkout.
-    pub(crate) async fn start_hosted_agent_clone(
+    pub async fn start_hosted_agent_clone(
         &self,
         placement: &tddy_service::proto::session::AgentClonePlacement,
         sessions_base: &Path,
@@ -67,11 +67,10 @@ impl AgentRoster {
             .map_err(|e| {
                 Status::failed_precondition(format!("this daemon cannot hold an agent clone: {e}"))
             })?;
-        let worktree_path =
-            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
-                sessions_base,
-                codebase_session_id,
-            )?;
+        let worktree_path = crate::peer_session_answer::resolve_worktree_root_for_session(
+            sessions_base,
+            codebase_session_id,
+        )?;
         // The repository the checkout was cut from, which is where its WIP ref is fetched from.
         let projects_dir = projects_path_for_user(
             &self
@@ -106,7 +105,7 @@ impl AgentRoster {
     /// Queuing it would make a 90-second `git clone` look like a hung agent, and serving it would
     /// read an empty checkout and report "not found" for a file that is simply not there yet
     /// (PRD AC33).
-    pub(crate) fn refuse_unready_clone(
+    pub fn refuse_unready_clone(
         &self,
         session_id: &str,
         record: &tddy_core::SessionAgentRecord,
@@ -123,10 +122,7 @@ impl AgentRoster {
     /// own* prompts with an error naming that daemon, while the rest of the roster keeps working
     /// (PRD AC35). Waiting out `PEER_FORWARD_TIMEOUT` reaches the same answer thirty seconds later
     /// and tells the operator only that something timed out.
-    pub(crate) async fn refuse_departed_daemon(
-        &self,
-        daemon_instance_id: &str,
-    ) -> Result<(), Status> {
+    pub async fn refuse_departed_daemon(&self, daemon_instance_id: &str) -> Result<(), Status> {
         let eligible = self.peer_routing.eligible_instance_ids();
         departed_daemon::refuse_departed_daemon(daemon_instance_id, eligible)
     }
@@ -135,7 +131,7 @@ impl AgentRoster {
     ///
     /// The id travels rather than being minted there, so a forward that times out still leaves this
     /// daemon able to name — and therefore cancel — whatever the peer opened.
-    pub(crate) async fn forward_open_agent_conversation(
+    pub async fn forward_open_agent_conversation(
         &self,
         req: &OpenAgentConversationRequest,
         owner: &str,
@@ -157,7 +153,7 @@ impl AgentRoster {
     ///
     /// `system_prompt` replaces the def's own for this conversation alone — see
     /// [`conversation_system_prompt`]; `None` leaves the def's in place.
-    pub(crate) async fn open_local_agent_session(
+    pub async fn open_local_agent_session(
         &self,
         session_id: &str,
         session_dir: &Path,
@@ -203,10 +199,10 @@ impl AgentRoster {
     /// Takes the same override as [`Self::open_local_agent_session`], for the same reason: the
     /// caller opening the conversation chose it, and which host happens to hold the checkout is
     /// not something it can see.
-    pub(crate) async fn open_owned_agent_session(
+    pub async fn open_owned_agent_session(
         &self,
         agent_id: &str,
-        clone: &Arc<tddy_session_agents::session_agent_clone::HostedClone>,
+        clone: &Arc<crate::session_agent_clone::HostedClone>,
         system_prompt: Option<&str>,
     ) -> Result<Box<dyn tddy_discovery::subagent::SubagentSession>, Status> {
         let id = tddy_core::AgentId::parse(agent_id)
@@ -248,7 +244,7 @@ impl AgentRoster {
     /// access would be one YAML field away from writing anywhere this daemon can.
     pub(crate) fn owned_agent_codebase_access(
         &self,
-        clone: &Arc<tddy_session_agents::session_agent_clone::HostedClone>,
+        clone: &Arc<crate::session_agent_clone::HostedClone>,
     ) -> tddy_discovery::subagent::CodebaseAccess {
         let service = self.clone();
         let clone = Arc::clone(clone);
@@ -273,7 +269,7 @@ impl AgentRoster {
 
     /// How an agent this daemon serves locally reaches files: the session's own worktree, through
     /// the same tool engine every other exec-tool caller goes through.
-    pub(crate) fn local_agent_codebase_access(
+    pub fn local_agent_codebase_access(
         &self,
         session_id: &str,
         session_dir: &Path,
@@ -298,8 +294,8 @@ impl AgentRoster {
                     &session_id,
                     &session_dir,
                     &agent_id,
-                    tddy_session_agents::session_agent_status::ManagedAgentState::ExecutingTool,
-                    tddy_session_agents::session_agent_status::tool_call_summary(&tool_name, &args),
+                    crate::session_agent_status::ManagedAgentState::ExecutingTool,
+                    crate::session_agent_status::tool_call_summary(&tool_name, &args),
                 );
                 let request = ExecuteToolRequest {
                     session_token,
@@ -332,7 +328,7 @@ impl AgentRoster {
                     &session_id,
                     &session_dir,
                     &agent_id,
-                    tddy_session_agents::session_agent_status::ManagedAgentState::Prompting,
+                    crate::session_agent_status::ManagedAgentState::Prompting,
                     format!("{} finished", request.tool_name),
                 );
                 answer
@@ -350,10 +346,10 @@ impl AgentRoster {
         session_id: &str,
         session_dir: &Path,
         agent_id: &str,
-        state: tddy_session_agents::session_agent_status::ManagedAgentState,
+        state: crate::session_agent_status::ManagedAgentState,
         summary: impl AsRef<str>,
     ) {
-        tddy_session_agents::note_agent_activity(
+        crate::note_agent_activity(
             &self.session_agent_rosters,
             self.hosted_clone_for(session_id).is_some(),
             session_id,
@@ -365,10 +361,10 @@ impl AgentRoster {
     }
 }
 
-use tddy_session_agents::hosted_clone_start;
+use crate::hosted_clone_start;
 
-use tddy_session_agents::departed_daemon;
+use crate::departed_daemon;
 
-use tddy_session_agents::conversation_open_forward;
+use crate::conversation_open_forward;
 
-use tddy_session_agents::clone_readiness;
+use crate::clone_readiness;
