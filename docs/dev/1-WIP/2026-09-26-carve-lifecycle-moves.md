@@ -901,6 +901,15 @@ Preflighted (`check --deep`, nothing written; the hand pre-move edits and the `t
 - **`DemoVmServiceImpl` and `demo_vm_entry` stay in lifecycle for now** (R5b follows the constructor fix).
 - **After:** lifecycle **610** passed / the same 22 failed / 1 ignored; `tddy-demo-vm-service` 0 (no test moved): sum 610 as before. clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean.
 
+### Host-block node (inside #536, developer override 2026-10-08)
+
+- **Engine, own commit:** three `move_item` operations (`items` anchor `<DaemonSessionHost>`, `name` = a new module under `connection_service`, `reexport: outside`): `session_worktree_observer.rs` → `svc_worktree_observer_wiring` (`with_worktree_observer`),
+  `session_acting_identity.rs` → `svc_session_identity_wiring` (`project_account_assignments`, `session_account_access`, `session_identity`), `conversation_worktree_op.rs` → `svc_conversation_worktree_wiring` (`conversation_worktree_from_jail`).
+  A grep of `^impl.*DaemonSessionHost` finds no other host block in a launch-topic module (the others are the wiring files).
+- **Hand edits after the move (build corrections):** `svc_session_identity_wiring.rs`: `super::tddy_session_split::service_util::` → `super::service_util::` (the engine mis-spelled a facade path); the 17 unused imports it left in the three source modules and the new modules removed by `cargo fix` (not hand-typed), `cargo fmt`.
+  Filed: [`2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block`](../todo/2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block.md); the todo [`launch-topic-modules-still-carry-host-impls`](../todo/2026-10-08-launch-topic-modules-still-carry-host-impls.md) is closed by this commit.
+- **After:** lifecycle **610** passed / the same 22 failed / 1 ignored (unchanged); clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean.
+
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 
 Run on the tree after R1's `agent_list_mapping`, to learn every refusal in one go. **No milestone after R1 was applied**

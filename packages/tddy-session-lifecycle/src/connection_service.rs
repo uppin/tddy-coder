@@ -557,7 +557,10 @@ pub use tddy_daemon_livekit::{first_admission_token, placement};
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
 mod svc_agent_roster_wiring;
+mod svc_conversation_worktree_wiring;
 mod svc_ensure_project_available_for_start;
 mod svc_host_builders;
 mod svc_index_workspace_worktree;
 mod svc_resume_sandboxed_claude_cli_session;
+mod svc_session_identity_wiring;
+mod svc_worktree_observer_wiring;
