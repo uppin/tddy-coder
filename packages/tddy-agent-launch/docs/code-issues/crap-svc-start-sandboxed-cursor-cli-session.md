@@ -1,11 +1,12 @@
 # crap: start_sandboxed_cursor_cli_session — untested, and the sweep ranked it low
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:31` — `start_sandboxed_cursor_cli_session`
+**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs:35` — `start_sandboxed_cursor_cli_session`
 **Category:** CRAP
 **Detected:** 2026-09-18 by `tddy-tools analyze coverage` + `report` (245 tests across 96 files, join rate 51.9%)
 **Metrics:** **CRAP 1,722** · complexity **41** · **never executed by any test** · rank **5/50** in this crate · 465 lines · nesting depth 3
 **Restructure:** **no** — tests first. Same rule as `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`
 **Status:** Open — converted 2026-10-07 by #534 without tests, against this record's rule (developer decision D10 (a)); the `TODO(crap-svc-start-sandboxed-cursor-cli-session)` marker in the source points here; still never executed — **unclaimed**
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:32`
 
 ## Measurement history
 
@@ -17,6 +18,7 @@
 | 2026-10-04 | — | — | never executed | — | touched by #573 (`#live-plan` 14/15): one added line, `env.extend(self.restructure_tools_env())`, beside the existing `lsp_tools_env` one (file 445 → 446 lines); still never executed by any test |
 | 2026-10-05 | — | — | never executed | 416 | touched by #532 (`#carve` 17/21): +1 (415 → 416, fn line to closing brace) — the seed-clone claim goes through `.agent_roster()`. No branch added; still never executed by any test |
 | 2026-10-07 | — | — | never executed | 421 | converted by #534 (`#carve` 19/21) onto `LaunchSessions` by the **header-only edit** (developer decision D10 (a)): the `impl` header, the roster calls through `self.agent_roster`, the host call through `self.host`, and A4 import paths. **No branch added**, but the function grew **416 → 421** (fn line to closing brace at the base `7abe4a74` and at HEAD) — rustfmt wrapped five lines the longer paths and the extra `.agent_roster` hop push over 100 columns. File 447 → 453 production lines (the extra six are the `TODO(crap-svc-start-sandboxed-cursor-cli-session)` marker above the `impl`). Still never executed by any test; the "tests first" rule this record states is **deferred, not met** **421 accepted** by the developer (2026-10-07): the planned bound (≤ 414) was below the base's 416 and unreachable by a token-only edit |
+| 2026-10-09 | — | — | — | 429 | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 
 ## What the tool found
 

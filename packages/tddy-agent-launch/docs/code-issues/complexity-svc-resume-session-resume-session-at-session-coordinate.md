@@ -1,6 +1,6 @@
 # complexity: resume_session_at_session_coordinate
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers/svc_resume_session.rs:29` — `resume_session_at_session_coordinate`
+**Location:** `packages/tddy-agent-launch/src/svc_resume_session.rs:31` — `resume_session_at_session_coordinate`
 **Moved:** 2026-09-24 by #524 plan `08`, from `connection_service/session_coordinate_handlers.rs:271`; this record was `complexity-session-coordinate-handlers-resume-session-at-session-coordinate.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -10,6 +10,7 @@
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — narrowed 2026-09-24 by #524 (242 → 137); still over the 60-line budget — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/session_coordinate_handlers/svc_resume_session.rs:30`
 
 ## Measurement history
 
@@ -20,6 +21,7 @@
 | 2026-09-24 | 137 | — | — | — | #524: moved by plan `08`; DRY #2 folded its inline `tddy-coder` spawn into `spawn_tddy_coder(ToolSpawnPlan)` (242 → 137 by the plan's count). Nesting, branches and exits not re-derived |
 | 2026-10-07 | 138 | — | — | — | touched by `#carve` 18/21: +1 (137 → 138, rustfmt wrap of a re-pointed call). No control flow added |
 | 2026-10-08 | 141 | — | — | — | `#carve` 20/21: converted to `impl LaunchSessions`; +3 against `origin/master` (138 -> 141, fn line to closing brace) from rustfmt re-wraps of re-pointed calls (`self.agent_roster.…`, `self.split_sessions.…`). No control flow added. Over the 60-line budget: **kept open** |
+| 2026-10-09 | unchanged | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 
 ## What the tool found
 

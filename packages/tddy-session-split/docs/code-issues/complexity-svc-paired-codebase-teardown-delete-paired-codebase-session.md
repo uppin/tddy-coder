@@ -1,6 +1,6 @@
 # complexity: delete_paired_codebase_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent/svc_paired_codebase_teardown.rs:78` — `delete_paired_codebase_session`
+**Location:** `packages/tddy-session-split/src/svc_paired_codebase_teardown.rs:78` — `delete_paired_codebase_session`
 **Moved:** 2026-09-24 by #524 plan `05` (`8b55523e`), from `connection_service/svc_spawn_split_agent.rs:337`, with the teardown it belongs to; this record was `complexity-svc-spawn-split-agent-delete-paired-codebase-session.md`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
@@ -9,6 +9,7 @@
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — regressed (61 → 95 lines since detection, measured 2026-09-24; none of it from #509, unattributed) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-session-split`, from `packages/tddy-session-lifecycle/src/connection_service/svc_spawn_split_agent/svc_paired_codebase_teardown.rs:78`
 
 ## Measurement history
 
@@ -19,6 +20,7 @@
 | 2026-09-24 | unchanged | — | — | — | #524: moved whole by plan `05`, body unchanged. (The plan's fn-line-to-closing-brace count gives 95 both before and after the move; the 61 above is the detection scan's measure) |
 | 2026-10-05 | 96 | — | — | — | touched by the same-crate moves: `split_pairing` and `peer_has_no_such_session` are now named through `connection_service::peer_session_answer`, and rustfmt wraps the longer `let Some((codebase_daemon, codebase_session)) = …` over two lines: **+1** (95 to 96, fn line to closing brace on `origin/master` and at HEAD). The function starts at `:79` on both, not `:83` as the header said. Nesting, branches and exits not re-derived |
 | 2026-10-07 | 96 | — | — | — | touched by `#carve` 18/21 (`SplitSessions`) and **unchanged in length**: it moved to `impl SplitSessions`, `self.delete_session_at_session_coordinate(..)` became `self.host.delete_session(..)` (`SplitHost`) and `self.common_room_slot(..)` became `self.peer_routing.common_room_slot(..)`; rustfmt re-wraps the `Box::pin(..)` call and the count stays 96 (fn line to closing brace at `4157e47f` and at HEAD), now at `:78`. Nesting, branches and exits not re-derived |
+| 2026-10-09 | 96 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-session-split` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 
 ## What the tool found
 

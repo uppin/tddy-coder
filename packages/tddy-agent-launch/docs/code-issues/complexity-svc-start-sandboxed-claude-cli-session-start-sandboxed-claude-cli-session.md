@@ -1,6 +1,6 @@
 # complexity: start_sandboxed_claude_cli_session
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs:96` — `start_sandboxed_claude_cli_session`
+**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_claude_cli_session.rs:97` — `start_sandboxed_claude_cli_session`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **615 lines** · **nesting depth 5** · 1 parameters · 17 branch/match lines · 32 early exits
@@ -9,6 +9,7 @@
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — narrowed 2026-09-24 by #524 (615 → 342) — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs:96`
 
 ## Measurement history
 
@@ -20,6 +21,7 @@
 | 2026-10-05 | 342 | — | — | — | touched by the same-crate moves and **unchanged by them**: the file gained the `mod jail_env_builders;` line when that module was re-parented under it (494 to 495 production lines); the function is 342 lines at `origin/master` and at HEAD (fn line to closing brace), still at `:96`. Nesting, branches and exits not re-derived |
 | 2026-10-05 | 343 | — | — | — | touched by #532 (`#carve` 17/21): +1 (342 → 343, fn line to closing brace) — the seed-clone claim goes through `.agent_roster()`. No control flow added; nesting, branches and exits not re-derived |
 | 2026-10-07 | 343 | — | — | — | touched by #534 (`#carve` 19/21): converted onto `LaunchSessions` by an `impl` header change, the roster call through `self.agent_roster`, and imports re-pointed (A4). **Unchanged: 343** (fn line to closing brace, `:94`–`:436`, the same count at the base `7abe4a74`); file 496 → 494 production lines. No branch added; still never executed on macOS (its suites sit in the known-red 22 — the sandbox RPC bridge is never installed), so its preservation rests on compiling, the token-only edit rule and Linux CI. Nesting, branches and exits not re-derived |
+| 2026-10-09 | 344 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 
 ## What the tool found
 

@@ -1,6 +1,6 @@
 # complexity: ensure_project_available_for_start
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_ensure_project_available_for_start.rs:123` — `ensure_project_available_for_start`
+**Location:** `packages/tddy-agent-launch/src/svc_ensure_project_available_for_start.rs:124` — `ensure_project_available_for_start`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **157 lines** · **nesting depth 8** · 1 parameters · 9 branch/match lines · 2 early exits
@@ -8,6 +8,7 @@
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — narrowed 2026-09-24 by #524 (158 → 99); still over the 60-line budget — **unclaimed**
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_ensure_project_available_for_start.rs:123`; this record was `complexity-svc-resolve-listed-worktree-ensure-project-available-for-start.md`
 
 ## Measurement history
 
@@ -20,6 +21,7 @@
 | 2026-10-05 | 99 | — | — | — | touched by the same-crate moves and **unchanged by them**: its file lost the `mod session_room_opening;` line when that module was re-parented under `svc_ensure_session_room_for_agents`; this function is identical at `origin/master` and HEAD (fn line to closing brace), still at `:30` |
 | 2026-10-05 | 99 | — | — | — | touched by #532 (`#carve` 17/21) and **unchanged by it**: the file's agent-def functions became `impl AgentRoster` and `session_dir_lookup` left its `mod` list; this function is 99 lines at `origin/master` and at HEAD (fn line to closing brace), now at `:31` |
 | 2026-10-08 | 99 | — | — | — | `#carve` 20/21: **moved** by the engine (`move_item`) to `svc_ensure_project_available_for_start.rs:123` and converted to `impl LaunchSessions`; 99 lines at `origin/master` and at HEAD (fn line to closing brace), unchanged. Nesting not re-derived. Over the 60-line budget: **kept open**; **Location** line below updated |
+| 2026-10-09 | 99 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 
 ## What the tool found
 

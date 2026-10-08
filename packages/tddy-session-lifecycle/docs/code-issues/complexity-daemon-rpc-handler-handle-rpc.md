@@ -17,6 +17,7 @@
 | 2026-09-24 | 147 | — | re-measured for #524 (2026-09-24): unchanged, and not touched by it |
 | 2026-10-01 | 182 | 8 | **worse** by 3 (179 → 182, same fn-line-to-closing-brace count on `master` and HEAD; the 147 above predates growth that was not recorded) in PR #560 (`#agent-worktree` 1/4): one more arm, `(EXEC_TOOL_SERVICE, "ConversationWorktree")`, delegating to `conversation_worktree_from_jail`. Nesting unchanged |
 | 2026-10-03 | 185 | 8 | **worse** by 3 (182 → 185, fn line to closing brace on `0ce696aa` and `4f2a3b66`) in PR #576 (caller sync): the `ConversationWorktree` arm passes the jail's bound session, `conversation_worktree_from_jail(&self.bound, payload)`, which rustfmt wraps over four lines. The handler is per jail (`BoundJailSession`); no arm added, nesting unchanged |
+| 2026-10-09 | 185 | — | `#carve` 21/21 (#536): re-measured, **unchanged**: 185 (fn line to closing brace) on `origin/master` (`468b368f9`) and on HEAD, same file `connection_service/daemon_rpc_handler.rs:26`. It is wiring (the RPC dispatch table) and stays in lifecycle by the node's contract; the node moved nothing out of it. Still open, unclaimed |
 
 ## What the tool found
 

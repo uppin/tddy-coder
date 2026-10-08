@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle` becomes a wiring crate: every converted topic moves into its receiver with the restructure engine
 
 **Date**: 2026-09-26
-**Status**: Implemented on the branch, **not green**: R1-R10 (R5 as R5a/R5b) done; B5 is ~1k over its target and `test_util` is not gated; the final gates found two tests broken by path (one failing in `tddy-daemon-kernel`, one target not compiling in `tddy-daemon-sandbox`, see Validation results). The developer's rulings of 2026-10-08 are recorded under Decisions and "Developer overrides"
+**Status**: Implemented on the branch, CI green on `1712a9305`: R1-R10 (R5 as R5a/R5b) done; B1-B4, B6, B7 pass (B4 with the approved `cursor_cli_spawn.rs` deferral); **B5 is ~1k over its target and `test_util` is not gated, awaiting the developer's call**. The two tests the final gates found broken by path were fixed in `1712a9305`. The developer's rulings of 2026-10-08 are recorded under Decisions and "Developer overrides"
 **Type**: Refactor (crate extraction by engine moves; no behaviour change)
 **Stack**: `#carve` 21/21, branch `feature/carve/lifecycle-moves`, on top of `#carve` 20
 (`feature/carve/lifecycle-ports-launch-start`). Plan label **17**, the move node
@@ -243,8 +243,8 @@ per-crate baseline → B-checks for that receiver.
   `effective_spawn_branch`, `connection_service::*` and the rest daemon-rpc names
 - [~] **R10 lifecycle's manifest** (D14 done; `test_util` not gated: consumers' manifests would change, see Validation results): drop dependencies nothing names any more, as D14 rules; `test_util`
   as ruled
-- [~] **B1–B7**: B1, B2, B3 pass; **B4 passes with one accepted exception** (`cursor_cli_spawn.rs`); **B5 is ~1k over its target** (`test_util` ungated); **B6 holds for the consumers but a `tddy-daemon-sandbox` test target no longer compiles; B7 is 1,256 of 1,257 with one new failure in `tddy-daemon-kernel`** (both path-reading tests, open). Same state as the Final Checklist
-- [ ] `restructure verify --against <16e tip>` per receiver: every statement accounted for
+- [~] **B1–B7**: B1, B2, B3, B4 (one approved deferral: `cursor_cli_spawn.rs`), B6 and B7 (1,257 of 1,257) pass; **B5 is ~1k over its target** (`test_util` ungated; **not yet approved by the developer**). Same state as the Final Checklist
+- [x] `restructure verify --against <16e tip>`: every statement accounted for (workspace-wide, see "Node-level checks": 24 lost and 29 gained, all re-spelled paths, rustfmt wrapping, facade doc comments and the constructor)
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -950,12 +950,14 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   Files ≥ 500: the new crates have one, `tddy-agent-launch/src/cursor_cli_spawn.rs`: **563 by this counter (549 before the move)**; `/pr-wrap`'s step 3.5 script, which counts to the first `#[cfg(test)]`, says 548 → 562. The receivers' large files are inherited (`session_room.rs` 2,876, `livekit_peer_discovery.rs` 1,659, `config.rs` 1,529, `session_agent_clone.rs` 1,158, `service.rs` 1,150, `host_documents.rs` 822, …).
   ⚠ **Accepted exception, with the developer's consent to defer its split in this PR:** `cursor_cli_spawn.rs` is the T1 file this node moves whole. Its +14 lines are paths re-spelled through their defining crate, the `rustfmt` wrapping those longer paths cause, and `mod chat; mod resume;` becoming `pub use crate::{chat, resume};`; no statement changed.
   Filed: [`2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines`](../todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md).
+- **`restructure verify --against 468b368f9`** (16e's tip = `origin/master`), run 2026-10-09 on the branch tip with the debug `tddy-tools`; it compares the whole tree, not one receiver at a time, so it is the per-receiver check made once. `371,133 statements before, 371,138 after`; 100 re-pointed through a module qualifier, 272 visibility-normalised, 88 `cfg(test)` gate lines excused; **exit 1, "24 statement(s) the tree lost and 29 it gained"**, and every one of the 53 is accounted for by hand: (a) paths re-spelled through their defining crate and the rustfmt wrapping they cause (`crate::connection_service::peer_session_answer::…` → `crate::peer_session_answer::…` / `tddy_session_agents::…`, `daemon_hook_urls`, `staging_root_for`, `prompt_with_attached_changeset`, the two `spawn_*_cli_process` signatures, `Arc<tddy_cli_sessions::…::PtyHandle>`, the `session_notification_bus` field); (b) the four `include_str!` / `source_of` paths of the two path-reading tests (`1712a9305`); (c) the approved `DemoVmServiceImpl::new(host)` → `new(state)` constructor and its three call sites, with `state: host.demo_vm_service_state()` / `Self { state }`; (d) the four crate-level `//!` doc lines and the one `/// … must request the stdio transport` line that name the new crates. No statement was lost or invented outside those. (The earlier per-receiver normalised-identity result, 100 of 103 files identical and the three host blocks byte-identical in wiring files, agrees. The todo this rested on, `restructure-verify-cannot-exit-zero-for-an-extract-module`, was closed by #539, which is why its link above no longer resolves.)
 - **B5** lifecycle end state: **5,587 production lines** (from 20.3k), against the ~4.4k–4.6k target. The ~1k over is the 366-line `test_util` (not gated, above; [todo](../todo/2026-10-08-session-lifecycle-test-util-is-not-gated-behind-a-test-util-feature.md)), the three wiring modules the host-block node created (15 + 57 + 48 = 120 lines), the facade lines for each receiver, and `PeerRouted*` (stays by the developer's ruling of 2026-09-25; D13 accepted ~4.5k, so it is part of the target, not of the overshoot). The wiring definition holds: no topic module remains
   (`cargo` shows only `svc_*_ports`, builders, `handler_state`, delegators, `daemon_rpc_handler`, the terminal adapter and bridge, `local_exec_tools` (D7-A), `svc_resolve_os_user` (wiring), `svc_demo_vm_ports` (`demo_vm_entry`), and facades). Largest file: `connection_service.rs`, 525. ⚠ over the target by ~1k; ✅ for the wiring definition.
 - **B6** consumers: no edit, except the two `tddy-daemon` call sites forced by the approved `DemoVmServiceImpl::new(state)` change. `cargo check --all-targets` clean on `tddy-daemon`, `tddy-daemon-rpc`, `tddy-telegram-control`, `tddy-model-registry`, `tddy-tool-engine`, `tddy-worktree-service`. ✅ with that exception. (`tddy-desktop` builds on CI only.)
   ⚠ **Qualified by the final gates:** the consumers compile, but a test in `tddy-daemon-sandbox` (not a consumer) no longer compiles because it `include_str!`s moved lifecycle files; see "Open: two tests …".
 - **B7** per-crate baseline: before R1, lifecycle 658 + kernel 126 + livekit 178 + files 160 + activity 45 + demo-runner 15 + agents 75 = **1,257**. *(This paragraph originally claimed the same sum after R9, taking kernel's 126 from the R0 baseline instead of running it. That was wrong; it is superseded by the measured run.)*
-  **Measured at the end:** 564 + 125 + 178 + 160 + 47 + 15 + 75 + 37 + 9 + 0 + 46 = **1,256 passed**, 22 known failures by name **plus one new** (`tddy-daemon-kernel`'s `telegram_extraction_shape`), 1 ignored. ❌ See "Final scoped gates" and "Open: two tests …".
+  **Measured at the end (tip `93b12a429`):** 564 + 125 + 178 + 160 + 47 + 15 + 75 + 37 + 9 + 0 + 46 = **1,256 passed**, 22 known failures by name **plus one new** (`tddy-daemon-kernel`'s `telegram_extraction_shape`), 1 ignored. ❌ See "Final scoped gates" and "Open: two tests …".
+  **Re-measured after `1712a9305` (2026-10-09), `./test -p tddy-daemon-kernel`: 126 passed, 0 failed** (the sum of every `test result` line in `.verify-result.txt`). Every other crate is unchanged from the table below (that commit touched only two test files, in `tddy-daemon-kernel` and `tddy-daemon-sandbox`). The sum is therefore 564 + **126** + 178 + 160 + 47 + 15 + 75 + 37 + 9 + 0 + 46 = **1,257 passed**, lifecycle's 22 known failures by name, 1 ignored: the expected 1,257. ✅ The per-crate figures other than the kernel's are the 2026-10-08/09 measurements, not re-run on `1712a9305`, which does not touch their sources.
 
 ### Final scoped gates (`/pr-wrap` step 6, run 2026-10-08/09 on tip `93b12a429`; scoped to the touched packages, never the workspace)
 
@@ -1011,6 +1013,13 @@ because it is in a package the node did not list.
    Found by a grep of the workspace's tests for the paths of the 103 moved or deleted lifecycle files (string literals `connection_service/<file>.rs` and `session-lifecycle/src/<file>.rs`); `tddy-daemon-rpc`'s `rpc_handlers_shape` (10 passed) and `tddy-daemon-auth`'s `login_time_token_store_is_retired` (4 passed) also scan lifecycle's sources and pass.
    **Not found by that grep, so unverified:** a test that builds such a path from parts, and the other workspace tests that were not run.
 
+#### Resolution (2026-10-09, commit `1712a9305` and a re-run)
+
+1. **`tddy-daemon-kernel` fixed.** `telegram_extraction_shape.rs` reads the file at its new path (`tddy-session-split`); `./test -p tddy-daemon-kernel`: **126 passed, 0 failed**, the R0 baseline. ✅
+2. **`tddy-daemon-sandbox` compiles again** as far as this PR is concerned: `sandbox_session_stdio_acceptance.rs` now names `tddy-agent-launch/src/` (`cargo test -p tddy-daemon-sandbox --test sandbox_session_stdio_acceptance`: the target builds, 1 passed, 1 failed). The failure and a second target are **pre-existing on macOS, not caused by this PR**, checked against `origin/master` (`468b368f9`, the merge-base: #535) in a scratch worktree, removed afterwards:
+   - `real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_over_stdio` (`sandbox_session_stdio_acceptance.rs:186`) **fails identically on `origin/master`**, same line, same panic, with the same `tddy-sandbox-runner` and `tddy-tools` binaries (the test was pointed at them with `CARGO_BIN_EXE_*`): `tool dispatch timed out: Elapsed(())`. That is the macOS Seatbelt harness (the jailed runner never answers the tool IPC call in time), not a moved path: the file's only differences from master are the four re-spelled `include_str!` paths. The sibling test `sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags` passes on both.
+   - `sandbox_stdio_seatbelt_acceptance` **does not compile on `origin/master` either** (`error[E0425]: cannot find type SandboxHandle in this scope`, x3). This PR does not touch that file (its last change is #560, `5d250a7ba`); the missing import is #560's. Not fixed here (unrelated file). A bare `cargo test -p tddy-daemon-sandbox` therefore stops at that target on macOS, on master and on this branch alike; run the targets one by one to see the rest.
+
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 
 Run on the tree after R1's `agent_list_mapping`, to learn every refusal in one go. **No milestone after R1 was applied**
@@ -1032,7 +1041,7 @@ Run on the tree after R1's `agent_list_mapping`, to learn every refusal in one g
 - [x] Rebase onto 16e once it is green
 - [x] R0: re-run the cycle check on 16e's tip; record the per-crate baselines
 - [x] R1–R10 (R5 as R5a/R5b; `test_util` gating not done)
-- [ ] Fix the two path-reading tests the final gates found (`tddy-daemon-kernel/tests/telegram_extraction_shape.rs:204`, `tddy-daemon-sandbox/tests/sandbox_session_stdio_acceptance.rs:204-216`): not done by `/pr-wrap` step 6, which reports without editing
+- [x] Fix the two path-reading tests the final gates found (`tddy-daemon-kernel/tests/telegram_extraction_shape.rs:204`, `tddy-daemon-sandbox/tests/sandbox_session_stdio_acceptance.rs:204-216`): fixed in `1712a9305`; kernel 126/0, see "Resolution"
 - [ ] `/analyze-code-issues` on every receiver that gained code
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
@@ -1046,10 +1055,10 @@ Tasks executed at wrap:
 - [x] B1: `cargo tree -i tddy-session-lifecycle -e normal,dev --workspace` shows no receiver
 - [x] B2: the edge set matches the approved table, and nothing more
 - [x] B3: no reverse edge between receivers (`cargo tree` per receiver)
-- [~] B4: every receiver ≤ 10k ✅; no file ≥ 500 in the new crates ⚠ **except `cursor_cli_spawn.rs` (563, was 549; accepted, split deferred with the developer's consent, todo filed)**
+- [x] B4: every receiver ≤ 10k ✅; no file ≥ 500 in the new crates except `cursor_cli_spawn.rs` (563, was 549): **approved deferral** — the developer consented to defer its split in this PR (the file moves whole, +14 lines are re-spelled paths and rustfmt wrapping, no statement changed); todo filed
 - [~] B5: lifecycle meets the wiring definition (yes) at 5.6k, ~1k over the D13 target (`test_util` ungated, see Validation results)
-- [~] B6: public paths resolve; consumers compile (`cargo check --all-targets` clean) and are unedited except the two `DemoVmServiceImpl::new(state)` call sites ✅; ⚠ a non-consumer test target (`tddy-daemon-sandbox`'s `sandbox_session_stdio_acceptance`) no longer compiles (open, see Validation results)
-- [ ] B7: per-crate baseline with moved tests accounted: **1,256 passed of 1,257 expected; the 22 known failures by name plus one new, in `tddy-daemon-kernel`** (a path-reading test, open, see Validation results)
+- [x] B6: public paths resolve; consumers compile (`cargo check --all-targets` clean) and are unedited except the two `DemoVmServiceImpl::new(state)` call sites; the two path-reading tests are fixed (`1712a9305`); the residue is **pre-existing on `origin/master` on macOS** (the seatbelt stdio test times out identically; `sandbox_stdio_seatbelt_acceptance` lacks a `SandboxHandle` import since #560) and is not this PR's, see "Resolution"
+- [x] B7: per-crate baseline with moved tests accounted: **1,257 passed of 1,257 expected** (kernel re-measured 126/0 after `1712a9305`; the other crates as measured 2026-10-08/09), the 22 known failures by name, 1 ignored
 - [x] Every hand edit after an engine move is a build correction, and each new cause has a todo (the developer's overrides of 2026-10-08 also allowed pre-move hand edits, host-block moves and the one constructor signature)
 
 **Documentation**

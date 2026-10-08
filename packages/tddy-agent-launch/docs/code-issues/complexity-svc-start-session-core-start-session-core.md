@@ -1,6 +1,6 @@
 # complexity: start_session_core
 
-**Location:** `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:51` — `start_session_core`
+**Location:** `packages/tddy-agent-launch/src/svc_start_session_core.rs:62` — `start_session_core`
 **Category:** complexity
 **Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
 **Metrics:** **842 lines** · **nesting depth 6** · 1 parameters · 40 branch/match lines · 54 early exits
@@ -9,6 +9,7 @@
 **Restructure:** `extract_method` — `/code-restructuring` territory
 **Status:** Open — regressed 2026-10-04 (358 → 373, +15 from #571); narrowed 2026-09-24 by #524 (857 → 358); what is left is its early-return guards, which the engine refuses to extract (E4, plan `19`) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:62`
 
 ## Measurement history
 
@@ -22,6 +23,7 @@
 | 2026-10-05 | 374 | — | — | — | touched by #532 (`#carve` 17/21): +1 (373 → 374, fn line to closing brace) — rustfmt wraps `.agent_roster().unwind_seeded_roster(…)` over one more line. No control flow added; nesting, branches and exits not re-derived |
 | 2026-10-07 | 377 | — | — | — | touched by `#carve` 18/21 (`SplitSessions`): +3 (374 → 377, fn line to closing brace) from three `self.split_sessions()` re-points where the launch topic calls the split topic through its handle. No control flow added. Measured by brace matching on `HEAD` vs `origin/master` |
 | 2026-10-08 | 386 | — | — | — | `#carve` 20/21 (launch start): +5 against `origin/master` (381 -> 386, fn line to closing brace). Re-pointed to `impl LaunchSessions`; rustfmt wraps the three roster calls (`self.agent_roster.agent_def_for_spawn(…)`, `seeded_roster_records(…)`) and the `DaemonSeedCloneClaimant { service: … }` literal over more lines. No control flow added. **Regressed, kept open**: still over 60 lines |
+| 2026-10-09 | 386 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
 
 ## What the tool found
 

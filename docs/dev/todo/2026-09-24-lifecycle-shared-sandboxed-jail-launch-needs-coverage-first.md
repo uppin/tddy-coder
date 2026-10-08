@@ -73,7 +73,7 @@ sandbox RPC bridge not installed — runtime must call install_sandbox_rpc_bridg
 The harness never installs the bridge, so every sandboxed-start path panics before it launches.
 A hand merge of three launch paths would land with nothing exercising any of them.
 
-[`crap-svc-start-sandboxed-cursor-cli-session`](../../../packages/tddy-session-lifecycle/docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md)
+[`crap-svc-start-sandboxed-cursor-cli-session`](../../../packages/tddy-agent-launch/docs/code-issues/crap-svc-start-sandboxed-cursor-cli-session.md)
 says the same about the Cursor start alone: **"Restructure: no — tests first"** (CRAP 1,722, never
 executed by any test).
 
