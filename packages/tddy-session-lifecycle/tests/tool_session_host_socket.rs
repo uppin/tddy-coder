@@ -73,14 +73,15 @@ fn vaults_holding_ada_and_grace(dir: &Path) -> Arc<SessionVaults> {
 }
 
 /// A stand-in for `tddy-coder` that records its argv to `args.<pid>` in `dir`, then outlives the
-/// startup watch.
+/// startup watch: it runs for the seconds named in `dir/lifetime` when that file exists (read when
+/// the process starts, so a test can give a later start a different lifetime), else five.
 fn a_tool_that_records_its_argv(dir: &Path) -> PathBuf {
     let path = dir.join("fake-tddy-coder.sh");
     std::fs::write(
         &path,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{}/args.$$\"\nsleep 5\n",
-            dir.display()
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{dir}/args.$$\"\nsleep \"$(cat {dir}/lifetime 2>/dev/null || echo 5)\"\n",
+            dir = dir.display()
         ),
     )
     .unwrap();
@@ -88,7 +89,7 @@ fn a_tool_that_records_its_argv(dir: &Path) -> PathBuf {
     path
 }
 
-fn a_daemon(data_dir: &Path, vault_dir: &Path) -> DaemonSessionHost {
+fn a_daemon(data_dir: &Path, vaults: Arc<SessionVaults>) -> DaemonSessionHost {
     let config_dir = tempfile::tempdir().unwrap();
     let config_path = config_dir.path().join("daemon.yaml");
     std::fs::write(
@@ -121,7 +122,8 @@ spawn_startup_poll_interval_ms: 10
         None,
         Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
     )
-    .with_credential_vaults(vaults_holding_ada_and_grace(vault_dir))
+    .with_credential_vaults(vaults)
+    .with_host_session_stop_watch_interval(std::time::Duration::from_millis(50))
 }
 
 /// Register projects: `(project_id, assigned account or none)`.
@@ -153,6 +155,7 @@ fn register_projects(data_dir: &Path, repo: &Path, projects: &[(&str, Option<&st
 struct World {
     data_dir: tempfile::TempDir,
     _vault_dir: tempfile::TempDir,
+    vaults: Arc<SessionVaults>,
     repo: tempfile::TempDir,
     tools: tempfile::TempDir,
     tool: PathBuf,
@@ -166,10 +169,12 @@ fn a_world_with(projects: &[(&str, Option<&str>)]) -> World {
     let tools = tempfile::tempdir().unwrap();
     let tool = a_tool_that_records_its_argv(tools.path());
     register_projects(data_dir.path(), repo.path(), projects);
-    let daemon = a_daemon(data_dir.path(), vault_dir.path());
+    let vaults = vaults_holding_ada_and_grace(vault_dir.path());
+    let daemon = a_daemon(data_dir.path(), Arc::clone(&vaults));
     World {
         data_dir,
         _vault_dir: vault_dir,
+        vaults,
         repo,
         tools,
         tool,
@@ -263,6 +268,36 @@ impl World {
 
     async fn the_only_child(&self) -> ChildArgv {
         self.children(1).await.remove(0)
+    }
+
+    /// How long, in seconds, the stand-in tool runs for each start from now on.
+    fn tools_run_for(&self, seconds: u32) {
+        std::fs::write(self.tools.path().join("lifetime"), seconds.to_string()).unwrap();
+    }
+
+    /// Record `session_id` on disk the way a real coder does, so the daemon knows it exists.
+    fn record_session(&self, session_id: &str, project_id: &str) {
+        let session_dir = unified_session_dir_path(self.data_dir.path(), session_id);
+        std::fs::create_dir_all(&session_dir).unwrap();
+        write_session_yaml(
+            &session_dir,
+            &a_session_metadata()
+                .with_session_id(session_id)
+                .with_project_id(project_id)
+                .with_repo_path(self.repo.path().display().to_string())
+                .with_tool(self.tool.display().to_string())
+                .build(),
+        );
+    }
+
+    /// The daemon restarts: the process and everything it held in memory go, a new one starts over
+    /// the same data and vaults. Its host-session sockets are bound again only when a session
+    /// starts or resumes.
+    async fn restart_daemon(&mut self) {
+        // (the vaults stay open: what a restart loses here is the host-session registry, not them)
+        self.daemon = a_daemon(self.data_dir.path(), Arc::clone(&self.vaults));
+        // The old daemon's server tasks are cancelled by their drop; let the runtime run that.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
     fn expected_socket(&self) -> PathBuf {
@@ -582,4 +617,187 @@ async fn a_coder_given_no_host_socket_refuses_a_token_request_as_having_no_crede
 
     // Then it is refused as having no credential handler: nothing else is consulted
     assert!(outcome.unwrap_err().contains("no credential handler"));
+}
+
+/// Ask until `session_id` is refused, or fail after a deadline (a process stopping is not an event
+/// the test can wait on).
+async fn refusal_once_stopped(socket: &Path, session_id: &str) -> String {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match token_over(socket, session_id).await {
+            Err(refusal) => return refusal,
+            Ok(_) => {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the stopped session is still answered"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_tool_session_whose_process_has_stopped_is_no_longer_answered() {
+    // Given a started session whose coder runs for one second, and which has a record on disk
+    let world = a_world_with(&[(ADA_PROJECT, Some("acct-ada"))]);
+    world.tools_run_for(1);
+    world.start(ADA_PROJECT, "tdd").await;
+    let child = world.the_only_child().await;
+    world.record_session(&child.session_id(), ADA_PROJECT);
+    assert_eq!(
+        token_over(&child.host_session_socket(), &child.session_id()).await,
+        Ok("ghp_ada_token".to_string())
+    );
+
+    // When the coder's process exits
+    let refusal = refusal_once_stopped(&child.host_session_socket(), &child.session_id()).await;
+
+    // Then the daemon has dropped the session, and no token is in the refusal
+    assert!(
+        refusal.contains("resume it") && !refusal.contains("ghp_"),
+        "{refusal}"
+    );
+}
+
+#[tokio::test]
+async fn a_resumed_session_stays_answered_when_its_earlier_process_stops() {
+    // Given a session started with a one-second coder, then resumed with a long-lived one
+    let world = a_world_with(&[(ADA_PROJECT, Some("acct-ada"))]);
+    world.tools_run_for(1);
+    world.start(ADA_PROJECT, "tdd").await;
+    let first = world.the_only_child().await;
+    let session_id = first.session_id();
+    world.tools_run_for(30);
+    world.resume(&session_id, ADA_PROJECT).await;
+    world.children(2).await;
+
+    // When the first process has exited
+    tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
+
+    // Then the session is still answered: the resume's process is the registered one
+    assert_eq!(
+        token_over(&first.host_session_socket(), &session_id).await,
+        Ok("ghp_ada_token".to_string())
+    );
+}
+
+#[tokio::test]
+async fn after_a_daemon_restart_a_running_session_is_told_to_resume_and_then_is_answered() {
+    // Given a session that started before a restart and is still running
+    let mut world = a_world_with(&[(ADA_PROJECT, Some("acct-ada"))]);
+    world.start(ADA_PROJECT, "tdd").await;
+    let child = world.the_only_child().await;
+    let session_id = child.session_id();
+    world.record_session(&session_id, ADA_PROJECT);
+
+    // When the daemon restarts and another session of the user starts, rebinding the socket
+    world.restart_daemon().await;
+    world.start(ADA_PROJECT, "tdd").await;
+    let still_running = token_over(&child.host_session_socket(), &session_id).await;
+
+    // Then the running session is told, in so many words, to resume — not left hanging
+    assert_eq!(
+        still_running,
+        Err("this session was started before the daemon restarted; resume it to re-enable GitHub tools"
+            .to_string())
+    );
+
+    // And once it is resumed it is answered again, from the refreshed resolution
+    world.resume(&session_id, ADA_PROJECT).await;
+    assert_eq!(
+        token_over(&child.host_session_socket(), &session_id).await,
+        Ok("ghp_ada_token".to_string())
+    );
+}
+
+#[tokio::test]
+async fn after_a_daemon_restart_a_session_that_never_existed_is_not_told_to_resume() {
+    // Given a restarted daemon with a session of its own running
+    let mut world = a_world_with(&[(ADA_PROJECT, Some("acct-ada"))]);
+    world.restart_daemon().await;
+    world.start(ADA_PROJECT, "tdd").await;
+    let child = world.the_only_child().await;
+
+    // When an id that exists nowhere asks
+    let refusal = token_over(&child.host_session_socket(), "no-such-session")
+        .await
+        .expect_err("refused");
+
+    // Then it is the unknown-session refusal
+    assert!(
+        refusal.contains("no session `no-such-session`") && !refusal.contains("resume"),
+        "{refusal}"
+    );
+}
+
+/// A credential handler that answers one fixed token, standing for a session's resolved account.
+struct AnswersWith(&'static str);
+
+#[async_trait::async_trait]
+impl tddy_core::toolcall::GithubCredentialHandler for AnswersWith {
+    async fn github_token(&self) -> Result<String, String> {
+        Ok(self.0.to_string())
+    }
+}
+
+/// Serve `owner`'s host-session socket at `path` over `registry`, as the daemon does per OS user.
+fn serve_the_socket_of(
+    owner: &str,
+    path: &Path,
+    registry: &Arc<tddy_host_service::host_session_service::HostSessionRegistry>,
+) {
+    let listener = tokio::net::UnixListener::bind(path).unwrap();
+    let owner = owner.to_string();
+    let registry = Arc::clone(registry);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let service = tddy_host_service::host_session_service::HostSessionService::new(
+                &owner,
+                Arc::clone(&registry),
+            );
+            let (reader, writer) = tokio::io::split(stream);
+            let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                reader,
+                writer,
+                service,
+                tddy_rpc::RequestTransport::UnixSocket,
+            );
+            tokio::spawn(endpoint.run());
+        }
+    });
+}
+
+#[tokio::test]
+async fn one_os_users_socket_cannot_fetch_another_os_users_session_token() {
+    // Given two OS users' sockets over one registry, and a session registered as alice's
+    // (a daemon cannot bind a socket for a second real OS user without privilege, so the two
+    // services here are the daemon's own, over real sockets, with the owners named directly)
+    use tddy_host_service::host_session_service::{HostSessionRegistry, RegisteredSession};
+    let registry = Arc::new(HostSessionRegistry::default());
+    registry.register(
+        "alices-session",
+        RegisteredSession {
+            os_user: "alice".to_string(),
+            conversation_spawn_handler: None,
+            github_credential_handler: Some(Arc::new(AnswersWith("ghp_alice_token"))),
+        },
+    );
+    let sockets = tempfile::tempdir().unwrap();
+    let alices = sockets.path().join("alice.sock");
+    let bobs = sockets.path().join("bob.sock");
+    serve_the_socket_of("alice", &alices, &registry);
+    serve_the_socket_of("bob", &bobs, &registry);
+
+    // When bob's socket is asked for alice's session's token, and alice's socket is
+    let over_bobs = token_over(&bobs, "alices-session").await;
+    let over_alices = token_over(&alices, "alices-session").await;
+
+    // Then only her own socket answers, and bob's refusal carries no token
+    assert_eq!(over_alices, Ok("ghp_alice_token".to_string()));
+    let refusal = over_bobs.expect_err("bob's socket must refuse alice's session");
+    assert!(
+        refusal.contains("different OS user") && !refusal.contains("ghp_alice_token"),
+        "{refusal}"
+    );
 }

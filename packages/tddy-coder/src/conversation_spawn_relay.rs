@@ -64,7 +64,9 @@ impl HostSessionClient {
             .await
             .map_err(|e| {
                 format!(
-                    "the daemon's host-session socket {} could not be reached: {e}",
+                    "the daemon's host-session socket {} could not be reached: {e} (if the daemon \
+                     restarted since this session started, resume the session to re-enable GitHub \
+                     tools)",
                     self.socket.display()
                 )
             })?;
@@ -373,6 +375,9 @@ mod tests {
             refusal.contains("could not be reached") && refusal.contains("host.sock"),
             "{refusal}"
         );
+        // And says what a person can do: a restarted daemon binds the socket again only when a
+        // session of this user is started or resumed
+        assert!(refusal.contains("resume"), "{refusal}");
     }
 
     #[tokio::test]

@@ -27,11 +27,13 @@ fn require_token(op: &str, token: &str) -> Result<(), tddy_core::WorkflowError> 
     Ok(())
 }
 
-/// Root of the GitHub REST API every call in this module is built from.
-const GITHUB_API_BASE: &str = "https://api.github.com";
+/// Root of the GitHub REST API. Every call in this module is built from a base the caller names —
+/// this one in production, a local listener where a test stands in for GitHub — never from the
+/// environment.
+pub const GITHUB_API_BASE: &str = "https://api.github.com";
 
-fn github_api_url(repo: &str, path: &str) -> String {
-    format!("{GITHUB_API_BASE}/repos/{repo}/{path}")
+fn github_api_url(api_base: &str, repo: &str, path: &str) -> String {
+    format!("{}/repos/{repo}/{path}", api_base.trim_end_matches('/'))
 }
 
 fn temp_github_path(prefix: &str) -> std::path::PathBuf {
@@ -103,34 +105,37 @@ fn run_curl_json_body(
 
 /// HTTP PATCH with a JSON body string, returns the response body, authenticated as `token`.
 pub fn curl_github_patch_json_with_token(
+    api_base: &str,
     repo: &str,
     path: &str,
     body: &str,
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    let url = github_api_url(repo, path);
+    let url = github_api_url(api_base, repo, path);
     run_curl_json_body(&url, "PATCH", body, token)
 }
 
 /// HTTP POST with a JSON body string (see [`curl_github_patch_json_with_token`]).
 pub fn curl_github_post_json_with_token(
+    api_base: &str,
     repo: &str,
     path: &str,
     body: &str,
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    let url = github_api_url(repo, path);
+    let url = github_api_url(api_base, repo, path);
     run_curl_json_body(&url, "POST", body, token)
 }
 
 /// HTTP GET with query parameters (see [`curl_github_patch_json_with_token`]).
 pub fn curl_github_get_json_with_token(
+    api_base: &str,
     repo: &str,
     path: &str,
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    run_curl_get(&github_api_url(repo, path), query, token)
+    run_curl_get(&github_api_url(api_base, repo, path), query, token)
 }
 
 /// HTTP GET against an API path that is **not** under `/repos/{owner}/{repo}/` — `/search/issues`
@@ -141,11 +146,16 @@ pub fn curl_github_get_json_with_token(
 /// same headers, same token handling — only the URL shape differs. `path` is relative to the API
 /// root, e.g. `"search/issues"`.
 pub fn curl_github_get_json_absolute_path(
+    api_base: &str,
     path: &str,
     query: &[(&str, &str)],
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    let url = format!("{GITHUB_API_BASE}/{}", path.trim_start_matches('/'));
+    let url = format!(
+        "{}/{}",
+        api_base.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    );
     run_curl_get(&url, query, token)
 }
 
@@ -205,12 +215,13 @@ fn run_curl_get(
 
 /// HTTP PUT with a JSON body string (see [`curl_github_patch_json_with_token`]).
 pub fn curl_github_put_json_with_token(
+    api_base: &str,
     repo: &str,
     path: &str,
     body: &str,
     token: &str,
 ) -> Result<String, tddy_core::WorkflowError> {
-    let url = github_api_url(repo, path);
+    let url = github_api_url(api_base, repo, path);
     run_curl_json_body(&url, "PUT", body, token)
 }
 
@@ -225,6 +236,7 @@ mod tests {
 
         // When a PATCH is attempted with it
         let result = curl_github_patch_json_with_token(
+            GITHUB_API_BASE,
             "owner/repo",
             "pulls/1",
             r#"{"base":"master"}"#,
@@ -245,6 +257,7 @@ mod tests {
 
         // When a POST is attempted with it
         let result = curl_github_post_json_with_token(
+            GITHUB_API_BASE,
             "owner/repo",
             "pulls",
             r#"{"title":"x","head":"y","base":"master"}"#,
@@ -264,7 +277,8 @@ mod tests {
         let token = "";
 
         // When a GET is attempted with it
-        let result = curl_github_get_json_with_token("owner/repo", "pulls", &[], token);
+        let result =
+            curl_github_get_json_with_token(GITHUB_API_BASE, "owner/repo", "pulls", &[], token);
 
         // Then it is refused
         assert!(

@@ -35,6 +35,10 @@
   `--host-session-socket`
 - **tddy-presenter** / **tddy-workflow**: the run's context is seeded with `github_pr_tools_available`
   (`context_keys::GITHUB_PR_TOOLS_AVAILABLE_KEY`, moved down so the presenter and the recipes name one string)
+- **tddy-github**: `RealGithubPrApi::with_api_base` (the REST root is a value on the client, defaulting to
+  `https://api.github.com`, never an environment variable) and the `curl_github_*_with_token` entry points take it
+- **tddy-telegram-control**: a Telegram-started session whose project acts as an account tells its chat that the
+  account's identity and tools are unavailable there, and why — see *Telegram-started sessions*
 - **tddy-spawn**: the commit-identity pairs ride the supervisor/worker wire (`SpawnRequest::git_environment`,
   `SpawnOptions::git_environment`) — see *Tool sessions: the commit identity over the spawn wire*
 
@@ -304,7 +308,7 @@ remaining seams* below):
 - ~~`tddy-daemon-rpc` — `RepointPlannedPr` (`pr_stack/ports.rs`)~~ — **done**, resolved directly (not through
   `retained_github_token`, which is the login-keyed credential this stack retires);
 - ~~prompt awareness of the PR tools (`merged_red_system_prompt(false)`, merge-pr hooks)~~ — the gate now reads
-  a context flag; **nothing sets it in production yet**, see *Still open*.
+  a context flag — **since closed**: the coder sets it when it binds the host-session handlers (*Tool sessions: the token over the per-OS-user host-session socket*).
 
 **M2's wiring is the open item.** Something must read the project's assignments and the session's
 vault, call `acting_identity`, and apply `session_git_environment` to the spawned agent. That call site
@@ -361,10 +365,10 @@ read from session metadata and nothing was missing.
 
 **Consequences, stated rather than hidden**
 
-- The assignments are a **snapshot taken at session start/resume** (the commit identity's snapshot, so
-  a commit and a push in one session cannot come from two accounts because the project was reassigned
-  between them). A reassignment takes effect on the next start or resume. The vault is read **per
-  call**, so a vault locked since, or an owner whose session token expired, refuses at the call.
+- **The account is chosen once, at start/resume, and the handler is pinned to that outcome** (see *One resolution,
+  pinned at the session's start*): a reassignment, or a second account appearing, takes effect on the next start or
+  resume. The vault is read **per call** (for the pinned account's record, by id), so a vault locked since, or an
+  owner whose session token expired, refuses at the call.
 - The handler holds the start's session token in daemon memory for the session's life. When it
   expires, tools refuse with `NoSuchSession` until the session is resumed with a live token.
 - **Refusals are distinct and verbatim.** `NotAssigned`, `UnknownOnThisHost`, `Ambiguous`,
@@ -397,10 +401,7 @@ read from session metadata and nothing was missing.
 - an in-jail `tddy-tools` that cannot reach the host listener was **not exercised**: the jail path is
   verified by the shared code path and the doc comment above, not by a running jail (the sandbox RPC
   bridge acceptance suite is unavailable here);
-- `tddy-tools` is verified against a real socket and a real `ToolcallRpcService`, but the *token's use
-  at GitHub* is not: `RealGithubPrApi` shells out to `api.github.com`, so the tests prove the token is
-  asked for, the refusal surfaces, and a client is built from the answer — not that the REST call
-  carries it;
+- ~~the *token's use at GitHub* is not exercised~~ — **closed**, see *The REST call carries the host's token*;
 - tool-session (`tddy-coder`) token delivery and the engine-driven prompt flag — closed, see *Tool sessions: the token over
   the per-OS-user host-session socket*.
 
@@ -604,35 +605,131 @@ function. **Not covered:** the supervisor path starts the child from the *superv
 (which `plan_session_child` already restricts to the four commit-identity keys); the supervisor's own environment is the
 operator's configuration and is not touched here.
 
+### Resolved in this PR
+
+The deferrals this section used to list were worked in this PR; what each became is recorded below, and what did
+**not** close is in *Still open*.
+
+#### One resolution, pinned at the session's start
+
+`SessionAccountAccess::session_identity` now resolves **once** (`acting_identity`) and both halves derive from that
+outcome: the `GIT_*` pairs from the `ActingIdentity` (`session_git_environment`), and `SessionGithubCredential`
+**pinned** to it. If the start resolved an account the handler holds that account's **id**; every later `github-token`
+request lists the owner's vault (per call, never cached) and fetches **that** record by id — through the same
+`acting_identity` function, over a one-entry assignment naming the pinned account — so it can never answer with another
+account's token, whatever the project's assignments or the vault's contents become. If the start was **refused**
+(the session started without `GIT_*` by the consented decision) the handler holds the reason and **repeats it verbatim**
+on every request, until a resume resolves again: a session whose commits are not attributed to an account is never
+handed that account's token. The consequence, stated plainly: a start refused only because the vault was *locked*
+stays refused after the person unlocks it, until the session is resumed.
+
+Pinned by (`session_acting_identity_tests.rs`): `a_start_refused_because_the_vault_was_locked_keeps_refusing_after_it_is_unlocked`,
+`a_start_refused_for_an_unheld_account_keeps_refusing_once_the_account_arrives`,
+`a_start_refused_for_no_assignment_is_not_rescued_by_the_environment_or_a_later_assignment`,
+`the_token_stays_the_started_accounts_when_a_second_account_appears`,
+`the_started_accounts_token_is_never_replaced_by_another_accounts_when_it_is_removed`,
+`the_commit_pairs_and_the_token_derive_from_one_record`, and `each_call_reads_the_vault_as_it_stands` (rewritten: the
+original constructed a handler over a *locked* vault and expected it to recover on unlock — exactly the behaviour this
+decision removes; it now ends the token owner's session between two calls instead). The first two were red against the
+previous code (`Ok("ghp_…")` where a refusal was required); the others pass on both and guard the construction.
+`SessionGithubCredential::new`, `git_environment` and `git_environment_or_inherited` are gone; `git_environment_for`
+survives under `#[cfg(test)]` as the pure helper the unit tests drive.
+
+#### Stopped sessions and daemon restarts
+
+- **Stop hook.** The daemon does not track a spawned `tddy-coder`, but the spawn result carries its pid. After a start
+  or resume spawns, `HostSessionSockets::watch_until_stopped(session_id, pid)` records the pid on the registration and
+  watches it (`kill(pid, 0)` every two seconds by default; `ESRCH` is gone, `EPERM` — a process of another user — is
+  still there). When it is gone the session is unregistered, so the daemon stops holding the start's session token for
+  a session that is not running. A resume registers again, which forgets the earlier pid, so an **old** process stopping
+  late never removes the newer registration (`unregister_stopped` is conditional on the pid). The watch ends with the
+  session's deletion or replacement. A spawn that fails unregisters. Polling rather than a process-exit event because
+  the supervised backend's children are not the daemon's to `wait` on; a pid reused inside one poll interval would
+  keep a dead session registered a little longer (memory only). Tests: `a_tool_session_whose_process_has_stopped_is_no_longer_answered`,
+  `a_resumed_session_stays_answered_when_its_earlier_process_stops`, host-service `a_stopped_process_unregisters_its_session_only_while_it_is_still_the_registered_one`
+  and `a_session_registered_with_no_process_is_not_removed_by_a_stopped_report`. Dropping the daemon's sockets now
+  aborts its servers (`BoundServer: Drop`), so a daemon that starts over in one process finds no live peer.
+- **Restart.** The registry is daemon memory and **no token is persisted**. An unregistered session that **exists on
+  disk** (`.session.yaml` under the socket owner's sessions base, id validated as one path segment) is refused with its
+  own message — `this session was started before the daemon restarted; resume it to re-enable GitHub tools`
+  (`failed_precondition`) — distinct from an unknown or deleted one (`not_found`, *no session `<id>` is registered…*,
+  which does not suggest resuming). The probe is asked about the socket's owner only, so a request can never learn that
+  another OS user's session exists. Tests: host-service `a_session_that_exists_but_is_not_registered_is_told_to_resume_it`,
+  `a_session_that_does_not_exist_is_not_told_to_resume`, `the_existence_of_another_os_users_session_is_not_revealed`;
+  integration `after_a_daemon_restart_a_running_session_is_told_to_resume_and_then_is_answered` (a second daemon over the
+  same data dir; the running session gets the message over the rebound socket, and the real token after a resume) and
+  `after_a_daemon_restart_a_session_that_never_existed_is_not_told_to_resume`. The coder side (`HostSessionClient`)
+  already relays the host's status text verbatim and reconnects (`the_connection_is_made_again_after_the_host_restarts_and_rebinds`).
+- **No startup re-attach exists**, and none was added: re-registering needs the owner's session token, which is not durable
+  by design. **What a running coder sees after a restart, until a session of that OS user is started or resumed:** the
+  socket is bound only by that, so a connect fails and the coder reports *the daemon's host-session socket … could not be
+  reached* — now followed by *if the daemon restarted since this session started, resume the session to re-enable GitHub
+  tools* (`an_unreachable_socket_is_an_error_that_names_it`). Not a hang. The distinct message above is what it sees once
+  the socket is rebound. (The vaults in the restart test stay open across the "restart"; what the test models is the loss
+  of the registry, not of the vaults.)
+
+#### The REST call carries the host's token
+
+`RealGithubPrApi` gained `with_api_base(base)` (default `https://api.github.com`, a value on the client, **not** an
+environment variable); the `curl_github_{get,post,patch,put}_json_with_token` and `…_absolute_path` entry points take the
+base as their first argument (their only callers are `RealGithubPrApi`). `workflow-recipes/tests/github_rest_call_carries_the_session_hosts_token.rs`
+runs a fake session host on a real toolcall socket (`TDDY_SOCKET`) and a listener on loopback standing in for GitHub:
+`a_rest_call_carries_the_token_the_session_host_returned` asserts the request's `Authorization: Bearer <token>` is the one
+`request_github_token_from_session()` returned; `a_refusing_host_means_no_request_reaches_the_api` asserts zero HTTP requests
+and the host's words in the failure; `a_github_token_in_the_environment_authenticates_no_call`;
+`the_token_travels_in_the_header_alone_not_in_the_url`. Non-vacuous by mutation (a wrong header token fails two). Proven for
+a GET; the PUT/POST/PATCH path builds its header with the same format string but has no request-level test of its own.
+
+#### Telegram-started sessions
+
+**Investigated.** A Telegram start has an OS user (a daemon-config field) and a Telegram-to-GitHub-**login** link
+(`TelegramGithubMappingStore`), but **no session token**; the vault opens only by an owner's session token. Reaching an
+already-open vault *by login* would let a Telegram chat bypass that gate, so **no mechanism is invented**: such sessions
+start under the checkout's own identity and **no token is ever available to them**. What changed is that this is now
+**visible**: when the project assigns an account, the session's chat is told — after the start message, on the workflow,
+claude-cli and cursor-cli paths — that the account's commits and the agent's GitHub tools are unavailable and why, and that
+starting from the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account is
+told nothing (nothing is lost). Tests: `a_telegram_started_session_on_a_project_that_acts_as_an_account_says_the_account_is_unavailable`
+(red first), `a_telegram_started_session_on_a_project_with_no_account_says_nothing_about_accounts`
+(`tddy-telegram-control/tests/telegram_start_claude_acceptance.rs`; the claude-cli path is the one exercised end to end,
+the workflow and cursor paths call the same method). `TODO(keyring 9/9)` is **removed**. **`TODO(stdio-relay)` remains**
+(`workflow_spawn.rs`), reworded: a Telegram-started *tool* session gets no host-session socket, because the socket answers
+from a registration the daemon's own session host makes and this crate does not hold it; without one the socket would only
+refuse. Telegram never wired `spawn_conversation`, so it is not a regression.
+
 ### Still open
 
-- ~~A tool session's PR tools cannot reach the token~~ and ~~the prompt flag has no production setter~~ — **closed**,
-  see *Tool sessions: the token over the per-OS-user host-session socket* below.
-- **Telegram-started tool sessions get no commit identity and no host socket.** No session token — hence no vault —
-  reaches `telegram_spawn_options`, so nothing can resolve the project's account; they start under the checkout's
-  own identity with `host_session_socket: None`, so their agent's token request is refused as having no credential
-  handler. `TODO(keyring 9/9)` and `TODO(stdio-relay)` in
-  `tddy-telegram-control/src/telegram_session_control/workflow_spawn.rs`, deliberately untouched: nothing there can
-  reach a vault.
-- **A running tool session is not re-registered after a daemon restart, and a stopped one is not unregistered.**
-  The registry is daemon memory. There is no stop hook for a tool session (the daemon does not track a spawned
-  `tddy-coder` after the spawn; `CliSessionManager::stop_session` belongs to the claude-cli manager) and no startup
-  re-attach (a session comes back only through `ResumeSession`, which registers again). So after a restart a
-  still-running coder is refused (*no session … registered*) until it is resumed, and a stopped-but-not-deleted
-  session keeps its entry — and with it the start's session token, **in daemon memory only** — until it is resumed
-  (replaced), deleted (removed) or the daemon restarts. Persisting the token so startup could re-register was **not**
-  done: the decision that a token is never in a file stands.
-- **A daemon that cannot `chown` to the session's OS user gets no socket for that user** (see the permission model
-  below): its sessions start with no `--host-session-socket`, hence no token and no `spawn_conversation` — which used
-  to work over a `0o777` socket. Logged per session at `warn`.
+- **A daemon that cannot `chown` to the session's OS user gets no socket for that user — NOT FIXED, blocked on a design
+  decision** (D3). That is the documented production topology: `tddy-supervisor` (root) runs `tddy-daemon` as an
+  **unprivileged** child and sessions run as other users, so the daemon cannot give a socket to them; its sessions start
+  with no `--host-session-socket` — no token and no `spawn_conversation`, which worked over the old `0o777` socket. The
+  per-session precedent does not transfer: `agent_tool_socket` (embedded daemon) applies **no** permissions at all, and
+  `write_agent_def_file` is written by the *spawning* process, which is the privileged one under the supervisor. The two
+  supervisor precedents that do exist are (a) the supervisor binds a service socket **as root** and hands it to the
+  daemon as fd 3 with a `group`/`mode` grant, declared per service in `supervisor.yaml` — one socket per service, not per
+  OS user, and fd passing is not part of the spawn request surface; and (b) `SpawnSession` carries a path/`env` the
+  supervisor already gates by `spawn_policy`. A directory the supervisor creates *user-owned 0700* (the shape the brief
+  suggested) would be unusable: the unprivileged daemon could not bind inside it. Every safe shape needs the root
+  supervisor to perform a **new privileged filesystem operation on a path the daemon names** (e.g. a `SpawnSession`
+  field asking it to `fchown` a daemon-created `0600` socket to the session user, gated by `allowed_session_users` and a
+  socket-owned-by-caller check), or per-OS-user sockets declared in `supervisor.yaml`. Either widens what a compromised
+  daemon can ask root for — the line `supervisor.yaml` calls *the ENTIRE privilege surface of the host* — and is the
+  maintainer's decision, so nothing was added. What *was* done: the refusal now says exactly this (*not privileged … as
+  when it runs as tddy-supervisor's unprivileged child*) and still removes everything it created; no wider mode is ever
+  used. **Who can connect today:** a daemon able to `chown` (root, or the session user itself): only that OS user and the
+  daemon (`0700` directory, `0600` socket, both owned by the user; root can always connect). A daemon that cannot: nobody —
+  there is no socket.
 - **The socket path lives under the data dir** (`<data dir>/run/<os user>/host.sock`), not under the session's own
   directory: that nests too deep for AF_UNIX's ~104-byte limit on a real checkout path (the overflow
   `agent_tool_socket_path` was digested to avoid). A data dir deep enough that the path exceeds 100 bytes is refused
   with that reason.
+- **A running tool session is not re-registered after a daemon restart** (it must be resumed — see *Stopped sessions and
+  daemon restarts*); and a **restarted daemon binds a user's socket only when a session of that user starts or resumes**.
+- **Telegram-started tool sessions get no host-session socket** (`TODO(stdio-relay)`), and no token or commit identity at
+  all — see *Telegram-started sessions*.
 - **Plain cursor-cli: no PR-tool token.** It has no toolcall listener at all, so there is nothing to answer.
 - **Sandboxed cursor-cli resume is not implemented** (`resume_cursor_cli_session` ignores `sandbox`), so there
   is no relaunch to carry an identity.
-- The commit identity and the token remain **two resolutions over one assignment snapshot** (see Scope).
 
 ## M6 — package documentation: `packages/tddy-accounts/docs/github-identity-resolution.md`
 
@@ -749,6 +846,42 @@ delete → `a_deleted_session_is_no_longer_answered` fails (integration only); s
 fail. Not every test of this change was written before its code: the host-service module and the wiring were implemented first and
 their tests written against them (the socket module and the inheritance fix were red first).
 
+### Verification — closing the deferrals (measured 2026-10-08)
+
+Scoped, not whole-workspace; CI is the authority on everything else. `./test -p tddy-host-service -p tddy-session-lifecycle
+-p tddy-coder -p tddy-toolcall -p tddy-github -p tddy-workflow-recipes -p tddy-telegram-control -p tddy-spawn -p tddy-supervisor
+-p tddy-daemon -p tddy-tools -p tddy-daemon-rpc -p tddy-accounts -p tddy-daemon-livekit -p tddy-daemon-auth -p tddy-pr-stack
+-p tddy-presenter -p tddy-workflow`, `.verify-result.txt` read: **3569 passed, 25 failed** (`./test` exits 0 regardless). The 25:
+the known 16 *sandbox RPC bridge not installed*; 7 in `session_sync_livekit_acceptance`/`session_agent_remote_acceptance`
+(6 `session_sync_livekit_acceptance` — *tddy-remote-git-repo* not built, then a poisoned `Once` — plus
+`session_agent_remote_acceptance::restores_a_clone_that_diverged_and_says_so`, which **passes when run alone** (14.7 s) and whose
+own doc comment already names a contended host as the likely cause; it is not on the earlier list and is flaky under the full
+run, not caused by this change); `pr_stack_artifact_paths_acceptance::a_plan_left_at_the_legacy_session_root_is_still_advertised_to_the_agent`
+(`/tmp` vs `/private/tmp`); and `session_room_acceptance::a_session_started_while_livekit_was_down_is_drivable_over_livekit_once_it_is_back`
+(*container startup timeout* — no Docker; the same cause as the previously-listed `session_room_livekit_acceptance` failure, a
+different test in a different crate). `cargo check --all-targets` over the six packages with source changes plus `tddy-daemon-rpc`,
+`tddy-pr-stack`, `tddy-spawn`, `tddy-toolcall`, `tddy-tools`, `tddy-daemon` (every consumer of a changed signature): clean.
+`cargo clippy --all-targets -D warnings` over `tddy-host-service`, `tddy-session-lifecycle`, `tddy-coder`, `tddy-github`,
+`tddy-workflow-recipes`, `tddy-telegram-control`: clean; `cargo fmt` applied to them (two untouched test files carry older format
+drift and were left as they were).
+
+Red first, by kind: *failed on behaviour* — the two refused-at-start tests (`Ok("ghp_…")` where a refusal was required),
+`a_telegram_started_session_on_a_project_that_acts_as_an_account_says_the_account_is_unavailable` (no notice). *Failed to compile*
+(the API they name did not exist) — the host-service probe and stop-report tests, the stop/restart integration tests
+(`with_host_session_stop_watch_interval`) and the four REST tests (`with_api_base`). *Written with their code, never seen red* —
+the `…keeps_refusing`-adjacent guards that pass on both implementations, `one_os_users_socket_cannot_fetch_another_os_users_session_token`
+(it exercises code that already existed; its value is the mutation below), the unprivileged-chown message assertion, and the coder's
+*resume* hint on an unreachable socket.
+
+Mutation-checked, each restored afterwards: **skip the OS-user check → `one_os_users_socket_cannot_fetch_another_os_users_session_token`
+fails in the integration file** (previously unit tests only; the two sockets there are the daemon's own service over real sockets with
+the owners named directly — a daemon cannot bind a socket for a second real OS user without privilege, so a two-user test through
+`DaemonSessionHost` is not possible unprivileged); no `watch_until_stopped` on spawn → `a_tool_session_whose_process_has_stopped_is_no_longer_answered`
+fails; existence probe always false → that test and `after_a_daemon_restart_a_running_session_is_told_to_resume_and_then_is_answered` fail;
+a wrong token in the REST `Authorization` header → `a_rest_call_carries_the_token_the_session_host_returned` and
+`a_github_token_in_the_environment_authenticates_no_call` fail. Not mutation-checked: `unregister_stopped`'s pid condition (covered by its
+unit test and `a_resumed_session_stays_answered_when_its_earlier_process_stops`, not by a deliberate break).
+
 ## Green wave
 
 **Wave 5 of 5** — alone.
@@ -829,11 +962,11 @@ two above. **"Not measured" is not "clean"**; this node claims nothing about the
       and the REST half of the contract is deferred to this node's green phase
 - [x] **Draft PR contract**: surface + failing tests (wave 2, commit 2) — ⚠ **partly**: the REST
       half is deferred, see **As published** under `## Draft PR contract`
-- [ ] **Resolution**: one call, token and identity from one answer — ⚠ **open by design**: both come from the same `acting_identity` function over one assignment snapshot, but the commit pairs (at start) and the token (per call, so a locked vault refuses) are two *calls*
+- [x] **Resolution**: one call, token and identity from one answer — the account is chosen **once** at start/resume (`SessionAccountAccess::session_identity`); the commit pairs derive from that `ActingIdentity` and the token handler is pinned to its outcome (the account's id, or the refusal), so the token is fetched per call but only ever for that account — see *One resolution, pinned at the session's start*
 - [x] **Outcomes**: a distinct failure per `AccountResolution` variant — `project_resolved_identity_acceptance.rs`, `acting_identity_unit.rs`, and the lifecycle/daemon-rpc refusal tests
 - [x] **Deletion**: the environment resolution path; `FileGitHubTokenStore`'s readers — `login_time_token_store_is_retired.rs` (4 structural tests)
-- [x] **Testing**: unit + acceptance, scoped — see *Verification (measured)*
-- [x] **Package Documentation**: `packages/tddy-accounts/docs/github-identity-resolution.md` — content written under *M6* above; the file itself is created at wrap, since `packages/*/docs/` is changeset-driven
+- [x] **Testing**: unit + acceptance, scoped — see *Verification (measured)* and *Verification — closing the deferrals*
+- [x] **Package Documentation** — *recorded, not written into the package*: the content of `packages/tddy-accounts/docs/github-identity-resolution.md` is under *M6* above and the file is created at wrap, because CLAUDE.md forbids editing `packages/*/docs/` directly (changeset workflow). Ticked as a recorded plan, not as a file that exists
 - [ ] **Code Quality**: scoped clippy ✅ (`-D warnings`, `--all-targets`, the six packages with source changes — see *Verification (measured)*); ⚠ CI green not yet read
 
 ## Technical Changes
@@ -936,20 +1069,22 @@ clippy. LiveKit-backed tests reuse the testkit container. Whole-workspace green 
 
 ## Acceptance Criteria
 
-- [x] A commit carries the assigned account's name and email — `session_git_identity_acceptance.rs` (author and committer pairs), and the lifecycle tests that the pairs reach the agent's env; ⚠ no test runs a real `git commit` under them
+- [x] A commit carries the assigned account's name and email — `a_commit_made_in_a_session_is_authored_by_the_account_the_project_assigns`, `a_commit_made_in_a_session_is_committed_by_the_same_account_that_authored_it` (`session_git_identity_acceptance.rs`), and `an_assigned_project_gives_the_session_its_pairs_and_a_handler_for_the_same_account` / `tool_session_git_identity.rs` for the pairs reaching the agent's env; ⚠ no test runs a real `git commit` under them
 - [x] A tool session's agent obtains the assigned account's token — `a_tools_token_request_reaches_the_assigned_account_through_the_coder_and_the_host_socket`
-- [x] Tool-session sockets are owner-only (0600 in 0700) and per OS user — `the_socket_a_session_is_given_is_owner_only_in_an_owner_only_directory`, `host_session_socket_tests`
-- [ ] A GitHub API call uses the assigned account's token — ⚠ open: proven as far as the token being asked for and a client built from it; no test asserts the REST call carries it (`RealGithubPrApi` shells out to `api.github.com`)
+- [x] Tool-session sockets are owner-only (0600 in 0700) and per OS user — `the_socket_a_session_is_given_is_owner_only_in_an_owner_only_directory`, `host_session_socket_tests`; ⚠ **only where the daemon can `chown`** — under `tddy-supervisor` it cannot and there is no socket (see *Still open*)
+- [x] A GitHub API call uses the assigned account's token — `a_rest_call_carries_the_token_the_session_host_returned` (the request's `Authorization: Bearer` is the token `request_github_token_from_session()` returned from a fake host over a real socket), with `a_refusing_host_means_no_request_reaches_the_api`; that the host answers the *assigned* account's token is `a_tools_token_request_reaches_the_assigned_account_through_the_coder_and_the_host_socket`
 - [x] Two projects assigned different accounts act as different GitHub users — `two_projects_on_one_daemon_act_as_different_github_users`
-- [ ] Token and identity always come from **one** resolution — ⚠ open, same reason as *Resolution* in Scope; `the_token_and_the_git_identity_name_the_same_account` pins the one function
-- [x] `NotAssigned` fails; **no environment fallback** — `a_project_that_assigns_no_account_is_refused_although_the_environment_holds_a_token`, and the `GITHUB_TOKEN`-set tests at the session edge, the tools, and the toolcall client
-- [x] `UnknownOnThisHost` fails with its own reason
-- [x] `Ambiguous` fails rather than picking
-- [x] `GITHUB_TOKEN` in the daemon's environment is never used for a session
+- [x] Token and identity always come from **one** resolution — `the_commit_pairs_and_the_token_derive_from_one_record`, `a_start_refused_because_the_vault_was_locked_keeps_refusing_after_it_is_unlocked`, `a_start_refused_for_an_unheld_account_keeps_refusing_once_the_account_arrives`, `the_token_stays_the_started_accounts_when_a_second_account_appears`, `the_started_accounts_token_is_never_replaced_by_another_accounts_when_it_is_removed`; `the_token_and_the_git_identity_name_the_same_account` pins the one function
+- [x] `NotAssigned` fails; **no environment fallback** — `a_project_that_assigns_no_account_is_refused_although_the_environment_holds_a_token`, `a_start_refused_for_no_assignment_is_not_rescued_by_the_environment_or_a_later_assignment`, `a_github_token_in_the_daemons_environment_rescues_an_unassigned_project_from_nothing`, `a_github_token_in_the_environment_authenticates_no_call`
+- [x] `UnknownOnThisHost` fails with its own reason — `an_account_this_host_has_never_received_is_refused_in_its_own_words`, `the_credential_handler_tells_an_unheld_assignment_apart_from_no_assignment`, `an_unassigned_and_an_unknown_account_are_refused_distinctly_and_verbatim`
+- [x] `Ambiguous` fails rather than picking — `two_accounts_assigned_at_one_provider_are_refused_rather_than_one_being_picked` (`tddy-accounts`), `two_accounts_assigned_at_one_provider_is_ambiguous_and_names_that_provider`; ⚠ no *lifecycle*-level test drives an ambiguous assignment through the handler (it would be pinned as `Refused` by construction, the same path as `NotAssigned`)
+- [x] `GITHUB_TOKEN` in the daemon's environment is never used for a session — `a_github_token_in_the_daemons_environment_rescues_nothing_and_replaces_nothing`, `a_github_token_in_the_daemons_environment_rescues_an_unassigned_project_from_nothing`, `a_github_token_in_the_environment_authenticates_no_call`, and the spawn-inheritance test in `tddy-spawn`
 - [x] `github_token_from_env` is deleted — no crate, daemon-side or agent-side, reads a
       GitHub token from the process environment — `no_crate_still_resolves_a_github_token_from_the_process_environment`
-- [x] WIP snapshot commits are still authored by `tddy-daemon`
-- [x] `FileGitHubTokenStore` has no readers left
+- [x] WIP snapshot commits are still authored by `tddy-daemon` — `a_work_in_progress_snapshot_is_still_signed_by_the_daemon_itself`
+- [x] `FileGitHubTokenStore` has no readers left — `login_time_token_store_is_retired.rs` (`the_session_path_no_longer_reaches_for_the_operator_s_login_time_github_token`, `the_authentication_service_no_longer_retains_a_github_token_beside_the_vault`, `nothing_in_the_tree_still_declares_a_login_keyed_github_token_store`)
+- [x] A stopped session stops being answered, a restarted daemon's running session is told to resume — `a_tool_session_whose_process_has_stopped_is_no_longer_answered`, `after_a_daemon_restart_a_running_session_is_told_to_resume_and_then_is_answered`
+- [ ] A session of an OS user the daemon cannot `chown` to has the host-session socket — **not met**: blocked on a supervisor design decision, see *Still open*
 
 ## TODO
 

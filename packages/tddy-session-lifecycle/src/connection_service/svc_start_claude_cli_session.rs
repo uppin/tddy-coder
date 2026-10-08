@@ -240,6 +240,23 @@ impl LaunchSessions {
     }
 }
 
+impl LaunchSessions {
+    /// The tool session's spawn returned: watch its process, and stop answering the session when it
+    /// stops. A spawn that failed leaves nothing registered — nobody is running to ask.
+    pub(crate) fn tool_session_spawned<E>(
+        &self,
+        session_id: &str,
+        spawned: &Result<tddy_spawn::spawner::SpawnResult, E>,
+    ) {
+        match spawned {
+            Ok(result) => self
+                .host_session_sockets
+                .watch_until_stopped(session_id, result.pid),
+            Err(_) => self.host_session_sockets.registry().unregister(session_id),
+        }
+    }
+}
+
 /// What a tool session registers on its OS user's host-session socket.
 pub(crate) struct ToolSessionHostRegistration<'a> {
     pub(crate) os_user: &'a str,

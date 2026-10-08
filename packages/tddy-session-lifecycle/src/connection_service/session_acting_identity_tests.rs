@@ -7,7 +7,6 @@ use super::session_acting_identity::*;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use tddy_accounts::{AccountsError, IdentityError, META_SUBJECT, META_SUBJECT_ID, PROVIDER_GITHUB};
-use tddy_core::toolcall::GithubCredentialHandler;
 use tddy_credentials::{
     AccountId, CredentialRecord, CredentialStore, ProviderId, SecretString, SessionVaults,
     FIRST_VERSION,
@@ -190,8 +189,8 @@ fn the_vault_backed_resolution_yields_the_assigned_accounts_pairs() {
 
     // When her session's start resolves a project assigned to Grace's account
     let pairs = access
-        .git_environment(&assigned("acct-grace"))
-        .expect("grace resolves");
+        .session_identity("s1", Some(&assigned("acct-grace")))
+        .git_environment;
 
     // Then the commits are Grace's
     assert_eq!(pair(&pairs, "GIT_AUTHOR_NAME"), Some("grace"));
@@ -203,11 +202,13 @@ fn without_vaults_the_refusal_says_so_and_the_session_gets_no_pairs() {
     let access = access_with(None, ADAS_SESSION);
 
     // When it resolves an assigned project
-    let refusal = access.git_environment(&assigned("acct-ada"));
-    let inherited = access.git_environment_or_inherited("s1", &assigned("acct-ada"));
+    let refusal = access.acting_identity(&assigned("acct-ada")).err();
+    let inherited = access
+        .session_identity("s1", Some(&assigned("acct-ada")))
+        .git_environment;
 
     // Then the refusal is named, and the session still proceeds without GIT_* variables
-    assert_eq!(refusal, Err(SessionIdentityRefusal::NoVaultsConfigured));
+    assert_eq!(refusal, Some(SessionIdentityRefusal::NoVaultsConfigured));
     assert!(inherited.is_empty());
 }
 
@@ -221,15 +222,16 @@ fn a_token_no_session_owns_is_refused_as_such_and_the_session_gets_no_pairs() {
     );
 
     // When it resolves an assigned project
-    let refusal = access.git_environment(&assigned("acct-ada"));
+    let refusal = access.acting_identity(&assigned("acct-ada")).err();
 
     // Then the refusal is NoSuchSession, distinct from a locked or missing vault
     assert_eq!(
         refusal,
-        Err(SessionIdentityRefusal::Vault(AccountsError::NoSuchSession))
+        Some(SessionIdentityRefusal::Vault(AccountsError::NoSuchSession))
     );
     assert!(access
-        .git_environment_or_inherited("s1", &assigned("acct-ada"))
+        .session_identity("s1", Some(&assigned("acct-ada")))
+        .git_environment
         .is_empty());
 }
 
@@ -239,13 +241,13 @@ fn an_unassigned_project_in_an_open_vault_starts_without_pairs() {
     let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
 
     // When the start asks for the environment
-    let refusal = access.git_environment(&[]);
-    let inherited = access.git_environment_or_inherited("s1", &[]);
+    let refusal = access.acting_identity(&[]).err();
+    let inherited = access.session_identity("s1", Some(&[])).git_environment;
 
     // Then the refusal is the identity's, and no variables are added
     assert_eq!(
         refusal,
-        Err(SessionIdentityRefusal::Identity(
+        Some(SessionIdentityRefusal::Identity(
             IdentityError::NotAssigned { provider: github() }
         ))
     );
@@ -262,12 +264,16 @@ fn the_two_vault_refusals_read_differently() {
     assert_ne!(no_session, locked);
 }
 
-/// The handler a session's listener carries, for a project assigning `accounts`, over Ada's vault.
+/// The handler a session's listener carries, for a project assigning `accounts`, over Ada's vault —
+/// bound the way a session start binds it, from the one resolution.
 fn credential_handler_over(
     access: SessionAccountAccess,
     accounts: &[AccountAssignment],
-) -> SessionGithubCredential {
-    SessionGithubCredential::new(access, accounts)
+) -> SharedGithubCredential {
+    access
+        .session_identity("s1", Some(accounts))
+        .github_credential
+        .expect("a project row binds a handler")
 }
 
 #[tokio::test]
@@ -358,34 +364,31 @@ async fn the_credential_handler_names_a_vault_it_cannot_read() {
 
 #[tokio::test]
 async fn each_call_reads_the_vault_as_it_stands() {
-    // Given a handler over a vault Ada has not unlocked yet
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let passphrase = SecretString::new(ADAS_PASSPHRASE);
-    let store =
-        CredentialStore::create(&CredentialStore::path_in(dir.path(), ADA), &passphrase, ADA)
-            .expect("Ada's vault is created");
-    store
-        .put(a_github_account("acct-ada", "ada", "101"))
-        .expect("the record is retained");
-    let vaults = Arc::new(SessionVaults::new(dir.path()));
-    let handler = credential_handler_over(
-        access_with(Some(Arc::clone(&vaults)), ADAS_SESSION),
-        &assigned("acct-ada"),
+    // Given a session started while Ada's session token was live, and a token owner that can expire
+    let (_dir, vaults) = vaults_where_ada_unlocked(ada_and_grace_held());
+    let owner_signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let signed_in = Arc::clone(&owner_signed_in);
+    let access = SessionAccountAccess::new(
+        Some(vaults),
+        Arc::new(move |t: &str| {
+            (t == ADAS_SESSION && signed_in.load(std::sync::atomic::Ordering::SeqCst))
+                .then(|| ADA.to_string())
+        }),
+        ADAS_SESSION,
     );
-    let while_locked = handler.github_token().await;
+    let handler = credential_handler_over(access, &assigned("acct-ada"));
+    let while_signed_in = handler.github_token().await;
 
-    // When she unlocks it and the agent asks again
-    vaults
-        .unlock(ADA, &passphrase)
-        .expect("the passphrase opens it");
-    let once_unlocked = handler.github_token().await;
+    // When the owner's session ends and the agent asks again
+    owner_signed_in.store(false, std::sync::atomic::Ordering::SeqCst);
+    let once_signed_out = handler.github_token().await;
 
-    // Then the first answer was a refusal and the second is the token
+    // Then the first answer was the token and the second a refusal: nothing was kept from the first
+    assert_eq!(while_signed_in, Ok("ghp_ada_token".to_string()));
     assert_eq!(
-        while_locked,
-        Err(SessionIdentityRefusal::Vault(AccountsError::Locked).to_string())
+        once_signed_out,
+        Err(SessionIdentityRefusal::Vault(AccountsError::NoSuchSession).to_string())
     );
-    assert_eq!(once_unlocked, Ok("ghp_ada_token".to_string()));
 }
 
 // ── A session's identity: the commit pairs and the token handler, from one lookup ─────────
@@ -495,4 +498,154 @@ fn a_daemon_side_operation_with_no_vaults_names_that() {
         token,
         Err(SessionIdentityRefusal::NoVaultsConfigured.to_string())
     );
+}
+
+// ── One resolution: the account is chosen at the session's start and pinned ───────────────
+
+fn vault_of(vaults: &Arc<SessionVaults>) -> tddy_accounts::SessionVaultAccountStore {
+    tddy_accounts::SessionVaultAccountStore::new(
+        Arc::clone(vaults),
+        Arc::new(|t: &str| (t == ADAS_SESSION).then(|| ADA.to_string())),
+    )
+}
+
+#[tokio::test]
+async fn a_start_refused_because_the_vault_was_locked_keeps_refusing_after_it_is_unlocked() {
+    // Given a session started while Ada's vault was locked: no pairs, the vault's refusal
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let passphrase = SecretString::new(ADAS_PASSPHRASE);
+    let store =
+        CredentialStore::create(&CredentialStore::path_in(dir.path(), ADA), &passphrase, ADA)
+            .expect("Ada's vault is created");
+    store
+        .put(a_github_account("acct-ada", "ada", "101"))
+        .expect("the record is retained");
+    let vaults = Arc::new(SessionVaults::new(dir.path()));
+    let identity = access_with(Some(Arc::clone(&vaults)), ADAS_SESSION)
+        .session_identity("s1", Some(&assigned("acct-ada")));
+    let handler = identity.github_credential.expect("a handler is bound");
+    let refusal = SessionIdentityRefusal::Vault(AccountsError::Locked).to_string();
+    assert!(identity.git_environment.is_empty());
+
+    // When Ada unlocks the vault and the agent asks for a token
+    vaults
+        .unlock(ADA, &passphrase)
+        .expect("the passphrase opens it");
+    let token = handler.github_token().await;
+
+    // Then the session is still refused, with the start's reason: its commits are not Ada's
+    assert_eq!(token, Err(refusal));
+}
+
+#[tokio::test]
+async fn a_start_refused_for_an_unheld_account_keeps_refusing_once_the_account_arrives() {
+    // Given a session started for a project assigned to an account the vault does not hold yet
+    let (_dir, vaults) =
+        vaults_where_ada_unlocked(vec![a_github_account("acct-ada", "ada", "101")]);
+    let identity = access_with(Some(Arc::clone(&vaults)), ADAS_SESSION)
+        .session_identity("s1", Some(&assigned("acct-grace")));
+    let handler = identity.github_credential.expect("a handler is bound");
+    let unknown = IdentityError::UnknownOnThisHost {
+        provider: github(),
+        account: AccountId::new("acct-grace"),
+    }
+    .to_string();
+
+    // When the account is linked afterwards and the agent asks for a token
+    vaults
+        .retain(ADA, a_github_account("acct-grace", "grace", "202"))
+        .expect("the record is retained");
+    let token = handler.github_token().await;
+
+    // Then it is still refused with the start's reason, and no pairs were ever given
+    assert_eq!(token, Err(unknown));
+    assert!(identity.git_environment.is_empty());
+}
+
+#[tokio::test]
+async fn a_start_refused_for_no_assignment_is_not_rescued_by_the_environment_or_a_later_assignment()
+{
+    // Given GITHUB_TOKEN exported, and a session started for a project assigning nothing
+    std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
+    let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
+    let handler = credential_handler_over(access, &[]);
+
+    // When the agent asks, twice
+    let first = handler.github_token().await;
+    let second = handler.github_token().await;
+
+    // Then both are the NotAssigned refusal, word for word
+    let refusal = Err(IdentityError::NotAssigned { provider: github() }.to_string());
+    assert_eq!(first, refusal);
+    assert_eq!(second, refusal);
+}
+
+#[tokio::test]
+async fn the_token_stays_the_started_accounts_when_a_second_account_appears() {
+    // Given a session started for Ada's account
+    let (_dir, vaults) =
+        vaults_where_ada_unlocked(vec![a_github_account("acct-ada", "ada", "101")]);
+    let access = access_with(Some(Arc::clone(&vaults)), ADAS_SESSION);
+    let handler = credential_handler_over(access, &assigned("acct-ada"));
+
+    // When a second GitHub account appears in the vault
+    vaults
+        .retain(ADA, a_github_account("acct-grace", "grace", "202"))
+        .expect("the record is retained");
+
+    // Then the token is still Ada's
+    assert_eq!(
+        handler.github_token().await,
+        Ok("ghp_ada_token".to_string())
+    );
+}
+
+#[tokio::test]
+async fn the_started_accounts_token_is_never_replaced_by_another_accounts_when_it_is_removed() {
+    // Given a session started for Ada's account, with Grace's also held
+    let (_dir, vaults) = vaults_where_ada_unlocked(ada_and_grace_held());
+    let access = access_with(Some(Arc::clone(&vaults)), ADAS_SESSION);
+    let handler = credential_handler_over(access, &assigned("acct-ada"));
+
+    // When Ada's record is removed from the vault
+    use tddy_accounts::AccountStore;
+    vault_of(&vaults)
+        .remove(ADAS_SESSION, &github(), &AccountId::new("acct-ada"))
+        .expect("the record is removed");
+    let token = handler.github_token().await;
+
+    // Then the answer is a refusal naming Ada's account, not Grace's token
+    assert_eq!(
+        token,
+        Err(IdentityError::UnknownOnThisHost {
+            provider: github(),
+            account: AccountId::new("acct-ada"),
+        }
+        .to_string())
+    );
+}
+
+#[tokio::test]
+async fn the_commit_pairs_and_the_token_derive_from_one_record() {
+    // Given a project assigned to Grace's account, in a vault holding Ada's and Grace's
+    let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
+
+    // When the session's identity is resolved
+    let identity = access.session_identity("s1", Some(&assigned("acct-grace")));
+
+    // Then the author, the committer email and the token are all Grace's
+    assert_eq!(
+        pair(&identity.git_environment, "GIT_COMMITTER_NAME"),
+        Some("grace")
+    );
+    assert_eq!(
+        pair(&identity.git_environment, "GIT_AUTHOR_EMAIL"),
+        Some("202+grace@users.noreply.github.com")
+    );
+    let token = identity
+        .github_credential
+        .expect("a handler")
+        .github_token()
+        .await;
+    assert_eq!(token, Ok("ghp_grace_token".to_string()));
 }

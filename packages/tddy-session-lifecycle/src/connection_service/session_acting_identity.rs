@@ -75,7 +75,8 @@ pub(crate) fn acting_identity_for(
 }
 
 /// The `GIT_*` pairs of the GitHub account `assignments` name, from one `acting_identity`
-/// resolution over `held`.
+/// resolution over `held` — the pure half the unit tests drive without a vault.
+#[cfg(test)]
 pub(crate) fn git_environment_for(
     assignments: &[(ProviderId, AccountId)],
     held: &[CredentialRecord],
@@ -131,15 +132,6 @@ impl SessionAccountAccess {
         Self::new(None, Arc::new(|_| None), "")
     }
 
-    /// The identity pairs for `accounts`, or the reason there are none.
-    pub(crate) fn git_environment(
-        &self,
-        accounts: &[AccountAssignment],
-    ) -> Result<Vec<(String, String)>, SessionIdentityRefusal> {
-        git_environment_for(&assignments_of(accounts), &self.held_github_accounts()?)
-            .map_err(SessionIdentityRefusal::Identity)
-    }
-
     /// The account `accounts` name — one `acting_identity` resolution over what the session's vault
     /// holds right now, or the reason there is none.
     pub(crate) fn acting_identity(
@@ -164,26 +156,6 @@ impl SessionAccountAccess {
             .into_iter()
             .filter(|record| record.provider.as_str() == PROVIDER_GITHUB)
             .collect())
-    }
-
-    /// [`Self::git_environment`], where a refusal leaves the session starting with no `GIT_*`
-    /// variables and is logged — the checkout's own identity stays in force.
-    pub(crate) fn git_environment_or_inherited(
-        &self,
-        session_id: &str,
-        accounts: &[AccountAssignment],
-    ) -> Vec<(String, String)> {
-        // A refused project starts with the checkout's inherited commit identity. Developer-consented
-        // (changeset, M2 "a refused resolution does not stop the session") so unassigned projects
-        // keep working; it is the one place the identity half is not strictly enforced, and it is
-        // not a token fallback.
-        self.git_environment(accounts).unwrap_or_else(|refusal| {
-            log::warn!(
-                target: "tddy_daemon::connection_service",
-                "session {session_id} starts without an account identity: {refusal}"
-            );
-            Vec::new()
-        })
     }
 }
 
@@ -214,52 +186,85 @@ impl SessionAccountAccess {
                 github_credential: None,
             };
         };
+        // The one resolution of this start: the commit pairs and the handler both derive from its
+        // outcome, so neither can name an account the other does not.
+        let (git_environment, pinned) = match self.acting_identity(accounts) {
+            Ok(acting) => (
+                session_git_environment(&acting),
+                PinnedAccount::Acting(acting.account),
+            ),
+            Err(refusal) => {
+                // A refused project starts with the checkout's inherited commit identity.
+                // Developer-consented (changeset, M2 "a refused resolution does not stop the
+                // session") so unassigned projects keep working; the handler stays refused with the
+                // same reason, so no token is handed out for commits that are not the account's.
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "session {session_id} starts without an account identity: {refusal}"
+                );
+                (Vec::new(), PinnedAccount::Refused(refusal.to_string()))
+            }
+        };
         SessionIdentity {
-            git_environment: self.git_environment_or_inherited(session_id, accounts),
-            github_credential: Some(Arc::new(SessionGithubCredential::new(
-                self.clone(),
-                accounts,
-            ))),
+            git_environment,
+            github_credential: Some(Arc::new(SessionGithubCredential {
+                access: self.clone(),
+                pinned,
+            })),
         }
     }
+}
+
+/// What a session's start decided about the account it acts as.
+enum PinnedAccount {
+    /// The start resolved this account; every later request fetches **this** record.
+    Acting(AccountId),
+    /// The start was refused, with this message; so is every later request, until a resume resolves
+    /// again.
+    Refused(String),
 }
 
 /// The token half of a session's resolution, answered to the agent's tools over the session's own
 /// toolcall socket.
 ///
-/// Holds the project's assignments **as they were when the session started** — the same snapshot
-/// the commit identity was resolved from, so a commit and a push in one session cannot come from
-/// two accounts because someone reassigned the project in between — and the start's session token,
-/// so the vault is read **per call**: a vault locked since, or a signed-out owner, refuses rather
-/// than being served from a copy. The token is returned to the caller and kept nowhere.
+/// **Pinned to the outcome of the start's resolution** — the one the commit pairs came from. If the
+/// start resolved an account, each call fetches that account's record, by id, from the owner's
+/// vault; it can never answer with another account's token, whatever the project's assignments or
+/// the vault's contents become. If the start was refused, each call repeats that refusal: a session
+/// whose commits are not attributed to an account is never given that account's token. The vault is
+/// read **per call** (a vault locked since, or a signed-out owner, refuses rather than being served
+/// from a copy); the token is returned to the caller and kept nowhere.
 pub(crate) struct SessionGithubCredential {
     access: SessionAccountAccess,
-    assignments: Vec<AccountAssignment>,
-}
-
-impl SessionGithubCredential {
-    pub(crate) fn new(access: SessionAccountAccess, assignments: &[AccountAssignment]) -> Self {
-        Self {
-            access,
-            assignments: assignments.to_vec(),
-        }
-    }
+    pinned: PinnedAccount,
 }
 
 #[async_trait::async_trait]
 impl tddy_core::toolcall::GithubCredentialHandler for SessionGithubCredential {
     async fn github_token(&self) -> Result<String, String> {
-        self.access
-            .acting_identity(&self.assignments)
-            .map(|acting| acting.token)
-            .map_err(|refusal| {
-                // The refusal is the agent's to read; the token never reaches a log line.
-                log::warn!(
-                    target: "tddy_daemon::connection_service",
-                    "a session's GitHub token was refused: {refusal}"
-                );
-                refusal.to_string()
-            })
+        let refuse = |reason: String| {
+            // The refusal is the agent's to read; the token never reaches a log line.
+            log::warn!(
+                target: "tddy_daemon::connection_service",
+                "a session's GitHub token was refused: {reason}"
+            );
+            reason
+        };
+        let account = match &self.pinned {
+            PinnedAccount::Acting(account) => account,
+            PinnedAccount::Refused(reason) => return Err(refuse(reason.clone())),
+        };
+        let held = self
+            .access
+            .held_github_accounts()
+            .map_err(|refusal| refuse(refusal.to_string()))?;
+        // The same resolution function the pairs came from, over the one assignment the start chose.
+        acting_identity_for(
+            &[(ProviderId::new(PROVIDER_GITHUB), account.clone())],
+            &held,
+        )
+        .map(|acting| acting.token)
+        .map_err(|error| refuse(error.to_string()))
     }
 }
 

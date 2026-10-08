@@ -227,6 +227,16 @@ impl DaemonSessionHost {
         self
     }
 
+    /// How often the process of a registered tool session is looked at to see whether it has stopped
+    /// (builder); a stopped session is no longer answered on its host-session socket. Replaces the
+    /// daemon's sockets, so call it before any session starts.
+    pub fn with_host_session_stop_watch_interval(mut self, interval: std::time::Duration) -> Self {
+        self.host_session_sockets = Arc::new(
+            super::host_session_socket::HostSessionSockets::with_stop_watch_interval(interval),
+        );
+        self
+    }
+
     /// Sign agents' credentials with this daemon's key and verify callers' through its key
     /// directory (builder). Pass the very value the daemon's auth entries were built with, so the
     /// credentials minted here are ones every gate on the fleet already trusts.

@@ -326,8 +326,16 @@ async fn an_account_this_daemon_cannot_give_the_socket_to_is_refused_and_leaves_
         .ensure_bound(other, data.path())
         .await;
 
-    // Then it refuses rather than leaving a socket the account cannot use or others can
-    assert!(outcome.is_err());
+    // Then it refuses, saying why and what topology it is — rather than leaving a socket the
+    // account cannot use or others can
+    let refusal = format!(
+        "{:#}",
+        outcome.expect_err("an unprivileged daemon cannot serve another account")
+    );
+    assert!(
+        refusal.contains("not privileged") && refusal.contains("tddy-supervisor"),
+        "{refusal}"
+    );
     let path = host_session_socket_path(data.path(), other).unwrap();
     assert!(!path.exists(), "no socket may be left behind");
     assert!(

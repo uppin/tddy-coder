@@ -327,13 +327,68 @@ fn telegram_spawn_options<'a>(
         // A Telegram spawn names no PR-stack base session: it has no orchestrator to seed.
         stack_seed_base_session: None,
         model: None,
-        // Telegram-spawned sessions don't wire the reverse spawn_conversation channel.
-        // TODO(stdio-relay): telegram path.
+        // No host-session socket: the socket answers a session's `github_token` and
+        // `spawn_conversation` from a registration the daemon's own session host makes at start
+        // (`DaemonSessionHost::register_tool_session_on_host_socket`), and this path starts a
+        // session without that host. Without a registration the socket would answer every request
+        // with a refusal, so the flag is left off and the agent's request is refused as having no
+        // credential handler. Telegram has never wired `spawn_conversation`; that is not a
+        // regression. TODO(stdio-relay): give Telegram-started tool sessions the per-user socket,
+        // which needs the daemon's session host (and its sockets) handed to this crate.
         host_session_socket: None,
-        // TODO(keyring 9/9): a Telegram spawn has no signed-in owner whose vault could resolve the
-        // project's account (no session token reaches this path), so it adds no commit identity and
-        // the checkout's own stays in force — the same outcome as a refused resolution elsewhere.
+        // No commit identity: the project's account is resolved from the signed-in owner's
+        // credential vault, which is opened only by that owner's session token. A Telegram start has
+        // an OS user and a Telegram-to-GitHub-login link but **no session token**, and the vault is
+        // session-gated by design, so there is nothing legitimate to resolve with — using the
+        // login to reach an already-open vault would let a Telegram chat bypass that gate. The
+        // session therefore starts under the checkout's own identity, and the chat is told so
+        // (`notify_account_identity_unavailable`). The same refusal the daemon's own starts apply
+        // when a resolution is refused; it is not a token fallback.
         git_environment: &[],
+    }
+}
+
+/// What a Telegram-started session's chat is told when its project acts as a GitHub account: that
+/// the account's commit identity and the agent's GitHub tools are unavailable here, and why.
+/// `None` for a project that assigns no account — nothing is lost, so nothing is said.
+pub(super) fn account_identity_unavailable_notice(project: &ProjectData) -> Option<String> {
+    let account = project.accounts.first()?;
+    Some(format!(
+        "This project acts as the {} account `{}`, but a session started from Telegram has no \
+         signed-in web session to open that account's credential vault with. Its commits use the \
+         checkout's own git identity, and its agent's GitHub tools are unavailable. Start the \
+         session from the web dashboard to act as the project's account.",
+        capitalized_provider(&account.provider),
+        account.account_id
+    ))
+}
+
+fn capitalized_provider(provider: &str) -> String {
+    match provider {
+        "github" => "GitHub".to_string(),
+        other => other.to_string(),
+    }
+}
+
+impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
+    /// Tell the chat — and the log — that `project`'s account cannot act in a session started
+    /// here. A project with no account assigned is not told anything.
+    pub(super) async fn notify_account_identity_unavailable(
+        &self,
+        chat_id: i64,
+        session_id: &str,
+        project: &ProjectData,
+    ) -> anyhow::Result<()> {
+        let Some(notice) = account_identity_unavailable_notice(project) else {
+            return Ok(());
+        };
+        log::warn!(
+            target: "tddy_daemon::telegram_session_control",
+            "session {session_id} (project {}) starts without its project's account identity: {notice}",
+            project.project_id
+        );
+        self.sender.send_message(chat_id, &notice).await?;
+        Ok(())
     }
 }
 

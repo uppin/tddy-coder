@@ -29,7 +29,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
-use tddy_host_service::host_session_service::{HostSessionRegistry, HostSessionService};
+use tddy_host_service::host_session_service::{
+    HostSessionRegistry, HostSessionService, SessionProbe,
+};
 use tokio::task::JoinHandle;
 
 /// Longest socket path accepted. `sun_path` is 104 bytes on macOS and 108 on Linux, NUL included.
@@ -68,14 +70,74 @@ struct BoundServer {
     task: JoinHandle<()>,
 }
 
+impl Drop for BoundServer {
+    /// A server outlives nothing: dropping the daemon's sockets closes the listener, so a daemon that
+    /// starts over in the same process (or a test that does) finds no live peer on the path.
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// How often a registered session's process is looked at to see whether it is still running.
+const DEFAULT_STOP_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The daemon's per-OS-user host-session socket servers and the sessions they answer.
-#[derive(Default)]
 pub(crate) struct HostSessionSockets {
     registry: Arc<HostSessionRegistry>,
     servers: tokio::sync::Mutex<HashMap<String, BoundServer>>,
+    stop_watch_interval: std::time::Duration,
+}
+
+impl Default for HostSessionSockets {
+    fn default() -> Self {
+        Self::with_stop_watch_interval(DEFAULT_STOP_WATCH_INTERVAL)
+    }
 }
 
 impl HostSessionSockets {
+    /// Sockets whose registered sessions' processes are looked at every `stop_watch_interval`.
+    pub(crate) fn with_stop_watch_interval(stop_watch_interval: std::time::Duration) -> Self {
+        Self {
+            registry: Arc::default(),
+            servers: tokio::sync::Mutex::default(),
+            stop_watch_interval,
+        }
+    }
+
+    /// Stop answering `session_id` once `pid` — the process it was just started or resumed as — is
+    /// gone, so the daemon stops holding the start's session token for a session that is not running.
+    ///
+    /// The registered session records `pid`; a later registration of the same id (a resume) replaces
+    /// it, and then this watch ends without touching the newer registration. The watch also ends when
+    /// the session is deleted. The process's absence is read with `kill(pid, 0)`: `ESRCH` is gone,
+    /// anything else (including `EPERM`, a process of another user) is still there.
+    pub(crate) fn watch_until_stopped(&self, session_id: &str, pid: u32) {
+        if !self.registry.attach_process(session_id, pid) {
+            return;
+        }
+        let registry = Arc::clone(&self.registry);
+        let interval = self.stop_watch_interval;
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(interval).await;
+                if registry.process_of(&session_id) != Some(pid) {
+                    return;
+                }
+                if !process_exists(pid) {
+                    if registry.unregister_stopped(&session_id, pid) {
+                        log::info!(
+                            target: "tddy_daemon::connection_service",
+                            "session {session_id}: its process {pid} has stopped; no longer answered \
+                             on its host-session socket until resumed"
+                        );
+                    }
+                    return;
+                }
+            }
+        });
+    }
+
     /// The sessions answered on these sockets: registered at a session's start or resume, removed
     /// when it is deleted.
     pub(crate) fn registry(&self) -> &Arc<HostSessionRegistry> {
@@ -100,9 +162,9 @@ impl HostSessionSockets {
         }
         // A server whose file is gone or replaced listens on nothing anyone can reach; stop it so
         // the probe below does not mistake it for a live peer.
-        if let Some(stale) = servers.remove(os_user) {
+        if let Some(mut stale) = servers.remove(os_user) {
             stale.task.abort();
-            let _ = stale.task.await;
+            let _ = (&mut stale.task).await;
         }
         let path = host_session_socket_path(data_dir, os_user)?;
         let listener = bind_owner_only(&path, os_user)?;
@@ -111,7 +173,8 @@ impl HostSessionSockets {
             .context("hand the socket to the runtime")?;
         let registry = Arc::clone(&self.registry);
         let owner = os_user.to_string();
-        let task = tokio::spawn(serve(listener, owner, registry));
+        let exists = session_probe(data_dir);
+        let task = tokio::spawn(serve(listener, owner, registry, exists));
         servers.insert(
             os_user.to_string(),
             BoundServer {
@@ -135,6 +198,7 @@ async fn serve(
     listener: tokio::net::UnixListener,
     owner: String,
     registry: Arc<HostSessionRegistry>,
+    exists: SessionProbe,
 ) {
     loop {
         let stream = match listener.accept().await {
@@ -148,7 +212,8 @@ async fn serve(
                 return;
             }
         };
-        let service = HostSessionService::new(&owner, Arc::clone(&registry));
+        let service = HostSessionService::new(&owner, Arc::clone(&registry))
+            .with_session_probe(Arc::clone(&exists));
         let (reader, writer) = tokio::io::split(stream);
         let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
             reader,
@@ -158,6 +223,33 @@ async fn serve(
         );
         tokio::spawn(endpoint.run());
     }
+}
+
+/// Whether a process with `pid` still exists.
+fn process_exists(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the process can be signalled.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    rc == 0 || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+/// Whether a session exists on disk — durable state under the daemon's data dir — for the OS user a
+/// socket belongs to. The id is validated as one path segment first: it comes from a request.
+fn session_probe(data_dir: &Path) -> SessionProbe {
+    let data_dir = data_dir.to_path_buf();
+    Arc::new(move |os_user, session_id| {
+        if tddy_core::session_lifecycle::validate_session_id_segment(session_id).is_err() {
+            return false;
+        }
+        let Some(base) =
+            crate::user_sessions_path::sessions_base_for_user(os_user, Some(&data_dir))
+        else {
+            return false;
+        };
+        tddy_core::read_session_metadata(&tddy_core::session_lifecycle::unified_session_dir_path(
+            &base, session_id,
+        ))
+        .is_ok()
+    })
 }
 
 /// Bind `path` for `os_user` with no window in which anyone else can reach it. See the module docs.
@@ -196,8 +288,18 @@ fn bind_owner_only(path: &Path, os_user: &str) -> anyhow::Result<std::os::unix::
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .context("restrict the socket to its owner")?;
         if needs_chown {
-            chown(path, target.uid, target.gid)?;
-            chown(user_dir, target.uid, target.gid)?;
+            let not_privileged = || {
+                format!(
+                    "this daemon (uid {euid}) is not privileged to hand the socket to {os_user} \
+                     (uid {}) — as when it runs as tddy-supervisor's unprivileged child, which \
+                     cannot chown; a session of that user gets no host-session socket until the \
+                     daemon can give it to them (see \
+                     docs/dev/1-WIP/2026-09-19-keyring-github-identity.md)",
+                    target.uid
+                )
+            };
+            chown(path, target.uid, target.gid).with_context(not_privileged)?;
+            chown(user_dir, target.uid, target.gid).with_context(not_privileged)?;
         }
         listener
             .set_nonblocking(true)

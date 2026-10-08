@@ -298,6 +298,9 @@ fn ask_the_session_host() -> Result<String, String> {
 pub struct RealGithubPrApi {
     pub repo: String,
     token: TokenSource,
+    /// Root of the REST API — [`GITHUB_API_BASE`](crate::github_rest_common::GITHUB_API_BASE) unless
+    /// [`Self::with_api_base`] names another. A value, never an environment variable.
+    api_base: String,
 }
 
 impl RealGithubPrApi {
@@ -307,6 +310,7 @@ impl RealGithubPrApi {
         Self {
             repo: repo.into(),
             token: TokenSource::Explicit(token.into()),
+            api_base: crate::github_rest_common::GITHUB_API_BASE.to_string(),
         }
     }
 
@@ -319,6 +323,7 @@ impl RealGithubPrApi {
         Self {
             repo: repo.into(),
             token: TokenSource::Absent,
+            api_base: crate::github_rest_common::GITHUB_API_BASE.to_string(),
         }
     }
 
@@ -335,7 +340,16 @@ impl RealGithubPrApi {
                 ask: Box::new(ask),
                 answered: std::sync::OnceLock::new(),
             },
+            api_base: crate::github_rest_common::GITHUB_API_BASE.to_string(),
         }
+    }
+
+    /// Send this client's requests to `api_base` instead of `https://api.github.com` — a GitHub
+    /// Enterprise host, or a local listener standing in for GitHub. The token is sent there as it
+    /// would be to GitHub, so name only a host the account's token may be shown to.
+    pub fn with_api_base(mut self, api_base: impl Into<String>) -> Self {
+        self.api_base = api_base.into();
+        self
     }
 
     /// [`Self::asking`] the host of the calling process's own session — the `github-token` request
@@ -827,6 +841,7 @@ impl GithubPrApi for RealGithubPrApi {
         // would then repoint or merge an arbitrary PR.
         let head = qualified_head(&self.repo, head_branch);
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             "pulls",
             &[("state", "open"), ("head", head.as_str())],
@@ -877,6 +892,7 @@ impl GithubPrApi for RealGithubPrApi {
         // Unqualified, GitHub ignores the filter and returns the whole PR list.
         let head = qualified_head(&self.repo, head_branch);
         let body = match crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             "pulls",
             &[("state", "all"), ("head", head.as_str())],
@@ -922,6 +938,7 @@ impl GithubPrApi for RealGithubPrApi {
     fn merge_pr(&self, number: u64) -> Result<String, tddy_core::WorkflowError> {
         let token = self.require_token("RealGithubPrApi::merge_pr")?;
         let body = crate::github_rest_common::curl_github_put_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/merge"),
             r#"{"merge_method":"merge"}"#,
@@ -940,6 +957,7 @@ impl GithubPrApi for RealGithubPrApi {
         let token = self.require_token("RealGithubPrApi::patch_pr_base")?;
         let body = serde_json::json!({ "base": new_base }).to_string();
         crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &body,
@@ -964,7 +982,11 @@ impl GithubPrApi for RealGithubPrApi {
         .to_string();
         let token = self.require_token("RealGithubPrApi::create_pr")?;
         let resp = crate::github_rest_common::curl_github_post_json_with_token(
-            &self.repo, "pulls", &payload, &token,
+            &self.api_base,
+            &self.repo,
+            "pulls",
+            &payload,
+            &token,
         )?;
         let v: serde_json::Value = serde_json::from_str(&resp).map_err(|e| {
             tddy_core::WorkflowError::WriteFailed(format!("create_pr: JSON parse: {e}"))
@@ -984,6 +1006,7 @@ impl GithubPrApi for RealGithubPrApi {
         let token = self.require_token("RealGithubPrApi::disable_auto_merge")?;
         let body = serde_json::json!({ "auto_merge": null }).to_string();
         let _ = crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &body,
@@ -996,6 +1019,7 @@ impl GithubPrApi for RealGithubPrApi {
         let token = self.require_token("RealGithubPrApi::close_pr")?;
         let body = serde_json::json!({ "state": "closed" }).to_string();
         crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &body,
@@ -1055,6 +1079,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::get_pr";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &[],
@@ -1103,6 +1128,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_pr_files";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/files"),
             &[("per_page", PER_PAGE)],
@@ -1121,6 +1147,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_check_runs";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("commits/{head_sha}/check-runs"),
             &[("per_page", PER_PAGE)],
@@ -1147,6 +1174,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_reviews";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/reviews"),
             &[("per_page", PER_PAGE)],
@@ -1170,6 +1198,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         const OP: &str = "RealGithubPrApi::list_review_comments";
         let token = self.require_token(OP)?;
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}/comments"),
             &[("per_page", PER_PAGE)],
@@ -1207,6 +1236,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         let token = self.require_token(OP)?;
         // A PR's conversation comments live on its issue, not on the pull resource.
         let body = crate::github_rest_common::curl_github_get_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("issues/{number}/comments"),
             &[("per_page", PER_PAGE)],
@@ -1233,6 +1263,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
         // `/search/issues` is not under `/repos/{owner}/{repo}/` — the repository is a `repo:`
         // qualifier inside `q`, which is why this call needs the absolute-path helper.
         let body = crate::github_rest_common::curl_github_get_json_absolute_path(
+            &self.api_base,
             "search/issues",
             &[("q", q.as_str()), ("per_page", per_page.as_str())],
             &token,
@@ -1308,6 +1339,7 @@ impl GithubPrInsightApi for RealGithubPrApi {
 
         let token = self.require_token(OP)?;
         crate::github_rest_common::curl_github_patch_json_with_token(
+            &self.api_base,
             &self.repo,
             &format!("pulls/{number}"),
             &serde_json::Value::Object(payload).to_string(),

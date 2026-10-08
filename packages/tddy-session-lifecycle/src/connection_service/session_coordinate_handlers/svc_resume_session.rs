@@ -162,7 +162,7 @@ impl DaemonSessionHost {
                 github_credential: identity.github_credential,
             })
             .await;
-        let result = self
+        let spawned = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Resume,
                 os_user,
@@ -184,7 +184,10 @@ impl DaemonSessionHost {
                 host_session_socket,
                 git_environment,
             })
-            .await?;
+            .await;
+        self.launch_sessions()
+            .tool_session_spawned(&req.session_id, &spawned);
+        let result = spawned?;
         self.maybe_spawn_presenter_observer(
             &observer_os_user,
             &result.session_id,

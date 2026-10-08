@@ -114,8 +114,8 @@ impl DaemonSessionHost {
                 github_credential: identity.github_credential,
             })
             .await;
-        let pre_session_id = Some(tool_session_id);
-        let result = self
+        let pre_session_id = Some(tool_session_id.clone());
+        let spawned = self
             .spawn_tddy_coder(ToolSpawnPlan {
                 purpose: ToolSpawnPurpose::Start,
                 os_user,
@@ -135,7 +135,10 @@ impl DaemonSessionHost {
                 host_session_socket,
                 git_environment,
             })
-            .await?;
+            .await;
+        self.launch_sessions()
+            .tool_session_spawned(&tool_session_id, &spawned);
+        let result = spawned?;
         log::debug!(
             "StartSession: spawn returned, session_id={}",
             result.session_id
