@@ -1,4 +1,4 @@
-use crate::connection_service::activity_hub;
+use crate::activity_hub;
 use async_trait::async_trait;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::demo_vm::{

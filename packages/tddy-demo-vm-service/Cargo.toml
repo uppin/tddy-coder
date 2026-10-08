@@ -5,6 +5,7 @@ edition = "2021"
 description = "The demo_vm.DemoVmService handlers: per-session demo VM start, stop and status"
 
 [dependencies]
+async-trait = "0.1"
 log = "0.4"
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }

@@ -230,7 +230,7 @@ per-crate baseline → B-checks for that receiver.
   `presenter_intent_client`), `session_notification_publishing`, `remote_git_pack_execution`; `tonic`
   (approved)
 - [x] **R5a `tddy-demo-vm-service`** (new, D12 as changed): `activity_hub`, `demo_vm_coordinate_handlers` (`move_cluster_to_crate`)
-- [ ] **R5b**: `DemoVmServiceImpl` after the constructor fix `new(state)` (developer-approved signature exception), in this PR
+- [x] **R5b**: `DemoVmServiceImpl` after the constructor fix `new(state)` (developer-approved signature exception), in this PR
 - [x] **R6 `tddy-session-agents`**: T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
   `ExecToolRoute` under D7-B, with their four edges)
 - [x] **R7 `tddy-cli-sessions`** (new, D4): `cli_session_manager` (anchor) with its 9 children and
@@ -909,6 +909,17 @@ Preflighted (`check --deep`, nothing written; the hand pre-move edits and the `t
 - **Hand edits after the move (build corrections):** `svc_session_identity_wiring.rs`: `super::tddy_session_split::service_util::` → `super::service_util::` (the engine mis-spelled a facade path); the 17 unused imports it left in the three source modules and the new modules removed by `cargo fix` (not hand-typed), `cargo fmt`.
   Filed: [`2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block`](../todo/2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block.md); this fixes the host-naming launch modules the R9 preflight found (no todo needed).
 - **After:** lifecycle **610** passed / the same 22 failed / 1 ignored (unchanged); clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean.
+
+### R5b: `DemoVmServiceImpl` → `tddy-demo-vm-service` (done; developer's signature exception)
+
+- **Hand edit before the move (own commit, the approved exception):** `DemoVmServiceImpl::new(host: Arc<DaemonSessionHost>)` → `new(state: DemoVmState)`; `demo_vm_entry` calls `new(self.demo_vm_service_state())`; `DaemonSessionHost::demo_vm_service_state` is now `pub`.
+  **Two consumer call sites follow and were edited** (the one place B6's "consumers unedited" does not hold): `tddy-daemon/src/runtime.rs` and `tddy-daemon/tests/local_token_uds.rs` now call `DemoVmServiceImpl::new(connection.demo_vm_service_state())`. An inherent constructor taking the host cannot stay in lifecycle once the type is in another crate (`E0116`).
+- **Engine, step one (own commit):** `move_item` (`name` = `demo_vm_service`, `reexport: none`) gathers `DemoVmServiceImpl` and its two impls out of the wiring file `svc_demo_vm_ports.rs` (`demo_vm_entry` stays). The engine re-pointed two `tddy-daemon` paths; reverted by hand
+  ([`…move-item-reexport-none-edits-other-packages-callers`](../todo/2026-10-08-restructure-move-item-reexport-none-edits-other-packages-callers.md)).
+- **Engine, step two:** `move_module_to_crate` (`reexport: glob`) of `demo_vm_service`; facade `pub use tddy_demo_vm_service::demo_vm_service::DemoVmServiceImpl` path kept (`connection_service::DemoVmServiceImpl`).
+- **Hand edits after the move (build corrections):** `async-trait = "0.1"` added to `tddy-demo-vm-service/Cargo.toml` (the engine missed a crate named only by `#[async_trait]`; lifecycle already depends on it; not one of the seven internal edges) — [`…misses-a-crate-named-only-by-an-attribute-macro`](../todo/2026-10-08-restructure-move-to-crate-misses-a-crate-named-only-by-an-attribute-macro.md); `cargo fmt`. No visibility widening was needed.
+- **After:** lifecycle **610** passed / the same 22 failed / 1 ignored; `tddy-demo-vm-service` 0 (no test moved); sum 610 as before. clippy `--all-targets -D warnings` (`tddy-demo-vm-service`, lifecycle, `tddy-daemon`) and fmt clean; `cargo check --all-targets` clean on `tddy-daemon`, `tddy-daemon-rpc`, `tddy-telegram-control`.
+- Disk: the build directory filled the volume partway (`No space left on device`); `./clean` freed 57 GB and the step was re-run.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 
