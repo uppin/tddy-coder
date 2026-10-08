@@ -1,0 +1,47 @@
+[package]
+name = "tddy-agent-launch"
+version = "0.1.0"
+edition = "2021"
+description = "Agent session launch: the start, resume, relaunch and spawn paths for CLI, jailed and stacked sessions"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+libc = "0.2"
+log = "0.4"
+prost = "0.13"
+serde_json = "1"
+tddy-accounts = { path = "../tddy-accounts" }
+tddy-cli-sessions = { path = "../tddy-cli-sessions" }
+tddy-core = { path = "../tddy-core" }
+tddy-credentials = { path = "../tddy-credentials" }
+tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
+tddy-discovery = { path = "../tddy-discovery" }
+tddy-host-service = { path = "../tddy-host-service" }
+tddy-pr-stack = { path = "../tddy-pr-stack" }
+tddy-projects = { path = "../tddy-projects" }
+tddy-rpc = { path = "../tddy-rpc" }
+tddy-sandbox = { path = "../tddy-sandbox" }
+tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
+tddy-semantic-index = { path = "../tddy-semantic-index" }
+tddy-service = { path = "../tddy-service" }
+tddy-session-activity = { path = "../tddy-session-activity" }
+tddy-session-agents = { path = "../tddy-session-agents" }
+tddy-session-files = { path = "../tddy-session-files" }
+tddy-session-split = { path = "../tddy-session-split" }
+tddy-spawn = { path = "../tddy-spawn" }
+tddy-stdio = { path = "../tddy-stdio" }
+tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
+tddy-task = { path = "../tddy-task" }
+tddy-workflow = { path = "../tddy-workflow" }
+tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
+tddy-worktree-service = { path = "../tddy-worktree-service" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
+tonic = { version = "0.12", default-features = false, features = ["transport"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,93 @@
+# crap: start_sandboxed_cursor_cli_session — untested, and the sweep ranked it low
+
+**Location:** `packages/tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs:35` — `start_sandboxed_cursor_cli_session`
+**Category:** CRAP
+**Detected:** 2026-09-18 by `tddy-tools analyze coverage` + `report` (245 tests across 96 files, join rate 51.9%)
+**Metrics:** **CRAP 1,722** · complexity **41** · **never executed by any test** · rank **5/50** in this crate · 465 lines · nesting depth 3
+**Restructure:** **no** — tests first. Same rule as `packages/tddy-telegram-control/docs/code-issues/crap-telegram-bot-handlers.md`
+**Status:** Open — converted 2026-10-07 by #534 without tests, against this record's rule (developer decision D10 (a)); the `TODO(crap-svc-start-sandboxed-cursor-cli-session)` marker in the source points here; still never executed — **unclaimed**
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs:32`
+
+## Measurement history
+
+| Run | CRAP | Complexity | Coverage | Lines | Note |
+|---|---|---|---|---|---|
+| 2026-09-18 | 1,722 | 41 | 0% | 465 | first detection |
+| 2026-09-24 | — | — | never executed | 414 | #524 touched it only through merges of proven-identical copies: DRY #3 (project lookup, metadata), #5 (semantic index), #6 (initial changeset), #7 (worktree cut): 465 → 414. Its suite is still red on this host (the RPC bridge is never installed), so it is still unexecuted, and it was not restructured, per this record. CRAP and complexity not re-derived |
+| 2026-10-03 | — | — | never executed | 414 | touched by PR #576 (caller sync) and **unchanged by it**: one call gains its arguments, `sandbox_rpc_handler(session_id, &session_dir)`, so the jail's bridge is bound to its session. Same line count on `0ce696aa` and `4f2a3b66`; no branch added |
+| 2026-10-04 | — | — | never executed | — | touched by #573 (`#live-plan` 14/15): one added line, `env.extend(self.restructure_tools_env())`, beside the existing `lsp_tools_env` one (file 445 → 446 lines); still never executed by any test |
+| 2026-10-05 | — | — | never executed | 416 | touched by #532 (`#carve` 17/21): +1 (415 → 416, fn line to closing brace) — the seed-clone claim goes through `.agent_roster()`. No branch added; still never executed by any test |
+| 2026-10-07 | — | — | never executed | 421 | converted by #534 (`#carve` 19/21) onto `LaunchSessions` by the **header-only edit** (developer decision D10 (a)): the `impl` header, the roster calls through `self.agent_roster`, the host call through `self.host`, and A4 import paths. **No branch added**, but the function grew **416 → 421** (fn line to closing brace at the base `7abe4a74` and at HEAD) — rustfmt wrapped five lines the longer paths and the extra `.agent_roster` hop push over 100 columns. File 447 → 453 production lines (the extra six are the `TODO(crap-svc-start-sandboxed-cursor-cli-session)` marker above the `impl`). Still never executed by any test; the "tests first" rule this record states is **deferred, not met** **421 accepted** by the developer (2026-10-07): the planned bound (≤ 414) was below the base's 416 and unreachable by a token-only edit |
+| 2026-10-09 | — | — | — | 429 | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
+
+## What the tool found
+
+One of **three** sandboxed/plain session-start entry points in this crate, and the only one with no
+test entering it at all. Because CRAP treats coverage as a boolean, the score is exactly
+`cx² + cx` — the ranking among untested functions is complexity alone.
+
+The three siblings measure very differently:
+
+| Function | CRAP | Complexity | Covered | Lines | Nesting |
+|---|---|---|---|---|---|
+| `start_sandboxed_claude_cli_session` | 2,862 | 53 | **no** | 615 | 5 |
+| **`start_sandboxed_cursor_cli_session`** | **1,722** | **41** | **no** | **465** | **3** |
+| `start_session_core` | 80 | 80 | **yes, fully** | 842 | 6 |
+
+## Why this record exists: the sweep missed it
+
+**`/jev-restructuring` ranked this outside its top 100** and it therefore got no `complexity` record
+in the batch. Jev's answers explain why, and they were not wrong:
+
+| Jev signal | Value | Reading |
+|---|---|---|
+| `p_problem` | 0.83 | below the 0.91 floor the top 100 happened to cut at |
+| `p_dispatch` | 0.06 | correctly: this is **not** a dispatcher |
+| `category` | `unsure`, confidence **0.28** | the model flagged its own uncertainty |
+| measured nesting | 3 | **under** the `/analyze-clean-code` threshold of 4 |
+
+Jev was asked about **shape**, and the shape is genuinely flat: 465 lines of mostly straight-line
+setup with 29 early exits and only 10 branch points. On the question it was asked, it answered
+correctly, and its confidence of 0.28 said so.
+
+What it cannot see is that this flat function has **complexity 41 and zero coverage**. That is the
+CRAP axis, and no amount of reading the body semantically will produce it.
+
+**This is the worked example of why both passes are mandatory.** The
+[`jev-restructuring`](../../../../.agents/skills/jev-restructuring/SKILL.md) skill says to run
+`/analyze-code-issues` alongside it and treat the disagreements as the finding. Here the
+disagreement is the whole finding: the crate's **#5 risk** is invisible to a shape-based sweep, and
+the function the sweep ranked **#1 in the entire repo** (`start_session_core`) turns out to be
+**fully covered** and 46th of 50 by CRAP.
+
+Ranking by shape alone would have put the safest of the three siblings first and left this one
+unrecorded.
+
+## Why it matters here
+
+This is the entry point for starting a **sandboxed Cursor CLI session**. Nothing enters it in the
+test suite, so every behaviour it has is unverified — and it sits beside two siblings that do
+almost the same job, one of which is also untested.
+
+A change to session startup usually has to be made in all three. Two of the three have no test to
+catch a mistake in that edit.
+
+## What would close it
+
+**Tests before decomposition, and in that order.** Splitting an untested complexity-41 function
+moves risk without reducing it.
+
+1. A test that enters this path at all — CRAP falls from 1,722 to 41 the moment coverage is non-zero,
+   because coverage is a boolean in the formula. That single test is the cheapest change on this
+   list.
+2. Only then consider whether the three startup paths should share extracted steps. At nesting 3
+   this body is **not** tangled, so `extract_method` buys much less here than it does for its
+   siblings — length is the only threshold it breaches.
+
+`missing-tests` is never a delete: this is a live production entry point.
+
+## If you are about to change this code
+
+Unclaimed, so no in-flight PR conflict. **Check whether the same change is needed in
+`svc_start_sandboxed_claude_cli_session.rs` and `svc_start_session_core.rs`** — the three paths have
+no enforced relationship, and only the last of them has a test that would notice.

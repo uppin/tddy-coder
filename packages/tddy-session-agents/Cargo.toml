@@ -57,6 +57,7 @@ tokio = { version = "1", features = ["sync", "time", "process"] }
 # `project_storage::find_project`: a hosted clone fetches its WIP ref from the project repository
 # the owning daemon registered.
 tddy-projects = { path = "../tddy-projects" }
+tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 
 [dev-dependencies]
 rstest = { workspace = true }

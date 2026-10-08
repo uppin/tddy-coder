@@ -17,4 +17,4 @@ The developer consented, at `/pr-wrap` on #571 (2026-10-04), to defer decomposin
 
 Extract the reporting wrapper and its phase helpers into a sibling module once the function's own seams are movable, so the file drops back under 500. This is a `/code-restructuring` job, scheduled together with the open code issue rather than inside a feature stack.
 
-Tracked in `packages/tddy-session-lifecycle/docs/code-issues/complexity-cursor-cli-spawn-spawn-cursor-cli-session-inner.md`, which carries the measurement history, is set to regressed and is unclaimed.
+Tracked in `packages/tddy-agent-launch/docs/code-issues/complexity-cursor-cli-spawn-spawn-cursor-cli-session-inner.md`, which carries the measurement history, is set to regressed and is unclaimed.

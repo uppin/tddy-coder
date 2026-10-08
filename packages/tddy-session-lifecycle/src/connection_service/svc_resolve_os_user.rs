@@ -125,8 +125,8 @@ impl DaemonSessionHost {
     }
 }
 
-mod os_user_resolution;
 pub use os_user_resolution::*;
+pub use tddy_daemon_livekit::os_user_resolution;
 
 pub use tddy_session_agents::exec_tool_caller::authorize_exec_tool_caller;
 

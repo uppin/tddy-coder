@@ -11803,6 +11803,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-agent-launch"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "libc",
+ "log",
+ "prost 0.13.5",
+ "serde_json",
+ "tddy-accounts",
+ "tddy-cli-sessions",
+ "tddy-core",
+ "tddy-credentials",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-daemon-sandbox",
+ "tddy-discovery",
+ "tddy-host-service",
+ "tddy-pr-stack",
+ "tddy-projects",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-sandbox-runner",
+ "tddy-semantic-index",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-session-agents",
+ "tddy-session-files",
+ "tddy-session-split",
+ "tddy-spawn",
+ "tddy-stdio",
+ "tddy-subagent-worktree",
+ "tddy-task",
+ "tddy-workflow",
+ "tddy-workflow-recipes",
+ "tddy-worktree-service",
+ "tempfile",
+ "tokio",
+ "tonic 0.12.3",
+ "uuid",
+]
+
+[[package]]
 name = "tddy-agent-skills"
 version = "0.1.0"
 dependencies = [
@@ -11949,6 +11993,32 @@ dependencies = [
  "tddy-workflow",
  "tempfile",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tddy-cli-sessions"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "libc",
+ "log",
+ "portable-pty 0.9.0",
+ "prost 0.13.5",
+ "tddy-core",
+ "tddy-daemon-sandbox",
+ "tddy-livekit",
+ "tddy-pty",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-stdio",
+ "tddy-task",
+ "tddy-terminal-rpc",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -12430,6 +12500,22 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+]
+
+[[package]]
+name = "tddy-demo-vm-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "tddy-core",
+ "tddy-daemon-kernel",
+ "tddy-rpc",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-vm",
+ "tddy-workflow-recipes",
+ "tokio",
 ]
 
 [[package]]
@@ -13255,6 +13341,7 @@ dependencies = [
  "tddy-worktree-service",
  "tempfile",
  "tokio",
+ "tonic 0.12.3",
  "uuid",
 ]
 
@@ -13279,6 +13366,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-session-sync",
+ "tddy-subagent-worktree",
  "tddy-testing-commons",
  "tddy-worktree-service",
  "tempfile",
@@ -13316,6 +13404,7 @@ dependencies = [
  "serde_json",
  "tddy-core",
  "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
  "tddy-livekit",
  "tddy-rpc",
  "tddy-sandbox",
@@ -13332,34 +13421,25 @@ name = "tddy-session-lifecycle"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "assert_cmd",
  "async-trait",
  "axum 0.8.9",
- "base64 0.22.1",
  "bytes",
- "chrono",
- "clap",
  "futures-util",
- "glob",
  "http 1.4.2",
- "hyper-util",
  "libc",
  "livekit",
  "log",
- "portable-pty 0.9.0",
  "pretty_assertions",
  "prost 0.13.5",
  "reqwest 0.12.28",
- "rsa 0.9.10",
- "rstest 0.24.0",
  "scopeguard",
  "serde",
  "serde_json",
  "serde_yaml",
  "serial_test",
  "tddy-accounts",
- "tddy-actions",
- "tddy-bsp",
+ "tddy-agent-launch",
+ "tddy-cli-sessions",
  "tddy-coder",
  "tddy-connectrpc",
  "tddy-core",
@@ -13368,29 +13448,25 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
- "tddy-demo-runner",
+ "tddy-demo-vm-service",
  "tddy-discovery",
  "tddy-github",
  "tddy-host-service",
  "tddy-livekit",
  "tddy-livekit-testkit",
- "tddy-lsp",
- "tddy-lsp-executor",
  "tddy-model-registry",
  "tddy-pr-stack",
  "tddy-projects",
- "tddy-pty",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-sandbox-cgroups",
- "tddy-sandbox-recipes",
  "tddy-sandbox-runner",
- "tddy-screen-sharing",
  "tddy-semantic-index",
  "tddy-service",
  "tddy-session-activity",
  "tddy-session-agents",
  "tddy-session-files",
+ "tddy-session-split",
  "tddy-session-sync",
  "tddy-session-tool-client",
  "tddy-spawn",
@@ -13402,7 +13478,6 @@ dependencies = [
  "tddy-terminal-rpc",
  "tddy-testing-commons",
  "tddy-tool-engine",
- "tddy-vm",
  "tddy-workflow",
  "tddy-workflow-recipes",
  "tddy-worktree-service",
@@ -13411,8 +13486,43 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tonic 0.12.3",
- "tower 0.5.3",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "tddy-session-split"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "log",
+ "pretty_assertions",
+ "serde_json",
+ "tddy-cli-sessions",
+ "tddy-core",
+ "tddy-daemon-auth",
+ "tddy-daemon-kernel",
+ "tddy-daemon-livekit",
+ "tddy-daemon-sandbox",
+ "tddy-discovery",
+ "tddy-github",
+ "tddy-livekit",
+ "tddy-projects",
+ "tddy-rpc",
+ "tddy-sandbox",
+ "tddy-sandbox-recipes",
+ "tddy-semantic-index",
+ "tddy-service",
+ "tddy-session-activity",
+ "tddy-session-agents",
+ "tddy-session-files",
+ "tddy-task",
+ "tddy-worktree-service",
+ "tempfile",
+ "tokio",
  "uuid",
 ]
 

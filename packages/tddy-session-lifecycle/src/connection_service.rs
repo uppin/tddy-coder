@@ -40,7 +40,7 @@ use tddy_service::proto::session::{Signal, SignalSessionRequest, StartSessionReq
 
 use tddy_daemon_kernel::HOST_DOCUMENT_FRAME_BYTES;
 
-mod service_util;
+#[cfg(test)]
 pub(crate) use service_util::*;
 /// The deadlines every clone and supervised spawn runs under — shared with the project handlers in
 /// `tddy-daemon-rpc`, which clone repositories the way session starts do.
@@ -75,7 +75,7 @@ const _: () = assert!(
      forwarded subscription"
 );
 
-mod activity_hub;
+pub use tddy_demo_vm_service::{activity_hub, demo_vm_coordinate_handlers, demo_vm_service};
 
 /// ConnectionService implementation.
 ///
@@ -201,43 +201,47 @@ pub struct DaemonSessionHost {
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
 }
 
-mod session_worktree_observer;
 pub use session_worktree_observer::SessionWorktreeObserver;
 
-mod seed_codebase;
 pub use seed_codebase::*;
 
-mod stack_parent;
 pub use stack_parent::*;
 
-mod seeded_clone_guard;
 pub use seeded_clone_guard::*;
 
-mod svc_resolve_tddy_tools_path;
 pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 
-mod svc_pr_status_for_caller;
-
-mod svc_start_claude_cli_session;
-
-pub(crate) mod host_session_socket;
-pub mod inherited_host_sockets;
-
-pub(crate) mod session_acting_identity;
 pub use session_acting_identity::project_github_token;
 
-mod hooks_and_urls;
 pub use hooks_and_urls::*;
 
-mod agent_host_callbacks;
+pub use tddy_session_agents::{
+    agent_host_callbacks, agent_roster, peer_session_answer, roster_replacement, seed_codebase,
+    seeded_clone_guard, session_dir_lookup, svc_ensure_session_room_for_agents,
+    svc_provision_agent_clone, svc_resolve_listed_worktree, svc_start_hosted_agent_clone,
+    svc_turn_end_reporter,
+};
 
-mod split_ports;
+pub use tddy_session_split::{
+    attached_initial_prompt, service_util, split_ports, split_start,
+    svc_provision_workspace_tool_sandbox, svc_resolve_tddy_tools_path, svc_resume_split_wiring,
+    svc_spawn_split_agent, svc_split_context_from_codebase_host,
+    svc_start_sandboxed_codebase_session,
+};
 
-mod launch_ports;
+pub use tddy_agent_launch::{
+    child_spawn_handler, claude_cli_spawn, conversation_spawn, conversation_spawn_handler,
+    conversation_worktree_op, family_proto_bridge, hooks_and_urls, host_session_socket,
+    inherited_host_sockets, jail_relaunch, launch_ports, managed_launch, session_acting_identity,
+    session_coordinate_handlers, session_worktree_observer, stack_child_spawn, stack_parent,
+    stack_seed_validation, svc_ensure_project_available_for_start, svc_index_workspace_worktree,
+    svc_pr_status_for_caller, svc_relaunch_sandboxed_runner, svc_resume_claude_cli_session,
+    svc_resume_sandboxed_claude_cli_session, svc_start_claude_cli_session,
+    svc_start_sandboxed_claude_cli_session, svc_start_sandboxed_cursor_cli_session,
+    svc_start_session_core, worktree_source,
+};
 
 mod svc_launch_delegators;
-
-mod attached_initial_prompt;
 
 mod svc_agent_host_ports;
 
@@ -245,54 +249,17 @@ mod svc_agent_roster_delegators;
 
 mod svc_split_delegators;
 
-mod agent_roster;
+#[cfg(test)]
 pub(crate) use agent_roster::*;
 /// Shared with `tddy-daemon-rpc`'s `ListSubagents`, whose rows name agents the way the roster does.
 pub use agent_roster::{def_tool_names, qualified_agent_id};
 
-mod claude_cli_spawn;
-pub(crate) use claude_cli_spawn::*;
-
-mod svc_resolve_listed_worktree;
 pub use svc_resolve_listed_worktree::resolvable_agent_defs;
 
 mod terminal_bridge_impl;
 
-mod svc_ensure_session_room_for_agents;
-
-mod svc_provision_agent_clone;
-
-mod svc_start_hosted_agent_clone;
-
-mod svc_turn_end_reporter;
-
-mod svc_start_sandboxed_claude_cli_session;
-
-mod svc_start_sandboxed_cursor_cli_session;
-
-mod svc_resume_claude_cli_session;
-
-mod svc_split_context_from_codebase_host;
-
-mod svc_relaunch_sandboxed_runner;
-
-mod managed_launch;
-pub(crate) use managed_launch::*;
-
-mod stack_child_spawn;
-pub(crate) use stack_child_spawn::*;
-
-mod child_spawn_handler;
-
-/// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
-/// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
-/// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.
-///
-/// These drive real spawns. A git worktree is cut, the daemon's own attachment materializer runs,
-/// and a stub standing in for `claude` records the command line it was handed — so deleting the
-/// call to [`crate::stack_doc_attachments`] fails here, which no test of that pure helper does.
 #[cfg(test)]
-mod stack_child_spawn_tests;
+pub(crate) use stack_child_spawn::*;
 
 /// The deadline a split session's own context read is bounded by.
 ///
@@ -317,20 +284,13 @@ mod stack_child_spawn_tests;
 #[cfg(test)]
 mod split_context_from_codebase_host_tests;
 
-mod conversation_spawn;
+#[cfg(test)]
 pub(crate) use conversation_spawn::*;
 
-mod conversation_spawn_handler;
-
-mod roster_replacement;
 pub use roster_replacement::*;
 
-pub(crate) use tddy_session_files::attachment_progress::*;
-
-mod placement;
 pub use placement::*;
 
-mod split_start;
 pub use split_start::*;
 
 mod svc_resolve_os_user;
@@ -339,25 +299,15 @@ pub use crate::connection_service::peer_session_answer::resolve_exec_tool_worktr
 /// authenticate a caller exactly as the host does.
 pub use svc_resolve_os_user::{authorize_exec_tool_caller, resolve_os_user};
 
-/// How a sandboxed `workspace` session's jail is specified, and rebuilt when it dies mid-call.
-mod jail_relaunch;
-
 /// Where an exec tool runs on this daemon, shared with `tddy-daemon-rpc`'s exec-tool family.
-mod conversation_worktree_op;
 pub use conversation_worktree_op::run_conversation_worktree_op;
 
 mod local_exec_tools;
 pub use local_exec_tools::LocalExecTools;
 
-mod svc_materialize_staged_attachment;
-
-mod svc_spawn_split_agent;
+pub use tddy_session_files::svc_materialize_staged_attachment;
 
 mod svc_shut_down_children;
-
-mod svc_start_sandboxed_codebase_session;
-
-mod svc_start_session_core;
 
 mod svc_terminal_ports;
 
@@ -367,13 +317,11 @@ mod svc_session_files_ports;
 /// and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_activity_ports;
 
-mod family_proto_bridge;
 /// Shared with the families served in `tddy-daemon-rpc`, whose bodies bridge the same
 /// wire-identical messages.
 pub use family_proto_bridge::wire_same;
 /// The host state `tddy-daemon-rpc`'s family handlers are built from.
 mod handler_state;
-mod session_coordinate_handlers;
 /// The daemon's half of `session_agents.SessionAgentService` — the host capabilities family B
 /// reads, and the routing the daemon keeps. `#unbundle` node 7.
 mod svc_session_agent_ports;
@@ -432,9 +380,8 @@ impl DaemonRpcHandler {
 
 mod daemon_rpc_handler;
 
-mod demo_vm_coordinate_handlers;
 mod svc_demo_vm_ports;
-pub use svc_demo_vm_ports::DemoVmServiceImpl;
+pub use crate::connection_service::demo_vm_service::DemoVmServiceImpl;
 
 /// Bytes to leave free in a LiveKit data packet for everything in a frame that is not payload: the
 /// RPC envelope (request id, service/method metadata, sender identity) plus the frame's own fields —
@@ -473,7 +420,6 @@ pub fn activity_delta_frames(delta: &ActivityDelta) -> Vec<AgentActivityDeltaChu
     ))
 }
 
-mod stack_seed_validation;
 pub use stack_seed_validation::*;
 
 #[cfg(test)]
@@ -503,12 +449,6 @@ mod resume_agent_recipe_restore_tests;
 mod specialized_subagent_env_unit_tests;
 
 #[cfg(test)]
-mod session_acting_identity_tests;
-
-#[cfg(test)]
-mod host_session_socket_tests;
-
-#[cfg(test)]
 mod inherited_host_sockets_tests;
 
 #[cfg(test)]
@@ -527,7 +467,6 @@ mod start_session_binary_resolution_tests;
 #[cfg(test)]
 mod resume_session_binary_resolution_tests;
 
-mod worktree_source;
 pub use worktree_source::*;
 
 #[cfg(test)]
@@ -535,9 +474,6 @@ mod worktree_source_tests;
 
 #[cfg(test)]
 mod sandbox_claude_passthrough_args_tests;
-
-#[cfg(test)]
-mod conversation_spawn_wiring_tests;
 
 #[cfg(test)]
 mod remote_branch_push_gating_tests;
@@ -565,17 +501,24 @@ mod workspace_sandbox_roster_dispatch_unit_tests;
 #[cfg(test)]
 mod conversation_worktree_jail_route_unit_tests;
 
-pub(crate) mod daemon_hook_urls;
-mod first_admission_token;
+pub use tddy_daemon_kernel::daemon_hook_urls;
+pub use tddy_daemon_livekit::{first_admission_token, placement};
 /// A jail whose tool channel died is rebuilt once and the call retried, and an ordinary tool
 /// failure is not mistaken for one. Driven through the same private
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
-pub(crate) mod peer_session_answer;
-mod session_dir_lookup;
+/// The spawn *wiring*, both ways in: a child of a planned PR must come up holding the
+/// orchestrator's documents and knowing to read its boundaries — whether the orchestrator agent
+/// spawned it through `pr_spawn_child` or the operator started it from the Start-session dialog.
+///
+/// These drive real spawns. A git worktree is cut, the daemon's own attachment materializer runs,
+/// and a stub standing in for `claude` records the command line it was handed — so deleting the
+/// call to [`crate::stack_doc_attachments`] fails here, which no test of that pure helper does.
+#[cfg(test)]
+mod stack_child_spawn_tests;
 mod svc_agent_roster_wiring;
-mod svc_ensure_project_available_for_start;
+mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
-mod svc_index_workspace_worktree;
-mod svc_resume_sandboxed_claude_cli_session;
+mod svc_session_identity_wiring;
+mod svc_worktree_observer_wiring;

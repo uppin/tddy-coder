@@ -1,0 +1,53 @@
+# complexity: start_session_core
+
+**Location:** `packages/tddy-agent-launch/src/svc_start_session_core.rs:62` — `start_session_core`
+**Category:** complexity
+**Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
+**Metrics:** **842 lines** · **nesting depth 6** · 1 parameters · 40 branch/match lines · 54 early exits
+**CRAP:** **CRAP 80** · complexity 80 · rank 46/50 in this crate · **fully covered** (CRAP == complexity means coverage 1.0)
+**Thresholds breached:** length 842 > 60; nesting 6 > 4 (`/analyze-clean-code`)
+**Restructure:** `extract_method` — `/code-restructuring` territory
+**Status:** Open — regressed 2026-10-04 (358 → 373, +15 from #571); narrowed 2026-09-24 by #524 (857 → 358); what is left is its early-return guards, which the engine refuses to extract (E4, plan `19`) — **unclaimed**, **low priority**: fully covered, so this is a readability cost, not a risk
+**Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_start_session_core.rs:62`
+
+## Measurement history
+
+| Run | Lines | Nesting | Branches | Early exits | Note |
+|---|---|---|---|---|---|
+| 2026-09-18 | 842 | 6 | 40 | 54 | first detection |
+| 2026-09-23 | 857 | 6 | — | — | 854 on master before #520 (+12 since detection, unrecorded); +3 from #520 (`#carve` 11/12) — rustfmt re-wraps the peer-roster and common-room reads that moved behind `self.peer_routing`. No control flow added: nesting, and `return`/`?` count, identical to master; branches not re-derived |
+| 2026-09-24 | 857 | 6 | — | — | touched by #509 (`#keyring` 2/9) and **unchanged by it**: `let os_user = self` → `&self` (the live `users:` holder), same line count; nesting and `return`/`?` count identical on the merge-base with `origin/master` (`4e7157d2`) and HEAD; branches not re-derived |
+| 2026-09-24 | 358 | — | — | — | #524: plans `10a` and `10b` (15 extract-methods between the returns) and DRY #2, #4, #8 (857 → 358). Plan `19` authored the four branch bodies and the agent-allowlist check as extract-methods; each was refused for its early returns (E4) |
+| 2026-10-04 | 373 | — | — | — | #571 (`#live-plan` 12/15): 358 → 373 (+15), by brace matching from the `fn start_session_core` line on `origin/feature/live-plan/session-lsp-tools` (which reproduces the 358 above) and on HEAD. Added: the `begin_phase` / `end_phase` calls around the workspace start's seed and semantic index, the `announce_worktree_ready` call after each of the three reporting starts, and the `sessions_base` / `session_id` captures the claude-cli and cursor-cli branches take before their `.await?`. Nesting, branches and exits not re-derived. Not split: the remaining seams are the early-return guards the engine refuses (E4) |
+| 2026-10-05 | 374 | — | — | — | touched by #532 (`#carve` 17/21): +1 (373 → 374, fn line to closing brace) — rustfmt wraps `.agent_roster().unwind_seeded_roster(…)` over one more line. No control flow added; nesting, branches and exits not re-derived |
+| 2026-10-07 | 377 | — | — | — | touched by `#carve` 18/21 (`SplitSessions`): +3 (374 → 377, fn line to closing brace) from three `self.split_sessions()` re-points where the launch topic calls the split topic through its handle. No control flow added. Measured by brace matching on `HEAD` vs `origin/master` |
+| 2026-10-08 | 386 | — | — | — | `#carve` 20/21 (launch start): +5 against `origin/master` (381 -> 386, fn line to closing brace). Re-pointed to `impl LaunchSessions`; rustfmt wraps the three roster calls (`self.agent_roster.agent_def_for_spawn(…)`, `seeded_roster_records(…)`) and the `DaemonSeedCloneClaimant { service: … }` literal over more lines. No control flow added. **Regressed, kept open**: still over 60 lines |
+| 2026-10-09 | 386 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
+
+## What the tool found
+
+The body is **842 lines**, 14.0x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored. It is the **only function in its file**, so the file's 896 production lines are this function and nothing else — there is nothing else to move out.
+
+The function carries **40 branch or match lines** and **54 early exits**
+(`return` / `?`). Its file is 896 lines total, 896 of them production, with **no `#[cfg(test)]` block**.
+
+**How this was found.** `/jev-restructuring` ranked it 1 of 3,503 production units by
+semantic shape (Jev classified it `tangled_dispatch`). That ranking is **targeting only** and appears
+in no metric above — every number in this record comes from a structural scan and can be re-derived
+without an API call.
+
+## Why it matters here
+
+A function that is the whole of its file has no seam a reader can use to skip past what their change does not touch.
+With no unit test in the file, nothing catches a behaviour change made while restructuring it.
+
+## What would close it
+
+Bring it under the `/analyze-clean-code` thresholds — length 842 > 60; nesting 6 > 4 — by `extract_method`
+along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
+the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
+
+⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
+the numbers still hold and that the finding is real before spending a PR on it — an unverified
+finding is a lead, not an issue.

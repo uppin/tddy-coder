@@ -116,7 +116,9 @@ fn start_local_socket_server(
         SessionServiceTonicAdapter::new(Arc::new(connection.session_lifecycle_service()));
     let project_adapter = ProjectServiceTonicAdapter::new(Arc::new(rpc_handlers.project_service()));
     let demo_vm_adapter = DemoVmServiceTonicAdapter::new(Arc::new(
-        tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(Arc::clone(&connection)),
+        tddy_session_lifecycle::connection_service::DemoVmServiceImpl::new(
+            connection.demo_vm_service_state(),
+        ),
     ));
     let local_token_adapter =
         LocalTokenUdsTonicAdapter::new(Arc::new(config.clone()), signer, uid_to_username);

@@ -1,0 +1,51 @@
+# complexity: ensure_project_available_for_start
+
+**Location:** `packages/tddy-agent-launch/src/svc_ensure_project_available_for_start.rs:124` — `ensure_project_available_for_start`
+**Category:** complexity
+**Detected:** 2026-09-18 — targeted by `/jev-restructuring` sweep, measured by structural scan
+**Metrics:** **157 lines** · **nesting depth 8** · 1 parameters · 9 branch/match lines · 2 early exits
+**Thresholds breached:** length 157 > 60; nesting 8 > 4 (`/analyze-clean-code`)
+**Restructure:** `extract_method` — `/code-restructuring` territory
+**Status:** Open — narrowed 2026-09-24 by #524 (158 → 99); still over the 60-line budget — **unclaimed**
+**Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
+**Moved:** 2026-10-09 by `#carve` 21/21 (#536), engine move into `tddy-agent-launch`, from `packages/tddy-session-lifecycle/src/connection_service/svc_ensure_project_available_for_start.rs:123`; this record was `complexity-svc-resolve-listed-worktree-ensure-project-available-for-start.md`
+
+## Measurement history
+
+| Run | Lines | Nesting | Branches | Early exits | Note |
+|---|---|---|---|---|---|
+| 2026-09-18 | 157 | 8 | 9 | 2 | first detection |
+| 2026-09-23 | 158 | 8 | — | — | +1 from #520 (`#carve` 11/12): the peer-project read goes through `self.peer_routing.eligible_daemon_source()`, which rustfmt splits over one more line. No control flow added: nesting and `return`/`?` count identical to master; branches not re-derived |
+| 2026-09-24 | 99 | — | — | — | #524 plan `20`: the blocking-pool clone task → `spawn_project_clone` (158 → 99). The placement `match` and its early return stay; nesting not re-derived |
+| 2026-09-26 | 99 | — | — | — | touched by #526 (`#carve` 15/21) and **unchanged by it**: its file gained the `agent_def_for_spawn` delegation to `tddy_session_agents::spawn_agent_def`; this function is identical at `2688227f` and `22787218` (fn line to closing brace), still at `:30` |
+| 2026-10-05 | 99 | — | — | — | touched by the same-crate moves and **unchanged by them**: its file lost the `mod session_room_opening;` line when that module was re-parented under `svc_ensure_session_room_for_agents`; this function is identical at `origin/master` and HEAD (fn line to closing brace), still at `:30` |
+| 2026-10-05 | 99 | — | — | — | touched by #532 (`#carve` 17/21) and **unchanged by it**: the file's agent-def functions became `impl AgentRoster` and `session_dir_lookup` left its `mod` list; this function is 99 lines at `origin/master` and at HEAD (fn line to closing brace), now at `:31` |
+| 2026-10-08 | 99 | — | — | — | `#carve` 20/21: **moved** by the engine (`move_item`) to `svc_ensure_project_available_for_start.rs:123` and converted to `impl LaunchSessions`; 99 lines at `origin/master` and at HEAD (fn line to closing brace), unchanged. Nesting not re-derived. Over the 60-line budget: **kept open**; **Location** line below updated |
+| 2026-10-09 | 99 | — | — | — | `#carve` 21/21 (#536): **moved whole** from lifecycle into `tddy-agent-launch` (the receiver lifecycle's wiring crate now consumes). Length by brace matching (fn line to closing brace) is identical on `origin/master` (`468b368f9`, the old path) and on HEAD, so the move changed no length, nesting or branch; the new location is the only difference. Re-measured structurally only: complexity, CRAP and coverage were **not** re-derived (no `analyze coverage` run), so those figures stay the earlier ones. Still open, unclaimed |
+
+## What the tool found
+
+The body is **157 lines**, 2.6x the 60-line ceiling at which `/analyze-clean-code` says a function must be refactored.
+
+The function carries **9 branch or match lines** and **2 early exits**
+(`return` / `?`). Its file is 430 lines total, 430 of them production, with **no `#[cfg(test)]` block**, across 10 functions.
+
+**How this was found.** `/jev-restructuring` ranked it 33 of 3,503 production units by
+semantic shape (Jev classified it `tangled_dispatch`). That ranking is **targeting only** and appears
+in no metric above — every number in this record comes from a structural scan and can be re-derived
+without an API call.
+
+## Why it matters here
+
+Within its file this is the body a change to this area has to be read in full to modify safely.
+With no unit test in the file, nothing catches a behaviour change made while restructuring it.
+
+## What would close it
+
+Bring it under the `/analyze-clean-code` thresholds — length 157 > 60; nesting 8 > 4 — by `extract_method`
+along the branch structure. Anchor with `tddy-tools restructure anchors`, never by hand, then prove
+the seam with `restructure check --deep` against a warm index (`./run-index-daemon`).
+
+⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
+the numbers still hold and that the finding is real before spending a PR on it — an unverified
+finding is a lead, not an issue.

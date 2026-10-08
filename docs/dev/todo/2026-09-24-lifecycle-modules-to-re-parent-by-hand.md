@@ -82,11 +82,19 @@ checked with `--all-targets`.
 
 ## Status
 
-Partly resolved. The `reparent_module` operation exists and the six in-crate rows are done. Remaining: the
-three rows above (node 17), the `cli_spawn/` regrouping and `ManagedWorkflow`, which no plan has been
-written for.
+Partly resolved; narrowed at `#carve` 21/21 ([#536](https://github.com/uppin/tddy-coder/pull/536)). The
+`reparent_module` operation exists, the six in-crate rows are done, and two of the three receiver-bound
+modules moved to their receivers (`session_dir_lookup.rs` to `tddy-session-agents`,
+`first_admission_token.rs` to `tddy-daemon-livekit`). What remains:
 
-**Update, `#carve` 17/21 (PR #532) stage E1 to E5.** Two of the three rows moved: `session_dir_lookup.rs` and
-`first_admission_token.rs` are now direct children of `connection_service` (`reparent_module`, developer's
-consent), so `svc_provision_agent_clone.rs` no longer reaches them through a mixed or wiring parent. They still
-go to their receiver crates in node 17; only `svc_host_builders/rpc_activity.rs` remains under its old parent.
+- `svc_host_builders/rpc_activity.rs` (`record_rpc_activity`) is still a child of the wiring builders in
+  `tddy-session-lifecycle`; its destination is routing (`relay_idle`, in `tddy-daemon-kernel`).
+- The `cli_spawn/` regrouping. The five modules are flat files of `tddy-agent-launch` now
+  (`claude_cli_spawn.rs`, `claude_cli_spawn_steps.rs`, `cursor_cli_spawn.rs`, `chat.rs`, `resume.rs`), and
+  `cursor_cli_spawn` is a public module whose path the facade keeps, so the regrouping is a
+  `reparent_module` inside that crate, with `pub use … as cursor_cli_spawn`.
+- `ManagedWorkflow`, which sits in `tddy-cli-sessions`' `session_toolcall.rs` and belongs with
+  `tddy-agent-launch`'s `managed_launch.rs`; `tddy-cli-sessions` may not depend on launch, so the type has to
+  move into launch, and `tddy_daemon_sandbox`'s type-erased `SessionScopedResource` names it by path only.
+
+No plan has been written for these.

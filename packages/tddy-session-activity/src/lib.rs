@@ -17,9 +17,14 @@
 //! [`tddy_service::session_activity::next_tick`] for why — and is re-exported here because this is
 //! the crate that stamps the ticks.
 
+pub mod presenter_intent_client;
+pub mod presenter_observer_spawn;
+pub mod presenter_observer_task;
+pub mod remote_git_pack_execution;
 pub mod service;
 pub mod session_deletion;
 pub mod session_list_enrichment;
+pub mod session_notification_publishing;
 pub mod session_notification_subscribers;
 pub mod session_notifications;
 pub mod session_reader;

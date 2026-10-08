@@ -31,6 +31,7 @@ pub mod context_files;
 pub mod context_sync;
 pub mod host_documents;
 pub mod service;
+pub mod session_attachment_materialization;
 pub mod session_attachment_staging;
 pub mod session_attachments;
 pub mod session_context_docs;
@@ -38,6 +39,7 @@ pub mod session_file_upload;
 pub mod session_uploads;
 pub mod session_workflow_files;
 pub mod stack_doc_attachments;
+pub mod svc_materialize_staged_attachment;
 
 /// Where the agent's guidance is read from, for one session — the agent-context-sync trait, which
 /// arrived with the module that owns it.
