@@ -4,7 +4,8 @@ use tddy_service::proto::session_agents_svc::OpenAgentConversationRequest;
 
 use std::{path::Path, sync::Arc};
 
-use crate::connection_service::{agent_roster, peer_session_answer};
+use crate::connection_service::agent_roster;
+use crate::connection_service::peer_session_answer;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;

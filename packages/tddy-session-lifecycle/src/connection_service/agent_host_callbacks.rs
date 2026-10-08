@@ -16,7 +16,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::connection_service::{seed_codebase, seeded_clone_guard, SeededAgentClones};
+use crate::connection_service::seed_codebase;
+use crate::connection_service::seeded_clone_guard;
+use crate::connection_service::seed_codebase::SeededAgentClones;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::SessionUserResolver;
 use tddy_daemon_livekit::livekit_rooms_stream::RoomRoster;

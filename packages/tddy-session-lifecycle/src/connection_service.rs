@@ -571,7 +571,7 @@ pub use tddy_daemon_livekit::{first_admission_token, placement};
 /// [`DaemonSessionHost::local_agent_codebase_access`] seam, for the same reason.
 #[cfg(test)]
 mod jail_relaunch_unit_tests;
-pub(crate) mod peer_session_answer;
+pub mod peer_session_answer;
 mod session_dir_lookup;
 mod svc_agent_roster_wiring;
 mod svc_ensure_project_available_for_start;
