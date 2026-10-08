@@ -1,7 +1,7 @@
 # Changeset: `tddy-session-lifecycle` becomes a wiring crate: every converted topic moves into its receiver with the restructure engine
 
 **Date**: 2026-09-26
-**Status**: ✅ Implemented on the branch, awaiting review and CI: R1-R10 (R5 as R5a/R5b) done; B5 is ~1k over its target and `test_util` is not gated (see Validation results). The developer's rulings of 2026-10-08 are recorded under Decisions and "Developer overrides"
+**Status**: Implemented on the branch, **not green**: R1-R10 (R5 as R5a/R5b) done; B5 is ~1k over its target and `test_util` is not gated; the final gates found two tests broken by path (one failing in `tddy-daemon-kernel`, one target not compiling in `tddy-daemon-sandbox`, see Validation results). The developer's rulings of 2026-10-08 are recorded under Decisions and "Developer overrides"
 **Type**: Refactor (crate extraction by engine moves; no behaviour change)
 **Stack**: `#carve` 21/21, branch `feature/carve/lifecycle-moves`, on top of `#carve` 20
 (`feature/carve/lifecycle-ports-launch-start`). Plan label **17**, the move node
@@ -14,14 +14,16 @@ Nodes are named by their plan label: 16a–16e are the five in-place conversion 
 - **`tddy-session-lifecycle`**: left with only wiring: host construction and builders, the state
   builders, the three callback-trait impls, `PeerRouted*` and the port adapters, the
   `SessionHandler` / `SessionService` impls, the terminal adapter and bridge, and `pub use` facades.
-  About 4.4k–4.6k production lines (D13).
+  Target about 4.4k–4.6k production lines (D13); **as landed 5,587** (about 5.5k; `test_util`, 366 lines, is not gated, see B5
+  and [the todo](../todo/2026-10-08-session-lifecycle-test-util-is-not-gated-behind-a-test-util-feature.md)).
 - **New crates:** `tddy-agent-launch` (T1, T9, T1c), `tddy-session-split` (T4, `service_util`,
-  `workspace_session`), `tddy-cli-sessions` (the PTY runtime; proposed, D4).
+  `workspace_session`), `tddy-cli-sessions` (the PTY runtime; proposed, D4), `tddy-demo-vm-service` (T11; D12 as changed 2026-10-08).
 - **Existing receivers:** `tddy-session-agents` (T3), `tddy-session-files` (T8), `tddy-session-activity`
   (T10, the notification publishing half, `remote_git_pack_execution`), `tddy-daemon-livekit` (T7,
-  `placement`), `tddy-daemon-kernel` (`agent_list_mapping`, `daemon_urls`), `tddy-demo-runner` (T11, D12).
-- **Consumers** (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`): **none is
-  edited**, except a test that reads lifecycle source by path. They resolve through facades.
+  `placement`), `tddy-daemon-kernel` (`agent_list_mapping`, `daemon_urls`). `tddy-demo-runner` is **not** a receiver: T11 went to the new `tddy-demo-vm-service`.
+- **Consumers** (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`): resolve through facades and
+  are not edited, **except two `tddy-daemon` call sites** (`src/runtime.rs`, `tests/local_token_uds.rs`) that follow the approved
+  `DemoVmServiceImpl::new(state)` signature change (see "Developer overrides, 2026-10-08").
 
 ## Related Feature Documentation
 
@@ -78,7 +80,7 @@ What 16a–16e left, per topic:
   {`sandbox_rpc_handler`, `pr_stack`} (16d, 16e);
 - the three traits each defined in their topic's ports module and implemented once on
   `DaemonSessionHost` in lifecycle's wiring ports file;
-- the four mixed parent/child files re-parented (**not done in 16a**: deferred, see "Carried from 16a"), so a module move no longer drags another
+- the four mixed parent/child files re-parented (**not done in 16a**; the engine delivered it afterwards, see "Carried from 16a"), so a module move no longer drags another
   topic's child with it.
 
 **This node is one node** (decided 2026-09-26). It could be cut one receiver per node later, and that
@@ -106,28 +108,31 @@ cut is cheap: moves review faster than conversions.
 - **Moves only with the `tddy-tools restructure` engine.** No `git mv` of a module across crates. **A
   refusal means stop and ask**; no workaround, no hand move. Hand edits after a move are **build
   corrections only** (a `use` path, a `pub(crate)` → `pub`, a manifest line the engine missed), each
-  with a todo filed per new cause in `docs/dev/todo/`.
+  with a todo filed per new cause in `docs/dev/todo/`. *(Overridden 2026-10-08: hand pre-move edits, and hand-move commits with a todo each, are allowed.)*
 - **No behaviour change.** Tests move with their code; the baseline is the per-crate sum (see
   "Baseline").
 - **Public `tddy_session_lifecycle::…` paths stay reachable** through facades. Consumers are unedited
   (`tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`, `tddy-desktop`), except a test that
-  reads lifecycle source by path.
+  reads lifecycle source by path. *(Exception 2026-10-08: two `tddy-daemon` call sites follow the `DemoVmServiceImpl::new(state)` change.)*
 - **No receiver depends on lifecycle**, normal or dev, and **each receiver is ≤ 10k** production lines,
   with no file ≥ 500.
 - **New edges need approval.** Every edge this node adds is in "New crate edges"; an edge not in the
   approved table is a stop-and-ask.
 - **No conversion here.** A topic module that still names the host, a wiring module or an upward
-  topic is a defect of 16a–16e: stop and report it upward, do not convert it here.
-- **No deduplication, no functional refactor, no signature change** beyond visibility.
+  topic is a defect of 16a–16e: stop and report it upward, do not convert it here. *(Lifted 2026-10-08 for the host-block moves only.)*
+- **No deduplication, no functional refactor, no signature change** beyond visibility. *(One exception, 2026-10-08: `DemoVmServiceImpl::new(state: DemoVmState)`.)*
 - **`PeerRouted*`, the port adapters, the terminal adapter and bridge stay** in lifecycle (the
   developer's 2026-09-25 ruling); moving them is a later node (D13).
+
+**Three of the bullets above were overridden on 2026-10-08** (the "hand edits are build corrections only" rule, "no conversion
+here" and "no signature change", and with the last one "consumers are unedited"): see the next section, which is the authority.
 
 ### Developer overrides, 2026-10-08
 
 The developer lifted three of the Boundaries above, for exactly what is listed, and kept everything in this PR (#536), with no inserted node and no split:
 - **Hand workarounds are allowed** when the engine refuses or mis-applies a move: pre-move edits of `use` lines, `mod` declarations and visibility, and post-move build corrections, each filed as a `docs/dev/todo/2026-10-08-*` entry and listed here; a hand **move** goes in its own commit.
 - **"No conversion here" is lifted** for the host-block moves only: each `impl DaemonSessionHost` block still sitting in a launch-topic module (`session_worktree_observer.rs`, `session_acting_identity.rs`, `conversation_worktree_op.rs`, plus any other the R9 check finds) moves with the engine's `move_item` into a wiring module in lifecycle (behaviour-preserving, own commit).
-- **"No signature change" is lifted** for exactly one signature: `DemoVmServiceImpl::new(state: DemoVmState)` (R5b).
+- **"No signature change" is lifted** for exactly one signature: `DemoVmServiceImpl::new(state: DemoVmState)` (R5b). The two `tddy-daemon` call sites (`src/runtime.rs`, `tests/local_token_uds.rs`) follow it; that is the node's only consumer edit.
 
 ## Dependencies
 
@@ -142,25 +147,21 @@ Implementing one here collides with the PR that owns it.
 | **16b** `#carve` 17, lifecycle-ports-agents | `agent_host_callbacks` (`trait AgentHostCallbacks`, roster handle), T3 converted, `AgentRosterState` with 12 fields | moves T3 and `agent_host_callbacks` into `tddy-session-agents` | change `AgentRosterState` or `AgentHostCallbacks` |
 | **16a** `#carve` 16, lifecycle-ports (#531) | T7, T8, T10, T11 converted; `peer_session_answer`, `daemon_urls`, `session_notification_publishing`; four files re-parented; the host-constructing split-context test in its own lifecycle file | moves each leaf topic into its receiver | re-parent or re-split a file |
 
-## Carried from 16a (2026-10-04)
+## Carried from 16a (2026-10-04) — superseded
 
-16a (#531) landed M0.2 (the `daemon_urls` module), M0.3, M0.5, M1, M2 and M3 and deferred four items until the
-engine can do them (the developer's decision, 2026-10-04; never by hand). This node's plan assumed three of them were
-done, so read every "from 16a" below against this list:
+16a (#531) deferred four items until the engine could do them. **All of them are delivered by the engine in this node's base or in this node**
+(R0 found M0.1 and M0.6 already present on 16e's tip; M0.4 came with the engine's `reparent_module`, #584, and R6/R8 used it for the two
+modules still nested). Nothing in this section blocks the node any more; it stays only because "Background" and the Prerequisites table link here.
 
-| 16a item | State | Consequence for this node |
-|---|---|---|
-| **M0.4** re-parent the four mixed parent/child files (D8) | **Deferred.** Needs the developer's consent (D8) and an engine `reparent_module` operation ([`2026-09-24-lifecycle-modules-to-re-parent-by-hand`](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md)) | **Blocking.** A module move takes its children, so each of the four must be re-parented first, or this node moves each nested module individually (untested for a parent that itself moves). `PresenterObserverDeps` and `mint_first_admission_token` still sit under wiring's `svc_host_builders` |
-| **M0.1** the `peer_session_answer` module | **Not delivered**; the four items stay in their files ([`2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files`](../todo/2026-10-04-restructure-extract-module-cannot-gather-items-from-several-files.md)) | The T3 rows naming `peer_session_answer` do not hold until the engine's same-crate move exists |
-| **M0.6** the `seeded_clone_guard.rs` split | **Not delivered**, same gap | `ExecToolRoute` and `SessionStdioEndpoint` are still in that file; `ExecToolRoute`'s move to `tddy-session-agents` depends on the split |
-| the T4 half of M0.2 (`write_claude_hooks_settings`, `resolve_start_session_claude_binary`) | Skipped; carried by 16c | none, once 16c lands |
+| 16a item | State now |
+|---|---|
+| **M0.4** re-parent the four mixed parent/child files (D8) | Delivered by the engine (`reparent_module`); `session_dir_lookup` and `first_admission_token` sit directly under `connection_service` on 16e's tip. R6 and R8 each re-parented one more by the engine |
+| **M0.1** the `peer_session_answer` module | Present on 16e's tip, with the four items; moved in R6 |
+| **M0.6** the `seeded_clone_guard.rs` split | Present on 16e's tip (`ExecToolRoute` is no longer in that file); `seeded_clone_guard` moved in R6 |
+| the T4 half of M0.2 | Carried by 16c; done |
 
-16a also left `session_notifications` as a facade over the new `session_notification_publishing` module (visible as
-`pub(crate)` only, because the engine writes `mod x; pub use x::*;`).
-
-**Baseline.** This document's baseline was 562 passed, measured on #526's old base. Master has since landed #571,
-#573 and others, so the figures here are updated to the baseline on the current tree: **575 passed, the same 22
-failures by name, 1 ignored**.
+**Baseline.** This document once carried 562, then 575 passed. **Both are superseded: the baseline measured on 16e's tip is 658 passed, the same 22 failures
+by name, 1 ignored** (R0 below).
 
 ## Draft PR contract
 
@@ -183,7 +184,7 @@ the engine refuse a move.
 **Blocks:** nothing. This is the top of the stack.
 
 Real dependency edges: `16a → 16b → 16c → 16d → 16e → 17`. Inside this node the receivers are
-independent except in the order of their edges (kernel, livekit, files, activity, demo-runner, agents,
+independent except in the order of their edges (kernel, livekit, files, activity, demo-vm-service, agents,
 cli-sessions, split, agent-launch).
 
 ## Prerequisites
@@ -207,7 +208,7 @@ The scan followed `deferred-work/references/planning-cross-check.md`. No record 
 | [restructure defects from the first cross-crate move](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md) (item 3: `pub(crate)` → `pub`) | ⚠ **During** | This node widens what crosses a crate, and nothing else |
 | [check misses a module name the destination already has](../todo/2026-09-25-restructure-check-misses-a-module-name-the-destination-already-has.md) | ⚠ **During** | The only collision, `session_notifications`, was renamed in 16a (`session_notification_publishing`). None of the modules arriving in agents, files, livekit or kernel shares a name with theirs (near-misses: agents' `ports`, the kernel's `agent_tool_socket` and `peer_forwarding`) |
 | [check misses a body path to a module staying behind](../todo/2026-09-25-restructure-check-misses-a-body-path-to-a-module-staying-behind.md) | ⚠ **During** | Checks A2/A4 of 16a–16e were the manual version; the compile gate catches the rest |
-| [lifecycle modules to re-parent by hand](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) | ⛔ **Blocking, deferred from 16a** (needs developer consent D8 and an engine `reparent_module`) | see "Carried from 16a" |
+| [lifecycle modules to re-parent by hand](../todo/2026-09-24-lifecycle-modules-to-re-parent-by-hand.md) | ✅ **Delivered** (engine `reparent_module`, #584; D8 ruled 2026-10-08) | see "Carried from 16a" |
 | [2026-09-09 untested complexity hotspots](../todo/2026-09-09-tddy-daemon-untested-complexity-hotspots.md) | ⚠ **During** | Re-measured per owning crate after the moves |
 | [lifecycle files over the 400-line target](../todo/2026-09-24-lifecycle-files-over-the-400-line-target.md), [functions over 150](../todo/2026-09-24-lifecycle-functions-still-over-150-lines.md) | ⚠ **During** | Entries move with their files; re-homed to the receiving crate's name at wrap |
 | [restructure verify cannot exit zero for an extract module](../todo/2026-09-18-restructure-verify-cannot-exit-zero-for-an-extract-module.md) | ⚠ **During** | `verify --against` accounted by hand per receiver |
@@ -242,7 +243,7 @@ per-crate baseline → B-checks for that receiver.
   `effective_spawn_branch`, `connection_service::*` and the rest daemon-rpc names
 - [~] **R10 lifecycle's manifest** (D14 done; `test_util` not gated: consumers' manifests would change, see Validation results): drop dependencies nothing names any more, as D14 rules; `test_util`
   as ruled
-- [ ] **B1–B7** pass (see "Acceptance graph — after this node")
+- [~] **B1–B7**: B1, B2, B3 pass; **B4 passes with one accepted exception** (`cursor_cli_spawn.rs`); **B5 is ~1k over its target** (`test_util` ungated); **B6 holds for the consumers but a `tddy-daemon-sandbox` test target no longer compiles; B7 is 1,256 of 1,257 with one new failure in `tddy-daemon-kernel`** (both path-reading tests, open). Same state as the Final Checklist
 - [ ] `restructure verify --against <16e tip>` per receiver: every statement accounted for
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
@@ -254,12 +255,12 @@ per-crate baseline → B-checks for that receiver.
 `tddy-session-lifecycle` at about 20.3k–20.4k production lines, 110+ production files. Every topic
 module is host-free; no `impl DaemonSessionHost` block outside wiring. The receivers at their
 `#carve` 15 sizes: `tddy-session-agents` 4,132 (+ the two fields), `tddy-session-files` 4,716,
-`tddy-session-activity` 2,541, `tddy-daemon-livekit` 5,863, `tddy-daemon-kernel` 3,409,
-`tddy-demo-runner` 156.
+`tddy-session-activity` 2,541, `tddy-daemon-livekit` 5,863, `tddy-daemon-kernel` 3,409.
+(`tddy-demo-runner`, 156, is not a receiver: T11 goes to the new `tddy-demo-vm-service`.)
 
 ### State B (after this node)
 
-Lifecycle is wiring only (~4.4k–4.6k, D13). The receivers are as in "Receiver budget". The crate graph
+Lifecycle is wiring only (target ~4.4k–4.6k, D13; 5,587 as landed). The receivers are as in "Receiver budget". The crate graph
 is "Final design" below.
 
 ### What moves, by engine operation
@@ -286,7 +287,7 @@ test code).
 | T10: `presenter_observer_spawn.rs`, `presenter_observer_task.rs`, `presenter_intent_client.rs` | 47 + 120 + 98 | `move_cluster_to_crate` | `tddy-session-activity` | `tonic` on activity (approved) |
 | `session_notification_publishing.rs` | ~70 | `move_module_to_crate`; lifecycle's `session_notifications` facade (~26) keeps `crate::session_notifications::X` | `tddy-session-activity` | name collision avoided by 16a's rename |
 | `remote_git_pack_execution.rs` | 86 | `move_module_to_crate` | `tddy-session-activity` | none: zero edges |
-| T11: `demo_vm_coordinate_handlers.rs`, `activity_hub.rs`, `DemoVmServiceImpl` (from `svc_demo_vm_ports.rs`) | 241 + 19 + 53 | `move_cluster_to_crate` | `tddy-demo-runner` (D12) | new edges (D12); `tddy-daemon/src/runtime.rs` names `DemoVmServiceImpl` and `demo_vm_entry()`: facade kept, `demo_vm_entry` stays |
+| T11: `demo_vm_coordinate_handlers.rs`, `activity_hub.rs`, `DemoVmServiceImpl` (from `svc_demo_vm_ports.rs`) | 241 + 19 + 53 | `move_cluster_to_crate`, then (R5b) `move_item` + `move_module_to_crate` for `DemoVmServiceImpl` | `tddy-demo-vm-service` (new; D12 as changed) | new crate and its seven approved edges; `tddy-daemon/src/runtime.rs` names `DemoVmServiceImpl` and `demo_vm_entry()`: facade kept, `demo_vm_entry` stays; two `tddy-daemon` call sites follow `new(state)` |
 | T3: `agent_host_callbacks`, `svc_provision_agent_clone`, `svc_ensure_session_room_for_agents` (T3 part), `svc_start_hosted_agent_clone`, `svc_resolve_listed_worktree` (T3 part) + `session_dir_lookup` + `session_room_opening`, `svc_turn_end_reporter`, `agent_roster` (T3 part), `seeded_clone_guard`, `seed_codebase`, `roster_replacement`, `peer_session_answer` | 2,054 | `move_cluster_to_crate` | `tddy-session-agents` | #526's pilot import refusal (A4 mitigated) |
 | CLI: `cli_session_manager.rs` + 9 children, `session_toolcall.rs` | 1,709 | `move_cluster_to_crate` (anchor `cli_session_manager`) | `tddy-cli-sessions` (D4) | new crate; `tddy-desktop` facade |
 | T4/SU/WS: `split_ports`, `svc_spawn_split_agent` + teardown, `split_claude_cli_start`, split context (T4 part), `svc_start_sandboxed_codebase_session`, `split_start`, `svc_resolve_tddy_tools_path`, `split_session` + 2 children, the extracted `resume_split_wiring` and `provision_workspace_tool_sandbox` modules, `attached_initial_prompt`, T4's `hooks_and_urls` group, `service_util`, `workspace_session` | 3,044 | `move_cluster_to_crate` | `tddy-session-split` (new) | facades (`resolve_tddy_tools_path`, `service_util`, `workspace_session`) |
@@ -388,7 +389,7 @@ R1:
 ./dev cargo test -p <receiver> --no-fail-fast -- --test-threads=1   # each existing receiver
 ```
 
-Lifecycle's expected: **575 passed, 22 failed, 1 ignored**, the same 22 by name. The flaky
+Lifecycle's expected: **658 passed (measured at R0; this document first said 575), 22 failed, 1 ignored**, the same 22 by name. The flaky
 `session_room_acceptance::the_first_connect_makes_the_sessions_terminal_drivable_over_livekit` passes
 when re-run alone. The 22 known red (macOS):
 
@@ -430,7 +431,7 @@ graph TD
   lc --> ac["tddy-session-activity - about 3.0k"]
   lc --> lk["tddy-daemon-livekit - about 6.1k"]
   lc --> kn["tddy-daemon-kernel - about 3.5k"]
-  lc --> dm["tddy-demo-runner - about 0.5k"]
+  lc --> dm["tddy-demo-vm-service - about 0.35k"]
   lc --o|implements LaunchHost| al
   lc --o|implements SplitHost| sp
   lc --o|implements AgentHostCallbacks| ag
@@ -457,6 +458,7 @@ graph TD
   lk --> kn
   tr --> kn
   dm --> kn
+  dm --> ac
   al --x|must not| lc
   sp --x|must not| lc
   cs --x|must not| lc
@@ -545,7 +547,7 @@ graph TD
     kn["agent_list_mapping, daemon_urls, split_forward_deadline"]
   end
 
-  subgraph demo["tddy-demo-runner - about 0.5k"]
+  subgraph demo["tddy-demo-vm-service - new, about 0.35k"]
     dm_state["DemoVmState"]
     dm_t11["T11 demo VM handlers, DemoVmServiceImpl"]
   end
@@ -625,7 +627,8 @@ graph TD
   livekit --> projects
 
   demo --> vm
-  demo -.-> kernel
+  demo ==> kernel
+  demo ==> activity
 
   sandbox --> kernel
   trpc --> kernel
@@ -688,7 +691,7 @@ a todo.
 
 - **Edge approvals (all of them).** Every row marked "needs approval" in "New crate edges":
   lifecycle → agent-launch, split, cli-sessions; agent-launch's 22; split's 21; cli-sessions' 10;
-  session-files → daemon-livekit; demo-runner's 4 (D12); session-agents' 4 (only under D7-B). Nothing
+  session-files → daemon-livekit; demo-vm-service's 7 (D12, as changed 2026-10-08); session-agents' 4 (only under D7-B). Nothing
   is added until approved.
 - **D1 (carried, as settled for 16a–16e).** Under Recipe B the per-topic handle types move with their
   methods (`impl` blocks move with the type, no `E0116`); under Recipe A the free functions and state
@@ -711,9 +714,10 @@ a todo.
   - **Recommended: A** (no new edges; B is a trait change as well as a move).
 - **D11: shape tests.** B1–B7 are commands and counts by default. A shape test would make B1/B3 a
   regression CI catches. Recommended: a `cargo tree`-based CI check for B1 is worth a follow-up todo.
-- **D12: T11's receiver.** `tddy-demo-runner` (156 lines today) needs `tddy-daemon-kernel`, `tddy-core`,
-  `tddy-rpc` and `tddy-service`. `tddy-vm` (7.2k, a low-level crate that `tddy-vm-build` and
-  `-testkit` consume) would push daemon-kernel into their graphs. **Recommended: demo-runner.**
+- **D12: T11's receiver.** *(Changed by the developer on 2026-10-08: a new crate `tddy-demo-vm-service`; see the ruling above.)*
+  The original options: `tddy-demo-runner` (156 lines then) would need `tddy-daemon-kernel`, `tddy-core`,
+  `tddy-rpc` and `tddy-service`, and `tddy-vm` (7.2k, a low-level crate that `tddy-vm-build` and
+  `-testkit` consume) would push daemon-kernel into their graphs. The recommendation then was demo-runner; it is **superseded**.
 - **D13: the size target.** The code says **~4.4k–4.6k** with `PeerRouted*` staying. ~3.4k needs
   `PeerRouted*` behind a forwarding port (→ ~3.6k–3.8k) plus the adapters as receiver-side impls
   (→ ~3.3k–3.5k). The choice: accept ~4.5k as this node's target (B5), or approve those two moves as a
@@ -840,6 +844,35 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   `remote_git_pack_execution`'s inline tests; sum 703 = 658 + 45 as before. clippy `--all-targets -D warnings`, fmt clean; `cargo check --all-targets`
   clean on `tddy-daemon-rpc`, `tddy-daemon`, `tddy-telegram-control`; consumer diff empty. Doc tests ran (1 ignored, as before).
 
+### R5a: `tddy-demo-vm-service` (done; new crate; commit `7976d2880`)
+
+- **By hand:** the crate skeleton (`Cargo.toml`, `src/lib.rs`, a `members` line in the root `Cargo.toml`): a plan whose `to` is not a crate is refused.
+- **Engine:** one `move_cluster_to_crate` (anchor `activity_hub`, also `demo_vm_coordinate_handlers`, `reexport: glob`); `check --deep` `no findings`. Facade `pub use tddy_demo_vm_service::{activity_hub, demo_vm_coordinate_handlers};`
+  in `connection_service.rs`; edge lifecycle → `tddy-demo-vm-service`. The manifest gained the approved seven (`tddy-daemon-kernel`, `tddy-core`, `tddy-rpc`, `tddy-service`, `tddy-session-activity`, `tddy-vm`, `tddy-workflow-recipes`) plus `log` and `tokio`; no lifecycle, no `tddy-demo-runner`.
+- **Hand edits after the move (build corrections, visibility only):** `DemoVmHandle`, `DemoVmState` and its 5 fields, and the three `*_demo_vm_at_coordinate` methods `pub(crate)` → `pub`; `cargo fmt`. Filed (appended): [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md); note: [`2026-10-08-demo-vm-service-impl-constructor-ruling-update`](../todo/2026-10-08-demo-vm-service-impl-constructor-ruling-update.md).
+- **`DemoVmServiceImpl` and `demo_vm_entry` stay in lifecycle for now** (R5b follows the constructor fix).
+- **After** (the milestone run, recorded in that commit): lifecycle 610 passed / the same 22 failed / 1 ignored; `tddy-demo-vm-service` 0 (no test moved); sum 610 as before.
+
+### Host-block node (inside #536, developer override 2026-10-08; commit `9f8fa241c`)
+
+- **Engine, own commit:** three `move_item` operations (`items` anchor `<DaemonSessionHost>`, `name` = a new module under `connection_service`, `reexport: outside`): `session_worktree_observer.rs` → `svc_worktree_observer_wiring` (`with_worktree_observer`),
+  `session_acting_identity.rs` → `svc_session_identity_wiring` (`project_account_assignments`, `session_account_access`, `session_identity`), `conversation_worktree_op.rs` → `svc_conversation_worktree_wiring` (`conversation_worktree_from_jail`).
+  A grep of `^impl.*DaemonSessionHost` found no other host block in a launch-topic module (the others are the wiring files). The three new wiring modules are 15, 57 and 48 lines.
+- **Hand edits after the move (build corrections):** `svc_session_identity_wiring.rs`: `super::tddy_session_split::service_util::` → `super::service_util::` (the engine spelled a path through lifecycle's facade as if it were a child of `super`); the 17 unused imports left in the source and new modules removed by `cargo fix` (a machine edit), `cargo fmt`.
+  Filed: [`2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block`](../todo/2026-10-08-restructure-move-item-miswrites-a-facade-path-in-a-moved-impl-block.md).
+- **After** (that commit's run): lifecycle 610 passed / the same 22 failed / 1 ignored (unchanged).
+
+### R5b: `DemoVmServiceImpl` → `tddy-demo-vm-service` (done; the developer's signature exception; commits `6c9f5b2b2`, `b6ebf108a`, `8eaab155a`)
+
+- **Hand edit before the move (own commit `6c9f5b2b2`, the approved exception):** `DemoVmServiceImpl::new(host: Arc<DaemonSessionHost>)` → `new(state: DemoVmState)`; `demo_vm_entry` calls `new(self.demo_vm_service_state())`; `DaemonSessionHost::demo_vm_service_state` is now `pub`.
+  **Two consumer call sites follow and were edited** (the one place B6's "consumers unedited" does not hold): `tddy-daemon/src/runtime.rs` and `tddy-daemon/tests/local_token_uds.rs` now call `DemoVmServiceImpl::new(connection.demo_vm_service_state())`. An inherent constructor taking the host cannot stay in lifecycle once the type is in another crate (`E0116`).
+- **Engine, step one (own commit `b6ebf108a`):** `move_item` (`name` = `demo_vm_service`, `reexport: none`) gathers `DemoVmServiceImpl` and its two impls out of the wiring file `svc_demo_vm_ports.rs` (`demo_vm_entry` stays). With `reexport: none` the engine **re-pointed two `tddy-daemon` paths** to the new module path; they were reverted by hand so `connection_service::DemoVmServiceImpl` still resolves through the facade:
+  [`2026-10-08-restructure-move-item-reexport-none-edits-other-packages-callers`](../todo/2026-10-08-restructure-move-item-reexport-none-edits-other-packages-callers.md).
+- **Engine, step two (`8eaab155a`):** `move_module_to_crate` (`reexport: glob`) of `demo_vm_service`; the facade `pub use crate::connection_service::demo_vm_service::DemoVmServiceImpl` keeps the old path.
+- **Hand edit after the move (build correction):** `async-trait = "0.1"` added to `tddy-demo-vm-service/Cargo.toml` (the engine missed a crate named only by `#[async_trait]`; lifecycle already depends on it; not one of the seven approved internal edges):
+  [`2026-10-08-restructure-move-to-crate-misses-a-crate-named-only-by-an-attribute-macro`](../todo/2026-10-08-restructure-move-to-crate-misses-a-crate-named-only-by-an-attribute-macro.md); `cargo fmt`. No visibility widening was needed.
+- **After** (the milestone run, recorded in the commits): lifecycle 610 passed / the same 22 failed / 1 ignored; `tddy-demo-vm-service` 0 (no test moved); sum 610 as before. Clippy and `cargo check --all-targets` were clean on the touched crates and on `tddy-daemon`, `tddy-daemon-rpc`, `tddy-telegram-control`.
+
 ### R6: `tddy-session-agents` (done; D7-A kept, one approved edge)
 
 - **Developer's ruling, 2026-10-08:** `tddy-session-agents` → `tddy-subagent-worktree` approved (leaf crate, no cycle); `tddy-sandbox-runner` **not** approved (D7-A: it falls).
@@ -892,12 +925,12 @@ first are what the jail suites need; without them 13 more tests fail with a jail
 - **By hand:** the crate skeleton (`Cargo.toml`, `src/lib.rs`, a `members` line).
 - **Hand edits before the move (own commit; imports, paths and visibility only):** 14 flat grouped `use` lines and one nested group split; about 100 paths through the origin's glob facades re-spelled through their defining module or crate; `mod worktree_source;`, `mod hooks_and_urls;`, `mod stack_parent;` → `pub mod`;
   `pub(crate) mod host_session_socket;` and `session_acting_identity` → `pub mod`; `pub(in crate::connection_service)` → `pub` (21). Itemised in [`…hand-split-grouped-use-lines-before-the-agents-cluster-move`](../todo/2026-10-08-hand-split-grouped-use-lines-before-the-agents-cluster-move.md), section R9.
-- **Engine, own commit:** one `move_cluster_to_crate` (`reexport: glob`) of 46 modules, 97 files: anchor `launch_ports`; `claude_cli_spawn` + steps, `cursor_cli_spawn` + `chat` + `resume`, the claude and cursor starts with their jail children, resume and relaunch, `managed_launch`, `jail_relaunch`, `stack_parent`, `stack_child_spawn`, `child_spawn_handler`,
+- **Engine, own commit:** one `move_cluster_to_crate` (`reexport: glob`) of 46 modules, written as 46 module files (children flattened to root siblings; `lib.rs` is the by-hand skeleton): anchor `launch_ports`; `claude_cli_spawn` + steps, `cursor_cli_spawn` + `chat` + `resume`, the claude and cursor starts with their jail children, resume and relaunch, `managed_launch`, `jail_relaunch`, `stack_parent`, `stack_child_spawn`, `child_spawn_handler`,
   `conversation_spawn`, `conversation_spawn_handler`, `conversation_worktree_op`, `svc_start_session_core` + 5, `svc_ensure_project_available_for_start`, `session_coordinate_handlers` + 2, `hooks_and_urls`, `worktree_source`, `stack_seed_validation`, `host_session_socket`, `inherited_host_sockets`,
   `svc_index_workspace_worktree`, `svc_pr_status_for_caller`, `session_acting_identity`, `session_worktree_observer`, `family_proto_bridge`. The manifest gained exactly the 22 + 5 approved internal edges (and `chrono`, `prost`, `serde_json`, `tonic`, `uuid`, `anyhow`, `async-trait`, `log`, `tokio` already in lifecycle).
-- **Hand build corrections after the move:** self-referencing re-exports `tddy_agent_launch::` → `crate::` (6 files); `pub use tool_spawn_plan::*` → `crate::tool_spawn_plan::*`; about 140 `pub(crate)`/private items and fields → `pub`; a `pub` wrongly written onto a trait method removed; `libc` and a `tempfile` dev-dependency added to the manifest;
+- **Hand build corrections after the move:** self-referencing re-exports `tddy_agent_launch::` → `crate::` (6 files); `pub use tool_spawn_plan::*` → `crate::tool_spawn_plan::*`; 166 `pub(crate)`/private items and fields → `pub` (a line-pair count over `git diff -M -U0`; 275 across the node); a `pub` wrongly written onto a trait method removed; `libc` and a `tempfile` dev-dependency added to the manifest;
   eight stale glob re-exports and one orphan doc line in `connection_service.rs` (three deleted, four gated `#[cfg(test)]`); `cargo fmt`. Filed: [`…cluster-move-leaves-unused-reexports-and-an-orphan-doc-in-the-origin`](../todo/2026-10-08-restructure-cluster-move-leaves-unused-reexports-and-an-orphan-doc-in-the-origin.md), [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md).
-- **Hand moves, own commit:** four test modules of the moved code (`claude_cli_spawn_steps_tests`, `conversation_spawn_wiring_tests`, `host_session_socket_tests`, `session_acting_identity_tests`) → `tddy-agent-launch/src`; `stack_child_spawn_tests` stays (it builds a `DaemonSessionHost`).
+- **Hand moves, own commit:** four test modules of the moved code (`claude_cli_spawn_steps_tests`, `conversation_spawn_wiring_tests`, `host_session_socket_tests`, `session_acting_identity_tests`) → `tddy-agent-launch/src`, which then holds 51 `.rs` files (`lib.rs`, the 46 modules, these 4); `stack_child_spawn_tests` stays (it builds a `DaemonSessionHost`).
   Filed: [`…cluster-move-strands-test-modules-of-the-moved-code`](../todo/2026-10-08-restructure-cluster-move-strands-test-modules-of-the-moved-code.md). (The engine commit alone does not build test targets; the next commit does.)
 - **After:** lifecycle **564** passed / the same 22 failed / 1 ignored; `tddy-agent-launch` **46** passed: sum 610 = lifecycle before (610). clippy `--all-targets -D warnings` (launch, lifecycle) and fmt clean; consumers `cargo check --all-targets` clean, diff empty.
 
@@ -913,13 +946,70 @@ first are what the jail suites need; without them 13 more tests fail with a jail
 - **B1** `cargo tree -i tddy-session-lifecycle -e normal,dev --workspace`: `tddy-daemon`, `tddy-daemon-rpc`, `tddy-desktop`, `tddy-telegram-control`, plus the dev users `tddy-model-registry`, `tddy-tool-engine`, `tddy-worktree-service`. No receiver. ✅
 - **B2** the manifests of the four new crates (`tddy-cli-sessions`, `tddy-session-split`, `tddy-demo-vm-service`, `tddy-agent-launch`) and every touched receiver hold only the approved internal edges (the changeset's table, the developer's D12 change and the five R9 approvals), plus external crates lifecycle already depended on. Two additions to the approved wording: `async-trait` for `tddy-demo-vm-service`, and `tddy-session-agents` → `tddy-subagent-worktree` (approved by the developer for R6). ✅
 - **B3** `cargo tree -e normal,dev` per receiver: agents, files, activity, livekit, kernel reach none of {lifecycle, agent-launch, split, cli-sessions} that they must not; split reaches cli-sessions, agents, files; launch reaches split, cli-sessions, agents, files; no receiver reaches lifecycle; `tddy-session-split` does not reach `tddy-agent-launch`. ✅
-- **B4** production lines (the counter, `#[cfg(test)] mod` blocks and `*_tests.rs` excluded): `tddy-agent-launch` 9,213; `tddy-session-agents` 6,606; `tddy-daemon-livekit` 6,337; `tddy-session-files` 5,143; `tddy-daemon-kernel` 3,586; `tddy-session-split` 3,361; `tddy-session-activity` 3,000; `tddy-cli-sessions` 1,738; `tddy-demo-vm-service` 329. All ≤ 10k. ✅
-  Files ≥ 500: the new crates have one, `tddy-agent-launch/src/cursor_cli_spawn.rs` (563, 548 before the move); the receivers' large files are inherited (`session_room.rs` 2,876, `livekit_peer_discovery.rs` 1,659, `config.rs` 1,529, `session_agent_clone.rs` 1,158, `service.rs` 1,150, `host_documents.rs` 822, …). ⚠ `cursor_cli_spawn.rs` is the one this node could not avoid: it is the T1 file the changeset moves whole.
-- **B5** lifecycle end state: **5,587 production lines** (from 20.3k), against the ~4.4k–4.6k target. The ~1k over is the 366-line `test_util` (not gated, above), the three wiring modules the host-block node created (~100), the three facade lines per receiver, and `PeerRouted*` (D13, left as ruled). The wiring definition holds: no topic module remains
+- **B4** ⚠ **one accepted exception** (below). Production lines (the counter, `#[cfg(test)] mod` blocks and `*_tests.rs` excluded; re-measured at wrap): `tddy-agent-launch` 9,213; `tddy-session-agents` 6,606; `tddy-daemon-livekit` 6,337; `tddy-session-files` 5,143; `tddy-daemon-kernel` 3,586; `tddy-session-split` 3,361; `tddy-session-activity` 3,000; `tddy-cli-sessions` 1,738; `tddy-demo-vm-service` 329. All ≤ 10k. ✅
+  Files ≥ 500: the new crates have one, `tddy-agent-launch/src/cursor_cli_spawn.rs`: **563 by this counter (549 before the move)**; `/pr-wrap`'s step 3.5 script, which counts to the first `#[cfg(test)]`, says 548 → 562. The receivers' large files are inherited (`session_room.rs` 2,876, `livekit_peer_discovery.rs` 1,659, `config.rs` 1,529, `session_agent_clone.rs` 1,158, `service.rs` 1,150, `host_documents.rs` 822, …).
+  ⚠ **Accepted exception, with the developer's consent to defer its split in this PR:** `cursor_cli_spawn.rs` is the T1 file this node moves whole. Its +14 lines are paths re-spelled through their defining crate, the `rustfmt` wrapping those longer paths cause, and `mod chat; mod resume;` becoming `pub use crate::{chat, resume};`; no statement changed.
+  Filed: [`2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines`](../todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md).
+- **B5** lifecycle end state: **5,587 production lines** (from 20.3k), against the ~4.4k–4.6k target. The ~1k over is the 366-line `test_util` (not gated, above; [todo](../todo/2026-10-08-session-lifecycle-test-util-is-not-gated-behind-a-test-util-feature.md)), the three wiring modules the host-block node created (15 + 57 + 48 = 120 lines), the facade lines for each receiver, and `PeerRouted*` (stays by the developer's ruling of 2026-09-25; D13 accepted ~4.5k, so it is part of the target, not of the overshoot). The wiring definition holds: no topic module remains
   (`cargo` shows only `svc_*_ports`, builders, `handler_state`, delegators, `daemon_rpc_handler`, the terminal adapter and bridge, `local_exec_tools` (D7-A), `svc_resolve_os_user` (wiring), `svc_demo_vm_ports` (`demo_vm_entry`), and facades). Largest file: `connection_service.rs`, 525. ⚠ over the target by ~1k; ✅ for the wiring definition.
 - **B6** consumers: no edit, except the two `tddy-daemon` call sites forced by the approved `DemoVmServiceImpl::new(state)` change. `cargo check --all-targets` clean on `tddy-daemon`, `tddy-daemon-rpc`, `tddy-telegram-control`, `tddy-model-registry`, `tddy-tool-engine`, `tddy-worktree-service`. ✅ with that exception. (`tddy-desktop` builds on CI only.)
-- **B7** per-crate baseline: before R1, lifecycle 658 + kernel 126 + livekit 178 + files 160 + activity 45 + demo-runner 15 + agents 75 = **1,257**; now lifecycle 564 + kernel 126 + livekit 178 + files 160 + activity 47 + demo-runner 15 + agents 75 + split 37 + cli-sessions 9 + demo-vm-service 0 + agent-launch 46 = **1,257**; the 22 known failures unchanged by name; 1 ignored. ✅
-  (Each milestone's run covered lifecycle and the receivers it touched; the other receivers' counts are the R0 baseline, their tests being untouched. The final R10 run is below.)
+  ⚠ **Qualified by the final gates:** the consumers compile, but a test in `tddy-daemon-sandbox` (not a consumer) no longer compiles because it `include_str!`s moved lifecycle files; see "Open: two tests …".
+- **B7** per-crate baseline: before R1, lifecycle 658 + kernel 126 + livekit 178 + files 160 + activity 45 + demo-runner 15 + agents 75 = **1,257**. *(This paragraph originally claimed the same sum after R9, taking kernel's 126 from the R0 baseline instead of running it. That was wrong; it is superseded by the measured run.)*
+  **Measured at the end:** 564 + 125 + 178 + 160 + 47 + 15 + 75 + 37 + 9 + 0 + 46 = **1,256 passed**, 22 known failures by name **plus one new** (`tddy-daemon-kernel`'s `telegram_extraction_shape`), 1 ignored. ❌ See "Final scoped gates" and "Open: two tests …".
+
+### Final scoped gates (`/pr-wrap` step 6, run 2026-10-08/09 on tip `93b12a429`; scoped to the touched packages, never the workspace)
+
+- **`cargo fmt --check`** on the 11 touched crates and the three consumers (`-p tddy-session-lifecycle -p tddy-agent-launch -p tddy-session-split -p tddy-cli-sessions -p tddy-demo-vm-service -p tddy-session-agents -p tddy-session-files -p tddy-session-activity -p tddy-daemon-livekit -p tddy-daemon-kernel -p tddy-demo-runner -p tddy-daemon -p tddy-daemon-rpc -p tddy-telegram-control`): clean, nothing to commit.
+- **`cargo clippy -p <the 11 touched crates> --all-targets -- -D warnings`:** exit 0, no warning.
+- **`cargo check --all-targets -p tddy-daemon-rpc -p tddy-daemon -p tddy-telegram-control -p tddy-model-registry`:** exit 0, no warning.
+- **Tests**, one package at a time, in the environment `./test` builds (the same `cargo build` of the jail binaries and `scripts/ssh-exec-test-fixture.sh`, then `cargo test --no-fail-fast -p <pkg> -- --test-threads=1 --skip sandboxed_bash_pty_action_streams_output`; `./test` hard-codes its trailing arguments, so the skip is passed by a wrapper that runs the same steps):
+
+  | Crate | passed | failed | ignored | R0 baseline |
+  |---|---:|---:|---:|---:|
+  | `tddy-session-lifecycle` | **564** | **22** | 1 (doc) | 658 / 22 / 1 |
+  | `tddy-agent-launch` | 46 | 0 | 0 | (new) |
+  | `tddy-session-split` | 37 | 0 | 0 | (new) |
+  | `tddy-cli-sessions` | 9 | 0 | 0 | (new) |
+  | `tddy-demo-vm-service` | 0 | 0 | 0 | (new) |
+  | `tddy-session-agents` | 75 | 0 | 0 | 75 |
+  | `tddy-session-files` | 160 | 0 | 0 | 160 |
+  | `tddy-session-activity` | 47 | 0 | 0 | 45 |
+  | `tddy-daemon-livekit` | 178 | 0 | 0 | 178 |
+  | `tddy-daemon-kernel` | **125** | **1** | 0 | 126 / 0 / 0 |
+  | `tddy-demo-runner` | 15 | 0 | 0 | 15 |
+  | **sum** | **1,256** | **23** | **1** | **1,257 / 22 / 1** |
+
+  Lifecycle's 22 failures are the 22 known ones **by name** (the table in "Baseline"; compared name by name against it). **The expected sum of 1,257 was not reached: 1,256 passed, plus one new failure, in `tddy-daemon-kernel`.**
+
+### `/pr-wrap` steps 2, 3, 3.5 and 4 (report only: this is a move PR, so none of these was fixed here)
+
+- **Step 2, tests.** The PR changed four hand-moved test files (`claude_cli_spawn_steps_tests`, `conversation_spawn_wiring_tests`, `host_session_socket_tests`, `session_acting_identity_tests`) by three lines in all (three paths re-spelled through their defining crate), plus one call site, `tddy-daemon/tests/local_token_uds.rs`. No test body, assertion or name changed; no new anti-pattern.
+- **Step 3, production readiness.** No `TODO`/`FIXME`/`dbg!`/`println!`/mock/`#[allow]` line was added to code (one doc comment mentioning "a stub" moved with its test). Open, for the developer: four `#[cfg(test)]`-gated `pub(crate)` glob re-exports in `connection_service.rs` (`service_util::*` at 43-44, `agent_roster::*` at 252-253, `stack_child_spawn::*` at 261-262, `conversation_spawn::*` at 287-288), and
+  37 named facade modules in its `pub use tddy_*::{…}` blocks (lines 78, 218-242, 308, 504-505, plus `svc_resolve_os_user.rs:129`) that nothing else in lifecycle (`src/`, `tests/`) or in a consumer names. They are the node's public facade by contract, so they are kept; a developer's call whether each is still wanted. The ones named in `lib.rs` all have users.
+- **Step 3.5, file length** (`/pr-wrap`'s script, base `origin/master`, merge-base `468b368f9`; production lines before → after): `cursor_cli_spawn.rs` 548 → 562 (**new in `tddy-agent-launch`, moved whole: accepted, todo filed**); `tddy-daemon/src/runtime.rs` 1,781 → 1,781 (pre-existing, two lines edited, same length);
+  `session_acting_identity_tests.rs` 651 → 651 (a `*_tests.rs` file the script cannot tell from production; test code, not a finding). With the changeset's counter, which excludes `#[cfg(test)] mod` blocks, `tddy-session-files/src/lib.rs` is 547 → 549 (pre-existing, **+2 lines: the two `pub mod` declarations the move needs**) and lifecycle's `connection_service.rs` 582 → 525 (pre-existing, shrank).
+  `tddy-session-files/src/lib.rs` grew while over 500, which the gate's table would call "decompose now"; it was not touched, because the growth is the move's own declarations.
+- **Step 4, clean-code metrics** (functions over 100 lines; moved code is deliberately unchanged, so these are the inherited numbers): `tddy-agent-launch` 174 functions, 12 over 100 and 7 over 150, the longest `start_sandboxed_cursor_cli_session` 429, `start_session_core` 386, `start_sandboxed_claude_cli_session` 344, `spawn_claude_cli_session_inner` 280, `spawn_cursor_cli_session_reporting` 267;
+  `tddy-session-split` 75 functions, 4 over 100, none over 150 (longest 149); `tddy-cli-sessions` none over 100 (longest 84); `tddy-demo-vm-service` one over 100 (`start_demo_vm_at_coordinate`, 132); lifecycle one over 150 (`daemon_rpc_handler.rs:26 handle_rpc`, 185, wiring, not moved). The new files are the three wiring modules (15, 48 and 57 lines), `demo_vm_service.rs` (43) and the four `lib.rs` skeletons.
+
+### ⚠ Open: two tests outside the moved code read moved files by path (found by the final gates; not fixed here)
+
+Both name a lifecycle source file that this node moved, so both are damage from this PR, not noise. `./test -p` and `cargo check --all-targets` on the three consumers do not reach the second one,
+because it is in a package the node did not list.
+
+1. **`tddy-daemon-kernel`: `telegram_extraction_shape::the_only_consumer_of_the_field_goes_through_the_port` fails** (`packages/tddy-daemon-kernel/tests/telegram_extraction_shape.rs:204-207`; baseline 126, now 125 + this one):
+   ```
+   thread 'the_only_consumer_of_the_field_goes_through_the_port' panicked at packages/tddy-daemon-kernel/tests/telegram_extraction_shape.rs:36:29:
+   …/packages/tddy-session-lifecycle/src/connection_service/svc_resolve_tddy_tools_path.rs is unreadable: No such file or directory (os error 2) — has it moved?
+   ```
+   Cause: R8 moved `svc_resolve_tddy_tools_path` to `tddy-session-split/src/svc_resolve_tddy_tools_path.rs`. The test reads it by package and path; this is the "test that reads lifecycle source by path" the node's B6 expected, and the one `./test -p tddy-daemon-kernel` surfaces. It was not re-run at R8 (R8 ran lifecycle, split and cli-sessions only).
+2. **`tddy-daemon-sandbox`: the test target `sandbox_session_stdio_acceptance` does not compile** (`cargo check -p tddy-daemon-sandbox --test sandbox_session_stdio_acceptance`):
+   `include_str!` at `packages/tddy-daemon-sandbox/tests/sandbox_session_stdio_acceptance.rs:204-216` names `tddy-session-lifecycle/src/connection_service/{svc_start_sandboxed_claude_cli_session,svc_start_sandboxed_cursor_cli_session,svc_relaunch_sandboxed_runner}.rs`, which R9 moved to `tddy-agent-launch/src/`:
+   `error: couldn't read …/tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs: No such file or directory`, three times, then `E0282` ×2 from the missing sources; `could not compile tddy-daemon-sandbox (test "sandbox_session_stdio_acceptance") due to 5 previous errors`.
+   Every test in that target is lost, not only the one that reads the files. This package is not one of the node's receivers or consumers, so none of the node's gates built it.
+
+   Found by a grep of the workspace's tests for the paths of the 103 moved or deleted lifecycle files (string literals `connection_service/<file>.rs` and `session-lifecycle/src/<file>.rs`); `tddy-daemon-rpc`'s `rpc_handlers_shape` (10 passed) and `tddy-daemon-auth`'s `login_time_token_store_is_retired` (4 passed) also scan lifecycle's sources and pass.
+   **Not found by that grep, so unverified:** a test that builds such a path from parts, and the other workspace tests that were not run.
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 
@@ -931,7 +1021,7 @@ Run on the tree after R1's `agent_list_mapping`, to learn every refusal in one g
 | R2 `tddy-daemon-livekit`: `first_admission_token`, `os_user_resolution` (the child module, anchored on `svc_resolve_os_user/os_user_resolution.rs`; the parent `svc_resolve_os_user` is wiring and stays), `placement` | `no findings` |
 | R3 `tddy-session-files`: `svc_materialize_staged_attachment` (takes `session_attachment_materialization`) | `no findings` |
 | R4 `tddy-session-activity`: `presenter_observer_task` + `presenter_intent_client` (cluster), `session_notification_publishing`, `remote_git_pack_execution` | **Refused**: `session_notification_publishing` and `presenter_observer_spawn` are declared `pub(crate) mod` (same defect as R1); and the order must change: `presenter_observer_task` names `session_notification_publishing`, so it must go in the same cluster |
-| R5 `tddy-demo-runner`: `activity_hub` + `demo_vm_coordinate_handlers` (cluster) | `no findings`; but `DemoVmServiceImpl::new(host)` still names the host ([todo](../todo/2026-10-08-demo-vm-service-impl-constructor-still-names-the-host.md)), and the cluster names `tddy_session_activity::user_sessions_path`, an edge (`tddy-demo-runner` → `tddy-session-activity`) that the D12 row does not list |
+| R5 (planned at the time into `tddy-demo-runner`; the receiver became `tddy-demo-vm-service`, see R5a): `activity_hub` + `demo_vm_coordinate_handlers` (cluster) | `no findings`; but `DemoVmServiceImpl::new(host)` still names the host ([todo](../todo/2026-10-08-demo-vm-service-impl-constructor-still-names-the-host.md)), and the cluster names `tddy_session_activity::user_sessions_path`, an edge (`tddy-demo-runner` → `tddy-session-activity`) that the D12 row does not list |
 | R6 `tddy-session-agents`: the 12-module T3 cluster | **Refused**: one `use` writes several paths that need different qualifiers (`agent_host_callbacks.rs:19`); `peer_session_answer` is declared `pub(crate) mod`; `svc_ensure_session_room_for_agents` still carries a T4 child (`svc_provision_workspace_tool_sandbox`, `impl SplitSessions`) that must be re-parented first ([todo](../todo/2026-10-08-restructure-move-cluster-refuses-a-grouped-use-the-conversion-nodes-left.md)) |
 | R7–R9 | not preflighted: `tddy-cli-sessions`, `tddy-session-split` and `tddy-agent-launch` do not exist yet (a plan that names a destination that is not a crate is refused) |
 
@@ -942,6 +1032,7 @@ Run on the tree after R1's `agent_list_mapping`, to learn every refusal in one g
 - [x] Rebase onto 16e once it is green
 - [x] R0: re-run the cycle check on 16e's tip; record the per-crate baselines
 - [x] R1–R10 (R5 as R5a/R5b; `test_util` gating not done)
+- [ ] Fix the two path-reading tests the final gates found (`tddy-daemon-kernel/tests/telegram_extraction_shape.rs:204`, `tddy-daemon-sandbox/tests/sandbox_session_stdio_acceptance.rs:204-216`): not done by `/pr-wrap` step 6, which reports without editing
 - [ ] `/analyze-code-issues` on every receiver that gained code
 - [ ] `/validate-changes`
 - [ ] `/pr-wrap`
@@ -955,10 +1046,10 @@ Tasks executed at wrap:
 - [x] B1: `cargo tree -i tddy-session-lifecycle -e normal,dev --workspace` shows no receiver
 - [x] B2: the edge set matches the approved table, and nothing more
 - [x] B3: no reverse edge between receivers (`cargo tree` per receiver)
-- [x] B4: every receiver ≤ 10k, and no file ≥ 500 (counter per crate)
+- [~] B4: every receiver ≤ 10k ✅; no file ≥ 500 in the new crates ⚠ **except `cursor_cli_spawn.rs` (563, was 549; accepted, split deferred with the developer's consent, todo filed)**
 - [~] B5: lifecycle meets the wiring definition (yes) at 5.6k, ~1k over the D13 target (`test_util` ungated, see Validation results)
-- [x] B6: public paths resolve; consumers unedited (`git diff` empty; `cargo check --all-targets` clean)
-- [x] B7: per-crate baseline with moved tests accounted; the 22 known failures unchanged by name
+- [~] B6: public paths resolve; consumers compile (`cargo check --all-targets` clean) and are unedited except the two `DemoVmServiceImpl::new(state)` call sites ✅; ⚠ a non-consumer test target (`tddy-daemon-sandbox`'s `sandbox_session_stdio_acceptance`) no longer compiles (open, see Validation results)
+- [ ] B7: per-crate baseline with moved tests accounted: **1,256 passed of 1,257 expected; the 22 known failures by name plus one new, in `tddy-daemon-kernel`** (a path-reading test, open, see Validation results)
 - [x] Every hand edit after an engine move is a build correction, and each new cause has a todo (the developer's overrides of 2026-10-08 also allowed pre-move hand edits, host-block moves and the one constructor signature)
 
 **Documentation**
