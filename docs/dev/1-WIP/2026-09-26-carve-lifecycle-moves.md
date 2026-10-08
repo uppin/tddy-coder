@@ -222,7 +222,7 @@ per-crate baseline → B-checks for that receiver.
 - [x] **R4 `tddy-session-activity`**: T10 cluster (`presenter_observer_spawn`, `presenter_observer_task`,
   `presenter_intent_client`), `session_notification_publishing`, `remote_git_pack_execution`; `tonic`
   (approved)
-- [ ] **R5 `tddy-demo-runner`** (D12): T11 cluster (`demo_vm_coordinate_handlers`, `activity_hub`,
+- [ ] **R5 `tddy-demo-runner`** (skipped: the `tddy-demo-runner` → `tddy-session-activity` edge and `DemoVmServiceImpl::new(host)` await the developer) (D12): T11 cluster (`demo_vm_coordinate_handlers`, `activity_hub`,
   `DemoVmServiceImpl`); `demo_vm_entry` stays; new edges → kernel, core, rpc, service
 - [x] **R6 `tddy-session-agents`**: T3 cluster + `agent_host_callbacks` (+ `LocalExecTools` and
   `ExecToolRoute` under D7-B, with their four edges)
@@ -231,7 +231,7 @@ per-crate baseline → B-checks for that receiver.
   `tddy_session_lifecycle::cli_session_manager::CliSessionManager`
 - [x] **R8 `tddy-session-split`** (new): `split_ports`, the T4 cluster, `service_util`, `workspace_session`;
   facades for `resolve_tddy_tools_path`, `service_util`'s two `pub use`, `workspace_session`
-- [ ] **R9 `tddy-agent-launch`** (new): `launch_ports`, the T1/T9/T1c cluster; facades for
+- [ ] **R9 `tddy-agent-launch`** (preflighted; blocked on three host-naming launch modules, see Validation results) (new): `launch_ports`, the T1/T9/T1c cluster; facades for
   `effective_spawn_branch`, `connection_service::*` and the rest daemon-rpc names
 - [ ] **R10 lifecycle's manifest**: drop dependencies nothing names any more, as D14 rules; `test_util`
   as ruled
@@ -872,6 +872,18 @@ first are what the jail suites need; without them 13 more tests fail with a jail
   Filed: [`…cluster-move-misses-body-paths-and-writes-self-referencing-test-reexports`](../todo/2026-10-08-restructure-cluster-move-misses-body-paths-and-writes-self-referencing-test-reexports.md), [`…move-to-crate-leaves-pub-crate-items-the-origin-still-uses`](../todo/2026-10-08-restructure-move-to-crate-leaves-pub-crate-items-the-origin-still-uses.md).
 - **After:** lifecycle **610** passed / the same 22 failed / 1 ignored, `tddy-session-split` **37**, `tddy-cli-sessions` 9: sum 656 as before (647 + 9). clippy `--all-targets -D warnings` and fmt clean; consumers `cargo check --all-targets` clean, diff empty;
   `cargo tree -p tddy-session-split`: no `tddy-agent-launch`, no lifecycle.
+
+### R9: `tddy-agent-launch` (NOT applied; stopped on three host-naming topic modules)
+
+Preflighted (`check --deep`, nothing written; the hand pre-move edits and the `tddy-agent-launch` skeleton were reverted): the cluster of every host-free launch module (anchor `launch_ports`, 42 others in `also`:
+`claude_cli_spawn` + steps, `cursor_cli_spawn` + `chat` + `resume`, `svc_start_claude_cli_session`, the sandboxed claude and cursor starts with their jail children, the resume and relaunch modules, `managed_launch`, `jail_relaunch`, `stack_parent`, `stack_child_spawn`, `child_spawn_handler`,
+`conversation_spawn`, `conversation_spawn_handler`, `svc_start_session_core` + 5 children, `svc_ensure_project_available_for_start`, `session_coordinate_handlers` + 2, `hooks_and_urls`, `worktree_source`, `stack_seed_validation`, `host_session_socket`, `inherited_host_sockets`,
+`svc_index_workspace_worktree`, `svc_pr_status_for_caller`, `session_acting_identity`).
+
+- Grouped `use` lines (14 flat, 1 nested) and the `pub(crate) mod` declarations of `host_session_socket` and `session_acting_identity` were the first refusals; split/widened by hand and compiled (then reverted with the rest).
+- After those, `check --deep` reports 24 findings of the known kind (a path through the origin's glob facade to a member), **and one real one**: `launch_ports.rs` names `session_worktree_observer::SessionWorktreeObserver`, a module that also holds
+  `impl DaemonSessionHost { with_worktree_observer }`. Two more launch modules hold host impls: `session_acting_identity.rs:271` and `conversation_worktree_op.rs:198`. **Per the Boundaries (a topic module that names the host is a parent defect) the node stopped.** Filed:
+  [`2026-10-08-launch-topic-modules-still-carry-host-impls`](../todo/2026-10-08-launch-topic-modules-still-carry-host-impls.md), with the fix (an engine `move_item` of each `<DaemonSessionHost>` block into a wiring module).
 
 ### Preflight of R2–R6 (`check --deep`, nothing written), 2026-10-08
 
