@@ -2,7 +2,7 @@
 
 **Category:** Deferred from `lifecycle-moves` (#536): oversized file, developer-consented deferral
 **Source:** #carve 21/21 (PR #536), step 3.5 of `/pr-wrap` and acceptance check B4 of
-[`2026-09-26-carve-lifecycle-moves`](../1-WIP/2026-09-26-carve-lifecycle-moves.md)
+[`2026-09-26-carve-lifecycle-moves`](../changesets/2026-10-09-carve-lifecycle-moves.md)
 
 `packages/tddy-agent-launch/src/cursor_cli_spawn.rs` is **563 production lines** by the changeset's counter
 (562 by `/pr-wrap`'s count-to-the-first-`#[cfg(test)]` script), against the 500-line budget. It is the only file

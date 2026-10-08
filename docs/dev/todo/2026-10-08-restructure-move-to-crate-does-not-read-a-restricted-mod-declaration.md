@@ -2,7 +2,7 @@
 
 **Category:** Restructure engine defect
 **Source:** #carve 21/21 (PR #536), R1 (`tddy-daemon-kernel`) and R4 (`tddy-session-activity`) of
-[2026-09-26-carve-lifecycle-moves](../1-WIP/2026-09-26-carve-lifecycle-moves.md)
+[2026-09-26-carve-lifecycle-moves](../changesets/2026-10-09-carve-lifecycle-moves.md)
 
 ## What the engine did
 

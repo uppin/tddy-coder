@@ -2,7 +2,7 @@
 
 **Category:** Deferred from `lifecycle-moves` (#536): ruled work not done, and the reason lifecycle ends ~1k over its size target
 **Source:** #carve 21/21 (PR #536), R10 and acceptance check B5 of
-[`2026-09-26-carve-lifecycle-moves`](../1-WIP/2026-09-26-carve-lifecycle-moves.md)
+[`2026-09-26-carve-lifecycle-moves`](../changesets/2026-10-09-carve-lifecycle-moves.md)
 
 ## What was ruled, and what was not done
 

@@ -1,7 +1,7 @@
 # 2026-10-08 — `DemoVmServiceImpl::new` takes the host, so T11's service adapter cannot move to `tddy-demo-runner`
 
 **Category:** Deferred from `#carve` 16a (T11 conversion), found by #carve 21/21 (PR #536) R5 preflight
-**Source:** [2026-09-26-carve-lifecycle-moves](../1-WIP/2026-09-26-carve-lifecycle-moves.md), "What moves, by engine operation" T11 row
+**Source:** [2026-09-26-carve-lifecycle-moves](../changesets/2026-10-09-carve-lifecycle-moves.md), "What moves, by engine operation" T11 row
 
 ## What the tree has
 
