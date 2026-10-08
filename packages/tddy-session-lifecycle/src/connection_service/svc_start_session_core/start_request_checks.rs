@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use super::super::validate_stack_seed_base_session;
+use crate::connection_service::stack_seed_validation::validate_stack_seed_base_session;
 
-use crate::connection_service::service_util;
+use tddy_session_split::service_util;
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 
 use tddy_rpc::Status;

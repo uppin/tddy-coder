@@ -1,4 +1,4 @@
-use crate::connection_service::service_util;
+use tddy_session_split::service_util;
 use std::sync::Mutex as StdMutex;
 
 use super::super::launch_ports::LaunchSessions;

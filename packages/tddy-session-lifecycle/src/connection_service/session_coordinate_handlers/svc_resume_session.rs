@@ -1,12 +1,13 @@
-use crate::connection_service::service_util;
+use tddy_session_split::service_util;
 
 use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
 
-use crate::connection_service::svc_start_session_core::{ToolSpawnPlan, ToolSpawnPurpose};
+use crate::connection_service::svc_start_session_core::ToolSpawnPlan;
+use crate::connection_service::svc_start_session_core::ToolSpawnPurpose;
 
 use std::path::PathBuf;
 
-use super::bridge_conn_resume_response;
+use crate::connection_service::session_coordinate_handlers::bridge_conn_resume_response;
 
 use tddy_core::read_session_metadata;
 

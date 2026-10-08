@@ -1,4 +1,6 @@
-use crate::connection_service::{hooks_and_urls, service_util, stack_parent};
+use crate::connection_service::hooks_and_urls;
+use tddy_session_split::service_util;
+use crate::connection_service::stack_parent;
 use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
@@ -23,7 +25,7 @@ use std::path::Path;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
-use super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use super::session_acting_identity::SessionAccountAccess;
 
@@ -182,7 +184,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     let session_id_owned = session_id.to_string();
     let model_owned = model.to_string();
     let binary_owned =
-        crate::connection_service::service_util::resolve_start_session_claude_binary(config);
+        tddy_session_split::service_util::resolve_start_session_claude_binary(config);
     let worktree_clone = worktree_path.clone();
 
     let initial_prompt_opt = tddy_daemon_kernel::trim_to_option(initial_prompt);
@@ -247,7 +249,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
         } else {
             Some(ssh_alias.to_string())
         },
-        ..crate::connection_service::starting_session_metadata(session_id, project_id, "claude-cli")
+        ..tddy_session_split::service_util::starting_session_metadata(session_id, project_id, "claude-cli")
     };
     tddy_core::write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

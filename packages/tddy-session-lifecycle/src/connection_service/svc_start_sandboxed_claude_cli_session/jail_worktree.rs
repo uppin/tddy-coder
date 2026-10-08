@@ -9,7 +9,9 @@ use std::path::Path;
 
 use super::JailBranch;
 
-use crate::connection_service::{hooks_and_urls, service_util, stack_parent};
+use crate::connection_service::hooks_and_urls;
+use tddy_session_split::service_util;
+use crate::connection_service::stack_parent;
 use tddy_session_activity::user_sessions_path::projects_path_for_user;
 
 impl LaunchSessions {

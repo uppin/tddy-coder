@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
-use crate::connection_service::{service_util, stack_parent};
+use tddy_session_split::service_util;
+use crate::connection_service::stack_parent;
 
 use tddy_service::proto::types::BranchSession;
 
@@ -8,9 +9,9 @@ use tddy_service::proto::session::BranchConflict;
 
 use tddy_service::proto::session::StartSessionRequest;
 
-use super::prepare_managed_workflow_inner;
+use crate::connection_service::managed_launch::prepare_managed_workflow_inner;
 
-use super::ManagedLaunch;
+use crate::connection_service::managed_launch::ManagedLaunch;
 
 use std::sync::Arc;
 

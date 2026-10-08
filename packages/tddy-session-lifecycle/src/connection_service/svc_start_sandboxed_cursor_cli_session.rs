@@ -2,9 +2,12 @@ use std::sync::Mutex as StdMutex;
 
 use tddy_task::TerminalCapture;
 
-use super::roster_replacement_pairs;
+use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
-use crate::connection_service::{agent_roster, seed_codebase, service_util, stack_parent};
+use tddy_session_agents::agent_roster;
+use tddy_session_agents::seed_codebase;
+use tddy_session_split::service_util;
+use crate::connection_service::stack_parent;
 use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
 use tddy_worktree_service::branch_intent::BranchIntentRequest;
@@ -432,7 +435,7 @@ impl LaunchSessions {
             recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
             agents_rev: agent_roster::started_roster_rev(&started_agents),
             agents: started_agents,
-            ..crate::connection_service::starting_session_metadata(
+            ..tddy_session_split::service_util::starting_session_metadata(
                 session_id,
                 project_id,
                 "cursor-cli",

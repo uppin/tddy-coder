@@ -1,7 +1,7 @@
-use crate::{
-    connection_service::seed_codebase, session_deletion,
-    user_sessions_path::projects_path_for_user, workspace_session,
-};
+use tddy_session_agents::seed_codebase;
+use crate::session_deletion;
+use crate::user_sessions_path::projects_path_for_user;
+use crate::workspace_session;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
@@ -28,8 +28,8 @@ impl LaunchSessions {
     ) -> Result<
         (
             Response<StartSessionResponse>,
-            super::super::SeedCodebase,
-            Vec<super::super::SeededAgent>,
+            tddy_session_agents::seed_codebase::SeedCodebase,
+            Vec<tddy_session_agents::seeded_clone_guard::SeededAgent>,
         ),
         Status,
     > {
@@ -75,8 +75,8 @@ impl LaunchSessions {
         os_user: &str,
         sessions_base: &Path,
         session_id: &str,
-        codebase: super::super::SeedCodebase,
-        seeded: Vec<super::super::SeededAgent>,
+        codebase: tddy_session_agents::seed_codebase::SeedCodebase,
+        seeded: Vec<tddy_session_agents::seeded_clone_guard::SeededAgent>,
     ) {
         self.agent_roster
             .unwind_seeded_roster(session_id, &codebase, &req.session_token, seeded)

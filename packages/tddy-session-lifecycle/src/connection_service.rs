@@ -205,7 +205,7 @@ pub use session_worktree_observer::SessionWorktreeObserver;
 
 pub use seed_codebase::*;
 
-mod stack_parent;
+pub mod stack_parent;
 pub use stack_parent::*;
 
 pub use seeded_clone_guard::*;
@@ -216,13 +216,13 @@ mod svc_pr_status_for_caller;
 
 mod svc_start_claude_cli_session;
 
-pub(crate) mod host_session_socket;
+pub mod host_session_socket;
 pub mod inherited_host_sockets;
 
-pub(crate) mod session_acting_identity;
+pub mod session_acting_identity;
 pub use session_acting_identity::project_github_token;
 
-mod hooks_and_urls;
+pub mod hooks_and_urls;
 pub use hooks_and_urls::*;
 
 pub use tddy_session_agents::{
@@ -511,7 +511,7 @@ mod start_session_binary_resolution_tests;
 #[cfg(test)]
 mod resume_session_binary_resolution_tests;
 
-mod worktree_source;
+pub mod worktree_source;
 pub use worktree_source::*;
 
 #[cfg(test)]

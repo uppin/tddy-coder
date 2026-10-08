@@ -1,4 +1,4 @@
-use crate::connection_service::service_util;
+use tddy_session_split::service_util;
 
 use crate::connection_service::svc_start_claude_cli_session::ToolSessionHostRegistration;
 
@@ -12,7 +12,7 @@ use tddy_projects::project_storage;
 use tddy_spawn::{spawn_worker, spawner};
 use uuid::Uuid;
 
-use super::super::recipe_enables_conversation_spawn;
+use crate::connection_service::conversation_spawn::recipe_enables_conversation_spawn;
 
 use tddy_daemon_kernel::trim_to_option;
 
@@ -20,7 +20,7 @@ use std::path::Path;
 
 use tddy_rpc::Status;
 
-use super::super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_service::proto::session::StartSessionRequest;
@@ -151,7 +151,7 @@ impl LaunchSessions {
     /// Spawn a `tddy-coder` child for a starting or resuming tool session, through whichever
     /// backend the config chooses: `tddy-supervisor`, or the forked spawn worker (or, without
     /// one, a direct spawn) on the blocking pool. Both run under the spawn deadline.
-    pub(in crate::connection_service) async fn spawn_tddy_coder(
+    pub async fn spawn_tddy_coder(
         &self,
         plan: ToolSpawnPlan,
     ) -> Result<spawner::SpawnResult, Status> {

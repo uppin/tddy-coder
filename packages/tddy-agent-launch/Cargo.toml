@@ -1,0 +1,7 @@
+[package]
+name = "tddy-agent-launch"
+version = "0.1.0"
+edition = "2021"
+description = "Agent session launch: the start, resume, relaunch and spawn paths for CLI, jailed and stacked sessions"
+
+[dependencies]

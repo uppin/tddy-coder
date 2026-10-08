@@ -1,4 +1,5 @@
-use crate::{cli_session_manager::CliSessionManager, connection_service::StackParentHost};
+use crate::cli_session_manager::CliSessionManager;
+use crate::connection_service::stack_parent::StackParentHost;
 
 use std::path::PathBuf;
 

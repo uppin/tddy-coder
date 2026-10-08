@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::connection_service::agent_roster;
+use tddy_session_agents::agent_roster;
 
 use super::JailSession;
 
-use super::super::roster_replacement_pairs;
+use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
 use tddy_rpc::Status;
 
@@ -97,7 +97,7 @@ pub(super) fn write_jail_session_metadata(
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
         agents_rev: agent_roster::started_roster_rev(&started_agents),
         agents: started_agents,
-        ..crate::connection_service::starting_session_metadata(session_id, project_id, "claude-cli")
+        ..tddy_session_split::service_util::starting_session_metadata(session_id, project_id, "claude-cli")
     };
     tddy_core::write_session_metadata(session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {e}")))?;

@@ -10,10 +10,11 @@ use tddy_service::proto::session::StartSessionResponse;
 
 use crate::cli_session_manager::CliSessionManager;
 use crate::connection_service::session_acting_identity::SessionAccountAccess;
-use crate::connection_service::AttachmentProgressSink;
-use crate::connection_service::{
-    effective_spawn_branch, session_worktree_source, spawned_branch_of_session, WorktreeSource,
-};
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
+use crate::connection_service::hooks_and_urls::effective_spawn_branch;
+use crate::connection_service::worktree_source::session_worktree_source;
+use crate::connection_service::hooks_and_urls::spawned_branch_of_session;
+use crate::connection_service::worktree_source::WorktreeSource;
 use tddy_daemon_kernel::config::{resolve_cursor_binary_path, DaemonConfig};
 use tddy_projects::project_storage;
 use tddy_service::proto::session::start_phase::Step as StartStep;
@@ -47,7 +48,7 @@ pub async fn spawn_cursor_cli_session_inner(
     repo_path: &str,
     // The spawn's PR-stack parent, and the daemon that resolves what the child bases off — this one
     // when it owns the parent, the daemon named in the request when it does not.
-    stack_parent: crate::connection_service::SpawnStackParent<'_>,
+    stack_parent: crate::connection_service::stack_parent::SpawnStackParent<'_>,
     initial_prompt: &str,
     managed_codebase: bool,
     // The session's starting agent roster, already resolved against the request's
@@ -66,7 +67,7 @@ pub async fn spawn_cursor_cli_session_inner(
     // read. A parameter rather than something built here because this is a free function, and
     // naming the concrete daemon type would drag it through every caller of a function that
     // otherwise mentions nothing of the kind.
-    agent_clones: &dyn crate::connection_service::SeededAgentClones,
+    agent_clones: &dyn tddy_session_agents::seed_codebase::SeededAgentClones,
 ) -> Result<Response<StartSessionResponse>, Status> {
     spawn_cursor_cli_session_reporting(
         config,
@@ -124,7 +125,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     repo_path: &str,
     // The spawn's PR-stack parent, and the daemon that resolves what the child bases off — this one
     // when it owns the parent, the daemon named in the request when it does not.
-    stack_parent: crate::connection_service::SpawnStackParent<'_>,
+    stack_parent: crate::connection_service::stack_parent::SpawnStackParent<'_>,
     initial_prompt: &str,
     managed_codebase: bool,
     // The session's starting agent roster, already resolved against the request's
@@ -143,7 +144,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // read. A parameter rather than something built here because this is a free function, and
     // naming the concrete daemon type would drag it through every caller of a function that
     // otherwise mentions nothing of the kind.
-    agent_clones: &dyn crate::connection_service::SeededAgentClones,
+    agent_clones: &dyn tddy_session_agents::seed_codebase::SeededAgentClones,
     // What the start reads its owner's vault with, for the account identity the agent's commits
     // carry. A cursor-cli session runs no toolcall listener, so there is no token to answer.
     account_access: &SessionAccountAccess,
@@ -164,7 +165,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
 
     // No project default branch is consulted here: this path may run against a client-supplied
     // `repo_path` with no registered project at all, and it never read one before the extraction.
-    let intent = crate::connection_service::write_initial_changeset(
+    let intent = tddy_session_split::service_util::write_initial_changeset(
         session_id,
         &BranchIntentRequest {
             branch_worktree_intent,
@@ -188,8 +189,8 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
                 ));
             }
             let (projects_dir, project) =
-                crate::connection_service::find_registered_project(tddy_data_dir, os_user, &pid)?;
-            let repo_root = crate::connection_service::project_repo_root(&project)?;
+                tddy_session_split::service_util::find_registered_project(tddy_data_dir, os_user, &pid)?;
+            let repo_root = tddy_session_split::service_util::project_repo_root(&project)?;
             let project_accounts = project.accounts.clone();
             let chain_base_ref = stack_parent
                 .chain_base_ref(
@@ -269,7 +270,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     let seeded_clones = agent_clones
         .claim_for_seed(
             session_id,
-            &crate::connection_service::SeedCodebase::of_a_starting_session(
+            &tddy_session_agents::seed_codebase::SeedCodebase::of_a_starting_session(
                 session_dir.clone(),
                 worktree_path.clone(),
                 project_id,
@@ -376,7 +377,7 @@ async fn cut_cursor_cli_worktree(
 ) -> Result<PathBuf, Status> {
     let worktree_base_ref =
         tddy_core::select_worktree_base_ref(selected_integration_base_ref, chain_base_ref);
-    let wt = crate::connection_service::create_session_worktree(
+    let wt = tddy_session_split::service_util::create_session_worktree(
         timeout,
         "start_cursor_cli_session: create worktree",
         repo_root,
@@ -384,7 +385,7 @@ async fn cut_cursor_cli_worktree(
         worktree_base_ref,
     )
     .await?;
-    crate::connection_service::push_new_branch_to_origin_if_requested(
+    tddy_session_split::service_util::push_new_branch_to_origin_if_requested(
         create_remote_branch,
         intent,
         session_dir,
@@ -454,7 +455,7 @@ async fn cursor_cli_semantic_env(
     let mut session_env: Vec<(String, String)> = Vec::new();
     if semantic_index {
         progress.begin_phase(StartStep::SemanticIndex);
-        crate::connection_service::index_session_worktree(
+        tddy_session_split::service_util::index_session_worktree(
             tddy_data_dir,
             task_registry,
             session_id,
@@ -535,9 +536,9 @@ fn write_cursor_cli_session_metadata(launch: CursorCliSessionRecord<'_>) -> Resu
         cursor_chat_id: Some(cursor_chat_id),
         hook_token: Some(hook_token),
         recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),
-        agents_rev: crate::connection_service::started_roster_rev(agents),
+        agents_rev: tddy_session_agents::agent_roster::started_roster_rev(agents),
         agents: agents.to_vec(),
-        ..crate::connection_service::starting_session_metadata(session_id, project_id, "cursor-cli")
+        ..tddy_session_split::service_util::starting_session_metadata(session_id, project_id, "cursor-cli")
     };
     write_session_metadata(&session_dir, &meta)
         .map_err(|e| Status::internal(format!("failed to write session metadata: {}", e)))?;

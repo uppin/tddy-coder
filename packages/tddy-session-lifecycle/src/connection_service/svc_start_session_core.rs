@@ -1,4 +1,4 @@
-use crate::connection_service::service_util;
+use tddy_session_split::service_util;
 use tddy_spawn::spawner;
 
 use std::sync::Arc;
@@ -9,13 +9,14 @@ use uuid::Uuid;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use super::CodebasePlacement;
+use tddy_daemon_livekit::placement::CodebasePlacement;
 
-use super::resolve_split_agent_placement;
+use tddy_session_split::split_start::resolve_split_agent_placement;
 
-use super::resolve_caller_chosen_session_id;
+use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
-use super::{classify_placement, PlacementRequest};
+use tddy_daemon_livekit::placement::classify_placement;
+use tddy_daemon_livekit::placement::PlacementRequest;
 
 use tddy_rpc::Status;
 
@@ -23,11 +24,11 @@ use tddy_service::proto::session::StartSessionResponse;
 
 use tddy_rpc::Response;
 
-use super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use tddy_service::proto::session::StartSessionRequest;
 
-use crate::connection_service::agent_host_callbacks::DaemonSeedCloneClaimant;
+use tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant;
 
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
@@ -35,7 +36,7 @@ use tddy_daemon_kernel::trim_to_option;
 
 mod tool_spawn_plan;
 use crate::connection_service::launch_ports::LaunchSessions;
-pub(in crate::connection_service) use tool_spawn_plan::*;
+pub use tool_spawn_plan::*;
 
 /// What a CLI-agent start holds once its prelude has run: where the session lives, the id it was
 /// given, and the first prompt, with any attached changeset named in it.

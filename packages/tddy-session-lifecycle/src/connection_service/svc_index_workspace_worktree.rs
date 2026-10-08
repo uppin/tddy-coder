@@ -25,12 +25,12 @@ impl LaunchSessions {
         session_id: &str,
     ) -> Result<(), Status> {
         let worktree_path =
-            crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+            tddy_session_agents::peer_session_answer::resolve_worktree_root_for_session(
                 sessions_base,
                 session_id,
             )?;
         let session_dir = unified_session_dir_path(sessions_base, session_id);
-        super::service_util::index_session_worktree(
+        tddy_session_split::service_util::index_session_worktree(
             &self.tddy_data_dir,
             &self.task_registry,
             session_id,

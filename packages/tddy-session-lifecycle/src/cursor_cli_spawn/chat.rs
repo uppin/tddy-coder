@@ -25,7 +25,7 @@ pub fn install_cursor_hooks_in_worktree(
     // the same last resort every hook URL falls back to.
     let daemon_url = tddy_daemon_kernel::config::resolve_cursor_cli_daemon_url(config)
         .unwrap_or_else(|| {
-            crate::connection_service::daemon_hook_urls::local_daemon_hook_url(config)
+            tddy_daemon_kernel::daemon_hook_urls::local_daemon_hook_url(config)
         });
 
     let hook_token = Uuid::new_v4().to_string();

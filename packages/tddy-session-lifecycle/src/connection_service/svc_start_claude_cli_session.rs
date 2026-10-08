@@ -1,14 +1,14 @@
 use crate::connection_service::stack_parent;
 
-use super::GrillMeConversationSpawnHandler;
+use crate::connection_service::conversation_spawn::GrillMeConversationSpawnHandler;
 
-use super::recipe_enables_conversation_spawn;
+use crate::connection_service::conversation_spawn::recipe_enables_conversation_spawn;
 
 use std::path::Path;
 
-use super::spawn_claude_cli_session_inner;
+use crate::connection_service::claude_cli_spawn::spawn_claude_cli_session_inner;
 
-use super::StackChildSpawnHandler;
+use crate::connection_service::stack_child_spawn::StackChildSpawnHandler;
 
 use tddy_core::output::SESSIONS_SUBDIR;
 
@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use std::path::PathBuf;
 
-use super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use super::launch_ports::LaunchSessions;
 

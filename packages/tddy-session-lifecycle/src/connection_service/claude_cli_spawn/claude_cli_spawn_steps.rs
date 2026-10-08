@@ -1,7 +1,7 @@
-use crate::{
-    cli_session_manager::CliSessionManager,
-    connection_service::{hooks_and_urls, managed_launch, service_util},
-};
+use crate::cli_session_manager::CliSessionManager;
+use crate::connection_service::hooks_and_urls;
+use crate::connection_service::managed_launch;
+use tddy_session_split::service_util;
 
 use tddy_projects::project_storage;
 use tddy_spawn::spawner;
@@ -19,7 +19,7 @@ use std::path::Path;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 
-use crate::connection_service::daemon_hook_urls;
+use tddy_daemon_kernel::daemon_hook_urls;
 use tddy_service::proto::session::start_phase::Step as StartStep;
 
 /// What cutting a claude-cli session's worktree reads: the checkout, the base, and where it goes.
@@ -136,7 +136,7 @@ pub(super) fn install_claude_cli_hooks(
     // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
     // Write failure is warn-and-continue so it never blocks the session from starting.
     let hook_token = Uuid::new_v4().to_string();
-    crate::connection_service::service_util::write_claude_hooks_settings(
+    tddy_session_split::service_util::write_claude_hooks_settings(
         worktree_path,
         &tddy_core::HookCommandParams {
             tddy_tools_path: &tddy_tools_path,
@@ -160,7 +160,7 @@ pub(super) struct ManagedClaudeCliLaunch<'a> {
     pub(super) conversation_spawn_handler:
         Option<Arc<dyn tddy_core::toolcall::ConversationSpawnHandler + 'static>>,
     pub(super) semantic_index: bool,
-    pub(super) progress: &'a super::AttachmentProgressSink,
+    pub(super) progress: &'a tddy_session_files::attachment_progress::AttachmentProgressSink,
     pub(super) task_registry: &'a TaskRegistry,
     pub(super) session_dir: &'a Path,
     pub(super) worktree_path: &'a Path,

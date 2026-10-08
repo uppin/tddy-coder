@@ -1,4 +1,4 @@
-use super::super::roster_replacement_pairs;
+use tddy_session_agents::roster_replacement::roster_replacement_pairs;
 
 use tddy_rpc::Status;
 

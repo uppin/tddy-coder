@@ -4,7 +4,7 @@ use tddy_spawn::spawner::{self, SpawnOptions};
 /// resume's: the label the deadline and its log lines carry, and whether the forked worker traces
 /// itself (only a start's does).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(in crate::connection_service) enum ToolSpawnPurpose {
+pub enum ToolSpawnPurpose {
     Start,
     Resume,
 }
@@ -28,26 +28,26 @@ impl ToolSpawnPurpose {
 /// What a `tddy-coder` child is spawned with, beyond what the daemon's own config supplies. The
 /// optional fields are the child's optional flags ([`SpawnOptions`]), owned so the plan can cross
 /// into the blocking pool.
-pub(in crate::connection_service) struct ToolSpawnPlan {
-    pub(in crate::connection_service) purpose: ToolSpawnPurpose,
-    pub(in crate::connection_service) os_user: String,
-    pub(in crate::connection_service) tool_path: String,
-    pub(in crate::connection_service) repo_path: std::path::PathBuf,
-    pub(in crate::connection_service) livekit: spawner::LiveKitCreds,
-    pub(in crate::connection_service) resume_session_id: Option<String>,
-    pub(in crate::connection_service) new_session_id: Option<String>,
-    pub(in crate::connection_service) project_id: Option<String>,
-    pub(in crate::connection_service) agent: Option<String>,
-    pub(in crate::connection_service) agent_def_json: Option<String>,
-    pub(in crate::connection_service) recipe: Option<String>,
-    pub(in crate::connection_service) stack_parent: Option<String>,
-    pub(in crate::connection_service) stack_node_id: Option<String>,
-    pub(in crate::connection_service) stack_seed_base_session: Option<String>,
-    pub(in crate::connection_service) model: Option<String>,
-    pub(in crate::connection_service) host_session_socket: Option<String>,
+pub struct ToolSpawnPlan {
+    pub purpose: ToolSpawnPurpose,
+    pub os_user: String,
+    pub tool_path: String,
+    pub repo_path: std::path::PathBuf,
+    pub livekit: spawner::LiveKitCreds,
+    pub resume_session_id: Option<String>,
+    pub new_session_id: Option<String>,
+    pub project_id: Option<String>,
+    pub agent: Option<String>,
+    pub agent_def_json: Option<String>,
+    pub recipe: Option<String>,
+    pub stack_parent: Option<String>,
+    pub stack_node_id: Option<String>,
+    pub stack_seed_base_session: Option<String>,
+    pub model: Option<String>,
+    pub host_session_socket: Option<String>,
     /// The commit identity pairs the child's agent authors under — the project's account, from
     /// `SessionAccountAccess::session_identity`. Empty when it resolves to none. Never a token.
-    pub(in crate::connection_service) git_environment: Vec<(String, String)>,
+    pub git_environment: Vec<(String, String)>,
 }
 
 impl ToolSpawnPlan {

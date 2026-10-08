@@ -12,8 +12,8 @@
 //! fields carry the host's names, so a method
 //! that moves from `impl DaemonSessionHost` to `impl LaunchSessions` changes its `impl` header and
 //! nothing in the body, and the `self.clone()` it hands to a task is textually the same. This
-//! follows [`AgentRoster`](super::agent_host_callbacks::AgentRoster) and
-//! [`SplitSessions`](super::split_ports::SplitSessions) exactly.
+//! follows [`AgentRoster`](tddy_session_agents::agent_host_callbacks::AgentRoster) and
+//! [`SplitSessions`](tddy_session_split::split_ports::SplitSessions) exactly.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,17 +31,18 @@ use tddy_session_agents::session_agent_inference::SessionAgentInferenceStore;
 use tddy_spawn::spawn_worker::SpawnClient;
 use tddy_task::TaskRegistry;
 
-use super::agent_host_callbacks::AgentRoster;
+use tddy_session_agents::agent_host_callbacks::AgentRoster;
 use super::host_session_socket::HostSessionSockets;
 use super::session_worktree_observer::SessionWorktreeObserver;
-use super::split_ports::SplitSessions;
-use super::svc_materialize_staged_attachment::AttachmentState;
-use super::AttachmentMaterialization;
+use tddy_session_split::split_ports::SplitSessions;
+use tddy_session_files::svc_materialize_staged_attachment::AttachmentState;
+use tddy_session_files::attachment_progress::AttachmentMaterialization;
 use crate::cli_session_manager::CliSessionManager;
 use crate::presenter_observer_task::presenter_observer_spawn::PresenterObserverDeps;
 use crate::PrStackHandler;
 
-use super::session_acting_identity::{SessionAccountAccess, SessionIdentity};
+use super::session_acting_identity::SessionAccountAccess;
+use super::session_acting_identity::SessionIdentity;
 
 /// The capabilities of the session host the launch topic calls and does not own.
 ///

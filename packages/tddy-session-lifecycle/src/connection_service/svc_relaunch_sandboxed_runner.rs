@@ -1,4 +1,4 @@
-use crate::connection_service::agent_roster;
+use tddy_session_agents::agent_roster;
 
 use std::path::Path;
 

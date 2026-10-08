@@ -3,9 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use super::peer_session_answer::resolve_exec_tool_worktree;
-use super::svc_resolve_os_user::resolve_os_user;
-use super::{service_util, AttachmentProgressSink};
+use tddy_session_agents::peer_session_answer::resolve_exec_tool_worktree;
+use tddy_daemon_livekit::os_user_resolution::resolve_os_user;
+use tddy_session_split::service_util;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 use crate::connection_service::launch_ports::LaunchSessions;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;

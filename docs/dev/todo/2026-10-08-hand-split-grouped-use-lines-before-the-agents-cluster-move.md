@@ -53,3 +53,18 @@ Also: `hooks_and_urls` was **left out of the split cluster**. The changeset assi
 
 What the engine should do: follow a facade to the defining module and test that module for membership in the moving set, and not treat
 `pub(in crate::origin_module)` as naming the origin crate. Delete this section with that fix.
+
+## R9 (`tddy-agent-launch`): hand edits before the cluster move (commit "imports and visibility the engine needs before the launch cluster move")
+
+Imports, paths and visibility only, over the 46 modules of the cluster; every one made because `check --deep` refused the plan until it was made, and all were applied by small scripts (kept in the author's scratch, not in the repo) and then compiled:
+
+1. **Grouped `use` lines split to one path each**: 14 flat groups and one nested group (`use crate::{cli_session_manager::…, connection_service::{…}}`) in 15 files.
+2. **A path through the origin's glob facade to a member or a moved module, re-spelled through its defining module or crate** (the same engine blind spot as R6/R8): `AttachmentProgressSink` → `tddy_session_files::attachment_progress::…`;
+   `SeedCodebase`, `SeededAgentClones`, `roster_replacement_pairs`, `agent_host_callbacks`, `agent_roster`, `seed_codebase`, `peer_session_answer`, `SeededAgent`, `started_roster_rev` → `tddy_session_agents::…`;
+   `service_util`, `split_ports`, `attached_initial_prompt`, `resolve_split_agent_placement`, `create_session_worktree`, `find_registered_project`, `index_session_worktree`, `project_repo_root`, `push_new_branch_to_origin_if_requested`,
+   `starting_session_metadata`, `write_initial_changeset` → `tddy_session_split::…`; `CodebasePlacement`, `classify_placement`, `PlacementRequest`, `resolve_os_user` → `tddy_daemon_livekit::…`; `daemon_hook_urls` → `tddy_daemon_kernel::…`;
+   `svc_materialize_staged_attachment`, `AttachmentMaterialization` → `tddy_session_files::…`; and cluster members named through the facade (`recipe_enables_conversation_spawn`, `WorktreeSource`, `StackParentHost`, `SpawnStackParent`, `ManagedLaunch`,
+   `effective_spawn_branch`, …) → `crate::connection_service::<member>::…`.
+3. **Visibility so those paths resolve before the move**: `mod worktree_source;`, `mod hooks_and_urls;`, `mod stack_parent;` → `pub mod`; `pub(crate) mod host_session_socket;` and `pub(crate) mod session_acting_identity;` → `pub mod`;
+   `pub(in crate::connection_service)` → `pub` (21 occurrences in `svc_start_session_core.rs`, `tool_session_spawn.rs`, `tool_spawn_plan.rs`): the engine counts a `pub(in crate::origin_module)` path as naming the origin crate.
+4. **Plan correction**: `family_proto_bridge` (14 lines, host-free, named by `session_coordinate_handlers`) joins the cluster; the changeset lists it under the staying wiring, but a launch module cannot name lifecycle. Its facade `pub use family_proto_bridge::wire_same;` stays in lifecycle.

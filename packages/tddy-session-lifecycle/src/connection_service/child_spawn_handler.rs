@@ -1,15 +1,15 @@
-use super::spawn_claude_cli_session_inner;
+use crate::connection_service::claude_cli_spawn::spawn_claude_cli_session_inner;
 
-use super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
-use super::AttachmentMaterialization;
+use tddy_session_files::attachment_progress::AttachmentMaterialization;
 
 use uuid::Uuid;
 
 use crate::connection_service::stack_parent;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
-use super::StackChildSpawnHandler;
+use crate::connection_service::stack_child_spawn::StackChildSpawnHandler;
 
 #[async_trait::async_trait]
 impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
@@ -125,7 +125,7 @@ impl tddy_core::toolcall::ChildSpawnHandler for StackChildSpawnHandler {
             &self.account_access,
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
-            &super::AttachmentProgressSink::discarding(),
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
         )
         .await
         .map_err(|status| status.message().to_string())?;

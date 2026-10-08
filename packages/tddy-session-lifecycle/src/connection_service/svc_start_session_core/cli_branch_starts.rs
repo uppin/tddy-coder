@@ -2,9 +2,9 @@ use crate::connection_service::stack_parent;
 
 use uuid::Uuid;
 
-use crate::connection_service::attached_initial_prompt::attached_initial_prompt;
+use tddy_session_split::attached_initial_prompt::attached_initial_prompt;
 
-use super::super::AttachmentProgressSink;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 use tddy_rpc::Status;
 
@@ -159,7 +159,7 @@ impl LaunchSessions {
         start: CliStart,
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
         mut started_agents: Vec<tddy_core::SessionAgentRecord>,
-        clones: crate::connection_service::agent_host_callbacks::DaemonSeedCloneClaimant,
+        clones: tddy_session_agents::agent_host_callbacks::DaemonSeedCloneClaimant,
         progress: &AttachmentProgressSink,
     ) -> Result<Response<StartSessionResponse>, Status> {
         crate::cursor_cli_spawn::spawn_cursor_cli_session_reporting(

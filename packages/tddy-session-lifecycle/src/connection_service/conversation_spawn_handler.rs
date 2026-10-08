@@ -1,13 +1,13 @@
 use crate::connection_service::stack_parent;
 use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
 
-use super::spawn_claude_cli_session_inner;
+use crate::connection_service::claude_cli_spawn::spawn_claude_cli_session_inner;
 
 use uuid::Uuid;
 
-use super::conversation_branch_slug;
+use crate::connection_service::conversation_spawn::conversation_branch_slug;
 
-use super::GrillMeConversationSpawnHandler;
+use crate::connection_service::conversation_spawn::GrillMeConversationSpawnHandler;
 
 #[async_trait::async_trait]
 impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnHandler {
@@ -81,7 +81,7 @@ impl tddy_core::toolcall::ConversationSpawnHandler for GrillMeConversationSpawnH
             &self.account_access,
             &self.claude_cli_manager.task_registry(),
             // Nobody watches a spawned child's start: the orchestrator is told its id, not its steps.
-            &super::AttachmentProgressSink::discarding(),
+            &tddy_session_files::attachment_progress::AttachmentProgressSink::discarding(),
         )
         .await
         .map_err(|status| status.message().to_string())?;

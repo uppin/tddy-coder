@@ -1,10 +1,11 @@
-use super::sandbox_claude_passthrough_args;
+use crate::connection_service::worktree_source::sandbox_claude_passthrough_args;
 
-use super::WorktreeSource;
+use crate::connection_service::worktree_source::WorktreeSource;
 
-use super::session_worktree_source;
+use crate::connection_service::worktree_source::session_worktree_source;
 
-use crate::connection_service::{seed_codebase, service_util};
+use tddy_session_agents::seed_codebase;
+use tddy_session_split::service_util;
 use tddy_worktree_service::branch_intent::BranchIntentPolicy;
 
 use tddy_worktree_service::branch_intent::BranchIntentRequest;

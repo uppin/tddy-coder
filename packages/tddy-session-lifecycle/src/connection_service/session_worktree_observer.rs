@@ -29,7 +29,7 @@ impl LaunchSessions {
         let Some(observer) = self.worktree_observer.as_ref() else {
             return;
         };
-        match crate::connection_service::peer_session_answer::resolve_worktree_root_for_session(
+        match tddy_session_agents::peer_session_answer::resolve_worktree_root_for_session(
             sessions_base,
             session_id,
         ) {
