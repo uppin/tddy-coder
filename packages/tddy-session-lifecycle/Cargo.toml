@@ -14,13 +14,9 @@ local-model = ["tddy-semantic-index/local-model"]
 [dependencies]
 anyhow = "1"
 tempfile = "3"
-base64 = "0.22"
-glob = "0.3"
 futures-util = "0.3"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
 async-trait = "0.1"
 axum = "0.8"
-clap = { version = "4", features = ["derive", "env"] }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -41,17 +37,13 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # `connection_service` resolves registry assistants as `--agent` targets. `sqlx`,
 # `agent-client-protocol` and `tddy-acp` left with it.
 tddy-model-registry = { path = "../tddy-model-registry" }
-tddy-bsp = { path = "../tddy-bsp" }
 tddy-discovery = { path = "../tddy-discovery" }
-tddy-demo-runner = { path = "../tddy-demo-runner" }
 tddy-github = { path = "../tddy-github" }
 # Defines `PrStackHandler`, which session start names for the stack paths it serves.
 tddy-pr-stack = { path = "../tddy-pr-stack" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 tddy-workflow = { path = "../tddy-workflow" }
 tddy-livekit = { path = "../tddy-livekit" }
-tddy-lsp = { path = "../tddy-lsp" }
-tddy-lsp-executor = { path = "../tddy-lsp-executor" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-stdio = { path = "../tddy-stdio" }
 tddy-service = { path = "../tddy-service" }
@@ -60,15 +52,12 @@ tddy-service = { path = "../tddy-service" }
 # second implementation of "restore from the WIP ref, apply a delta, notice a divergence" would be
 # two mirrors that disagree, and the disagreement is silent.
 tddy-session-sync = { path = "../tddy-session-sync" }
-tddy-actions = { path = "../tddy-actions" }
 tddy-task = { path = "../tddy-task" }
-tddy-pty = { path = "../tddy-pty" }
 tddy-terminal-rpc = { path = "../tddy-terminal-rpc" }
 tddy-tool-engine = { path = "../tddy-tool-engine" }
 tddy-subagent-worktree = { path = "../tddy-subagent-worktree" }
 tddy-semantic-index = { path = "../tddy-semantic-index" }
 tokio-stream = "0.1"
-tddy-vm = { path = "../tddy-vm" }
 tddy-connectrpc = { path = "../tddy-connectrpc" }
 tddy-sandbox = { path = "../tddy-sandbox" }
 # The extracted sandbox subsystem: `sandbox_session`, `workspace_tool_sandbox`, `sandbox_action`,
@@ -79,30 +68,15 @@ tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
 # `supervisor_client`. `tddy-supervisor` left with them — the daemon reaches the supervisor only
 # through this crate now.
 tddy-spawn = { path = "../tddy-spawn" }
-tddy-sandbox-recipes = { path = "../tddy-sandbox-recipes" }
 tddy-sandbox-runner = { path = "../tddy-sandbox-runner" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
-portable-pty = "0.9"
-# `default = ["agent"]` is the *server* side — tokio, futures, async-trait, service-binding and
-# a log facade we do not use. The blocking client and the protocol types are ungated.
-# `encryption` (and the ed25519 support the fixtures use): an OpenSSH private key on disk is
-# passphrase-protected, and unlocking one in process is the whole reason this daemon never needs a
-# TTY or `SSH_ASKPASS`. Without the feature `PrivateKey::decrypt` does not exist and the passphrase
-# would have to reach `ssh-add` as a subprocess, which is the design node 5 rejected.
-# `host_keypair.rs`: the host's RSA keypair, and RSA-OAEP(SHA-256) decryption of an answer the
-# browser encrypted with `SubtleCrypto`. Pinned — it is a cryptographic implementation, and a patch
-# release changing key generation or padding behaviour is not something to pick up silently.
-rsa = "=0.9.10"
 # The moved host and worktree services. A runtime dependency, not a dev one: `runtime.rs` builds
 # and registers both, and `session_reader` implements the worktree crate's session-listing port.
 tddy-host-service = { path = "../tddy-host-service" }
 tddy-worktree-service = { path = "../tddy-worktree-service" }
-# The moved screen-sharing subsystem: `runtime.rs` builds its service and registers the entry it
-# returns. `argon2`, `chacha20poly1305` and `rand` are the vault's, and left with it.
-tddy-screen-sharing = { path = "../tddy-screen-sharing" }
 # The moved telegram transport plus `active_elicitation`, `elicitation`,
 # `telegram_tracked_session` and `telegram_github_link`. `hmac`, `sha2` and `subtle` are the
 # OAuth-state signer's and left with it. Still a dependency after the control plane left for
@@ -139,13 +113,10 @@ tddy-agent-launch = { path = "../tddy-agent-launch" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-hyper-util = { version = "0.1", features = ["tokio"] }
 http = "1"
-tower = "0.5"
 tokio-stream = "0.1"
 
 [dev-dependencies]
-assert_cmd = "2"
 # The acceptance suites dispatch through the very client the in-jail MCP server uses, over the same
 # in-jail socket, rather than re-implementing its wire format. `livekit` because this crate also
 # exercises the split-session transport.
@@ -159,9 +130,6 @@ tddy-github = { path = "../tddy-github" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 livekit = "0.7"
 serial_test = "3"
-# Already workspace dependencies (see the root `[workspace.dependencies]`); no new crate enters
-# the tree. Used by the remote-git acceptance suites for table-driven cases and readable diffs.
-rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json"] }
 scopeguard = "1"
