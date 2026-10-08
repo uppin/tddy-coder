@@ -197,21 +197,21 @@ async fn real_daemon_session_drives_a_seatbelt_jailed_sandbox_runner_entirely_ov
 }
 
 /// **sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags**: family-C spawn modules in
-/// `tddy-session-lifecycle` must request the stdio transport and must never build gRPC flags.
+/// `tddy-agent-launch` must request the stdio transport and must never build gRPC flags.
 #[test]
 fn sandboxed_session_spawn_argv_carries_stdio_and_no_grpc_flags() {
     let sources = [
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_claude_cli_session.rs"
+            "/../tddy-agent-launch/src/svc_start_sandboxed_claude_cli_session.rs"
         )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tddy-session-lifecycle/src/connection_service/svc_start_sandboxed_cursor_cli_session.rs"
+            "/../tddy-agent-launch/src/svc_start_sandboxed_cursor_cli_session.rs"
         )),
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../tddy-session-lifecycle/src/connection_service/svc_relaunch_sandboxed_runner.rs"
+            "/../tddy-agent-launch/src/svc_relaunch_sandboxed_runner.rs"
         )),
     ];
 

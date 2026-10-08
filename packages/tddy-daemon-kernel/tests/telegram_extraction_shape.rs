@@ -201,10 +201,7 @@ fn the_connection_service_holds_the_presenter_event_sink_port() {
 #[test]
 fn the_only_consumer_of_the_field_goes_through_the_port() {
     // Given the module holding the single call site
-    let text = source_of(
-        "tddy-session-lifecycle",
-        "connection_service/svc_resolve_tddy_tools_path.rs",
-    );
+    let text = source_of("tddy-session-split", "svc_resolve_tddy_tools_path.rs");
 
     // Then it no longer reaches into the Telegram subscriber
     assert!(
