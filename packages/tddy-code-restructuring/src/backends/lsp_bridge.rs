@@ -128,6 +128,14 @@ impl LspClientBridge {
 /// LSP `ContentModified` — rust-analyzer's "the document changed under this request, ask again".
 const CONTENT_MODIFIED: i64 = -32801;
 
+/// JSON-RPC `InternalError` — what rust-analyzer answers when a request handler panicked. The
+/// server's defect, not the plan's.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-extract-method-clean): implement — its arm in `map_lsp_error`"
+)]
+const INTERNAL_ERROR: i64 = -32603;
+
 /// Classify a transport failure by whether waiting can fix it.
 ///
 /// Only [`RestructureError::ServerCatchingUp`] is retried by the backend's assist and settle
@@ -187,6 +195,25 @@ mod tests {
         assert!(
             matches!(error, RestructureError::ServerCatchingUp),
             "expected ServerCatchingUp, got {error:?}"
+        );
+    }
+
+    /// rust-analyzer panicking inside a request handler (`-32603`) is the server's defect. Read as
+    /// `plan is malformed`, it sent the author of #524's plan 16 to edit a plan that was correct.
+    #[test]
+    fn a_server_that_panics_answering_is_the_servers_defect_not_a_malformed_plan() {
+        // Given the server answering a request with a panic
+        let error = map_lsp_error(LspError::Server {
+            code: -32603,
+            message: "request handler panicked: called `Option::unwrap()` on a `None` value"
+                .to_string(),
+        });
+
+        // Then it reads as the server's answer being unusable, quoting the panic
+        assert_eq!(
+            error.to_string(),
+            "rust-analyzer's answer was unusable: rust-analyzer failed answering this request: \
+             request handler panicked: called `Option::unwrap()` on a `None` value"
         );
     }
 

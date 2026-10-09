@@ -231,6 +231,39 @@ mod tests {
 
     const BORROWING: &str = "fn f(&self) -> bool {\n    let r = &self.v;\n    r.is_some()\n}\n";
 
+    const BLOCK_AND_COMMENT: &str = "fn block(x: u32) -> u32 {\n    let mut y = x;\n    {\n        \
+                                     // the step\n        let z = y + 1;\n        y = z * 2;\n    }\n    y\n}\n";
+
+    #[test]
+    fn a_range_opening_on_a_blocks_brace_is_probed_at_its_first_statement() {
+        // The range opens on the bare block's `{` (3:5); the first typed token is `let`'s, at 5:9,
+        // past the comment on line 4
+        assert_eq!(
+            hover_bearing_position(
+                BLOCK_AND_COMMENT,
+                Range {
+                    start: at(3, 5),
+                    end: at(7, 6)
+                }
+            ),
+            at(5, 9)
+        );
+    }
+
+    #[test]
+    fn a_range_opening_on_a_line_comment_is_probed_at_the_code_after_it() {
+        assert_eq!(
+            hover_bearing_position(
+                BLOCK_AND_COMMENT,
+                Range {
+                    start: at(4, 9),
+                    end: at(6, 19)
+                }
+            ),
+            at(5, 9)
+        );
+    }
+
     #[test]
     fn a_range_opening_with_a_borrow_is_probed_past_the_ampersand() {
         // `&self.v` spans 2:13–2:20; the hover-bearing token is `self`, at 2:14

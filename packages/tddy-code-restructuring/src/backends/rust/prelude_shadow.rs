@@ -60,6 +60,19 @@ pub(super) fn shadowed_imports(parent: &str, child: &str) -> Vec<String> {
     lines
 }
 
+/// Every `use <path> as _;` of `parent` — including a group member `<path> as _`, flattened — as a
+/// `use` line rebased for the module one level deeper. Such an import binds no name, so it can only
+/// be there for a trait's methods, which the moved code may call without ever naming the trait.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-extract-method-clean): implement, and chain it into `shadowed_imports`"
+)]
+pub(super) fn anonymous_trait_imports(parent: &str) -> Vec<String> {
+    let _ = parent;
+    // TODO(reshape-extract-method-clean): implement
+    todo!("anonymous_trait_imports")
+}
+
 /// `use <path>;`, rebased for the module one level deeper, with the alias if the parent had one.
 fn use_line(binding: &Binding) -> String {
     let path = rebased_for_child(&binding.path);
@@ -193,6 +206,35 @@ mod tests {
     use super::*;
 
     const PARENT: &str = "use crate::{Overlay, Result};\n\nfn parent() {}\n";
+
+    #[test]
+    fn reads_every_anonymous_trait_import_of_the_parent_rebased_for_the_child() {
+        // Given a parent importing traits for their methods alone, one of them in a group
+        let parent =
+            "use prost::Message as _;\nuse std::{fmt::Write as _, io};\nuse super::Codec as _;\n";
+
+        // Then each is a line the child can carry
+        assert_eq!(
+            anonymous_trait_imports(parent),
+            [
+                "use prost::Message as _;",
+                "use std::fmt::Write as _;",
+                "use super::super::Codec as _;",
+            ]
+        );
+    }
+
+    #[test]
+    fn carries_the_parents_anonymous_trait_import_into_a_child_that_never_names_the_trait() {
+        // When the moved code calls a trait method the parent imports `as _`
+        let imports = shadowed_imports(
+            "use prost::Message as _;\n",
+            "fn frame(out: &TerminalOutput) -> Vec<u8> {\n    out.encode_to_vec()\n}",
+        );
+
+        // Then the child carries the import
+        assert_eq!(imports, vec!["use prost::Message as _;"]);
+    }
 
     #[test]
     fn carries_an_alias_the_parent_binds_and_the_moved_code_names() {
