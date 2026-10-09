@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Feature (one new restructure operation, one refused variant implemented, two `verify` rules, one `verify` declaration)
-**Stack**: `#reshape` 6/19, branch `feature/reshape/methods-leave-type`, wave 1. PR title:
+**Stack**: `#reshape` 6/19, branch `feature/reshape/methods-leave-type`, wave 1, PR [#603](https://github.com/uppin/tddy-coder/pull/603). PR title:
 `feat(code-restructuring): method bodies read fields through a state value and retarget_impl leaves delegators (#reshape 6/19)`.
 Base in the linear stack: `feature/reshape/move-children` (K=5). **Real edges**: none in. Out: `methods-leave-type -> backend-session` (K=18 consumes self mode).
 Nodes 1-12 share `backends/rust.rs` wiring and `plan/codec.rs`. They collide in the text only; no behaviour is shared.
@@ -151,7 +151,7 @@ findings** for a `range` anchor (plain `check`). RS5-RS7 need the server and are
 | # | Message stem | When |
 |---|---|---|
 | RS1 | `` the range starts at line {n} col {c}, which is not the start of a statement: a `let` cannot be inserted before it `` | The code byte before the range start, comments and strings masked (`masked_to_code`), is not `;`, `{` or `}` |
-| RS2 | `` the range names no `self`: there is nothing to rebind `` | — |
+| RS2 | `` the range names no `self`: there is nothing to rebind `` | In self mode a `Self` counts as something to rebind, so an associated function naming only `Self` reaches RS5 |
 | RS3 | `` the range calls `self.{m}(…)` at line {n} and uses `self` bare at line {k}: read through `{name}` only fields, or rebind every `self` with `"expr": "self"` `` (every site listed) | Field mode only |
 | RS4 | `` `{name}` is already written at line {n} of this function: the new binding would shadow it `` | `name` occurs as a whole word in the masked body of the enclosing `fn` |
 | RS5 | `` the range is in no method with a `self` receiver `` | Outline: the enclosing symbol is not a method (kind 6), or its parameter list has no `self` |
@@ -349,8 +349,9 @@ below:
   the `--rebind` arm in `Options` parsing.
 - `tddy-index-daemon` `VerifyRequest.rebinds` (field 5).
 
-Failing tests: acceptance tests 1-27 and 29-30 below are red on the first push. Test 28 is the
-regression pin, green.
+Failing tests: acceptance tests 1-27 and 29 below are red on the first push. Test 28 is the
+regression pin, green. Test 30 is green too: the `--rebind` carrier is owned surface and landed
+complete in this push (see Validation Results).
 
 ## Green wave
 
@@ -537,7 +538,7 @@ argument, and `VerifyRequest` has no `rebinds`. 28 is a **green pin**.
 11. `a_field_whose_type_differs_by_more_than_one_reference_is_refused_naming_both_types` (RS7: a state
     `&'a Arc<T>` against a host `Arc<T>` is accepted; a state `Vec<u8>` against a host
     `Arc<Vec<u8>>` is refused).
-12. `a_range_in_a_free_function_is_refused_as_having_no_self_receiver` (RS5).
+12. `a_range_in_an_associated_function_without_a_receiver_is_refused` (RS5: self mode over `doubled + Self::BASE` in an associated function. A free function's body cannot name `self`, so RS2 would refuse it first)
 13. `self_mode_rebinds_method_calls_fields_and_the_self_type_and_a_following_extract_method_writes_a_free_function`
     (a `Self::helper()` call and a `Self { .. }` literal in the range become `Host::helper()` and `Host { .. }`):
     a group of `read_fields_through` (`expr: "self"`) and `extract_method` over the same range. The new
@@ -652,7 +653,42 @@ argument, and `VerifyRequest` has no `rebinds`. 28 is a **green pin**.
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Draft-PR contract push (commit 2, 2026-10-09)
+
+Scoped gates on the three touched packages:
+- `cargo check -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools --all-targets`: clean.
+- `cargo clippy` for the same three packages, `--all-targets -- -D warnings`: clean.
+- `cargo fmt --all --check`: clean.
+
+The baseline inherited from `feature/reshape/move-children` was clean on the same gates. The full
+suite was not re-run (the node-1 baseline is 1334 passed, 0 failed).
+
+**Red: 29 acceptance tests, each because the implementation is missing.**
+- Tests 1-6 (`tests/read_fields_through_plan_lines.rs`) and 7-16 (`tests/read_fields_through_acceptance.rs`, live): the codec refuses the op with `` `read_fields_through` is not implemented yet ``, from `plan/codec/rebind_fields.rs`. The live ones fail before any server starts.
+- Tests 17-19 (`tests/verify_accounts_for_a_rebind.rs`): `Rebind::from_str` returns "not implemented", and R-rebind does not exist.
+- Test 20 (`tests/retarget_impl_plan_lines.rs`): the plan parses, because P9 is not enforced.
+- Tests 21-26 (`tests/retarget_impl_delegator_acceptance.rs`, live): `deferred_delegator` still refuses the variant (`UnsupportedOp`). Every fixture passes the pre-apply compile gate, so the fixtures themselves compile.
+- Test 27 (`tests/verify_accounts_for_a_retarget.rs`): R3 does not exist.
+- Test 29 (`tddy-index-daemon/tests/dual_transport_acceptance.rs`): the CLI and the daemon refuse `--rebind state` as not implemented.
+
+**Unit tests of the surface, red (`todo!()`):** 15 in total.
+- `read_fields_through::range::tests`: 6
+- `read_fields_through::typing::tests`: 3
+- `read_fields_through::edits::tests`: 2, including receiver mode writing `Self` as `Host`
+- `retarget_impl::delegator::tests`: 4
+
+**Green:**
+- Test 28, `tests/retarget_impl_acceptance.rs`: 13/13. `retarget_impl()` was refactored to call `the_replacement` (65 lines, down from 70), and its behaviour is unchanged.
+- Test 30: the daemon's `cli.rs` unit test.
+
+**Diverged from the plan above (deliberate):**
+- **The `--rebind` carrier is complete.** `RestructureVerifyArgs.rebind`, `Options.rebinds` and the `--rebind` flag, `Declared.rebinds` with `with_rebinds`, `runner/comparison.rs`, proto `VerifyRequest.rebinds = 5`, the daemon's `cli.rs`/`queries.rs` and `tddy-tools`'s `index_client.rs` all landed. Only `Rebind::from_str` and the R-rebind pass are left for green. Green also adds `[--rebind NAME]...` to the runner's usage line (`runner/options.rs`).
+- **Wiring is in place.** `SUPPORTED` is 26, and the `check` and `resolve` arms call the stubs. `the_replacement` (with `Retarget`) is extracted and already calls the `delegator` stubs; it is unreachable while `deferred_delegator` stands.
+- **`signature_fields.rs` already admits `expr` on `ReadFieldsThrough`.**
+- **Dead-code allowances to remove in green.** `#[allow(dead_code, reason = "TODO(reshape-methods-leave-type)…")]` sits on the three `read_fields_through` children (`edits`, `range`, `typing`). Remove each when the run calls it.
+- **New `edits::rebound` parameter.** It takes `self_type: &str`, the promise to `#reshape` 18. `SelfUse` gained `SelfType`.
+- **Harness change.** `tests/harness/mod.rs`: `a_range_over` is now `pub` (it was private), and two live binaries use it.
+- **Risk for green: the ledger and an insertion at the range start.** Test 13 groups `read_fields_through` with an `extract_method` anchored on the same original lines. The `let` is inserted at the range-start offset, so the ledger must translate the later anchor to start **after** the insertion. If it does not, the extraction takes the `let` in. Insert at the start of the range's line instead if needed.
 
 ## TODO
 
@@ -661,8 +697,8 @@ argument, and `VerifyRequest` has no `rebinds`. 28 is a **green pin**.
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-methods-leave-type.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code

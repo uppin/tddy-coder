@@ -250,6 +250,11 @@ pub(crate) struct VerifyArgs {
     /// the differences it causes instead of reporting them.
     #[arg(long = "repoint", value_name = "OLD=NEW")]
     pub(crate) repoint: Vec<String>,
+
+    /// A `self` the author rebound to a local, `NAME` (repeatable, one per `read_fields_through`):
+    /// `verify` accounts for the differences it causes instead of reporting them.
+    #[arg(long = "rebind", value_name = "NAME")]
+    pub(crate) rebind: Vec<String>,
 }
 
 /// One operation, as the request its RPC carries — the only form the single-shot path deals in.
@@ -385,6 +390,7 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
             against: verify.against,
             retargets: verify.retarget,
             repoints: verify.repoint,
+            rebinds: verify.rebind,
         }),
         RestructureCommand::Load(load) => Requested::LoadPlans(LoadPlansRequest {
             workspace_root: named(&load.root.workspace_root)?,
@@ -683,6 +689,7 @@ mod tests {
                 against: "HEAD~1".to_string(),
                 retargets: vec!["Host=Roster".to_string(), "Old=New".to_string()],
                 repoints: Vec::new(),
+                rebinds: Vec::new(),
             }
         );
     }
@@ -717,6 +724,40 @@ mod tests {
                     ".slot=.peer.slot".to_string(),
                     "self.dir_for=lookup::dir_for".to_string()
                 ]
+            )
+        );
+    }
+
+    #[test]
+    fn verify_carries_the_rebinds_it_is_told_of_beside_the_repoints_and_the_retargets() {
+        // Given a verify against a ref, told of a retarget, a call re-point and two rebinds
+        let requested = requested_by(&[
+            "restructure",
+            "verify",
+            "--workspace-root",
+            "/trees/one",
+            "--against",
+            "HEAD~1",
+            "--retarget",
+            "Host=Roster",
+            "--repoint",
+            ".slot=.peer.slot",
+            "--rebind",
+            "state",
+            "--rebind",
+            "backend",
+        ]);
+
+        // Then all three lists reach the request, each in the order given
+        let Requested::Verify(verify) = requested else {
+            panic!("expected a verify request");
+        };
+        assert_eq!(
+            (verify.retargets, verify.repoints, verify.rebinds),
+            (
+                vec!["Host=Roster".to_string()],
+                vec![".slot=.peer.slot".to_string()],
+                vec!["state".to_string(), "backend".to_string()]
             )
         );
     }

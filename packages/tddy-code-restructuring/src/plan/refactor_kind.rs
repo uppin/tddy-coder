@@ -159,6 +159,13 @@ pub enum RefactorKind {
     /// bodies. The line carries only an anchor: a `symbol` anchor names one file, an `items`
     /// anchor on a `mod` declaration names a module.
     RepointFacadeImports,
+    /// Rebinds the `self` a range of a method reads to a local the operation inserts before it:
+    /// `let <name> = <expr>;`. With a borrowed view of the host's fields as `expr` only field reads
+    /// are rewritten (`self.f` -> `state.f`); with `expr` being `self` every `self` is, method
+    /// receivers included, and `Self` becomes the impl's self type. Either way the range then names
+    /// no `self`, so `extract_method` writes a free function. Anchored on a range; `name` is the
+    /// binding, `expr` its value.
+    ReadFieldsThrough,
 }
 
 impl RefactorKind {
