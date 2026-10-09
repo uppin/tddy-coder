@@ -133,6 +133,7 @@ impl LspServerBody {
                 cwd: root_dir.is_dir().then(|| root_dir.clone()),
                 env_names: spec.env.iter().map(|(name, _)| name.clone()).collect(),
                 pid: child.id(),
+                operation: None,
             };
             (Arc::clone(observer), observer.started(&start))
         });

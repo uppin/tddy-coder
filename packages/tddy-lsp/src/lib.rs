@@ -24,4 +24,6 @@ pub use client::{
 pub use error::LspError;
 pub use registry::{DocumentSource, LspKey, LspRegistry, LspService};
 pub use server_body::LspServerBody;
-pub use spawn_observer::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
+pub use spawn_observer::{
+    OperationContext, ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver,
+};
