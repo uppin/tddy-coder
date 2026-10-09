@@ -1250,22 +1250,6 @@ impl LanguageBackend for RustBackend {
         Ok(findings)
     }
 
-    /// Where a named, adjacent run of items begins and ends, with the trivia attached to the first.
-    ///
-    /// The outline comes from the server, so the extents are the ones the assist itself will see. Two
-    /// things are refused rather than approximated: an item the file does not define, which is a
-    /// mistake in the request and not an empty range; and items that are not adjacent, because a seam
-    /// is one contiguous range and the span between two distant items would silently carry everything
-    /// in between.
-    fn anchor_for(
-        &mut self,
-        file: &str,
-        items: &[String],
-        workspace: &Workspace<'_>,
-    ) -> Result<Range> {
-        self.closing_what_it_opens(|backend| backend.anchor_opening(file, items, workspace))
-    }
-
     fn resolve(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Resolution> {
         self.closing_what_it_opens(|backend| backend.resolve_opening(op, workspace))
     }
@@ -1471,44 +1455,6 @@ impl RustBackend {
             )?,
             report,
             notes,
-        })
-    }
-
-    /// [`LanguageBackend::anchor_for`], with the documents it opens left for the caller to close.
-    fn anchor_opening(
-        &mut self,
-        file: &str,
-        items: &[String],
-        workspace: &Workspace<'_>,
-    ) -> Result<Range> {
-        if items.is_empty() {
-            return Err(failure("`--items` named nothing to cover"));
-        }
-
-        let text = workspace.read(file)?;
-        let uri = uri_of(&workspace.root.join(file));
-
-        self.start(workspace.root)?;
-        self.did_open(&uri, &text)?;
-        self.ensure_indexed(&uri)?;
-
-        (self.progress)("building anchor from module outline");
-        let outline = self.module_outline(&uri)?;
-        let places = places_of(&outline, items, file)?;
-        refuse_non_adjacent(&outline, &places)?;
-
-        let first = &outline[places[0]];
-        let last = &outline[places[places.len() - 1]];
-
-        Ok(Range {
-            start: Position {
-                line: attached_trivia_starts_at(&text, first.start_line + 1),
-                col: 1,
-            },
-            end: Position {
-                line: last.end_line + 1,
-                col: last.end_column + 1,
-            },
         })
     }
 
@@ -1796,20 +1742,6 @@ impl RustBackend {
     /// loading: it has items, or the server has been seen to finish loading.
     fn outline_is_the_servers_answer(&self, symbols: &Value) -> bool {
         !outline_is_empty(symbols) || self.indexed || self.chatter.quiescent()
-    }
-
-    /// The file's module-level items, in the order they appear.
-    fn module_outline(&mut self, uri: &str) -> Result<Vec<OutlineItem>> {
-        let symbols = self.settled_outline(uri)?;
-
-        let mut outline: Vec<OutlineItem> = symbols
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(OutlineItem::read)
-            .collect();
-        outline.sort_by_key(|item| item.start_line);
-        Ok(outline)
     }
 
     /// The members of an `impl` the seam cuts through rather than around, with the lines their
@@ -2425,68 +2357,6 @@ fn edits_the_parent(change: &Value, relative: &str, workspace: &Workspace<'_>) -
     }
     let path = relative_path(change.pointer("/textDocument/uri"), workspace.root)?;
     Ok(path == relative)
-}
-
-/// One module-level item, as the server reports its extent.
-///
-/// A named struct rather than a tuple because four numbers with the same type are exactly where an
-/// argument swaps places with its neighbour unnoticed.
-struct OutlineItem {
-    name: String,
-    start_line: u32,
-    end_line: u32,
-    end_column: u32,
-}
-
-impl OutlineItem {
-    fn read(symbol: &Value) -> Option<OutlineItem> {
-        Some(OutlineItem {
-            name: symbol.get("name")?.as_str()?.to_string(),
-            start_line: symbol.pointer("/range/start/line")?.as_u64()? as u32,
-            end_line: symbol.pointer("/range/end/line")?.as_u64()? as u32,
-            end_column: symbol.pointer("/range/end/character")?.as_u64()? as u32,
-        })
-    }
-}
-
-/// Where each named item sits in the outline, sorted, refusing a name the file does not define.
-///
-/// An unknown name is a mistake in the request rather than an empty range, so it is named back.
-fn places_of(outline: &[OutlineItem], items: &[String], file: &str) -> Result<Vec<usize>> {
-    let mut places = Vec::new();
-
-    for item in items {
-        let at = outline
-            .iter()
-            .position(|candidate| &candidate.name == item)
-            .ok_or_else(|| {
-                failure(format!(
-                    "`{item}` is not an item `{file}` defines at module level"
-                ))
-            })?;
-        places.push(at);
-    }
-
-    places.sort_unstable();
-    Ok(places)
-}
-
-/// Refuse a run of items with anything between them.
-///
-/// A seam is one contiguous range, so a span reaching from one item to a distant one would carry
-/// everything in between — silently, and with nothing in the plan to show it.
-fn refuse_non_adjacent(outline: &[OutlineItem], places: &[usize]) -> Result<()> {
-    let Some(gap) = places.windows(2).find(|pair| pair[1] != pair[0] + 1) else {
-        return Ok(());
-    };
-
-    Err(seam_refusal(format!(
-        "the named items are not adjacent: `{}` and `{}` have `{}` between them, and a seam is one \
-         contiguous range — a span reaching from one to the other would carry everything in between.",
-        outline[gap[0]].name,
-        outline[gap[1]].name,
-        outline[gap[0] + 1].name
-    )))
 }
 
 /// The first line of the comment block and attributes attached to the item on `line`.

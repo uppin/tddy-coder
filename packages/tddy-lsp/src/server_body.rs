@@ -44,8 +44,9 @@ pub struct LspServerBody {
     pub spec: LaunchSpec,
     /// Workspace root the server operates on (its cwd / `rootUri`).
     pub root_dir: PathBuf,
-    /// One-shot used to publish the initialized client back to the registry.
-    pub client_tx: oneshot::Sender<Arc<LspClient>>,
+    /// One-shot used to publish the initialized client back to the registry — or why the server
+    /// never came up, so the registry can refuse in those words rather than as a bare exit.
+    pub client_tx: oneshot::Sender<Result<Arc<LspClient>, crate::error::LspError>>,
 }
 
 /// The body a registry with a [`SpawnObserver`] spawns: the same server, reporting through the
@@ -114,6 +115,8 @@ impl LspServerBody {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
+                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
+                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
                 return TaskStatus::Failed {
                     message: format!(
                         "failed to spawn language server '{}': {}",
@@ -146,6 +149,8 @@ impl LspServerBody {
             Some(channel) => channel,
             None => {
                 let _ = child.start_kill();
+                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
+                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
                 report_end(&record, child.wait().await);
                 return TaskStatus::Failed {
                     message: "language server task is missing its output channel".to_string(),
@@ -222,6 +227,8 @@ impl LspServerBody {
         {
             Ok(client) => Arc::new(client),
             Err(err) => {
+                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
+                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
                 let _ = child.start_kill();
                 report_end(&record, child.wait().await);
                 stdin_task.abort();
@@ -232,7 +239,7 @@ impl LspServerBody {
                 };
             }
         };
-        let _ = client_tx.send(Arc::clone(&client));
+        let _ = client_tx.send(Ok(Arc::clone(&client)));
 
         // Run until cancelled or the child exits on its own.
         let cancel = ctx.cancel_token();

@@ -193,7 +193,12 @@ impl LspRegistry {
             .await;
 
         let client = match tokio::time::timeout(SPAWN_TIMEOUT, client_rx).await {
-            Ok(Ok(client)) => client,
+            Ok(Ok(Ok(client))) => client,
+            Ok(Ok(Err(never_started))) => {
+                self.task_registry.cancel_task(&handle.id).await;
+                return Err(never_started);
+            }
+            // The body went away without a word, which only a defect in it can do.
             Ok(Err(_)) => {
                 self.task_registry.cancel_task(&handle.id).await;
                 return Err(LspError::ServerExited);

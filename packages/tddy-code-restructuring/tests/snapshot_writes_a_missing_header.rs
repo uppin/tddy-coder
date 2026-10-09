@@ -87,6 +87,55 @@ fn an_extraction_naming(file: &str) -> String {
 }
 
 #[test]
+fn a_written_header_names_each_file_by_its_hash_alone() {
+    // Given a plan of one operation over `src/lib.rs`, with no header
+    let workspace = a_workspace_of_three_files();
+    let plan = a_headerless_plan(
+        workspace.path(),
+        &format!("{}\n", an_extraction_of_items("src/lib.rs", "demo::foo")),
+    );
+
+    // When the plan is snapshotted
+    runner::snapshot(workspace.path(), a_snapshot_of(&plan)).expect("a snapshot");
+
+    // Then the file's hint is its hash and nothing else
+    assert_eq!(
+        the_header_line_of(&plan)["files"]["src/lib.rs"],
+        serde_json::json!({ "sha256": the_digest_of(workspace.path(), "src/lib.rs") })
+    );
+}
+
+#[test]
+fn a_plan_whose_header_carries_modified_is_checked_and_its_rewrite_drops_it() {
+    // Given a v2 plan whose header still carries a `modified` time, and a stale hash
+    let workspace = a_workspace_of_three_files();
+    let plan = a_headerless_plan(
+        workspace.path(),
+        &format!(
+            "{}\n{}\n",
+            r#"{"v":2,"files":{"src/lib.rs":{"sha256":"sha256:old","modified":"2026-09-26T00:00:00Z"}}}"#,
+            an_extraction_of_a_range("src/lib.rs")
+        ),
+    );
+
+    // When it is checked, and then snapshotted
+    let checked = runner::check(
+        workspace.path(),
+        a_check_of(&plan),
+        None,
+        CancellationToken::new(),
+    );
+    runner::snapshot(workspace.path(), a_snapshot_of(&plan)).expect("a snapshot");
+
+    // Then the header did not stop the check, and the rewritten hint is the hash alone
+    assert!(checked.is_ok(), "{checked:?}");
+    assert_eq!(
+        the_header_line_of(&plan)["files"]["src/lib.rs"],
+        serde_json::json!({ "sha256": the_digest_of(workspace.path(), "src/lib.rs") })
+    );
+}
+
+#[test]
 fn writes_a_header_naming_every_file_the_operations_anchor() {
     // Given a plan of two item-anchored operations over two files, with no header
     let workspace = a_workspace_of_three_files();
