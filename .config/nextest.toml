@@ -115,6 +115,7 @@ package(tddy-code-restructuring) and (
     or binary(move_item_into_an_existing_module_acceptance)
     or binary(move_item_of_an_item_the_destination_imports_acceptance)
     or binary(move_item_outside_facade_acceptance)
+    or binary(move_item_paths_acceptance)
     or binary(move_module_to_crate_acceptance)
     or binary(move_paths_acceptance)
     or binary(move_to_crate_widening_acceptance)

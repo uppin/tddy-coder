@@ -30,6 +30,7 @@ pub(super) mod rebase;
 pub(super) mod scope;
 pub(super) mod sites;
 pub(super) mod text;
+pub(super) mod use_path;
 
 use std::collections::BTreeMap;
 

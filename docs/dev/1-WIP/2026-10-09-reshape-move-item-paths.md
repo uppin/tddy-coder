@@ -5,7 +5,8 @@
 **Type**: Bug Fix (engine correctness: path rebasing, the destination's imports, `retarget_impl` S6)
 **Stack**: `#reshape` 11/19, branch `feature/reshape/move-item-paths`, wave 1. PR title:
 `fix(code-restructuring): moves and retarget_impl resolve imports as rustc does (#reshape 11/19)`.
-Base in the linear stack: `feature/reshape/apply-robust` (K=10). **Real edges**: none — no node's behaviour is
+PR [#608](https://github.com/uppin/tddy-coder/pull/608) (draft).
+Base in the linear stack: `feature/reshape/apply-robust` (K=10, #607). **Real edges**: none — no node's behaviour is
 consumed, and no node consumes this one's. The base is a line position only (nodes 1–12 share
 `item_move/*` and `crate_move/source_scan*` textually, not behaviourally).
 
@@ -179,7 +180,29 @@ Published with the wave-2 contract commit (the first push of this PR carrying co
   `fn respelled(at: usize, cursor: usize, named: &str, arrives_at: &[String], to: &[String], modules: &Modules<'_>) -> Result<Option<Edit>>`.
 - `item_move::sites`: new private `fn destination_import(head: &str, name: &str, alias: &str) -> String`.
 - `retarget_impl::imports::the_use` keeps its signature.
-- Failing tests: the 21 red ones under "Acceptance tests" (22 is a green pin).
+- Failing tests: the red ones under "Acceptance tests" (22 is a green pin); see `## Validation results`
+  for the exact red/green split the contract commit measured.
+
+**As published in the contract commit (2026-10-09), where it differs from the list above:**
+
+- `preflight::resolved_from` is **kept** with its three callers until green: `use_path::resolved` is
+  `todo!()`, and routing the live clash check through it would panic every `move_item`. Green moves the
+  callers over and deletes `resolved_from` (and its test `reads_a_super_import_against_the_module_it_is_written_in`,
+  which test 13 replaces).
+- `rebase::respelled` is `fn respelled(masked: &str, prefix: Range<usize>, named: &str, arrives_at: &[String], to: &[String], modules: &Modules<'_>) -> Result<Option<Edit>>`
+  (the prefix as one range, plus the masked text). `path_edit` now returns `Option<Result<Edit>>` so its
+  early returns stay `?`/`None` and the function shrinks (60 → 50 lines); `edits` returns `Result<Vec<Edit>>`.
+- Behaviour-preserving stubs, not `todo!()`, where a live caller exists: `import_target` answers today's R4
+  only (`Imported::InCrate`), `respelled` follows only an `InCrate` answer that keeps the written name,
+  `read_use` stamps no visibility, `destination_import` returns the empty statement (today's drop). Each is
+  marked `TODO(reshape-move-item-paths)`. Surface with no reader yet carries
+  `#[allow(dead_code, reason = "TODO(reshape-move-item-paths)…")]` (`UsePath`, `resolved`,
+  `UseLeaf::visibility`, `Modules::file`, three `Imported` variants); green removes each.
+- New test helper `item_move::use_path::on_disk::{AnAppOnDisk, an_app_holding}` (`#[cfg(test)]`, an `app`
+  package in a temp dir read through an empty `Overlay`), shared by the `bindings` and
+  `retarget_impl::imports` unit tests.
+- `moved_text` stays at 60 lines: the new `file:` field is paid for by folding `let mut shifted = shifted;`
+  into its declaration.
 
 ## Green wave
 
@@ -205,7 +228,7 @@ None — no node consumes this one's behaviour.
 - [ ] **Rebasing**: `path_edit` R1–R8 via `respelled`, `edits` → `Result`, `Modules.file`
 - [ ] **Destination alias**: D1 in `rewrite_statement` via `destination_import`
 - [ ] **`retarget_impl`**: S6′
-- [ ] **Registration**: `move_item_paths_acceptance` in `.config/rust-e2e.filterset` and the `rust-analyzer` group
+- [x] **Registration**: `move_item_paths_acceptance` in `.config/rust-e2e.filterset` and the `rust-analyzer` group
 - [ ] **Package documentation** at wrap (list under Affected Packages); todos deleted/narrowed; stale marker removed
 - [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
 - [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring -- -D warnings`, `cargo fmt`; no listed function grows; every touched file ≤ 500 production lines
@@ -358,7 +381,9 @@ green pin.
     `pub(in crate::x) use`, private `use` → `None`). *Red*: no `visibility` field.
 15. `packages/tddy-code-restructuring/src/backends/rust/item_move/bindings.rs` —
     `a_pub_crate_import_reachable_from_the_destination_is_visible` (R3) and
-    `a_pub_super_import_the_destination_is_outside_of_is_followed` (R3 negative → R4). *Red*: no `Imported`,
+    `a_restricted_import_the_destination_is_outside_of_is_followed` (R3 negative → R4; published under this
+    name with a `pub(in crate::host)` import — the fixture's `host` sits at the crate root, where
+    `pub(super)` would be crate-wide). *Red*: no `Imported`,
     no `destination` parameter.
 16. same file — `an_aliased_import_answers_the_name_it_brings_in` (R5) and
     `an_extern_import_answers_the_crates_path_and_whether_the_destination_shadows_it` (R7). *Red*: alias
@@ -436,7 +461,36 @@ Decisions taken by this plan: `resolved_from` is replaced, not wrapped; `rebase:
 
 ## Validation Results
 
-(empty; populated during development)
+**Contract commit (2026-10-09), on `feature/reshape/apply-robust` @ #607's commit 2.** Scoped gates:
+`cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`
+and `cargo fmt --all --check` clean. Only the binaries and unit filters below were run (no full suite; the
+baseline is node 1's: 1334 passed, 0 failed). Adjacent live suites
+`reparent_module_through_the_old_parents_import_acceptance` and
+`move_item_of_an_item_the_destination_imports_acceptance` still pass (the stubs preserve behaviour).
+
+| # | Test | Result | Why |
+|---|---|---|---|
+| 1 | `move_item_paths_acceptance::a_move_into_a_sibling_keeps_a_path_through_the_parents_facade_of_another_crate` | 🔴 | gate: `super::kernel::util` (`E0433`) |
+| 2 | `…::a_move_out_of_a_module_that_privately_imports_another_crate_writes_the_crates_path` | 🔴 | gate: `super::host::kernel::util` (`E0433`) |
+| 3 | `…::a_reparented_module_names_another_crate_its_old_parent_imported_by_the_crates_path` | 🔴 | gate: `E0433` in `split/observer.rs` |
+| 4 | `…::a_path_through_the_old_modules_aliased_import_names_the_item_it_brings_in` | 🔴 | gate: private import `Settings` (`E0603`) |
+| 5 | `…::a_path_through_the_old_modules_glob_import_names_the_module_that_holds_the_item` | 🔴 | gate: private import `Config` (`E0603`) |
+| 6 | `…::a_path_through_a_glob_that_cannot_confirm_the_name_is_refused_by_check_deep_and_by_apply_and_nothing_is_written` | 🔴 | deep check finds nothing (R8 absent) |
+| 7 | `…::a_destination_that_imports_the_moving_item_under_an_alias_keeps_the_alias_bound` | 🔴 | gate: `check` not found (`E0425`) |
+| 8 | `retarget_impl_acceptance::retargets_a_block_in_a_file_that_imports_the_new_type_by_a_super_path` | 🔴 | S6 refusal (`E0255`) |
+| 9 | `retarget_impl_acceptance::retargets_a_block_in_a_file_that_imports_the_new_type_from_a_child_module_by_a_relative_path` | 🔴 | S6 refusal (`E0255`) |
+| 10 | `rebase::tests::{keeps_a_super_path_when_the_destination_is_inside_the_module_it_reaches, follows_an_aliased_import_and_writes_the_name_it_brings_in, writes_an_extern_import_as_the_crates_own_path, roots_an_extern_path_when_the_destination_shadows_the_crate_name, refuses_a_path_through_an_unconfirmed_glob_naming_the_file_and_the_line}` | 🔴 | R2, R5, R7, R8 absent in `respelled` |
+| 10 | `rebase::tests::{keeps_a_super_path_through_an_import_visible_at_the_destination, follows_a_confirmed_glob_import_to_the_module_that_binds_the_name, follows_an_import_of_the_module_a_super_path_names}` | 🟢 pin | at the rebase level R3 and R6 spell what R1/R4 already spell; their red is in `bindings` (15, 17) |
+| 11–13 | `use_path::tests::*` (3) | 🔴 | `resolved` is `todo!()` |
+| 14 | `module_items::tests::a_top_level_use_records_its_visibility_on_every_leaf` | 🔴 | every leaf reads `None` |
+| 15 | `bindings::tests::a_pub_crate_import_reachable_from_the_destination_is_visible` | 🔴 | answers `InCrate`, not `Visible` |
+| 15 | `bindings::tests::a_restricted_import_the_destination_is_outside_of_is_followed` | 🟢 pin | today's R4 answer is already right |
+| 16 | `bindings::tests::{an_aliased_import_answers_the_name_it_brings_in, an_extern_import_answers_the_crates_path_and_whether_the_destination_shadows_it}` | 🔴 | alias skipped; extern read as `[host, kernel]` |
+| 17 | `bindings::tests::a_glob_counts_only_when_exactly_one_glob_module_binds_the_name` | 🔴 | globs never considered |
+| 18–19 | `retarget_impl::imports::tests::{a_super_import_of_the_new_type_needs_no_second_use, a_self_or_child_relative_import_of_the_new_type_needs_no_second_use}` | 🔴 | S6 refusal |
+| 20 | `retarget_impl::imports::tests::an_import_of_another_item_or_another_crate_under_the_name_is_still_refused` | 🟢 pin | both verdicts already hold (as planned) |
+| 21 | `sites::tests::the_destination_keeps_an_aliased_import_of_the_moved_item_as_a_self_import` | 🔴 | the aliased import is emptied |
+| 22 | `retarget_impl_acceptance::still_refuses_a_super_import_of_a_different_type_of_the_same_name` | 🟢 pin | green as planned |
 
 ## TODO
 
@@ -444,10 +498,10 @@ Decisions taken by this plan: `resolved_from` is replaced, not wrapped; `rebase:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
