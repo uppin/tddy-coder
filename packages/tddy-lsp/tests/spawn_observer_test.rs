@@ -157,9 +157,9 @@ async fn a_server_that_exits_before_the_handshake_is_reported_ended_with_its_exi
     // When a server is requested
     let refusal = registry.get_or_spawn(the_key_of(&root)).await.err();
 
-    // Then the request failed because the server went away
+    // Then the request failed because the server never came up
     assert!(
-        matches!(refusal, Some(LspError::ServerExited)),
+        matches!(refusal, Some(LspError::ServerNotStarted { .. })),
         "{refusal:?}"
     );
     // And the end is reported with the exit code, although initialization never finished

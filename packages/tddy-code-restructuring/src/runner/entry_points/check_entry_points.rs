@@ -234,7 +234,7 @@ pub fn check_plan(
     } else if options.deep {
         item_anchor::resolve_item_anchors(&plan, root, &mut registry)?
     } else {
-        findings.extend(unresolvable_without_a_server(&plan));
+        findings.extend(item_anchor_findings(&plan, root)?);
         plan
     };
     let mut rehearsal = Rehearsal::default();
@@ -360,24 +360,44 @@ fn one_finding_per_refused_group(plan: &Plan, findings: Vec<Finding>) -> Vec<Fin
     merged
 }
 
-/// A finding for each operation a static check cannot examine because an anchor of it names items.
-fn unresolvable_without_a_server(plan: &Plan) -> impl Iterator<Item = Finding> + '_ {
-    plan.ops
-        .iter()
-        .enumerate()
-        .filter(|(_, op)| {
-            op.anchors()
-                .any(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }))
-        })
-        .map(|(index, op)| Finding {
-            operation: index,
-            detail: format!(
+/// The findings a static check gives the operations whose anchors name items: what can be
+/// verified without a server — that each item lies in the module its file is — and, for an
+/// operation that passes, that the rest needs `check --deep`.
+///
+/// One finding per operation: a refused prefix replaces the deep-check finding rather than joining
+/// it. A refusal other than a malformed anchor (a manifest that cannot be read) is the check's own
+/// error.
+fn item_anchor_findings(plan: &Plan, root: &Path) -> Result<Vec<Finding>> {
+    let mut findings = Vec::new();
+    for (index, op) in plan.ops.iter().enumerate() {
+        let names_items = op
+            .anchors()
+            .any(|anchor| matches!(anchor, Anchor::Item { .. } | Anchor::Items { .. }));
+        if !names_items {
+            continue;
+        }
+        let refused = op
+            .anchors()
+            .map(|anchor| item_anchor::prefix::refuse_a_foreign_prefix(root, anchor))
+            .find_map(std::result::Result::err);
+        let detail = match refused {
+            Some(RestructureError::MalformedPlan(reason)) => reason,
+            Some(other) => return Err(other),
+            // TODO(reshape-anchors-outline): implement — R3(b)'s wording, saying the module prefix
+            // was verified; this is the wording from before the prefix was checked.
+            None => format!(
                 "{:?} in `{}` anchors by item, which only a deep check can resolve, so this \
                  static check did not examine it — run `check --deep`",
                 op.op,
                 op.anchor.file()
             ),
-        })
+        };
+        findings.push(Finding {
+            operation: index,
+            detail,
+        });
+    }
+    Ok(findings)
 }
 
 #[cfg(test)]

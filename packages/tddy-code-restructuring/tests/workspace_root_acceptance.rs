@@ -167,6 +167,15 @@ async fn a_backend_reporting_to(
     RustBackend::from_lsp_client(Arc::clone(&service.client), Some(cancel), sink)
 }
 
+/// An extraction of the second line of the fixture's one function — an operation that waits for
+/// the crate graph before it asks for its assist.
+fn an_extraction_of_the_function_body() -> tddy_code_restructuring::RefactorOp {
+    serde_json::from_str(
+        r#"{"op":"extract_method","anchor":{"kind":"range","file":"src/lib.rs","start":{"line":2,"col":5},"end":{"line":2,"col":6}},"name":"extracted"}"#,
+    )
+    .expect("an extraction parses")
+}
+
 /// Drive a wait that reports progress, then stop it.
 ///
 /// `spawn_blocking` rather than a plain thread: the backend is synchronous and reaches the shared
@@ -182,7 +191,7 @@ async fn a_cancelled_wait(
             root: &root,
             overlay: &overlay,
         };
-        let _ = backend.anchor_for("src/lib.rs", &["foo".to_string()], &workspace);
+        let _ = backend.resolve(&an_extraction_of_the_function_body(), &workspace);
     });
     tokio::time::sleep(Duration::from_millis(400)).await;
     cancel.cancel();
