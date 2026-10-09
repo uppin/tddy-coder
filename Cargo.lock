@@ -12048,6 +12048,7 @@ dependencies = [
  "clap",
  "log",
  "pretty_assertions",
+ "proc-macro2",
  "rstest 0.24.0",
  "serde",
  "serde_json",
