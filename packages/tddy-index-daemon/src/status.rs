@@ -54,13 +54,19 @@ pub fn status_of(error: &RestructureError) -> Status {
         // A group that did not compile at its end was rolled back: the tree is as the operations
         // before it left it, and the same request fails identically until the plan or the code
         // changes.
-        | RestructureError::GroupDoesNotCompile { .. } => Status::failed_precondition(refusal),
+        | RestructureError::GroupDoesNotCompile { .. }
+        // A move of a file git does not track: nothing of the operation was written, and the same
+        // request fails identically until the file is added.
+        | RestructureError::UntrackedMoveSource { .. } => Status::failed_precondition(refusal),
         // The wait ended before the index was ready. Nothing here says the plan is wrong, which is
         // the distinction `docs/dev/todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md`
         // records as actively misleading when it is lost.
-        RestructureError::IndexingIncomplete { .. } | RestructureError::ServerNotSettled { .. } => {
-            Status::deadline_exceeded(refusal)
-        }
+        //
+        // A stalled server is the same kind of answer: the index did not get there, and it stopped
+        // saying anything for longer than the silence bound.
+        RestructureError::IndexingIncomplete { .. }
+        | RestructureError::ServerNotSettled { .. }
+        | RestructureError::ServerStalled { .. } => Status::deadline_exceeded(refusal),
         // The server asked to be asked again, so the same request is worth repeating.
         RestructureError::ServerCatchingUp => Status::unavailable(refusal),
         // The caller stopped waiting mid-request, which is neither a slow server nor a bad plan.
@@ -151,6 +157,42 @@ pub fn status_of_lsp(error: &LspError) -> Status {
 mod tests {
     use super::*;
     use tddy_rpc::Code;
+
+    /// `#reshape` 10/19: a move of a file git does not track wrote nothing, and the same request
+    /// fails identically until the file is added — the tree is what is wrong.
+    #[test]
+    fn an_untracked_move_source_is_a_failed_precondition() {
+        // Given an operation refused because git does not track the file it moves
+        let refusal = RestructureError::UntrackedMoveSource {
+            op: 0,
+            paths: vec!["crates/origin/tests/golden.rs".to_string()],
+        };
+
+        // When it is classified
+        let status = status_of(&refusal);
+
+        // Then the tree is named as the thing that is wrong
+        assert_eq!(status.code(), Code::FailedPrecondition);
+    }
+
+    /// `#reshape` 10/19: a stalled server is the index not getting there, like a cancelled wait.
+    #[test]
+    fn a_stalled_server_is_a_deadline_exceeded() {
+        // Given a wait refused because a loading server said nothing new past the silence bound
+        let refusal = RestructureError::ServerStalled {
+            stage: "type inference at src/lib.rs:3".to_string(),
+            server: "rust-analyzer behind a shared client".to_string(),
+            last: "working: build script num-bigint run".to_string(),
+            quiet_seconds: 600,
+            furthest: "Roots Scanned 100%".to_string(),
+        };
+
+        // When it is classified
+        let status = status_of(&refusal);
+
+        // Then it reaches every transport as a deadline
+        assert_eq!(status.code(), Code::DeadlineExceeded);
+    }
 
     #[test]
     fn reports_a_plan_carrying_code_text_as_an_invalid_argument() {

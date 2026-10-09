@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Bug fix (engine robustness: preflight, compile gate, readiness bounds, spawn record, refusal text)
-**Stack**: `#reshape` 10/19, branch `feature/reshape/apply-robust`, wave 1. PR title:
+**Stack**: `#reshape` 10/19, branch `feature/reshape/apply-robust`, PR [#607](https://github.com/uppin/tddy-coder/pull/607), wave 1. PR title:
 `fix(code-restructuring): apply never half-moves, gates destinations, bounds silent waits (#reshape 10/19)`.
 Base in the linear stack: `feature/reshape/new-crate` (K=9). **Real edges**: none. Nothing this node does consumes another node's behaviour, and no node consumes this one's.
 **Textual collisions** (not edges): node 1 (`widen-same-crate`) adds emptied-directory removal beside `git_move` in `src/apply.rs`, and nodes 1–12 share `backends/rust.rs` wiring. Resolve these at rebase; the behaviour is independent.
@@ -100,13 +100,15 @@ Owned surface:
 - `tddy_code_restructuring::Overlay::introduced(&self, path: &str) -> bool`
 - `RestructureError::UntrackedMoveSource { op: usize, paths: Vec<String> }`
 - `RestructureError::ServerStalled { stage: String, server: String, last: String, quiet_seconds: u64, furthest: String }`
-- `RestructureError::StaleOperation { plan, op, reason, written_by: Option<WrittenByRun> }` and `pub struct WrittenByRun { pub last_applied: usize, pub last_applied_id: Option<String>, pub journal: String, pub undone: bool }` (in `lib.rs`, with `Display` producing P10's text)
+- `RestructureError::StaleOperation { plan, op, reason, written_by: Option<Box<WrittenByRun>> }` (boxed: `RestructureError` is at clippy's `result_large_err` limit) and `pub struct WrittenByRun { pub last_applied: usize, pub last_applied_id: Option<String>, pub journal: String, pub undone: bool }` (in `lib.rs`, with `Display` producing P10's text)
 - `tddy_code_restructuring::backends::rust::{SilenceBounds, READY_HOVER_BOUND, LOADING_SILENCE_BOUND}` with `pub struct SilenceBounds { pub ready: Duration, pub loading: Duration }` and `impl Default`, plus `RustBackend::with_silence_bounds(self, bounds: SilenceBounds) -> Self`
 - `tddy_lsp::OperationContext { pub op: Option<usize>, pub op_id: Option<String>, pub group: Option<String> }` and `ProcessStart::operation: Option<OperationContext>`
 - `SpawnRecorder::for_operation(&self, op: usize, op_id: Option<&OpId>) -> SpawnRecorder` and `SpawnRecorder::for_group(&self, group: &str) -> SpawnRecorder`
 - `runner::resume::written_by_run(journal: &Journal, root: &Path, paths: &StatePaths) -> Result<Option<WrittenByRun>>` (`pub(super)`)
 - `runner::compile_gate::baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>>` (`pub(super)`)
 - `fake_lsp --narrates-while-loading`
+- Published beyond the list above (commit 2): `backends::rust::readiness::{Silence, silence_verdict(loading: bool, ready_silent_for: Option<Duration>, words_unchanged_for: Duration, bounds: &SilenceBounds) -> Silence}` (`pub(super)`, the pure decision tests 17–18 pin), and the `RustBackend.silence_bounds` field. `tddy-index-daemon`'s `status_of` arms were implemented with the variants, because the match is exhaustive and a stub arm would be a fallback.
+- Uncalled surface carries `#[allow(dead_code, reason = "TODO(reshape-apply-robust)…")]` (`silence_bounds`, `Silence`, `silence_verdict`, `written_by_run`, `baseline_packages`). Green removes each when it wires the caller.
 
 Failing tests: acceptance tests 1–28 below. Each is red on `master` for the reason given against its group.
 
@@ -173,8 +175,8 @@ As in Responsibility rules P1–P10.
 
 ### Testing Strategy
 
-- Library level throughout. The git fixture is `tests/harness/mod.rs`'s `a_workspace_with_a_test_binary` (+ `.tracked_by_git()`), driven by `moving_the_test_binary_recording` over `fake_lsp`: a test-binary move asks the server nothing, so the preflight, the gate and the spawn record need no rust-analyzer. New harness helpers: `a_workspace_whose_test_binary_is_untracked()` (the test binary is written after the baseline commit), `a_workspace_whose_destination_does_not_compile()`, and `checking_a_move_of_the_test_binary(fixture, deep: bool) -> Vec<Finding>`.
-- Wait tests use the `RustBackend` built over `fake_lsp` with injected `SilenceBounds` and heartbeat (as `wait_heartbeat_acceptance.rs` does): `--cold-hovers 1000000 --loads-crate-graph` for ready-silent, `--never-quiescent` for loading-silent, `--narrates-while-loading` for the guard. No test branches on being a test.
+- Library level throughout. The git fixture is `tests/harness/mod.rs`'s `a_workspace_with_a_test_binary` (+ `.tracked_by_git()`), driven by `moving_the_test_binary_recording` over `fake_lsp`: a test-binary move asks the server nothing, so the preflight, the gate and the spawn record need no rust-analyzer. New harness helpers (as written in commit 2): `a_workspace_whose_test_binary_is_untracked()` (the builder's `untracked(path)` takes the file back out of the index), `DESTINATION_LIB` (tests 9–10 break it with `rewriting`), `checking_a_move_of_the_test_binary(fixture, deep) -> Result<Vec<String>, String>`, `moving_the_test_binary_in_a_group_recording(fixture, group, spawns)`, and the shared plan writer `the_test_binary_move_plan(root, group)`.
+- Wait tests use the `RustBackend` built over `fake_lsp` with injected `SilenceBounds` and heartbeat (as `wait_heartbeat_acceptance.rs` does): `--cold-hovers 1000000 --loads-crate-graph` for ready-silent, `--goes-busy-after-hovers 1` for loading-silent at the type-inference stage (`--never-quiescent` stalls in the warm-up instead), `--narrates-while-loading` for the guard. No test branches on being a test.
 - No new live rust-analyzer suite (F3), so there are no `.config/rust-e2e.filterset` / nextest-group changes.
 - Fluent-tests style: Given/When/Then, no conditionals, one behaviour per test.
 
@@ -186,7 +188,7 @@ As in Responsibility rules P1–P10.
 
 ## Acceptance tests
 
-Names read as behaviour specifications. Items 1–28 are **red on `master`**; the reason is given per group. The guard `a_wait_has_no_deadline_however_many_beats_pass` (`tests/wait_heartbeat_acceptance.rs:343`) stays green, unchanged.
+Names read as behaviour specifications. Items 1–28 are **red on `master`** except the green pins 15, 19, 20, 22, 25, 27 (see Validation Results); the reason is given per group. The guard `a_wait_has_no_deadline_however_many_beats_pass` (`tests/wait_heartbeat_acceptance.rs:343`) stays green, unchanged.
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/tests/apply_preflight_acceptance.rs` (new; `fake_lsp`, git fixture)
 
@@ -302,8 +304,12 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 
 ## Validation Results
 
-- M1 reproduction: _pending_.
-- Scoped runs: _pending_ (`./test -p tddy-code-restructuring -p tddy-lsp -p tddy-index-daemon`); CI answers for the rest.
+- M1 reproduction: _pending_ (green).
+- **Commit 2 (draft-PR contract), 2026-10-09.** Scoped: `cargo check` / `cargo clippy --all-targets -D warnings` for `tddy-code-restructuring`, `tddy-lsp`, `tddy-index-daemon` clean; `cargo fmt --all --check` clean; `tddy-lsp` 66 passed; `wait_heartbeat_acceptance` 7 passed (the no-deadline guard unchanged).
+- **Red, each because the implementation is missing:** 1–7 (the apply fails at `git mv` as `plan is malformed`, the journal keeps an in-flight record so the re-run is `JournalExists`, the dry run and both checks report nothing, the resolving line has no id); 8, 11, 17, 18, 28 (`todo!()` in the stub); 9–10 (the baseline checks `-p origin` only, the post gate blames the plan); 12, 16 (cancelled as `IndexingIncomplete` at `type inference at src/lib.rs:N`: no ready bound on those waits); 13 (the type-inference beat says `has not said it is ready`); 14 (no `ServerStalled`: the wait runs on until the fake's next poll and the rename ends `no edits`); 21, 23 (`ProcessStart.operation` is never set); 24 (the JSONL line has no op keys); 26 (the refusal has no run context).
+- **Green pins** (specify what already holds and must keep holding): 15 (a narrating load is not refused), 19–20 (status classes, implemented with the variants), 22 and 25 (run-level processes carry no operation), 27 (no journal, unchanged text).
+- **Implementation constraint found while writing 14:** `fake_lsp`'s busy report is followed, at the next 2 s poll, by the shared client folding the earlier `quiescent: true`. So the loading verdict has to be evaluated in the wait's sleep slices (where the heartbeat beats, every 100 ms), not only once per poll.
+- Seen and not ours: `apply_compile_gate_acceptance::a_failed_apply_says_the_tidy_did_not_run_and_how_many_unused_imports_it_left` (node 3's contract) and `apply_tidy_acceptance::{removes_an_unused_mut_from_a_file_the_run_wrote, says_which_file_it_removed_an_unused_mut_from}` (node 4's contract) are red on this branch's base.
 
 ## TODO
 
@@ -312,8 +318,8 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-apply-robust.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests (commit 2: owned surface + tests 1–28)
+- [x] Run acceptance tests (verify they fail) — see Validation Results: 22 red, 6 green pins
 - [ ] USER REVIEW — acceptance tests
 - [ ] M1 — reproduce the B2 hang and record its shape
 - [ ] TDD Red — write failing unit/integration tests

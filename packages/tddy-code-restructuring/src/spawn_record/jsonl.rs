@@ -182,3 +182,66 @@ fn now_unix_ms() -> u64 {
         .map(|elapsed| elapsed.as_millis() as u64)
         .unwrap_or(0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tddy_lsp::OperationContext;
+
+    /// A `git mv` start, labelled with `operation` when it was started for one.
+    fn a_git_move_started_for(operation: Option<OperationContext>) -> ProcessStart {
+        ProcessStart {
+            purpose: purpose::GIT,
+            program: "git".to_string(),
+            args: vec!["mv".to_string(), "a.rs".to_string(), "b.rs".to_string()],
+            cwd: None,
+            env_names: Vec::new(),
+            pid: Some(4242),
+            operation,
+        }
+    }
+
+    fn the_start_line_of(process: &ProcessStart) -> Value {
+        let (_, line) = RecordBook::new().started(process);
+        serde_json::from_str(&line).expect("a start line is JSON")
+    }
+
+    /// `#reshape` 10/19: a start line joins the journal record of the operation that started it.
+    #[test]
+    fn a_start_line_carries_op_op_id_and_group_when_the_process_was_started_for_one() {
+        // Given a process started for operation 3, `a1`, of group `g`
+        let process = a_git_move_started_for(Some(OperationContext {
+            op: Some(3),
+            op_id: Some("a1".to_string()),
+            group: Some("g".to_string()),
+        }));
+
+        // When its start line is written
+        let line = the_start_line_of(&process);
+
+        // Then the line names all three
+        assert_eq!(
+            (&line["op"], &line["op_id"], &line["group"]),
+            (&json!(3), &json!("a1"), &json!("g"))
+        );
+    }
+
+    /// A run-level process's line keeps the shape it always had: no operation keys at all.
+    #[test]
+    fn a_start_line_for_a_run_level_process_has_no_op_keys() {
+        // Given a process started for no operation
+        let process = a_git_move_started_for(None);
+
+        // When its start line is written
+        let line = the_start_line_of(&process);
+
+        // Then none of the operation keys is present
+        let keys: Vec<&String> = line
+            .as_object()
+            .expect("an object")
+            .keys()
+            .filter(|key| ["op", "op_id", "group"].contains(&key.as_str()))
+            .collect();
+        assert!(keys.is_empty(), "{line}");
+    }
+}

@@ -16,7 +16,7 @@ use harness::{
     a_workspace_whose_test_binary_reads_a_file_beside_it,
     a_workspace_whose_test_binary_reads_a_file_beside_it_and_carries_an_unused_import,
     a_workspace_whose_test_binary_stands_alone, applying_a_move_of_the_test_binary,
-    moving_the_test_binary, ORIGIN_LIB,
+    moving_the_test_binary, DESTINATION_LIB, ORIGIN_LIB,
 };
 use tddy_code_restructuring::runner::RunSummary;
 
@@ -171,5 +171,48 @@ async fn a_successful_apply_says_nothing_about_a_skipped_tidy() {
             }),
             false
         )
+    );
+}
+
+/// `#reshape` 10/19: a move writes into its destination, so a destination that was already broken
+/// is refused up front — not reported afterwards as damage the plan did.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_to_apply_a_move_whose_destination_did_not_compile_before_the_plan() {
+    // Given a test-binary move whose destination crate does not compile
+    let workspace = a_workspace_whose_test_binary_stands_alone();
+    workspace.rewriting(DESTINATION_LIB, "pub fn level() -> u32 {\n    \"two\"\n}\n");
+
+    // When it is applied
+    let refusal = applying_a_move_of_the_test_binary(&workspace)
+        .await
+        .expect_err("an apply into a destination that does not compile is refused");
+
+    // Then the baseline refusal checked the destination beside the origin
+    assert!(
+        refusal.starts_with(
+            "the tree does not compile before the plan runs: `cargo check --all-targets -p \
+             destination -p origin` fails"
+        ),
+        "the baseline did not check the destination:\n{refusal}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn writes_nothing_when_the_destination_did_not_compile_before_the_plan() {
+    // Given a test-binary move whose destination crate does not compile
+    let workspace = a_workspace_whose_test_binary_stands_alone();
+    workspace.rewriting(DESTINATION_LIB, "pub fn level() -> u32 {\n    \"two\"\n}\n");
+
+    // When it is applied
+    let _refusal = applying_a_move_of_the_test_binary(&workspace).await;
+
+    // Then the test binary has not moved and the run wrote no state
+    assert!(
+        workspace.holds("crates/origin/tests/golden.rs"),
+        "the plan was applied into a destination that did not compile"
+    );
+    assert!(
+        !workspace.holds(".restructure"),
+        "the refusal says nothing was written, but the run's state directory was"
     );
 }

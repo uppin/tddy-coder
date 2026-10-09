@@ -445,6 +445,8 @@ pub fn refuse_a_stale_pending_op(
                 plan: key.to_string(),
                 op: id.to_string(),
                 reason: found.reason.to_string(),
+                // TODO(reshape-apply-robust): implement — fill from `resume::written_by_run`.
+                written_by: None,
             });
         }
     }
@@ -577,6 +579,86 @@ mod tests {
         options: &Options,
     ) -> std::result::Result<(), String> {
         refuse_a_stale_pending_op(store, key, options).map_err(|error| error.to_string())
+    }
+
+    /// Journal, for `second.jsonl`, a run that completed `c1` over `src/a.rs` — whose content
+    /// before the run was `before` — and then wrote the plan back.
+    fn a_run_of_second_that_applied_c1(store: &PlanStore, second: &PlanKey, before: &str) {
+        let directory =
+            crate::runner::state_directory_for_plan(store.root(), &store.path_of(second)).unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
+        let scratch = directory.join("before.tmp");
+        std::fs::write(&scratch, before).unwrap();
+        let pre = std::collections::BTreeMap::from([(
+            "src/a.rs".to_string(),
+            crate::apply::hash_file(&scratch).unwrap(),
+        )]);
+        std::fs::remove_file(&scratch).unwrap();
+        let c1 = Some(OpId("c1".to_string()));
+        let mut journal = Journal::default();
+        for record in [
+            JournalRecord::in_flight(0, c1.clone(), pre.clone()),
+            JournalRecord::completed(
+                0,
+                c1.clone(),
+                lines_replaced(10, 11, "    moved();\n"),
+                pre,
+                std::collections::BTreeMap::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            JournalRecord::plan_synced(0, c1, "digest".to_string()),
+        ] {
+            journal
+                .append(&directory.join("journal.jsonl"), record)
+                .unwrap();
+        }
+    }
+
+    /// `#reshape` 10/19: the commonest stale plan is one its own failed run rewrote and the author
+    /// then rolled back — the refusal says so, instead of sending them after an edit they never
+    /// made.
+    #[test]
+    fn a_stale_plan_a_run_wrote_back_and_whose_edits_were_undone_says_so_and_to_regenerate_it() {
+        // Given c2 stale, and a journal whose run applied c1 to `src/a.rs` — now back as it was
+        let (_root, store, second) = second_with_stale(1);
+        a_run_of_second_that_applied_c1(&store, &second, "fn untouched() {}\n");
+
+        // When the run is checked for stale operations
+        let refusal = refused(&store, &second, &Options::default()).unwrap_err();
+
+        // Then it says a run of the plan wrote it, that the run was undone, and to regenerate
+        assert!(
+            refusal.contains(
+                "this plan file was last written by a run of it, which applied operation 0 (c1)"
+            ),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("its edits have since been undone"),
+            "{refusal}"
+        );
+        assert!(refusal.contains("Regenerate the plan"), "{refusal}");
+    }
+
+    /// Without a journal there is nothing to say about a run, and the refusal is as it always was.
+    #[test]
+    fn a_stale_plan_with_no_journal_keeps_todays_refusal() {
+        // Given c2 stale, and no run of the plan on record
+        let (_root, store, second) = second_with_stale(1);
+
+        // When the run is checked for stale operations
+        let refusal = refused(&store, &second, &Options::default());
+
+        // Then the refusal names the operation and why, and nothing about a run
+        assert_eq!(
+            refusal,
+            Err(
+                "operation `c2` of second.jsonl is stale (edited by first.jsonl#a1) — re-anchor \
+                 it before applying"
+                    .to_string()
+            )
+        );
     }
 
     #[test]

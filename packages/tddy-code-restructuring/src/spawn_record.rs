@@ -65,6 +65,22 @@ impl SpawnRecorder {
         }
     }
 
+    /// A recorder that labels every process it starts as started for plan operation `op`, so its
+    /// spawn record line names the operation the journal records it under.
+    ///
+    /// What `commit_operation` starts its `git` processes through.
+    pub fn for_operation(&self, op: usize, op_id: Option<&crate::OpId>) -> SpawnRecorder {
+        let _ = (op, op_id);
+        todo!("TODO(reshape-apply-robust): implement — carry an OperationContext with op and op_id")
+    }
+
+    /// A recorder that labels every process it starts as started for the transactional group
+    /// `group` — what a group's end-of-group compile gate runs through.
+    pub fn for_group(&self, group: &str) -> SpawnRecorder {
+        let _ = group;
+        todo!("TODO(reshape-apply-robust): implement — carry an OperationContext with the group")
+    }
+
     /// Whether anyone is told about the processes this recorder starts.
     pub fn is_listened_to(&self) -> bool {
         self.observer.is_some()
@@ -150,6 +166,7 @@ fn process_start(purpose: &'static str, command: &Command, pid: Option<u32>) -> 
             .map(|(name, _)| name.to_string_lossy().into_owned())
             .collect(),
         pid,
+        operation: None,
     }
 }
 

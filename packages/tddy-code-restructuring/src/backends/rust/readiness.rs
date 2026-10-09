@@ -23,7 +23,68 @@ const UNLINKED_FILE: &str = "unlinked-file";
 /// A ready index answers a hover in well under a second. Past this the position is one the server
 /// will never type, and waiting longer is how a range opening with `&` held a warm daemon for
 /// minutes with the server idle.
-pub(super) const READY_HOVER_BOUND: Duration = Duration::from_secs(30);
+pub const READY_HOVER_BOUND: Duration = Duration::from_secs(30);
+
+/// How long a server that says it is loading may say nothing new before a wait calls it stalled.
+///
+/// A silence bound, not a deadline: every new word from the server restarts it, so a load that
+/// keeps narrating — twenty minutes of indexing on this workspace — is never ended by it. Ten
+/// minutes is past any single build script this workspace runs, and is where the `#carve` 17
+/// stage B2 apply had already been killed by hand. Reverses `#sharpen` 4/8's "no deadline" for
+/// silence only, with the developer's consent (`#reshape` 10/19).
+pub const LOADING_SILENCE_BOUND: Duration = Duration::from_secs(600);
+
+/// The two silences a wait for type inference tolerates before it refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SilenceBounds {
+    /// A ready index leaving the hover `null` at a position nothing excuses.
+    pub ready: Duration,
+    /// A loading server whose last words have not changed.
+    pub loading: Duration,
+}
+
+impl Default for SilenceBounds {
+    fn default() -> Self {
+        SilenceBounds {
+            ready: READY_HOVER_BOUND,
+            loading: LOADING_SILENCE_BOUND,
+        }
+    }
+}
+
+/// What one look at a silent wait decides.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-apply-robust): implement — constructed by silence_verdict at green"
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Silence {
+    /// Keep waiting: nothing has been silent past its bound.
+    Waiting,
+    /// The index is ready and has left the hover `null` past [`SilenceBounds::ready`].
+    ReadyUntypable,
+    /// The server says it is loading and its words have not changed past
+    /// [`SilenceBounds::loading`].
+    Stalled,
+}
+
+/// What a wait that has seen no answer decides, from the server's state and its two silences.
+///
+/// `ready_silent_for` is how long a ready index has left the hover `null` (`None` while it is
+/// loading); `words_unchanged_for` is how long the server's last words have stood.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-apply-robust): implement — called by await_answer at green"
+)]
+pub(super) fn silence_verdict(
+    loading: bool,
+    ready_silent_for: Option<Duration>,
+    words_unchanged_for: Duration,
+    bounds: &SilenceBounds,
+) -> Silence {
+    let _ = (loading, ready_silent_for, words_unchanged_for, bounds);
+    todo!("TODO(reshape-apply-robust): implement")
+}
 
 /// Whether a hover silent for `silent_for` has outlasted `bound`; no bound never does.
 fn silent_past(silent_for: Duration, bound: Option<Duration>) -> bool {
@@ -303,6 +364,39 @@ fn inactive_code_refusal(uri: &str, position: &Value, said: &str) -> Result<Rest
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bounds a test reads easily: a ready bound of 30 s and a loading bound of 10 min.
+    fn the_default_bounds() -> SilenceBounds {
+        SilenceBounds::default()
+    }
+
+    /// `#reshape` 10/19: a server that says it is loading and has said nothing new for longer than
+    /// the loading bound is stalled, not slow.
+    #[test]
+    fn a_loading_server_whose_words_are_unchanged_past_the_loading_bound_is_stalled() {
+        // Given a loading server silent for one second past the loading bound
+        let silent_for = LOADING_SILENCE_BOUND + Duration::from_secs(1);
+
+        // When the wait looks at it
+        let verdict = silence_verdict(true, None, silent_for, &the_default_bounds());
+
+        // Then it is stalled
+        assert_eq!(verdict, Silence::Stalled);
+    }
+
+    /// The bound measures silence, not time: a loading server that said something new a moment ago
+    /// is waited on however long the wait has lasted.
+    #[test]
+    fn a_loading_server_with_new_words_inside_the_bound_is_waited_on() {
+        // Given a loading server whose last words are one second old
+        let silent_for = Duration::from_secs(1);
+
+        // When the wait looks at it
+        let verdict = silence_verdict(true, None, silent_for, &the_default_bounds());
+
+        // Then the wait goes on
+        assert_eq!(verdict, Silence::Waiting);
+    }
 
     /// rust-analyzer's own answer for `#[cfg(not(rust_analyzer))] fn …` spanning lines 9–12.
     fn a_report_of_inactive_code_on_lines_9_to_12() -> Value {
