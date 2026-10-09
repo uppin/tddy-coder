@@ -59,6 +59,8 @@ fn answered_without_an_index(command: &RestructureCommand) -> bool {
         RestructureCommand::Snapshot(snapshot) => {
             !tddy_code_restructuring::item_anchor::plan_file_has_item_anchors(&snapshot.plan)
         }
+        // A count of lines in files on disk: no index holds anything it needs.
+        RestructureCommand::Lines(_) => true,
         RestructureCommand::Apply(_)
         | RestructureCommand::Status(_)
         | RestructureCommand::Check(_)
@@ -112,6 +114,14 @@ async fn restructure_at(socket: &Path, args: RestructureArgs) -> Result<()> {
         RestructureCommand::Unload(unload) => self::unload(&mut client, root, unload).await,
         RestructureCommand::Plans => self::plans(&mut client, root).await,
         RestructureCommand::Warm => self::warm(&mut client, root).await,
+        // Routed before the dial by `answered_without_an_index`; answered in process should a
+        // caller reach here directly, since a daemon holds nothing a line count needs.
+        RestructureCommand::Lines(lines) => {
+            tddy_code_restructuring::restructure_cli::run(RestructureArgs {
+                command: RestructureCommand::Lines(lines),
+            })
+            .await
+        }
     }
 }
 
@@ -453,6 +463,20 @@ mod tests {
         // When it is asked whether this process answers it without an index
         // Then it does not: re-resolving an item needs the language server the daemon holds warm
         assert!(!answered_without_an_index(&command));
+    }
+
+    #[test]
+    fn a_line_count_is_answered_in_process_whatever_the_environment_names() {
+        use tddy_code_restructuring::restructure_cli::RestructureLinesArgs;
+
+        // Given a `lines` over two files
+        let command = RestructureCommand::Lines(RestructureLinesArgs {
+            files: vec![PathBuf::from("src/a.rs"), PathBuf::from("src/b.rs")],
+        });
+
+        // When it is asked whether this process answers it without an index
+        // Then it does: a count of lines in files on disk needs no index
+        assert!(answered_without_an_index(&command));
     }
 
     #[test]

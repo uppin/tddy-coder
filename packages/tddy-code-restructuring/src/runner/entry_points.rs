@@ -80,6 +80,7 @@ pub fn dispatch(
         }),
         // What a warm leaves behind is a loaded graph in a process that outlives the request.
         Command::Warm => Err(RestructureError::WarmNeedsIndexDaemon),
+        Command::Lines => lines_entry_point::lines(root, &options).map(Outcome::Measured),
     }
 }
 
@@ -199,6 +200,8 @@ pub use check_entry_points::{
 
 mod anchor_entry_points;
 pub use anchor_entry_points::{item_anchors, open_run_resolving_anchors};
+
+mod lines_entry_point;
 
 fn read_plan(path: &Path) -> Result<Plan> {
     Plan::parse(&std::fs::read_to_string(path)?)
