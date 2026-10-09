@@ -294,6 +294,7 @@ mod tests {
             in_test: false,
             in_body: true,
             site: Position { line, col },
+            restriction: false,
         }
     }
 
