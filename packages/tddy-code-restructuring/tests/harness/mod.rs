@@ -137,6 +137,52 @@ pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
         .tracked_by_git()
 }
 
+/// The child [`a_workspace_whose_module_has_a_directory_child`]'s `host_registry` declares, in the
+/// directory beside its file.
+pub const A_DIRECTORY_CHILD: &str = "crates/origin/src/host_registry/clock_face.rs";
+
+/// [`a_workspace_a_module_can_move_across`], whose `host_registry` declares `pub mod clock_face;`
+/// with its file in `host_registry/` — the `foo.rs` + `foo/` shape a crate move used to strand
+/// (`#reshape` 5/19).
+pub fn a_workspace_whose_module_has_a_directory_child() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing("Cargo.toml", THREE_CRATES)
+        .writing("crates/shared/Cargo.toml", SHARED_MANIFEST)
+        .writing("crates/shared/src/lib.rs", SHARED_LIB)
+        .writing(
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nshared = { path = \"../shared\" }\n",
+        )
+        .writing(
+            "crates/origin/src/lib.rs",
+            "//! The crate the module leaves.\n\npub mod host_registry;\npub mod runtime;\n",
+        )
+        .writing(
+            "crates/origin/src/host_registry.rs",
+            "pub mod clock_face;\n\nuse shared::Clock;\n\npub struct HostRegistry {\n    \
+             clock: Clock,\n}\n\nimpl HostRegistry {\n    pub fn new() -> Self {\n        \
+             Self { clock: Clock }\n    }\n\n    pub fn face(&self) -> clock_face::Face {\n        \
+             clock_face::Face::of(&self.clock)\n    }\n}\n",
+        )
+        .writing(
+            A_DIRECTORY_CHILD,
+            "use shared::Clock;\n\npub struct Face;\n\nimpl Face {\n    \
+             pub fn of(_clock: &Clock) -> Self {\n        Face\n    }\n}\n",
+        )
+        .writing(
+            "crates/origin/src/runtime.rs",
+            "use crate::host_registry::HostRegistry;\n\npub fn boot() -> HostRegistry {\n    \
+             HostRegistry::new()\n}\n",
+        )
+        .writing("crates/destination/Cargo.toml", DESTINATION_MANIFEST)
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! The crate the module moves into.\n\n",
+        )
+        .tracked_by_git()
+}
+
 /// The file [`a_workspace_whose_module_file_no_module_declares`] writes and no `mod` declares.
 pub const AN_UNDECLARED_MODULE_FILE: &str = "crates/origin/src/clock_face.rs";
 
