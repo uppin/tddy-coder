@@ -1251,8 +1251,8 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_header_carries_its_file_hints() {
-        // Given a v2 plan with one hinted file and one item-anchored op
+    fn a_v2_header_that_still_carries_modified_parses_and_keeps_only_the_hash() {
+        // Given a v2 plan whose hint still carries the `modified` time older plans were written with
         let jsonl = concat!(
             r#"{"v":2,"files":{"src/lib.rs":{"sha256":"sha256:ab","modified":"2026-09-26T00:00:00Z"}}}"#,
             "\n",
@@ -1263,18 +1263,18 @@ mod tests {
         // When it is parsed
         let plan = Plan::parse(jsonl).unwrap();
 
-        // Then the hint is kept and nothing is read as a refusing snapshot
+        // Then it is a hinted plan, nothing is read as a refusing snapshot, and the hint is the hash
         assert_eq!(plan.version, 2);
         assert_eq!(plan.snapshot, BTreeMap::new());
         assert_eq!(
-            plan.files,
-            BTreeMap::from([(
+            plan.files
+                .iter()
+                .map(|(file, hint)| (file.clone(), serde_json::to_value(hint).unwrap()))
+                .collect::<Vec<_>>(),
+            vec![(
                 "src/lib.rs".to_string(),
-                FileHint {
-                    sha256: "sha256:ab".to_string(),
-                    modified: Some("2026-09-26T00:00:00Z".to_string()),
-                }
-            )])
+                serde_json::json!({ "sha256": "sha256:ab" })
+            )]
         );
     }
 

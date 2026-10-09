@@ -3,10 +3,10 @@
 **Category:** broken
 **Command:** `tddy-tools restructure anchors <file> --items …`
 **Measured:** `#carve` 5/11, against master tip `d5a157cc`
-**Claimed by:** none. [#537](https://github.com/uppin/tddy-coder/pull/537) (`#live-plan 1/7`) merged on 2026-10-02 with part of the fix; nothing is in flight for the rest
-**Status:** Open — partially fixed in #537 (2026-10-02); the remainder is unowned
-**Lands after:** nothing — the stack's root
-**Remainder owned by:** unowned — needs a repo-scale cold and warm run of the command above; #537 does not finish it
+**Claimed by:** #609 — `#reshape 12/19` (earlier: [#537](https://github.com/uppin/tddy-coder/pull/537), `#live-plan 1/7`, merged 2026-10-02 with part of the fix)
+**Status:** Open — partially fixed in #537 (2026-10-02); the remainder is claimed by #609
+**Lands after:** #608
+**Remainder owned by:** #609 (`#reshape 12/19`) — a repo-scale cold and warm run of the command above, and the cold path naming why its server never started
 
 ## What happens
 

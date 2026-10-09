@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use super::{attached_trivia_starts_at, failure, server_defect, uri_of, LspPoint, RustBackend};
 use crate::edit::{Position, Range};
+use crate::item_anchor::prefix::segments_below;
 use crate::item_anchor::{module_path_of, ItemAtResolver, ItemResolver, ResolvedItem};
 use crate::plan::{Fingerprint, ItemPath, ItemSegment};
 use crate::{RestructureError, Result};
@@ -341,32 +342,6 @@ impl ItemAtResolver for RustBackend {
     fn item_enclosing(&mut self, file: &str, range: Range) -> Result<(ItemPath, ResolvedItem)> {
         self.closing_what_it_opens(|backend| backend.item_enclosing_opening(file, range))
     }
-}
-
-/// The segments of `item` that lie below the module `file` is, refusing a path that is not in it.
-fn segments_below(item: &ItemPath, module: &[String], file: &str) -> Result<Vec<ItemSegment>> {
-    let segments = item.segments();
-    let modules = &module[1..];
-    let in_this_module = item.crate_name() == module[0]
-        && segments.len() >= modules.len()
-        && segments
-            .iter()
-            .zip(modules)
-            .all(|(segment, name)| segment == &ItemSegment::Named(name.clone()));
-    if !in_this_module {
-        return Err(failure(format!(
-            "`{item}` is not in {file}, which is module `{}`",
-            module.join("::")
-        )));
-    }
-
-    let below = segments[modules.len()..].to_vec();
-    if below.is_empty() {
-        return Err(failure(format!(
-            "`{item}` names the module {file} is, not an item in it"
-        )));
-    }
-    Ok(below)
 }
 
 /// How a node of the outline is written in an item path: a type's `impl` is its type, a trait's

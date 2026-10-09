@@ -88,25 +88,6 @@ pub trait LanguageBackend {
     fn item_locator(&mut self) -> Option<&mut dyn ItemAtResolver> {
         None
     }
-
-    /// The range anchor covering a named, adjacent run of items, trivia included.
-    ///
-    /// Hand-computing a seam's extent is the busywork whose failures look like tool bugs: "start
-    /// marker, then the next item's marker minus two" breaks when adjacent seams destroy each other's
-    /// markers, and again when one doc comment is a prefix of another. The engine already knows where
-    /// items begin and end, so it is asked.
-    fn anchor_for(
-        &mut self,
-        file: &str,
-        items: &[String],
-        workspace: &Workspace<'_>,
-    ) -> Result<crate::edit::Range> {
-        let _ = (file, items, workspace);
-        Err(crate::RestructureError::UnsupportedOp {
-            backend: format!("{:?}", self.language()),
-            op: "anchors".to_string(),
-        })
-    }
 }
 
 #[derive(Default)]

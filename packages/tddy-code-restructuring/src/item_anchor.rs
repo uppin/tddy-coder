@@ -10,6 +10,7 @@
 //! relative range becomes an absolute one, and when a resolved item is refused.
 
 mod package_lookup;
+pub(crate) mod prefix;
 
 use std::path::Path;
 

@@ -6,6 +6,8 @@
 **Metrics:** 1 field · 1 write site (`hint_of`, `plan/codec/file_hint.rs:8,13`) · 0 read sites outside tests
 **Restructure:** no — delete the field and its serialisation, or give it a reader
 **Status:** Open
+**Claimed by:** #609 — `#reshape 12/19`
+**Lands after:** #608
 
 ## Measurement history
 
