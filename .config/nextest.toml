@@ -109,6 +109,7 @@ package(tddy-code-restructuring) and (
     or binary(live_plans_acceptance)
     or binary(move_facades_acceptance)
     or binary(move_fidelity_acceptance)
+    or binary(move_impl_members_acceptance)
     or binary(move_item_acceptance)
     or binary(move_item_beyond_the_basics_acceptance)
     or binary(move_item_creates_module_acceptance)
