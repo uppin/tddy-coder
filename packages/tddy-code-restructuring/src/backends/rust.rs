@@ -54,6 +54,7 @@ mod signature_rewrites;
 mod wait;
 
 pub use chatter::ServerChatter;
+pub use readiness::{SilenceBounds, LOADING_SILENCE_BOUND, READY_HOVER_BOUND};
 pub use wait::WAIT_HEARTBEAT;
 
 pub(crate) use wait::human_delta;
@@ -495,6 +496,12 @@ pub struct RustBackend {
     spawns: SpawnRecorder,
     /// How often a wait that lasts says what it is waiting for. Not a budget: nothing ends at it.
     wait_heartbeat: Duration,
+    /// How long a wait for type inference tolerates a server that has gone silent.
+    #[allow(
+        dead_code,
+        reason = "TODO(reshape-apply-robust): implement — read by readiness::await_answer at green"
+    )]
+    silence_bounds: SilenceBounds,
 }
 
 /// The default progress sink: a library that was not asked to report says nothing.
@@ -549,6 +556,7 @@ impl RustBackend {
             root: None,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
+            silence_bounds: SilenceBounds::default(),
         }
     }
 
@@ -604,6 +612,16 @@ impl RustBackend {
         self
     }
 
+    /// End a silent wait at `bounds` instead of [`SilenceBounds::default`].
+    ///
+    /// A collaborator a host or a test injects, as the heartbeat is. The bounds measure
+    /// **silence**, never total time: a server that keeps reporting progress is waited on until it
+    /// is ready or the caller stops the run.
+    pub fn with_silence_bounds(mut self, bounds: SilenceBounds) -> Self {
+        self.silence_bounds = bounds;
+        self
+    }
+
     /// Attach to an already-initialized rust-analyzer session from `tddy-lsp`.
     ///
     /// No child process is spawned; [`LspClientBridge`] forwards requests through the shared
@@ -643,6 +661,7 @@ impl RustBackend {
             root: None,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
+            silence_bounds: SilenceBounds::default(),
         }
     }
 

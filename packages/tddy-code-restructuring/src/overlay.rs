@@ -30,6 +30,18 @@ impl Overlay {
         self.files.is_empty()
     }
 
+    /// Whether an edit this overlay folded in created `path` or moved a file to it.
+    ///
+    /// What a dry run and a rehearsal ask before refusing a move whose source git does not track:
+    /// nothing reached disk, so a file an earlier operation created or moved is in no index, and
+    /// is still the run's own.
+    pub fn introduced(&self, path: &str) -> bool {
+        let _ = path;
+        todo!(
+            "TODO(reshape-apply-robust): implement — remember Create and Rename targets in record"
+        )
+    }
+
     /// The contents of `relative` as this run last resolved it, or as it stands on disk.
     pub fn read(&self, root: &Path, relative: &Path) -> Result<String> {
         match self.files.get(relative) {

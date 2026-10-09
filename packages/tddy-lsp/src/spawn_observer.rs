@@ -34,6 +34,24 @@ pub struct ProcessStart {
     pub env_names: Vec<String>,
     /// The process id, absent when the process could not be started.
     pub pid: Option<u32>,
+    /// The unit of work above this crate that started the process — a restructure plan's
+    /// operation or group — when it was started for one. `None` for run-level processes, and
+    /// always for the language server this crate starts.
+    pub operation: Option<OperationContext>,
+}
+
+/// Which unit of a caller's work a process was started for, so a record of it can be joined to
+/// that caller's own record (a restructure journal names operations by index and id).
+///
+/// Opaque to this crate: it carries the labels and never reads them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OperationContext {
+    /// The operation's index in its plan.
+    pub op: Option<usize>,
+    /// The operation's stable id, when the plan has one.
+    pub op_id: Option<String>,
+    /// The transactional group the process ran for (a group's compile gate).
+    pub group: Option<String>,
 }
 
 /// What an observer hands back from [`SpawnObserver::started`], to pair the end with the start.
