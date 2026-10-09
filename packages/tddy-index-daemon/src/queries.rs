@@ -288,6 +288,7 @@ async fn comparison_against(
         against: Some(request.against),
         retargets: request.retargets,
         repoints: request.repoints,
+        rebinds: request.rebinds,
         ..Options::default()
     };
 

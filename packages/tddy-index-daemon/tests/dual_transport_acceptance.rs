@@ -451,6 +451,7 @@ async fn the_daemon_verifying(
             against: "HEAD".to_string(),
             retargets: retargets.iter().map(|text| (*text).to_string()).collect(),
             repoints: Vec::new(),
+            rebinds: Vec::new(),
         })
         .await
         .expect("the daemon answers")
@@ -515,6 +516,7 @@ async fn the_daemon_verifying_repoints(
             against: "HEAD".to_string(),
             retargets: Vec::new(),
             repoints: repoints.iter().map(|text| (*text).to_string()).collect(),
+            rebinds: Vec::new(),
         })
         .await
         .expect("the daemon answers")
@@ -558,6 +560,73 @@ async fn verify_carries_a_declared_repoint_through_the_cli_and_the_daemon_and_bo
         (cli_declared_holds, daemon_declared.holds),
         (true, true),
         "a declared repoint was not accounted for: {cli_declared:?}"
+    );
+    assert_eq!(cli_declared, the_lines_of(&daemon_declared));
+    assert_eq!(
+        (cli_undeclared_holds, daemon_undeclared.holds),
+        (false, false)
+    );
+    assert_eq!(cli_undeclared, the_lines_of(&daemon_undeclared));
+}
+
+/// A verify of `workspace` against `HEAD`, put to the served daemon at `port` with `rebinds`.
+async fn the_daemon_verifying_rebinds(
+    port: u16,
+    workspace: &Path,
+    rebinds: &[&str],
+) -> tddy_index_daemon::proto::code_index::VerifyResponse {
+    a_grpc_client_on(port)
+        .await
+        .verify(tddy_index_daemon::proto::code_index::VerifyRequest {
+            workspace_root: workspace.to_string_lossy().to_string(),
+            against: "HEAD".to_string(),
+            retargets: Vec::new(),
+            repoints: Vec::new(),
+            rebinds: rebinds.iter().map(|text| (*text).to_string()).collect(),
+        })
+        .await
+        .expect("the daemon answers")
+        .into_inner()
+}
+
+#[tokio::test]
+async fn verify_carries_a_declared_rebind_through_the_cli_and_the_daemon_and_both_render_the_same_lines(
+) {
+    // Given a committed tree whose method now reads its field through `state`, and the binary serving gRPC
+    let workspace = a_committed_workspace_holding(
+        "impl Host {\n    fn total(&self) -> u32 {\n        let a = self.n + 1;\n        a\n    }\n}\n",
+    );
+    std::fs::write(
+        workspace.path().join("src/lib.rs"),
+        "impl Host {\n    fn total(&self) -> u32 {\n        let state = self.state();\n        let a = state.n + 1;\n        a\n    }\n}\n",
+    )
+    .expect("rebind the read");
+    let port = a_free_port();
+    let mut serving = Command::new(the_index_daemon())
+        .args(["--grpc", &format!("127.0.0.1:{port}")])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the binary starts");
+    assert!(
+        a_tcp_connection_is_accepted_on(port, A_RUN_SHOULD_FINISH_WITHIN),
+        "the gRPC listener never accepted a client"
+    );
+
+    // When it is verified through each, once told of the rebind and once not
+    let (cli_declared, cli_declared_holds) =
+        the_cli_verifying(workspace.path(), &["--rebind", "state"]);
+    let (cli_undeclared, cli_undeclared_holds) = the_cli_verifying(workspace.path(), &[]);
+    let daemon_declared = the_daemon_verifying_rebinds(port, workspace.path(), &["state"]).await;
+    let daemon_undeclared = the_daemon_verifying_rebinds(port, workspace.path(), &[]).await;
+    let _ = serving.kill();
+    let _ = serving.wait();
+
+    // Then both hold, and print the same lines, when told; and both report the rebind when not
+    assert_eq!(
+        (cli_declared_holds, daemon_declared.holds),
+        (true, true),
+        "a declared rebind was not accounted for: {cli_declared:?}"
     );
     assert_eq!(cli_declared, the_lines_of(&daemon_declared));
     assert_eq!(

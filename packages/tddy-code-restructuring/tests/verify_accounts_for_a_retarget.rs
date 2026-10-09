@@ -193,3 +193,61 @@ fn a_declaration_is_two_different_bare_type_names() {
     // Then every one is refused
     assert_eq!(outcomes, [true; 6]);
 }
+
+/// A host whose two methods moved to `Roster`, each leaving a forwarding method in its slot.
+const A_HOST_OF_TWO_METHODS: &str = concat!(
+    "impl Host {\n",
+    "    pub fn get(&self) -> u32 {\n",
+    "        self.n\n",
+    "    }\n",
+    "    pub fn put(&mut self, v: u32) {\n",
+    "        self.n = v;\n",
+    "    }\n",
+    "}\n",
+);
+const THE_HOST_FORWARDING_TO_ROSTER: &str = concat!(
+    "impl Host {\n",
+    "    pub fn get(&self) -> u32 {\n",
+    "        self.roster.get()\n",
+    "    }\n",
+    "    pub fn put(&mut self, v: u32) {\n",
+    "        self.roster.put(v)\n",
+    "    }\n",
+    "}\n",
+    "\n",
+    "impl Roster {\n",
+    "    pub fn get(&self) -> u32 {\n",
+    "        self.n\n",
+    "    }\n",
+    "    pub fn put(&mut self, v: u32) {\n",
+    "        self.n = v;\n",
+    "    }\n",
+    "}\n",
+);
+
+#[test]
+fn a_declared_retarget_accounts_for_its_delegators_and_a_forwarding_method_with_other_arguments_is_reported(
+) {
+    // Given two methods moved with delegators, and the same with `put` forwarding another argument
+    let forwarded = comparing_declared(
+        A_HOST_OF_TWO_METHODS,
+        THE_HOST_FORWARDING_TO_ROSTER,
+        &["Host=Roster"],
+    );
+    let forwarding_another_argument = comparing_declared(
+        A_HOST_OF_TWO_METHODS,
+        &THE_HOST_FORWARDING_TO_ROSTER.replace("self.roster.put(v)", "self.roster.put(1)"),
+        &["Host=Roster"],
+    );
+
+    // When each is compared with `Host=Roster` declared
+    // Then the delegators are accounted for, and the one forwarding another argument is reported
+    assert!(
+        forwarded.holds() && forwarded.excused.repointed >= 4,
+        "the delegators were not accounted for: {forwarded:?}"
+    );
+    assert_eq!(
+        forwarding_another_argument.added,
+        vec!["self.roster.put(1)".to_string()]
+    );
+}
