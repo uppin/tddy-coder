@@ -71,6 +71,7 @@ fn a_glob_move_of(paths: &[&[&str]], declared_in: &str) -> MovingCluster {
             extern_name: "destination".to_string(),
         },
         reexport: Reexport::Glob,
+        creates: None,
     }
 }
 
