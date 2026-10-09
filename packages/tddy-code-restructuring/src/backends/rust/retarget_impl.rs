@@ -9,7 +9,7 @@
 mod delegator;
 mod fields;
 mod imports;
-mod outline;
+pub(in crate::backends::rust) mod outline;
 mod preflight;
 mod rewrite;
 
