@@ -48,7 +48,7 @@ use crate::spawn_record::SpawnRecorder;
 use crate::{RestructureError, Result};
 use diagnostics::{parse, Diagnostic, Fix, Span};
 use format::format_touched;
-use gating::{named_by_errors, place, quoted_in_errors, reconcile, Placement};
+use gating::{place, quoted_in_errors, reconcile, to_gate_in_a_repair, Placement};
 
 /// How many times unused imports are removed and the tree re-checked.
 const MAX_ROUNDS: usize = 3;
@@ -325,7 +325,7 @@ fn repair(
     report: &mut Report,
 ) -> Result<Repair> {
     restore(tidying.root, &round.before)?;
-    let named = named_by_errors(&round.unused.primaries, &round.before, &failure.quoted);
+    let named = to_gate_in_a_repair(&round.unused, &round.before, &failure.quoted);
     let mut repairs = Repairs {
         attempts: round.repairs.attempts + 1,
         failing: failure.quoted.len(),
@@ -884,8 +884,11 @@ mod tests {
         );
     }
 
+    /// Was `fails_loudly_and_undoes_the_tidy_when_gating_cannot_repair_the_tree`, which pinned this
+    /// shape as the known limitation: the error names the method, never the trait. `#reshape` 3/19
+    /// gates what one build reads and another reports unused, so the shape now succeeds.
     #[test]
-    fn fails_loudly_and_undoes_the_tidy_when_gating_cannot_repair_the_tree() {
+    fn gates_a_trait_import_only_a_tests_method_call_needs() {
         // Given a trait import only the tests need: the error names the method, never the trait
         let source = "use std::fmt::Write;\n\npub fn two() -> u32 {\n    2\n}\n\n\
                       #[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    \
@@ -894,15 +897,75 @@ mod tests {
         let demo = a_crate_with(&[("src/lib.rs", source)]);
 
         // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then the import is gated for the tests, the tree compiles with them and the gate is reported
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let tidied = demo.read("src/lib.rs");
+        assert!(
+            tidied.starts_with("#[cfg(test)]\nuse std::fmt::Write;\n"),
+            "the trait import was not gated:\n{tidied}"
+        );
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(
+            said.contains(&"gated for tests: src/lib.rs: use std::fmt::Write".to_string()),
+            "{said:?}"
+        );
+    }
+
+    /// A library whose only tests call `used_by_tests` through `glob`, a glob re-export of the
+    /// module holding it.
+    fn a_library_whose_tests_read_a_glob(glob: &str) -> ACrate {
+        let source = format!(
+            "mod tested {{\n    pub(crate) fn used_by_tests() -> u8 {{\n        1\n    }}\n}}\n\
+             {glob}\n\npub fn two() -> u8 {{\n    2\n}}\n\n#[cfg(test)]\nmod tests {{\n    \
+             use super::*;\n\n    #[test]\n    fn reads() {{\n        \
+             assert_eq!(used_by_tests(), 1);\n    }}\n}}\n"
+        );
+        a_crate_with(&[("src/lib.rs", &source)])
+    }
+
+    #[test]
+    fn gates_a_glob_only_the_tests_read_and_the_tree_compiles_with_its_tests() {
+        // Given a glob re-export that only the unit-test module reads
+        let demo = a_library_whose_tests_read_a_glob("pub(crate) use tested::*;");
+
+        // When its file is tidied
+        let (verdict, said) = demo.tidied_touching(&["src/lib.rs"]);
+
+        // Then the glob stays for the tests, gated, and the tree compiles with them
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let tidied = demo.read("src/lib.rs");
+        assert!(
+            tidied.contains("#[cfg(test)]\npub(crate) use tested::*;\n"),
+            "the glob was not gated:\n{tidied}"
+        );
+        demo.compiles_with_its_tests().expect("the tree compiles");
+        assert!(
+            said.contains(&"gated for tests: src/lib.rs: use tested::*".to_string()),
+            "{said:?}"
+        );
+    }
+
+    #[test]
+    fn removes_a_glob_no_build_reads() {
+        // Given a glob re-export of a module nothing reaches through it
+        let demo = a_crate_with(&[(
+            "src/lib.rs",
+            "mod gone {\n    pub(crate) fn never() {}\n}\npub(crate) use gone::*;\n\n\
+             pub fn two() -> u8 {\n    gone::never();\n    2\n}\n",
+        )]);
+
+        // When its file is tidied
         let (verdict, _) = demo.tidied_touching(&["src/lib.rs"]);
 
-        // Then the run fails, says the tidy was undone and names the import, and the file is as it was
-        let Tidied::Broken { errors, .. } = verdict.expect("the tidy runs") else {
-            panic!("the tidy reported a tree that compiles");
-        };
-        assert!(errors.contains("the tidy was undone"), "{errors}");
-        assert!(errors.contains("Write"), "{errors}");
-        assert_eq!(demo.read("src/lib.rs"), source);
+        // Then the glob is gone and the tree compiles
+        assert_eq!(verdict.expect("the tidy runs"), Tidied::Compiles);
+        let tidied = demo.read("src/lib.rs");
+        assert!(
+            !tidied.contains("use gone::*"),
+            "the glob survived:\n{tidied}"
+        );
     }
 
     /// A library whose module `parts` holds `names`, imported in one group by the library file; its

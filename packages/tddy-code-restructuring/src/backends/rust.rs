@@ -1701,6 +1701,7 @@ impl RustBackend {
                 within: found.within,
                 stranded_in: reach.stranded_in,
                 reached_from_outside: reach.from_outside,
+                reached_from_production: reach.from_production,
                 referenced_in_impl_at: Vec::new(),
             });
         }
@@ -1827,6 +1828,7 @@ impl RustBackend {
                 // away, which reads as a defect even where it is not one.
                 stranded_in: reach.stranded_in,
                 reached_from_outside: reach.from_outside,
+                reached_from_production: reach.from_production,
                 referenced_in_impl_at: reach.in_file_outside_at,
             });
         }
@@ -3493,6 +3495,7 @@ mod tests {
             within: Vec::new(),
             stranded_in: Vec::new(),
             reached_from_outside: outside,
+            reached_from_production: outside,
             referenced_in_impl_at: Vec::new(),
         }
     }
@@ -3506,6 +3509,7 @@ mod tests {
             within: vec![module.to_string()],
             stranded_in: Vec::new(),
             reached_from_outside: outside,
+            reached_from_production: outside,
             referenced_in_impl_at: Vec::new(),
         }
     }

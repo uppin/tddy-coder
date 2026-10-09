@@ -75,6 +75,19 @@ pub(super) fn named_by_errors<'a>(
         .collect()
 }
 
+/// The imports a repair gates for tests: those an error of the failed re-check names.
+///
+/// TODO(reshape-tidy-facades): implement — add every import one build reads and another reports
+/// unused (`unused.read_by_a_unit`), which needs no quoted name: a glob binds none, and an error over
+/// a trait method quotes the method, never the trait.
+pub(super) fn to_gate_in_a_repair<'a>(
+    unused: &'a UnusedImports,
+    before: &BTreeMap<String, Vec<u8>>,
+    quoted: &BTreeSet<String>,
+) -> Vec<&'a Span> {
+    named_by_errors(&unused.primaries, before, quoted)
+}
+
 /// A `use` statement located around an import's span.
 struct Statement<'a> {
     /// Start of the line the `use` sits on; the replacement covers `line_start..end`.

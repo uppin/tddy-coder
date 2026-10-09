@@ -280,9 +280,9 @@ pub fn gate_group(
     let silent = discard();
     match failing_check(root, &packages, spawns, cancel, &silent, WAIT_HEARTBEAT)? {
         None => Ok(()),
-        Some((_, errors)) => Err(RestructureError::GroupDoesNotCompile {
+        Some(rejection) => Err(RestructureError::GroupDoesNotCompile {
             group: group.to_string(),
-            errors,
+            errors: rejection.errors,
         }),
     }
 }

@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Bug fix (engine defects found by real restructures; no new operation, plan field or wire message)
-**Stack**: `#reshape` 3/19, branch `feature/reshape/tidy-facades`, green wave 1. PR title:
+**Stack**: `#reshape` 3/19, branch `feature/reshape/tidy-facades`, PR [#600](https://github.com/uppin/tddy-coder/pull/600), green wave 1. PR title:
 `fix(code-restructuring): facades keep their public path and the tidy leaves a lint-clean origin (#reshape 3/19)`.
 Base in the linear stack: `feature/reshape/multi-seam-extract` (K=2). **Real edges**: none in (this node consumes no
 other node's behaviour); out: `tidy-facades -> oversized-files` (K=15) and `tidy-facades -> rust-backend-split` (K=17).
@@ -37,9 +37,9 @@ PR in the path: **no 🚧 claimed issue, no wait-or-proceed fork.**
 ## Affected Packages
 
 - **`tddy-code-restructuring`**:
-  - `src/backends/rust/facade.rs` (named rule, `named_facade_lines`) + new `src/backends/rust/facade_tests.rs`;
+  - `src/backends/rust/facade.rs` (named rule, `named_facade_lines`) + new `src/backends/rust/facade/facade_tests.rs`;
   - `src/backends/rust/seam_survey.rs` (`MovedItem.reached_from_production`, `Reach.from_production`,
-    `refuse_unsurveyed_range`, `test_module_lines`) + new `src/backends/rust/seam_survey_tests.rs`;
+    `refuse_unsurveyed_range`, `test_module_lines`) + new `src/backends/rust/seam_survey/seam_survey_tests.rs`;
   - `src/backends/rust.rs` (`survey_moved_items`, `survey_impl_members` read `settled_outline`; `reach_of` takes the
     test-module lines; `attached_trivia_starts_at` leaves, by an engine move, for `src/crate_move/source_scan.rs`);
     `src/backends/rust/impl_seam.rs` (one `MovedItem` literal);
@@ -48,7 +48,7 @@ PR in the path: **no 🚧 claimed issue, no wait-or-proceed fork.**
     `declared_in_destination`), `src/crate_move/preconditions.rs` (`move_preconditions` reads the declaration whole);
   - `src/runner/tidy/gating.rs` (`to_gate_in_a_repair`); `src/runner/tidy.rs` (one call swapped at `:328`, tests added
     after its production code);
-  - `src/runner/compile_gate.rs` (`Rejection`, `untidied_note`), `src/lib.rs` (`AppliedTreeDoesNotCompile.untidied`);
+  - `src/runner/compile_gate.rs` (`Rejection`, `untidied_note`), `src/runner/group_gate.rs` (reads `Rejection.errors`);
   - tests: new `tests/extract_facade_acceptance.rs`; `tests/move_facades_acceptance.rs`,
     `tests/apply_compile_gate_acceptance.rs`, `tests/harness/mod.rs`.
   - Docs at wrap: [facades.md](../../../packages/tddy-code-restructuring/docs/facades.md),
@@ -99,7 +99,7 @@ eight unused globs and stranded doc comments in `#carve 21/21` (one still on mas
   an empty replacement becomes `"\n"` and a facade replacement is followed by `"\n"`.
 - **Tidy repair**: the spans gated in a repair are those `named_by_errors` matches **plus** every span in
   `read_by_a_unit` — evidence that does not need a quoted name.
-- **Gate failure**: `AppliedTreeDoesNotCompile` carries `untidied`: "the tidy did not run, so the written files were
+- **Gate failure**: `AppliedTreeDoesNotCompile.errors` opens with one line (see Draft PR contract: no new field): "the tidy did not run, so the written files were
   neither tidied nor formatted; the failing check reported N `unused import` warning(s) in them" (N from the gate's
   `short` stderr, counted over touched files).
 - Register `tests/extract_facade_acceptance.rs` in `.config/rust-e2e.filterset` and the `rust-analyzer` group.
@@ -184,8 +184,9 @@ Published with the wave-2 contract commit (the first push of this PR, stubs that
 - `runner::tidy::gating`: `pub(super) fn to_gate_in_a_repair<'a>(unused: &'a UnusedImports, before: &BTreeMap<String, Vec<u8>>, quoted: &BTreeSet<String>) -> Vec<&'a Span>`.
 - `runner::compile_gate`: `pub(super) struct Rejection { checked: String, errors: String, stderr: String }`;
   `failing_check(...) -> Result<Option<Rejection>>`; `fn untidied_note(stderr: &str, touched: &BTreeSet<String>) -> String`.
-- `RestructureError::AppliedTreeDoesNotCompile { …, untidied: String }` (public enum; matched with `{ .. }` in
-  `tddy-index-daemon`).
+- ~~`RestructureError::AppliedTreeDoesNotCompile { …, untidied: String }`~~ — **not added**: one more `String` trips
+  `clippy::result_large_err` on every `Result` of the crate. `untidied_note` returns one line ending in `\n`, written
+  ahead of the compiler's `errors`; the enum is unchanged.
 - Test harness: `harness::a_workspace_whose_test_binary_reads_a_file_beside_it_and_carries_an_unused_import`.
 - Failing tests: the red ones in "Acceptance tests" (4 green pins and one reproduction are named there).
 
@@ -217,7 +218,7 @@ names).
 - [ ] **Crate-move declarations**: `removed_declaration`, comment travel, attribute refusal (static + resolve)
 - [ ] **Use runs**: `separates_use_runs` in `leaving`
 - [ ] **Tidy repair**: `to_gate_in_a_repair`
-- [ ] **Gate note**: `Rejection`, `untidied_note`, the error field
+- [ ] **Gate note**: `Rejection`, `untidied_note`, the line ahead of `errors`
 - [ ] **Engine move**: `attached_trivia_starts_at` to `crate_move/source_scan.rs` via `tddy-tools restructure`
 - [ ] **Registration**: `extract_facade_acceptance` in both config files
 - [ ] **Package documentation** at wrap (list under Affected Packages)
@@ -252,9 +253,9 @@ The rules above hold; every #536 / #539 / #566 hand edit listed in Background is
 
 #### `tddy-code-restructuring`
 - **`backends/rust/seam_survey.rs`** (237 → ~300): two fields, `refuse_unsurveyed_range`, `test_module_lines`.
-  New `seam_survey_tests.rs`.
+  New `seam_survey/seam_survey_tests.rs`.
 - **`backends/rust/facade.rs`** (262 → ~300): `named_facade_lines` takes the Named arm (depth falls); test-only tier;
-  `facade_will_bind` predicate. New `facade_tests.rs` (`#[cfg(test)] mod facade_tests;`).
+  `facade_will_bind` predicate. New `facade/facade_tests.rs` (`#[cfg(test)] mod facade_tests;`).
 - **`backends/rust.rs`**: two `request_settled("textDocument/documentSymbol", …)` → `self.settled_outline(uri)`; the
   refusal call at the end of `survey_moved_items`; `reach_of` gains a `tests: &[RangeInclusive<u32>]` parameter;
   `MovedItem` literals (`:1666`, `:1792`, test helpers `:3458`, `:3470`) and `impl_seam.rs:158` gain the field.
@@ -269,7 +270,7 @@ The rules above hold; every #536 / #539 / #566 hand edit listed in Background is
   `named_by_errors` (same line count); tests appended inside its existing `mod tests`.
 - **`runner/compile_gate.rs`** (429): `Rejection`, `untidied_note`; `refuse_a_broken_baseline` and
   `refuse_a_broken_result` destructure `Rejection` (the latter stays ≤ 60 lines; the note is built in a new function).
-- **`lib.rs`**: `untidied` field and one `{untidied}` in the message.
+- **`lib.rs`**: unchanged (see Draft PR contract). **`runner/group_gate.rs`**: reads `Rejection.errors`.
 
 ## Implementation milestones
 
@@ -309,22 +310,22 @@ Would let test 10 be deterministic, at the cost of a fake rust-analyzer assist p
 
 ## Acceptance tests
 
-Items are **red on `master`** unless marked: green pins (2, 6, 23, 26) specify what already holds; test 10 is a
+Items are **red on `master`** unless marked: green pins (2, 4, 6, 23, 26) specify what already holds; test 10 is a
 **reproduction** — the cold path may already be green on master, in which case it stays as a guard and test 7 carries
 the red evidence for the glob defect.
 
-### `packages/tddy-code-restructuring/src/backends/rust/facade_tests.rs` (new; unit, `MovedItem` literals)
+### `packages/tddy-code-restructuring/src/backends/rust/facade/facade_tests.rs` (new; unit, `MovedItem` literals)
 
 1. `a_named_facade_re_exports_an_unreferenced_pub_item_on_the_pub_line` — *red*: `facade.rs:172-175` drops it.
 2. `a_named_facade_still_leaves_out_an_unreferenced_pub_crate_item` — green pin.
 3. `a_named_facade_writes_names_only_tests_reach_under_cfg_test_after_the_production_lines` — the exact lines of rule 2.
    *Red*: no `reached_from_production` field.
-4. `a_pub_item_reached_only_from_tests_stays_on_the_pub_line` — *red*: same.
+4. `a_pub_item_reached_only_from_tests_stays_on_the_pub_line` — **green pin** (today's rule already puts it on the `pub` line; it pins that the new test-only tier does not take it).
 5. `a_named_facade_binds_every_name_it_writes_including_unreferenced_pub_and_test_only_names` (`facade_will_bind`) —
    *red*: an unreferenced `pub` item is not bound today.
 6. `a_glob_facade_is_pub_when_anything_moved_is_pub_and_pub_crate_otherwise` — green pin of `widest_visibility`.
 
-### `packages/tddy-code-restructuring/src/backends/rust/seam_survey_tests.rs` (new; unit)
+### `packages/tddy-code-restructuring/src/backends/rust/seam_survey/seam_survey_tests.rs` (new; unit)
 
 7. `a_range_declaring_items_whose_survey_found_none_is_refused_naming_the_range_and_the_first_item` — *red*: no refusal exists.
 8. `a_range_holding_only_impl_blocks_is_not_refused_for_an_empty_survey` — *red* (function missing); specifies the exemption.
@@ -336,8 +337,10 @@ the red evidence for the glob defect.
     `journal.rs` / `group.rs` (`#[derive]` + `///` on `pub struct`s, `pub use parent::{A, B};` in `lib.rs`). Reproduction (see above).
 11. `a_named_extraction_keeps_an_unreferenced_pub_fn_reachable_through_the_old_path` — a second crate calls
     `demo::parent::statements()` after the split and compiles. *Red*: the `pub use` is not written.
-12. `a_named_extraction_gates_the_names_only_the_parents_tests_use_and_the_tidy_gates_nothing_more` — the facade holds
-    a `#[cfg(test)]` line and the apply's progress has no `gated for tests:` line. *Red*: today the tidy gates them.
+12. `a_named_extraction_gates_the_names_only_the_parents_tests_use_and_the_tidy_gates_nothing_more` — the parent holds
+    `#[cfg(test)]\npub(crate) use parts::checked;` and the apply's progress has no `gated for tests:` line. *Red*: today
+    the tidy gates it (`gated for tests: crates/origin/src/parent.rs: use parts::checked`). The production name is not
+    asserted: the assist re-points `total`'s call to `parts::part()`, so the tidy removes that facade name.
 
 ### `packages/tddy-code-restructuring/src/crate_move/manifest_edits.rs` (unit, existing `mod tests`)
 
@@ -363,7 +366,9 @@ the red evidence for the glob defect.
 22. `gates_a_glob_only_the_tests_read_and_the_tree_compiles_with_its_tests` — *red*: fails with "the tidy was undone".
 23. `removes_a_glob_no_build_reads` — green pin.
 24. `gates_a_trait_import_only_a_tests_method_call_needs` (`use std::fmt::Write;`, `out.write_str` in `mod tests`) —
-    *red*: the documented known limitation.
+    *red*: the documented known limitation. **Replaces** the existing `fails_loudly_and_undoes_the_tidy_when_gating_cannot_repair_the_tree`,
+    which pinned that limitation with the same fixture; the undo-and-fail path keeps its decision-level tests in
+    `runner/tidy/wide_facade_tests.rs` (`gives_up_*`) but no longer an end-to-end one (see Validation results).
 
 ### `packages/tddy-code-restructuring/tests/apply_compile_gate_acceptance.rs` (library `apply`, test-binary move, no server)
 
@@ -422,7 +427,43 @@ tests stays on the `pub` line; a facade between two runs is followed by a blank 
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Draft-PR contract (commit 2, 2026-10-09)
+
+Scoped gates on the rebased branch: `cargo check -p tddy-code-restructuring --all-targets`, `cargo check -p
+tddy-index-daemon -p tddy-tools --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`,
+`cargo fmt --all --check` — all clean. Only this node's binaries and filters were run (the stack baseline is 0 failures).
+
+| # | Test | Result | Why |
+|---|---|---|---|
+| 1, 3, 5 | `facade_tests` | 🔴 red | assertion: today's rule (`named_facade_lines` is the old arm, moved) |
+| 2, 4, 6 | `facade_tests` | 🟢 pin | |
+| 7, 8, 9 | `seam_survey_tests` | 🔴 red | `todo!()` in `refuse_unsurveyed_range` / `test_module_lines` |
+| 10 | `extract_facade_acceptance` | 🟢 **guard** | the cold path already writes `pub use group::*;`; the `#live-plan 10/15` defect does not reproduce cold, which supports F1 (empty early outline) — test 7 carries the red evidence |
+| 11, 12 | `extract_facade_acceptance` | 🔴 red | 11: parent writes `pub use counting::count;` only; 12: the tidy reports `gated for tests: … use parts::checked` |
+| 13-16 | `removed_declaration_tests` | 🔴 red | `todo!()` in `removed_declaration` / `separates_use_runs` |
+| 17 | `removed_declaration_tests` | 🔴 red | assertion: the comments parameter is not written yet |
+| 18 | `move_facades_acceptance` | 🔴 red | the doc stays on the origin's facade line; the destination's `pub mod observer;` has none |
+| 19, 20 | `move_facades_acceptance` | 🔴 red | rustfmt sorts the joined run (`Cell, HashMap, Rc, Arc` order) |
+| 21 | `move_facades_acceptance` | 🔴 red | plain `check` returns `Ok([])` |
+| 22, 24 | `runner::tidy::tests` | 🔴 red | `Broken { "the tidy was undone …" }` (E0425 / E0599) |
+| 23 | `runner::tidy::tests` | 🟢 pin | |
+| 25 | `apply_compile_gate_acceptance` | 🔴 red | the refusal has no `the tidy did not run` line |
+| 26 | `apply_compile_gate_acceptance` | 🟢 pin | |
+
+Regression check for the surface changes (`failing_check` → `Rejection`, `to_gate_in_a_repair` wired at `tidy.rs:328`,
+`insert_module_declaration_sorted`'s third parameter): the rest of `--lib`, `apply_compile_gate_acceptance`,
+`apply_tidy_acceptance` and `transactional_groups_acceptance` pass. `--lib` also reports 19 red tests that are the
+parents' contracts (`item_move::members`, `module_reparent::tree_{reach,visibility}`, `projection`, `apply`,
+`journal::group`, `runner::rehearsal`), not this node's.
+
+**Deferred to green (no caller yet, `expect(dead_code)` with `TODO(reshape-tidy-facades)`, which green must remove):**
+`MovedItem.reached_from_production` (field, unconditional `expect`), `refuse_unsurveyed_range`, `test_module_lines`,
+`removed_declaration`, `separates_use_runs`. `Reach.from_production` exists and is copied into the survey, never set.
+The surveys still read `request_settled`; `facade_writer` and `move_preconditions` still call `module_declaration`.
+
+**Divergences from this changeset as planned:** test files live in `facade/` and `seam_survey/` (the crate's
+child-module convention, as `runner/tidy/wide_facade_tests.rs`); no `untidied` field (above); `runner/group_gate.rs`
+changed by one destructure; test 4 is a pin; test 24 replaces an existing test; test 12's assertion narrowed.
 
 ## TODO
 
@@ -431,10 +472,10 @@ tests stays on the `pub` line; a facade between two runs is followed by a blank 
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-tidy-facades.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail; record whether test 10 is red or a guard)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail; test 10 is a guard — Validation results)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests (contract surface published, commit 2)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

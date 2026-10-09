@@ -2,6 +2,7 @@
 //! `unused_imports` diagnostics rustc gave for them, trimmed from the failing run of #539.
 
 use super::*;
+use gating::named_by_errors;
 
 const ROUND_ONE: &str = include_str!("../../../tests/fixtures/tidy_wide_facade/round1.jsonl");
 const FACADE_GROUPS: &str =

@@ -81,6 +81,9 @@ pub(crate) struct Reach {
     pub(crate) stranded_in: Vec<String>,
     /// Whether anything outside the range reaches it, in this file or another.
     pub(crate) from_outside: bool,
+    /// Whether one of those references is production code: in another file, or in this file
+    /// outside its own `#[cfg(test)]` module.
+    pub(crate) from_production: bool,
     /// One-based lines in this same file, outside the range, where something references it.
     ///
     /// Kept separately from `from_outside` because that flag answers a visibility question and
@@ -102,6 +105,14 @@ pub(crate) struct MovedItem {
     pub(crate) stranded_in: Vec<String>,
     /// Whether anything outside the range being relocated reaches it, in this file or another.
     pub(crate) reached_from_outside: bool,
+    /// Whether something outside the range reaches it from production code: from another file, or
+    /// from this file outside its own `#[cfg(test)]` module. An item reached only from that module
+    /// is re-exported by a `named` facade under `#[cfg(test)]`.
+    #[expect(
+        dead_code,
+        reason = "TODO(reshape-tidy-facades): implement — `named_facade_lines` reads it"
+    )]
+    pub(crate) reached_from_production: bool,
     /// One-based lines, in this same file, where a sibling *inside the same `impl`* still references
     /// it after the seam moves.
     ///
@@ -109,6 +120,47 @@ pub(crate) struct MovedItem {
     /// only a visibility signal. This one blocks a seam that cuts a trait `impl`, whose halves cannot
     /// both be `impl`s of the trait; see [`refuse_impl_sibling_references`].
     pub(crate) referenced_in_impl_at: Vec<u32>,
+}
+
+/// Refuse an extraction whose survey found nothing in a range that declares items.
+///
+/// An outline that lists none of the range's declarations is the silence of a server that has not
+/// answered yet, not a range that moves nothing: a facade written from it names nothing (a glob comes
+/// out `pub(crate)` over `pub` items, a named facade comes out empty). `range_text` is the range's
+/// original lines; a range of `impl` blocks only declares no named item and is not refused.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TODO(reshape-tidy-facades): implement — `survey_moved_items` calls it"
+    )
+)]
+pub(crate) fn refuse_unsurveyed_range(
+    range_text: &str,
+    file: &str,
+    range: Range,
+    moved: &[MovedItem],
+) -> Result<()> {
+    // TODO(reshape-tidy-facades): implement
+    let _ = (range_text, file, range, moved);
+    todo!("refuse_unsurveyed_range")
+}
+
+/// The one-based line spans of the inline `#[cfg(test)] mod … { … }` modules of `text`.
+///
+/// An out-of-line `#[cfg(test)] mod x_tests;` declaration spans no lines of this file: what it holds
+/// is another file, whose references count as production.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TODO(reshape-tidy-facades): implement — `reach_of` calls it"
+    )
+)]
+pub(crate) fn test_module_lines(text: &str) -> Vec<std::ops::RangeInclusive<u32>> {
+    // TODO(reshape-tidy-facades): implement
+    let _ = text;
+    todo!("test_module_lines")
 }
 
 /// Refuse an extraction that would strand a reference written in another file.
@@ -235,3 +287,6 @@ fn collect_impls_cut_through(symbols: &Value, range: Range, cut: &mut Vec<String
         }
     }
 }
+
+#[cfg(test)]
+mod seam_survey_tests;
