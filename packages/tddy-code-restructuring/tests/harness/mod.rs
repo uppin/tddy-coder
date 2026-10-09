@@ -498,6 +498,38 @@ async fn resolving_against(
     .expect("the blocking half of the operation joins")
 }
 
+/// Resolve one operation against a live rust-analyzer and hand back the whole
+/// [`Resolution`](tddy_code_restructuring::Resolution) — the edit and what the operation reported
+/// about it, its widenings above all. Nothing is applied.
+pub async fn resolution_of(
+    fixture: &AFixtureWorkspace,
+    op: RefactorOp,
+) -> Result<tddy_code_restructuring::Resolution, String> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+
+    tokio::task::spawn_blocking(move || {
+        let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
+            client,
+            Some(cancel),
+            discard(),
+        );
+        let overlay = Overlay::default();
+        let workspace = Workspace {
+            root: &root,
+            overlay: &overlay,
+        };
+
+        backend
+            .resolve(&op, &workspace)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the operation joins")
+}
+
 /// Resolve one operation on a server that a `check --deep` of `earlier` has already run against.
 ///
 /// This is the daemon's shape across requests: one warm server for the root, a backend per run,
@@ -969,7 +1001,7 @@ pub fn assert_compiles_with_its_tests(fixture: &AFixtureWorkspace) {
 pub const ORIGIN_LIB: &str = "crates/origin/src/lib.rs";
 
 /// Source text from its lines, one per entry, so a fixture's line numbers can be read off it.
-fn source(lines: &[&str]) -> String {
+pub fn source(lines: &[&str]) -> String {
     let mut text = lines.join("\n");
     text.push('\n');
     text
@@ -3236,6 +3268,223 @@ pub fn a_crate_whose_parent_tests_alone_call_a_helper() -> AFixtureWorkspace {
                 "    }",
                 "}",
             ]),
+        )
+        .tracked_by_git()
+}
+
+/// The module [`a_workspace_whose_module_the_origin_still_reaches`] moves.
+pub const THE_ROSTER: &str = "crates/origin/src/roster.rs";
+/// Where [`THE_ROSTER`] lands.
+pub const THE_MOVED_ROSTER: &str = "crates/destination/src/roster.rs";
+/// The module staying behind that names [`THE_ROSTER`]'s type and calls its method.
+pub const THE_LEDGER: &str = "crates/origin/src/ledger.rs";
+/// Where [`THE_LEDGER`] lands when it moves with the roster.
+pub const THE_MOVED_LEDGER: &str = "crates/destination/src/ledger.rs";
+
+/// `roster`'s lines as written before any move: a `pub(crate)` struct with a `pub(crate)` and a private
+/// field, an inherent `impl` with two `pub(crate)` methods and a private one, a trait `impl`, a
+/// `pub(crate)` free function the origin calls and one only the module itself uses.
+pub const ROSTER_BEFORE: &[&str] = &[
+    "//! The roster.",
+    "",
+    "pub(crate) struct AgentRoster {",
+    "    pub(crate) rev: u64,",
+    "    secret: u64,",
+    "}",
+    "",
+    "impl AgentRoster {",
+    "    pub(crate) fn new() -> Self {",
+    "        Self { rev: 1, secret: 0 }",
+    "    }",
+    "",
+    "    pub(crate) fn broadcast(&self) -> u64 {",
+    "        self.rev + self.internal()",
+    "    }",
+    "",
+    "    fn internal(&self) -> u64 {",
+    "        self.secret + only_the_roster_uses()",
+    "    }",
+    "}",
+    "",
+    "impl Default for AgentRoster {",
+    "    fn default() -> Self {",
+    "        Self::new()",
+    "    }",
+    "}",
+    "",
+    "pub(crate) fn started_roster_rev(roster: &AgentRoster) -> u64 {",
+    "    roster.rev",
+    "}",
+    "",
+    "pub(crate) fn only_the_roster_uses() -> u64 {",
+    "    0",
+    "}",
+];
+
+/// A three-crate workspace whose `origin` keeps naming, from `runtime` and `ledger`, a
+/// `pub(crate)` type of `roster`, one of its fields, two of its methods and a free function — the
+/// `#carve` 21 R3 shape, where every one of them was widened by hand after the move.
+pub fn a_workspace_whose_module_the_origin_still_reaches() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing("Cargo.toml", THREE_CRATES)
+        .writing("crates/shared/Cargo.toml", SHARED_MANIFEST)
+        .writing("crates/shared/src/lib.rs", SHARED_LIB)
+        .writing("crates/origin/Cargo.toml", ORIGIN_OVER_BOTH)
+        .writing(
+            ORIGIN_LIB,
+            "//! The crate the roster leaves.\n\npub mod ledger;\npub mod roster;\npub mod runtime;\n",
+        )
+        .writing(THE_ROSTER, &source(ROSTER_BEFORE))
+        .writing(
+            THE_LEDGER,
+            &source(&[
+                "use crate::roster::AgentRoster;",
+                "",
+                "pub(crate) fn ledger_rev(roster: &AgentRoster) -> u64 {",
+                "    roster.broadcast()",
+                "}",
+            ]),
+        )
+        .writing(
+            "crates/origin/src/runtime.rs",
+            &source(&[
+                "use crate::ledger::ledger_rev;",
+                "use crate::roster::{started_roster_rev, AgentRoster};",
+                "",
+                "pub fn boot(rev: u64) -> u64 {",
+                "    let roster = AgentRoster::new();",
+                "    roster.broadcast() + started_roster_rev(&roster) + ledger_rev(&roster) + roster.rev + rev",
+                "}",
+            ]),
+        )
+        .writing("crates/destination/Cargo.toml", DESTINATION_MANIFEST)
+        .writing("crates/destination/src/lib.rs", "//! The crate the roster moves into.\n\n")
+        .tracked_by_git()
+}
+
+/// The nested module [`a_workspace_whose_nested_module_its_parent_globs`] moves.
+pub const THE_ATTACHMENT_PROGRESS: &str =
+    "crates/origin/src/connection_service/attachment_progress.rs";
+/// Where [`THE_ATTACHMENT_PROGRESS`] lands.
+pub const THE_MOVED_ATTACHMENT_PROGRESS: &str = "crates/destination/src/attachment_progress.rs";
+/// The parent that re-exports [`THE_ATTACHMENT_PROGRESS`] by glob.
+pub const THE_CONNECTION_SERVICE: &str = "crates/origin/src/connection_service.rs";
+
+/// A three-crate workspace whose `connection_service` declares a private child
+/// `attachment_progress` and re-exports all of it with `pub(crate) use attachment_progress::*;` —
+/// the `#carve` 15 shape of the 09-25 todo. Its sibling reaches the child's struct and field through
+/// `use super::*;`, and calls a `pub(crate)` trait's method that no path names.
+pub fn a_workspace_whose_nested_module_its_parent_globs() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing("Cargo.toml", THREE_CRATES)
+        .writing("crates/shared/Cargo.toml", SHARED_MANIFEST)
+        .writing("crates/shared/src/lib.rs", SHARED_LIB)
+        .writing("crates/origin/Cargo.toml", ORIGIN_OVER_BOTH)
+        .writing(
+            ORIGIN_LIB,
+            "//! The crate the child leaves.\n\npub mod connection_service;\n",
+        )
+        .writing(
+            THE_CONNECTION_SERVICE,
+            &source(&[
+                "//! The service.",
+                "",
+                "mod attachment_progress;",
+                "pub(crate) use attachment_progress::*;",
+                "",
+                "pub mod sibling;",
+            ]),
+        )
+        .writing(
+            THE_ATTACHMENT_PROGRESS,
+            &source(&[
+                "pub(crate) struct AttachmentProgressSink {",
+                "    pub(crate) sent: u64,",
+                "}",
+                "",
+                "pub(crate) trait Progressing {",
+                "    fn tick(&self) -> u64;",
+                "}",
+                "",
+                "impl Progressing for AttachmentProgressSink {",
+                "    fn tick(&self) -> u64 {",
+                "        self.sent + private_helper()",
+                "    }",
+                "}",
+                "",
+                "fn private_helper() -> u64 {",
+                "    0",
+                "}",
+            ]),
+        )
+        .writing(
+            "crates/origin/src/connection_service/sibling.rs",
+            &source(&[
+                "use super::*;",
+                "",
+                "pub fn progress() -> u64 {",
+                "    let sink = AttachmentProgressSink { sent: 1 };",
+                "    sink.tick() + sink.sent",
+                "}",
+            ]),
+        )
+        .writing("crates/destination/Cargo.toml", DESTINATION_MANIFEST)
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! The crate the child moves into.\n\n",
+        )
+        .tracked_by_git()
+}
+
+/// The module [`a_workspace_whose_moved_fn_returns_a_type_no_path_names`] moves.
+pub const THE_FACTORY: &str = "crates/origin/src/factory.rs";
+/// Where [`THE_FACTORY`] lands.
+pub const THE_MOVED_FACTORY: &str = "crates/destination/src/factory.rs";
+
+/// A three-crate workspace whose `runtime` calls `factory::make().size()`: `make` and `size` are
+/// reached by path, while `Widget`, the type `make` returns, is named by nothing outside.
+pub fn a_workspace_whose_moved_fn_returns_a_type_no_path_names() -> AFixtureWorkspace {
+    an_empty_fixture()
+        .writing("Cargo.toml", THREE_CRATES)
+        .writing("crates/shared/Cargo.toml", SHARED_MANIFEST)
+        .writing("crates/shared/src/lib.rs", SHARED_LIB)
+        .writing("crates/origin/Cargo.toml", ORIGIN_OVER_BOTH)
+        .writing(
+            ORIGIN_LIB,
+            "//! The crate the factory leaves.\n\npub mod factory;\npub mod runtime;\n",
+        )
+        .writing(
+            THE_FACTORY,
+            &source(&[
+                "//! Makes widgets.",
+                "",
+                "pub(crate) struct Widget {",
+                "    size: u64,",
+                "}",
+                "",
+                "impl Widget {",
+                "    pub(crate) fn size(&self) -> u64 {",
+                "        self.size",
+                "    }",
+                "}",
+                "",
+                "pub(crate) fn make() -> Widget {",
+                "    Widget { size: 3 }",
+                "}",
+            ]),
+        )
+        .writing(
+            "crates/origin/src/runtime.rs",
+            &source(&[
+                "pub fn boot() -> u64 {",
+                "    crate::factory::make().size()",
+                "}",
+            ]),
+        )
+        .writing("crates/destination/Cargo.toml", DESTINATION_MANIFEST)
+        .writing(
+            "crates/destination/src/lib.rs",
+            "//! The crate the factory moves into.\n\n",
         )
         .tracked_by_git()
 }

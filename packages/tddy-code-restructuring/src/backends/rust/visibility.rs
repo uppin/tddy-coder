@@ -91,6 +91,7 @@ pub(crate) fn restore_visibility(
                     item.visibility.clone()
                 },
                 to: "pub(crate)".to_string(),
+                reason: None,
             });
             continue;
         }

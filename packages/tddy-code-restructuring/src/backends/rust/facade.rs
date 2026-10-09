@@ -47,6 +47,7 @@ pub(crate) fn impl_widenings(
                 member.visibility.clone()
             },
             to: super::visibility::WIDENED.trim().to_string(),
+            reason: None,
         })
         .collect()
 }
