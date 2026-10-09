@@ -249,6 +249,7 @@ fn visibilities(
                 item: item.name.clone(),
                 from: spelled(&item.visibility),
                 to: spelled(&to),
+                reason: None,
             });
         }
         landing.scopes.push((item.name.clone(), scope));
@@ -270,6 +271,7 @@ fn visibilities(
                 item: item.name.clone(),
                 from: spelled(&item.visibility),
                 to: spelled(&to),
+                reason: None,
             });
         }
     }

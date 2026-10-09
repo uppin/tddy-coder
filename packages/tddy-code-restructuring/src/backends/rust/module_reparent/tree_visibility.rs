@@ -161,6 +161,7 @@ mod tests {
                 item: "materialize".to_string(),
                 from: "pub(super)".to_string(),
                 to: "pub(crate)".to_string(),
+                reason: None,
             }]
         );
     }
