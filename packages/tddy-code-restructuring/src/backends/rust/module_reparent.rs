@@ -17,6 +17,8 @@ pub(super) mod declaration;
 mod reading;
 pub(super) mod relocation;
 mod survey;
+mod tree_reach;
+mod tree_visibility;
 mod visibility;
 
 use serde_json::Value;

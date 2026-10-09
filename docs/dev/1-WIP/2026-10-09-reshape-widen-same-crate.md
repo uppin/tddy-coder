@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Feature (engine capability of two existing operations; `apply` filesystem sweep; test registration)
-**Stack**: `#reshape` 1/19, branch `feature/reshape/widen-same-crate`, wave 1. PR title:
+**Stack**: `#reshape` 1/19, branch `feature/reshape/widen-same-crate`, PR [#598](https://github.com/uppin/tddy-coder/pull/598) (draft), wave 1. PR title:
 `feat(code-restructuring): same-crate moves widen split members and tree reach, and drop emptied dirs (#reshape 1/19)`.
 Base in the linear stack: `master` (K=1). **Real edges**: none in (this node consumes nothing); out:
 `widen-same-crate -> move-impl-members` (K=13 calls `widen_members`, `members_of`, `member_visibility_edit`,
@@ -29,7 +29,7 @@ issue is in this node's path, so there is no wait-or-proceed decision.**
 | Item | Verdict | What this change does about it |
 |---|---|---|
 | [2026-10-04-restructure-move-item-does-not-widen-fields-or-impl-members.md](../todo/2026-10-04-restructure-move-item-does-not-widen-fields-or-impl-members.md) | ✅ **RESOLVED HERE** (main limit); entry **narrowed** at wrap | Member survey and widening (rules 1-3). Its "Other limits of the first cut" list (nested `use` group, keyword above name, one-line inline destination, relative range, `#[path]` lib+main, fn-body `use`) is untouched and stays as the entry's whole content |
-| [2026-10-04-restructure-reparent-module-does-not-widen-what-the-moved-tree-reaches.md](../todo/2026-10-04-restructure-reparent-module-does-not-widen-what-the-moved-tree-reaches.md) | ✅ **RESOLVED HERE** | All three bullets (rules 4-5). Deleted at wrap. The sibling-module case it does not name becomes a new todo |
+| [2026-10-04-restructure-reparent-module-does-not-widen-what-the-moved-tree-reaches.md](../todo/2026-10-04-restructure-reparent-module-does-not-widen-what-the-moved-tree-reaches.md) | ✅ **RESOLVED HERE** | Bullets 1-2 (rules 4-5). Bullet 3 (an absolute `pub(in crate::host::attachments)` is not respelled) is **stale on `master`**: rust-analyzer reports the module's name inside the visibility as a reference, so the callers' re-pointing rewrites it (acceptance test 12 is a green pin, found by the contract commit). Deleted at wrap. The sibling-module case it does not name becomes a new todo |
 | [2026-10-05-restructure-same-crate-moves-limits-found-moving-lifecycle.md](../todo/2026-10-05-restructure-same-crate-moves-limits-found-moving-lifecycle.md) | ⚠ **DURING**, claimed here; **narrowed** at wrap | Emptied directories close (rule 6). The `pub use` chain item moves to a new todo (no reproduction; developer decision 2026-10-09). The aliased `use` and glob `super::Name` items are `feature/reshape/move-item-paths`'s slice and stay. Import placement and one module per `name` stay |
 | [2026-10-04-restructure-reparent-module-first-cut-limits.md](../todo/2026-10-04-restructure-reparent-module-first-cut-limits.md) | partial, claimed here; **narrowed** at wrap | Emptied directories close (rule 6). Items 1 (doc wording) and 2 (byte-identical facade test) are **already fixed on `master`** (`plan-schema.md:220`; `reparent_module_acceptance.rs:286-297`) and close. Every other refusal stays |
 | [2026-10-06-restructure-item-move-assemble-past-500.md](../todo/2026-10-06-restructure-item-move-assemble-past-500.md) | ⚠ **DURING** (resolved by `feature/reshape/oversized-files`) | `item_move/assemble.rs` (507) gains **no** net line: the member widening is in `item_move/members.rs`, and the one changed call keeps its line count |
@@ -170,16 +170,19 @@ moved file. It uses the masked text and the same span reading as `rebase::visibi
 + `enclosing_modules` at the span.
 
 - `pub(crate)` is never touched.
-- If `old_scope` lies inside the old tree, its prefix is replaced by the new tree path and it is respelled
-  at the new module. `pub(in crate::host::attachments)` becomes `pub(in crate::split::attachments)`, and a
-  child's `pub(super)` is unchanged because it reads the same.
+- If `old_scope` lies inside the old tree, the span is **left alone**. A relative one (a child's
+  `pub(super)`) reads the same where the tree sits now. An absolute one
+  (`pub(in crate::host::attachments)`) is already rewritten to `pub(in crate::split::attachments)` by the
+  callers' re-pointing on `master`, because rust-analyzer reports the module name inside it as a
+  reference (found by the contract commit: acceptance tests 12-13 are green on `master`). Writing it here
+  too would be a second edit of the same bytes, which `text::applied` refuses as an overlap.
 - If `old_scope` reaches outside the tree, the new scope is `old_scope.widened_to(new_module)`. Every module
   that could see it still can, and the new spelling is legal: `pub(super) fn materialize` in
   `host::attachments` becomes `pub(crate)` under `split`.
 - A span that `Scope::parse` cannot read is refused naming the file and line, the way `read_scope` refuses
   an item (`assemble.rs:197-204`).
 - An edit whose text is unchanged is dropped.
-- Each widening (not a pure translation) is a report line: the item is the identifier after the
+- Each widening is a report line: the item is the identifier after the
   declaration keyword, or the field name.
 
 `rebase::edits` keeps skipping visibilities when `travelling` is set (`rebase.rs:47-52`). This rule owns
@@ -256,28 +259,44 @@ Published with the wave-2 contract commit (the first push of this PR, not its de
 surface, new today:**
 
 - `backends::rust::item_move::members` (new module, declared `pub(crate) mod members;` in `item_move.rs`; `item_move` is a child of `backends::rust`, so every sibling module there reaches it). The four functions node 13 calls directly are `pub(crate)`: `members_of`, `widen_members`, `member_visibility_edit` and `outline::root_items`:
-  - `pub(in crate::backends::rust) struct Member { pub owner: String, pub name: String, pub position: serde_json::Value, pub visibility: String }`
-  - `pub(in crate::backends::rust) struct ReachedMember { pub member: Member, pub written_in: Vec<String>, pub lands_in: Vec<String>, pub users: Vec<Vec<String>> }`
-  - `pub(in crate::backends::rust) struct MemberWidening { pub edits: Vec<Edit>, pub report: Vec<VisibilityChange> }`
+  - `pub(crate) struct Member { pub(crate) owner: String, pub(crate) name: String, pub(crate) position: serde_json::Value, pub(crate) visibility: String }`
+  - `pub(crate) struct ReachedMember { pub(crate) member: Member, pub(crate) written_in: Vec<String>, pub(crate) lands_in: Vec<String>, pub(crate) users: Vec<Vec<String>> }`
+  - `pub(crate) struct MemberWidening { pub(crate) edits: Vec<Edit>, pub(crate) report: Vec<VisibilityChange> }` (`Default`, `PartialEq`)
   - `pub(crate) fn members_of(symbols: &Value, text: &str, starting_in: std::ops::RangeInclusive<u32>, inside: bool) -> Vec<Member>`
   - `pub(crate) fn widen_members(text: &str, reached: &[ReachedMember]) -> Result<MemberWidening>` (the piece `move-impl-members` consumes)
   - `pub(crate) fn member_visibility_edit(text: &str, member: &Member, to: &str) -> Result<Edit>`
 - `item_move.rs`:
   - `pub(super) struct Reach { pub(super) items: Vec<Item>, pub(super) moved_members: Vec<ReachedMember>, pub(super) kept_members: Vec<ReachedMember> }`
-  - `RustBackend::reached_by_the_move(&mut self, uri: &str, workspace: &Workspace<'_>, file: &str, source_text: &str, symbols: &Value, left: &[Item], run: &Run, source: &[String], destination: &[String]) -> Result<Reach>`, which replaces `reached_by_the_moved_code`
-  - `Moving.reached: &'a Reach`
+  - `RustBackend::move_reach(&mut self, uri: &str, workspace: &Workspace<'_>, source_text: &str, symbols: &Value, run: &Run, destination: &Destination) -> Result<Reach>`
+    (**published differently from the plan's `reached_by_the_move`**: `reach_of` and the planned name were
+    taken or too long for the one-line call that keeps `move_items` from growing, and nine parameters
+    fail `clippy::too_many_arguments`. `left` is read inside, the source module comes from the
+    workspace, and the destination is the `creation::Destination` `move_items` already holds). It
+    wraps `reached_by_the_moved_code`, which stays. Until milestone M4 it returns no members
+    (`// TODO(reshape-widen-same-crate)`), which is `master`'s behaviour.
+  - `Moving.reached: &'a Reach` (`assemble.rs` reads `moving.reached.items`; net zero lines)
 - `module_reparent::tree_reach` (new):
   - `pub(super) fn modules_to_survey(old_parent: &[String], new_parent: &[String]) -> Vec<Vec<String>>`
   - `pub(super) struct ReachedItem { pub(super) file: String, pub(super) module: Vec<String>, pub(super) item: Item }`
   - `RustBackend::reached_by_the_tree(&mut self, workspace: &Workspace<'_>, request: &Reparent, survey: &Survey) -> Result<Vec<ReachedItem>>`
-  - `pub(super) fn widenings(texts: &BTreeMap<String, String>, reached: &[ReachedItem], new_module: &[String]) -> Result<(Vec<(String, Edit)>, Vec<VisibilityChange>)>`
-- `module_reparent::tree_visibility` (new): `pub(super) fn respelled(texts: &BTreeMap<String, String>, request: &Reparent, survey: &Survey) -> Result<(Vec<(String, Edit)>, Vec<VisibilityChange>)>`; `Reparenting.reached: &'a [ReachedItem]`.
+  - `pub(super) type Widened = (Vec<(String, Edit)>, Vec<VisibilityChange>);` (the tuple, named, for `clippy::type_complexity`)
+  - `pub(super) fn widenings(texts: &BTreeMap<String, String>, reached: &[ReachedItem], new_module: &[String]) -> Result<Widened>`
+- `module_reparent::tree_visibility` (new): `pub(super) fn respelled(texts: &BTreeMap<String, String>, request: &Reparent, survey: &Survey) -> Result<Widened>`.
+  `Reparenting.reached: &'a [ReachedItem]` is **not** added by the contract commit: a field nothing reads
+  fails `dead_code`, so green adds it with the call (M6).
 - `apply.rs`: `pub(crate) fn remove_emptied_directories<'a>(root: &Path, vacated: impl IntoIterator<Item = &'a str>) -> Result<()>`.
-- Widened, visibility only: `item_move::outline::Item` to `pub(crate)`, the module to `pub(crate) mod outline;`, and the new `pub(crate) fn root_items(symbols: &Value, text: &str, outside: Option<&Run>) -> Vec<Item>` (split out of `left_behind`; called directly by `move-impl-members`)
-  and `rebase::visibility_spans` to `pub(in crate::backends::rust)`.
+- Widened, visibility only: `item_move::outline::{Item, Run}` (and their fields) to `pub(crate)`, the module to
+  `pub(crate) mod outline;`, and the new `pub(crate) fn root_items(symbols: &Value, text: &str, outside: Option<&Run>) -> Vec<Item>`,
+  **implemented** (split out of `left_behind`, which now delegates to it; called directly by
+  `move-impl-members`). `Run` is widened because `root_items` names it. `rebase::visibility_spans` is widened
+  by green with its first caller (M5), not here.
 - The registration edits of rule 7.
-- Failing tests: 1-15, 21-24 and 27-29 in "Acceptance tests" are red. 16-20 and 25-26 are green pins or
-  outline probes, as each says.
+- Failing tests: every test in "Acceptance tests" except 12, 13 and 20 is red; those three are green pins. 25 and 26 are red
+  until `members_of` exists (26's outline fixture is the one assumed for `struct Id(u32);`, marked
+  `TODO` to be replaced by the captured one at M3).
+- Unimplemented bodies are `todo!()` with `// TODO(reshape-widen-same-crate): implement`, and the new
+  modules carry a module-level `#![allow(dead_code)]` with a `TODO` naming the milestone that removes it
+  (nothing calls them before green wires them).
 
 ## Green wave
 
@@ -442,16 +461,18 @@ Names read as behaviour specifications. Unless marked, each is **red on `master`
    `attachments` calls `super::host_name()` and is reparented under `split`. The result is
    `pub(crate) fn host_name`, reported. *Red*: `E0603`.
 10. `widens_a_grandparents_private_item_but_not_one_of_an_ancestor_both_places_share`:
-    `app::a::b::host::attachments` → `app::a::split`, reaching private items of `b` (widened to `pub(in crate::a)`)
+    `app::a::b::host::attachments` → `app::a::split`, reaching private items of `b` (widened to the scope `a`, spelled `pub(super)` in `a::b`)
     and of `a` (untouched). *Red*: `E0603`.
 11. `widens_a_pub_super_item_of_the_moved_module_that_its_old_parent_names`: `pub(super) fn materialize` called as
     `attachments::materialize()` from `host` becomes `pub(crate)` under `split`, reported. *Red*: `E0603`.
 12. `respells_an_absolute_pub_in_path_that_points_into_the_moved_tree`:
     `pub(in crate::host::attachments) fn stage` in `attachments/staging.rs` becomes
-    `pub(in crate::split::attachments)`. *Red*: unresolved path in the visibility at the gate.
+    `pub(in crate::split::attachments)`. **Green pin** (found by the contract commit): the callers'
+    re-pointing already rewrites the path, since rust-analyzer reports the module name inside the
+    visibility as a reference. It guards rule 5 against writing the same bytes a second time.
 13. `leaves_a_pub_super_inside_the_moved_tree_as_written`: a child's `pub(super) fn stage` is byte-identical
-    after the move. *Red*: fails together with 12 in one fixture (the same tree carries both); green once
-    rule 5 lands.
+    after the move. **Green pin**: a relative visibility inside the tree means the same after the move, and
+    rule 5 must keep it that way.
 14. `removes_the_directories_the_move_emptied`: after `host::attachments` (with child `staging`) moves under
     `split`, `src/host/attachments/` and `src/host/` are gone and `src/` remains. *Red*: both directories
     are still on disk.
@@ -481,13 +502,14 @@ Names read as behaviour specifications. Unless marked, each is **red on `master`
     `#[allow(dead_code)] count: u32`, `pub(super) count: u32` widened to `pub(crate)`).
 25. `reads_the_fields_of_a_struct_and_the_members_of_an_inherent_impl_but_nothing_of_a_trait_impl_or_an_enum`.
 26. `a_tuple_struct_contributes_the_fields_the_outline_lists`. This is an **outline probe**: the fixture is
-    the outline rust-analyzer returns for `struct Id(u32);`, captured at M3. It is a green record of the
-    limit `feature/reshape/move-widen`'s tuple-field todo describes; if rust-analyzer lists `0`, the member
-    is surveyed like a named one and that todo narrows.
+    the outline rust-analyzer returns for `struct Id(u32);`, captured at M3 (the contract commit assumes a
+    struct symbol with no field children, marked `TODO`). It is red until `members_of` exists, then a green
+    record of the limit `feature/reshape/move-widen`'s tuple-field todo describes; if rust-analyzer lists
+    `0`, the member is surveyed like a named one and that todo narrows.
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/src/backends/rust/module_reparent/tree_visibility.rs` (`#[cfg(test)] mod tests`)
 
-27. `translates_a_scope_inside_the_tree_and_widens_one_that_reached_outside_it_until_legal`. *Red*: module missing.
+27. `widens_a_scope_that_reached_outside_the_tree_and_leaves_an_absolute_path_into_it_to_the_re_pointing` (renamed from the plan's `translates_a_scope_inside_the_tree_…`, which would have written the bytes the re-pointing writes). *Red*: `todo!()` in `respelled`.
 28. `leaves_pub_pub_crate_and_a_childs_pub_super_untouched_and_refuses_an_unreadable_visibility_naming_its_line`.
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/src/backends/rust/module_reparent/tree_reach.rs` (`#[cfg(test)] mod tests`)
@@ -558,7 +580,30 @@ overlay does not model directories.
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Contract commit (2026-10-09)
+
+- **Gates, scoped:** `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p
+  tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` are clean.
+- **Package baseline before this commit:** `./test -p tddy-code-restructuring` on commit 1 gave
+  1334 passed, 0 failed, 1 ignored (a doc-test that is `ignore` by design). No pre-existing failure.
+- **Live suite** `tests/same_crate_widening_acceptance.rs` (live rust-analyzer, 88 s): 13 red, 2 green.
+  - Red at the compile gate, each naming the error the rule removes: 1 (`E0616`), 2 (`E0616`),
+    3 (`E0624`), 4 (`E0624`), 5 (`E0451`), 7 (`E0616`), 8 (`E0616`), 9 (`E0603`), 10 (`E0603`),
+    11 (`E0603`).
+  - Red on assertion: 6 (no `surveying 1 member(s) of the types the move splits` progress line),
+    14 (`src/host/attachments` left on disk), 15 (`src/host/attachments/staging` left on disk).
+  - Green pins: 12 and 13. Rust-analyzer reports the module name inside `pub(in crate::host::attachments)`
+    as a reference, so the re-pointing already rewrites it on `master`. Rule 5 and test 27 were narrowed
+    to match.
+- **Unit tests** (`cargo test -p tddy-code-restructuring --lib`): 13 red, 1 green pin.
+  - Red at `todo!()`: 17, 18 (`remove_emptied_directories`); 21-26 (`members_of`, `widen_members`,
+    `member_visibility_edit`); 27-28 (`respelled`); 29 (`modules_to_survey`).
+  - Red on assertion: 16 (`src/host` left on disk after a rename), 19 (`src/split` left on disk after a
+    rollback).
+  - Green pin: 20.
+- **Registration:** 13 binaries added to `.config/rust-e2e.filterset` and 32 to the `rust-analyzer`
+  group, as rule 7 lists. `apply_tidy_acceptance` and `apply_compile_gate_acceptance` are in the e2e set
+  but not the group: they run `cargo`, not rust-analyzer.
 
 ## TODO
 
@@ -567,10 +612,11 @@ overlay does not model directories.
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-widen-same-crate.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create the draft-PR contract surface (commit 2)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
