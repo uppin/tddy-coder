@@ -40,6 +40,14 @@ mod item_path;
 mod module_reparent;
 mod nested_modules;
 mod prelude_shadow;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TODO(reshape-multi-seam-extract): `resolve` and `did_open` call this in the green phase"
+    )
+)]
+mod projection;
 mod readiness;
 mod relative_visibility;
 mod repoint_call;
@@ -481,6 +489,26 @@ pub struct RustBackend {
     claimed: Vec<(String, String)>,
     /// The documents this backend has opened and not yet closed. See [`documents`].
     opened: Vec<String>,
+    /// The files earlier operations of this run wrote, shown to the server before each later one.
+    /// See [`projection`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "TODO(reshape-multi-seam-extract): `resolve` and `did_open` call this in the green phase"
+        )
+    )]
+    projection: projection::PlanProjection,
+    /// The projected documents read for the operation in flight, as `(uri, text)`, waiting for its
+    /// first `did_open`.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "TODO(reshape-multi-seam-extract): `resolve` and `did_open` call this in the green phase"
+        )
+    )]
+    staged_projection: Vec<(String, String)>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
     /// Where the language server this backend starts itself is recorded, when a run asks for it.
@@ -536,6 +564,8 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            projection: projection::PlanProjection::default(),
+            staged_projection: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
@@ -628,6 +658,8 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            projection: projection::PlanProjection::default(),
+            staged_projection: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
