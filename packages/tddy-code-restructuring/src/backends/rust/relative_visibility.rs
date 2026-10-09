@@ -163,6 +163,7 @@ mod tests {
             visibility: visibility.to_string(),
             stranded_in: Vec::new(),
             reached_from_outside: false,
+            reached_from_production: false,
             referenced_in_impl_at: Vec::new(),
         }
     }

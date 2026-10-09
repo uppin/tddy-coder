@@ -159,6 +159,7 @@ mod tests {
             visibility: "pub".to_string(),
             stranded_in: Vec::new(),
             reached_from_outside: true,
+            reached_from_production: true,
             referenced_in_impl_at: Vec::new(),
         }
     }

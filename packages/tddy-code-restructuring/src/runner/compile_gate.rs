@@ -73,9 +73,9 @@ pub fn refuse_a_broken_baseline(
         options.wait_heartbeat,
     )? {
         None => Ok(()),
-        Some((checked, errors)) => {
-            Err(RestructureError::BaselineDoesNotCompile { checked, errors })
-        }
+        Some(Rejection {
+            checked, errors, ..
+        }) => Err(RestructureError::BaselineDoesNotCompile { checked, errors }),
     }
 }
 
@@ -122,7 +122,14 @@ pub fn refuse_a_broken_result(
     }
     let broken = match checked? {
         None => tidy_a_complete_run(root, options, (applied, total), &touched, &packages, cancel)?,
-        Some(broken) => Some(broken),
+        Some(rejection) => Some((
+            rejection.checked,
+            format!(
+                "{}{}",
+                untidied_note(&rejection.stderr, &touched),
+                rejection.errors
+            ),
+        )),
     };
     match broken {
         None => Ok(()),
@@ -140,6 +147,17 @@ pub fn refuse_a_broken_result(
             errors,
         }),
     }
+}
+
+/// What a failed result check says about the tidy it kept from running: that the written files were
+/// neither tidied nor formatted, and how many `unused import` warnings the failing check reported in
+/// them (`stderr` is the check's `short` output, `touched` the files the run wrote). One line ending
+/// in a newline, written ahead of the compiler's errors.
+///
+/// TODO(reshape-tidy-facades): implement — today it says nothing, as the gate always did.
+fn untidied_note(stderr: &str, touched: &BTreeSet<String>) -> String {
+    let _not_yet_counted = (stderr, touched);
+    String::new()
 }
 
 /// Tidy the tree of a run that applied **every** operation, returning the check and errors when
@@ -234,7 +252,7 @@ pub(super) fn failing_check(
     cancel: &CancellationToken,
     progress: &ProgressSink,
     wait_heartbeat: Duration,
-) -> Result<Option<(String, String)>> {
+) -> Result<Option<Rejection>> {
     if packages.is_empty() {
         return Ok(None);
     }
@@ -250,10 +268,19 @@ pub(super) fn failing_check(
     if output.succeeded {
         return Ok(None);
     }
-    Ok(Some((
-        described_check(packages),
-        compiler_errors(&output.stderr),
-    )))
+    Ok(Some(Rejection {
+        checked: described_check(packages),
+        errors: compiler_errors(&output.stderr),
+        stderr: output.stderr,
+    }))
+}
+
+/// Why a check failed: the check as a reader runs it, the compiler's errors, and everything the
+/// compiler wrote — which also carries its warnings.
+pub(super) struct Rejection {
+    pub(super) checked: String,
+    pub(super) errors: String,
+    pub(super) stderr: String,
 }
 
 /// What a finished `cargo check` said, on both streams.

@@ -10,8 +10,8 @@ mod harness;
 
 use harness::{
     a_move_of, a_workspace_holding_files, applying_a_plan_of, assert_compiles,
-    assert_compiles_with_its_tests, assert_lints_clean, performing, DESTINATION_MANIFEST,
-    SHARED_LIB, SHARED_MANIFEST, THREE_CRATES,
+    assert_compiles_with_its_tests, assert_lints_clean, checking_the_plan, performing,
+    DESTINATION_MANIFEST, SHARED_LIB, SHARED_MANIFEST, THREE_CRATES,
 };
 use tddy_code_restructuring::{Anchor, Reexport, RefactorKind, RefactorOp};
 
@@ -311,4 +311,171 @@ async fn a_test_binary_move_after_a_module_move_names_the_defining_crate() {
     assert!(workspace
         .read("crates/destination/tests/golden.rs")
         .starts_with("use destination::host_registry::one;\n"));
+}
+
+/// An origin whose root declares `observer` with `above` directly over its `mod` line.
+fn an_origin_declaring_the_observer_under(above: &str) -> harness::AFixtureWorkspace {
+    a_workspace_of(&[
+        ("crates/origin/Cargo.toml", ORIGIN_OVER_SHARED),
+        (
+            ORIGIN_LIB,
+            &format!(
+                "{above}pub mod observer;\n\npub fn boot() -> u32 {{\n    observer::one()\n}}\n"
+            ),
+        ),
+        (
+            "crates/origin/src/observer.rs",
+            "pub fn one() -> u32 {\n    1\n}\n",
+        ),
+        (DESTINATION_LIB, ""),
+    ])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moved_modules_doc_comment_leaves_the_origin_and_lands_on_the_destinations_declaration() {
+    // Given a module whose declaration carries a doc comment
+    let workspace =
+        an_origin_declaring_the_observer_under("/// The observer, spawned per session.\n");
+
+    // When it moves into `destination` with a facade
+    performing(
+        &workspace,
+        a_glob_move_of("crates/origin/src/observer.rs", "observer"),
+    )
+    .await;
+
+    // Then the doc comment is on the destination's declaration and nowhere in the origin
+    assert_eq!(
+        (
+            workspace.read(ORIGIN_LIB).contains("The observer"),
+            workspace
+                .read(DESTINATION_LIB)
+                .contains("/// The observer, spawned per session.\npub mod observer;\n"),
+        ),
+        (false, true),
+        "origin:\n{}\ndestination:\n{}",
+        workspace.read(ORIGIN_LIB),
+        workspace.read(DESTINATION_LIB)
+    );
+    assert_compiles(&workspace);
+}
+
+/// An origin whose root holds two `use` runs with `pub mod beta;` the only line between them, and
+/// `alpha` declared above both. Every run is rustfmt-sorted; joined, they would sort differently.
+fn an_origin_whose_use_runs_beta_separates() -> harness::AFixtureWorkspace {
+    a_workspace_of(&[
+        ("crates/origin/Cargo.toml", ORIGIN_OVER_SHARED),
+        (
+            ORIGIN_LIB,
+            "pub mod alpha;\n\npub use std::cell::Cell;\npub use std::rc::Rc;\npub mod beta;\n\
+             pub use std::collections::HashMap;\npub use std::sync::Arc;\n\n\
+             pub fn boot() -> u32 {\n    alpha::one() + beta::two()\n}\n",
+        ),
+        (
+            "crates/origin/src/alpha.rs",
+            "pub fn one() -> u32 {\n    1\n}\n",
+        ),
+        (
+            "crates/origin/src/beta.rs",
+            "pub fn two() -> u32 {\n    2\n}\n",
+        ),
+        (DESTINATION_LIB, ""),
+    ])
+}
+
+/// The two `use` runs of [`an_origin_whose_use_runs_beta_separates`], as they stand when kept apart.
+const THE_USE_RUNS_KEPT_APART: &str =
+    "pub use std::cell::Cell;\npub use std::rc::Rc;\n\npub use std::collections::HashMap;\n\
+     pub use std::sync::Arc;\n";
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_that_removes_the_only_line_between_two_use_runs_leaves_the_origins_other_lines_where_they_were(
+) {
+    // Given two `use` runs that `beta`'s declaration alone separates
+    let workspace = an_origin_whose_use_runs_beta_separates();
+
+    // When `alpha` and then `beta` move with one facade, so `beta`'s line goes without a replacement
+    let summary = applying_a_plan_of(
+        &workspace,
+        &[
+            a_glob_move_of("crates/origin/src/alpha.rs", "alpha"),
+            a_glob_move_of("crates/origin/src/beta.rs", "beta"),
+        ],
+    )
+    .await;
+
+    // Then the facade names both, and the runs keep their lines in their order
+    assert_eq!(summary.map(|run| run.applied), Ok(2));
+    let origin = workspace.read(ORIGIN_LIB);
+    assert!(
+        origin.contains("pub use destination::{alpha, beta};\n")
+            && origin.contains(THE_USE_RUNS_KEPT_APART),
+        "the origin's root was re-sorted:\n{origin}"
+    );
+    assert_lints_clean(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_facade_that_replaces_a_declaration_between_two_use_runs_leaves_the_run_below_in_place() {
+    // Given two `use` runs that `beta`'s declaration alone separates
+    let workspace = an_origin_whose_use_runs_beta_separates();
+
+    // When `beta` alone moves with a facade, which takes the place of its declaration, through an
+    // apply that formats what it wrote
+    let summary = applying_a_plan_of(
+        &workspace,
+        &[a_glob_move_of("crates/origin/src/beta.rs", "beta")],
+    )
+    .await;
+
+    // Then the run below the facade is still a run of its own
+    assert_eq!(summary.map(|run| run.applied), Ok(1));
+    let origin = workspace.read(ORIGIN_LIB);
+    assert!(
+        origin.contains(
+            "pub use std::rc::Rc;\n\npub use std::collections::HashMap;\npub use std::sync::Arc;\n"
+        ),
+        "the run below the facade was merged into the one above:\n{origin}"
+    );
+    assert_lints_clean(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_moved_declaration_carrying_a_cfg_attribute_is_refused_by_check_and_by_apply_and_nothing_is_written(
+) {
+    // Given a module declared under an attribute a move can neither keep nor drop
+    let workspace =
+        an_origin_declaring_the_observer_under("#[cfg(not(feature = \"no-observer\"))]\n");
+    let the_origin_before = workspace.read(ORIGIN_LIB);
+    let the_plan = [a_glob_move_of("crates/origin/src/observer.rs", "observer")];
+
+    // When the plan is checked, then applied
+    let found = checking_the_plan(&workspace, workspace.a_plan_of(&the_plan), false).await;
+    let applied = applying_a_plan_of(&workspace, &the_plan).await;
+
+    // Then both refuse it naming the attribute, and the tree is as it was
+    let names_the_attribute = |text: &str| {
+        text.contains(
+            "`mod observer;` in crates/origin/src/lib.rs carries `#[cfg(not(feature = \"no-observer\"))]`",
+        )
+    };
+    assert!(
+        found
+            .as_ref()
+            .is_ok_and(|findings| findings.iter().any(|finding| names_the_attribute(finding))),
+        "the static check did not refuse it: {found:?}"
+    );
+    assert!(
+        applied
+            .as_ref()
+            .is_err_and(|refusal| names_the_attribute(refusal)),
+        "the apply did not refuse it: {applied:?}"
+    );
+    assert_eq!(
+        (
+            workspace.read(ORIGIN_LIB),
+            workspace.holds("crates/destination/src/observer.rs")
+        ),
+        (the_origin_before, false)
+    );
 }

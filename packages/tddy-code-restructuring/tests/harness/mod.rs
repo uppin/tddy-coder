@@ -1406,6 +1406,23 @@ pub fn a_workspace_whose_test_binary_reads_a_file_beside_it() -> AFixtureWorkspa
     .tracked_by_git()
 }
 
+/// [`a_workspace_whose_test_binary_reads_a_file_beside_it`], with an import nothing reads: the moved
+/// binary fails to compile and also carries one `unused import` the tidy would have removed.
+pub fn a_workspace_whose_test_binary_reads_a_file_beside_it_and_carries_an_unused_import(
+) -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Reads its expected output from a file beside it, and imports what it never uses.",
+        "use std::collections::HashMap;",
+        "",
+        "#[test]",
+        "fn matches_the_golden_output() {",
+        "    assert_eq!(include_str!(\"golden/expected.txt\"), \"2\\n\");",
+        "}",
+    ])
+    .writing("crates/origin/tests/golden/expected.txt", "2\n")
+    .tracked_by_git()
+}
+
 /// A test binary that needs nothing beside it, so moving it leaves a tree that still compiles.
 pub fn a_workspace_whose_test_binary_stands_alone() -> AFixtureWorkspace {
     a_workspace_with_a_test_binary(&[
@@ -3008,4 +3025,118 @@ pub async fn resolving_in_order(
     })
     .await
     .expect("the blocking half of the resolution joins")
+}
+
+/// The module the facade fixtures below split.
+pub const PARENT_MODULE: &str = "crates/origin/src/parent.rs";
+
+/// A crate whose `parent` module holds two documented, derived `pub struct`s the crate root
+/// re-exports publicly — the shape `journal.rs` / `journal/group.rs` had when `#live-plan 10/15`
+/// split them. Lines 7–17 are the two structs.
+pub fn a_crate_whose_root_re_exports_documented_pub_items_of_parent() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "//! Re-exports what `parent` declares.",
+                "",
+                "pub mod parent;",
+                "",
+                "pub use parent::{OpenGroup, PreImage};",
+            ]),
+        )
+        .writing(
+            PARENT_MODULE,
+            &source(&[
+                "//! A journal and its groups.",
+                "",
+                "pub fn record() -> u32 {",
+                "    1",
+                "}",
+                "",
+                "/// The bytes of one file before a group touched it.",
+                "#[derive(Debug, Clone)]",
+                "pub struct PreImage {",
+                "    pub path: String,",
+                "}",
+                "",
+                "/// A group that has not finished.",
+                "#[derive(Debug)]",
+                "pub struct OpenGroup {",
+                "    pub members: Vec<usize>,",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// A crate whose `parent` module holds `count`, which `total` calls, and `statements`, a `pub fn`
+/// nothing calls. Lines 3–9 are `count` and `statements`.
+pub fn a_crate_whose_parent_holds_an_unreferenced_pub_fn() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&["//! Holds `parent`.", "", "pub mod parent;"]),
+        )
+        .writing(
+            PARENT_MODULE,
+            &source(&[
+                "//! Counts and statements.",
+                "",
+                "pub fn count() -> usize {",
+                "    3",
+                "}",
+                "",
+                "pub fn statements() -> Vec<u32> {",
+                "    vec![1, 2]",
+                "}",
+                "",
+                "pub fn total() -> usize {",
+                "    count() + 1",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
+}
+
+/// A crate whose `parent` module holds `part`, which production code calls, and `checked`, which
+/// only `parent`'s own test module calls. Lines 3–9 are `part` and `checked`.
+pub fn a_crate_whose_parent_tests_alone_call_a_helper() -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&["//! Holds `parent`.", "", "pub mod parent;"]),
+        )
+        .writing(
+            PARENT_MODULE,
+            &source(&[
+                "//! A total and its parts.",
+                "",
+                "pub(crate) fn part() -> u32 {",
+                "    2",
+                "}",
+                "",
+                "pub(crate) fn checked() -> u32 {",
+                "    1",
+                "}",
+                "",
+                "pub fn total() -> u32 {",
+                "    part() + 1",
+                "}",
+                "",
+                "#[cfg(test)]",
+                "mod tests {",
+                "    use super::*;",
+                "",
+                "    #[test]",
+                "    fn checks() {",
+                "        assert_eq!(checked(), 1);",
+                "    }",
+                "}",
+            ]),
+        )
+        .tracked_by_git()
 }
