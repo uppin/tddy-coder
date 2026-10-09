@@ -37,6 +37,7 @@ mod escaping_types;
     reason = "TODO(reshape-extract-method-clean): `check` and `assisted_edit` call this in the green phase"
 )]
 mod extracted_fn;
+mod impl_move;
 mod impl_seam;
 mod imports;
 mod inline_paths;
@@ -60,6 +61,7 @@ mod relative_visibility;
 mod repoint_call;
 mod repoint_facade;
 mod retarget_impl;
+mod same_crate_dispatch;
 mod selection;
 mod signature;
 mod signature_rewrites;
@@ -88,7 +90,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 26] = [
+const SUPPORTED: [RefactorKind; 27] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -115,6 +117,7 @@ const SUPPORTED: [RefactorKind; 26] = [
     RefactorKind::RepointCall,
     RefactorKind::RepointFacadeImports,
     RefactorKind::ReadFieldsThrough,
+    RefactorKind::MoveImplMembers,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1181,11 +1184,8 @@ impl LanguageBackend for RustBackend {
     /// carried forward, so a seam colliding with an earlier seam's new module is caught as well as one
     /// colliding with a declaration that was always there.
     fn check(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<String>> {
-        if op.op == RefactorKind::MoveItem {
-            return item_move::findings(op, workspace);
-        }
-        if op.op == RefactorKind::ReparentModule {
-            return module_reparent::findings(op, workspace);
+        if same_crate_dispatch::handles(op.op) {
+            return same_crate_dispatch::findings(op, workspace);
         }
         if op.op == RefactorKind::RetargetImpl {
             return retarget_impl::findings(op, workspace);
@@ -1332,16 +1332,10 @@ impl RustBackend {
             return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
         }
 
-        // Moves items between modules of one crate: authored here and informed by the server, like
-        // the cross-crate moves, and opens the document for itself.
-        if op.op == RefactorKind::MoveItem {
-            return self.move_items(op, workspace);
-        }
-
-        // Moves a module and its directory under another parent of the same crate, authored here
-        // the same way and opening the parent's document for itself.
-        if op.op == RefactorKind::ReparentModule {
-            return self.reparent_module(op, workspace);
+        // Moves within one crate — items, a module, or members of an `impl` — authored here and
+        // informed by the server, each opening the documents it needs for itself.
+        if same_crate_dispatch::handles(op.op) {
+            return self.same_crate_move(op, workspace);
         }
 
         // Rebinds the `self` a range reads to a local inserted before it, authored here and informed

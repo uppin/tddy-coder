@@ -166,6 +166,13 @@ pub enum RefactorKind {
     /// no `self`, so `extract_method` writes a free function. Anchored on a range; `name` is the
     /// binding, `expr` its value.
     ReadFieldsThrough,
+    /// Moves a contiguous run of members of one inherent `impl T` into an `impl T` block of another
+    /// module of the **same crate**: one the members join when it has exactly one block of the same
+    /// header, a new block otherwise. Anchored by `items` (or a single `item`) on the members;
+    /// `to` is the destination module, or with `name` its parent (the module is created first, as
+    /// `move_item` creates one). No caller is edited — a method resolves through its type wherever
+    /// its block is written — and what the split puts out of reach is widened, each change reported.
+    MoveImplMembers,
 }
 
 impl RefactorKind {
