@@ -3,6 +3,8 @@
 **Category:** Future enhancement (a decomposition deferred with the developer's consent)
 **Source:** the `2026-10-05-sharpen-move-fidelity` change (#589, `#sharpen` 2/8), found by the
 `/pr-wrap` file-length gate
+**Claimed by:** #612 — `#reshape 17/24`
+**Lands after:** #609
 
 ## What crossed the line
 

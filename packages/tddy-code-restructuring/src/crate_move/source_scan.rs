@@ -377,6 +377,13 @@ pub(crate) fn attached_trivia_starts_at(text: &str, line: u32) -> u32 {
 mod test_declarations;
 pub(crate) use test_declarations::{test_declarations, TestDeclaration};
 
+mod test_only;
+#[allow(
+    unused_imports,
+    reason = "TODO(reshape-oversized-files): implement — `runner::budget::production_lines` reads the spans"
+)]
+pub(crate) use test_only::test_only_spans;
+
 #[cfg(test)]
 mod tests {
     use super::*;

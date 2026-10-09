@@ -2,6 +2,8 @@
 
 **Category:** Deferred decomposition
 **Source:** the `/pr-wrap` file-length gate on #498 (`#carve` 4/10 `test-homes`)
+**Claimed by:** #612 — `#reshape 17/24`
+**Lands after:** #609
 **Deferred with explicit developer consent on 2026-09-19.**
 
 #498 created `packages/tddy-code-restructuring/src/crate_move/test_binary.rs` at **966 production
