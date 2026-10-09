@@ -490,12 +490,16 @@ fn a_cluster_member_reaching_the_module_that_anchors_the_cluster_in_a_body_is_no
     );
 }
 
-/// A body path to an item of the crate root is no finding.
+/// A body path to an item of the crate root is the finding `apply` refuses on (`#reshape` 8/19).
 ///
-/// `crate::helper()` is inside no module, so there is no module that "stays behind" for the
-/// finding to name; the header pass owns root items.
+/// `crate::helper()` is inside no module, so the body-path finding has no module to name — but the
+/// destination would still name `origin`, and `apply`'s cycle refusal reads every path
+/// (`move_paths_acceptance::a_body_path_to_an_item_the_origin_defines_is_an_edge_back_and_refuses_the_move`).
+/// The stranded-sibling finding reads every path too, and since a root item is no module that could
+/// travel in `also`, its remedy does not suggest `move_cluster_to_crate`.
 #[test]
-fn a_body_path_to_an_item_at_the_crate_root_is_no_finding() {
+fn a_body_path_to_an_item_at_the_crate_root_is_reported_as_apply_refuses_it_without_suggesting_a_cluster(
+) {
     // Given a move of `workspace_session`, which calls `crate::helper()`, defined in `origin`'s
     // `lib.rs` and in no module
     let workspace = an_origin_holding(&[
@@ -513,10 +517,12 @@ fn a_body_path_to_an_item_at_the_crate_root_is_no_finding() {
     // When the plan is checked
     let findings = unrunnable_in(workspace.path(), &plan);
 
-    // Then there is nothing to report
+    // Then the root item is the one finding, and its remedy is not a cluster
     assert!(
-        findings.is_empty(),
-        "a body path to a crate-root item was reported: {findings:?}"
+        findings.len() == 1
+            && findings[0].contains("origin::helper")
+            && !findings[0].contains("move_cluster_to_crate"),
+        "the crate-root item was not reported with its own remedy: {findings:?}"
     );
 }
 

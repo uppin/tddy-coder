@@ -17,10 +17,12 @@
 mod harness;
 
 use harness::{
-    a_cluster_move_of, a_rename_in, a_workspace_whose_module_has_a_directory_child,
-    a_workspace_whose_modules_reference_each_other,
+    a_cluster_move_of, a_cluster_move_of_the_service_members, a_rename_in,
+    a_service_whose_members_name_each_other_through_grouped_uses,
+    a_workspace_whose_module_has_a_directory_child, a_workspace_whose_modules_reference_each_other,
     a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive, applying_a_plan_of,
-    assert_compiles, assert_compiles_with_its_tests, performing, refusal_from, A_DIRECTORY_CHILD,
+    assert_compiles, assert_compiles_with_its_tests, checking_deep_keeping_the_account, performing,
+    refusal_from, A_DIRECTORY_CHILD,
 };
 use tddy_code_restructuring::{Anchor, Reexport};
 
@@ -196,4 +198,33 @@ async fn a_cluster_naming_a_child_in_also_nests_it_and_every_crate_compiles() {
         (Ok(1), true, false, false)
     );
     assert_compiles_with_its_tests(&workspace);
+}
+
+/// Test 24 (`#reshape` 8/19) — the `#carve` 21 R6 shape moves with no hand edit before it: a grouped
+/// `use` whose leaves land on different qualifiers, a path through the service's glob facade to a
+/// co-moving member, and a `pub(in crate::connection_service)` function. `check --deep` finds
+/// nothing, the apply runs, and every crate compiles.
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_a_cluster_whose_members_name_each_other_through_grouped_uses_and_a_glob_facade_and_the_workspace_compiles(
+) {
+    // Given the three service members
+    let workspace = a_service_whose_members_name_each_other_through_grouped_uses();
+    let cluster = a_cluster_move_of_the_service_members(&[
+        "agent_host_callbacks",
+        "attached_initial_prompt",
+        "seed_codebase",
+        "seeded_clone_guard",
+    ]);
+
+    // When the plan is checked deep and then applied
+    let (checked, _account) =
+        checking_deep_keeping_the_account(&workspace, std::slice::from_ref(&cluster)).await;
+    let applied = applying_a_plan_of(&workspace, &[cluster]).await;
+
+    // Then the check found nothing, the one operation applied, and what landed compiles
+    assert_eq!(
+        (checked, applied.map(|run| run.applied)),
+        (Ok(Vec::new()), Ok(1))
+    );
+    assert_compiles(&workspace);
 }

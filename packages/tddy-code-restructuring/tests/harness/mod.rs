@@ -3488,3 +3488,58 @@ pub fn a_workspace_whose_moved_fn_returns_a_type_no_path_names() -> AFixtureWork
         )
         .tracked_by_git()
 }
+
+/// The `#carve` 21 R6 shape (`#reshape` 8/19): `origin`'s `connection_service` holds three members
+/// that name each other through one grouped `use`, through the service's `pub use seed_codebase::*;`
+/// glob, and through a `pub(in crate::connection_service)` function — the three shapes that were
+/// hand-edited before the engine would move them.
+pub fn a_service_whose_members_name_each_other_through_grouped_uses() -> AFixtureWorkspace {
+    a_workspace_holding_files(&[
+        ("Cargo.toml", THREE_CRATES),
+        ("crates/shared/Cargo.toml", SHARED_MANIFEST),
+        ("crates/shared/src/lib.rs", SHARED_LIB),
+        ("crates/origin/Cargo.toml", ORIGIN_OVER_BOTH),
+        ("crates/origin/src/lib.rs", "//! The origin.\n\npub mod connection_service;\n"),
+        (
+            "crates/origin/src/connection_service.rs",
+            "//! The service.\n\npub mod agent_host_callbacks;\npub mod attached_initial_prompt;\n\
+             pub mod seed_codebase;\npub mod seeded_clone_guard;\n\npub use seed_codebase::*;\n",
+        ),
+        (
+            "crates/origin/src/connection_service/agent_host_callbacks.rs",
+            "use crate::connection_service::attached_initial_prompt;\n\
+             use crate::connection_service::{seed_codebase, seeded_clone_guard, SeededAgentClones};\n\n\
+             pub fn callbacks(clones: &dyn SeededAgentClones) -> (u32, seeded_clone_guard::Guard) {\n    \
+             (\n        seed_codebase::seed() + clones.count() + attached_initial_prompt::prompt(),\n        \
+             seeded_clone_guard::Guard,\n    )\n}\n",
+        ),
+        (
+            "crates/origin/src/connection_service/attached_initial_prompt.rs",
+            "pub(in crate::connection_service) fn prompt() -> u32 {\n    2\n}\n",
+        ),
+        (
+            "crates/origin/src/connection_service/seed_codebase.rs",
+            "pub trait SeededAgentClones {\n    fn count(&self) -> u32;\n}\n\n\
+             pub fn seed() -> u32 {\n    1\n}\n",
+        ),
+        (
+            "crates/origin/src/connection_service/seeded_clone_guard.rs",
+            "pub struct Guard;\n",
+        ),
+        ("crates/destination/Cargo.toml", DESTINATION_MANIFEST),
+        ("crates/destination/src/lib.rs", "//! The destination.\n"),
+    ])
+}
+
+/// One `move_cluster_to_crate` of `members` of `connection_service`, leaving a facade.
+pub fn a_cluster_move_of_the_service_members(members: &[&str]) -> RefactorOp {
+    let mut anchors = members.iter().map(|member| Anchor::Symbol {
+        file: format!("crates/origin/src/connection_service/{member}.rs"),
+        path: format!("connection_service::{member}"),
+    });
+    RefactorOp {
+        anchor: anchors.next().expect("a cluster names at least one module"),
+        also: anchors.collect(),
+        ..a_cluster_move_of(&[members[0]], Some(Reexport::Glob))
+    }
+}
