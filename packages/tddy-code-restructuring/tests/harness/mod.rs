@@ -2749,3 +2749,263 @@ pub async fn what_the_server_answers(
     }
     answers
 }
+
+// ---------------------------------------------------------------------------------------------
+// Multi-seam plans (`#reshape` 2): several `extract_module`s cut out of one file, each later seam
+// reaching what an earlier one wrote.
+// ---------------------------------------------------------------------------------------------
+
+/// A crate whose module `outer` holds `PtyHandle`, whose `send_input` calls the private
+/// `strip_resize` below it — the shape of gap J of the 2026-09-24 apply-gaps record.
+///
+/// Lines 3–11 are the first seam (`PtyHandle` and its `impl`); lines 13–15 the second
+/// (`strip_resize`). After the first, `pty_handle.rs` reaches `strip_resize` in the parent.
+pub fn a_crate_whose_pty_handle_calls_strip_resize() -> AFixtureWorkspace {
+    a_crate_whose_outer_module_reads(&[
+        "//! `PtyHandle::send_input` calls `strip_resize`; each is moved into a module of its own.",
+        "",
+        "pub(crate) struct PtyHandle {",
+        "    pub(crate) data: Vec<u8>,",
+        "}",
+        "",
+        "impl PtyHandle {",
+        "    pub(crate) fn send_input(&self) -> usize {",
+        "        strip_resize(&self.data)",
+        "    }",
+        "}",
+        "",
+        "fn strip_resize(data: &[u8]) -> usize {",
+        "    data.len()",
+        "}",
+        "",
+        "pub(crate) fn total() -> usize {",
+        "    PtyHandle { data: vec![1, 2] }.send_input()",
+        "}",
+    ])
+}
+
+/// The lines of [`a_crate_whose_pty_handle_calls_strip_resize`]'s first seam.
+pub const THE_PTY_HANDLE_AND_ITS_IMPL: std::ops::RangeInclusive<u32> = 3..=11;
+/// The lines of [`a_crate_whose_pty_handle_calls_strip_resize`]'s second seam.
+pub const STRIP_RESIZE: std::ops::RangeInclusive<u32> = 13..=15;
+/// The file the first seam of either pty fixture writes.
+pub const THE_PTY_HANDLE_FILE: &str = "crates/origin/src/outer/pty_handle.rs";
+/// The file the `strip_resize` seam of either pty fixture writes.
+pub const THE_RESIZE_FILE: &str = "crates/origin/src/outer/resize.rs";
+
+/// A crate whose module `outer` holds the private `relative_from` and, after it, `moving`, which
+/// calls it bare — the shape of the `replacement` / `relative_from` row of the 2026-09-18 record.
+///
+/// The first seam's assist rewrites the call in the parent to `paths::relative_from`, so the second
+/// seam carries a path through a sibling module, which the import pass binds as `use super::paths;`.
+///
+/// Lines 3–5 are the first seam (`relative_from`); lines 7–9 the second (`moving`).
+pub fn a_crate_whose_mover_calls_relative_from() -> AFixtureWorkspace {
+    a_crate_whose_outer_module_reads(&[
+        "//! `moving` calls `relative_from`; each is moved into a module of its own.",
+        "",
+        "fn relative_from(base: &str, path: &str) -> usize {",
+        "    path.len() - base.len()",
+        "}",
+        "",
+        "pub(crate) fn moving(path: &str) -> usize {",
+        "    relative_from(\"/\", path)",
+        "}",
+        "",
+        "pub(crate) fn total() -> usize {",
+        "    moving(\"/ab\")",
+        "}",
+    ])
+}
+
+/// The lines of [`a_crate_whose_mover_calls_relative_from`]'s first seam.
+pub const RELATIVE_FROM: std::ops::RangeInclusive<u32> = 3..=5;
+/// The lines of [`a_crate_whose_mover_calls_relative_from`]'s second seam.
+pub const MOVING: std::ops::RangeInclusive<u32> = 7..=9;
+/// The file the second seam of [`a_crate_whose_mover_calls_relative_from`] writes.
+pub const THE_MOVING_FILES_FILE: &str = "crates/origin/src/outer/moving_files.rs";
+
+/// Three seams that reach one another, as `#carve` 3's eight did: `PtyHandle` (lines 3–11) and
+/// `refusals` (lines 13–15) both call `strip_resize` (lines 17–19). The parent keeps a test module
+/// that reaches `total` through `use super::*`.
+///
+/// No later seam's lines name what an earlier seam moves: the assist rewrites such a line in the
+/// parent (`&PtyHandle` → `&pty_handle::PtyHandle`), and the position ledger then refuses the later
+/// anchor as fallen inside text an earlier operation removed.
+pub fn a_crate_cut_three_ways_like_carve_3() -> AFixtureWorkspace {
+    a_crate_whose_outer_module_reads(&[
+        "//! Three seams reach one another, as `#carve` 3's eight did.",
+        "",
+        "pub(crate) struct PtyHandle {",
+        "    pub(crate) data: Vec<u8>,",
+        "}",
+        "",
+        "impl PtyHandle {",
+        "    pub(crate) fn send_input(&self) -> usize {",
+        "        strip_resize(&self.data)",
+        "    }",
+        "}",
+        "",
+        "pub(crate) fn refusals(data: &[u8]) -> bool {",
+        "    strip_resize(data) > 4",
+        "}",
+        "",
+        "fn strip_resize(data: &[u8]) -> usize {",
+        "    data.len()",
+        "}",
+        "",
+        "pub(crate) fn total() -> usize {",
+        "    let handle = PtyHandle { data: vec![1, 2] };",
+        "    handle.send_input() + usize::from(refusals(&handle.data))",
+        "}",
+        "",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    use super::*;",
+        "",
+        "    #[test]",
+        "    fn totals_the_input() {",
+        "        assert_eq!(total(), 2);",
+        "    }",
+        "}",
+    ])
+}
+
+/// The lines of [`a_crate_cut_three_ways_like_carve_3`]'s `refusals` seam.
+pub const THE_REFUSALS: std::ops::RangeInclusive<u32> = 13..=15;
+/// The lines of [`a_crate_cut_three_ways_like_carve_3`]'s `strip_resize` seam.
+pub const STRIP_RESIZE_AFTER_THE_REFUSALS: std::ops::RangeInclusive<u32> = 17..=19;
+
+fn a_crate_whose_outer_module_reads(lines: &[&str]) -> AFixtureWorkspace {
+    a_workspace_of(&["origin"])
+        .writing("crates/origin/Cargo.toml", &a_manifest_for("origin", ""))
+        .writing(
+            ORIGIN_LIB,
+            &source(&[
+                "mod outer;",
+                "",
+                "pub fn total() -> usize {",
+                "    outer::total()",
+                "}",
+            ]),
+        )
+        .writing(OUTER_MODULE, &source(lines))
+        .tracked_by_git()
+}
+
+/// `extract_module` of `lines` of [`OUTER_MODULE`] into a file of its own named `name`, with the
+/// facade `reexport` asks for.
+pub fn a_seam_of_outer(
+    fixture: &AFixtureWorkspace,
+    lines: std::ops::RangeInclusive<u32>,
+    name: &str,
+    reexport: Reexport,
+) -> RefactorOp {
+    let mut seam = an_extract_module_of(fixture, OUTER_MODULE, lines, name);
+    seam.to_file = true;
+    seam.reexport = Some(reexport);
+    seam
+}
+
+/// The `visibility:` lines of a run's account, in the order it printed them.
+pub fn the_widenings_in(account: &[String]) -> Vec<String> {
+    account
+        .iter()
+        .filter(|line| line.trim_start().starts_with("visibility:"))
+        .cloned()
+        .collect()
+}
+
+/// An `apply` of `ops`, through the runner against a live rust-analyzer, with the account it gave.
+pub async fn applying_keeping_the_account(
+    fixture: &AFixtureWorkspace,
+    ops: &[RefactorOp],
+    dry_run: bool,
+) -> (
+    Result<tddy_code_restructuring::runner::RunSummary, String>,
+    Vec<String>,
+) {
+    let (sink, heard) = a_sink_that_keeps_what_it_hears();
+    let plan = fixture.a_plan_of(ops);
+    let applied = applying_the_plan_with(fixture, plan, |options| {
+        options.dry_run = dry_run;
+        options.account = sink;
+    })
+    .await;
+    let account = heard.lock().expect("the account is readable").clone();
+    (applied, account)
+}
+
+/// A `check --deep` of `ops`, through the runner against a live rust-analyzer, with the account it
+/// gave beside its findings.
+pub async fn checking_deep_keeping_the_account(
+    fixture: &AFixtureWorkspace,
+    ops: &[RefactorOp],
+) -> (Result<Vec<String>, String>, Vec<String>) {
+    let (sink, heard) = a_sink_that_keeps_what_it_hears();
+    let plan = fixture.a_plan_of(ops);
+    let found = checking_the_plan_with(fixture, plan, true, |options| {
+        options.account = sink;
+    })
+    .await;
+    let account = heard.lock().expect("the account is readable").clone();
+    (found, account)
+}
+
+/// What a run that writes nothing would leave in each file: `ops` resolved one after another through
+/// one backend, one position ledger and one overlay — exactly as `check --deep` and `apply --dry-run`
+/// resolve a plan — against a live rust-analyzer.
+pub struct ResolvedInOrder {
+    root: PathBuf,
+    overlay: Overlay,
+}
+
+impl ResolvedInOrder {
+    /// The projected text of `relative`: the overlay's when an operation wrote it, the disk's else.
+    pub fn text(&self, relative: &str) -> String {
+        self.overlay
+            .read(&self.root, Path::new(relative))
+            .unwrap_or_else(|error| panic!("reading the projected {relative}: {error}"))
+    }
+}
+
+/// See [`ResolvedInOrder`]. Every anchor must already be in snapshot coordinates (a range).
+pub async fn resolving_in_order(
+    fixture: &AFixtureWorkspace,
+    ops: &[RefactorOp],
+) -> Result<ResolvedInOrder, String> {
+    let _serialized = ONE_SERVER_AT_A_TIME.lock().await;
+    let root = fixture.path().to_path_buf();
+    let client = a_rust_analyzer_rooted_at(&root).await;
+    let cancel = a_token_cancelled_after(A_WAIT_A_TEST_CAN_OUTLAST);
+    let ops = ops.to_vec();
+
+    tokio::task::spawn_blocking(move || {
+        let mut backend = tddy_code_restructuring::backends::rust::RustBackend::from_lsp_client(
+            client,
+            Some(cancel),
+            discard(),
+        );
+        let mut ledger = tddy_code_restructuring::PositionLedger::new();
+        let mut overlay = Overlay::default();
+        for op in &ops {
+            let at = ledger.translate_op(op).map_err(|error| error.to_string())?;
+            let resolution = backend
+                .resolve(
+                    &at,
+                    &Workspace {
+                        root: &root,
+                        overlay: &overlay,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+            ledger.record(&resolution.edit);
+            overlay
+                .record(&root, &resolution.edit)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(ResolvedInOrder { root, overlay })
+    })
+    .await
+    .expect("the blocking half of the resolution joins")
+}

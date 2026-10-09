@@ -6,7 +6,7 @@
 use crate::crate_move::{self, Survey};
 use crate::plan::RefactorKind;
 use crate::registry::{BackendRegistry, Workspace};
-use crate::{Overlay, PositionLedger, Result};
+use crate::{Overlay, PositionLedger, Result, VisibilityChange};
 use std::path::Path;
 
 #[derive(Default)]
@@ -24,6 +24,12 @@ pub(super) struct Rehearsed {
     /// What the operation had to say beyond its edit, in the order it said it: for
     /// `repoint_facade_imports`, one line per path it would rewrite.
     pub(super) notes: Vec<String>,
+    /// Every visibility the operation would widen, which `apply` reports and a deep check must too.
+    #[expect(
+        dead_code,
+        reason = "TODO(reshape-multi-seam-extract): `rehearsed_lines` reads it in the green phase"
+    )]
+    pub(super) widenings: Vec<VisibilityChange>,
 }
 
 impl Rehearsal {
@@ -45,6 +51,7 @@ impl Rehearsal {
                     survey: None,
                     refusal: Some(refusal.to_string()),
                     notes: Vec::new(),
+                    widenings: Vec::new(),
                 })
             }
         };
@@ -67,12 +74,15 @@ impl Rehearsal {
                     survey,
                     refusal: None,
                     notes: resolved.notes,
+                    // TODO(reshape-multi-seam-extract): carry `resolved.report`
+                    widenings: Vec::new(),
                 })
             }
             Err(refusal) => Ok(Rehearsed {
                 survey,
                 refusal: Some(refusal.to_string()),
                 notes: Vec::new(),
+                widenings: Vec::new(),
             }),
         }
     }
@@ -151,6 +161,21 @@ pub(super) fn survey_lines(index: usize, survey: &Survey) -> Vec<String> {
     lines
 }
 
+/// What a deep check prints for one rehearsed operation, in order: the survey's lines, one
+/// `visibility:` line per widening in the form `apply` prints it, then one `note:` line per note.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "TODO(reshape-multi-seam-extract): `check_plan` prints through this in the green phase"
+    )
+)]
+pub(super) fn rehearsed_lines(index: usize, rehearsed: &Rehearsed) -> Vec<String> {
+    // TODO(reshape-multi-seam-extract): implement
+    let _ = (index, rehearsed);
+    todo!("the lines a deep check prints for a rehearsed operation")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,6 +243,45 @@ mod tests {
             [
                 "   op 0 survey: packages/tddy-daemon/src/host_registry.rs -> tddy-daemon-kernel \
               (tddy_daemon_kernel), 0 item(s) reached from outside, 0 caller(s)"
+            ]
+        );
+    }
+
+    fn widened(item: &str, from: &str) -> VisibilityChange {
+        VisibilityChange {
+            item: item.to_string(),
+            from: from.to_string(),
+            to: "pub(crate)".to_string(),
+        }
+    }
+
+    /// `apply` reports every widening an operation performs; a deep check that withheld them could not
+    /// show the widening a sibling seam forces, which is the one a plan author most needs to see.
+    #[test]
+    fn prints_each_widening_between_the_survey_and_the_notes_in_the_form_apply_prints() {
+        // Given a rehearsed move with a survey, two widenings and a note
+        let rehearsed = Rehearsed {
+            survey: Some(a_survey_of_the_host_registry(&[], Vec::new())),
+            refusal: None,
+            notes: vec!["paths: 1 path(s) re-rooted for the new module".to_string()],
+            widenings: vec![
+                widened("strip_resize", "private"),
+                widened("WrittenPath", "private"),
+            ],
+        };
+
+        // When its lines are rendered for the third operation
+        let lines = rehearsed_lines(2, &rehearsed);
+
+        // Then the survey comes first, each widening as `apply` states it, then the note
+        assert_eq!(
+            lines,
+            [
+                "   op 2 survey: packages/tddy-daemon/src/host_registry.rs -> tddy-daemon-kernel \
+                 (tddy_daemon_kernel), 0 item(s) reached from outside, 0 caller(s)",
+                "   visibility: `strip_resize` private -> pub(crate)",
+                "   visibility: `WrittenPath` private -> pub(crate)",
+                "   note: paths: 1 path(s) re-rooted for the new module",
             ]
         );
     }

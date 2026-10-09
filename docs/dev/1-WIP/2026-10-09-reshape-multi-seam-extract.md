@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Bug fix / feature (check/apply parity for multi-seam `extract_module` plans; no new operation, field, flag or wire message)
-**Stack**: `#reshape` 2/19, branch `feature/reshape/multi-seam-extract`, green wave 1. PR title:
+**Stack**: `#reshape` 2/19, branch `feature/reshape/multi-seam-extract`, PR [#599](https://github.com/uppin/tddy-coder/pull/599), green wave 1. PR title:
 `fix(code-restructuring): multi-seam plans see the files earlier seams wrote (#reshape 2/19)`.
 Base in the linear stack: `feature/reshape/widen-same-crate` (K=1). **Real edges**: none into this node; out of it `multi-seam-extract → oversized-files` (K=15) and `multi-seam-extract → rust-backend-split` (K=17).
 K=1 is the base only because `gh stack` needs a line; nothing of it is consumed.
@@ -30,7 +30,7 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 
 ## Affected Packages
 
-- **`tddy-code-restructuring`**: [README.md](../../../packages/tddy-code-restructuring/README.md); new `src/backends/rust/projection.rs`; `src/backends/rust.rs` (`mod projection;`, two `RustBackend` fields and their initialisers, the `resolve` trait method); `src/backends/rust/documents.rs` (`did_open` flushes the staged projection, `close_opened` drops it); `src/runner/rehearsal.rs` (`Rehearsed.widenings`, new `rehearsed_lines`); `src/runner/entry_points/check_entry_points.rs` (the deep-check loop prints through `rehearsed_lines`). Tests: new `tests/multi_seam_extract_acceptance.rs`, new `tests/multi_seam/mod.rs`. Registration: `.config/rust-e2e.filterset`, `.config/nextest.toml`.
+- **`tddy-code-restructuring`**: [README.md](../../../packages/tddy-code-restructuring/README.md); new `src/backends/rust/projection.rs`; `src/backends/rust.rs` (`mod projection;`, two `RustBackend` fields and their initialisers, the `resolve` trait method); `src/backends/rust/documents.rs` (`did_open` flushes the staged projection, `close_opened` drops it); `src/runner/rehearsal.rs` (`Rehearsed.widenings`, new `rehearsed_lines`); `src/runner/entry_points/check_entry_points.rs` (the deep-check loop prints through `rehearsed_lines`). Tests: new `tests/multi_seam_extract_acceptance.rs`; fixtures and helpers appended to `tests/harness/mod.rs`. Registration: `.config/rust-e2e.filterset`, `.config/nextest.toml`.
   Docs at wrap: [assist-output-repairs.md](../../../packages/tddy-code-restructuring/docs/assist-output-repairs.md) (a seam after a seam), [readiness-and-gates.md](../../../packages/tddy-code-restructuring/docs/readiness-and-gates.md) (a row: projected documents), [docs/ft/coder/rust-code-restructuring.md](../../ft/coder/rust-code-restructuring.md).
 - **`tddy-index-daemon`, `tddy-tools`**: no source change. The daemon's apply loop (`tddy-index-daemon/src/apply.rs`) builds one backend per run and gets the behaviour through it.
 
@@ -86,8 +86,9 @@ Published with the wave-2 contract commit (the first push of this PR after plann
 - `impl RustBackend` in `projection.rs`: `pub(super) fn stage_projection(&mut self, workspace: &Workspace<'_>) -> Result<()>` and `pub(super) fn open_staged_projection(&mut self, except: &str) -> Result<()>`.
 - `RustBackend` fields `projection: PlanProjection` and `staged_projection: Vec<(String, String)>` (uri, text).
 - `runner::rehearsal::Rehearsed::widenings: Vec<VisibilityChange>`; `runner::rehearsal::rehearsed_lines(index: usize, rehearsed: &Rehearsed) -> Vec<String>`.
-- Test support: `tests/multi_seam/mod.rs` fixtures (`a_crate_whose_pty_handle_calls_strip_resize`, `a_crate_whose_mover_calls_relative_from`, `a_crate_cut_three_ways_like_carve_3`), op builders, and `resolving_in_order(fixture, ops) -> Result<ResolvedInOrder, String>` (one backend, one `PositionLedger`, one `Overlay`, as `Rehearsal::rehearse` does; `ResolvedInOrder::text(path)` reads the overlay).
-- Failing tests: acceptance tests 1, 3, 4, 6, 8 and unit tests 10–15 below; 2, 5, 7, 9 are pins (see each).
+- Test support, in `tests/harness/mod.rs` (not a new `tests/multi_seam/mod.rs`: the fixture builders `a_workspace_of`, `writing`, `tracked_by_git` and the server helpers are private to the harness): fixtures `a_crate_whose_pty_handle_calls_strip_resize`, `a_crate_whose_mover_calls_relative_from`, `a_crate_cut_three_ways_like_carve_3` with their line-range constants; `a_seam_of_outer(fixture, lines, name, reexport) -> RefactorOp` (range-anchored, `to_file`); `the_widenings_in(&[String]) -> Vec<String>`; `applying_keeping_the_account(fixture, ops, dry_run)`; `checking_deep_keeping_the_account(fixture, ops)`; `resolving_in_order(fixture, ops) -> Result<ResolvedInOrder, String>` (one backend, one `PositionLedger`, one `Overlay`, as `Rehearsal::rehearse` does; `ResolvedInOrder::text(path)` reads the overlay).
+- **As published** (commit 2): every body is `todo!()` with `// TODO(reshape-multi-seam-extract): implement`; nothing is wired yet, so the existing suite is unaffected. To keep `-D warnings` clean without callers, `mod projection;`, the two `RustBackend` fields and `rehearsed_lines` carry `#[cfg_attr(not(test), expect(dead_code, reason = "TODO(reshape-multi-seam-extract): …"))]`, and `open_staged_projection` and `Rehearsed.widenings` an unconditional `#[expect(dead_code, …)]`. `rehearse` sets `widenings: Vec::new()` (TODO: carry `resolved.report`). **Green removes every one of these `expect`s** as it wires `resolve`, `did_open`, `close_opened` and `check_plan` — an `expect` left behind fails the build once its item has a caller.
+- Failing tests: acceptance tests 1, 3, 4, 8 and unit tests 10–15 below; 2, 5, 6, 7, 9 are pins (see each).
 
 ## Green wave
 
@@ -136,15 +137,15 @@ Every server question of operation `k+1` is answered for the tree ops `1..k` pro
 - **`documents.rs`**: `did_open` calls `open_staged_projection(uri)` first while staging is non-empty, and sends `didChange` for a uri already open; `close_opened` clears `staged_projection`.
 - **`runner/rehearsal.rs`**: `Rehearsed.widenings` filled from `resolved.report`; new `rehearsed_lines`.
 - **`runner/entry_points/check_entry_points.rs`**: the survey/notes printing in `check_plan` is replaced by one loop over `rehearsed_lines`.
-- **`tests/multi_seam/mod.rs`**, **`tests/multi_seam_extract_acceptance.rs`**: new. **`.config/rust-e2e.filterset`**: `or binary(multi_seam_extract_acceptance)`; **`.config/nextest.toml`**: the same binary in the `rust-analyzer` group's filter.
+- **`tests/multi_seam_extract_acceptance.rs`**: new; fixtures and helpers appended to **`tests/harness/mod.rs`**. **`.config/rust-e2e.filterset`**: `or binary(multi_seam_extract_acceptance)`; **`.config/nextest.toml`**: the same binary in the `rust-analyzer` group's filter.
 
 ## Implementation milestones
 
-- [ ] **M1** spike: one live test that rust-analyzer resolves `mod x;` in an open parent to a file that exists only as another open document (acceptance test 6 is that test); if it does not, stop and ask the developer (the fallback would be materialising the overlay, a different design)
+- [ ] **M1** spike: rust-analyzer resolves `mod x;` in an open parent to a file that exists only as another open document — acceptance tests 1 and 3 are the evidence (red on master only because `pty_handle.rs` is overlay-only); if the server does not, stop and ask the developer (the alternative would be materialising the overlay, a different design)
 - [ ] **M2** `PlanProjection` and its fold; unit tests 10–13
-- [ ] **M3** staging, flush, re-open as `didChange`, clear on close; unit test 14; acceptance tests 1, 3, 6, 9
+- [ ] **M3** staging, flush, re-open as `didChange`, clear on close; unit tests 13–14; acceptance tests 1, 3, 6, 9
 - [ ] **M4** deep-check widenings; acceptance tests 4, 8; unit test 15
-- [ ] **M5** apply pins 2, 5, 7; registration in both config files
+- [ ] **M5** apply pins 2, 5, 7 stay green; registration in both config files (done in commit 2)
 - [ ] **M6** docs staged, scoped gate, function-size check
 
 ## Testing plan
@@ -155,10 +156,10 @@ Every server question of operation `k+1` is answered for the tree ops `1..k` pro
 **Unit level** for the record's fold and the deep-check line rendering, no server.
 
 #### Option 1 (chosen): new live binary with its own fixture module
-Fixtures in `tests/multi_seam/mod.rs`, following the harness's `OUTER_MODULE` pattern (`crates/origin/src/outer.rs`, item-anchored `extract_module --to_file`), built on `harness::{a_workspace_of, a_manifest_for, applying_a_plan_of, checking_the_plan_with, resolving_after_a_check_of, assert_compiles, assert_compiles_with_its_tests}`.
+Fixtures in `tests/harness/mod.rs` (its builders are private to it), following the harness's `OUTER_MODULE` pattern (`crates/origin/src/outer.rs`, item-anchored `extract_module --to_file`), built on `harness::{a_workspace_of, a_manifest_for, applying_a_plan_of, checking_the_plan_with, resolving_after_a_check_of, assert_compiles, assert_compiles_with_its_tests}`.
 - `a_crate_whose_pty_handle_calls_strip_resize`: `outer.rs` holds `pub(crate) struct PtyHandle { pub(crate) data: Vec<u8> }`, `impl PtyHandle { pub(crate) fn send_input(&self) -> usize { strip_resize(&self.data) } }`, private `fn strip_resize(data: &[u8]) -> usize`, and `pub(crate) fn total()` calling `send_input`. Seam 1: `PtyHandle` + `impl PtyHandle` → `pty_handle`, `reexport: glob`. Seam 2: `strip_resize` → `resize`, `reexport` per test.
 - `a_crate_whose_mover_calls_relative_from`: private `fn relative_from(..)`, `pub(crate) fn moving(..)` calling it bare, `total`. Seam 1: `relative_from` → `paths` (glob). Seam 2: `moving` → `moving_files` (glob).
-- `a_crate_cut_three_ways_like_carve_3`: the first fixture plus `pub(crate) fn refusals(handle: &PtyHandle) -> bool` calling `strip_resize` too, and a `#[cfg(test)] mod tests` using `total`. Seams: `pty_handle`, `refusals`, `resize`, all glob.
+- `a_crate_cut_three_ways_like_carve_3`: the first fixture plus `pub(crate) fn refusals(data: &[u8]) -> bool` calling `strip_resize` too, and a `#[cfg(test)] mod tests` using `total`. Seams: `pty_handle`, `refusals`, `resize`, all glob.
 **Location**: `packages/tddy-code-restructuring/tests/multi_seam_extract_acceptance.rs`.
 
 #### Option 2 (rejected): `fake_lsp` recording `didOpen`
@@ -178,7 +179,7 @@ Makes the apply tests red on master, but adds harness-only server configuration 
 
 ## Acceptance tests
 
-Names read as behaviour specifications. **Red on `master`**: 1, 3, 4, 6, 8 (and 10–15, which do not compile without the owned surface). **Pins**: 2, 5, 7, 9 — they may pass on master and must stay green.
+Names read as behaviour specifications. **Red on `master`**: 1, 3, 4, 8 (and 10–15, red on the `todo!()` surface). **Pins**: 2, 5, 6, 7, 9 — they pass on master and must stay green.
 
 ### `tddy-code-restructuring` — `packages/tddy-code-restructuring/tests/multi_seam_extract_acceptance.rs` (new live binary; registered in `.config/rust-e2e.filterset` and the `rust-analyzer` group)
 
@@ -187,9 +188,9 @@ Names read as behaviour specifications. **Red on `master`**: 1, 3, 4, 6, 8 (and 
 3. `a_dry_run_reports_the_widening_a_file_an_earlier_seam_wrote_forces` — seam 2 `reexport: glob`, `apply --dry-run` through the runner capturing `options.account`; contains the `visibility:` line for `strip_resize`, `private` → `pub(crate)`. *Red on master*: the item is narrowed back to private and no line is printed (gap J).
 4. `a_deep_check_reports_the_same_widenings_a_dry_run_reports` — `checking_the_plan_with(deep)` capturing `options.account`; its `visibility:` lines equal test 3's. *Red on master*: `check --deep` prints no widenings at all, and the rehearsal narrows.
 5. `a_plan_whose_earlier_seam_reaches_what_a_later_seam_moves_applies_and_compiles` — same glob plan applied: `applied == 2`, `assert_compiles`, `resize.rs` declares `pub(crate) fn strip_resize`. *Pin*.
-6. `a_later_seam_imports_a_helper_an_earlier_seam_moved_when_the_plan_is_resolved_without_writing` — `a_crate_whose_mover_calls_relative_from` through `resolving_in_order`; `crates/origin/src/outer/moving_files.rs`'s projected text has a `use` binding `relative_from` (`use super::relative_from;` or `use super::paths::relative_from;`, whichever the server offers first — asserted as "one `use` line whose last segment is `relative_from`"). *Red on master*: no import — the name was already unresolved in the parent's overlay text, so `restore_imports` treats it as not lost. Doubles as M1's spike.
-7. `the_same_plan_applied_imports_the_helper_and_compiles` — applied: `applied == 2`, `assert_compiles`. *Pin*.
-8. `a_three_seam_plan_of_the_carve_shape_widens_the_same_items_in_its_deep_check_and_its_apply_and_compiles_with_its_tests` — `a_crate_cut_three_ways_like_carve_3`: deep check has no findings; its `visibility:` lines equal the apply's; the apply applies 3 of 3; `assert_compiles_with_its_tests`. *Red on master*: the deep check prints no widenings.
+6. `a_later_seam_reaches_a_helper_an_earlier_seam_moved_when_the_plan_is_resolved_without_writing` — `a_crate_whose_mover_calls_relative_from` through `resolving_in_order`; `crates/origin/src/outer/moving_files.rs`'s projected text binds the sibling module (`use …::paths;`) and calls `paths::relative_from("/", path)`. *Pin* — **changed from the planned red test**: row 2 of the 09-18 record ("helpers left unqualified in a later seam") does not reproduce on the current engine. The first seam's assist rewrites the parent's call as `paths::relative_from` even behind a glob, and the later seam's import pass binds the module: blind (master rehearsal) it writes `use super::paths;`, seeing `paths.rs` (master apply) `use crate::outer::paths;`; both compile. A bare name is left only in *another* file (`use super::strip_resize;` in `pty_handle.rs`), which is gap J, tests 1–5.
+7. `the_same_plan_applied_reaches_the_helper_and_compiles` — applied: `applied == 2`, the same shape, `assert_compiles`. *Pin*.
+8. `a_three_seam_plan_of_the_carve_shape_widens_the_same_items_in_its_deep_check_and_its_apply_and_compiles_with_its_tests` — `a_crate_cut_three_ways_like_carve_3` (as published, `refusals` takes `&[u8]` rather than naming `PtyHandle`: a later seam's anchored line that names what an earlier seam moved is rewritten by that seam's assist, and the ledger then refuses the anchor as "fell inside text removed by an earlier operation" — a composition limit outside this node): deep check has no findings; its `visibility:` lines equal the apply's; the apply applies 3 of 3; `assert_compiles_with_its_tests`. *Red on master*: the deep check prints no widenings.
 9. `a_check_leaves_no_projected_document_open_on_the_server_it_shares` — `resolving_after_a_check_of(the two-seam plan with seam 2 glob, then seam 2 alone with reexport: none on the untouched tree)` returns `Ok`: had `pty_handle.rs`'s rehearsed text stayed open, the lone seam would be refused as stranded. *Pin* (nothing is projected on master); guards rule 3.
 
 ### `tddy-code-restructuring` — unit tests in `packages/tddy-code-restructuring/src/backends/rust/projection.rs` (`#[cfg(test)] mod tests`, no server)
@@ -245,7 +246,25 @@ Taken by the developer (brief, 2026-10-09): "All 12 wave-1 PRDs approved. Every 
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+**Commit 2 (draft-PR contract, 2026-10-09)**, on `feature/reshape/widen-same-crate` commit 2. Scoped gates: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt --all --check` — clean. Full-suite baseline reused from `#reshape` 1 (1334 passed, 0 failed); this commit wires nothing, so no existing test can change.
+
+`cargo test -p tddy-code-restructuring --test multi_seam_extract_acceptance -- --test-threads=1` (live rust-analyzer): **4 red, 5 green pins**.
+
+| # | Test | State | Why |
+|---|---|---|---|
+| 1 | `a_deep_check_refuses_a_seam_that_strands_a_reference_from_a_file_an_earlier_seam_wrote` | 🔴 red | `expected one finding: []` — the server never sees the overlay-only `pty_handle.rs` |
+| 2 | `an_apply_refuses_the_same_seam_after_applying_the_first` | 🟢 pin | the small fixture's watcher shows the apply's `pty_handle.rs` |
+| 3 | `a_dry_run_reports_the_widening_a_file_an_earlier_seam_wrote_forces` | 🔴 red | no `strip_resize` widening: narrowed back to private (gap J) |
+| 4 | `a_deep_check_reports_the_same_widenings_a_dry_run_reports` | 🔴 red | deep check prints `[]`, expected the `strip_resize` line |
+| 5 | `a_plan_whose_earlier_seam_reaches_what_a_later_seam_moves_applies_and_compiles` | 🟢 pin | as 2 |
+| 6 | `a_later_seam_reaches_a_helper_an_earlier_seam_moved_when_the_plan_is_resolved_without_writing` | 🟢 pin | row 2 does not reproduce (see the test's entry) |
+| 7 | `the_same_plan_applied_reaches_the_helper_and_compiles` | 🟢 pin | as 6 |
+| 8 | `a_three_seam_plan_of_the_carve_shape_…_compiles_with_its_tests` | 🔴 red | deep check prints `[]`; the apply printed three widenings incl. `strip_resize` |
+| 9 | `a_check_leaves_no_projected_document_open_on_the_server_it_shares` | 🟢 pin | nothing is projected yet |
+
+Unit tests 10–15 (`cargo test -p tddy-code-restructuring --lib -- projection::tests rehearsal::tests`): all 🔴 red, each panicking on the `todo!()` of the surface it exercises; the two pre-existing rehearsal tests pass.
+
+Noticed, not this node's: a dry run reports `` `PtyHandle` pub(crate) -> pub(crate)`` — a "widening" to the same visibility — for an already-`pub(crate)` item a seam moves (seen in tests 3 and 8).
 
 ## TODO
 
@@ -254,10 +273,10 @@ Taken by the developer (brief, 2026-10-09): "All 12 wave-1 PRDs approved. Every 
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-multi-seam-extract.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests (contract surface + unit tests 10–15)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
