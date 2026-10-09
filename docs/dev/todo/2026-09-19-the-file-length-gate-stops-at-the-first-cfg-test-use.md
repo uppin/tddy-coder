@@ -2,6 +2,8 @@
 
 **Category:** Defect
 **Source:** `/pr-wrap` step 3.5 on PR #518, cross-checked against `/analyze-clean-code`
+**Claimed by:** #612 — `#reshape 15/19`
+**Lands after:** #611
 
 `/pr-wrap` step 3.5 and every `packages/*/docs/code-issues/oversized-file-*.md` record measure Rust
 files as **production lines counted to the first `#[cfg(test)]`**:

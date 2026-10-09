@@ -50,6 +50,8 @@ pub enum Command {
     Plans,
     /// Load a root's crate graph into the index daemon — a daemon-only command.
     Warm,
+    /// Print the production lines of each named file — answered in process, no server.
+    Lines,
 }
 
 /// What a restructuring run was asked for, and where its live account goes.
@@ -80,6 +82,8 @@ pub struct Options {
     pub plans: Vec<PathBuf>,
     /// `unload --all`.
     pub all: bool,
+    /// The files `lines` measures, in the order they were named.
+    pub files: Vec<PathBuf>,
     /// The position `anchors --at` names: the innermost item enclosing it is what is anchored.
     pub at: Option<crate::edit::Range>,
     /// The git ref `verify` compares against.
@@ -139,6 +143,7 @@ impl Default for Options {
             at: None,
             plans: Vec::new(),
             all: false,
+            files: Vec::new(),
             against: None,
             retargets: Vec::new(),
             repoints: Vec::new(),

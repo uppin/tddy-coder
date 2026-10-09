@@ -38,7 +38,7 @@ pub use plan::{
     RefactorKind, RefactorOp,
 };
 pub use registry::{BackendRegistry, LanguageBackend};
-pub use runner::state_directory_for_plan;
+pub use runner::{production_lines_of_file, state_directory_for_plan};
 
 /// Errors surfaced by the executor. Every variant is fatal — the executor never falls back.
 #[derive(Debug, thiserror::Error)]

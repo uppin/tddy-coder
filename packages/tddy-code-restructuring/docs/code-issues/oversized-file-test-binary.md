@@ -6,6 +6,8 @@
 **Metrics:** **967 production lines** (966 before #539) (0 before this PR) · budget 500
 **Restructure:** required — `extract_module --to_file` along the three seams below
 **Status:** Open — deferred from #498 with explicit developer consent
+**Claimed by:** #612 — `#reshape 15/19`
+**Lands after:** #611
 **Deferred by:** #498 — `#carve` 4/10 `test-homes`, see `docs/dev/todo/2026-09-19-test-binary-rs-is-950-production-lines.md`
 
 ## Measurement history
