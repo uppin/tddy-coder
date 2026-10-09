@@ -97,6 +97,33 @@ fn below(
     Ok(())
 }
 
+/// One file of a moved module, and where it lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MovedFile {
+    pub(crate) from: String,
+    pub(crate) to: String,
+    /// The modules between the moved module and this file, outermost first; empty for the
+    /// module's own file.
+    pub(crate) below: Vec<String>,
+}
+
+/// The files of the module `name` (`files` as [`files_of`] found them, the module's own first),
+/// moved from the children directory `old` of the module's parent to `new`: each keeps its place
+/// relative to the module.
+///
+/// The one relocation rule: a cross-crate move lands its module under the destination's `src/`, a
+/// same-crate reparent under the new parent's directory.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-move-children): implement — `Move::carried` and \
+              `module_reparent::relocation::plan` call it"
+)]
+pub(crate) fn relocated(old: &Path, new: &Path, name: &str, files: &[String]) -> Vec<MovedFile> {
+    // TODO(reshape-move-children): implement
+    let _ = (old, new, name, files);
+    todo!("relocated")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +185,45 @@ mod tests {
         let refusal = files_below(&root, "src/a.rs").unwrap_err().to_string();
 
         assert!(refusal.contains("missing"), "{refusal}");
+    }
+
+    #[test]
+    fn relocates_each_file_of_a_module_to_the_same_place_under_the_new_directory() {
+        // Given the files of `a`, found under its parent's directory `crates/origin/src/x`
+        let files = [
+            "crates/origin/src/x/a.rs".to_string(),
+            "crates/origin/src/x/a/b.rs".to_string(),
+            "crates/origin/src/x/a/c/mod.rs".to_string(),
+        ];
+
+        // When they are relocated under the destination's `src/`
+        let moved = relocated(
+            Path::new("crates/origin/src/x"),
+            Path::new("crates/destination/src"),
+            "a",
+            &files,
+        );
+
+        // Then each keeps its place relative to `a`, and knows the modules above it
+        assert_eq!(
+            moved,
+            [
+                MovedFile {
+                    from: files[0].clone(),
+                    to: "crates/destination/src/a.rs".to_string(),
+                    below: vec![],
+                },
+                MovedFile {
+                    from: files[1].clone(),
+                    to: "crates/destination/src/a/b.rs".to_string(),
+                    below: vec!["b".to_string()],
+                },
+                MovedFile {
+                    from: files[2].clone(),
+                    to: "crates/destination/src/a/c/mod.rs".to_string(),
+                    below: vec!["c".to_string()],
+                },
+            ]
+        );
     }
 }
