@@ -176,8 +176,14 @@ reports both):
 **Refused by `check --deep` and `apply` before anything is written** (`this seam cannot be cut here:`):
 - S1: members in two `impl` blocks.
 - S2: a member cut in half.
-- S3: a member of a **trait** `impl`, where a bare path resolved to one. The refusal says "move the whole trait `impl`
-  with `move_item`".
+- S3: a member of a **trait** `impl`, where a bare path resolved to one. The refusal contains "a trait `impl` moves whole
+  with `move_item`", the same phrase as P8, because the anchors command can emit either form.
+- *Found at the first push:* `item_anchor::covering_run` (`src/item_anchor.rs:261`) already refuses an `items` anchor
+  whose members have anything but blank lines between them ("the named items are not adjacent", a
+  `this seam cannot be cut here:` refusal). That happens at run open, so for an item anchor S1 and S4 are pre-empted by
+  it, and so is a free-standing comment separated from the members by a blank line. S1 and S4 stay as the engine's
+  guard for a lowered range (a resumed plan). Tests 13 and 15 assert the seam refusal and that nothing was written,
+  not the wording of S1 or S4.
 - S4: an item inside the run that is not a member (a macro invocation, or an item the outline does not list).
 - S5: a name the moved lines reach in the origin that the destination binds to a **different** item: one it declares,
   or one it imports by a crate-rooted path that differs from the origin's.
@@ -213,14 +219,26 @@ No other node delivers behaviour this PR consumes.
 - `plan::codec::impl_move_fields::rules(op: &RefactorOp) -> Result<()>`.
 - `backends::rust::impl_move::findings(op, workspace) -> Result<Vec<String>>`.
 - `impl RustBackend { pub(super) fn move_impl_members(&mut self, op, workspace) -> Result<Resolution> }`.
-- `impl_move::assemble::assemble(moving: &MovingMembers<'_>) -> Result<Assembled>`, with `MovingMembers` (source
-  file and text, `retarget_impl::outline::Run`, destination `Module`, optional created parent and name, reached root
-  items, member widenings from node 1) and `item_move::assemble::Assembled` reused.
+- `impl_move::assemble::assemble(moving: &MovingMembers<'_>) -> Result<Assembled>`, as published:
+  `MovingMembers { source_file, source_text, source: &[String], run: &retarget_impl::outline::Run, destination: &Module,
+  destination_text, created: Option<(&Module, &str)>, reached: &[item_move::outline::Item], widening:
+  &item_move::members::MemberWidening }`. **Changed from the plan:** `impl_move::assemble::Assembled { files, report,
+  notes }` is this module's own struct and does not reuse `item_move::assemble::Assembled`. Reusing it would widen that
+  struct's fields in `item_move/assemble.rs`, which nodes 1 and 15 own.
+- `retarget_impl::outline::{Run, Member, read}` and `mod outline` are widened to `pub(in crate::backends::rust)` (the
+  visibility half of F7). The operation-name parameter is green's.
+- `same_crate_dispatch::{handles, findings}` and `RustBackend::same_crate_move` are **live at the first push** (F5).
+  `check` and `resolve_opening` route `MoveItem | ReparentModule | MoveImplMembers` through one arm each, and the
+  behaviour of the first two is unchanged.
+- `impl_move/preflight.rs` and `impl_move/survey.rs` are not created yet. Green adds them with their first caller.
 - `impl_move::landing::block_for(destination_text, scope, header) -> Landing { Join { before: usize } | New }`.
 
 **Failing tests the first push carries**: acceptance tests 1–22 below. They fail on master because the op does not
-parse (`unknown variant move_impl_members`), and on the first push because the bodies are `todo!()`-free stubs that
-return `UnsupportedOp`.
+parse (`unknown variant move_impl_members`). On the first push they fail because `impl_move_fields::rules`,
+`impl_move::findings`, `move_impl_members` and `assemble` return a typed `UnsupportedOp` ("`move_impl_members` is not
+implemented yet"). `landing::block_for` is a `todo!()` that nothing reaches yet. Every stub is marked
+`TODO(reshape-move-impl-members)`, and each uncalled item carries an `#[allow(dead_code, reason = "TODO(…)")]` that green
+removes. Test 22 is a **green pin**: it passes today.
 
 ## Green wave
 
@@ -415,7 +433,22 @@ Edges that must **not** exist:
 
 ## Validation results
 
-Not run yet.
+First push (2026-10-09), scoped to `tddy-code-restructuring`. `cargo check --all-targets`, `cargo clippy --all-targets
+-D warnings` and `cargo fmt --check` are clean. Before the change the same three were clean on the rebased base.
+
+| Tests | Where | State | Why |
+|---|---|---|---|
+| 1–6 (6 tests) | `tests/move_impl_members_plan_lines.rs` | 🔴 red | `impl_move_fields::rules` refuses every `move_impl_members` line as `UnsupportedOp` |
+| 7–12 (6 tests) | `src/backends/rust/impl_move/assemble/assemble_tests.rs` | 🔴 red | `assemble` returns `UnsupportedOp` (`expect("the member move assembles")`) |
+| 13–21 (10 tests; 17 is two) | `tests/move_impl_members_acceptance.rs` | 🔴 red | the plan file is refused at parse by the codec stub (6 by `expect("the member move applies")`, 4 by the expected refusal text) |
+| 22 (2 tests) | `tests/verify_accounts_for_a_member_move.rs` | 🟢 green pin | `verify` already holds for a plain `impl Host` move and still reports a dropped statement |
+
+Not run locally: the whole suite. It is reused from the node 1 baseline (0 failures).
+
+**Found while writing test 22.** A **generic** header (`impl<T> Host<T>`, `where`, `T: Copy,`) *is* a statement
+`verify` reads (`tests/verify_accounts_for_a_retarget.rs:66-95`). A member run from a generic block that opens a new
+block therefore adds statements `verify` reports. That is not pinned here. Green either accepts it as a known limitation
+or excuses a repeated header, and the developer decides which.
 
 ## TODO
 
@@ -424,6 +457,7 @@ Not run yet.
 - [x] PRD written
 - [x] Changeset written
 - [x] Developer review of F1–F7 (all recommendations approved, 2026-10-09)
-- [ ] First push: owned surface and failing tests 1–22
+- [x] First push: owned surface and failing tests 1–22 ([#610](https://github.com/uppin/tddy-coder/pull/610))
+- [ ] USER REVIEW — acceptance tests
 - [ ] Green: milestones 1–5
 - [ ] `/validate-changes`, `/pr-wrap`: docs, todo narrowing, history row

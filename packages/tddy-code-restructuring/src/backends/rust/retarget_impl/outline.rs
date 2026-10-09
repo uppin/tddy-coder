@@ -13,47 +13,47 @@ use crate::edit::Range;
 use crate::Result;
 
 /// One member of an `impl`, with what the operation needs about it.
-pub(super) struct Member {
-    pub(super) name: String,
+pub(in crate::backends::rust) struct Member {
+    pub(in crate::backends::rust) name: String,
     /// Where the server reports the member's name, which is where a reference query asks about it.
-    pub(super) position: Value,
+    pub(in crate::backends::rust) position: Value,
     /// The one-based first line of the member, its attached trivia (docs, attributes, comments)
     /// included.
-    pub(super) first_line: u32,
+    pub(in crate::backends::rust) first_line: u32,
     /// The one-based last line of the member.
-    pub(super) last_line: u32,
+    pub(in crate::backends::rust) last_line: u32,
 }
 
 /// The `impl` an anchor lands in, its members, and which run of them moves.
-pub(super) struct Run {
-    pub(super) members: Vec<Member>,
+pub(in crate::backends::rust) struct Run {
+    pub(in crate::backends::rust) members: Vec<Member>,
     /// The index of the first moved member.
-    pub(super) first_moved: usize,
+    pub(in crate::backends::rust) first_moved: usize,
     /// One past the index of the last moved member.
-    pub(super) moved_end: usize,
+    pub(in crate::backends::rust) moved_end: usize,
     /// The `impl`'s self type as the outline names it: `Host` of `impl<T> Host<T>`.
-    pub(super) self_type: String,
+    pub(in crate::backends::rust) self_type: String,
     /// The one-based line the `impl` keyword is on.
-    pub(super) header_line: u32,
+    pub(in crate::backends::rust) header_line: u32,
     /// The one-based line the closing `}` is on.
-    pub(super) close_line: u32,
+    pub(in crate::backends::rust) close_line: u32,
 }
 
 impl Run {
     /// The members the anchor moves.
-    pub(super) fn moved(&self) -> &[Member] {
+    pub(in crate::backends::rust) fn moved(&self) -> &[Member] {
         &self.members[self.first_moved..self.moved_end]
     }
 
     /// Whether the run is every member of the block, so the self type alone changes.
-    pub(super) fn whole_block(&self) -> bool {
+    pub(in crate::backends::rust) fn whole_block(&self) -> bool {
         self.first_moved == 0 && self.moved_end == self.members.len()
     }
 }
 
 /// The `impl` block `range` lands in and the run of members it moves, or the refusal for why none
 /// can be.
-pub(super) fn read(symbols: &Value, text: &str, range: Range) -> Result<Run> {
+pub(in crate::backends::rust) fn read(symbols: &Value, text: &str, range: Range) -> Result<Run> {
     let overlapping: Vec<&Value> = symbols
         .as_array()
         .into_iter()
