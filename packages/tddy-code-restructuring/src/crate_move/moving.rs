@@ -34,6 +34,24 @@ pub(crate) struct Move {
     pub(crate) destination: destination::Destination,
     /// What to leave behind in the crate it left.
     pub(crate) reexport: Reexport,
+    /// The crate the move creates at the destination, when its plan line names one with `name`.
+    #[allow(
+        dead_code,
+        reason = "TODO(reshape-new-crate): implement — `travelling_alone` and the preconditions read it"
+    )]
+    pub(crate) creates: Option<super::NewCrate>,
+}
+
+/// The dependency lines a destination's manifest gains for what the moved code names: those for
+/// its plain table, and those for each `[target.'<cfg>'.…]` table, keyed by the header verbatim.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-new-crate): implement — `Move::dependency_lines` returns it"
+)]
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct CarriedLines {
+    pub(crate) plain: Vec<String>,
+    pub(crate) by_target: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Move {
@@ -52,6 +70,8 @@ impl Move {
             origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
             destination: destination::Destination::read(workspace.root, destination)?,
             reexport: op.reexport.unwrap_or(Reexport::None),
+            // TODO(reshape-new-crate): implement — `NewCrate::named_by(op)`
+            creates: None,
             source,
             module,
             home,
@@ -77,6 +97,8 @@ impl Move {
             origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
             destination: destination.clone(),
             reexport,
+            // TODO(reshape-new-crate): implement — the cluster's `creates`
+            creates: None,
             source: format!("{}/src/{}.rs", home.crate_dir, home.path.join("/")),
             module,
             home: home.clone(),
