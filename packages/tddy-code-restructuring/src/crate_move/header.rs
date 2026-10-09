@@ -120,6 +120,30 @@ pub(crate) fn repointed_header(
     Ok(header)
 }
 
+/// [`repointed_header`] for a file the move **carries** below its module: `below` is the modules
+/// between the moved module and the file (`["b"]` for `a/b.rs`), so the survey resolves its
+/// `self::` and `super::` paths against `moving.home.path ++ below`, and one that stays inside the
+/// carried tree is left as written. `repointed_header` is this with `below` empty.
+///
+/// # Errors
+///
+/// Refuses for every reason [`repointed_header`] does.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-move-children): implement — `resolve_cluster` re-points every carried file"
+)]
+pub(crate) fn repointed_header_at(
+    workspace: &Workspace<'_>,
+    text: &str,
+    moving: &Move,
+    below: &[String],
+    co_moving: &BTreeSet<String>,
+) -> Result<Header> {
+    // TODO(reshape-move-children): implement
+    let _ = (workspace, text, moving, below, co_moving);
+    todo!("repointed_header_at")
+}
+
 fn push_once(paths: &mut Vec<String>, path: &str) {
     if !paths.iter().any(|known| known == path) {
         paths.push(path.to_string());

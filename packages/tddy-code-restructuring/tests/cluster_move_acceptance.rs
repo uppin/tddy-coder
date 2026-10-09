@@ -17,10 +17,12 @@
 mod harness;
 
 use harness::{
-    a_cluster_move_of, a_rename_in, a_workspace_whose_modules_reference_each_other,
-    a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive, assert_compiles,
-    performing, refusal_from,
+    a_cluster_move_of, a_rename_in, a_workspace_whose_module_has_a_directory_child,
+    a_workspace_whose_modules_reference_each_other,
+    a_workspace_whose_moving_module_holds_code_the_server_treats_as_inactive, applying_a_plan_of,
+    assert_compiles, assert_compiles_with_its_tests, performing, refusal_from, A_DIRECTORY_CHILD,
 };
+use tddy_code_restructuring::{Anchor, Reexport};
 
 const SPAWNER: &str = "crates/origin/src/spawner.rs";
 const WORKER: &str = "crates/origin/src/spawn_worker.rs";
@@ -162,4 +164,36 @@ async fn refuses_to_rename_a_symbol_the_server_treats_as_inactive() {
             workspace.path().join(SPAWNER).display()
         )
     );
+}
+
+/// `#reshape` 5/19 — a cluster naming a module's directory child in `also` carries the child at
+/// its nested position: not flattened to the destination's root, and with no facade in the moved
+/// parent naming the destination's own crate (`#carve` R3 and R4 fixed both by hand).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_cluster_naming_a_child_in_also_nests_it_and_every_crate_compiles() {
+    // Given a cluster of `host_registry` with its child `host_registry::clock_face` in `also`
+    let workspace = a_workspace_whose_module_has_a_directory_child();
+    let mut op = a_cluster_move_of(&["host_registry"], Some(Reexport::Glob));
+    op.also.push(Anchor::Symbol {
+        file: A_DIRECTORY_CHILD.to_string(),
+        path: "host_registry::clock_face".to_string(),
+    });
+
+    // When it is applied
+    let applied = applying_a_plan_of(&workspace, &[op]).await;
+
+    // Then the child sits under its module, nothing sits flat beside it, and the moved parent
+    // does not name its own crate
+    assert_eq!(
+        (
+            applied.map(|run| run.applied),
+            workspace.holds("crates/destination/src/host_registry/clock_face.rs"),
+            workspace.holds("crates/destination/src/clock_face.rs"),
+            workspace
+                .read("crates/destination/src/host_registry.rs")
+                .contains("destination::"),
+        ),
+        (Ok(1), true, false, false)
+    );
+    assert_compiles_with_its_tests(&workspace);
 }
