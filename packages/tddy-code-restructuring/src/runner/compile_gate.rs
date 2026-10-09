@@ -48,6 +48,21 @@ use super::{Options, StatePaths};
 /// `--from`): that tree already holds the earlier run's edits, so a baseline would judge the plan's
 /// own partial work, and [`refuse_a_broken_result`] checks everything the journal records anyway —
 /// the same line [`super::open_run`] draws for the snapshot.
+/// The packages a fresh apply's baseline `cargo check` covers: those owning every file the plan
+/// names (its snapshot and its anchors), and the destination crate of each cross-crate move.
+///
+/// A destination counts because a move writes into it, so a failure already there would otherwise
+/// surface after the apply and be blamed on the plan. A `to` with no manifest yet adds nothing —
+/// that is a crate the move creates, and there is nothing to check before it exists.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-apply-robust): implement — called by refuse_a_broken_baseline at green"
+)]
+pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>> {
+    let _ = (root, plan);
+    todo!("TODO(reshape-apply-robust): implement")
+}
+
 pub fn refuse_a_broken_baseline(
     root: &Path,
     plan: &Plan,
@@ -416,6 +431,45 @@ pub(super) fn compiler_errors(said: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A workspace holding only the `origin` crate, with a test binary a plan can name.
+    fn a_workspace_with_only_the_origin_crate() -> tempfile::TempDir {
+        let workspace = tempfile::tempdir().expect("a temporary workspace");
+        let root = workspace.path();
+        std::fs::create_dir_all(root.join("crates/origin/tests")).expect("tests");
+        std::fs::write(
+            root.join("crates/origin/Cargo.toml"),
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("the manifest");
+        std::fs::write(
+            root.join("crates/origin/tests/golden.rs"),
+            "#[test]\nfn t() {}\n",
+        )
+        .expect("the test binary");
+        workspace
+    }
+
+    /// `#reshape` 10/19: a destination a move will create has no manifest yet, and so nothing to
+    /// check before the move — it adds no package and raises nothing.
+    #[test]
+    fn a_destination_without_a_manifest_adds_no_package_to_the_baseline() {
+        // Given a test-binary move to a crate directory that does not exist yet
+        let workspace = a_workspace_with_only_the_origin_crate();
+        let plan = Plan::parse(
+            "{\"v\":1,\"snapshot\":{}}\n\
+             {\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+             \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+             \"to\":\"crates/not-yet\"}\n",
+        )
+        .expect("the plan parses");
+
+        // When the baseline's packages are read
+        let packages = baseline_packages(workspace.path(), &plan).expect("the packages are read");
+
+        // Then only the origin is checked
+        assert_eq!(packages, BTreeSet::from(["origin".to_string()]));
+    }
 
     #[test]
     fn keeps_the_error_lines_of_a_failed_check_and_drops_the_ones_merely_mentioning_the_word() {

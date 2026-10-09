@@ -369,6 +369,32 @@ impl AFixtureWorkspace {
         self
     }
 
+    /// `relative` taken back out of git's index and committed so, leaving the file on disk: a file
+    /// written after the last commit and never added, which `git mv` refuses to move.
+    fn untracked(self, relative: &str) -> Self {
+        for arguments in [
+            vec!["rm", "--cached", "--quiet", relative],
+            vec![
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "untrack",
+            ],
+        ] {
+            let status = Command::new("git")
+                .args(&arguments)
+                .current_dir(&self.root)
+                .status()
+                .expect("git runs");
+            assert!(status.success(), "git {arguments:?} failed");
+        }
+        self
+    }
+
     /// `apply` moves files with `git mv`, which needs them in an index.
     fn tracked_by_git(self) -> Self {
         for arguments in [
@@ -1615,18 +1641,7 @@ pub async fn moving_the_test_binary_recording(
     Vec<String>,
 ) {
     let root = fixture.path().to_path_buf();
-    let digest = tddy_code_restructuring::apply::hash_file(&root.join(THE_TEST_BINARY))
-        .expect("the test binary hashes");
-    let plan = root.join("plan.jsonl");
-    std::fs::write(
-        &plan,
-        format!(
-            "{{\"v\":1,\"snapshot\":{{\"{THE_TEST_BINARY}\":\"{digest}\"}}}}\n\
-             {{\"op\":\"move_test_binary_to_crate\",\"anchor\":{{\"kind\":\"symbol\",\
-             \"file\":\"{THE_TEST_BINARY}\",\"path\":\"golden\"}},\"to\":\"crates/destination\"}}\n"
-        ),
-    )
-    .expect("the plan is written");
+    let plan = the_test_binary_move_plan(&root, None);
 
     let client = a_server_no_operation_asks(&root).await;
     let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1650,6 +1665,95 @@ pub async fn moving_the_test_binary_recording(
     let said = heard.lock().expect("lines").clone();
     (outcome, said)
 }
+
+/// Write the one-operation plan moving [`THE_TEST_BINARY`] to `destination` — in the transactional
+/// group `group` when one is named — and return its path.
+fn the_test_binary_move_plan(root: &Path, group: Option<&str>) -> PathBuf {
+    let digest = tddy_code_restructuring::apply::hash_file(&root.join(THE_TEST_BINARY))
+        .expect("the test binary hashes");
+    let grouped = group
+        .map(|group| format!(",\"group\":\"{group}\""))
+        .unwrap_or_default();
+    let plan = root.join("plan.jsonl");
+    std::fs::write(
+        &plan,
+        format!(
+            "{{\"v\":1,\"snapshot\":{{\"{THE_TEST_BINARY}\":\"{digest}\"}}}}\n\
+             {{\"op\":\"move_test_binary_to_crate\",\"anchor\":{{\"kind\":\"symbol\",\
+             \"file\":\"{THE_TEST_BINARY}\",\"path\":\"golden\"}},\"to\":\"crates/destination\"\
+             {grouped}}}\n"
+        ),
+    )
+    .expect("the plan is written");
+    plan
+}
+
+/// [`moving_the_test_binary_recording`], with the move the one member of the transactional group
+/// `group` — so the group's end-of-group compile gate runs.
+pub async fn moving_the_test_binary_in_a_group_recording(
+    fixture: &AFixtureWorkspace,
+    group: &str,
+    spawns: SpawnRecorder,
+) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    let root = fixture.path().to_path_buf();
+    let plan = the_test_binary_move_plan(&root, Some(group));
+    let client = a_server_no_operation_asks(&root).await;
+    let options = tddy_code_restructuring::runner::Options {
+        command: tddy_code_restructuring::runner::Command::Apply,
+        target: Some(plan),
+        spawns,
+        ..tddy_code_restructuring::runner::Options::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        tddy_code_restructuring::runner::apply(
+            &root,
+            options,
+            Some(client),
+            CancellationToken::new(),
+        )
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the apply joins")
+}
+
+/// A `check` of the plan moving [`THE_TEST_BINARY`] to `destination` — `--deep` when `deep` — over
+/// the deterministic fake server, as the details of its findings.
+pub async fn checking_a_move_of_the_test_binary(
+    fixture: &AFixtureWorkspace,
+    deep: bool,
+) -> Result<Vec<String>, String> {
+    let root = fixture.path().to_path_buf();
+    let plan = the_test_binary_move_plan(&root, None);
+    let client = a_server_no_operation_asks(&root).await;
+    let options = tddy_code_restructuring::runner::Options {
+        command: tddy_code_restructuring::runner::Command::Check,
+        target: Some(plan),
+        deep,
+        ..tddy_code_restructuring::runner::Options::default()
+    };
+    tokio::task::spawn_blocking(move || {
+        tddy_code_restructuring::runner::check(
+            &root,
+            options,
+            Some(client),
+            CancellationToken::new(),
+        )
+        .map(|findings| findings.into_iter().map(|finding| finding.detail).collect())
+        .map_err(|error| error.to_string())
+    })
+    .await
+    .expect("the blocking half of the check joins")
+}
+
+/// The test binary of [`a_workspace_whose_test_binary_stands_alone`], on disk but never added to
+/// git — a file written after the last commit, which `git mv` will not move.
+pub fn a_workspace_whose_test_binary_is_untracked() -> AFixtureWorkspace {
+    a_workspace_whose_test_binary_stands_alone().untracked(THE_TEST_BINARY)
+}
+
+/// The destination crate's root, which [`a_workspace_with_a_test_binary`] writes.
+pub const DESTINATION_LIB: &str = "crates/destination/src/lib.rs";
 
 /// The deterministic fake language server, for an operation that never asks it anything.
 async fn a_server_no_operation_asks(root: &Path) -> Arc<tddy_lsp::client::LspClient> {

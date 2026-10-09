@@ -138,11 +138,19 @@ pub enum RestructureError {
     )]
     PlanChangedOnDisk { plan: String },
     /// The next operation of a held plan is stale, so the run is refused before any write.
-    #[error("operation `{op}` of {plan} is stale ({reason}) — re-anchor it before applying")]
+    ///
+    /// `written_by` says, when this plan's journal shows it, that a run of the same plan wrote the
+    /// plan file back — the commonest way a plan goes stale is its own failed, rolled-back run.
+    /// Boxed: [`RestructureError`] is near clippy's `result_large_err` limit.
+    #[error(
+        "operation `{op}` of {plan} is stale ({reason}) — re-anchor it before applying{}",
+        written_by_suffix(.written_by.as_deref())
+    )]
     StaleOperation {
         plan: String,
         op: String,
         reason: String,
+        written_by: Option<Box<WrittenByRun>>,
     },
     /// A command only the index daemon's plan store can answer, asked of a run without one.
     #[error(
@@ -254,8 +262,78 @@ pub enum RestructureError {
     /// failure, and one that rustfmt cannot parse is source the engine should not have written.
     #[error("the run's output could not be formatted: {file}: {errors}")]
     FormatFailed { file: String, errors: String },
+    /// An operation would move a file git does not track. A move goes through `git mv`, so the
+    /// operation is refused before it writes anything — the tree and the journal stay as the
+    /// previous operation left them.
+    #[error(
+        "operation {op} moves {}, which git does not track — a move goes through `git mv` so \
+         history survives. `git add` it and apply again. Nothing of operation {op} was written.",
+        .paths.join(", ")
+    )]
+    UntrackedMoveSource { op: usize, paths: Vec<String> },
+    /// rust-analyzer said it was loading and then said nothing new for longer than the loading
+    /// silence bound: stalled, not slow. A server that keeps reporting progress is never refused
+    /// for how long it takes — only for how long it stays silent.
+    #[error(
+        "rust-analyzer said it was loading and then said nothing new for {quiet_seconds}s while \
+         {stage} ({server}; last words: \"{last}\"; furthest: {furthest}) — it is stalled, not \
+         slow. Look at the server (its build scripts, a lock on `target/`), or restart it: \
+         ./run-index-daemon --stop && ./run-index-daemon"
+    )]
+    ServerStalled {
+        stage: String,
+        server: String,
+        last: String,
+        quiet_seconds: u64,
+        furthest: String,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+/// What a plan's journal says about the run of that plan that last wrote the plan file back.
+///
+/// Carried by [`RestructureError::StaleOperation`], so a plan refused as stale after its own run
+/// failed and was rolled back says so instead of sending the author after an edit they never made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrittenByRun {
+    /// The plan index of the last operation that run applied.
+    pub last_applied: usize,
+    /// That operation's stable id, when the plan has ids.
+    pub last_applied_id: Option<String>,
+    /// The run's state directory, where its journal is.
+    pub journal: String,
+    /// Every file the run touched is back at the content it had before the run.
+    pub undone: bool,
+}
+
+impl std::fmt::Display for WrittenByRun {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let id = self
+            .last_applied_id
+            .as_deref()
+            .map(|id| format!(" ({id})"))
+            .unwrap_or_default();
+        write!(
+            formatter,
+            "this plan file was last written by a run of it, which applied operation {}{id} \
+             (journal: {})",
+            self.last_applied, self.journal
+        )?;
+        if self.undone {
+            formatter.write_str("; its edits have since been undone")?;
+        }
+        formatter.write_str(
+            ". Regenerate the plan with `restructure anchors` rather than re-anchoring by hand",
+        )
+    }
+}
+
+/// The text [`RestructureError::StaleOperation`] appends for a plan a run wrote back.
+fn written_by_suffix(written_by: Option<&WrittenByRun>) -> String {
+    written_by
+        .map(|run| format!(" — {run}"))
+        .unwrap_or_default()
 }
 
 pub type Result<T> = std::result::Result<T, RestructureError>;

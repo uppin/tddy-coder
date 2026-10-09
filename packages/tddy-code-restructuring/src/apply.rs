@@ -38,6 +38,25 @@ pub fn apply_workspace_edit(
     Ok(())
 }
 
+/// The sources of `edit`'s renames that git does not track, which `git mv` would refuse.
+///
+/// Asked before an operation writes anything, so a move of a file nobody has `git add`ed is
+/// refused with the tree and the journal as the previous operation left them — rather than
+/// failing at `git mv` after the operation's text edits are already on disk. A source counts as
+/// tracked when git knows it (an intent-to-add or a staged rename included), when the same edit
+/// creates it, or when `overlay` says an earlier operation of an unwritten run introduced it.
+pub fn untracked_move_sources(
+    root: &Path,
+    edit: &WorkspaceEdit,
+    overlay: &crate::Overlay,
+    spawns: &SpawnRecorder,
+) -> Result<Vec<String>> {
+    let _ = (root, edit, overlay, spawns);
+    todo!(
+        "TODO(reshape-apply-robust): implement — `git ls-files --error-unmatch` per rename source"
+    )
+}
+
 /// Confirm `root` is inside a git worktree. `git mv` is mandatory, so this is checked up front.
 pub fn ensure_git_worktree(root: &Path, spawns: &SpawnRecorder) -> Result<()> {
     let mut command = spawns.command("git");
@@ -300,6 +319,40 @@ mod tests {
             .output()
             .unwrap();
         String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// `#reshape` 10/19: what `git mv` would refuse is a file git has never seen — not one the
+    /// engine `git add -N`'d earlier in the run, and not one the index already holds.
+    #[test]
+    fn counts_a_file_the_engine_created_in_the_same_run_as_tracked_and_names_one_git_has_never_seen(
+    ) {
+        // Given a committed file, a file added with intent-to-add, and one never added
+        let workspace = git_workspace();
+        let root = workspace.path();
+        std::fs::write(root.join("src/created.ts"), "export const b = 1;\n").unwrap();
+        git(root, &["add", "-N", "src/created.ts"]);
+        std::fs::write(root.join("src/stray.ts"), "export const c = 1;\n").unwrap();
+        let moving_all_three = WorkspaceEdit {
+            changes: ["shapes", "created", "stray"]
+                .into_iter()
+                .map(|name| FileEdit::Rename {
+                    from: format!("src/{name}.ts"),
+                    to: format!("src/moved/{name}.ts"),
+                })
+                .collect(),
+        };
+
+        // When the edit's untracked rename sources are asked for
+        let untracked = untracked_move_sources(
+            root,
+            &moving_all_three,
+            &crate::Overlay::new(),
+            &SpawnRecorder::discard(),
+        )
+        .unwrap();
+
+        // Then only the file git has never seen is named
+        assert_eq!(untracked, vec!["src/stray.ts".to_string()]);
     }
 
     #[test]

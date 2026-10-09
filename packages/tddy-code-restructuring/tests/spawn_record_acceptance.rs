@@ -17,7 +17,8 @@ use std::time::Duration;
 use harness::{
     a_workspace_whose_origin_build_script_never_finishes,
     a_workspace_whose_test_binary_stands_alone, cancelling_once_a_process_has_started,
-    moving_the_test_binary_recording, CollectedSpawns, KeptProcess, ORIGIN_LIB,
+    moving_the_test_binary_in_a_group_recording, moving_the_test_binary_recording, CollectedSpawns,
+    KeptProcess, ORIGIN_LIB,
 };
 use serde_json::Value;
 use tddy_code_restructuring::backends::rust::RustBackend;
@@ -421,4 +422,105 @@ fn a_language_server_the_backend_starts_itself_is_recorded_with_the_names_of_its
     );
     // And it has an end, since dropping the backend closes the server's stdin and waits for it
     assert!(outcome.is_some(), "the server's end was not recorded");
+}
+
+/// The processes among `processes` that ran `program` with `first` as their first argument.
+fn the_starts_of<'a>(
+    processes: &'a [KeptProcess],
+    program: &str,
+    first: &str,
+) -> Vec<&'a ProcessStart> {
+    processes
+        .iter()
+        .map(|(start, _)| start)
+        .filter(|start| start.program == program && the_first_argument_of(start) == Some(first))
+        .collect()
+}
+
+/// `#reshape` 10/19: a process started for a plan operation names it, so a spawn record line joins
+/// the journal record of the operation that started it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_apply_records_the_operation_each_git_process_ran_for() {
+    // Given an apply of a test-binary move, recorded by an observer
+    let workspace = a_workspace_whose_test_binary_stands_alone();
+    let spawns = CollectedSpawns::default();
+
+    // When the move is applied
+    let (summary, _) = moving_the_test_binary_recording(
+        &workspace,
+        false,
+        spawns.recorder(),
+        CancellationToken::new(),
+    )
+    .await;
+
+    // Then its `git mv` names operation 0 and the id the run gave it
+    assert!(summary.is_ok(), "{summary:?}");
+    let processes = spawns.processes();
+    let moves = the_starts_of(&processes, "git", "mv");
+    assert_eq!(moves.len(), 1, "{:?}", programs_among(&processes));
+    let operation = moves[0]
+        .operation
+        .as_ref()
+        .expect("the git mv names its operation");
+    assert_eq!(operation.op, Some(0));
+    assert!(operation.op_id.is_some(), "{operation:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn run_level_processes_carry_no_operation() {
+    // Given an apply of a test-binary move, recorded by an observer
+    let workspace = a_workspace_whose_test_binary_stands_alone();
+    let spawns = CollectedSpawns::default();
+
+    // When the move is applied
+    let _applied = moving_the_test_binary_recording(
+        &workspace,
+        false,
+        spawns.recorder(),
+        CancellationToken::new(),
+    )
+    .await;
+
+    // Then the worktree probe and the baseline and result checks name no operation
+    let processes = spawns.processes();
+    let run_level: Vec<&ProcessStart> = the_starts_of(&processes, "git", "rev-parse")
+        .into_iter()
+        .chain(the_starts_of(&processes, "cargo", "check"))
+        .collect();
+    assert!(run_level.len() >= 3, "{:?}", programs_among(&processes));
+    assert!(
+        run_level.iter().all(|start| start.operation.is_none()),
+        "{run_level:#?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_groups_compile_gate_is_recorded_with_its_group() {
+    // Given a test-binary move that is the one member of the group `g`, recorded by an observer
+    let workspace = a_workspace_whose_test_binary_stands_alone();
+    let spawns = CollectedSpawns::default();
+
+    // When the move is applied
+    let summary =
+        moving_the_test_binary_in_a_group_recording(&workspace, "g", spawns.recorder()).await;
+
+    // Then one `cargo check` — the group's end-of-group gate — names the group
+    assert!(summary.is_ok(), "{summary:?}");
+    let processes = spawns.processes();
+    let gated: Vec<&ProcessStart> = the_starts_of(&processes, "cargo", "check")
+        .into_iter()
+        .filter(|start| {
+            start
+                .operation
+                .as_ref()
+                .is_some_and(|operation| operation.group.as_deref() == Some("g"))
+        })
+        .collect();
+    assert_eq!(
+        gated.len(),
+        1,
+        "{:#?}",
+        the_starts_of(&processes, "cargo", "check")
+    );
 }

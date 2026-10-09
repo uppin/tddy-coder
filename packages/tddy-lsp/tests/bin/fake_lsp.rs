@@ -35,6 +35,10 @@
 //!   after the Nth answer instead, whether a client that hovers again at once had heard it by the
 //!   time it read that answer would be a race, and a consumer's test could not name which wait it
 //!   was in.
+//! - `--narrates-while-loading` — behave like `--never-quiescent`, and before answering every
+//!   `textDocument/hover` report a *new* build script (`build script crate-N run`) on the same
+//!   phase: a server that stays loading and keeps saying so, the way a long but healthy load does.
+//!   Lets a test prove that a wait bounded on silence never ends a server that is still talking.
 //! - `--hover-never-answers` — receive `textDocument/hover` and send no response, as
 //!   `tddy/neverAnswers` does for its method. Every other request is answered.
 //!
@@ -84,7 +88,9 @@ fn main() {
         std::process::exit(0);
     }
     let hang = args.iter().any(|a| a == "--hang");
-    let never_quiescent = args.iter().any(|a| a == "--never-quiescent");
+    let narrates_while_loading = args.iter().any(|a| a == "--narrates-while-loading");
+    NARRATES_WHILE_LOADING.store(narrates_while_loading, std::sync::atomic::Ordering::SeqCst);
+    let never_quiescent = narrates_while_loading || args.iter().any(|a| a == "--never-quiescent");
     // `--never-quiescent` wins: a server that never finishes loading must not narrate a finished one.
     let loads_crate_graph = !never_quiescent
         && (args.iter().any(|a| a == "--loads-crate-graph")
@@ -133,6 +139,10 @@ fn main() {
 
 /// Set by `--answers-in-its-workspace`: locations are reported under the client's `rootUri`.
 static ANSWERS_IN_ITS_WORKSPACE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--narrates-while-loading`: every hover is preceded by a new build-script report.
+static NARRATES_WHILE_LOADING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Set by `--never-quiescent`: the server reports itself busy and never reports itself ready.
@@ -394,6 +404,19 @@ fn go_busy_on_a_build_script() {
     }));
 }
 
+/// Report the `served`-th build script on the busy phase — new words, so a client measuring how
+/// long the server has been silent sees it talking.
+fn report_another_build_script(served: u32) {
+    send(&json!({
+        "jsonrpc": "2.0",
+        "method": "$/progress",
+        "params": {
+            "token": "fake-lsp-build-script",
+            "value": { "kind": "report", "message": format!("build script crate-{served} run") },
+        }
+    }));
+}
+
 /// Whether `hovers_answered` hovers have been answered and `--goes-busy-after-hovers` names that
 /// many, so the hover now arriving is the first the server meets busy.
 fn the_server_goes_busy_before_this_hover(hovers_answered: u32) -> bool {
@@ -509,6 +532,9 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
             let served = COLD_HOVERS_SERVED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if the_server_goes_busy_before_this_hover(served) {
                 go_busy_on_a_build_script();
+            }
+            if NARRATES_WHILE_LOADING.load(std::sync::atomic::Ordering::SeqCst) {
+                report_another_build_script(served);
             }
             if HOVER_NEVER_ANSWERS.load(std::sync::atomic::Ordering::SeqCst) {
                 // Sends nothing back: only the caller's own decision ends the wait.
