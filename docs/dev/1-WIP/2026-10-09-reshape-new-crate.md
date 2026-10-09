@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Feature (crate moves gain crate creation; manifest pass bug fixes)
-**Stack**: `#reshape` 9/19, branch `feature/reshape/new-crate`, wave 1. PR title:
+**Stack**: `#reshape` 9/19, branch `feature/reshape/new-crate`, [PR #606](https://github.com/uppin/tddy-coder/pull/606), wave 1. PR title:
 `feat(code-restructuring): a crate move creates its destination and carries every crate it names (#reshape 9/19)`.
 Base in the linear stack: `feature/reshape/move-grouped-use` (K=8). **Real edges**: none. Nothing this node consumes comes from another
 node, and no node consumes this one. It sits on the line only because `gh stack` needs a line. With nodes 5, 7 and 8 it shares
@@ -28,7 +28,7 @@ in the path, and there is no wait-or-proceed fork.**
 | [2026-10-04-restructure-move-cluster-to-crate-leaves-a-modules-directory-children-behind.md](../todo/2026-10-04-restructure-move-cluster-to-crate-leaves-a-modules-directory-children-behind.md) | ⚠ **partial** (claimed by `#reshape` 5; slice reassigned here by the developer 2026-10-09) | Acceptance item 3, the `libc` cause. The origin declares `libc` only under `[target.'cfg(unix)'.dependencies]`, which `manifest_edits::dependencies_of` never reads. Fixed by rule T1 (tests 18, 21–25). This node's wrap narrows item 3 to "children only" |
 | [2026-09-23-carved-crate-manifests-repeat-versions-and-tokio-feature-lists.md](../todo/2026-09-23-carved-crate-manifests-repeat-versions-and-tokio-feature-lists.md) | — Reference, left open | New manifests copy lines verbatim and start no `[workspace.dependencies]` convention, so they add nothing new to that decision. They do repeat versions, exactly as hand-carved crates do |
 | [../../../packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md](../../../packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md) | — Unrelated (deliberately untouched) | Rule S1 lives in `survey.rs`, not in `test_binary.rs::names_bound_in`. The scanner `#reshape` 15 extracts is not edited |
-| Function-size list (whole-work discovery, Exploration 3): `plan/codec.rs::parse_op` (206), `crate_move/cluster.rs::resolve_cluster` (66), `crate_move/cluster/stranded.rs::stranded_siblings` (70) | ⚠ **DURING** (owned by `#reshape` 16) | None of them grows. The codec rule is called from `parse_ops`, not `parse_op`. `resolve_cluster` becomes a thin wrapper, and its unchanged body is renamed `resolve_members_together` (node 16's list entry moves with it). The `stranded.rs` edit is one changed line in `modules_the_plan_moves` |
+| Function-size list (whole-work discovery, Exploration 3): `plan/codec.rs::parse_op` (206), `crate_move/cluster.rs::resolve_cluster` (66), `crate_move/cluster/stranded.rs::stranded_siblings` (70) | ⚠ **DURING** (owned by `#reshape` 16) | None of them grows. The codec rule is called from `parse_ops`, not `parse_op`. `#reshape` 7 already moved `resolve_cluster`'s body into the private `cluster_edits`; creation hooks into `widened_cluster`, its 3-line caller, so neither function grows (node 16's list entry is now `cluster_edits`). The `stranded.rs` edit is one changed line in `modules_the_plan_moves` |
 | `docs/dev/todo/2026-09-25-restructure-move-to-crate-misses-a-crate-named-only-in-a-body-path.md` | — Already closed by #540 | The 10-08 entry links to it, but it no longer exists. The body-path survey it asked for is what rule T1 extends |
 
 ## Affected Packages
@@ -217,7 +217,8 @@ Published with the wave-2 contract commit (the first push of this PR's contract,
   - `pub(crate) struct Skeleton { manifest: String, root: String, created: [String; 2] }`
 - `MovingCluster.creates: Option<NewCrate>` (pub field) and `moving::Move.creates: Option<NewCrate>`.
 - `Destination::read_in(workspace: &Workspace<'_>, dir: &str) -> Result<Destination>` (pub).
-- `cluster::resolve_members_together(engine, workspace, cluster) -> Result<WorkspaceEdit>`: the unchanged body.
+- ~~`cluster::resolve_members_together`~~ — dropped at the contract (see Validation results): `#reshape` 7 already moved the body
+  into private `cluster_edits`, so creation hooks into `cluster::widened_cluster` and no rename is needed.
   `resolve_cluster` keeps its public signature.
 - In `manifest_edits`:
   - `pub(crate) struct DeclaredIn { pub(crate) header: String, pub(crate) line: String }`
@@ -228,7 +229,7 @@ Published with the wave-2 contract commit (the first push of this PR's contract,
 - `moving::CarriedLines { plain: Vec<String>, by_target: BTreeMap<String, Vec<String>> }`, returned by `Move::dependency_lines`.
 - In `survey`: `fn names_bound_by(text: &str, manifest: &str) -> BTreeSet<String>` and `fn bound_only_by_their_own_crate(text: &str) -> BTreeSet<String>`.
 - `plan::codec::crate_move_fields::refuse_crate_creations_it_cannot_honour(ops: &[RefactorOp]) -> Result<()>`.
-- Failing tests: the 26 in "Acceptance tests".
+- Failing tests: the 24 red ones in "Acceptance tests" (17 and 23 are green guards).
 
 ## Green wave
 
@@ -289,9 +290,9 @@ origin declares them in.
 
 - **New** `crate_move/new_crate.rs` (~180 production lines): `NewCrate`, `Skeleton`, `refusal`, `skeleton`, `folded`,
   `created_by_earlier_operations`, the package-name check shared with the codec.
-- **`crate_move/cluster.rs`**: `MovingCluster.creates`; `named_by` sets it; `travelling_alone` copies it. `resolve_cluster` becomes the
-  wrapper: no creation, call `resolve_members_together`. With a creation: refusal, then skeleton, then a seeded overlay clone, then
-  `resolve_members_together` against it, then `folded`. The body is renamed and keeps its length.
+- **`crate_move/cluster.rs`**: `MovingCluster.creates`; `named_by` sets it; `travelling_alone` copies it. `widened_cluster` (which
+  `resolve_cluster` calls) branches: no creation, as today. With a creation: refusal, then skeleton, then a seeded overlay clone, then
+  `cluster_edits` and the widening against it, then `folded`. `cluster_edits` is not edited.
 - **`crate_move/moving.rs`**:
   - `Move.creates`; `Move::read` reads `NewCrate::named_by(op)` and uses `NewCrate::destination()` when it is set, otherwise
     `Destination::read_in`
@@ -358,7 +359,7 @@ The existing `crate_move.rs:600-617` `refuses_a_destination_with_no_manifest` st
 
 ## Acceptance tests
 
-25 of the 26 are **red on `master`**; test 17 is a guard that is green today. Each red test's reason is given in its group heading or after its name.
+24 of the 26 are **red on `master`**; tests 17 and 23 are guards that are green today. Each red test's reason is given in its group heading or after its name.
 
 ### `packages/tddy-code-restructuring/tests/new_crate_acceptance.rs` (new; public API, no server)
 
@@ -479,7 +480,44 @@ Decisions taken by this plan:
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Draft PR contract (commit 2, 2026-10-09)
+
+Scoped gate on the contract commit: `cargo check -p tddy-code-restructuring --all-targets`,
+`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` are clean.
+
+**Surface published.** As listed under `## Draft PR contract`. Unimplemented bodies are `todo!()` marked
+`TODO(reshape-new-crate)`, and nothing is wired yet, so no existing path reaches a `todo!()`. Uncalled items carry
+`#[allow(dead_code, reason = "TODO(reshape-new-crate)…")]`; green removes each one as it wires it. Differences from the
+planned contract:
+- `NewCrate::destination` is implemented already, because it only builds the `Destination`.
+- `resolve_members_together` is dropped, as described above.
+- `MovingCluster.creates` and `Move.creates` exist and are always `None`.
+- `names_bound_by` already takes `manifest` but ignores it for now.
+- The codec function is not yet called from `parse_ops`, since a `todo!()` there would break every plan.
+
+**Required-field touch in parents' tests.** `creates: None` was added to the `MovingCluster` literals in
+`tests/cluster_move.rs`, `tests/crate_move_children.rs`, `tests/crate_move_restricted_declarations.rs`,
+`tests/grouped_use_crate_move.rs`, `tests/move_to_crate_widening.rs` and `src/crate_move/cluster.rs`'s test module.
+
+**Acceptance tests.** Run per binary or filter, never the whole suite. 24 are red because the implementation is missing;
+2 are guards that are green today.
+- 1–3 (`tests/new_crate_acceptance.rs`): red. `Plan::parse` accepts the line.
+- 4–9 (`tests/new_crate_acceptance.rs`): red. The static check reports "is not a crate" without the remedy, or reports
+  nothing (test 5).
+- 10–15 (`src/crate_move/new_crate_tests.rs`): red. The move is refused as "`crates/fresh` is not a crate".
+- 16 and 18 (`src/crate_move/survey.rs`): red. The survey returns `[]`.
+- **17: guard, green**, as planned.
+- 19–21, 24, 25 (`src/crate_move/manifest_pass_tests.rs`): red. The destination's manifest gains nothing.
+- 22: red. The move is refused with "names `libc`, which … does not declare".
+- **23: guard, green.** The plain table already wins today. The changeset had counted it as red; it pins that the
+  target-table pass leaves this case alone.
+- 26 (`tests/move_module_to_crate_acceptance.rs`, live): red. The resolution is refused as "not a crate".
+
+**Surface unit tests**: 5 tests, all red with `not yet implemented`.
+- 4 in `crate_move/manifest_edits.rs` `mod target_table_tests`, covering `target_declarations`,
+  `declares_dependency_in_any_table`, `with_lines_under` and `package_line`.
+- 1 in `crate_move/survey.rs` (`a_name_bound_only_by_its_own_crates_import_is_listed_and_one_bound_otherwise_is_not`),
+  covering `bound_only_by_their_own_crate`.
 
 ## TODO
 
@@ -488,8 +526,8 @@ Decisions taken by this plan:
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-new-crate.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code

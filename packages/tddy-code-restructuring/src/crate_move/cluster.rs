@@ -15,6 +15,8 @@ use crate::plan::Reexport;
 
 use super::module_home;
 
+use super::NewCrate;
+
 use super::malformed;
 use crate::crate_move::{header, moving, refusals};
 use crate::edit::{FileEdit, TextEdit, VisibilityChange};
@@ -37,6 +39,8 @@ pub struct MovingCluster {
     pub destination: destination::Destination,
     /// What each leaves behind in the crate it left.
     pub reexport: Reexport,
+    /// The crate the move creates at the destination, when its plan line names one with `name`.
+    pub creates: Option<NewCrate>,
 }
 
 impl MovingCluster {
@@ -63,6 +67,8 @@ pub(crate) fn travelling_alone(moving: &moving::Move) -> MovingCluster {
         members: vec![moving.home.clone()],
         destination: moving.destination.clone(),
         reexport: moving.reexport,
+        // TODO(reshape-new-crate): implement — copied from `moving.creates`
+        creates: None,
     }
 }
 
@@ -87,6 +93,8 @@ pub(crate) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Mov
         members,
         destination: destination::Destination::read(workspace.root, to)?,
         reexport: op.reexport.unwrap_or(Reexport::None),
+        // TODO(reshape-new-crate): implement — `NewCrate::named_by(op)`
+        creates: None,
     })
 }
 
@@ -446,6 +454,7 @@ mod tests {
                 extern_name: "destination".to_string(),
             },
             reexport,
+            creates: None,
         }
     }
 

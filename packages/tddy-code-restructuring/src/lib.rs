@@ -27,7 +27,7 @@ pub use backends::rust::{client_capabilities, server_settings};
 pub use crate_move::{
     defining_crate, module_home, read_test_binary_move, resolve_cluster, resolve_test_binary_move,
     siblings_left_behind, unrunnable_moves, CallerRewrite, Destination, ModuleHome, MovingCluster,
-    Survey, TestBinaryMove,
+    NewCrate, Survey, TestBinaryMove,
 };
 pub use edit::{FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit};
 pub use journal::{Journal, JournalRecord, OpStatus, OpenGroup, PreImage};

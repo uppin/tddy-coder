@@ -452,6 +452,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 }
 
 mod canonical_paths;
+mod crate_move_fields;
 mod facade_imports_fields;
 mod file_hint;
 mod groups;

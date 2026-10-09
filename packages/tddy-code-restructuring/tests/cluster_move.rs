@@ -138,6 +138,7 @@ fn names_the_modules_travelling_together() {
             extern_name: "destination".to_string(),
         },
         reexport: Reexport::Glob,
+        creates: None,
     };
 
     // When the co-moving set is asked for
