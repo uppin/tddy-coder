@@ -73,6 +73,7 @@ pub(super) fn widenings(
             item: item.name.clone(),
             from: as_written(&item.visibility),
             to: as_written(&to),
+            reason: None,
         });
     }
     Ok((edits, report))

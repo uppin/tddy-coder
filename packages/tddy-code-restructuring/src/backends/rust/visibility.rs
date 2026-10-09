@@ -107,6 +107,7 @@ fn widening_of(item: &MovedItem) -> Option<VisibilityChange> {
             item.visibility.clone()
         },
         to: "pub(crate)".to_string(),
+        reason: None,
     })
 }
 
@@ -238,6 +239,7 @@ mod tests {
             item: "helper".to_string(),
             from: from.to_string(),
             to: "pub(crate)".to_string(),
+            reason: None,
         }
     }
 

@@ -1,4 +1,4 @@
-//! A cross-crate move rewrites grouped `use` lines instead of refusing them — `#reshape` 7/19.
+//! A cross-crate move rewrites grouped `use` lines instead of refusing them — `#reshape` 7/24.
 //!
 //! `#carve` 21 moved three clusters out of `tddy-session-lifecycle`, and every one was refused before
 //! a server answered: a grouped `use` whose leaves land on different qualifiers, a path that reaches a
@@ -13,7 +13,9 @@
 
 use std::collections::BTreeMap;
 
-use tddy_code_restructuring::crate_move::{self, ItemReferences, ModuleReferences, Reference};
+use tddy_code_restructuring::crate_move::{
+    self, DeclarationKind, ItemReferences, ModuleReferences, Reference,
+};
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::{
     Destination, FileEdit, ModuleHome, MovingCluster, Overlay, Position, Reexport,
@@ -223,12 +225,19 @@ impl AKnownReferenceSet {
                     })
             })
             .collect();
+        let declared_at = every_place_named(workspace, declared_in, item)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("`{item}` is not declared in {declared_in}"));
         self.by_file
             .entry(declared_in.to_string())
             .or_default()
             .push(ItemReferences {
                 item: item.to_string(),
                 referenced_at,
+                declared_at,
+                within: Vec::new(),
+                kind: DeclarationKind::Item,
             });
         self
     }

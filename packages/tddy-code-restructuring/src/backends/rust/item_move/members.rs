@@ -158,6 +158,7 @@ pub(crate) fn widen_members(text: &str, reached: &[ReachedMember]) -> Result<Mem
             item: format!("{}::{}", member.owner, member.name),
             from: spelled(&member.visibility),
             to: spelled(&to),
+            reason: None,
         });
     }
     Ok(widening)
@@ -313,6 +314,7 @@ mod tests {
                 item: "Counter::count".to_string(),
                 from: "private".to_string(),
                 to: "pub(crate)".to_string(),
+                reason: None,
             }]
         );
     }
@@ -342,6 +344,7 @@ mod tests {
                 item: "Counter::peek".to_string(),
                 from: "private".to_string(),
                 to: "pub(crate)".to_string(),
+                reason: None,
             }]
         );
     }

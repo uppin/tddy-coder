@@ -249,6 +249,7 @@ pub(super) fn visibilities(
                 item: item.name.clone(),
                 from: spelled(&item.visibility),
                 to: spelled(&to),
+                reason: None,
             });
         }
         landing.scopes.push((item.name.clone(), scope));
@@ -280,6 +281,7 @@ fn widen_reached_items(
                 item: item.name.clone(),
                 from: spelled(&item.visibility),
                 to: spelled(&to),
+                reason: None,
             });
         }
     }

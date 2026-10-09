@@ -70,6 +70,7 @@ pub(super) fn respelled(
                 item: declared_after(&masked[span.end..]),
                 from: written.to_string(),
                 to: spelled.clone(),
+                reason: None,
             });
             edits.push((file.from.clone(), Edit::replace(span, spelled)));
         }
@@ -227,6 +228,7 @@ mod tests {
                 item: "materialize".to_string(),
                 from: "pub(super)".to_string(),
                 to: "pub(crate)".to_string(),
+                reason: None,
             }]
         );
     }
