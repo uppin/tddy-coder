@@ -144,6 +144,7 @@ mod tests {
 
     fn declared(pairs: &[(&str, &str)]) -> super::super::Declared {
         super::super::Declared {
+            rebinds: Vec::new(),
             retargets: Vec::new(),
             repoints: pairs
                 .iter()

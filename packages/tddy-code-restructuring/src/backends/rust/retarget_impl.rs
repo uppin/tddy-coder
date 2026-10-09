@@ -6,6 +6,7 @@
 //! `docs/dev/1-WIP/2026-10-05-sharpen-retarget-impl.md` for the rules (the splitting rule, the path
 //! re-points, the field refusal).
 
+mod delegator;
 mod fields;
 mod imports;
 mod outline;
@@ -14,6 +15,7 @@ mod rewrite;
 
 use serde_json::Value;
 
+use super::item_move::sites::Site;
 use super::item_move::text::{applied, line_start, use_insertion, Edit};
 use super::{failure, seam_refusal, seam_survey, uri_of, RustBackend};
 use crate::edit::{FileEdit, Range, Resolution, WorkspaceEdit};
@@ -118,18 +120,13 @@ impl RustBackend {
             .map(|member| (member.name.as_str(), &member.position))
             .collect();
         let sites = self.sites_of(&uri, workspace, file, &text, &named)?;
-        let inside: Vec<(usize, String)> = sites
-            .iter()
-            .filter(|site| site.path == file && layout.moved.contains(&site.offset))
-            .map(|site| (site.offset - layout.moved.start, site.name.clone()))
-            .collect();
-        let moved_text = rewrite::repointed(
-            &text[layout.moved.clone()],
-            &inside,
-            &run.self_type,
+        let retarget = Retarget {
+            op,
+            text: &text,
+            file,
             new_name,
-        );
-        let replacement = layout.assemble(&moved_text);
+        };
+        let (replacement, notes) = the_replacement(&retarget, &layout, &run, &sites)?;
 
         let use_line = imports::the_use(workspace, file, to_type)?;
         let edits = the_edits(&text, replacement, layout.replaced.clone(), use_line);
@@ -143,7 +140,7 @@ impl RustBackend {
                 }],
             },
             report: Vec::new(),
-            notes: Vec::new(),
+            notes,
         })
     }
 
@@ -159,6 +156,61 @@ impl RustBackend {
             Anchor::Symbol { .. } => Err(unlowered_item_anchor(&op.anchor, "`retarget_impl`")),
         }
     }
+}
+
+/// What [`the_replacement`] reads of the run besides the layout: the operation, the file's text and
+/// path, and the new type's bare name.
+struct Retarget<'a> {
+    op: &'a RefactorOp,
+    text: &'a str,
+    file: &'a str,
+    new_name: &'a str,
+}
+
+/// The text that replaces the block, with the `Old::` paths inside the moved members re-pointed,
+/// and the notes the run reports: with `variant: "leave_delegator"`, a delegator in each moved
+/// member's slot (S7 refused first) and a note for each delegator nothing calls.
+fn the_replacement(
+    retarget: &Retarget<'_>,
+    layout: &rewrite::Layout<'_>,
+    run: &outline::Run,
+    sites: &[Site],
+) -> Result<(String, Vec<String>)> {
+    let Retarget {
+        op,
+        text,
+        file,
+        new_name,
+    } = retarget;
+    let inside: Vec<(usize, String)> = sites
+        .iter()
+        .filter(|site| site.path == *file && layout.moved.contains(&site.offset))
+        .map(|site| (site.offset - layout.moved.start, site.name.clone()))
+        .collect();
+    let moved_text = rewrite::repointed(
+        &text[layout.moved.clone()],
+        &inside,
+        &run.self_type,
+        new_name,
+    );
+    let Some(expr) = op.expr.as_deref().filter(|_| op.variant.is_some()) else {
+        return Ok((layout.assemble(&moved_text), Vec::new()));
+    };
+
+    let members: Vec<(&str, &str)> = run
+        .moved()
+        .iter()
+        .map(|member| (member.name.as_str(), member_text(text, member)))
+        .collect();
+    delegator::refuse_unforwardable(&members)?;
+    let delegators = members
+        .iter()
+        .map(|(_, member)| delegator::forwarding_method(member, expr, new_name))
+        .collect::<Result<Vec<String>>>()?;
+    let names: Vec<&str> = members.iter().map(|(name, _)| *name).collect();
+    let notes =
+        delegator::dead_delegators(sites, file, layout.moved.clone(), &names, &run.self_type);
+    Ok((layout.with_delegators(&moved_text, &delegators), notes))
 }
 
 /// The edits that move the block: the replacement of the anchored range, plus the `use` of the new

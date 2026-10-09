@@ -53,6 +53,7 @@ mod prelude_shadow;
     )
 )]
 mod projection;
+pub(crate) mod read_fields_through;
 mod readiness;
 mod relative_visibility;
 mod repoint_call;
@@ -85,7 +86,7 @@ const SYMBOL_KIND_IMPL: u64 = 19;
 /// `Method` (6) children, and an inline `mod` as `Module` (2).
 const SYMBOL_KIND_MODULE: u64 = 2;
 
-const SUPPORTED: [RefactorKind; 25] = [
+const SUPPORTED: [RefactorKind; 26] = [
     RefactorKind::ExtractMethod,
     RefactorKind::ExtractVariable,
     RefactorKind::ExtractModule,
@@ -111,6 +112,7 @@ const SUPPORTED: [RefactorKind; 25] = [
     RefactorKind::RetargetImpl,
     RefactorKind::RepointCall,
     RefactorKind::RepointFacadeImports,
+    RefactorKind::ReadFieldsThrough,
 ];
 
 /// How to ask rust-analyzer for the assist behind an operation.
@@ -1174,6 +1176,9 @@ impl LanguageBackend for RustBackend {
         if op.op == RefactorKind::RepointFacadeImports {
             return repoint_facade::findings(op, workspace);
         }
+        if op.op == RefactorKind::ReadFieldsThrough {
+            return read_fields_through::findings(op, workspace);
+        }
         let Anchor::Range { start, end, .. } = &op.anchor else {
             return Ok(Vec::new());
         };
@@ -1333,6 +1338,12 @@ impl RustBackend {
         // the same way and opening the parent's document for itself.
         if op.op == RefactorKind::ReparentModule {
             return self.reparent_module(op, workspace);
+        }
+
+        // Rebinds the `self` a range reads to a local inserted before it, authored here and informed
+        // by the server (field mode), and opens the document for itself.
+        if op.op == RefactorKind::ReadFieldsThrough {
+            return self.read_fields_through(op, workspace);
         }
 
         // Changes the self type of an inherent `impl`'s members, authored here and informed by the

@@ -1907,7 +1907,7 @@ fn an_extraction(op: RefactorKind, anchor: Anchor, name: &str) -> RefactorOp {
 /// A one-based range from the first non-blank character of the first line to the end of the last.
 ///
 /// Read off the fixture's own text so a range can never point past a line, or into its indent.
-fn a_range_over(
+pub fn a_range_over(
     fixture: &AFixtureWorkspace,
     file: &str,
     lines: std::ops::RangeInclusive<u32>,
