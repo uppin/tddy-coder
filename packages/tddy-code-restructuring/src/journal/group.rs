@@ -63,3 +63,66 @@ pub struct OpenGroup {
     /// Every pre-image the group's members journalled, in the order they were written.
     pub pre_images: Vec<PreImage>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A directory holding `files` (relative path, contents).
+    fn a_tree_holding(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let root = tempfile::tempdir().expect("a temporary directory");
+        for (path, text) in files {
+            let file = root.path().join(path);
+            std::fs::create_dir_all(file.parent().expect("a parent")).expect("created");
+            std::fs::write(file, text).expect("written");
+        }
+        root
+    }
+
+    #[test]
+    fn restoring_a_file_the_group_created_removes_the_directory_that_emptied() {
+        // Given a file the group created in a directory of its own, beside a file that was there
+        let root = a_tree_holding(&[
+            ("src/lib.rs", "pub mod split;\n"),
+            ("src/split/attachments.rs", "pub fn f() {}\n"),
+        ]);
+        let created = PreImage {
+            path: "src/split/attachments.rs".to_string(),
+            contents: None,
+        };
+
+        // When the rollback restores it
+        created
+            .restore(root.path())
+            .expect("the creation is undone");
+
+        // Then the file and the directory it emptied are gone, and the rest stays
+        assert!(
+            !root.path().join("src/split").exists(),
+            "the rollback left the directory it emptied"
+        );
+        assert!(root.path().join("src/lib.rs").exists());
+    }
+
+    #[test]
+    fn restoring_a_renamed_file_recreates_the_directory_the_sweep_removed() {
+        // Given a file whose directory a move emptied and the sweep removed
+        let root = a_tree_holding(&[("src/lib.rs", "pub mod host;\n")]);
+        let renamed_away = PreImage {
+            path: "src/host/attachments.rs".to_string(),
+            contents: Some("pub fn f() {}\n".to_string()),
+        };
+
+        // When the rollback restores it
+        renamed_away
+            .restore(root.path())
+            .expect("the rename is undone");
+
+        // Then the directory is created again and holds the file as it was
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("src/host/attachments.rs"))
+                .expect("the file is back"),
+            "pub fn f() {}\n"
+        );
+    }
+}
