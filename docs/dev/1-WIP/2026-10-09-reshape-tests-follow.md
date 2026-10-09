@@ -5,6 +5,7 @@
 **Type**: Feature (engine capability for `move_module_to_crate` / `move_cluster_to_crate`) plus one defect fix
 **Stack**: `#reshape` 14/19, branch `feature/reshape/tests-follow`, green wave 2. PR title:
 `feat(code-restructuring): crate moves take the test modules that test only moved code (#reshape 14/19)`.
+**PR**: [#611](https://github.com/uppin/tddy-coder/pull/611).
 **Base branch** in the linear stack: `feature/reshape/move-impl-members` (K=13). That is a line position only, not a dependency.
 **Real edges:** one in, none out. `move-children → tests-follow` (5→14): this node extends node 5's carried-file set and travelling set with sibling `#[cfg(test)]` modules, and lands them with node 5's relocation rule.
 
@@ -100,7 +101,9 @@ note: test module `a_tests` (1 file(s)) follows `parent::a`: everything it names
 
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
-| 5 `move-children` (`feature/reshape/move-children`) | `Move::carried` / `module_files::MovedFile` / `module_files::relocated`; the travelling set over carried files; `cluster::member_changes`; `header::repointed_header_at`; `crate_move::cluster_resolution` with notes; static uncarriable findings in `unrunnable`; the `tests/crate_move_children.rs` fake reference set | Followers are landed with `relocated`; the moving set for classification is members ∪ their carried files; follower files are added to node 5's travelling set; `repointed_header_at` delegates to the new `repointed_header_in`; notes are appended to `cluster_resolution`'s; the refusal joins `unrunnable` beside node 5's findings | Re-implement carrying, relocation, facade visibility, restricted-child refusal or the `..` fix; change which children node 5 carries |
+| 5 `move-children` (`feature/reshape/move-children`) | `Move::carried` / `module_files::MovedFile` / `module_files::relocated`; the travelling set over carried files; `cluster::member_changes`; `header::repointed_header_at`; `crate_move::cluster_resolution` with notes; static uncarriable findings in `unrunnable` | Followers are landed with `relocated`; the moving set for classification is members ∪ their carried files; follower files are added to node 5's travelling set; `repointed_header_at` delegates to the new `repointed_header_in`; notes are appended to `cluster_resolution`'s; the refusal joins `unrunnable` beside node 5's findings | Re-implement carrying, relocation, facade visibility, restricted-child refusal or the `..` fix; change which children node 5 carries |
+
+Refined at the contract commit: node 5's surface is all `todo!()` until its green, so tests 9, 10, 11 and 15 (they read `cluster_resolution`'s notes) panic in node 5's `crate_move::cluster_resolution` until node 5 is green, and test 8 needs node 5's carrying before it can show the test gate. The fake reference set node 5 kept local to `tests/crate_move_children.rs` is now shared as `tests/harness/known_references.rs` (F5); node 5's local copy is left for its owner to switch over. Fake reference sets must set node 7's `declared_at`/`within`/`kind`, and `MovingCluster` literals node 9's `creates: None`.
 
 Textual collisions (not edges): node 3 (`facade_writer`, declaration spans), node 7 (`cluster.rs`), node 8 (`header.rs`, `check_precondition_parity.rs`), node 13 (`backends/rust.rs` untouched here). Rebase over them.
 
@@ -119,7 +122,7 @@ The wave-2 contract commit (the first push of this PR, never its deliverable) pu
   - `follow_changes(workspace: &Workspace<'_>, members: &[Move], following: &[FollowingTest], co_moving: &BTreeSet<String>) -> Result<(Vec<FileEdit>, BTreeSet<String>)>` (edits, dev crates)
   - `test_gated(workspace: &Workspace<'_>, carried: &[MovedFile]) -> Result<BTreeSet<String>>`
   - `unfollowable(workspace: &Workspace<'_>, ops: &[RefactorOp], index: usize, op: &RefactorOp) -> Result<Vec<String>>`
-- **Failing tests:** acceptance tests 1–11, 13–20 and 22 below. Items 12 and 21 are green pins.
+- **Failing tests:** acceptance tests 1–11, 13–20, 20a and 22 below. Items 12 and 21 are green pins. Shared test helpers added: `tests/harness/known_references.rs` (`AKnownReferenceSet`, `nothing_reaches_anything`, `position_of`) and `harness::a_workspace_whose_module_has_a_sibling_test_module` + `A_SIBLING_TEST_MODULE`.
 
 ## Green wave
 
@@ -186,7 +189,7 @@ None in `#reshape`: no node consumes this behaviour. The second stack (crate spl
 
 **Primary: library level, no rust-analyzer.** Through the public `crate_move::cluster_resolution` / `resolve_cluster` / `unrunnable_moves`, with node 5's fake `ModuleReferences` over tempdir workspaces (F5). Exact text and notes.
 
-**Thin live layer:** one case in `tests/cluster_move_acceptance.rs` (already in `.config/rust-e2e.filterset` and the `rust-analyzer` group), oracle `assert_compiles_with_its_tests`.
+**Thin live layer:** one case in `tests/move_module_to_crate_acceptance.rs` (already in `.config/rust-e2e.filterset` and the `rust-analyzer` group), oracle `assert_compiles_with_its_tests`.
 
 Fixture for `tests/crate_move_test_modules.rs`: `origin/src/lib.rs` declares `pub mod parent; pub mod facade;` (`facade` = `pub use other::defined;`); `origin/src/parent.rs` declares `pub(crate) mod a; pub(crate) use a::*; pub mod keeper;` and, each with a doc comment, `#[cfg(test)] mod a_tests;` (names only `super::recipe`, `super::a::Thing`, `crate::facade::defined::f`, `tempfile`), `#[cfg(test)] mod mixed_tests;` (`use super::*;` + `super::a::Thing`), `#[cfg(test)] mod unrelated_tests;` (names `std` only); `origin/Cargo.toml` declares `other` and dev-dependency `tempfile`; destination `dest` empty.
 
@@ -219,7 +222,7 @@ Red because no crate-move code reads a sibling test declaration, `reach` ignores
 9. `a_test_module_that_also_names_code_staying_behind_stays_and_the_resolution_notes_why`: `mixed_tests`, note names `super::*`.
 10. `a_test_module_whose_items_another_file_names_stays_and_the_resolution_notes_why`
 11. `a_test_module_placed_with_a_path_attribute_stays_and_the_resolution_notes_why`
-12. `a_test_module_naming_nothing_the_move_takes_is_left_alone_without_a_note`: *green pin*.
+12. `a_test_module_naming_nothing_the_move_takes_is_left_alone`: *green pin* (no rename, declaration kept). The "without a note" half is not asserted: reading notes needs node 5's `cluster_resolution`.
 13. `a_test_module_of_two_modules_moved_by_two_operations_follows_the_second`
 14. `no_reference_inside_a_following_test_module_is_rewritten_as_a_caller`: `reexport: none`.
 15. `the_resolution_notes_each_test_module_that_follows`
@@ -230,20 +233,26 @@ Red because no crate-move code reads a sibling test declaration, `reach` ignores
 Red because no static pass reads a sibling test declaration.
 
 17. `a_static_check_reports_a_following_test_module_whose_target_already_exists_in_the_destination`
+
+Test 18 needs a reference engine, which this file does not carry, so it lives in `tests/crate_move_test_modules.rs`:
+
 18. `check_and_apply_refuse_a_following_test_modules_merge_with_the_same_message`
 
 ### Unit tests, `packages/tddy-code-restructuring/src/crate_move/source_scan/test_declarations.rs`
 
 19. `reads_a_cfg_test_declaration_with_its_doc_comment_and_attributes_as_one_span`
 20. `a_cfg_any_test_or_an_inline_test_module_is_not_a_test_declaration`
+20a. `a_test_declaration_placed_with_a_path_attribute_says_so` (surface unit test)
 
 ### Existing suites, unchanged (*green pins*)
 
 21. `tests/crate_move_children.rs`, `tests/cluster_move.rs`, `tests/move_facades_acceptance.rs`, `tests/move_paths_acceptance.rs`, `tests/nested_module_move_acceptance.rs` pass without edits; a module named `*_tests` without `#[cfg(test)]` is not considered.
 
-### `packages/tddy-code-restructuring/tests/cluster_move_acceptance.rs` (existing, live; already registered)
+### `packages/tddy-code-restructuring/tests/move_module_to_crate_acceptance.rs` (existing, live; already registered)
 
-22. `moves_a_module_with_its_sibling_test_module_and_every_crate_compiles_with_its_tests`: also asserts dry-run and apply `-> N file(s)` are equal and the follow note is printed. Red: the stranded test file fails the gate (`E0432`).
+A cluster of one module is refused (`move_cluster_to_crate needs also`), so the single-module case lives with the single-module suite, beside node 5's `files_reported` helper.
+
+22. `moves_a_module_with_its_sibling_test_module_and_every_crate_compiles_with_its_tests`: fixture `harness::a_workspace_whose_module_has_a_sibling_test_module` (`A_SIBLING_TEST_MODULE`); also asserts dry-run and apply `-> N file(s)` are equal and the follow note is printed. Red: the test module stays in the origin (it still compiles there through the glob facade) and no note names it.
 
 ## Technical Debt & Production Readiness
 
@@ -290,7 +299,27 @@ Taken by the developer (2026-10-09, PRD review), with all recommendations accept
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+**Contract commit (wave 2, 2026-10-09)** — scoped runs only; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` clean.
+
+| Test | File | State | Why |
+|---|---|---|---|
+| 1 sibling moves | `tests/crate_move_test_modules.rs` | 🔴 red | only `a.rs` renamed |
+| 2 origin loses declaration | same | 🔴 red | `parent.rs` still declares `a_tests` |
+| 3 destination declares it | same | 🔴 red | root reads `pub mod a;` only |
+| 4, 5, 6 paths | same | 🔴 red | `a_tests` is not moved or re-pointed |
+| 7 dev-dependencies | same | 🔴 red | destination manifest gains no `tempfile` |
+| 8 gated carried child | same | 🔴 red | nothing carried yet (node 5) and no test gate |
+| 9, 10, 11, 15 notes | same | 🔴 red | panic in node 5's `crate_move::cluster_resolution` `todo!()` (`crate_move.rs:251`) — red until node 5 is green, then on this node's notes |
+| 12 unrelated left alone | same | 🟢 green pin | |
+| 13 two operations | same | 🔴 red | `ab_tests` not renamed at the second operation |
+| 14 no caller rewrite | same | 🔴 red | `a_tests` gains `use destination::a::Thing;` as a caller |
+| 16 member through parent glob | same | 🔴 red | resolve refuses as a cycle: `b.rs still names origin (origin::parent::a::recipe)` |
+| 17 static merge finding | `tests/check_precondition_parity.rs` | 🔴 red | no finding |
+| 18 check/apply same message | `tests/crate_move_test_modules.rs` | 🔴 red | apply `Ok(())`, check `[]` |
+| 19, 20, 20a declaration reader | `src/crate_move/source_scan/test_declarations.rs` | 🔴 red | `todo!("test_declarations")` |
+| 22 live | `tests/move_module_to_crate_acceptance.rs` | 🔴 red | dry run `5 file(s)`, no follow note, test file stays |
+
+Test 13's fixture gives `b` no `super::recipe`: through an earlier operation's facade, the re-export walk cannot follow `pub use a::*;` once `a` is `pub use destination::a;` (a `use`-bound name, not a child), which refuses `b` as a cycle — a separate gap, reported to the orchestrator as a proposed todo.
 
 ## TODO
 
@@ -299,10 +328,10 @@ Taken by the developer (2026-10-09, PRD review), with all recommendations accept
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-tests-follow.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point, not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests (contract surface + its unit tests)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

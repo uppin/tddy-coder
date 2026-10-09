@@ -370,6 +370,8 @@ pub(crate) mod module_files;
 
 mod carried;
 
+mod test_modules;
+
 pub(crate) mod survey;
 
 mod module_home;
