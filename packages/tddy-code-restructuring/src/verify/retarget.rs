@@ -29,6 +29,9 @@ pub struct Declared {
     /// The call re-points declared (`--repoint`, one per `repoint_call`): rule R-call, in
     /// [`super::repoint`].
     pub repoints: Vec<super::Repoint>,
+    /// The `self` rebinds declared (`--rebind`, one per `read_fields_through`): rule R-rebind, in
+    /// [`super::rebind`].
+    pub rebinds: Vec<super::Rebind>,
 }
 
 /// One declared retarget: the members of `impl from` became members of `impl to`. Bare type
@@ -87,6 +90,21 @@ impl Declared {
                 .map(|text| text.parse())
                 .collect::<Result<_, _>>()?,
             repoints: Vec::new(),
+            rebinds: Vec::new(),
+        })
+    }
+
+    /// This declaration with the rebinds the texts name added, or the first that is not one.
+    pub fn with_rebinds<'a>(
+        self,
+        rebinds: impl IntoIterator<Item = &'a String>,
+    ) -> Result<Declared, String> {
+        Ok(Declared {
+            rebinds: rebinds
+                .into_iter()
+                .map(|text| text.parse())
+                .collect::<Result<_, _>>()?,
+            ..self
         })
     }
 }

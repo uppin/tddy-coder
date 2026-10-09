@@ -88,6 +88,15 @@ impl<'a> Layout<'a> {
         out.pop();
         out
     }
+
+    /// The text that replaces [`Layout::replaced`] when the plan asks for delegators: the old block
+    /// keeps its shape with each moved member's slot holding its delegator (in `delegators`, in
+    /// member order), and `impl <New> { <moved> }` follows it after one blank line.
+    pub(super) fn with_delegators(&self, moved: &str, delegators: &[String]) -> String {
+        // TODO(reshape-methods-leave-type): implement
+        let _ = (moved, delegators);
+        todo!("TODO(reshape-methods-leave-type): implement Layout::with_delegators")
+    }
 }
 
 /// The offset of the `}` that closes the `impl`, on the line the outline says it ends on.
