@@ -334,6 +334,13 @@ pub(crate) use sighting_walk::sightings;
 mod module_items;
 pub(crate) use module_items::{items_of_module, ChildModule, ModuleItems};
 
+mod test_declarations;
+#[allow(
+    unused_imports,
+    reason = "TODO(reshape-tests-follow): implement — `test_modules::sorted` reads the candidates"
+)]
+pub(crate) use test_declarations::{test_declarations, TestDeclaration};
+
 #[cfg(test)]
 mod tests {
     use super::*;

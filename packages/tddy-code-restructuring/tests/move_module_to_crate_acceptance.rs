@@ -12,8 +12,10 @@ mod harness;
 
 use harness::{
     a_move_of, a_move_of_the_host_registry, a_workspace_a_module_can_move_across,
-    a_workspace_whose_module_has_a_directory_child, applying_keeping_the_account, assert_compiles,
-    assert_compiles_with_its_tests, performing, A_DIRECTORY_CHILD,
+    a_workspace_whose_module_has_a_directory_child,
+    a_workspace_whose_module_has_a_sibling_test_module, applying_keeping_the_account,
+    assert_compiles, assert_compiles_with_its_tests, performing, A_DIRECTORY_CHILD,
+    A_SIBLING_TEST_MODULE,
 };
 use tddy_code_restructuring::Reexport;
 
@@ -150,4 +152,43 @@ async fn relocates_a_module_into_a_crate_the_move_creates_and_leaves_every_crate
         "the caller was not re-pointed at the new crate"
     );
     assert_compiles(&workspace);
+}
+
+/// Test 22 (`#reshape` 14/19) — a test module declared beside the moved module, naming nothing else
+/// in the origin, moves with it: its file lands beside the module, its declaration moves from the
+/// origin's root to the destination's, the dry run and the apply agree on the count and both say it
+/// follows, and every crate compiles with its tests. `#carve` 21/21 R9 moved three such files by hand.
+#[tokio::test(flavor = "multi_thread")]
+async fn moves_a_module_with_its_sibling_test_module_and_every_crate_compiles_with_its_tests() {
+    // Given `host_registry`, beside which the crate root declares `host_registry_tests`
+    let workspace = a_workspace_whose_module_has_a_sibling_test_module();
+    let plan = [a_move_of(MODULE, "host_registry", Some(Reexport::Glob))];
+
+    // When the plan is dry-run, then applied
+    let (rehearsed, rehearsal) = applying_keeping_the_account(&workspace, &plan, true).await;
+    let (applied, account) = applying_keeping_the_account(&workspace, &plan, false).await;
+
+    // Then both runs agree and name the follower, the test file sits beside its module, and the
+    // declaration went with it
+    let follows = "test module `host_registry_tests`";
+    assert_eq!(
+        (
+            rehearsed.map(|run| run.applied),
+            applied.map(|run| run.applied),
+            files_reported(&rehearsal) == files_reported(&account),
+            rehearsal.iter().any(|line| line.contains(follows)),
+            account.iter().any(|line| line.contains(follows)),
+            workspace.holds("crates/destination/src/host_registry_tests.rs"),
+            workspace.holds(A_SIBLING_TEST_MODULE),
+            workspace.read("crates/destination/src/lib.rs").contains(
+                "/// Tests the registry alone.\n#[cfg(test)]\nmod host_registry_tests;\n"
+            ),
+            workspace
+                .read("crates/origin/src/lib.rs")
+                .contains("mod host_registry_tests;"),
+        ),
+        (Ok(1), Ok(1), true, true, true, true, false, true, false),
+        "dry run: {rehearsal:?}\napply: {account:?}"
+    );
+    assert_compiles_with_its_tests(&workspace);
 }
