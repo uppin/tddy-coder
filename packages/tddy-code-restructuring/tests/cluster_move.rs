@@ -327,3 +327,164 @@ fn gives_one_plan_a_stable_state_directory() {
         "a plan's state directory is not stable, so --resume could not find it"
     );
 }
+
+/// An `origin` crate over `shared`, with each of `files` (relative to `crates/origin/src`, the root
+/// included), and an empty `destination`.
+fn an_origin_over_shared_holding(files: &[(&str, &str)]) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().expect("a temporary directory");
+    let root = directory.path();
+    let shared_files = [
+        (
+            "crates/shared/Cargo.toml".to_string(),
+            "[package]\nname = \"shared\"\nversion = \"0.1.0\"\nedition = \"2021\"\n".to_string(),
+        ),
+        (
+            "crates/shared/src/lib.rs".to_string(),
+            "pub mod clock {\n    pub struct Clock;\n}\n".to_string(),
+        ),
+        (
+            "crates/origin/Cargo.toml".to_string(),
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+             [dependencies]\nshared = { path = \"../shared\" }\n"
+                .to_string(),
+        ),
+        (
+            "crates/destination/Cargo.toml".to_string(),
+            "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n"
+                .to_string(),
+        ),
+        (
+            "crates/destination/src/lib.rs".to_string(),
+            "\n".to_string(),
+        ),
+    ];
+    let origin_files = files
+        .iter()
+        .map(|(relative, text)| (format!("crates/origin/src/{relative}"), (*text).to_string()));
+    for (relative, text) in shared_files.into_iter().chain(origin_files) {
+        let absolute = root.join(relative);
+        std::fs::create_dir_all(absolute.parent().expect("a parent")).expect("directories");
+        std::fs::write(absolute, text).expect("the file is written");
+    }
+    directory
+}
+
+/// A `move_module_to_crate` of the module file at `file` (relative to `crates/origin/src`), leaving
+/// a facade.
+fn a_move_of_the_file(file: &str, module: &str) -> RefactorOp {
+    RefactorOp {
+        anchor: Anchor::Symbol {
+            file: format!("crates/origin/src/{file}"),
+            path: module.to_string(),
+        },
+        ..a_move_of(module)
+    }
+}
+
+/// Test 17 (`#reshape` 8/19) — a grouped `use` whose leaves land on different qualifiers is split by
+/// the move, so the static check reads it as the move will write it instead of refusing the plan.
+#[test]
+fn a_static_check_of_a_cluster_with_a_mixed_grouped_use_reports_nothing_and_does_not_refuse() {
+    // Given `spawner` naming its co-moving sibling and a `shared` item through a facade in one group
+    let workspace = an_origin_over_shared_holding(&[
+        (
+            "lib.rs",
+            "pub mod spawn_worker;\npub mod spawner;\n\npub use shared::clock;\n",
+        ),
+        (
+            "spawner.rs",
+            "use crate::{spawn_worker::Worker, clock::Clock};\n\n\
+             pub fn pair() -> (Worker, Clock) {\n    (Worker, Clock)\n}\n",
+        ),
+        ("spawn_worker.rs", "pub struct Worker;\n"),
+    ]);
+    let plan = [a_cluster_move_of(&["spawner", "spawn_worker"])];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then
+    assert_eq!(stranded, Vec::<String>::new());
+}
+
+/// Test 18 (`#reshape` 8/19) — `apply` refuses on every path the moved file writes outside
+/// `#[cfg(test)]`, so `check` reads a `use` nested in a function too.
+#[test]
+fn reports_a_sibling_reached_from_a_use_nested_in_a_function() {
+    // Given `spawner` importing a function of `spawn_worker` inside a function body
+    let workspace = an_origin_over_shared_holding(&[
+        ("lib.rs", "pub mod spawn_worker;\npub mod spawner;\n"),
+        (
+            "spawner.rs",
+            "pub fn spawned() -> u32 {\n    use crate::spawn_worker::count;\n    count()\n}\n",
+        ),
+        ("spawn_worker.rs", "pub fn count() -> u32 {\n    1\n}\n"),
+    ]);
+    let plan = [a_move_of("spawner")];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then the sibling the nested `use` reaches is named
+    assert!(
+        stranded.len() == 1 && stranded[0].contains("origin::spawn_worker::count"),
+        "the nested `use` was not read: {stranded:?}"
+    );
+}
+
+/// Test 19 (`#reshape` 8/19) — a path through the origin's glob facade to a module the same cluster
+/// moves travels with it, so the check strands nothing.
+#[test]
+fn reports_nothing_for_a_cluster_whose_member_reaches_another_through_a_glob_facade() {
+    // Given `agent_host_callbacks` naming `SeededAgentClones` through `pub use seed_codebase::*;`
+    let workspace = an_origin_over_shared_holding(&[
+        (
+            "lib.rs",
+            "pub mod agent_host_callbacks;\npub mod seed_codebase;\n\npub use seed_codebase::*;\n",
+        ),
+        (
+            "agent_host_callbacks.rs",
+            "use crate::SeededAgentClones;\n\npub fn clones(_clones: &dyn SeededAgentClones) {}\n",
+        ),
+        ("seed_codebase.rs", "pub trait SeededAgentClones {}\n"),
+    ]);
+    let plan = [a_cluster_move_of(&[
+        "agent_host_callbacks",
+        "seed_codebase",
+    ])];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then
+    assert_eq!(stranded, Vec::<String>::new());
+}
+
+/// Test 20 (`#reshape` 8/19) — a `pub(in …)` restriction is a visibility, not a path back into the
+/// origin, so it strands nothing — however many paths the finding reads.
+#[test]
+fn does_not_report_a_pub_in_restriction_as_a_stranded_sibling() {
+    // Given a member of `connection_service` restricted to it
+    let workspace = an_origin_over_shared_holding(&[
+        ("lib.rs", "pub mod connection_service;\n"),
+        (
+            "connection_service.rs",
+            "pub mod attached_initial_prompt;\n\npub fn serve() -> u32 {\n    \
+             attached_initial_prompt::prompt()\n}\n",
+        ),
+        (
+            "connection_service/attached_initial_prompt.rs",
+            "pub(in crate::connection_service) fn prompt() -> u32 {\n    1\n}\n",
+        ),
+    ]);
+    let plan = [a_move_of_the_file(
+        "connection_service/attached_initial_prompt.rs",
+        "attached_initial_prompt",
+    )];
+
+    // When
+    let stranded = stranded_by(workspace.path(), &plan);
+
+    // Then
+    assert_eq!(stranded, Vec::<String>::new());
+}

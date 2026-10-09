@@ -386,6 +386,8 @@ pub use test_binary::*;
 
 pub(crate) mod manifest_edits;
 
+pub(crate) mod use_group;
+
 /// The `pub use` line a facade leaves in the crate the module left.
 ///
 /// [`Reexport::Named`] names only the items something outside reaches, which the survey already

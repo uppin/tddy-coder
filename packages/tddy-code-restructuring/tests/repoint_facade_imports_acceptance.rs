@@ -417,25 +417,26 @@ async fn a_group_whose_every_member_goes_through_a_facade_becomes_one_use_per_me
     );
 }
 
+/// A nested member whose leaves go to two crates is flattened into one `use` per leaf rather than
+/// refused (`#reshape` 8/19: one group rule for this operation and the cross-crate moves).
 #[tokio::test(flavor = "multi_thread")]
-async fn a_nested_group_member_is_lifted_whole_when_its_leaves_agree_and_refused_when_they_do_not()
-{
+async fn a_nested_group_member_is_lifted_whole_when_its_leaves_agree_and_flattened_into_one_use_per_leaf_when_they_do_not(
+) {
     // Given a nested group whose leaves share one new prefix, and in a second tree one whose leaves go to two crates
     let agreeing = an_app_whose_a_rs_holds("use crate::{config::{Limits, Settings}, b::Thing};\n");
     let disagreeing = an_app_whose_a_rs_holds("use crate::{mix::{Limits, Roster}, b::Thing};\n");
 
     // When each is re-pointed
-    let after = the_file_after(&agreeing, a_repoint_of_the_file(A_RS), A_RS).await;
-    let refusal = refusal_of(&disagreeing, a_repoint_of_the_file(A_RS)).await;
+    let lifted = the_file_after(&agreeing, a_repoint_of_the_file(A_RS), A_RS).await;
+    let flattened = the_file_after(&disagreeing, a_repoint_of_the_file(A_RS), A_RS).await;
 
-    // Then the first lifts the nested group whole, and the second is refused naming the member
+    // Then the first lifts the nested group whole, and the second becomes one `use` per leaf
     assert_eq!(
-        after,
-        "use crate::{b::Thing};\nuse kernel::config::{Limits, Settings};\n"
-    );
-    assert!(
-        refusal.contains("mix"),
-        "the refusal does not name the member: {refusal}"
+        [lifted, flattened],
+        [
+            "use crate::{b::Thing};\nuse kernel::config::{Limits, Settings};\n",
+            "use crate::{b::Thing};\nuse kernel::config::Limits;\nuse agents::roster::Roster;\n"
+        ]
     );
 }
 

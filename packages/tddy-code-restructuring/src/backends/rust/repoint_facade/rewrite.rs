@@ -185,6 +185,7 @@ mod tests {
             in_test: false,
             in_body: false,
             site: Position { line: 1, col: 5 },
+            restriction: false,
         }
     }
 

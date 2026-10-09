@@ -240,8 +240,10 @@ async fn a_test_module_naming_an_origin_item_is_not_an_edge_back() {
     assert!(!manifest.contains("[dependencies]\norigin"));
 }
 
+/// A group whose members land in different crates is split (`#reshape` 8/19); the member naming an
+/// item the origin defines is then an edge back, and the move is refused for that, by name.
 #[tokio::test(flavor = "multi_thread")]
-async fn a_use_group_whose_members_land_in_different_crates_is_refused_with_the_fix() {
+async fn a_use_group_whose_member_stays_in_the_origin_is_split_and_then_refused_as_a_cycle() {
     // Given one `use crate::{…}` naming an item `origin` forwards from `destination` and one it
     // defines itself
     let workspace = a_workspace_moving(
@@ -254,10 +256,11 @@ async fn a_use_group_whose_members_land_in_different_crates_is_refused_with_the_
     // When the file moves into `destination`
     let refusal = refusal_from(&workspace, moving_the_host_registry()).await;
 
-    // Then the refusal says to write one `use` per path
+    // Then the refusal is the cycle, naming the origin's item, not the group's shape
     assert!(
-        refusal.contains("write one `use` per path"),
-        "the refusal did not say how to fix the group: {refusal}"
+        refusal.contains("still names `origin` (origin::OriginOwned)")
+            && !refusal.contains("write one `use` per path"),
+        "the refusal is not the cycle: {refusal}"
     );
 }
 

@@ -5,7 +5,7 @@
 **Type**: Feature (a refusal removed) and bug fix (check/apply parity, caller splice, `pub(in …)` read as an edge)
 **Stack**: `#reshape` 8/19, branch `feature/reshape/move-grouped-use`, wave 1. PR title:
 `feat(code-restructuring): crate moves split grouped uses instead of refusing them (#reshape 8/19)`.
-Base in the linear stack: `feature/reshape/move-widen` (K=7). **Real edges**: none in either direction. The base is
+PR: [#605](https://github.com/uppin/tddy-coder/pull/605). Base in the linear stack: `feature/reshape/move-widen` (K=7, #604). **Real edges**: none in either direction. The base is
 textual only (nodes 1–12 share `crate_move/*` and `backends/rust/*`).
 
 ## Initial Discovery
@@ -199,6 +199,19 @@ Published with the wave-2 contract commit — the first push of this PR, not its
 - No public (`lib.rs`) export changes; no plan field, CLI flag or wire change.
 - Failing tests: 1, 3–7, 9, 10, 12–15, 17–19, 21–24 below. Tests 2, 8, 11, 20 are green pins; 16 is a probe (F5).
 
+**As published in commit 2** (what differs from the list above, and why):
+- New, with `todo!()` bodies (`TODO(reshape-move-grouped-use)`): `crate_move/use_group.rs` holding `Leaf`, `statement_edit`
+  and `statement_containing`, plus three unit tests of them (red).
+- `split_or_reprefix`, `members_of`, `split_use`, `use_statements` and the two refusals are **not** stubbed. They arrive in
+  `use_group` by the engine `move_item` of milestone M1 (F1); a stub of the same name in the destination would make that move
+  collide.
+- `Sighting.in_visibility` and `SurveyedPath.restriction` exist and are always `false` until R8. Two test literals outside this
+  node's files gained `restriction: false` (`backends/rust/item_move/canonical_paths.rs`, `backends/rust/repoint_facade/rewrite.rs`).
+- `Header.header_origin_paths` and `one_use_per_path` are still there: deleting them **is** the R1–R4 and R10 behaviour, so
+  green deletes them.
+- Since `#reshape` 7, `resolve_cluster`'s body is the private `cluster::cluster_edits`. The R9 change (callers collected across
+  members) lands there, and `resolve_cluster` itself is untouched.
+
 ## Green wave
 
 **Wave:** 1 of 4.
@@ -343,7 +356,7 @@ Names read as behaviour specifications. Every test is **red on `master`** unless
    three-line output, no `origin` in the destination manifest. Red: refused as a group, and `SeededAgentClones` reads as an edge.
 8. `a_path_through_an_in_crate_glob_facade_to_a_module_staying_behind_is_still_an_edge_back` — **green pin** (cycle refusal
    names the followed path).
-9. `a_split_group_whose_kept_member_stays_in_the_origin_is_refused_as_a_dependency_cycle_not_as_a_group` — red: today's message
+9. `a_split_group_whose_member_stays_in_the_origin_is_refused_as_a_dependency_cycle_not_as_a_group` — red: today's message
    is "write one `use` per path".
 10. `a_pub_in_restriction_naming_a_module_that_stays_becomes_pub_crate_and_is_no_edge` — red: cycle refusal on
     `origin::connection_service`.
@@ -373,7 +386,7 @@ Names read as behaviour specifications. Every test is **red on `master`** unless
     → `a_body_path_to_an_item_at_the_crate_root_is_reported_as_apply_refuses_it_without_suggesting_a_cluster` — red: no finding
     today (while `apply` refuses: `move_paths_acceptance.rs:206`).
 22. `packages/tddy-code-restructuring/tests/move_paths_acceptance.rs:244` `a_use_group_whose_members_land_in_different_crates_is_refused_with_the_fix`
-    → `a_use_group_whose_kept_member_stays_in_the_origin_is_split_and_then_refused_as_a_cycle` (live, existing filterset entry) —
+    → `a_use_group_whose_member_stays_in_the_origin_is_split_and_then_refused_as_a_cycle` (live, existing filterset entry) —
     red: today's message is the group refusal.
 23. `packages/tddy-code-restructuring/tests/repoint_facade_imports_acceptance.rs:421` `a_nested_group_member_is_lifted_whole_when_its_leaves_agree_and_refused_when_they_do_not`
     → `…_and_flattened_into_one_use_per_leaf_when_they_do_not`. The `mix::{Limits, Roster}` tree becomes
@@ -442,7 +455,40 @@ once per cluster.
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Commit 2: the contract (2026-10-09)
+
+Only the binaries this node touched were run, scoped; the whole-package baseline is `#reshape` 1's (1334 passed, 0 failed).
+`cargo check` / `clippy -D warnings` / `fmt --check` for `tddy-code-restructuring` are clean.
+
+| # | Test | File | State | Why |
+|---|---|---|---|---|
+| 1, 3, 4 | split, names/aliases, visibility/indentation | `tests/grouped_use_crate_move.rs` | 🔴 | `one_use_per_path` |
+| 2 | Rule P in place | same | 🟢 pin | today's behaviour |
+| 5 | nested flattening | same | 🔴 | `one_use_per_path` on `crate::mix::Clock` |
+| 6 | attribute refusal names file:line | same | 🔴 | today's refusal is `one_use_per_path` |
+| 7 | R6 glob facade to a co-mover | same | 🔴 | `one_use_per_path` on `seed_codebase` |
+| 8 | glob facade to a staying module is an edge | same | 🟢 pin | cycle refusal names `origin::connection_service::roster::AgentRoster` |
+| 9 | split, then the cycle refusal | same | 🔴 | the group refusal fires first |
+| 10 | `pub(in …)` of a staying module → `pub(crate)` | same | 🔴 | cycle refusal on `origin::connection_service` |
+| 11 | `pub(in …)` of a co-moving module | same | 🟢 pin | `travels_with` branch |
+| 12 | `pub(in …)` is no manifest line | same | 🔴 | writes `pub(in origin::connection_service)` and `origin` into the destination manifest |
+| 13 | caller re-point inside a group | same | 🔴 | writes `use crate::{…, destination::livekit_rooms_stream::RoomRoster, …}` |
+| 14 | one statement edit for two members | same | 🔴 | 2 edits, both spliced |
+| 15 | caller group re-prefixed in place | same | 🔴 | `use crate::{destination::…, destination::…}` |
+| 16 | cross-crate glob (`AttachmentProgressSink`) | same | 🟢 probe | **did not reproduce** at library level: `shared::progress::AttachmentProgressSink` is written today. The R8 refusal had another cause (not this node's) |
+| 17 | static check of a mixed group | `tests/cluster_move.rs` | 🔴 | `siblings_left_behind` errors with `one_use_per_path` |
+| 18 | nested `use` read by the static check | same | 🔴 | header-only reading reports nothing |
+| 19 | glob facade to a co-mover, static | same | 🔴 | "names `origin::seed_codebase::SeededAgentClones`, which stays behind" |
+| 20 | restriction is not stranded | same | 🟢 pin | guards R8 once 18 is green |
+| 21 | crate-root body path is a finding | `tests/check_precondition_parity.rs` | 🔴 | no finding today |
+| 22 | split, then the cycle (live) | `tests/move_paths_acceptance.rs` | 🔴 | group refusal on `crate::records::Id` |
+| 23 | nested member flattened (`repoint_facade_imports`) | `tests/repoint_facade_imports_acceptance.rs` | 🔴 | `nested_member_reaches_two_crates` refusal |
+| 24 | R6 cluster: deep check, apply, compiles (live) | `tests/cluster_move_acceptance.rs` | 🔴 | both refused with `one_use_per_path`. The fixture compiles before the move (checked separately) |
+| unit | `statement_containing` ×2, `statement_edit` | `src/crate_move/use_group.rs` | 🔴 | `todo!()` |
+
+Node 7's test 13 (`move_to_crate_widening.rs`, unreached `pub(in crate::roster)` byte-identical) stays valid under R8: `roster`
+is the moved module itself, so the restriction is a co-moving path and keeps its spelling (`crate::roster` lands as
+`crate::roster`).
 
 ## TODO
 
@@ -451,8 +497,8 @@ once per cluster.
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-move-grouped-use.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests (incl. F6)
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
