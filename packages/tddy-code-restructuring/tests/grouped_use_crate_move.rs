@@ -190,6 +190,7 @@ fn a_cluster_of(members: &[&[&str]], reexport: Reexport) -> MovingCluster {
             extern_name: "destination".to_string(),
         },
         reexport,
+        creates: None,
     }
 }
 

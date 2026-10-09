@@ -381,6 +381,13 @@ pub use preconditions::*;
 mod cluster;
 pub use cluster::*;
 
+mod new_crate;
+pub use new_crate::NewCrate;
+#[cfg(test)]
+mod manifest_pass_tests;
+#[cfg(test)]
+mod new_crate_tests;
+
 mod test_binary;
 pub use test_binary::*;
 
