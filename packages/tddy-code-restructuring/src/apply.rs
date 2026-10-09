@@ -154,6 +154,25 @@ pub(crate) fn byte_offset(contents: &str, line: u32, col: u32) -> Result<usize> 
     Ok((offset + column_offset).min(contents.len()))
 }
 
+/// Remove every directory a vacated path left empty, walking up from the path's own directory
+/// while each is empty, and stopping at the first that is not, or at `root`.
+///
+/// `git mv` moves files, and git tracks no directories, so a moved module's directory stays on disk
+/// with nothing in it. A directory that still holds anything — a data file no `mod` reaches, a
+/// `.DS_Store` — is left as it is, and so is `root` itself. Whatever writes into a removed directory
+/// later creates it again (`git_move`, a rollback's restore).
+// TODO(reshape-widen-same-crate): remove the allow once `apply_workspace_edit` calls it (M1).
+#[allow(dead_code)]
+pub(crate) fn remove_emptied_directories<'a>(
+    root: &Path,
+    vacated: impl IntoIterator<Item = &'a str>,
+) -> Result<()> {
+    let _ = (root, vacated.into_iter());
+    // TODO(reshape-widen-same-crate): implement, and call it at the end of `apply_workspace_edit`
+    // over the `from` of every `Rename`
+    todo!("remove the directories the vacated paths left empty")
+}
+
 /// Move a file with `git mv`, creating the destination directory first. Preserves history.
 fn git_move(root: &Path, from: &str, to: &str, spawns: &SpawnRecorder) -> Result<()> {
     if let Some(parent) = Path::new(to).parent() {
@@ -237,6 +256,37 @@ mod tests {
             Command::new("git")
                 .args(args)
                 .current_dir(root)
+                .status()
+                .unwrap();
+        }
+        workspace
+    }
+
+    /// A committed git worktree holding exactly `files` (relative path, contents).
+    fn a_git_workspace_holding(files: &[&str]) -> tempfile::TempDir {
+        let workspace = tempfile::tempdir().unwrap();
+        for file in files {
+            let path = workspace.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "pub fn f() {}\n").unwrap();
+        }
+        for args in [
+            vec!["init", "--quiet"],
+            vec!["add", "-A"],
+            vec![
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=fixture@example.com",
+                "commit",
+                "--quiet",
+                "-m",
+                "baseline",
+            ],
+        ] {
+            Command::new("git")
+                .args(args)
+                .current_dir(workspace.path())
                 .status()
                 .unwrap();
         }
@@ -368,6 +418,62 @@ mod tests {
             !status.starts_with("??"),
             "file was left untracked: {status}"
         );
+    }
+
+    #[test]
+    fn a_rename_removes_the_directory_it_emptied_and_every_empty_ancestor_below_the_root() {
+        // Given a module directory two levels deep, holding the only file under `src/host`
+        let workspace = a_git_workspace_holding(&["src/lib.rs", "src/host/attachments/staging.rs"]);
+        let edit = WorkspaceEdit {
+            changes: vec![FileEdit::Rename {
+                from: "src/host/attachments/staging.rs".to_string(),
+                to: "src/split/attachments/staging.rs".to_string(),
+            }],
+        };
+
+        // When the file moves away
+        apply_workspace_edit(workspace.path(), &edit, &SpawnRecorder::discard()).unwrap();
+
+        // Then the directories it emptied are gone, and the one that still holds a file stays
+        assert!(
+            !workspace.path().join("src/host").exists(),
+            "the directories the move emptied are still on disk"
+        );
+        assert!(workspace.path().join("src/lib.rs").exists());
+    }
+
+    #[test]
+    fn a_rename_keeps_a_directory_that_still_holds_a_file() {
+        // Given a module directory that also holds a data file no move touches
+        let workspace = a_git_workspace_holding(&[
+            "src/host/attachments/staging.rs",
+            "src/host/attachments/fixture.txt",
+        ]);
+        std::fs::remove_file(workspace.path().join("src/host/attachments/staging.rs")).unwrap();
+
+        // When the directories the vacated file left are swept
+        remove_emptied_directories(workspace.path(), ["src/host/attachments/staging.rs"]).unwrap();
+
+        // Then the directory holding the data file is kept
+        assert!(workspace
+            .path()
+            .join("src/host/attachments/fixture.txt")
+            .exists());
+    }
+
+    #[test]
+    fn an_empty_directory_no_rename_vacated_is_left_alone() {
+        // Given an empty directory beside the one a file left
+        let workspace = a_git_workspace_holding(&["src/lib.rs", "src/host/attachments.rs"]);
+        std::fs::create_dir_all(workspace.path().join("src/scratch")).unwrap();
+        std::fs::remove_file(workspace.path().join("src/host/attachments.rs")).unwrap();
+
+        // When the directories the vacated file left are swept
+        remove_emptied_directories(workspace.path(), ["src/host/attachments.rs"]).unwrap();
+
+        // Then the vacated directory is gone and the unrelated empty one is not
+        assert!(!workspace.path().join("src/host").exists());
+        assert!(workspace.path().join("src/scratch").is_dir());
     }
 
     #[test]

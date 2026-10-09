@@ -20,7 +20,8 @@ pub(super) mod destination;
 pub(super) mod doc_links;
 pub(super) mod facade;
 mod imports;
-mod outline;
+pub(crate) mod members;
+pub(crate) mod outline;
 pub(super) mod outside;
 pub(super) mod placement;
 pub(super) mod preflight;
@@ -42,6 +43,8 @@ use crate::plan::{Anchor, Reexport, RefactorOp};
 use crate::registry::Workspace;
 use crate::Result;
 use assemble::{assemble, Moving};
+use creation::Destination;
+use members::ReachedMember;
 use outline::{Item, Run};
 use sites::Site;
 
@@ -90,8 +93,8 @@ impl RustBackend {
         let reexport = op.reexport.unwrap_or(Reexport::None);
         let sites = self.sites_of(&uri, workspace, file, &source_text, &moved)?;
         let reach = outside::Reach::of(reexport, workspace.root, &named.package, sites)?;
-        let left = outline::left_behind(&symbols, &source_text, &run);
-        let reached = self.reached_by_the_moved_code(&uri, &source_text, &left, &run)?;
+        let reached =
+            self.move_reach(&uri, workspace, &source_text, &symbols, &run, &destination)?;
 
         let assembled = assemble(&Moving {
             workspace,
@@ -185,6 +188,30 @@ impl RustBackend {
         Ok(sites)
     }
 
+    /// What the move connects across its two sides: the items the run leaves behind that the moved
+    /// code names, and the private members of the types it splits, with who uses each from the other
+    /// side.
+    fn move_reach(
+        &mut self,
+        uri: &str,
+        workspace: &Workspace<'_>,
+        source_text: &str,
+        symbols: &Value,
+        run: &Run,
+        destination: &Destination,
+    ) -> Result<Reach> {
+        let left = outline::left_behind(symbols, source_text, run);
+        let items = self.reached_by_the_moved_code(uri, source_text, &left, run)?;
+        // TODO(reshape-widen-same-crate): implement — survey the members `members::members_of`
+        // reads on both sides of the run (rules 1-2 of the changeset).
+        let _ = (workspace, destination);
+        Ok(Reach {
+            items,
+            moved_members: Vec::new(),
+            kept_members: Vec::new(),
+        })
+    }
+
     /// The items the run leaves behind that the moved code names.
     ///
     /// Asked of the server for the items whose names the moved lines mention, because a name that
@@ -223,6 +250,19 @@ impl RustBackend {
         }
         Ok(reached)
     }
+}
+
+/// What a move connects across its two sides.
+pub(super) struct Reach {
+    /// The items the source module keeps that the moved code names.
+    pub(super) items: Vec<Item>,
+    /// The private members of the moved structs and `impl`s that code left behind uses.
+    // TODO(reshape-widen-same-crate): read by the assembly's member widening (milestone M4).
+    #[allow(dead_code)]
+    pub(super) moved_members: Vec<ReachedMember>,
+    /// The private members of the kept structs and `impl`s that the moved code uses.
+    #[allow(dead_code)]
+    pub(super) kept_members: Vec<ReachedMember>,
 }
 
 /// The module and names a lowered anchor holds, read from the lines it covers.
