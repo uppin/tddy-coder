@@ -586,3 +586,129 @@ async fn a_caller_left_pointing_at_the_old_type_fails_the_compile_gate_and_is_le
         "the caller was edited"
     );
 }
+
+/// The `svc` module of the crates below: its three children, each a file.
+const SVC_CHILDREN: &str = "pub mod host;\npub mod other;\npub mod roster;\n";
+
+/// A crate whose type `Host` lives in `app::svc::host`, which reads `imports` above it; its siblings
+/// `roster` and `other` each declare a `Roster`, only `roster`'s with the field `n`.
+fn a_crate_whose_svc_host_reads(imports: &str) -> AFixtureWorkspace {
+    an_app_holding(&[
+        ("src/lib.rs", "pub mod svc;\n"),
+        ("src/svc.rs", SVC_CHILDREN),
+        (
+            "src/svc/host.rs",
+            &format!("{imports}\n{}", a_host_impl_of(COMMENTED_MEMBERS)),
+        ),
+        ("src/svc/other.rs", "pub struct Roster;\n"),
+        ("src/svc/roster.rs", A_ROSTER),
+    ])
+}
+
+/// A plan retargeting the whole `impl Host` of `file`, whose module path is `module`, to `to_type`.
+async fn retargeting_the_block_in(
+    workspace: &AFixtureWorkspace,
+    file: &str,
+    module: &str,
+    to_type: &str,
+) -> Result<tddy_code_restructuring::runner::RunSummary, String> {
+    let block = format!("{module}::<Host>");
+    let anchor = the_anchor_over(workspace, file, &[block.as_str()]).await;
+    applying_a_plan_of(workspace, &[a_retarget_op(&anchor, to_type)]).await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retargets_a_block_in_a_file_that_imports_the_new_type_by_a_super_path() {
+    // Given a `host` that already imports `Roster` through its parent
+    let workspace = a_crate_whose_svc_host_reads("use super::roster::Roster;\n");
+
+    // When its `impl Host` is retargeted to `app::svc::roster::Roster`
+    retargeting_the_block_in(
+        &workspace,
+        "src/svc/host.rs",
+        "app::svc::host",
+        "app::svc::roster::Roster",
+    )
+    .await
+    .expect("the retarget applies");
+
+    // Then the block is `Roster`'s, the file keeps its one import of it, and the tree compiles
+    let host = workspace.read("src/svc/host.rs");
+    assert_eq!(
+        the_impl_blocks_of(&host),
+        blocks(&[("Roster", "get")]),
+        "the block was not retargeted:\n{host}"
+    );
+    assert_eq!(
+        host.matches("Roster;").count(),
+        1,
+        "the file does not bind `Roster` exactly once:\n{host}"
+    );
+    assert_compiles(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn retargets_a_block_in_a_file_that_imports_the_new_type_from_a_child_module_by_a_relative_path(
+) {
+    // Given a `svc` that declares `roster` and imports its `Roster` by the 2018 child-relative path
+    let workspace = an_app_holding(&[
+        ("src/lib.rs", "pub mod svc;\n"),
+        (
+            "src/svc.rs",
+            &format!(
+                "pub mod roster;\n\nuse roster::Roster;\n\n{}",
+                a_host_impl_of(COMMENTED_MEMBERS)
+            ),
+        ),
+        ("src/svc/roster.rs", A_ROSTER),
+    ]);
+
+    // When its `impl Host` is retargeted to `app::svc::roster::Roster`
+    retargeting_the_block_in(
+        &workspace,
+        "src/svc.rs",
+        "app::svc",
+        "app::svc::roster::Roster",
+    )
+    .await
+    .expect("the retarget applies");
+
+    // Then the block is `Roster`'s, no second import is written, and the tree compiles
+    let svc = workspace.read("src/svc.rs");
+    assert_eq!(
+        the_impl_blocks_of(&svc),
+        blocks(&[("Roster", "get")]),
+        "the block was not retargeted:\n{svc}"
+    );
+    assert_eq!(
+        svc.matches("Roster;").count(),
+        1,
+        "the file does not bind `Roster` exactly once:\n{svc}"
+    );
+    assert_compiles(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn still_refuses_a_super_import_of_a_different_type_of_the_same_name() {
+    // Given a `host` that imports the *other* `Roster` through its parent
+    let workspace = a_crate_whose_svc_host_reads("use super::other::Roster;\n");
+    let before = workspace.read("src/svc/host.rs");
+
+    // When its `impl Host` is retargeted to `app::svc::roster::Roster`
+    let refusal = retargeting_the_block_in(
+        &workspace,
+        "src/svc/host.rs",
+        "app::svc::host",
+        "app::svc::roster::Roster",
+    )
+    .await
+    .expect_err("the retarget refuses");
+
+    // Then it is refused as a clash, and nothing was written
+    assert!(
+        refusal.contains("this seam cannot be cut here:")
+            && refusal.contains("`Roster` is already bound in `src/svc/host.rs`"),
+        "unexpected refusal: {refusal}"
+    );
+    assert_eq!(workspace.read("src/svc/host.rs"), before);
+}
