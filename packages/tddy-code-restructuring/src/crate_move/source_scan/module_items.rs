@@ -70,9 +70,7 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
                     }
                 }
                 "use" => {
-                    let mut cursor = at + 1;
-                    scan.use_tree(&mut cursor, Vec::new(), &mut items.uses);
-                    at = scan.statement_end(cursor) + 1;
+                    at = read_use(&scan, at, &mut items);
                     continue;
                 }
                 keyword if DEFINING_KEYWORDS.contains(&keyword) => {
@@ -92,4 +90,58 @@ pub(crate) fn items_of_module(text: &str) -> ModuleItems {
         at += 1;
     }
     items
+}
+
+/// Read the top-level `use` item whose keyword is at token `at` into `items`, each leaf stamped with
+/// the item's visibility, and return the index of the token after it.
+fn read_use(scan: &Scan<'_>, at: usize, items: &mut ModuleItems) -> usize {
+    // TODO(reshape-move-item-paths): implement — stamp each new leaf with the `pub…` tokens before
+    // the keyword (`UseLeaf::visibility`); today every leaf reads as private.
+    let mut cursor = at + 1;
+    scan.use_tree(&mut cursor, Vec::new(), &mut items.uses);
+    scan.statement_end(cursor) + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The visibility of every leaf `text`'s top-level `use` items bind, in source order.
+    fn visibilities_of(text: &str) -> Vec<(String, Option<String>)> {
+        items_of_module(text)
+            .uses
+            .into_iter()
+            .map(|leaf| (leaf.segments.join("::"), leaf.visibility))
+            .collect()
+    }
+
+    fn leaf(path: &str, visibility: Option<&str>) -> (String, Option<String>) {
+        (path.to_string(), visibility.map(str::to_string))
+    }
+
+    #[test]
+    fn a_top_level_use_records_its_visibility_on_every_leaf() {
+        // Given a module with a public, a crate-wide grouped, a restricted and a private `use`
+        let text = concat!(
+            "pub use kernel::util;\n",
+            "pub(crate) use crate::a::{b, c};\n",
+            "pub(in crate::x) use crate::y::Z;\n",
+            "use crate::types::Config;\n",
+        );
+
+        // When its top level is read
+        let read = visibilities_of(text);
+
+        // Then each leaf carries the visibility of the item that holds it, a private one none
+        assert_eq!(
+            read,
+            vec![
+                leaf("kernel::util", Some("pub")),
+                leaf("crate::a::b", Some("pub(crate)")),
+                leaf("crate::a::c", Some("pub(crate)")),
+                leaf("crate::y::Z", Some("pub(in crate::x)")),
+                leaf("crate::types::Config", None),
+            ]
+        );
+    }
 }

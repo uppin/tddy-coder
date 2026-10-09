@@ -356,10 +356,11 @@ fn moved_text(
     edits: &mut BTreeMap<String, Vec<Edit>>,
     notes: &mut Vec<String>,
 ) -> Result<String> {
-    let imported = |module: &[String], name: &str| {
-        bindings::import_target(moving.workspace, moving.package, module, name)
+    let imported = |module: &[String], name: &str, to: &[String]| {
+        bindings::import_target(moving.workspace, moving.package, module, name, to)
     };
     let modules = Modules {
+        file: moving.source_file,
         from: moving.source,
         to: &moving.destination.path,
         travelling: None,
@@ -372,7 +373,7 @@ fn moved_text(
         &modules,
         moved_names,
         &landing.claimed,
-    ));
+    )?);
 
     let inside = |edit: &Edit| {
         edit.start >= region.start
@@ -382,7 +383,7 @@ fn moved_text(
     let (mut own, rest): (Vec<Edit>, Vec<Edit>) = source_edits.drain(..).partition(inside);
     *source_edits = rest;
     own.extend(landing.moved_edits.iter().cloned());
-    let shifted: Vec<Edit> = own
+    let mut shifted: Vec<Edit> = own
         .into_iter()
         .map(|edit| {
             Edit::replace(
@@ -391,7 +392,6 @@ fn moved_text(
             )
         })
         .collect();
-    let mut shifted = shifted;
     // In the coordinates of the lines themselves, as the edits just above are.
     let text = &moving.source_text[region.clone()];
     shifted.extend(doc_links::edits(text, &moved_paths(moving)));
