@@ -6,6 +6,7 @@
 **Stack**: `#reshape` 5/19, branch `feature/reshape/move-children`, green wave 1. PR title:
 `feat(code-restructuring): crate moves carry a module's children and keep its mod visibility (#reshape 5/19)`.
 **Base branch** in the linear stack: `feature/reshape/extract-method-clean` (K=4). That is a line position only, not a dependency.
+**PR:** [#602](https://github.com/uppin/tddy-coder/pull/602) (draft), lands after #601.
 **Real edges:** none in, one out. `move-children → tests-follow` (5→14): node 14 extends this node's carried-file set with sibling `#[cfg(test)]` modules.
 
 ## Initial Discovery
@@ -153,8 +154,16 @@ The wave-2 contract commit (the first push of this PR, never its deliverable) pu
   - `crate_move::cluster_resolution(engine: &mut dyn ModuleReferences, workspace: &Workspace<'_>, cluster: &MovingCluster) -> Result<Resolution>`
   - `resolve`/`resolve_cluster` keep their signatures and semantics, so existing callers and tests are untouched.
 - `crate_move::FacadeEntry { destination: Destination, visibility: String, module: String }`. `facade_lines_for_plan(moved: &[FacadeEntry]) -> Vec<String>` replaces the `(Destination, String)` tuple.
-- `facade_writer::WrittenFacade` gains `visibility: String`. `written_facade` matches `"{visibility} use {extern}::"`.
-- **Failing tests:** acceptance tests 1–10, 12–27 and 29–31 below (29 numbered items, 31 test functions; items 26 and 27 hold two functions each). Items 11, 28 and 32 are green pins.
+- `facade_writer::written_facade(text, extern_name, visibility: &str, destination_root)`: it takes the visibility to match as a parameter, and matches `"{visibility} use {extern}::"` once implemented. `WrittenFacade` gains **no** field (changed from the plan; see "As published" below).
+- **Failing tests:** see `## Validation Results`.
+
+**As published in commit 2 (what differs from the list above):**
+- **Two pure functions are already implemented,** because their signatures changed under callers that must keep compiling:
+  - `facade_lines_for_plan(&[FacadeEntry])` groups per (destination, visibility) and writes `"{vis} use …"` (`"use …"` when private). Its callers (`leaving`, `extended_facade`) still pass `"pub"` behind a `TODO(reshape-move-children)`, so behaviour is unchanged until green.
+  - `written_facade` takes `visibility` and ignores it (`TODO`), still matching `pub use`.
+- **Not yet created**, because they have no caller and would only add dead code: `cluster::member_changes` (private) and the `relocation::plan` delegation. Green adds both together with the wiring.
+- **The folding moves.** `also` folding was planned for `named_by`. The acceptance tests drive it through the public `resolve_cluster`, so green folds in `read_members`, which serves both the plan path and the API path. `fold_carried_members` keeps its signature.
+- **Unwired surface.** Every new crate-private stub carries `#[allow(dead_code, reason = "TODO(reshape-move-children) …")]`, and green removes each one when it wires the stub. `resolution`/`cluster_resolution` are `pub` stubs (`todo!()`) and are not yet called from `backends/rust.rs`.
 
 ## Green wave
 
@@ -390,7 +399,53 @@ Taken by this plan:
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Commit 2: contract surface and acceptance tests (2026-10-09)
+
+**Baseline (scoped):** `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` were clean on the rebased commit 1 and are clean with the surface. Only the binaries and filters listed below were run; the full suite was not (see `scratchpad/reshape/baseline-failures.txt`: none).
+
+**Red, each for the missing feature:**
+
+| # | Test | Why it is red today |
+|---|---|---|
+| 1 | `tests/crate_move_children.rs:288` `a_moved_module_carries_every_file_its_mod_declarations_lead_to_in_the_same_edit` | Only `x/a.rs` is renamed |
+| 2 | `:311` `a_carried_tree_lands_at_the_same_relative_places_under_the_destination` | `top/leaf.rs` is not renamed |
+| 4 | `:352` `a_carried_childs_crate_paths_are_re_pointed_and_its_super_paths_are_left_as_written` | The child is not re-pointed (`crate::x::a::c` stays) |
+| 5 | `:371` `a_crate_only_a_child_names_…_dev_dependencies` | The destination manifest gains neither `shared` nor `proptest` |
+| 6 | `:395` `a_caller_of_an_item_in_a_carried_child_is_re_pointed_when_no_facade_is_asked_for` | The child's callers are not surveyed |
+| 7 | `:414` `a_reference_from_inside_the_carried_tree_is_not_a_caller` | The child is not re-pointed |
+| 8 | `:433` `an_also_member_that_is_a_directory_child_of_another_member_is_carried_at_its_nested_position` | `b` is flattened to `src/b.rs` and declared at the root |
+| 9 | `:463` `the_moved_parents_mod_line_for_a_carried_child_is_left_as_written` | `pub mod b;` becomes `pub use destination::b;` |
+| 10 | `:481` `no_file_arriving_in_the_destination_names_the_destination_crate` | The moved `a.rs` names `destination::` (the self facade) |
+| 12 | `:531` `a_restricted_child_reached_from_outside_the_tree_is_refused_naming_the_child_and_the_caller` | Resolves `Ok` |
+| 13 | `:559` `a_carried_childs_path_back_into_the_origin_makes_the_move_refuse_as_a_cycle` | Resolves `Ok` (the child's header is never read) |
+| 24 | `:585` `a_struct_update_path_into_a_co_moving_module_is_re_pointed` | `..crate::x::a::defaults()` is left as written |
+| + | `:607` `a_single_module_move_carries_the_same_files_as_a_cluster_of_one` (added: `move_module_to_crate` path) | 0 child renames |
+| 14–18 | `tests/check_precondition_parity.rs:621, 642, 671, 702, 730` | No finding (the static pass opens no child) |
+| 19 | `:755` `a_static_check_accepts_a_module_declared_pub_crate_pub_super_or_pub_in` | "declares no `mod workspace_session`" |
+| 20 | `:800` `a_destination_declaring_the_module_pub_crate_is_reported_as_a_merge` | No merge finding |
+| 25 | `:826` `a_struct_update_path_into_a_module_staying_behind_is_a_finding_naming_the_line` | No finding (`..crate` is not sighted) |
+| 21 | `src/crate_move/manifest_edits.rs:569, 590` (`finds_a_module_declared_with_any_visibility…`, `a_comment_or_a_longer_name_is_not_a_declaration`) | `todo!("declared_module")` |
+| 21 | `:602` `module_declaration_finds_a_restricted_declaration` | `None` |
+| 22 | `:617` `places_a_new_declaration_in_sorted_position_among_restricted_ones` | Restricted neighbours are not read |
+| — | `src/crate_move/module_files.rs:191` `relocates_each_file_of_a_module_to_the_same_place_under_the_new_directory` | `todo!("relocated")` |
+| 23 | `src/crate_move/source_scan.rs:466` `reads_a_path_after_a_struct_update_or_a_range_operator_as_a_path` | `0..crate::…` and `..crate::…` are not sighted (`..=` already is: the preceding `=` breaks the continuation, so the plan's claim about `..=` was wrong) |
+| 26 | `tests/crate_move_restricted_declarations.rs:104, 129` | The move is refused ("declares no `mod`") |
+| 27 | `:154` `a_private_module_moved_with_a_glob_facade_leaves_a_private_use` | Writes `pub use destination::config;` |
+| 27 | `:176` `two_pub_crate_modules_…_beside_a_pub_line` | Refused ("declares no `mod`") |
+| 29 | `src/crate_move/moving.rs:404` `extends_an_earlier_facade_of_the_same_visibility_…` | `written_facade` ignores `visibility` |
+| 30 | `tests/move_module_to_crate_acceptance.rs:85` `relocates_a_module_with_its_directory_children_and_every_crate_compiles_with_its_tests` (live) | The compile gate fails (child stranded); the dry run and apply both say `6 file(s)`, with no note |
+| 31 | `tests/cluster_move_acceptance.rs:173` `a_cluster_naming_a_child_in_also_nests_it_and_every_crate_compiles` (live) | The compile gate fails (child flattened to `src/clock_face.rs`) |
+
+**Green pins:**
+- `tests/crate_move_children.rs:334` `the_destination_root_declares_the_moved_module_and_none_of_its_children` (planned red; today's move declares only `a` because it never sees the children, so this guards green from declaring them).
+- `:506` `a_nested_member_whose_parent_stays_behind_still_lands_at_the_destination_root` (11).
+- `tests/crate_move_restricted_declarations.rs:203` (28).
+- `src/crate_move.rs:479` `modules_of_two_visibilities_moved_to_one_destination_leave_one_line_per_visibility` (the already-implemented `facade_lines_for_plan`).
+- The existing suites in the touched binaries (`check_precondition_parity.rs`: 15 pass; `crate_move::facade_tests`, `moving::tests`, `module_files::tests`, `source_scan::tests`, `sorted_declaration_tests`: all pass).
+
+**Not this node's:** `backends::rust::facade::facade_tests::a_named_facade_*` (4) fail under `--lib`. They are node 3's contract reds.
+
+**Live registration:** none needed. Both live tests were added to binaries already in `.config/rust-e2e.filterset` and the `rust-analyzer` group. A new shared fixture is in the harness: `a_workspace_whose_module_has_a_directory_child`, `A_DIRECTORY_CHILD`.
 
 ## TODO
 
@@ -399,10 +454,10 @@ Taken by this plan:
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-move-children.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point, not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests (commit 2: contract surface and tests)
+- [x] Run acceptance tests (verify they fail) — see `## Validation Results`
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests (surface unit tests in commit 2)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

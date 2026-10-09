@@ -3,7 +3,7 @@ use super::PlannedRewrite;
 use std::collections::BTreeSet;
 
 use crate::{
-    crate_move::{destination, manifest_edits, module_home},
+    crate_move::{destination, manifest_edits, module_files, module_home},
     edit::FileEdit,
 };
 
@@ -86,6 +86,45 @@ impl Move {
     /// Where the module file lands.
     pub(crate) fn moved_to(&self) -> String {
         format!("{}/src/{}.rs", self.destination.dir, self.module)
+    }
+
+    /// Every file the module spans — its own first, then each file its `mod` declarations lead to
+    /// — with where each lands under the destination's `src/`, keeping its place relative to the
+    /// module.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when a declaration leads to no file, as [`module_files::files_of`] does.
+    #[allow(
+        dead_code,
+        reason = "TODO(reshape-move-children): implement — `resolve_cluster` and the \
+                  preconditions read every carried file"
+    )]
+    pub(crate) fn carried(
+        &self,
+        workspace: &Workspace<'_>,
+    ) -> Result<Vec<module_files::MovedFile>> {
+        // TODO(reshape-move-children): implement
+        let _ = workspace;
+        todo!("Move::carried")
+    }
+
+    /// The module's `mod` declaration in the file that declares it, with its visibility.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when that file declares no such module.
+    #[allow(
+        dead_code,
+        reason = "TODO(reshape-move-children): implement — the facade writer keeps its visibility"
+    )]
+    pub(crate) fn declaration(
+        &self,
+        workspace: &Workspace<'_>,
+    ) -> Result<manifest_edits::ModuleDeclaration> {
+        // TODO(reshape-move-children): implement
+        let _ = workspace;
+        todo!("Move::declaration")
     }
 
     /// The crate root that has to declare it afterwards.
@@ -313,7 +352,7 @@ mod tests {
 
         // When the written facade is read
         let facade =
-            facade_writer::written_facade(text, "dest", DESTINATION_ROOT).expect("a facade");
+            facade_writer::written_facade(text, "dest", "pub", DESTINATION_ROOT).expect("a facade");
 
         // Then both modules are in it
         assert_eq!(facade.modules, ["alpha", "beta"]);
@@ -326,7 +365,7 @@ mod tests {
         let text = "pub use dest::HostRegistry;\n";
 
         // When the written facade is read
-        let facade = facade_writer::written_facade(text, "dest", DESTINATION_ROOT);
+        let facade = facade_writer::written_facade(text, "dest", "pub", DESTINATION_ROOT);
 
         // Then there is none
         assert!(facade.is_none());
@@ -340,7 +379,7 @@ mod tests {
         let text = "pub use dest::alpha;\n";
 
         // When the written facade is read
-        let facade = facade_writer::written_facade(text, "dest", DESTINATION_ROOT);
+        let facade = facade_writer::written_facade(text, "dest", "pub", DESTINATION_ROOT);
 
         // Then it is taken for ours
         assert!(facade.is_some());
@@ -353,10 +392,34 @@ mod tests {
         let text = "pub use dest::alpha;\n";
 
         // When the written facade is read
-        let facade = facade_writer::written_facade(text, "dest", "mod alpha;\n");
+        let facade = facade_writer::written_facade(text, "dest", "pub", "mod alpha;\n");
 
         // Then there is none
         assert!(facade.is_none());
+    }
+
+    /// A later operation extends the facade an earlier one wrote with the same visibility, and
+    /// leaves a line of another visibility to itself.
+    #[test]
+    fn extends_an_earlier_facade_of_the_same_visibility_and_leaves_one_of_another_visibility_alone()
+    {
+        // Given a `pub(crate)` facade an earlier operation wrote, beside a `pub` one
+        let text = "pub use dest::alpha;\npub(crate) use dest::beta;\n";
+
+        // When the facade a `pub(crate)` move would extend is read, and the one a private move would
+        let restricted =
+            facade_writer::written_facade(text, "dest", "pub(crate)", DESTINATION_ROOT)
+                .map(|facade| (&text[facade.span], facade.modules));
+        let private = facade_writer::written_facade(text, "dest", "", DESTINATION_ROOT);
+
+        // Then the `pub(crate)` line is the one, and no private line exists to extend
+        assert_eq!(
+            (restricted, private.is_none()),
+            (
+                Some(("pub(crate) use dest::beta;\n", vec!["beta".to_string()])),
+                true
+            )
+        );
     }
 
     /// The parent's own glob over the moved module is re-pointed.

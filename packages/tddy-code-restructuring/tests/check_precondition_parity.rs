@@ -592,3 +592,255 @@ fn a_body_path_under_cfg_test_is_no_finding() {
         "a body path under cfg(test) was reported: {findings:?}"
     );
 }
+
+/// `origin` declaring `workspace_session`, whose file holds `session` and declares children; the
+/// files named here are added beside it.
+fn an_origin_whose_moving_module_holds(
+    session: &str,
+    beside: &[(&str, &str)],
+) -> tempfile::TempDir {
+    let files: Vec<(&str, &str)> = [
+        (
+            "crates/origin/src/lib.rs",
+            ORIGIN_DECLARING_HOST_AND_WORKSPACE_SESSION,
+        ),
+        ("crates/origin/src/host.rs", THE_HOST_MODULE),
+        ("crates/origin/src/workspace_session.rs", session),
+    ]
+    .into_iter()
+    .chain(beside.iter().copied())
+    .collect();
+    an_origin_holding(&files)
+}
+
+const A_CARRIED_PART: &str = "crates/origin/src/workspace_session/part.rs";
+
+/// A carried `mod missing;` that leads to no file is reported before `apply` — the move cannot
+/// carry what is not there, and `check --deep` used to say `no findings` over a stranded child.
+#[test]
+fn a_static_check_reports_a_carried_mod_line_that_leads_to_no_file() {
+    // Given `workspace_session` declaring a child whose file does not exist
+    let workspace = an_origin_whose_moving_module_holds("mod missing;\n\npub fn start() {}\n", &[]);
+
+    // When its move is checked
+    let findings = unrunnable_in(workspace.path(), &[a_move_of_workspace_session()]);
+
+    // Then the declaration and the directory it was looked for in are named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains("`mod missing;`")
+                && finding.contains("crates/origin/src/workspace_session"))
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
+
+/// A child placed with `#[path]` lives wherever the attribute says, which a move cannot follow.
+#[test]
+fn a_static_check_reports_a_carried_child_placed_with_a_path_attribute() {
+    // Given `workspace_session` placing a child with `#[path]`
+    let workspace = an_origin_whose_moving_module_holds(
+        "#[path = \"elsewhere.rs\"]\nmod part;\n\npub fn start() {}\n",
+        &[
+            ("crates/origin/src/workspace_session/elsewhere.rs", ""),
+            (A_CARRIED_PART, ""),
+        ],
+    );
+
+    // When its move is checked
+    let findings = unrunnable_in(workspace.path(), &[a_move_of_workspace_session()]);
+
+    // Then the file and the attribute are named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(
+                |finding| finding.contains("crates/origin/src/workspace_session.rs")
+                    && finding.contains("#[path]")
+            )
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
+
+/// A carried file whose target already exists in the destination would be a merge.
+#[test]
+fn a_static_check_reports_a_carried_file_whose_target_already_exists_in_the_destination() {
+    // Given `workspace_session` with a child `part`, and a destination already holding
+    // `workspace_session/part.rs`
+    let workspace = an_origin_whose_moving_module_holds(
+        "pub mod part;\n\npub fn start() {}\n",
+        &[
+            (A_CARRIED_PART, "pub struct Part;\n"),
+            (
+                "crates/destination/src/workspace_session/part.rs",
+                "pub struct Other;\n",
+            ),
+        ],
+    );
+
+    // When its move is checked
+    let findings = unrunnable_in(workspace.path(), &[a_move_of_workspace_session()]);
+
+    // Then the target that is in the way is named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains("crates/destination/src/workspace_session/part.rs"))
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
+
+/// A child the move carries cannot also be moved by another operation of the same plan: route
+/// `01c` (parent first, then each child) passed `check` and failed at its second operation.
+#[test]
+fn a_static_check_reports_a_carried_child_another_operation_of_the_plan_moves() {
+    // Given a plan moving `workspace_session`, then its child `part` on its own
+    let workspace = an_origin_whose_moving_module_holds(
+        "pub mod part;\n\npub fn start() {}\n",
+        &[(A_CARRIED_PART, "pub struct Part;\n")],
+    );
+    let plan = [
+        a_move_of_workspace_session(),
+        a_move_of(A_CARRIED_PART, "workspace_session::part"),
+    ];
+
+    // When the plan is checked
+    let findings = unrunnable_in(workspace.path(), &plan);
+
+    // Then the child and the operation that moves it again are named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains(A_CARRIED_PART) && finding.contains("operation 1"))
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
+
+/// A carried child's body is read like the module's own: a path into a module staying behind is a
+/// finding naming the child and the line.
+#[test]
+fn a_static_check_reports_a_carried_childs_body_reaching_a_module_that_stays_behind() {
+    // Given `workspace_session`'s child `part` reaching `host` in a body on line 2
+    let workspace = an_origin_whose_moving_module_holds(
+        "pub mod part;\n\npub fn start() {}\n",
+        &[(A_CARRIED_PART, REACHES_HOST_IN_A_BODY)],
+    );
+
+    // When its move is checked
+    let findings = unrunnable_in(workspace.path(), &[a_move_of_workspace_session()]);
+
+    // Then the child, the path and its line are named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains(A_CARRIED_PART)
+                && finding.contains("`crate::host::project_root` in a body at line 2"))
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
+
+/// A module declared with a restricted visibility is the declared module all the same — `#carve`
+/// R1 and R4 widened three such lines by hand to get past "declares no `mod`".
+#[test]
+fn a_static_check_accepts_a_module_declared_pub_crate_pub_super_or_pub_in() {
+    for (root, parent, declaration, anchor, path) in [
+        (
+            "pub(crate) mod workspace_session;\n",
+            None,
+            "",
+            "crates/origin/src/workspace_session.rs",
+            "workspace_session",
+        ),
+        (
+            "pub mod outer;\n",
+            Some("crates/origin/src/outer.rs"),
+            "pub(super) mod inner;\n",
+            "crates/origin/src/outer/inner.rs",
+            "outer::inner",
+        ),
+        (
+            "pub mod outer;\n",
+            Some("crates/origin/src/outer.rs"),
+            "pub(in crate::outer) mod inner;\n",
+            "crates/origin/src/outer/inner.rs",
+            "outer::inner",
+        ),
+    ] {
+        // Given a module whose declaration is restricted
+        let mut files = vec![
+            ("crates/origin/src/lib.rs", root),
+            (anchor, "pub fn start() {}\n"),
+        ];
+        if let Some(parent) = parent {
+            files.push((parent, declaration));
+        }
+        let workspace = an_origin_holding(&files);
+
+        // When its move is checked
+        let findings = unrunnable_in(workspace.path(), &[a_move_of(anchor, path)]);
+
+        // Then nothing is reported
+        assert_eq!(findings, Vec::<String>::new(), "{root}{declaration}");
+    }
+}
+
+/// A destination whose root declares the module `pub(crate)` already binds its name: the move
+/// would be a merge.
+#[test]
+fn a_destination_declaring_the_module_pub_crate_is_reported_as_a_merge() {
+    // Given a destination already declaring `pub(crate) mod workspace_session;`
+    let workspace = a_workspace_whose_moving_module_reaches_its_host_in_a_body();
+    std::fs::write(
+        workspace.path().join("crates/destination/src/lib.rs"),
+        "pub(crate) mod workspace_session;\n",
+    )
+    .expect("the destination's root is rewritten");
+
+    // When the move is checked
+    let findings = unrunnable_in(workspace.path(), &[a_move_of_workspace_session()]);
+
+    // Then the merge is reported
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains("would be a merge"))
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
+
+/// A struct update's `..crate::…` base is a body path: one into a module staying behind is a
+/// finding naming its line, as any other body path is.
+#[test]
+fn a_struct_update_path_into_a_module_staying_behind_is_a_finding_naming_the_line() {
+    // Given `workspace_session` building a value from `..crate::host::defaults()` on line 4
+    let workspace = an_origin_whose_moving_module_holds(
+        "pub fn start() -> Meta {\n    Meta {\n        id: 1,\n        \
+         ..crate::host::defaults()\n    }\n}\n",
+        &[],
+    );
+
+    // When its move is checked
+    let findings = unrunnable_in(workspace.path(), &[a_move_of_workspace_session()]);
+
+    // Then the path and its line are named
+    assert_eq!(
+        findings
+            .iter()
+            .filter(|finding| finding.contains("`crate::host::defaults` in a body at line 4"))
+            .count(),
+        1,
+        "{findings:?}"
+    );
+}
