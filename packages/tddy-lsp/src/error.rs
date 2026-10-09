@@ -8,8 +8,22 @@ pub enum LspError {
     LanguageNotAllowed(String),
 
     /// The configured server program could not be found (e.g. not on PATH).
+    ///
+    /// Raised when spawning the program fails with `NotFound`; carries `"<program>: <os error>"`.
     #[error("language server not found: {0}")]
     ServerNotFound(String),
+
+    /// A server this crate spawned never came up: it could not be spawned for a reason other than
+    /// being absent, it exited before the `initialize` handshake completed, or the handshake failed.
+    ///
+    /// Distinct from [`LspError::ServerExited`], which is a server that came up and later went away.
+    #[error("language server `{program}` did not start: {reason}")]
+    ServerNotStarted {
+        /// The program as the launch spec names it, verbatim.
+        program: String,
+        /// Why it never came up.
+        reason: String,
+    },
 
     /// The server sent a malformed or unexpected JSON-RPC message.
     #[error("lsp protocol error: {0}")]

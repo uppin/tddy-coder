@@ -4,7 +4,7 @@
 **Status**: 🚧 In Progress
 **Type**: Bug fix and hygiene. It touches the `tddy-lsp` error surface, a static-check rule, the plan
 header and removes dead code. It adds no new operation.
-**Stack**: `#reshape` 16/24, branch `feature/reshape/anchors-outline`, green wave 1.
+**Stack**: `#reshape` 16/24, branch `feature/reshape/anchors-outline`, green wave 1, PR [#609](https://github.com/uppin/tddy-coder/pull/609).
 PR title: `fix(code-restructuring,lsp): anchors names why its server never started; static check verifies item modules (#reshape 16/24)`.
 Base in the linear stack: `feature/reshape/move-item-paths` (K=10). **Real edges: none.** The node
 consumes no other node's behaviour, and no node consumes its behaviour. It is in the line only because
@@ -49,7 +49,7 @@ claimed by an open PR in this node's path. The empty-outline record says `**Clai
   - `src/runner/entry_points/check_entry_points.rs`;
   - `src/plan.rs`, `src/plan/codec.rs`, `src/plan/codec/file_hint.rs`;
   - tests.
-  - Package docs, at wrap through this changeset: `docs/item-anchors.md` (§ "Static `check` cannot examine item anchors", § Plan header) and `docs/plan-store.md:73`.
+  - Package docs, at wrap through this changeset: `docs/item-anchors.md` (§ "Static `check` cannot examine item anchors", § Plan header), `docs/plan-store.md:73` and `docs/readiness-and-gates.md:153` (names `anchor_for`).
 - **Dev tooling**: `.agents/skills/code-restructuring/references/plan-schema.md:14,17` (drop `modified`), edited in this PR.
 
 ## Related Feature Documentation
@@ -106,7 +106,10 @@ See the PRD's Background. The facts that decide the design, in short:
   sound it keeps the "only a deep check can resolve" finding, reworded.
 - **Remove `FileHint.modified`:** the mtime read, `rfc3339`, the `#[cfg(test)]` re-export and the two
   `TODO(sharpen)` markers they carried.
-- **Delete the dead `anchor_for` path and re-point its three test callers** (F6).
+- **Delete the dead `anchor_for` path and re-point its test callers** (F6): the three planned, plus
+  `language_support_acceptance.rs`' `a_document_opens_with_its_supports_language_id`, which #reshape 11
+  (`feature/reshape/language-support`) added after this plan and which used `anchor_for` only to open
+  a document.
 - **Measure at repo scale and record the result (M1).** This gates the rest of the node.
 
 ### The rules (the contract)
@@ -222,7 +225,26 @@ Published with the wave-2 contract commit, as the first push of this PR. **Owned
 - The contract commit stubs `item_anchor_findings` and `refuse_a_foreign_prefix` with `todo!()`-free
   bodies that keep today's behaviour: every item-anchored operation still gets today's finding. That
   makes tests 8–14 fail on assertions, not on panics.
-- Failing tests: 1–4, 6–14, 16 and 17 (red); 5 and 18–21 are green pins.
+- **As published (commit 2):**
+  - `tddy-lsp`: `ServerNotStarted` added. `client_tx` carrying `Result`, the registry passing a sent
+    `Err` through, and the spawn-`NotFound` → `ServerNotFound("{program}: {err}")` row were **already
+    landed by #649** (`dc739e1f3`) before the re-land, so R1's first row is live. The rest is marked
+    `TODO(reshape-anchors-outline)`: any other spawn error still answers `LspError::Io`, and the
+    missing-channel and before/failed-handshake branches still drop `client_tx`, so those startup
+    failures are still `ServerExited`. `fake_lsp --refuses-initialize` is implemented (test
+    infrastructure).
+  - `tddy-index-daemon`: the arm exists and maps to `Status::internal`, marked TODO, because the match
+    is exhaustive. Green changes it to `unavailable`.
+  - `tddy-code-restructuring`: `item_anchor/prefix.rs` holds the moved `segments_below` (live: the
+    Rust resolver calls it) and a `refuse_a_foreign_prefix` stub that returns `Ok(())`.
+    `item_anchor_findings` replaces `unresolvable_without_a_server` and still writes the old wording
+    (TODO). The R5 deletions are **done**; they are behaviour-neutral, and tests 18–21 pin that.
+  - **Not yet done: `FileHint.modified` is still there.** Removing it *is* R4's deliverable, and
+    removing it now would turn tests 15–17 green in the contract commit. Green removes the field,
+    `rfc3339`, the `#[cfg(test)]` re-export, the two `TODO(sharpen)` markers and the `"modified"` key
+    in `tests/harness/mod.rs` `a_hinted_plan_of` (now `:333`).
+- Failing tests: 2–4, 6–14, 15, 16 and 17 (red); 1, 5 and 18–21 are green pins (1 because #649
+  already raises `ServerNotFound`).
 
 ## Green wave
 
@@ -275,7 +297,8 @@ None. No node depends on this one.
     handshake, or a failed `initialize` (`server_body.rs:114-123, 145-153, 213-232`), and drops
     `client_tx`;
   - `spawn_service` maps the dropped one-shot to `ServerExited` (`registry.rs:195-199`);
-  - `ServerNotFound` is never constructed;
+  - `ServerNotFound` is never constructed (*superseded*: #649 constructs it for a spawn `NotFound`
+    and made `client_tx` carry `Result` — see Validation Results, re-land);
   - `spawn_observer_test.rs:151-170` pins `ServerExited` for `--exit-immediately`.
 - **`tddy-index-daemon`**: `status_of_lsp` maps `ServerExited` → `unavailable` and `ServerNotFound` →
   `failed_precondition` (`status.rs:128-148`).
@@ -318,7 +341,7 @@ Plan headers carry only hashes. `rust.rs` is about 125 lines shorter.
 - `src/plan/codec.rs:224-227`: the `TODO(sharpen)` comment and the `#[cfg(test)] pub(crate) use …rfc3339` are removed.
 - Tests:
   - new `tests/static_check_item_anchors.rs`, which is not in the e2e filterset;
-  - re-pointed: `tests/cancellation_acceptance.rs`, `tests/workspace_root_acceptance.rs`, `tests/spawn_record_acceptance.rs`;
+  - re-pointed: `tests/cancellation_acceptance.rs`, `tests/workspace_root_acceptance.rs`, `tests/spawn_record_acceptance.rs`, `tests/language_support_acceptance.rs` (to `LanguageBackend::resolve` of an `extract_method`);
   - `tests/harness/mod.rs:255` drops the `"modified"` key from its fixture header;
   - `tests/snapshot_writes_a_missing_header.rs` gains one test.
 
@@ -383,7 +406,7 @@ are green pins.
 1. `a_server_program_that_does_not_exist_is_refused_as_not_found_naming_the_program_and_the_os_error`.
    `LaunchSpec::new("<tempdir>/no-such-rust-analyzer")` → `Err(LspError::ServerNotFound(s))`, where `s`
    starts with that path followed by `": "` and contains `No such file or directory`.
-   *Red today:* `ServerExited`.
+   *Red today:* `ServerExited`. **Green since #649** (re-land, 2026-10-19): kept as a pin of R1's first row.
 2. `a_server_that_exits_before_the_handshake_is_refused_as_not_started_with_its_exit_status`.
    `--exit-immediately` → `ServerNotStarted { program: <fake path>, reason: "exited before the initialize handshake completed (exit status: 0)" }`.
    *Red today:* `ServerExited`.
@@ -393,8 +416,8 @@ are green pins.
 4. `a_server_that_did_not_start_reads_as_its_program_and_its_reason_in_one_line`.
    The `Display` of test 2's error is exactly `` language server `<fake path>` did not start: exited before the initialize handshake completed (exit status: 0) ``.
    *Red today:* no such variant.
-5. `a_request_to_a_server_shut_down_after_it_came_up_is_still_refused_as_exited`.
-   `get_or_spawn` succeeds, then `shutdown_all`, then a request through the old client → `ServerExited`.
+5. `a_request_to_a_server_that_exited_after_it_came_up_is_still_refused_as_exited`.
+   `get_or_spawn` succeeds, the server is sent `exit` and its task ends, then a request through the old client → `ServerExited`.
    **Green pin:** a died-later server keeps today's error.
 
 ### `tddy-lsp`, in `packages/tddy-lsp/tests/spawn_observer_test.rs` (changed)
@@ -467,15 +490,20 @@ Fixture: `a_workspace_holding_files` with package `stacks`, `src/lib.rs` (`pub m
 
 18. `packages/tddy-code-restructuring/tests/spawn_record_acceptance.rs`:
     `a_language_server_the_backend_starts_itself_is_recorded_with_the_names_of_its_pinned_environment`.
-    The trigger becomes `ItemResolver::resolve_item(&mut backend, ORIGIN_LIB, &ItemPath::parse("<crate>::level"))`,
-    with the answer ignored as today. The assertions are unchanged.
+    The trigger becomes `LanguageBackend::resolve` of an `extract_method` over `ORIGIN_LIB` (parsed
+    from a plan line), with the answer ignored as today. The assertions are unchanged. **Diverges from
+    F6**, which said `resolve_item`: on a self-spawned `RustBackend`, `resolve_item` → `outline_of` asks
+    `workspace_root()` *before* `start`, and a self-spawned backend has no root until it has started,
+    so it refuses "this backend has no workspace root" without spawning anything. The test would then
+    record no server. `resolve` takes the root from its `Workspace` and starts the server.
 19. `packages/tddy-code-restructuring/tests/cancellation_acceptance.rs`: `an_operation_that_waits_for_the_index`
     calls `backend.resolve(&an_extraction_of_the_function_body(), &workspace)`, which the same file
     already uses at `:228`, so it waits in `ensure_indexed` on `--cold-hovers`. The three tests at
     `:90, :111, :139` keep their assertions. The return type becomes `Result<Resolution, RestructureError>`;
     the assertions read only the error.
 20. `packages/tddy-code-restructuring/tests/workspace_root_acceptance.rs`: `a_cancelled_wait` calls
-    `backend.resolve(&<an extract_method over src/lib.rs's body>, &workspace)`. The two progress tests
+    `backend.resolve(&an_extraction_of_the_function_body(), &workspace)`, a local helper that parses
+    the operation from a plan line, so later `RefactorOp` fields do not touch it. The two progress tests
     at `:193, :212` keep their assertions.
 21. `packages/tddy-code-restructuring/tests/item_anchor_acceptance.rs:200`
     (`a_module_prefix_that_does_not_match_the_file_is_refused`, live, unchanged). It proves the deep
@@ -559,7 +587,69 @@ Decisions taken by this plan:
 
 ## Validation Results
 
-(empty; M1's measurement goes here first, then `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Commit 2: contract surface and acceptance tests (2026-10-09)
+
+Scoped gates: `cargo check` and `cargo clippy --all-targets -- -D warnings` for `tddy-code-restructuring`,
+`tddy-lsp` and `tddy-index-daemon` are clean, and `cargo fmt --all --check` is clean. Only the new and
+changed binaries were run, not the full suite.
+
+**Red, each failing on its assertion because the implementation is missing:**
+- 1, 2, 3, 4 (`tddy-lsp/tests/server_start_failure_test.rs:73, 94, 116, 135`). Each still gets
+  `ServerExited`, because the body sends no typed refusal.
+- 6 (`tddy-lsp/tests/spawn_observer_test.rs:151`). Same reason.
+- 7 (`tddy-index-daemon/src/status.rs:369`). The arm answers `Internal`, not `Unavailable`.
+- 8–14 (`tddy-code-restructuring/tests/static_check_item_anchors.rs:81, 101, 120, 139, 160, 178, 195`).
+  Each gets the old generic finding, because the prefix stub refuses nothing and the wording is unchanged.
+- 15 (`src/plan.rs:1254`). The hint still serialises `modified`.
+- 16, 17 (`tests/snapshot_writes_a_missing_header.rs:90, 109`). `modified` is still written.
+
+**Green pins, passing:**
+- 5 (`server_start_failure_test.rs:156`).
+- 18 (`spawn_record_acceptance.rs:383`).
+- 19 (`cancellation_acceptance.rs`: all 4 tests).
+- 20 (`workspace_root_acceptance.rs`: all 5 tests).
+- 21 (`item_anchor_acceptance.rs:200`, live), and its neighbour
+  `a_static_check_of_an_item_anchored_plan_is_not_green_because_it_examined_nothing`.
+
+**Seen, not this node's:** `spawn_record_acceptance.rs`
+`an_apply_records_the_operation_each_git_process_ran_for` and
+`a_groups_compile_gate_is_recorded_with_its_group` are red. They are `#reshape` 10's contract tests
+(added in `13ac129a9`).
+
+**Note for green:** `--exit-immediately` takes about 10 s to be refused (tests 2, 4 and 6). The
+client's `initialize` waits out its 10 s request timeout, because nothing fails a pending request
+when the server's stdout closes. Green can race `child.wait()` against `initialize`, so that an exit
+before the handshake is reported at once.
+
+M1's measurement is still to be done, at green.
+
+### Commit 2 re-landed against the current code (2026-10-19)
+
+The 2026-10-11 contract commit (`07fba4624`, on `backup/reshape-2026-10-11/anchors-outline`) did not
+replay onto `feature/reshape/detach-method`, so it was cherry-picked and its conflicts resolved. Same
+surface, same tests, same R1–R5. What changed against the 2026-10-11 version:
+
+- **R1's `NotFound` row was already live.** #649 (`dc739e1f3`, configurable rust-analyzer) made
+  `client_tx` carry `Result<Arc<LspClient>, LspError>`, made the registry pass a sent `Err` through,
+  and sends `ServerNotFound("{program}: {err}")` for a spawn `NotFound` (any other spawn error as
+  `LspError::Io`). The re-land keeps that code; the contract adds only `ServerNotStarted` and the
+  TODOs for the remaining rows. **Test 1 is therefore a green pin**, not red. #649 also added
+  `spawn_observer_test.rs` `a_server_program_that_does_not_exist_is_refused_as_not_found_naming_the_program`,
+  which overlaps test 1 (test 1 additionally pins the `"<program>: "` prefix and the OS error).
+- **A fourth `anchor_for` caller**, `language_support_acceptance.rs:119`
+  `a_document_opens_with_its_supports_language_id` (#reshape 11), is re-pointed to
+  `LanguageBackend::resolve` of an `extract_method`. It cannot be run here: it is red on
+  `SupportRegistry::backends`' `todo!` until #reshape 11 greens.
+- `attached_trivia_starts_at` had already left `backends/rust.rs` for `crate_move::source_scan`; the
+  now-unused import in `rust.rs` goes with the deletions.
+- `tddy_lsp::Language::Rust` is `LanguageId::RUST` in `server_start_failure_test.rs` (#reshape 11's rename).
+- `#reshape` 10's two `spawn_record_acceptance.rs` tests noted above are green now (merged).
+
+Scoped gates: `./dev cargo clippy -p tddy-lsp -p tddy-index-daemon -p tddy-code-restructuring
+--all-targets -- -D warnings` clean; `cargo fmt` clean for the three packages. Red as listed above
+(2–4, 6, 7, 8–14, 15, 16, 17); green pins 1, 5, 18, 19 (4 tests), 20 (5 tests), 21 (live).
+Seen, not this node's: `--lib` reds in `language::tests`, `impl_move::assemble`,
+`crate_move::source_scan::test_declarations` are #reshape 11/12/13 contract `todo!`s.
 
 ## TODO
 
@@ -567,10 +657,10 @@ Decisions taken by this plan:
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

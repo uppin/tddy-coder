@@ -200,6 +200,7 @@ impl LspRegistry {
                 self.task_registry.cancel_task(&handle.id).await;
                 return Err(refusal);
             }
+            // The body went away without a word, which only a defect in it can do.
             Ok(Err(_)) => {
                 self.task_registry.cancel_task(&handle.id).await;
                 return Err(LspError::ServerExited);

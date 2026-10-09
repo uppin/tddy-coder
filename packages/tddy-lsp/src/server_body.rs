@@ -45,8 +45,8 @@ pub struct LspServerBody {
     pub spec: LaunchSpec,
     /// Workspace root the server operates on (its cwd / `rootUri`).
     pub root_dir: PathBuf,
-    /// One-shot used to publish the initialized client back to the registry — or, when the
-    /// program could not be started at all, why. Dropped unsent when the server goes away later.
+    /// One-shot used to publish the initialized client back to the registry — or why the server
+    /// never came up, so the registry can refuse in those words rather than as a bare exit.
     pub client_tx: oneshot::Sender<Result<Arc<LspClient>, LspError>>,
 }
 
@@ -125,6 +125,8 @@ impl LspServerBody {
                 let refusal = if err.kind() == std::io::ErrorKind::NotFound {
                     LspError::ServerNotFound(format!("{}: {err}", spec.program))
                 } else {
+                    // TODO(reshape-anchors-outline): implement — any other spawn error is
+                    // `ServerNotStarted { reason: "could not be spawned: {err}" }` (changeset R1).
                     LspError::Io(message.clone())
                 };
                 let _ = client_tx.send(Err(refusal));
@@ -155,6 +157,8 @@ impl LspServerBody {
             Some(channel) => channel,
             None => {
                 let _ = child.start_kill();
+                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
+                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
                 report_end(&record, child.wait().await);
                 return TaskStatus::Failed {
                     message: "language server task is missing its output channel".to_string(),
@@ -231,6 +235,8 @@ impl LspServerBody {
         {
             Ok(client) => Arc::new(client),
             Err(err) => {
+                // TODO(reshape-anchors-outline): implement — send the typed refusal over `client_tx`
+                // (`ServerNotFound` / `ServerNotStarted`, changeset R1) before returning.
                 let _ = child.start_kill();
                 report_end(&record, child.wait().await);
                 stdin_task.abort();
