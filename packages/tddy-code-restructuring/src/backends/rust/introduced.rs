@@ -59,6 +59,24 @@ pub(super) fn introduced_by(
     ))
 }
 
+/// The one declaration of `keyword` (`fn`, `let`) `extracted` gained over `original`: declared more
+/// often after the assist than before, inside the span the assist changed. Replaces
+/// [`introduced_binding`] once `extract_method`'s placeholder is the server's own name, as
+/// rust-analyzer names a function extracted from a `let` initializer after the binding.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-extract-method-clean): implement, and replace `introduced_binding` with it"
+)]
+pub(super) fn introduced_declaration(
+    keyword: &str,
+    original: &str,
+    extracted: &str,
+) -> Result<Introduced> {
+    let _ = (keyword, original, extracted);
+    // TODO(reshape-extract-method-clean): implement
+    todo!("introduced_declaration")
+}
+
 /// The one `let` binding `extracted` gained over `original`.
 ///
 /// A binding is new when its name is declared more often than before, and when its name sits in
@@ -190,6 +208,35 @@ mod tests {
     /// Source text from its lines, one per entry.
     fn a_file(lines: &[&str]) -> String {
         lines.join("\n") + "\n"
+    }
+
+    #[test]
+    fn finds_the_function_the_assist_named_after_the_let_it_initialises() {
+        // Given rust-analyzer's extraction of a `let`'s `if … else` initializer
+        let original = a_file(&[
+            "pub fn let_value(flag: bool, dir: PathBuf) -> usize {",
+            "    let managed = if flag { Some(dir.join(\"a\")) } else { None };",
+            "    managed.map(|p| p.as_os_str().len()).unwrap_or(0)",
+            "}",
+        ]);
+        let extracted = a_file(&[
+            "pub fn let_value(flag: bool, dir: PathBuf) -> usize {",
+            "    let managed = managed(flag, &dir);",
+            "    managed.map(|p| p.as_os_str().len()).unwrap_or(0)",
+            "}",
+            "",
+            "fn managed(flag: bool, dir: &PathBuf) -> Option<PathBuf> {",
+            "    if flag { Some(dir.join(\"a\")) } else { None }",
+            "}",
+        ]);
+
+        // When
+        let introduced = introduced_declaration("fn", &original, &extracted);
+
+        // Then the function is found, at its name
+        let introduced = introduced.expect("one `fn` was introduced");
+        assert_eq!(introduced.name, "managed");
+        assert!(extracted[introduced.offset..].starts_with("managed(flag: bool"));
     }
 
     #[test]

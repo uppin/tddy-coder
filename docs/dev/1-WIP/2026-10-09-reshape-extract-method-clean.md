@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Fix + enhancement (post-processing of an existing operation; a wider set of accepted ranges; one tidy lint; one error class)
-**Stack**: `#reshape` 4/19, branch `feature/reshape/extract-method-clean`, wave 1. PR title:
+**Stack**: `#reshape` 4/19, branch `feature/reshape/extract-method-clean`, wave 1, PR [#601](https://github.com/uppin/tddy-coder/pull/601) (draft). PR title:
 `feat(code-restructuring): extract_method lifts error guards, keeps comments, writes lint-clean signatures (#reshape 4/19)`.
 Base in the linear stack: `feature/reshape/tidy-facades` (K=3). **Real edges**: none in (no parent's behaviour is
 consumed); out: `extract-method-clean -> fn-sizes-rest` (K=16) and `extract-method-clean -> fn-sizes-backend` (K=19), which
@@ -479,9 +479,10 @@ Names read as behaviour specifications. All are **red on `master`**, for the rea
 34. `a_range_propagating_with_a_question_mark_returns_the_callers_imported_result_alias_and_compiles` — the `imported`
     fixture of Exploration 2 §2b (`use crate::aliased::Result;`, `let y = parse(b)?; let z = x + y;`): `-> Result<(u32, u32)>`,
     `assert_compiles`. *Red*: `Result<(u32, u32), String>`, `E0107`.
-35. `a_range_in_a_module_that_defines_its_result_alias_is_spelled_with_the_alias` — the `aliased` fixture: `-> Result<u32>`,
-    not `std::result::Result<u32, String>`. *Red*: the qualified two-argument spelling (it compiles; the assertion is on the
-    text).
+35. `a_range_in_a_module_that_defines_its_result_alias_is_spelled_with_the_alias` — the alias defined at the crate root
+    of the file: `-> Result<u32>`. *Red*: rust-analyzer writes `Result<u32, String>` there (measured on the first push;
+    the `std::result::Result` spelling of Exploration 2 §2b was for an alias defined in an inner module), which is `E0107`
+    as well.
 
 ### `packages/tddy-code-restructuring/tests/apply_tidy_acceptance.rs` (existing; no rust-analyzer)
 
@@ -600,7 +601,38 @@ today's class).
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+### Draft-PR contract push (wave 2, 2026-10-09)
+
+Scoped to `tddy-code-restructuring`, on `feature/reshape/tidy-facades`'s commit 2:
+`cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D
+warnings` and `cargo fmt --all --check` are clean.
+
+Only this node's binaries and filters were run (no full suite; baseline: `scratchpad/reshape/baseline-failures.txt`, none):
+
+| Tests | Result | Why |
+|---|---|---|
+| `tests/extract_method_clean_acceptance.rs`, 19 tests (1-17, 34, 35) | 🔴 19 red | each on its behaviour: comments dropped (1-3, 15), `&PathBuf`/`&String`/`&Vec` kept (4, 5), no note (6, 9), `Ok(if` (7), `x: x` (8), short trait name (10), no refusal (11), the 30 s probe refusal (12, 13), did not produce a `fn fun_name` (14), `as _` not carried (16) and so the apply's compile gate (17), `Result<X, String>` under a one-argument alias (34, 35) |
+| `tests/extract_method_guard_lift_acceptance.rs`, 10 tests (23-31, 33) | 🔴 9 red, 🟢 1 pin | 23-26, 30, 31, 33: today's `returns early` refusal; 28, 29: today's refusal text instead of the new one. **27 is the green pin** (the value-return refusal is unchanged) |
+| `tests/apply_tidy_acceptance.rs`, 3 new (18-20) | 🔴 18, 19 red; 🟢 20 | 18-19: the `mut` survives and no `tidied:` line (`warning remains:` today). **20 is green by construction** (a dry run writes nothing) — a pin of the boundary, as the changeset says |
+| `src/backends/lsp_bridge.rs` test 21 | 🔴 | `plan is malformed: lsp: lsp server error -32603: …` |
+| `src/backends/rust/extracted_fn/comments.rs` test 22, `guards.rs` test 32, and every unit test in `extracted_fn/{span,comments,lints,ptr_args,respell,guards,return_type}.rs`, `introduced.rs` (`finds_the_function_the_assist_named_after_the_let_it_initialises`), `prelude_shadow.rs` (two `as _` tests) | 🔴 | `todo!()` in the surface |
+| `selection.rs`: `a_range_opening_on_a_blocks_brace_is_probed_at_its_first_statement`, `a_range_opening_on_a_line_comment_is_probed_at_the_code_after_it` | 🔴 | the probe stays at `3:5` / `4:9` (no surface: the behaviour of `hover_bearing_position` changes) |
+
+Every other test of `selection.rs`, `introduced.rs`, `prelude_shadow.rs`, `lsp_bridge.rs` stays green.
+
+**Diverged from the contract, deliberately:**
+- `assert_clippy_clean` was **not** added: the harness already has `assert_lints_clean` (`cargo clippy --workspace
+  --all-targets -- -D warnings`), which tests 15, 31 and 33 use.
+- The harness gained `the_function_named(text, name)` and `THE_UNUSED_MUT`, beside the planned
+  `a_workspace_whose_test_binary_carries_an_unused_mut`.
+- `comments::dropped` returns `Vec<Comment>` with `Comment { text, line, trailing }` (the contract named the type only).
+- The uncalled surface is silenced with `#[allow(dead_code, reason = "TODO(reshape-extract-method-clean): …")]` on
+  `mod extracted_fn;` (`backends/rust.rs`), `mod unused_mut;` (`runner/tidy.rs`), `INTERNAL_ERROR`
+  (`lsp_bridge.rs`), `introduced_declaration` and `anonymous_trait_imports`. **Green removes each** with its first
+  caller. `allow` rather than `cfg_attr(not(test), expect(…))`: the unit tests do not call every item, so an `expect`
+  would be unfulfilled in one of the two builds.
+- No wiring changed in this push: `check`, `resolve_opening` and `assisted_edit` still call today's code, so every
+  existing test stays green.
 
 ## TODO
 
@@ -609,10 +641,10 @@ today's class).
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-extract-method-clean.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests (draft-PR contract push, #601)
+- [x] Run acceptance tests (verify they fail) — see Validation Results
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests (the surface's unit tests, `todo!()` bodies)
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

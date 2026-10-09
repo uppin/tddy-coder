@@ -31,6 +31,11 @@ mod chatter;
 mod documents;
 mod early_return;
 mod escaping_types;
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-extract-method-clean): `check` and `assisted_edit` call this in the green phase"
+)]
+mod extracted_fn;
 mod impl_seam;
 mod imports;
 mod inline_paths;

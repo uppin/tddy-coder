@@ -137,7 +137,7 @@ fn declares_a_return_type(header: &[u8]) -> bool {
 ///
 /// **Not seen:** a `return` a macro expands to (`bail!`, `ensure!`). Nothing in the text shows it;
 /// `apply`'s compile gate is what catches the result.
-fn early_returns(text: &str, range: Range) -> Vec<u32> {
+pub(super) fn early_returns(text: &str, range: Range) -> Vec<u32> {
     let (Some(from), Some(to)) = (byte_offset(text, range.start), byte_offset(text, range.end))
     else {
         return Vec::new();
