@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Refactor (behaviour-preserving; engine-driven function extractions) + a new source-scanning test gate
-**Stack**: `#reshape` 16/19, branch `feature/reshape/fn-sizes-rest`, wave 2. PR title:
+**Stack**: `#reshape` 16/19, branch `feature/reshape/fn-sizes-rest`, wave 2, PR [#613](https://github.com/uppin/tddy-coder/pull/613). PR title:
 `refactor(code-restructuring): cut the nine functions past 60 lines outside the backend (#reshape 16/19)`.
 Base in the linear stack: `feature/reshape/oversized-files` (K=15). **Real edges**: in `extract-method-clean -> fn-sizes-rest`
 (K=4: the extractions rely on its guard lift, comment carry, signature clean-up and type respelling); out: none.
@@ -121,7 +121,7 @@ file's layout, not a behaviour; not an edge).
 
 ## Scope
 
-- **In:** the nine functions; the gate; the F2 hand edit and its todo; one todo per hand fix after an engine operation.
+- **In:** the nine functions, plus `crate_move.rs::surveyed` (the tenth: it grew past 60 on the wave-2 base, see Validation results); the gate; the F2 hand edit and its todo; one todo per hand fix after an engine operation.
 - **Deferred:** `backends/` (node 19); 41–60 (node 19's todo; first outside `backends/` is `verify.rs:166 compare_with`, 58);
   an operation that introduces a parameter struct (`todo/2026-10-09-restructure-has-no-operation-to-introduce-a-parameter-struct.md`);
   function lengths in `check --budget` (`todo/2026-10-09-restructure-check-budget-does-not-report-function-lengths.md`).
@@ -142,6 +142,7 @@ file's layout, not a behaviour; not an edge).
 | `crate_move/cluster/stranded.rs:54 stranded_siblings` | 70 | Per-module finding with two inline `format!` blocks |
 | `crate_move/cluster.rs:111 resolve_cluster` | 66 | Per-member accumulation + set-wide manifest edits |
 | `crate_move/source_scan/module_items.rs:32 items_of_module` | 64 | Top-level scanner; the `mod` arm |
+| `crate_move.rs:276 surveyed` (added in wave 2) | 65 | Per reached item, a loop over its outside references building caller and planned rewrites (57 on master; node 7's contract commit grew it) |
 
 ### State B
 
@@ -158,6 +159,7 @@ Each function ≤ 60, by these seams (master lines; re-read in wave 2):
 | `stranded_siblings` | `whereabouts` match `:88-104` (3); finding `format!` `:105-121` (4) | 40 |
 | `resolve_cluster` | set-wide tail `:159-176` (6, runs to the end); post-loop absorbs `:150-155` (4) | 43 |
 | `items_of_module` | `"mod"` arm `:54-71` (4) | 49 |
+| `surveyed` | the inner `for reference in outside_the_set { … }` loop (its `let … else { continue }` continues its own loop, so the range carries it): `outside_the_set`, `workspace`, `moving`, `callers`, `rewrites` (5); holds `?`, so it is a plain `?` extraction (the rule-14 gap in Decisions) | ≈ 43 |
 
 ### Delta
 
@@ -166,7 +168,7 @@ file; one `Cargo.toml` dev-dependency line; three new todo files. No other file.
 
 ## Implementation milestones
 
-1. [ ] Gate test written and red, naming the nine functions (acceptance tests 1–5).
+1. [x] Gate test written and red, naming the ten functions at the wave-2 base (acceptance tests 1–5).
 2. [ ] Rebase onto the post-node-15 base; re-measure (`function_length_budget` output); re-read seams; record changes here.
 3. [ ] `items_of_module`, `options_for`, `refreshed` (one plan each; `check --deep`, `apply`, clippy, scoped tests).
 4. [ ] `stranded_siblings`, `resolve_cluster`.
@@ -264,7 +266,33 @@ Decided by the developer on 2026-10-09 (PRD approved).
 
 ## Validation Results
 
-Not run yet (planning).
+**Contract commit (wave 2, 2026-10-09)**, on base `feature/reshape/oversized-files` @ `205e9854f`:
+
+- Baseline, scoped: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring
+  --all-targets -- -D warnings`, `cargo fmt --all --check` — clean before and after this commit.
+- `cargo test -p tddy-code-restructuring --test function_length_budget`: 4 passed, 1 failed.
+  - 🔴 `no_production_function_outside_the_backend_runs_past_sixty_lines` — red because the cuts are not made yet. It lists
+    ten functions (the `syn` measurement agrees line for line with the discovery's scan):
+
+    ```
+    src/crate_move/cluster/stranded.rs:54 stranded_siblings (70 lines)
+    src/crate_move/cluster.rs:145 cluster_edits (69 lines)
+    src/crate_move/source_scan/module_items.rs:32 items_of_module (62 lines)
+    src/crate_move/source_scan/sighting_walk.rs:39 sightings (99 lines)
+    src/crate_move.rs:276 surveyed (65 lines)
+    src/plan/codec.rs:246 parse_op (210 lines)
+    src/plan_store/refresh.rs:61 refreshed (76 lines)
+    src/restructure_args.rs:220 options_for (79 lines)
+    src/runner/entry_points/check_entry_points.rs:207 check_plan (115 lines)
+    src/runner/entry_points/store_run.rs:237 apply_held_plan (159 lines)
+    ```
+  - 🟢 green pins: `a_function_is_measured_from_its_fn_line_to_its_closing_brace`,
+    `a_method_and_a_trait_default_method_are_measured`, `test_code_is_not_measured`, `the_backend_is_left_to_its_own_node`.
+- Divergence from planning: **ten, not nine.** `resolve_cluster`'s long body is now private `cluster_edits` (node 7) at 69.
+  `surveyed` (`crate_move.rs:276`) grew 57 → 65 in node 7's contract commit, against the "do not grow listed functions"
+  rule (it was in the 41–60 band, not on the list). It is added to this node's scope. Growth since master: `parse_op`
+  206 → 210, `sightings` 95 → 99, `options_for` 73 → 79; `items_of_module` 64 → 62 (node 11). Several of these hold
+  contract `todo!()`/`TODO(reshape-…)` surfaces whose green may grow them again — green re-measures with this test.
 
 ## TODO
 
@@ -273,8 +301,8 @@ Not run yet (planning).
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-fn-sizes-rest.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code (engine plans, per milestone)
