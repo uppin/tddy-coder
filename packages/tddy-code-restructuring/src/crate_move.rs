@@ -71,11 +71,16 @@ fn malformed(reason: impl Into<String>) -> RestructureError {
 /// matters is the Rust backend's `textDocument/references`; the seam exists because the deciding
 /// half is worth testing against a known reference set rather than a cold index.
 pub trait ModuleReferences {
-    /// Every item in `file` a module path can name, each with the places outside `file` that reach
-    /// it.
+    /// Every declaration in `file`, each with the places outside `file` that reach it.
     ///
-    /// An item nothing outside reaches comes back with an empty list rather than being omitted, so
-    /// a caller can tell "reached by nobody" from "not an item".
+    /// Not only the items a module path can name: the items of inline modules, the fields of its
+    /// structs and the members of its `impl` blocks come back too, each with the containers it sits
+    /// in ([`ItemReferences::within`]) and its [`DeclarationKind`]. The caller re-pointing paths reads
+    /// only the top-level items; the widening pass reads all of them, because a field or a method
+    /// the origin still names has to be `pub` once its type has left the crate.
+    ///
+    /// A declaration nothing outside reaches comes back with an empty list rather than being
+    /// omitted, so a caller can tell "reached by nobody" from "not a declaration".
     fn outside_references(
         &mut self,
         workspace: &Workspace<'_>,
@@ -90,6 +95,28 @@ pub struct ItemReferences {
     pub item: String,
     /// Where it is reached from, outside the module's own file.
     pub referenced_at: Vec<Reference>,
+    /// Where its name is written in the file, one-based, in characters — the position a visibility
+    /// edit is addressed by, so a same-named declaration elsewhere is never the one rewritten.
+    pub declared_at: Position,
+    /// The containers it sits in, outermost first: an inline module's name, `impl T`,
+    /// `impl Tr for T`, a struct's or an enum's name. Empty for a top-level item.
+    pub within: Vec<String>,
+    /// What kind of declaration it is, which decides whether a visibility can be written on it.
+    pub kind: DeclarationKind,
+}
+
+/// What kind of declaration an [`ItemReferences`] is, as far as its visibility goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeclarationKind {
+    /// A module-level item, or an item of an inline module — a `mod` declaration included.
+    Item,
+    /// A named field of a struct.
+    Field,
+    /// A method or associated const of an inherent `impl`.
+    InherentMember,
+    /// A declaration no visibility can be written on: a member of an `impl Trait for T`, an item of
+    /// a `trait`, an enum variant.
+    NoVisibility,
 }
 
 /// One place a moving item is named.
@@ -135,6 +162,12 @@ pub struct Survey {
     pub reached_from_outside: Vec<String>,
     /// Every caller found by `textDocument/references`, with its new path.
     pub callers: Vec<CallerRewrite>,
+    /// Every declaration of the module's file, as the engine reported it — what the widening pass
+    /// reads, so the server is asked once per move.
+    pub declarations: Vec<ItemReferences>,
+    /// The parent's glob re-export of the module, `<file>:<line>: <statement>`, when it has one: what
+    /// makes a module reached with no caller to re-point.
+    pub reexported_by: Option<String>,
 }
 
 /// Survey a cross-crate move without writing anything.
@@ -250,7 +283,12 @@ pub(crate) fn surveyed(
     let mut callers = Vec::new();
     let mut rewrites = Vec::new();
 
-    for item in engine.outside_references(workspace, &moving.source)? {
+    let declarations = engine.outside_references(workspace, &moving.source)?;
+    for item in declarations
+        .iter()
+        .filter(|item| is_path_reached(item))
+        .cloned()
+    {
         let outside_the_set: Vec<Reference> = item
             .referenced_at
             .into_iter()
@@ -293,9 +331,18 @@ pub(crate) fn surveyed(
         destination: moving.destination.clone(),
         reached_from_outside: reached,
         callers,
+        declarations,
+        // TODO(reshape-move-widen): implement — the parent's `use <module>::*;`, read by `widening::glob`
+        reexported_by: None,
     };
 
     Ok((survey, rewrites))
+}
+
+/// Whether a declaration is one a module path names directly: a top-level item. Only those have
+/// callers to re-point and belong in the survey's count.
+fn is_path_reached(item: &ItemReferences) -> bool {
+    item.kind == DeclarationKind::Item && item.within.is_empty()
 }
 
 /// One path a caller writes, and the span of it to replace.
@@ -307,6 +354,8 @@ pub(crate) struct PlannedRewrite {
 
 mod moving;
 pub(crate) use moving::*;
+
+pub(crate) mod widening;
 
 mod refusals;
 pub(crate) use refusals::*;
@@ -633,6 +682,11 @@ mod tests {
         let text = workspace.read(file);
         ItemReferences {
             item: item.to_string(),
+            // TODO(reshape-move-widen): the declaration's real position in the moved file, once the
+            // widening pass edits at it — a reached item here is widened in the green phase.
+            declared_at: Position { line: 1, col: 1 },
+            within: Vec::new(),
+            kind: DeclarationKind::Item,
             referenced_at: text
                 .match_indices(item)
                 .map(|(offset, _)| Reference {

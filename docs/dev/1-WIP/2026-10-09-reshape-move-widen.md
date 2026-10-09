@@ -5,10 +5,13 @@
 **Type**: Feature (engine: visibility edits in the files a cross-crate move carries; report and `check --deep` output)
 **Stack**: `#reshape` 7/19, branch `feature/reshape/move-widen`, wave 1. PR title:
 `feat(code-restructuring): cross-crate moves widen what the origin still reaches and say so (#reshape 7/19)`.
-Base in the linear stack: `feature/reshape/methods-leave-type` (K=6). **Real edges**: none. This node consumes no
-behaviour of any other node, and no node of this stack consumes its behaviour. It sits on the line only because `gh stack`
-needs a line. It shares `crate_move/cluster.rs`, `crate_move.rs` and the `backends/rust.rs` wiring with nodes 1, 5 and 8,
-so the collisions are textual only.
+PR: [#604](https://github.com/uppin/tddy-coder/pull/604).
+Base in the linear stack: `feature/reshape/methods-leave-type` (K=6). **Real edges** (refined at the contract commit, see
+`## Dependencies`): `multi-seam-extract → move-widen` (K=2: `check --deep` prints widenings through its
+`Rehearsed.widenings` / `rehearsed_lines`) and `move-children → move-widen` (K=5: the `Resolution` a crate move returns is
+its `crate_move::resolution` / `cluster_resolution`). Both parents sit below this node on the line, so the order holds. No
+node of this stack consumes this node's behaviour. It shares `crate_move/cluster.rs`, `crate_move.rs` and the
+`backends/rust.rs` wiring with nodes 1, 5 and 8.
 
 ## Initial Discovery
 
@@ -167,8 +170,13 @@ explains "0 caller(s)" beside reached items.
 
 ## Dependencies
 
-This node has no parent: it consumes nothing from nodes 1–6, and its base `feature/reshape/methods-leave-type` is
-sequential only.
+The plan said "no parent". The parents' contracts showed that two surfaces this node had planned were already
+published by nodes below it. This node consumes them instead of duplicating them:
+
+| Parent node | What it delivers | How this PR consumes it | This PR does NOT |
+|---|---|---|---|
+| **`multi-seam-extract`** (K=2, `feature/reshape/multi-seam-extract`) | `Rehearsed.widenings: Vec<VisibilityChange>` filled from `Resolution.report`, and `rehearsed_lines(index, &Rehearsed)`, through which `check_plan` prints survey, `visibility:` and `note:` lines (its rule 5) | a crate move's widenings reach `check --deep` through them; acceptance test 24 is red until both that green and this one land | add `Rehearsed.report` or `account_rehearsal` (both dropped from this contract), or edit `check_plan` |
+| **`move-children`** (K=5, `feature/reshape/move-children`) | `crate_move::resolution(engine, workspace, op) -> Result<Resolution>` and `cluster_resolution(engine, workspace, cluster) -> Result<Resolution>` (the `Resolution` a backend returns, with carried-children notes), wired into `rust.rs` by its green | this node's green puts `widened_cluster`'s report into that `Resolution.report`. Acceptance tests 9 and 12 call `cluster_resolution`, so until that green they panic on its `todo!()`; test 23 reads the backend's `Resolution` | change `resolve` / `resolve_cluster` return types (they stay `Result<WorkspaceEdit>`, as planned in D3 before node 5 published), or edit the two `rust.rs` wrappers |
 
 ## Draft PR contract
 
@@ -196,18 +204,49 @@ Published with the wave-2 contract commit, the first push of this PR. **Owned su
   in `check_entry_points.rs`.
 - Harness: `pub async fn resolution_of(fixture: &AFixtureWorkspace, op: RefactorOp) -> Result<Resolution, String>`,
   `a_workspace_whose_module_the_origin_still_reaches()`, `a_workspace_whose_nested_module_its_parent_globs()`.
-- Failing tests: the 26 under "Acceptance tests".
+- Failing tests: the 25 under "Acceptance tests".
+
+**As published** (commit 2). Where this differs from the plan above, the published form is the contract:
+- `resolve` / `resolve_cluster` **keep** `Result<WorkspaceEdit>`. The `Resolution` API is node 5's
+  `resolution` / `cluster_resolution` (see Dependencies). `resolve_cluster`'s body is now `cluster_edits` (same lines) and
+  it returns `widened_cluster(…).map(|(edit, _)| edit)`. The new
+  `pub(crate) fn cluster::widened_cluster(engine, workspace, cluster) -> Result<(WorkspaceEdit, Vec<VisibilityChange>)>`
+  is what `cluster_resolution` reads in green.
+- `widening::widened(workspace, cluster, edit, surveys) -> Result<(WorkspaceEdit, Vec<VisibilityChange>)>`, a tuple and
+  not a `Resolution`. As published it **passes the edit through** with an empty report (the move's behaviour today),
+  marked `TODO(reshape-move-widen)`. A `todo!()` there would have broken every crate-move test.
+- `widening::{reach::reached, glob::{reexport_of, glob_visible}, escaping::escaping, declaration::visibility_span}`,
+  `struct Widened { file, name, declared_at, reason }` and `backends::rust::declarations::{Declared, declarations_within}`
+  are `todo!()` bodies under `#[allow(dead_code, reason = "TODO(reshape-move-widen) …")]`. Green removes each allow.
+- `outside_references_opening` fills the three new `ItemReferences` fields for the items it already returns (real
+  positions via `character_column`, `kind: Item`). Walking `declarations_within` is green's job (TODO in place).
+- `surveyed` reads only `kind == Item && within.is_empty()` and keeps the full list on `Survey.declarations`.
+  `Survey.reexported_by` is `None` (TODO); `survey_lines` gains the glob line in green (TODO).
+- `VisibilityChange.reason` is live (serde default, skipped when `None`). The 11 literals in `console.rs`,
+  `rehearsal.rs` (test), `facade.rs`, `visibility.rs`, `module_reparent/{visibility,tree_visibility}.rs`,
+  `item_move/{members,assemble}.rs` carry `reason: None`. `console::widening` does not state it yet (TODO).
+- The fakes in `crate_move.rs`, `crate_move/cluster.rs` and `tests/crate_move_children.rs` give each item
+  `declared_at: 1:1`, `kind: Item`. **Green must give them real declaration positions** wherever a test's item is reached
+  from outside, or the widening pass will edit at 1:1.
+- Dropped from the plan: `Rehearsed.report`, `account_rehearsal` (node 2's `widenings` / `rehearsed_lines`), and acceptance
+  test 26 (the `move_item` deep-check pin is node 2's test 4).
+- Harness: `resolution_of`, the three fixtures `a_workspace_whose_module_the_origin_still_reaches`,
+  `a_workspace_whose_nested_module_its_parent_globs` and `a_workspace_whose_moved_fn_returns_a_type_no_path_names` with
+  their path constants, and `ROSTER_BEFORE`. `source` became `pub`.
 
 ## Green wave
 
 **Wave:** 1 of 4.
-**Greenable independently:** yes. Nothing below it on the line is consumed.
+**Greenable independently:** mostly. Rules 1–5 and the library tests (except 9 and 12) need nothing below. Tests 9, 12
+and 23 need `move-children`'s green (`cluster_resolution` / `resolution`), and test 24 needs `multi-seam-extract`'s
+(`rehearsed_lines` wired into `check_plan`). Green this node after those two, or leave those four red, named, until they
+land.
 **Concurrent with:** every other wave-1 node: `feature/reshape/widen-same-crate`, `multi-seam-extract`, `tidy-facades`,
 `extract-method-clean`, `move-children`, `methods-leave-type`, `move-grouped-use`, `new-crate`, `apply-robust`,
 `move-item-paths`, `anchors-outline`.
 **Blocks:** none.
 Real dependency edges (whole stack): `1→13`, `5→14`, `2→15`, `3→15`, `4→16`, `13→17`, `2→17`, `3→17`, `17→18`, `6→18`, `4→19`,
-`17→19`. None touches this node.
+`17→19`, plus — found at this node's contract commit — `2→7` and `5→7` (see Dependencies).
 
 ## Successor PRs
 
@@ -365,7 +404,15 @@ Names read as behaviour specifications.
 23. `the_server_reports_fields_and_inherent_methods_at_the_positions_the_edits_address` — `resolution_of(…).report` equals the exact list, in order.
 24. `a_deep_check_prints_every_widening_the_apply_then_makes_and_writes_nothing` — the sink's `visibility:` lines from the check equal the apply's; the tree is unchanged after the check.
 25. `a_deep_check_explains_a_module_with_reached_items_and_no_callers_by_its_parents_glob` — the exact survey line of rule 7.
-26. `a_deep_check_of_a_move_item_plan_now_prints_its_widenings_and_reports_the_same_findings` — the side-effect pin, over `tests/same_crate/mod.rs` fixtures.
+~~26.~~ Dropped at the contract commit: the `move_item` deep-check pin is `multi-seam-extract`'s acceptance test 4.
+
+Test 18 is a **green pin**: serde already reads a reason-less record. Tests 9 and 12 read the report through node 5's
+`cluster_resolution`.
+
+**Unit tests (red, this node's surface)**: `crate_move/widening/declaration.rs` (4: restricted span, private field,
+attribute and qualifier, keyword-above refusal), `crate_move/widening/escaping.rs` (2: returned type, fixpoint through a
+field), `backends/rust/declarations.rs` (2: kinds and `within`, tuple field skipped), `runner/rehearsal.rs`
+`names_the_parent_glob_that_reaches_a_module_with_no_callers`.
 
 ## Technical Debt & Production Readiness
 
@@ -420,6 +467,23 @@ Decisions taken by this plan:
 
 ## Validation Results
 
+**Contract commit (2026-10-09), scoped.** `cargo check -p tddy-code-restructuring --all-targets`,
+`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` are clean.
+- `tests/move_to_crate_widening.rs`: 17 🔴, 1 🟢 (test 18, the pin). Tests 1–8, 10, 11, 13, 14 and 16 fail on their
+  assertions, because nothing is widened. Test 15 fails because no refusal is raised. Test 17 fails because
+  `console::widening` drops the reason. Tests 9 and 12 panic in node 5's `cluster_resolution` `todo!()` today; after its
+  green they fail on the report.
+- `tests/move_to_crate_widening_acceptance.rs` (live): 7 🔴.
+  - 19–22: the moved file keeps `pub(crate)`.
+  - 23: `report == []`.
+  - 24: the apply's compile gate fails with `E0603` on `AgentRoster` / `started_roster_rev`.
+  - 25: no glob line in the survey.
+- Unit tests: 9 🔴, each on its `todo!()` or on the missing glob line.
+- Touched existing suites: `cluster_move` 8/8 green. The red tests in `crate_move_children`,
+  `crate_move_restricted_declarations` and `--lib` (`manifest_edits`, `item_move::members`, `module_reparent`,
+  `facade_tests`, `module_files`, `moving`, `source_scan`, `rehearsal::prints_each_widening…`) are nodes 1–5's own contract
+  tests, failing on their `todo!()`s. None comes from this commit, whose production change is a pass-through.
+
 (empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`, and M6's cost measurement)
 
 ## TODO
@@ -429,10 +493,10 @@ Decisions taken by this plan:
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-move-widen.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete

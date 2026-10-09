@@ -56,6 +56,11 @@ pub struct VisibilityChange {
     pub item: String,
     pub from: String,
     pub to: String,
+    /// Why it was widened, when no reference of its own says so — a cross-crate move widens what a
+    /// parent's glob makes visible and what a widened signature names. `None` otherwise, and for a
+    /// journal written before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// What resolving one operation produced: the edit, and what the backend has to say about it.

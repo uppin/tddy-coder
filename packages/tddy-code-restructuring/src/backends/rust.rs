@@ -9,7 +9,7 @@
 //! that a non-editor client would write straight into the source.
 
 use crate::backends::lsp_bridge::LspClientBridge;
-use crate::crate_move::{self, ItemReferences, ModuleReferences, Reference};
+use crate::crate_move::{self, DeclarationKind, ItemReferences, ModuleReferences, Reference};
 use crate::edit::{
     FileEdit, Position, Range, Resolution, TextEdit, VisibilityChange, WorkspaceEdit,
 };
@@ -28,6 +28,7 @@ use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
 mod chatter;
+mod declarations;
 mod documents;
 mod early_return;
 mod escaping_types;
@@ -1520,8 +1521,13 @@ impl RustBackend {
                 continue;
             }
 
+            // TODO(reshape-move-widen): walk `declarations::declarations_within` instead, so the
+            // fields, inherent members and inline-module items a widening needs come back too.
             found.push(ItemReferences {
                 referenced_at: self.references_outside(&uri, &item.position, workspace)?,
+                declared_at: character_column(&text, LspPoint::read(Some(&item.position))?),
+                within: item.within,
+                kind: DeclarationKind::Item,
                 item: item.name,
             });
         }

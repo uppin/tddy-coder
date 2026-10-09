@@ -8,7 +8,9 @@
 
 use std::collections::BTreeMap;
 
-use tddy_code_restructuring::crate_move::{self, ItemReferences, ModuleReferences, Reference};
+use tddy_code_restructuring::crate_move::{
+    self, DeclarationKind, ItemReferences, ModuleReferences, Reference,
+};
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::{
     Anchor, Destination, FileEdit, ModuleHome, MovingCluster, Overlay, Position, Reexport,
@@ -141,6 +143,11 @@ impl AKnownReferenceSet {
             .push(ItemReferences {
                 item: item.to_string(),
                 referenced_at,
+                // The widening pass is not what these tests are about; a top-level item at the
+                // file's start is what the reference set stood for before declarations had positions.
+                declared_at: Position { line: 1, col: 1 },
+                within: Vec::new(),
+                kind: DeclarationKind::Item,
             });
         self
     }

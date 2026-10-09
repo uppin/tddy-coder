@@ -158,6 +158,8 @@ pub(super) fn survey_lines(index: usize, survey: &Survey) -> Vec<String> {
             .iter()
             .map(|caller| format!("      {}: {} -> {}", caller.path, caller.from, caller.to)),
     );
+    // TODO(reshape-move-widen): implement — `      reached through a glob re-export, not by path:
+    // <survey.reexported_by>` when the survey names the parent's glob.
     lines
 }
 
@@ -194,6 +196,8 @@ mod tests {
             },
             reached_from_outside: reached_from_outside.iter().map(|s| s.to_string()).collect(),
             callers,
+            declarations: Vec::new(),
+            reexported_by: None,
         }
     }
 
@@ -247,11 +251,40 @@ mod tests {
         );
     }
 
+    /// A module whose items are reached and which has no caller to re-point is reached through its
+    /// parent's glob; the survey names that glob rather than leaving "0 caller(s)" unexplained.
+    #[test]
+    fn names_the_parent_glob_that_reaches_a_module_with_no_callers() {
+        // Given a surveyed move whose items are reached only through the parent's glob
+        let survey = Survey {
+            reexported_by: Some(
+                "packages/tddy-session-lifecycle/src/connection_service.rs:4: \
+                 pub(crate) use attachment_progress::*;"
+                    .to_string(),
+            ),
+            ..a_survey_of_the_host_registry(&["AttachmentProgressSink"], Vec::new())
+        };
+
+        // When
+        let lines = survey_lines(0, &survey);
+
+        // Then the glob is named after the reached items
+        assert_eq!(
+            lines.last().map(String::as_str),
+            Some(
+                "      reached through a glob re-export, not by path: \
+                 packages/tddy-session-lifecycle/src/connection_service.rs:4: \
+                 pub(crate) use attachment_progress::*;"
+            )
+        );
+    }
+
     fn widened(item: &str, from: &str) -> VisibilityChange {
         VisibilityChange {
             item: item.to_string(),
             from: from.to_string(),
             to: "pub(crate)".to_string(),
+            reason: None,
         }
     }
 

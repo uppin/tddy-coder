@@ -66,6 +66,7 @@ pub(super) fn landing(
         item: request.name.clone(),
         from: as_written(visibility),
         to: as_written(&spelled),
+        reason: None,
     });
     Ok(Landing {
         written,
