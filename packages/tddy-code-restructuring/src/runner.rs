@@ -23,6 +23,7 @@ mod rehearsal;
 mod resume;
 mod tidy;
 
+pub use budget::production_lines_of_file;
 pub use comparison::verify;
 pub use compile_gate::{refuse_a_broken_baseline, refuse_a_broken_result, AppliedRun};
 pub use entry_points::{
@@ -32,7 +33,7 @@ pub use entry_points::{
     status_of_plan, PlanRun,
 };
 pub use options::{command_of, parse_options, Command, Options};
-pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
+pub use outcome::{FileLines, Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
 use crate::apply::{apply_workspace_edit, ensure_git_worktree, hash_touched_files};
 use crate::journal::{Journal, JournalRecord, ResumeDecision};

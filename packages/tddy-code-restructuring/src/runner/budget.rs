@@ -55,7 +55,10 @@ pub(crate) fn production_lines(text: &str) -> usize {
 }
 
 /// Production lines of a file: Rust is cut at its test module, any other language has none.
-fn lines_of_file(path: &str, text: &str) -> usize {
+///
+/// The one count the repository's file budget is measured by — `check --budget`, `restructure
+/// lines`, `/pr-wrap`'s file-length gate and every code-issue record.
+pub fn production_lines_of_file(path: &str, text: &str) -> usize {
     match Path::new(path).extension().and_then(|ext| ext.to_str()) {
         Some("rs") => production_lines(text),
         _ => text.lines().count(),
@@ -74,7 +77,7 @@ pub(super) fn measured(root: &Path, paths: &[String]) -> Result<Vec<FileSize>> {
             })?;
             Ok(FileSize {
                 path: path.clone(),
-                lines: lines_of_file(path, &text),
+                lines: production_lines_of_file(path, &text),
             })
         })
         .collect()
@@ -363,5 +366,168 @@ mod tests {
 
         // Then
         assert_eq!(sizes, [a_file_of("big.rs", 3)]);
+    }
+
+    // ---- #reshape 15/19: every test-only item is left out, wherever it sits ----
+
+    /// The defect that hid `runner/tidy.rs` (36 measured, 540 real): an extracted test module
+    /// declared out of line is one test-only item, not the start of the test module.
+    #[test]
+    fn keeps_counting_past_an_out_of_line_test_module_declaration() {
+        // Given a declaration of an extracted test module between two production items
+        let text = "fn a() {}\n#[cfg(test)]\nmod a_tests;\nfn b() {}\n";
+
+        // When its production lines are counted
+        let lines = production_lines(text);
+
+        // Then both production items count, and only the declaration's two lines do not
+        assert_eq!(lines, 2);
+    }
+
+    /// Test-only code is left out item by item, so production code after any of it still counts.
+    #[test]
+    fn leaves_out_every_test_only_item_wherever_it_sits() {
+        // Given three production items interleaved with a test-only import, a test-only
+        // function and an inline test module
+        let text = concat!(
+            "fn a() {}\n",
+            "#[cfg(test)]\n",
+            "use std::fmt;\n",
+            "fn b() {}\n",
+            "#[cfg(test)]\n",
+            "fn helper() {\n",
+            "    let _ = 1;\n",
+            "}\n",
+            "#[cfg(test)]\n",
+            "mod tests {\n",
+            "    fn t() {}\n",
+            "}\n",
+            "fn c() {}\n",
+        );
+
+        // When
+        let lines = production_lines(text);
+
+        // Then only the three production items count
+        assert_eq!(lines, 3);
+    }
+
+    /// The scan reads code, not text: a closing brace inside a string or a comment of a test item
+    /// does not end it, so the item's remaining lines are still test-only.
+    #[test]
+    fn a_brace_in_a_string_or_comment_does_not_end_a_test_item() {
+        // Given a test-only function whose body holds `}` in a string and in a comment, then one
+        // production item
+        let text = concat!(
+            "#[cfg(test)]\n",
+            "fn closes_early() {\n",
+            "    let brace = \"}\";\n",
+            "    // }\n",
+            "    let _ = brace;\n",
+            "}\n",
+            "fn production() {}\n",
+        );
+
+        // When
+        let lines = production_lines(text);
+
+        // Then only the production item counts
+        assert_eq!(lines, 1);
+    }
+
+    /// `#[cfg(all(test, …))]` builds only under test, like `#[cfg(test)]`.
+    #[test]
+    fn leaves_out_an_item_marked_cfg_all_test() {
+        // Given a production item and an item marked `cfg(all(test, unix))`
+        let text = "fn a() {}\n#[cfg(all(test, unix))]\nfn unix_only_helper() {}\nfn b() {}\n";
+
+        // When
+        let lines = production_lines(text);
+
+        // Then
+        assert_eq!(lines, 2);
+    }
+
+    /// `not(test)` and `any(test, …)` build outside tests too, so they are production — the reading
+    /// the old `/pr-wrap` gate got wrong by matching any `cfg` that mentions `test`.
+    #[test]
+    fn counts_cfg_not_test_and_cfg_any_test_items_as_production() {
+        // Given an item marked `cfg(not(test))`, one marked `cfg(any(test, feature = "x"))`, and
+        // an inline test module after them
+        let text = concat!(
+            "#[cfg(not(test))]\n",
+            "fn real_clock() {}\n",
+            "#[cfg(any(test, feature = \"x\"))]\n",
+            "fn either() {}\n",
+            "#[cfg(test)]\n",
+            "mod tests {}\n",
+        );
+
+        // When
+        let lines = production_lines(text);
+
+        // Then both marked items count, attributes included
+        assert_eq!(lines, 4);
+    }
+
+    /// An item's doc comment and its other attributes belong to it: they leave with it.
+    #[test]
+    fn leaves_out_the_doc_comment_and_attributes_above_a_test_only_item() {
+        // Given a production item, then a test-only helper with a doc comment and a second
+        // attribute above its marker
+        let text = concat!(
+            "fn a() {}\n",
+            "/// A helper only the tests call.\n",
+            "#[allow(dead_code)]\n",
+            "#[cfg(test)]\n",
+            "fn helper() {}\n",
+        );
+
+        // When
+        let lines = production_lines(text);
+
+        // Then only the production item counts
+        assert_eq!(lines, 1);
+    }
+
+    /// A test-only member of a production `impl` is test code; the `impl` around it is not.
+    #[test]
+    fn leaves_out_a_test_only_member_of_a_production_impl() {
+        // Given an `impl` with one production method and one test-only method
+        let text = concat!(
+            "struct S;\n",
+            "impl S {\n",
+            "    fn real(&self) {}\n",
+            "    #[cfg(test)]\n",
+            "    fn for_tests(&self) {}\n",
+            "}\n",
+        );
+
+        // When
+        let lines = production_lines(text);
+
+        // Then the struct, the impl's two lines and the production method count
+        assert_eq!(lines, 4);
+    }
+
+    /// The `runner/tidy.rs` shape on disk: module declarations, an extracted test module declared
+    /// among them, production code, then the inline test module.
+    #[test]
+    fn measures_a_file_whose_extracted_test_module_is_declared_at_the_top() {
+        // Given a Rust file of two `mod` lines, an out-of-line test module, 40 production lines
+        // and an inline test module
+        let production: String = (0..40).map(|n| format!("fn f{n}() {{}}\n")).collect();
+        let text = format!(
+            "mod diagnostics;\nmod format;\n#[cfg(test)]\nmod wide_facade_tests;\n{production}\
+             #[cfg(test)]\nmod tests {{\n    fn t() {{}}\n}}\n"
+        );
+        let dir = tempfile::tempdir().expect("a temp dir");
+        std::fs::write(dir.path().join("tidy.rs"), text).expect("the fixture is written");
+
+        // When it is measured
+        let sizes = measured(dir.path(), &["tidy.rs".to_string()]).expect("measured");
+
+        // Then the two `mod` lines and the 40 production lines count
+        assert_eq!(sizes, [a_file_of("tidy.rs", 42)]);
     }
 }

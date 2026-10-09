@@ -8,6 +8,7 @@
 Base in the linear stack: `feature/reshape/tests-follow` (K=14). **Real edges**: `multi-seam-extract → oversized-files`
 (K=2), `tidy-facades → oversized-files` (K=3), and — **not in the brief, found here** — `widen-same-crate →
 oversized-files` (K=1: the `tidy.rs` and `assemble.rs` seams split private fields and impl members from their users).
+**PR**: [#612](https://github.com/uppin/tddy-coder/pull/612), parent #611.
 **Out of this node**: `oversized-files → feature/reshape/rust-backend-split` (it uses this node's line counter and edits its two shape tests).
 
 ## Initial Discovery
@@ -39,7 +40,7 @@ touches: **no 🚧 claimed issue is in the path, no wait-or-proceed fork.**
   - edited: `src/runner/budget.rs` (`production_lines`), `src/crate_move/source_scan.rs` (new `test_only_spans`), `src/restructure_args.rs` +
     `src/runner/options.rs` + a new `src/runner/entry_points/lines_entry_point.rs` (the `lines` subcommand);
   - moved by `tddy-tools restructure` (no hand-written moved code): `src/crate_move/test_binary.rs` → new `src/lexical.rs`,
-    new `src/crate_move/source_names.rs`, new `src/crate_move/test_binary/facade_walk.rs`, `src/crate_move/manifest_edits.rs`;
+    new `src/crate_move/source_names.rs`, new `src/crate_move/test_binary/{facade_walk,dev_dependencies}.rs`;
     `src/runner/tidy.rs` → new `src/runner/tidy/rounds.rs`, `src/runner/tidy/fixes.rs`;
     `src/backends/rust/item_move/assemble.rs` → new `item_move/moving.rs`, `item_move/visibility.rs`;
     re-pointed callers: `crate_move/{source_scan,header,survey}.rs`, `backends/rust/early_return.rs`,
@@ -140,11 +141,24 @@ never use `git mv`.
 
 The first push of this PR (wave 2 of the stack plan) publishes:
 
-- **Owned surface**: `pub(crate) fn test_only_spans(text: &str) -> Vec<Range<usize>>` in `crate_move/source_scan.rs`,
-  `pub fn production_lines_of_file(path: &str, text: &str) -> usize` re-exported from `lib.rs` (F4),
-  `RestructureCommand::Lines(RestructureLinesArgs { files: Vec<PathBuf> })` and `Command::Lines` in
-  `runner/options.rs`, the routing arms in `tddy-tools` / `tddy-index-daemon`. Bodies that compile and answer wrongly
-  (today's cut) so every test below fails on its assertion, not on a panic.
+- **Owned surface** (as published in commit 2):
+  - `pub(crate) fn test_only_spans(text: &str) -> Vec<Range<usize>>` in new `crate_move/source_scan/test_only.rs`,
+    re-exported as `crate_move::source_scan::test_only_spans`. Body `todo!()`; `#[allow(dead_code / unused_imports)]`
+    tagged `TODO(reshape-oversized-files)`, removed when `runner::budget::production_lines` calls it.
+  - `pub fn production_lines_of_file(path: &str, text: &str) -> usize` in `runner/budget.rs` (the old private
+    `lines_of_file`, renamed), re-exported from `runner` and `lib.rs` (F4). It answers with today's count, so the shape
+    test fails on its assertion.
+  - `RestructureCommand::Lines(RestructureLinesArgs { files: Vec<PathBuf> })` (re-exported from `restructure_cli`), its
+    `options_for` arm `todo!()`; `Command::Lines`; `Options::files: Vec<PathBuf>`; `restructure_cli::needs_lsp_client`
+    → `false`.
+  - `runner/entry_points/lines_entry_point.rs`: `pub fn lines(root: &Path, options: &Options) -> Result<Vec<FileLines>>`,
+    body `todo!()`, dispatched as `Command::Lines => … .map(Outcome::Measured)`.
+  - **Not in the planned contract, needed to route a result:** `Outcome::Measured(Vec<FileLines>)`,
+    `pub struct FileLines { pub path: String, pub lines: usize }` (re-exported from `runner`), and
+    `console::file_lines` (implemented: `<lines>\t<path>` per file).
+  - `tddy-tools/src/index_client.rs`: `answered_without_an_index` → `true` for `Lines`, and an arm in `restructure_at`
+    that answers in process. **`tddy-index-daemon` is not touched**: its single-shot CLI has its own
+    `RestructureCommand` enum, and `lines` never reaches the daemon.
 - **Failing tests** (acceptance tests 1–10 and 12–13 below): the counting unit tests in `runner/budget.rs`, the `lines`
   parse and run tests, and the two shape tests, red on the base because `test_binary.rs`, `tidy.rs` and `assemble.rs`
   are over budget and the must-not edges exist.
@@ -198,7 +212,7 @@ test_binary`; `item_move/reach.rs:13 → assemble` (cycle); `item_move/canonical
 | `src/lexical.rs` (new, crate root) | `Prose`, `readable_spans`, `block_comment_end`, `literal_end`, `raw_string_hashes`, `string_end`, `character_literal_end` | ~154 | `move_item`, `to: crate`, `name: lexical`, `reexport: none` |
 | `crate_move/source_names.rs` (new) | `is_a_built_in_root`, `crate_shaped_heads`, `opens_a_path`, `inside_a_declaration`, `names_bound_in`, `behind_any_visibility`, `use_trees`, `record_names_bound_by`, `name_bound_by`, `grouped_members`, `segment_length`, `modules_declared_in`, `module_declared_by` | ~233 | `move_item`, `to: crate::crate_move`, `name: source_names`, `reexport: none` |
 | `crate_move/test_binary/facade_walk.rs` (new child) | `Defining`, `defining_home`, `crate_past_the_facades` | ~91 | `extract_module --to_file` |
-| `crate_move/manifest_edits.rs` | + `destination_dev_dependencies`, `dev_dependency_line_for` | 307 → ~402 | `move_item`, `to: crate::crate_move::manifest_edits`, `reexport: none` |
+| `crate_move/test_binary/dev_dependencies.rs` (new child) | `destination_dev_dependencies`, `dev_dependency_line_for` | ~95 | `extract_module --to_file` — **changed at commit 2**: `manifest_edits.rs` is 448 at this base (nodes 3, 5, 9 grew it), so +95 would put it at ~543 |
 | `crate_move/test_binary.rs` | the operation, its reference re-pointing, `origin_named_paths` | ~394 | — |
 | `item_move/moving.rs` (new) | `Moving` | ~25 | `move_item`, `name: moving`, `reexport: none` |
 | `item_move/visibility.rs` (new) | `Landing`, `spelled`, `read_scope`, `visibilities`, `users_of` | ~130 | `move_item`, `name: visibility`, `reexport: none` |
@@ -213,7 +227,7 @@ graph TD
   subgraph crate_move
     test_binary --> source_names
     test_binary --> facade_walk[test_binary/facade_walk]
-    test_binary --> manifest_edits
+    test_binary --> dev_dependencies[test_binary/dev_dependencies]
     source_names --> lexical
     test_binary --> lexical
     source_scan --> lexical
@@ -250,7 +264,7 @@ inline paths of the named file):
 | `backends/rust/early_return.rs` | `crate::crate_move` | the Rust backend's only reason to reach `crate_move` |
 | `crate_move/{source_scan,header,survey,source_names}.rs`, `runner/budget.rs` | `test_binary` | nothing but `crate_move.rs` names the operation's module |
 | `item_move/{moving,visibility,reach,canonical_paths}.rs` | `assemble` | the two cycles stay broken |
-| `item_move/moving.rs` | any sibling of `item_move` | `Moving` is a plain record |
+| `item_move/moving.rs` | `assemble`, `visibility`, `reach`, `canonical_paths` | `Moving` is the record those passes read. It still names `destination`, `outline`, `sites` and node 1's `Reach` types (**corrected at commit 2**: "any sibling" was wrong) |
 | `runner/tidy/{fixes,gating,diagnostics,format}.rs` | `rounds` | the loop depends on its parts, not the reverse |
 
 ### Delta (dependency order)
@@ -258,7 +272,7 @@ inline paths of the named file):
 1. Counter: `test_only_spans` + `production_lines` (hand-written, new behaviour, tests first).
 2. `lines` subcommand + routing + `/pr-wrap` + docs.
 3. Plan A (`test_binary.rs`): `lexical` (its callers re-pointed first, since `source_names` and `source_scan` need it),
-   then `source_names`, then dev-deps into `manifest_edits`, then `facade_walk`.
+   then `source_names`, then `dev_dependencies` and `facade_walk` (children, one multi-seam `extract_module` pair).
 4. Plan B (`assemble.rs`): `moving`, then `visibility`.
 5. Plan C (`tidy.rs`): `fixes`, then `rounds`.
 6. Any file F1 adds (re-measured at base), each its own plan.
@@ -305,7 +319,7 @@ All in `packages/tddy-code-restructuring/`. Red on the base for the reason given
 10. `src/runner/budget.rs` — `measures_a_file_whose_extracted_test_module_is_declared_at_the_top` via `measured` on a tempdir: the `runner/tidy.rs` shape (doc, `mod a; mod b; #[cfg(test)] mod c_tests;`, 40 production lines, inline tests) → 40 + header lines. *Red: reads the header only.*
 11. *(gate, manual at wrap)* `/pr-wrap` step 3.5 run on this branch prints `967 → 394 crate_move/test_binary.rs`-style rows from `restructure lines`, and with `tddy-tools` off `PATH` prints `GATE ERROR`.
 12. `tests/engine_file_budget_shape.rs` — `every_production_file_of_the_engine_is_within_500_lines`: walks `src/**/*.rs` through `restructure lines`' library entry (`tddy_code_restructuring::production_lines_of_file`, F4) and asserts none is over 500 except the exemption list `["src/backends/rust.rs"]` (`// TODO(#reshape 17): rust-backend-split empties this list`). *Red: `test_binary.rs` 967, `tidy.rs` 540, `assemble.rs` 507.*
-13. `tests/engine_module_edges_shape.rs` — one test per row of the must-not table, e.g. `the_rust_backend_does_not_reach_crate_move_for_the_masker`, `nothing_but_crate_move_names_test_binary`, `item_move_siblings_do_not_import_from_assemble`, `the_lexical_masker_depends_on_no_engine_module`, `tidy_parts_do_not_import_the_rounds`. *Red: `src/lexical.rs` does not exist and the edges are present.*
+13. `tests/engine_module_edges_shape.rs` — one test per row of the must-not table, `the_lexical_masker_depends_on_no_engine_module`, `the_rust_backend_does_not_reach_crate_move_for_the_masker`, `nothing_but_crate_move_names_test_binary`, `item_move_siblings_do_not_import_from_assemble`, `the_record_of_a_move_does_not_reach_the_modules_that_read_it`, `tidy_parts_do_not_import_the_rounds`. *Red: `src/lexical.rs` does not exist and the edges are present.*
 
 ## Technical Debt & Production Readiness
 
@@ -351,7 +365,44 @@ All in `packages/tddy-code-restructuring/`. Red on the base for the reason given
 
 ## Validation Results
 
-Not yet run.
+**Commit 2 (draft contract), 2026-10-09, at base `origin/feature/reshape/tests-follow` (756466a9e).**
+Scoped: `cargo check` / `cargo clippy --all-targets -D warnings` over `tddy-code-restructuring`, `tddy-tools`,
+`tddy-index-daemon` clean; `cargo fmt --all --check` clean. Only the new tests were run (no full suite).
+
+Re-measured at this base (items rule, `>440`):
+
+| File | items | `--budget` today | total |
+|---|---:|---:|---:|
+| `backends/rust.rs` (node 17) | 2,898 | 2,947 | 5,507 |
+| `crate_move/test_binary.rs` | **967** | 967 | 967 |
+| `runner/tidy.rs` | **545** | 41 | 1,102 |
+| `backends/rust/item_move/assemble.rs` | **511** | 511 | 511 |
+| `runner/tidy/gating.rs` | 492 | 492 | 492 |
+| `plan/codec.rs` | 485 | 487 | 487 |
+| `crate_move.rs` | 480 | 387 | 1,147 |
+| `plan_store.rs` | 476 | 477 | 1,128 |
+| `runner/entry_points/store_run.rs` | 473 | 473 | 800 |
+| `journal.rs` | 460 | 460 | 1,043 |
+| `item_anchor.rs` | 459 | 459 | 921 |
+| `backends/rust/item_path.rs` | 457 | 465 | 721 |
+| `crate_move/header.rs` | 455 | 471 | 498 |
+| `crate_move/manifest_edits.rs` | 448 | 444 | 783 |
+
+Same three files as planned (F1 adds none); `tidy.rs` +5 and `assemble.rs` +4 since master. Green re-measures after
+rebasing on its final base. `crate_move.rs` (480) is under-read by `--budget` too (out-of-line test module).
+
+Red, each for the missing implementation:
+- 1–4, 6, 7, 10 (`runner/budget.rs`): assertion — today's cut (e.g. 1 vs 2, 8 vs 3, 2 vs 42).
+- `test_only::tests::spans_an_out_of_line_test_module_declaration_…`: `todo!()` in `test_only_spans`.
+- 8 (`restructure_args.rs`): `todo!()` in the `Lines` arm of `options_for`.
+- 9 (`lines_entry_point.rs`, both tests): `todo!()` in `lines`.
+- 12: `assemble.rs` 511 and `test_binary.rs` 967 over (`tidy.rs` joins once the counter is fixed).
+- 13: five tests fail on the missing modules (`lexical.rs`, `source_names.rs`, `moving.rs`, `fixes.rs`); one on the
+  live edge `early_return.rs -> crate::crate_move`.
+
+Green pins: 5 (`counts_cfg_not_test_and_cfg_any_test_items_as_production`: today's cut happens to be right there),
+`tddy-tools` `a_line_count_is_answered_in_process_whatever_the_environment_names`.
+The existing 13 `runner::budget` tests still pass.
 
 ## TODO
 
@@ -359,8 +410,9 @@ Not yet run.
 - [x] Changeset written
 - [x] Initial discovery written (Exploration 2)
 - [x] Prerequisites and claimed entries listed
-- [ ] Draft PR contract pushed (failing tests 1–10, 12–13)
-- [ ] Baseline recorded
+- [x] Draft PR contract pushed (failing tests 1–4, 6–10, 12–13; 5 is a green pin)
+- [ ] USER REVIEW — acceptance tests
+- [x] Baseline recorded (node 1's: 1334 passed, 0 failed; scoped check/clippy/fmt clean at this base)
 - [ ] Counter and `lines` green
 - [ ] Plans A, B, C (and any F1 additions) applied, one commit each
 - [ ] Final gate; shape tests green
