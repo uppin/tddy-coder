@@ -51,6 +51,14 @@ function hexPreview(data: Uint8Array, n = 24): string {
   return Array.from(data.slice(0, n), (b) => b.toString(16).padStart(2, "0")).join(" ");
 }
 
+/**
+ * The history view's greyish color scheme, so it never reads as the live terminal. The theme greys
+ * the page terminal's default background and foreground; the filter desaturates whatever colors
+ * the replayed output itself carries (SGR palette and truecolor alike), which a theme can't reach.
+ */
+const HISTORY_THEME = { background: "#232326", foreground: "#9a9aa0" };
+const HISTORY_FILTER = "grayscale(1) brightness(0.9)";
+
 /** Scrollback lines retained by the older-history page terminal (large enough to hold a full session). */
 const PAGE_SCROLLBACK = 50000;
 
@@ -544,56 +552,21 @@ export function GhosttyTerminalSession({
     };
   }, []);
 
-  // Three-way wheel gate on the live pane (capture phase — runs before ghostty-web's canvas handler):
+  // Wheel gate on the live pane (capture phase — runs before ghostty-web's canvas handler):
   // 1. Mouse tracking ON → SGR wheel report to the TUI; block ghostty-web arrow emulation.
-  // 2. Mouse tracking OFF + alternate screen → no-op here; ghostty-web emits Up/Down for pagers.
-  // 3. Mouse tracking OFF + normal screen → wheel-up triggers forward-fill (or instant page swap).
+  // 2. Mouse tracking OFF → no-op here; ghostty-web emits Up/Down for pagers on the alternate screen.
+  // The wheel never swaps panes: switching to and from history is a manual toggle (the affordances
+  // below), so scrolling inside a TUI can't drop the user out of the live view by accident.
   useEffect(() => {
     const el = liveContainerRef.current;
     if (!el || !canScrollBack) return;
     const handler = (e: WheelEvent) => {
-      const mouseTracking = termRef.current?.hasMouseTracking?.() ?? false;
-      const alternateScreen = termRef.current?.isAlternateScreen?.() ?? false;
-
-      if (mouseTracking) {
-        if (!e.ctrlKey) {
-          termRef.current?.sendWheelSgr?.(e);
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        return;
+      if (!(termRef.current?.hasMouseTracking?.() ?? false)) return;
+      if (!e.ctrlKey) {
+        termRef.current?.sendWheelSgr?.(e);
       }
-
-      if (alternateScreen) {
-        return;
-      }
-
-      if (e.deltaY >= 0) return;
-      if (filled) {
-        setView("page");
-        olderTermRef.current?.scrollToBottom?.();
-        return;
-      }
-      // scrollback 0 ⇒ always pinned to the bottom ⇒ any wheel-up requests older history.
-      if (termRef.current?.isPinnedToBottom?.() ?? true) {
-        void startForwardFill();
-      }
-    };
-    el.addEventListener("wheel", handler, { capture: true });
-    return () => el.removeEventListener("wheel", handler, { capture: true } as AddEventListenerOptions);
-  }, [canScrollBack, filled]);
-
-  // Scroll-down-at-bottom gesture on the PAGE terminal: when the user scrolls down while pinned to
-  // the bottom of the older-history page, swap back to the live terminal (seamless return to the
-  // live tip). Capture phase for the same reason as the live-pane listener.
-  useEffect(() => {
-    const el = pageContainerRef.current;
-    if (!el || !canScrollBack) return;
-    const handler = (e: WheelEvent) => {
-      if (e.deltaY <= 0) return;
-      if (olderTermRef.current?.isPinnedToBottom?.() ?? false) {
-        setView("live");
-      }
+      e.preventDefault();
+      e.stopPropagation();
     };
     el.addEventListener("wheel", handler, { capture: true });
     return () => el.removeEventListener("wheel", handler, { capture: true } as AddEventListenerOptions);
@@ -693,6 +666,7 @@ export function GhosttyTerminalSession({
       minFontSize={minFontSize}
       maxFontSize={maxFontSize}
       scrollback={PAGE_SCROLLBACK}
+      theme={HISTORY_THEME}
       testId="ghostty-terminal-older"
       preventFocusOnTap
       onReady={() => {
@@ -850,12 +824,14 @@ export function GhosttyTerminalSession({
                 ref={pageContainerRef}
                 data-testid="terminal-page-pane"
                 data-foreground={!liveForeground ? "true" : "false"}
+                data-color-scheme="history"
                 style={{
                   position: "absolute",
                   inset: 0,
                   zIndex: liveForeground ? 1 : 2,
                   visibility: liveForeground ? "hidden" : "visible",
                   pointerEvents: liveForeground ? "none" : "auto",
+                  filter: HISTORY_FILTER,
                 }}
               >
                 {backToLiveVisible ? (

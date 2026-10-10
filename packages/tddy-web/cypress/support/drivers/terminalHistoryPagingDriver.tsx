@@ -489,6 +489,23 @@ export function aTerminalWithHistoryPaging() {
       return this;
     },
 
+    /** Assert the foreground terminal is rendered in the greyish history color scheme. */
+    expectHistoryColorScheme() {
+      byTestId(TEST_IDS.terminalPagePane)
+        .should("have.attr", "data-color-scheme", "history")
+        .and("have.css", "filter")
+        .and("match", /grayscale/);
+      return this;
+    },
+
+    /** Assert the foreground terminal is rendered in the normal (live) color scheme. */
+    expectLiveColorScheme() {
+      byTestId(TEST_IDS.terminalLivePane)
+        .should("have.attr", "data-foreground", "true")
+        .and("have.css", "filter", "none");
+      return this;
+    },
+
     /** Assert the "View history" affordance is visible on the live pane (after the first fill). */
     expectViewHistoryVisible() {
       byTestId(TEST_IDS.viewHistory).should("exist").and("be.visible");
