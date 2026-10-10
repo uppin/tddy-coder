@@ -9,10 +9,11 @@
  * scrollback, so a proper TUI that switches to the alternate screen never accumulates duplicate panes
  * — exactly as native ghostty does. The PAGE terminal (scrollback > 0) holds the forward-filled older
  * history and exposes a native Scrollbar {total, offset, len} as the single source of truth for
- * viewport position (same coordinate space as scrollToLine). On a scroll-up-at-top-of-live gesture
- * (or the "Load earlier output" affordance) the page terminal is forward-filled from offset 0 toward
+ * viewport position (same coordinate space as scrollToLine). On the "Load earlier output"
+ * affordance the page terminal is forward-filled from offset 0 toward
  * the anchor while a loading indicator is shown; once the fill completes the two terminals switch
- * places. "Back to live" (or a scroll-down-at-bottom gesture on the page terminal) swaps back. The
+ * places. "Back to live" swaps back. Switching is a manual toggle only — no wheel gesture swaps panes
+ * in either direction — and the page pane renders in a greyish history color scheme. The
  * scroll-to-bottom policy matches native defaults: keystroke = yes, output = no. Mouse tracking (DEC
  * 1006) gates the wheel to the TUI instead of the viewport. All paging logic is encapsulated here.
  */
@@ -181,21 +182,22 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .expectOlderBufferContainsInOrder("OLDER-2");
   });
 
-  it("triggers the forward fill on a scroll-up-at-top gesture on the live pane", () => {
+  it("does not start the forward fill on a scroll-up gesture on the live pane — history is a manual toggle", () => {
     // Given
     const terminal = aTerminalWithHistoryPaging()
       .mount()
       .expectReady()
       .pushFrame(REPLAY_FRAME);
 
-    // When — the user scrolls up while pinned to the bottom (no scrollback yet to scroll through)
+    // When — the user scrolls up while pinned to the bottom
     terminal.scrollUpAtTop();
 
-    // Then — the loading indicator is shown and a forward fetch is pending (0 → anchor)
+    // Then — nothing is fetched, the live pane stays foreground and the toggle is still offered
     terminal
-      .expectLoadingVisible()
-      .expectHistoryFetchPending()
-      .expectHistoryFetchCalledWith(0n, ANCHOR);
+      .expectNoHistoryFetchStarted()
+      .expectLoadingAbsent()
+      .expectLiveForeground()
+      .expectAffordanceVisible();
   });
 
   it("swaps back to the live pane on the Back-to-live affordance, then re-views history instantly", () => {
@@ -228,7 +230,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
     terminal.expectPageForeground().expectNoFurtherHistoryFetch();
   });
 
-  it("swaps back to live on a scroll-down-at-bottom gesture on the page pane", () => {
+  it("stays on the page pane on a scroll-down-at-bottom gesture — only Back to live leaves history", () => {
     // Given — the fill has completed and the page pane is foreground
     const terminal = aTerminalWithHistoryPaging()
       .mount()
@@ -244,11 +246,11 @@ describe("Terminal history paging — overlay double-buffer", () => {
     // When — the user scrolls down while pinned to the bottom of the page pane
     terminal.scrollDownAtBottom();
 
-    // Then — the live pane is foreground again
-    terminal.expectLiveForeground();
+    // Then — the page pane is still foreground; the toggle is the only way back
+    terminal.expectPageForeground().expectBackToLiveVisible();
   });
 
-  it("swaps to the page pane instantly on a scroll-up gesture once history is already filled", () => {
+  it("stays on the live pane on a scroll-up gesture once history is already filled", () => {
     // Given — the fill has completed and the user has returned to the live pane
     const terminal = aTerminalWithHistoryPaging()
       .mount()
@@ -266,8 +268,33 @@ describe("Terminal history paging — overlay double-buffer", () => {
     // When — the user scrolls up on the live pane again (history already filled)
     terminal.scrollUpAtTop();
 
-    // Then — the page pane swaps to the foreground instantly, with no new fetch
-    terminal.expectPageForeground().expectNoFurtherHistoryFetch();
+    // Then — the live pane stays foreground with the "View history" toggle offered, no new fetch
+    terminal.expectLiveForeground().expectViewHistoryVisible().expectNoFurtherHistoryFetch();
+  });
+
+  it("renders the history view in a greyish color scheme and the live view in the normal one", () => {
+    // Given — the live pane is foreground in the normal scheme
+    const terminal = aTerminalWithHistoryPaging()
+      .mount()
+      .expectReady()
+      .pushFrame(REPLAY_FRAME)
+      .expectLiveColorScheme();
+
+    // When — the user toggles into history and the fill completes
+    terminal
+      .activateLoadEarlier()
+      .expectHistoryFetchPending()
+      .resolveHistoryChunk(OLDER_CHUNK_FINAL)
+      .expectPageForeground();
+
+    // Then — the foreground terminal is greyed out
+    terminal.expectHistoryColorScheme();
+
+    // When — the user toggles back to live
+    terminal.activateBackToLive().expectLiveForeground();
+
+    // Then — the normal scheme is back
+    terminal.expectLiveColorScheme();
   });
 
   it("positions the page terminal viewport via scrollLines (full control of the viewport position)", () => {
@@ -305,7 +332,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
   // Scrollback-0 model (live terminal pinned to the tip; first scroll-up loads history)
   // -------------------------------------------------------------------------
 
-  it("live terminal has no native scrollback — overflow output does not accumulate, and a scroll-up gesture triggers the page forward-fill immediately", () => {
+  it("live terminal has no native scrollback — overflow output does not accumulate, and the load-earlier toggle triggers the page forward-fill immediately", () => {
     // Given — the live terminal carries scrollback 0 (always pinned to the live tip).
     const terminal = aTerminalWithHistoryPaging()
       .mount()
@@ -322,8 +349,8 @@ describe("Terminal history paging — overlay double-buffer", () => {
     // the tip) and the viewport stayed at the bottom (viewportY 0).
     terminal.expectLiveScrollbackLength(0).expectLiveViewportY(0);
 
-    // When — the user performs a scroll-up wheel gesture on the live pane (pinned to the bottom)
-    terminal.scrollUpAtTop();
+    // When — the user activates the load-earlier toggle
+    terminal.activateLoadEarlier();
 
     // Then — the loading indicator is shown and a forward fetch is pending immediately (no
     // intermediate "scroll through live scrollback" step with scrollback 0). The fetch is bounded by
@@ -335,7 +362,7 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .expectHistoryFetchCalledWith(0n, ANCHOR + liveBytes);
   });
 
-  it("after a reconnect that advances the tip past the original anchor, a scroll-up fills the page with the retained history (no blank page)", () => {
+  it("after a reconnect that advances the tip past the original anchor, loading earlier output fills the page with the retained history (no blank page)", () => {
     // Given — the live terminal opened at anchor 1000, then reconnected: a FROM_OFFSET catch-up
     // frame snaps currentOffset to a NEW tip (2000) past the original anchor, simulating the ring
     // evicting the original anchor. The page forward-fill must be bounded by the CURRENT tip, not
@@ -347,8 +374,8 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .pushFrame(REPLAY_FRAME) // anchor captured at 1000
       .pushFrame(aReplayFrame(enc("CATCHUP\r\n"), 2000n, /* atOldest */ false)); // reconnect catch-up → tip 2000
 
-    // When — the user scrolls up on the live pane (pinned to the bottom).
-    terminal.scrollUpAtTop();
+    // When — the user activates the load-earlier toggle.
+    terminal.activateLoadEarlier();
 
     // Then — the forward fetch is bounded by the CURRENT tip (2000), NOT the stale anchor (1000),
     // so the daemon returns the retained history `[start_offset, 2000]` instead of an empty range.
@@ -382,9 +409,9 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .expectReady()
       .pushFrame(REPLAY_FRAME);
 
-    // When — the user scrolls up and the daemon yields no chunk (the requested range is empty /
+    // When — the user loads earlier output and the daemon yields no chunk (the requested range is empty /
     // evicted below the ring's start_offset).
-    terminal.scrollUpAtTop().expectHistoryFetchPending().resolveHistoryNull();
+    terminal.activateLoadEarlier().expectHistoryFetchPending().resolveHistoryNull();
 
     // Then — the loading indicator is gone, the live pane stays foreground (NOT a blank page),
     // and the fill is not marked complete so the affordance remains available for a later retry.
@@ -402,10 +429,10 @@ describe("Terminal history paging — overlay double-buffer", () => {
       .expectReady()
       .pushFrame(REPLAY_FRAME);
 
-    // When — the user scrolls up and the fetch rejects (RPC error, e.g. a session type whose
+    // When — the user loads earlier output and the fetch rejects (RPC error, e.g. a session type whose
     // `getTerminalHistory` is not supported).
     terminal
-      .scrollUpAtTop()
+      .activateLoadEarlier()
       .expectHistoryFetchPending()
       .rejectHistoryFetch(new Error("not found: terminal not found or not running"));
 

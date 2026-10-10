@@ -7,14 +7,19 @@
 > component ownership model.
 >
 > **Live terminal scrollback policy:** the live terminal stays at `scrollback: 0` (the default).
-> It is always pinned to the live tip — there is no native live scrollback to scroll through, so
-> the first wheel-up (when the TUI is not mouse-tracking) loads the older-history page terminal
-> immediately. `scrollback: 0` is the deliberate duplicate-pane mitigation: with no live
+> It is always pinned to the live tip — there is no native live scrollback to scroll through;
+> older history is loaded into the page terminal on the manual toggle. `scrollback: 0` is the deliberate duplicate-pane mitigation: with no live
 > scrollback, neither primary-screen nor alternate-screen (DEC 1049) repaints accumulate, so a
 > TUI can never leave duplicate panes behind in the live terminal. The page terminal exposes a
 > native `Scrollbar { total, offset, len }` as the single source of truth for viewport position
-> (same coordinate space as `scrollToLine`). Mouse tracking (DEC 1006) gates the wheel to the TUI
-> instead of triggering the forward-fill.
+> (same coordinate space as `scrollToLine`). Mouse tracking (DEC 1006) gates the wheel to the TUI.
+>
+> **Manual history toggle (amended 2026-10-09):** the wheel no longer switches panes in either
+> direction. Entering history is the "Load earlier output" / "View history" affordance and leaving
+> it is "Back to live" — a wheel-up on the live pane, or a wheel-down at the bottom of the page
+> pane, stays where it is. The page (history) pane renders in a **greyish color scheme** (grey
+> theme plus a grayscale filter that also desaturates the replayed output's own colors), so
+> history never reads as the live terminal.
 >
 > **Reconnect resume by offset:** `StreamTerminalOutput` gains a `StreamReplayMode`
 > (`TAIL` default / `FROM_OFFSET`). A reconnecting terminal resumes by offset instead of
@@ -68,15 +73,13 @@ terminal at all. The **page terminal is the older PageList history view**: it ca
 `scrollback` and accumulates the forward-filled pre-connect capture, so the user scrolls through
 the retained history with the terminal's own viewport. The page terminal exposes a native
 `Scrollbar { total, offset, len }` (the same coordinate space as `scrollToLine`) as the single
-source of truth for its viewport position. "Back to live" (or a scroll-down-at-bottom gesture on
-the page terminal) swaps back to the live terminal, which has stayed current underneath.
+source of truth for its viewport position. "Back to live" swaps back to the live terminal, which has stayed current underneath.
 
 Because the live terminal has `scrollback: 0`, its viewport can never be scrolled up away from
 the live tip, so the native scroll-to-bottom policy (`scroll-to-bottom.keystroke` /
 `scroll-to-bottom.output`) is a no-op on the live terminal — there is nowhere to scroll back
 from. When the TUI has enabled **mouse tracking** (DEC 1006), the wheel is reported to the TUI
-(SGR button 64/65) and does **not** trigger the forward-fill — matching native ghostty's
-`isMouseReporting` gate.
+(SGR button 64/65) — matching native ghostty's `isMouseReporting` gate.
 
 The `GrpcSessionTerminal → onRegisterLoadOlderHistory` indirection is removed; the Ghostty shared
 component owns the scroll-up flow end-to-end, including the double-buffer paging.
@@ -90,8 +93,7 @@ the scrollback. The lazy-replay changeset added the `GetTerminalHistory` RPC and
 primitive but left the viewport integration undone.
 
 The live terminal therefore stays at `scrollback: 0`: it is always pinned to the live tip, and
-the first wheel-up (when the TUI is not mouse-tracking) loads the older-history page terminal
-immediately. There is no "scroll through post-connect live scrollback" step — the live terminal
+the manual history toggle loads the older-history page terminal. There is no "scroll through post-connect live scrollback" step — the live terminal
 retains nothing, so neither primary-screen nor alternate-screen (DEC 1049) repaints can
 accumulate as duplicate panes. This is stricter than native ghostty (whose primary screen has
 scrollback), but it is the chosen permanent mitigation for the duplicate-pane bug under
@@ -144,13 +146,11 @@ user sees a single seamless terminal surface rather than a split pane.
   This is the deliberate duplicate-pane mitigation: with no live scrollback, neither primary-screen
   nor alternate-screen (DEC 1049) repaints accumulate, so a TUI can never leave duplicate panes
   behind in the live terminal.
-- **Scroll-up-on-live gesture:** because the live terminal has `scrollback: 0` (always pinned to
-  the bottom), any wheel-up while the TUI is not mouse-tracking triggers the page forward-fill
-  immediately — there is no "scroll through post-connect live scrollback" step. Once the page
-  terminal is filled, the same gesture swaps to it instantly.
+- **No wheel-driven pane switch:** the wheel never swaps panes. A wheel-up on the live pane does
+  not start the fill or swap to the page pane, and a wheel-down at the bottom of the page pane does
+  not swap back — the affordances below are the only toggle.
 - **Mouse-tracking gating:** when the TUI has enabled mouse tracking (DEC 1006), the wheel is
-  reported to the TUI (SGR button 64/65) and does **not** trigger the forward-fill — matching
-  native ghostty's `isMouseReporting` gate.
+  reported to the TUI (SGR button 64/65) — matching native ghostty's `isMouseReporting` gate.
 - **Touch (mobile) is gated the same three ways.** A one-finger drag decides at `touchstart`, per
   line of finger travel: a **mouse-tracking** TUI is sent an SGR wheel report (button 64/65) at the
   touch point; the **alternate screen** (DEC 1049) without tracking is sent the arrow key
@@ -163,9 +163,9 @@ user sees a single seamless terminal surface rather than a split pane.
   background fill. After the first fill, the live pane shows a **"View history"** affordance
   (`data-testid="view-history"`) instead, which swaps to the page pane instantly (no re-fetch).
   The page pane shows a **"Back to live"** affordance (`data-testid="back-to-live"`).
-- A **scroll-down-at-bottom gesture** on the page pane swaps back to live. Both wheel listeners
-  are attached in the **capture phase** so they fire before ghostty-web's own wheel handler
-  (which may stop propagation).
+- The **page pane renders in a greyish history color scheme** (`data-color-scheme="history"`): a
+  grey theme on the page terminal plus a `grayscale` CSS filter on the pane, which also
+  desaturates SGR-palette and truecolor output that a theme alone cannot reach.
 - `GrpcSessionTerminal` builds the `historyFetcher` from its `Client<TerminalSessionService>` +
   session ids and passes it (plus the full `SessionTerminalOutput` frames carrying the offset
   metadata) into the `TerminalFeed` the component reads. There is no `onRegisterLoadOlderHistory` prop.
@@ -203,7 +203,7 @@ user sees a single seamless terminal surface rather than a split pane.
 **when** I open the terminal,
 **then** I see the current last screen immediately (no wait for a full replay),
 **and** a subtle "Load earlier output" affordance is visible at the top edge,
-**and when** I activate it (or scroll up with the wheel),
+**and when** I activate it (scrolling with the wheel does not),
 **then** a loading indicator appears while the older-history page terminal is forward-filled in
 the background,
 **and when** the fill completes, the page terminal swaps to the foreground (landed at its bottom,
@@ -305,12 +305,10 @@ Consumed from the unification changeset (forward-chunk shape):
 - **Live terminal `scrollback: 0`** (the default). The live terminal is always pinned to the live
   tip — there is no native live scrollback to scroll through, so neither primary-screen nor
   alternate-screen (DEC 1049) repaints can accumulate as duplicate panes.
-- **Scroll-up-on-live gesture:** because the live terminal has `scrollback: 0` (always pinned to
-  the bottom), any wheel-up while the TUI is not mouse-tracking triggers the page forward-fill
-  immediately — there is no "scroll through post-connect live scrollback" step. Once the page
-  terminal is filled, the same gesture swaps to it instantly.
-- Forward-fill algorithm (triggered by the "Load earlier output" affordance or a scroll-up-at-top
-  gesture when history is not yet filled):
+- **No wheel-driven pane switch:** the live pane's capture-phase wheel listener only routes the
+  wheel to a mouse-tracking TUI; it never starts the fill or swaps panes. The page pane has no
+  wheel listener.
+- Forward-fill algorithm (triggered only by the "Load earlier output" affordance):
   1. If `filling` or `filled`, no-op.
   2. Set `loading` (show the loading indicator over the foreground pane).
   3. While `!loader.done`: `await loader.loadNext(fetcher)`; if the chunk is non-null and
@@ -321,7 +319,8 @@ Consumed from the unification changeset (forward-chunk shape):
 - "Load earlier output" renders while `historyFetcher` is provided, the anchor is captured and not
   `atOldest`, and `!filled && !loading`. "View history" renders on the live pane once `filled`.
   "Back to live" renders on the page pane.
-- Scroll-down-at-bottom wheel listener on the page pane (capture phase): swap back to the live pane.
+- The page pane carries `data-color-scheme="history"` and a `grayscale` filter; the page terminal
+  is constructed with a grey theme.
 - **Page terminal Scrollbar mirror:** the page terminal's `getScrollbar()` is mirrored to a hidden
   `data-testid="terminal-page-scrollbar"` element (`{total,offset,len}`) so component tests can
   assert the native viewport position as the single source of truth.
@@ -359,12 +358,11 @@ Consumed from the unification changeset (forward-chunk shape):
 6. **Live bytes keep flowing during the fill.** Output pushed on the stream while a forward
    fetch is in flight is present in the **live** terminal buffer (and the page terminal
    independently holds the older chunk) — no reset, no loss.
-7. **Scroll-up-on-live gesture triggers the fill** when the live terminal is pinned to the
-   bottom and history is not yet filled; once filled, the same gesture swaps to the page pane
-   instantly (no new fetch).
+7. **The wheel never switches panes.** A wheel-up on the live pane starts no fill and keeps the
+   live pane foreground (before and after the first fill); a wheel-down at the bottom of the page
+   pane keeps the page pane foreground.
 8. **Back to live + re-view history is instant.** "Back to live" swaps to the live pane (which
-   has stayed current); "View history" (or a scroll-up gesture) swaps back to the page pane with
-   no new fetch. A scroll-down-at-bottom gesture on the page pane also swaps back to live.
+   has stayed current); "View history" swaps back to the page pane with no new fetch.
 9. **`GrpcSessionTerminal` no longer exposes `onRegisterLoadOlderHistory`.** The prop is gone;
    the runtime does not participate in history loading.
 10. **No blank page on a stale/empty/failed fill.** After a reconnect that evicts the original
@@ -380,6 +378,8 @@ Consumed from the unification changeset (forward-chunk shape):
     (transport blip), the terminal stays mounted, input is queued, and a stream-end does NOT evict.
     When a non-null client returns, the stream resumes with `FROM_OFFSET`. Only a stream-end with a
     valid client (a real `pty_done`) evicts the runtime.
+13. **History renders in a greyish color scheme.** While the page pane is foreground it carries
+    `data-color-scheme="history"` and a `grayscale` filter; the live pane has no filter.
 
 ## Decisions & trade-offs
 
@@ -390,8 +390,8 @@ Consumed from the unification changeset (forward-chunk shape):
   This is stricter than native ghostty (whose primary screen has scrollback), but it is the
   chosen permanent mitigation under ghostty-web's no-prepend constraint. The cost is that the
   live terminal retains no post-connect history of its own — but the older-history page terminal
-  (forward-filled from offset `0` toward the anchor) covers all pre-connect history, and the
-  first wheel-up loads it immediately.
+  (forward-filled from offset `0` toward the anchor) covers all pre-connect history, one toggle
+  away.
 - **Two overlaid, interchangeable terminals over a split pane or a single rebuilt terminal** —
   chosen because ghostty-web has no prepend API and resetting the *live* terminal would reintroduce
   the duplicate-pane bug. The two terminals share one rect and switch foreground/background, so the
@@ -415,9 +415,12 @@ Consumed from the unification changeset (forward-chunk shape):
   scrolled up away from the tip.)
 - **A history-fetcher callback over `Client` injection** — keeps `GhosttyTerminalSession` decoupled
   from `TerminalSessionService` and unit-testable with a plain function double.
-- **Capture-phase wheel listeners** — ghostty-web's own wheel handler may stop propagation; a
-  bubble-phase React `onWheel` would never see the event. The capture-phase listeners fire first
-  and reliably detect the scroll-up-on-live / scroll-down-on-page intent on each pane.
+- **Capture-phase wheel listener** — ghostty-web's own wheel handler may stop propagation; a
+  bubble-phase React `onWheel` would never see the event. The capture-phase listener fires first
+  and routes the wheel to a mouse-tracking TUI.
+- **Manual history toggle over wheel-driven switching** (2026-10-09) — scrolling inside a TUI
+  kept dropping the user out of the live view; an explicit toggle plus a greyed-out history pane
+  makes which view you are in unmistakable.
 - **Live terminal always mounted & streaming** — the live terminal is never unmounted or reset, so
   returning to the live tip is always instant and current, even after browsing history for a while.
 
