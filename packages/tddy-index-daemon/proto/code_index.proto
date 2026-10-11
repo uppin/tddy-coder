@@ -288,6 +288,8 @@ message VerifyRequest {
   repeated string repoints = 4;
   // `self` rebinds (`read_fields_through`) the author declares, one binding `NAME` each.
   repeated string rebinds = 5;
+  // Methods detached into functions (`detach_method`) the author declares, `TYPE=NAME` each.
+  repeated string detaches = 6;
 }
 
 message VerifyResponse {

@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Feature (one new restructure operation, one `verify` declaration) + Refactor (behaviour-preserving, engine-driven conversion of the Rust backend)
-**Stack**: `#reshape` 18/19, branch `feature/reshape/backend-session`, green wave 4. PR title:
+**Stack**: `#reshape` 18/19, branch `feature/reshape/backend-session`, PR [#615](https://github.com/uppin/tddy-coder/pull/615), green wave 4. PR title:
 `feat(code-restructuring): detach_method, and RustBackend's operations become session functions (#reshape 18/19)`.
 Base in the linear stack: `feature/reshape/rust-backend-split` (K=17). **Real edges**: in, `rust-backend-split → backend-session`
 (K=17: the modules this node converts) and `methods-leave-type → backend-session` (K=6: self-mode text rewrite, R-rebind).
@@ -301,9 +301,22 @@ The first push of this PR publishes this **owned surface** (exact signatures) an
   - re-exported as `verify::Detach`.
 - `RestructureVerifyArgs.detach: Vec<String>`, `runner::Options.detaches: Vec<String>`, the `--detach` arm in `Options`
   parsing; `tddy-index-daemon` `VerifyRequest.detaches` (field 6).
-- Bodies compile and return `UnsupportedOp`, so every test fails on its assertion, not on a panic.
+- Bodies compile and return `UnsupportedOp` (or, for the three text functions that return no `Result`, a wrong answer),
+  so every test fails on its assertion. Each stub carries `// TODO(reshape-backend-session): implement`.
+- **As published (2026-10-11), refining the list above:**
+  - wiring goes through node 13's `same_crate_dispatch.rs` (`handles`, `findings`, the `same_crate_move` arm), not new
+    arms in `check`/`resolve_opening`; `rust.rs` gains only `mod detach_method;` and the `SUPPORTED` entry (27 → 28);
+  - `detach_fields::refuse_a_detach_it_cannot_honour` runs beside `impl_move_fields::rules`, **before** the generic field
+    rules, so DP3 names `detach_method` for `to_type`, `variant`, `expr` and the rest instead of their generic refusals;
+  - `Declared::with_detaches` and every `--detach` carrier (CLI, runner options, comparison, proto field 6, daemon,
+    `tddy-tools`) are implemented end to end; only `Detach::from_str` and R-detach are stubs;
+  - `tests/engine_module_edges_shape.rs` (node 17's): `OPERATION_MODULES` gains `"detach_method"` (16 → 17), as its note
+    asks of every new module;
+  - the unit tests of the surface live in `detach_method/{text,calls,typing}.rs`.
 
-Failing tests: acceptance tests 1-19 and 21-22 below are red on the first push. Tests 20, 23 and 24 are green pins.
+Failing tests: acceptance tests 1-17, 19 and 21-22 below are red on the first push. Tests 23 and 24 are green pins. Test 18
+is green on the first push (the CLI carrier is surface, implemented); test 20 is red until `rust-backend-split`'s split
+lands on this base, and a pin after it.
 
 ## Green wave
 
@@ -379,7 +392,7 @@ function. The plans, by node 17's module (sizes and placement retaken at base):
 | P1 | `repoint_facade.rs`, `repoint_call.rs`, `retarget_impl.rs` | `repoint_facade_imports`; `repoint_call`; `retarget_impl`, `retarget_range` |
 | P2 | `item_path.rs` | `outline_of`, `resolve_item_opening`, `item_enclosing_opening` |
 | P3 | `imports.rs` | `restore_imports`, `next_import`, `offered_imports`, `first_offer_that_resolves`, `reconstructed`, `unresolved_after`, `unresolved_the_seam_lost` |
-| P4 | `item_move.rs`, `module_reparent.rs` | `move_items`, `range_of`, `sites_of`, `reached_by_the_move` (node 1's, replacing `reached_by_the_moved_code`); `reparent_module`, `callers_of_the_module`, `reached_by_the_tree` (node 1) |
+| P4 | `item_move.rs`, `module_reparent.rs`, `module_reparent/tree_reach.rs` | `move_items`, `range_of`, `sites_of`, `move_reach` (node 1's), `reached_by_the_moved_code`; `reparent_module`, `callers_of_the_module`; `reached_by_the_tree` (node 1) |
 | P5 | `signature_rewrites.rs`, `return_type.rs`, `signature.rs` | `rewrite_signature` (no receiver); `wrap_or_unwrap_return_type`; `name_converted_struct`, `rename_introduced` |
 | P6 | `symbols.rs` | `anchor_range`, `locate_symbol`, `rename_symbol` |
 | P7 | `seam_reach.rs` | `survey_moved_items`, `survey_impl_members`, `reach_of` |
@@ -387,7 +400,7 @@ function. The plans, by node 17's module (sizes and placement retaken at base):
 | P9 | `assist_edits.rs` | `edit_for`, `chain_module_to_file`, `multi_file_assist` |
 | P10 | `assists.rs` | `inference_ready_at`, `assist`, `offered_assist` |
 | P11 | node 6's `read_fields_through.rs`, node 13's `impl_move.rs` | `read_fields_through`; `move_impl_members` |
-| P12 | `language_backend.rs` | `resolve_opening`, `outside_references_opening` (callers also rewritten in node 13's `same_crate_dispatch.rs`) |
+| P12 | `language_backend.rs`, node 13's `same_crate_dispatch.rs` | `resolve_opening`, `outside_references_opening`; `same_crate_move` |
 | P13 | `repoint_call/sites.rs` | `rename_symbol` of the parameter `backend` → `session` in `repoint_receivers` |
 
 The order runs from the operations to the dispatcher. It is not forced, because a detach rewrites a caller whether that
@@ -669,7 +682,26 @@ taken. The rejected options are kept below for the record.
 
 ## Validation Results
 
-(empty; populated by `/validate-changes`, `/validate-tests`, `/validate-prod-ready`, `/analyze-clean-code`)
+**Draft PR contract (commit 2, 2026-10-11).** Scoped baseline on the rebased base was clean: `cargo check` and
+`cargo clippy --all-targets -D warnings` for `tddy-code-restructuring`, `tddy-index-daemon`, `tddy-tools`, and
+`cargo fmt --all --check`. They stay clean with the surface. Only the new and changed test binaries were run:
+
+| # | Test | Result | Why |
+|---|---|---|---|
+| 1-4 | `tests/detach_method_plan_lines.rs` | 🔴 red | `plan is malformed: detach_method is not implemented yet` (DP1-DP3 stub) |
+| 5-13 | `tests/detach_method_acceptance.rs` (live) | 🔴 red | every anchor resolves (the trait member and the generic block too); the plan line is refused as not implemented |
+| 14-16 | `tests/verify_accounts_for_a_detach.rs` | 🔴 red | `Detach::from_str` is a stub (`--detach … is not implemented yet`) |
+| 17 | `tddy-index-daemon/tests/dual_transport_acceptance.rs` | 🔴 red | the daemon refuses `--detach Host=session` as not implemented |
+| 18 | `tddy-index-daemon/src/cli.rs` unit | 🟢 green | the CLI carrier is surface and implemented |
+| 19, 21, 22 | `tests/rust_backend_session_shape.rs` | 🔴 red | about 20 modules hold an inherent block; the resolvers are methods |
+| 20 | same | 🔴 red | `rust.rs` still holds the unsplit backend: `rust-backend-split`'s split has not landed on this base; a pin after it |
+| 23, 24 | same | 🟢 green pins | the runner names only construction and the sinks; the five trait impls are there once each |
+| unit | `detach_method::{text,calls,typing}::tests` (12) | 🔴 red | stubs |
+
+Seen red and not this node's (pre-existing on the base, parents' contracts): `tests/engine_module_edges_shape.rs` (12 of 13,
+files the parents' splits create), `tests/engine_file_budget_shape.rs` (`rust.rs` 2,949, `test_binary.rs` 967,
+`assemble.rs` 511), `tests/function_length_budget.rs` (five `crate_move` functions), and the daemon's
+`verify_carries_a_declared_rebind_…` (node 6's stub).
 
 ## TODO
 
@@ -678,8 +710,8 @@ taken. The rejected options are kept below for the record.
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-backend-session.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append point, not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code

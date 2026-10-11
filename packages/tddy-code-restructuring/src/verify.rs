@@ -83,6 +83,8 @@ pub use statements::statements;
 mod tokens;
 pub use tokens::token_difference;
 
+mod detach;
+pub use detach::Detach;
 mod rebind;
 pub use rebind::Rebind;
 mod repoint;

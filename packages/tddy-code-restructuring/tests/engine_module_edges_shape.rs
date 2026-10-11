@@ -148,7 +148,7 @@ const SESSION_MODULES: [&str; 7] = [
 ];
 
 /// The modules of the Rust backend that carry out an operation, and its dispatcher.
-const OPERATION_MODULES: [&str; 16] = [
+const OPERATION_MODULES: [&str; 17] = [
     "assists",
     "assist_edits",
     "extraction",
@@ -165,6 +165,7 @@ const OPERATION_MODULES: [&str; 16] = [
     "signature",
     "signature_rewrites",
     "return_type",
+    "detach_method",
 ];
 
 /// The spellings by which a module of `backends::rust` names its sibling `module`.

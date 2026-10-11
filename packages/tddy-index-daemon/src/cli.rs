@@ -255,6 +255,11 @@ pub(crate) struct VerifyArgs {
     /// `verify` accounts for the differences it causes instead of reporting them.
     #[arg(long = "rebind", value_name = "NAME")]
     pub(crate) rebind: Vec<String>,
+
+    /// Methods of a type the author detached into functions, `TYPE=NAME` (repeatable, one per
+    /// detached type): `verify` accounts for the differences it causes instead of reporting them.
+    #[arg(long = "detach", value_name = "TYPE=NAME")]
+    pub(crate) detach: Vec<String>,
 }
 
 /// One operation, as the request its RPC carries — the only form the single-shot path deals in.
@@ -391,6 +396,7 @@ fn restructuring(command: RestructureCommand) -> Result<Requested, String> {
             retargets: verify.retarget,
             repoints: verify.repoint,
             rebinds: verify.rebind,
+            detaches: verify.detach,
         }),
         RestructureCommand::Load(load) => Requested::LoadPlans(LoadPlansRequest {
             workspace_root: named(&load.root.workspace_root)?,
@@ -690,6 +696,7 @@ mod tests {
                 retargets: vec!["Host=Roster".to_string(), "Old=New".to_string()],
                 repoints: Vec::new(),
                 rebinds: Vec::new(),
+                detaches: Vec::new(),
             }
         );
     }
@@ -758,6 +765,37 @@ mod tests {
                 vec!["Host=Roster".to_string()],
                 vec![".slot=.peer.slot".to_string()],
                 vec!["state".to_string(), "backend".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn verify_carries_the_detaches_it_is_told_of_beside_the_rebinds() {
+        // Given a verify against a ref, told of a rebind and of two detaches
+        let requested = requested_by(&[
+            "restructure",
+            "verify",
+            "--workspace-root",
+            "/trees/one",
+            "--against",
+            "HEAD~1",
+            "--rebind",
+            "state",
+            "--detach",
+            "RustBackend=session",
+            "--detach",
+            "Host=host",
+        ]);
+
+        // Then both lists reach the request, each in the order given
+        let Requested::Verify(verify) = requested else {
+            panic!("expected a verify request");
+        };
+        assert_eq!(
+            (verify.rebinds, verify.detaches),
+            (
+                vec!["state".to_string()],
+                vec!["RustBackend=session".to_string(), "Host=host".to_string()]
             )
         );
     }
