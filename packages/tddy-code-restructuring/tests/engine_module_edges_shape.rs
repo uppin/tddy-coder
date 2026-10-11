@@ -132,3 +132,176 @@ fn tidy_parts_do_not_import_the_rounds() {
     // Then there are none: the loop depends on its parts, not the reverse
     assert!(edges.is_empty(), "{edges:?}");
 }
+
+// ---- The Rust backend's split (`#reshape` 17/19) ----------------------------------------------
+
+/// The modules of the Rust backend's session layer: talking to the server, waiting on it, its
+/// documents and outline, its reference queries, LSP geometry, and the plan's projected tree.
+const SESSION_MODULES: [&str; 7] = [
+    "src/backends/rust/handshake.rs",
+    "src/backends/rust/transport.rs",
+    "src/backends/rust/readiness.rs",
+    "src/backends/rust/documents.rs",
+    "src/backends/rust/references.rs",
+    "src/backends/rust/lsp_edits.rs",
+    "src/backends/rust/projection.rs",
+];
+
+/// The modules of the Rust backend that carry out an operation, and its dispatcher.
+const OPERATION_MODULES: [&str; 16] = [
+    "assists",
+    "assist_edits",
+    "extraction",
+    "seam_reach",
+    "symbols",
+    "language_backend",
+    "same_crate_dispatch",
+    "item_move",
+    "module_reparent",
+    "retarget_impl",
+    "repoint_call",
+    "repoint_facade",
+    "impl_move",
+    "signature",
+    "signature_rewrites",
+    "return_type",
+];
+
+/// The spellings by which a module of `backends::rust` names its sibling `module`.
+fn paths_to_siblings(modules: &[&str]) -> Vec<String> {
+    modules
+        .iter()
+        .flat_map(|module| [format!("super::{module}"), format!("rust::{module}")])
+        .collect()
+}
+
+fn edges_from_each_to(files: &[&str], forbidden: &[String]) -> Vec<String> {
+    let forbidden: Vec<&str> = forbidden.iter().map(String::as_str).collect();
+    edges_from_each(files, &forbidden)
+}
+
+/// Every `.rs` file under `relative`, as paths relative to the package.
+fn rust_files_below(relative: &str) -> Vec<String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let mut pending = vec![root.join(relative)];
+    let mut found = Vec::new();
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("a readable source directory") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                let below = path.strip_prefix(&root).expect("under the package");
+                found.push(below.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The lines of `relative`'s code that open an `impl` block naming `type_name`.
+fn impl_headers_naming(relative: &str, type_name: &str) -> Vec<String> {
+    the_code_of(relative)
+        .lines()
+        .filter(|line| line.starts_with("impl") && line.contains(type_name))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn the_rust_backend_root_keeps_only_the_type_and_its_constructors() {
+    // Given the root of the Rust backend
+    // When the impl blocks naming the backend type are listed
+    let headers = impl_headers_naming("src/backends/rust.rs", "RustBackend");
+
+    // Then there is one, the constructors' inherent block, and no trait impl
+    assert_eq!(headers, vec!["impl RustBackend {".to_string()]);
+}
+
+#[test]
+fn the_session_modules_reach_no_operation_module() {
+    // Given the session layer of the Rust backend
+    // When its edges into the operation modules are listed
+    let edges = edges_from_each_to(&SESSION_MODULES, &paths_to_siblings(&OPERATION_MODULES));
+
+    // Then there are none: the session sits below the operations
+    assert!(edges.is_empty(), "{edges:?}");
+}
+
+#[test]
+fn the_handshake_and_the_lsp_geometry_never_name_the_backend_type() {
+    // Given the two session modules made of free functions only
+    // When their edges to the backend type are listed
+    let edges = edges_from_each(
+        &[
+            "src/backends/rust/handshake.rs",
+            "src/backends/rust/lsp_edits.rs",
+        ],
+        &["RustBackend"],
+    );
+
+    // Then there are none: they can leave for an engine crate without the type
+    assert!(edges.is_empty(), "{edges:?}");
+}
+
+#[test]
+fn the_dispatcher_module_holds_the_language_backend_impl() {
+    // Given the dispatcher module of the Rust backend
+    // When the impl blocks naming the backend type are listed
+    let headers = impl_headers_naming("src/backends/rust/language_backend.rs", "RustBackend");
+
+    // Then the `LanguageBackend` impl is among them
+    assert!(
+        headers.contains(&"impl LanguageBackend for RustBackend {".to_string()),
+        "{headers:?}"
+    );
+}
+
+#[test]
+fn nothing_in_the_rust_backend_imports_the_dispatcher() {
+    // Given every module below the Rust backend's root but the dispatcher itself
+    let files: Vec<String> = rust_files_below("src/backends/rust")
+        .into_iter()
+        .filter(|file| file != "src/backends/rust/language_backend.rs")
+        .collect();
+    let files: Vec<&str> = files.iter().map(String::as_str).collect();
+
+    // When their edges into the dispatcher are listed
+    let edges = edges_from_each_to(&files, &paths_to_siblings(&["language_backend"]));
+
+    // Then there are none: nothing depends on the dispatcher
+    assert!(edges.is_empty(), "{edges:?}");
+}
+
+#[test]
+fn the_assist_catalogue_reaches_none_of_its_users() {
+    // Given the assist catalogue
+    // When its edges into the modules that use assists are listed
+    let edges = edges_from_each_to(
+        &["src/backends/rust/assists.rs"],
+        &paths_to_siblings(&[
+            "extraction",
+            "assist_edits",
+            "symbols",
+            "seam_reach",
+            "language_backend",
+        ]),
+    );
+
+    // Then there are none: the catalogue sits below its users
+    assert!(edges.is_empty(), "{edges:?}");
+}
+
+#[test]
+fn reference_queries_do_not_reach_the_seam_survey() {
+    // Given the reference queries
+    // When their edges into the seam survey are listed
+    let edges = edges_from_each_to(
+        &["src/backends/rust/references.rs"],
+        &paths_to_siblings(&["seam_reach", "seam_survey"]),
+    );
+
+    // Then there are none: the survey consumes reference queries, never the reverse
+    assert!(edges.is_empty(), "{edges:?}");
+}

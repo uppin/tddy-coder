@@ -1,4 +1,5 @@
-//! Every production file of the engine fits the repository's 500-line budget (`#reshape` 13/19).
+//! Every production file of the engine fits the repository's 500-line budget (`#reshape` 13/19), the
+//! Rust backend's root included (`#reshape` 17/19): no file is exempt.
 //!
 //! Measured by the one count the budget is held to — [`production_lines_of_file`], which leaves out
 //! each `#[cfg(test)]` item wherever it sits — so a file cannot slip under the budget by declaring
@@ -10,10 +11,6 @@ use tddy_code_restructuring::production_lines_of_file;
 
 /// The budget, in production lines. A file *at* it is within it.
 const BUDGET: usize = 500;
-
-/// Files allowed over the budget for now, as paths relative to the package.
-// TODO(#reshape 17): rust-backend-split empties this list
-const NOT_YET_SPLIT: [&str; 1] = ["src/backends/rust.rs"];
 
 fn package_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -55,10 +52,10 @@ fn every_production_file_of_the_engine_is_within_500_lines() {
     // Given every production file of the engine, measured
     let measured = the_engines_files_measured();
 
-    // When the ones over the budget are listed, leaving out those not split yet
+    // When the ones over the budget are listed
     let over: Vec<&(String, usize)> = measured
         .iter()
-        .filter(|(path, lines)| *lines > BUDGET && !NOT_YET_SPLIT.contains(&path.as_str()))
+        .filter(|(_, lines)| *lines > BUDGET)
         .collect();
 
     // Then there are none

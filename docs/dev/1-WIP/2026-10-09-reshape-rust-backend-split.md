@@ -5,7 +5,7 @@
 **Type**: Refactor (behaviour-preserving split by the engine; no new behaviour)
 **Stack**: `#reshape` 17/19, branch `feature/reshape/rust-backend-split`, green wave 3. PR title:
 `refactor(code-restructuring): the Rust backend splits into modules of ≤500 lines (#reshape 17/19)`.
-Base in the linear stack: `feature/reshape/move-widen` (K=16).
+Base in the linear stack: `feature/reshape/move-widen` (K=16). PR: [#614](https://github.com/uppin/tddy-coder/pull/614).
 
 **Real edges in:**
 - `move-impl-members → rust-backend-split` (K=12, the member moves);
@@ -135,7 +135,8 @@ at the base is reported before its plan is applied, so the layout can change (F3
 (R5 of `move_impl_members`, `move_item`'s re-pointing). No function on the >60-line list grows.
 
 **R6. Public paths unchanged.** These keep resolving:
-- `tddy_code_restructuring::backends::rust::{RustBackend, ProgressSink, discard, WAIT_HEARTBEAT, human_delta, ServerChatter, client_capabilities, server_settings}`;
+- `tddy_code_restructuring::backends::rust::{RustBackend, ProgressSink, discard, WAIT_HEARTBEAT, ServerChatter, client_capabilities, server_settings}`;
+  `human_delta` is `pub(crate)` (`wait.rs:160`), so its `crate::backends::rust::human_delta` path is crate-internal and kept for `runner/compile_gate.rs:33`;
 - `tddy_code_restructuring::{client_capabilities, server_settings}`;
 - `tddy_code_restructuring::backends::RustBackend`.
 
@@ -168,15 +169,19 @@ No file outside the crate is edited.
 
 The first push of this PR (wave 2 of the stack plan) publishes:
 
-- **Owned surface:** none in production code. This node adds no API. The surface is the module layout fixed in State B,
-  and the test helper `fn names_any_of(file: &str, modules: &[&str]) -> Vec<String>` in
-  `tests/engine_module_edges_shape.rs`, if node 15's file has no equivalent. It returns the `use` lines and inline paths
-  of `file` that name one of `modules`.
+- **Owned surface:** none in production code. This node adds no API. The surface is the module layout fixed in State B.
+  `tests/engine_module_edges_shape.rs` reuses node 15's `edges_from`/`edges_from_each`/`the_code_of` and adds test-only
+  helpers: `SESSION_MODULES` (7 files, `projection.rs` included by the developer's decision for node 18),
+  `OPERATION_MODULES` (16 names), `paths_to_siblings(modules) -> Vec<String>` (`super::<m>` and `rust::<m>`),
+  `edges_from_each_to(files, forbidden: &[String])`, `rust_files_below(relative) -> Vec<String>`, and
+  `impl_headers_naming(relative, type_name) -> Vec<String>`. The planned `names_any_of` was not needed.
 - **Failing tests:** acceptance tests 1–6 below.
-  - Test 1 is red because `rust.rs` is about 2,850 lines.
-  - Tests 2–6 are red because `rust.rs` holds four inherent blocks and three trait impls, and because the files they read
-    do not exist yet. A missing file fails on its assertion, which names the path, never on a panic.
-  - Test 7 is a green pin.
+  - Test 1 is red because `rust.rs` is 2,947 lines at this base (and node 15's `test_binary.rs` 967 and `assemble.rs`
+    511 until node 15 greens).
+  - Test 2 is red because `rust.rs` holds three inherent blocks and three trait impls.
+  - Tests 3–6 are red because the files they read do not exist yet. Node 15's `the_code_of` **panics** naming the
+    missing path (`… should exist: No such file or directory`); that is the failure, not an assertion.
+  - Test 7 is a green pin (two tests).
 
 ## Green wave
 
@@ -361,7 +366,7 @@ are not `use` edges. **Edges that must NOT exist** (each checked by `tests/engin
 | From | Must not name | Why |
 |---|---|---|
 | `backends/rust.rs` | a second `impl RustBackend`, or any `impl … for RustBackend` | the root holds the type, not its operations; growth goes into a module |
-| `handshake.rs`, `transport.rs`, `readiness.rs`, `documents.rs`, `references.rs`, `lsp_edits.rs` | `assists`, `assist_edits`, `extraction`, `seam_reach`, `symbols`, `language_backend`, `same_crate_dispatch`, `item_move`, `module_reparent`, `retarget_impl`, `repoint_call`, `repoint_facade`, `impl_move`, `signature`, `signature_rewrites`, `return_type` | the session layer sits below the operations (stack 2's crate 3 vs crate 5) |
+| `handshake.rs`, `transport.rs`, `readiness.rs`, `documents.rs`, `references.rs`, `lsp_edits.rs`, `projection.rs` (node 2's; session module by the developer's decision) | `assists`, `assist_edits`, `extraction`, `seam_reach`, `symbols`, `language_backend`, `same_crate_dispatch`, `item_move`, `module_reparent`, `retarget_impl`, `repoint_call`, `repoint_facade`, `impl_move`, `signature`, `signature_rewrites`, `return_type` | the session layer sits below the operations (stack 2's crate 3 vs crate 5) |
 | `handshake.rs`, `lsp_edits.rs` | `RustBackend` | free functions only, movable to an engine crate without the type |
 | every file under `backends/rust/` | `language_backend` | nothing depends on the dispatcher |
 | `assists.rs` | `extraction`, `assist_edits`, `symbols`, `seam_reach`, `language_backend` | the catalogue sits below its users |
@@ -424,13 +429,15 @@ All in `packages/tddy-code-restructuring/`. Red on the base for the reason given
 4. `tests/engine_module_edges_shape.rs`: `the_handshake_and_the_lsp_geometry_never_name_the_backend_type`. *Red:
    `handshake.rs` does not exist.*
 5. `tests/engine_module_edges_shape.rs`: `nothing_in_the_rust_backend_imports_the_dispatcher` (no file under
-   `src/backends/rust/` names `language_backend`), with `the_dispatcher_module_exists`. *Red: `language_backend.rs` does
-   not exist.*
+   `src/backends/rust/` names `language_backend`; *passes on the base*, nothing names it yet, and it guards the result)
+   and `the_dispatcher_module_holds_the_language_backend_impl`. *Red: `language_backend.rs` does not exist.*
 6. `tests/engine_module_edges_shape.rs`: `the_assist_catalogue_reaches_none_of_its_users` and
    `reference_queries_do_not_reach_the_seam_survey`. *Red: `assists.rs` and `references.rs` do not exist.*
-7. `tests/rust_backend_public_paths.rs`: `the_backends_public_paths_resolve_where_they_did`. It uses every R6 path and
-   asserts `client_capabilities()["general"]["positionEncodings"][0] == "utf-8"` through both the crate-root and the
-   module path. *A green pin: it fails at compile time if a move drops a public path.*
+7. `tests/rust_backend_public_paths.rs`: `the_backends_public_paths_resolve_where_they_did` (the handshake asks for
+   `utf-8` through both the module and the crate-root path; `server_settings` agrees through both) and
+   `the_backend_type_and_its_companions_are_reachable_from_outside_the_crate` (`ProgressSink`, `discard`,
+   `WAIT_HEARTBEAT`, `ServerChatter`, and `RustBackend` through `backends::rust` and `backends`). *A green pin: it fails
+   at compile time if a move drops a public path.*
 
 ## Technical Debt & Production Readiness
 
@@ -510,7 +517,40 @@ All in `packages/tddy-code-restructuring/`. Red on the base for the reason given
 
 ## Validation Results
 
-Not yet run.
+**Commit 2 (draft-PR contract), 2026-10-11**, at `origin/feature/reshape/fn-sizes-rest` (`98e75a93e`):
+
+- Scoped gates on the inherited state: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p
+  tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --all --check` clean, before and after the tests.
+- `cargo test -p tddy-code-restructuring --test engine_file_budget_shape --test engine_module_edges_shape --test
+  rust_backend_public_paths --no-fail-fast`:
+  - `every_production_file_of_the_engine_is_within_500_lines` — **red**: `src/backends/rust.rs` 2,947,
+    `crate_move/test_binary.rs` 967, `item_move/assemble.rs` 511 (the last two are node 15's, until its green).
+  - `the_rust_backend_root_keeps_only_the_type_and_its_constructors` — **red**: six `impl … RustBackend` headers.
+  - `the_session_modules_reach_no_operation_module`, `the_handshake_and_the_lsp_geometry_never_name_the_backend_type`,
+    `the_dispatcher_module_holds_the_language_backend_impl`, `the_assist_catalogue_reaches_none_of_its_users`,
+    `reference_queries_do_not_reach_the_seam_survey` — **red**: `handshake.rs` / `language_backend.rs` / `assists.rs` /
+    `references.rs` should exist.
+  - `nothing_in_the_rust_backend_imports_the_dispatcher` — passes (guard).
+  - Node 15's six rows are red on their own missing files (`lexical.rs`, `item_move/moving.rs`, …) until node 15 greens.
+  - `rust_backend_public_paths`: both tests **green** (pins).
+- **Re-measure at this base.** `rust.rs` is **2,947** production lines, not the ~2,850 projected: node 12's deletions are
+  in, but the wave-1/2 contract wiring (node 2's two fields, node 10's `silence_bounds` field and builder, the
+  `allow`/`expect(dead_code)` attributes on five `mod` lines, `SUPPORTED` at 27) adds about 110 lines, and node 3's
+  `attached_trivia_starts_at` (27 lines, `:2356`) is still here until node 3's green moves it. The member and free-item
+  inventory is unchanged in kind: block #2 is `resolve_opening` + `outside_references_opening` (`:1290-1495`), block #3
+  `:1498-2310` keeps its 23 members in the same order, the trait impls are `:1157-1287`. **The set that stays in
+  `rust.rs` measures ~465** (struct `RustBackend` now 92 lines, constructors 135 with `with_silence_bounds`, the `mod`
+  list 14 attribute lines longer), so with nine new `mod` lines and the `handshake` facade line it projects to
+  **~460–475**, over R4's 450 warning line but under 500. The `allow`/`expect` attributes go when nodes 2, 4 and 6 green.
+  If the re-measure at green start is over 480, the fallback-free option is moving the three refusal builders
+  (`failure`, `seam_refusal`, `server_defect`, 34 lines) — that reverses F5 and needs the developer's consent first.
+- **New child modules since planning** (`extracted_fn/`, `impl_move/`, `same_crate_dispatch.rs`, `projection.rs`,
+  `read_fields_through/`, `declarations.rs`): none collides with a planned name (`language_backend`, `assists`,
+  `transport`, `assist_edits`, `extraction`, `seam_reach`, `references`, `symbols`, `handshake`). `projection.rs` joins
+  the session layer in the must-not table; `same_crate_dispatch` and `impl_move` are already in the operation list. The
+  module plan is unchanged.
+- **Member runs:** per node 13, a member anchor lists adjacent members only (blank lines between). The plan's runs are
+  re-read with `restructure anchors` at green and split at any free-standing comment block between members.
 
 ## TODO
 
@@ -519,8 +559,12 @@ Not yet run.
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
 - [x] Developer review of F1–F10 (2026-10-09: all recommendations taken)
-- [ ] First push: shape tests red (1–6), pin green (7)
-- [ ] Baseline recorded; re-measure at base
+- [x] Contract surface (none in production; test helpers in `tests/engine_module_edges_shape.rs`)
+- [x] Create failing acceptance tests (1–6 red, 7 green pin)
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests
+- [x] Re-measure at base (2,947; see Validation Results)
+- [ ] Baseline recorded by name (reuse `scratchpad/reshape/baseline-failures.txt` at green)
 - [ ] Plans A–K applied, one commit each; hand fixes (if any) each with a todo entry
 - [ ] Final gate; shape tests green
 - [ ] Validate changes (/validate-changes)
@@ -530,7 +574,7 @@ Not yet run.
 
 - [ ] Every production file in `packages/tddy-code-restructuring/src`, `backends/rust.rs` included, is ≤ 500 by `restructure lines`; the exemption list is gone (acceptance 1)
 - [ ] `rust.rs` holds one `impl RustBackend` and no `impl … for RustBackend` (2)
-- [ ] The session modules name no operation module (3)
+- [ ] The session modules (`projection.rs` included) name no operation module (3)
 - [ ] `handshake.rs` and `lsp_edits.rs` never name `RustBackend` (4)
 - [ ] Nothing under `backends/rust/` names `language_backend` (5)
 - [ ] `assists.rs` names none of its users; `references.rs` names neither `seam_reach` nor `seam_survey` (6)
