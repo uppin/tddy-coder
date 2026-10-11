@@ -171,6 +171,13 @@ mistake, and it costs the stack throughput for nothing.
    nothing depends on last. Break a remaining tie with the reading order you would have chosen
    anyway — usually the most foundational node first.
 
+**The waves never step back.** Read bottom to top, the line's wave numbers are non-decreasing. Wave
+1 above wave 2 (`1 1 2 1 1`) is illegal even though every edge is still satisfied. The wave-1 node
+can no longer merge until a node whose behaviour it never uses has merged. When a later discovery
+(usually the tests) moves a node into a later wave, the node **moves up the line** to that wave's
+place. It does not stay where it was just because its predecessors are still below it. See
+[Reordering a registered stack](#reordering-a-registered-stack).
+
 Step 3 is free. Every node's predecessors sit in a **strictly earlier** wave, so *any* permutation
 inside a wave is still a valid topological sort — which is exactly why nothing forces the order and
 why it has to be chosen.
@@ -280,6 +287,29 @@ layer seam, B is one PR and the answer is a smaller B, not two.
 **A split is a plan change, so do it surgically.** Move one PR at a time — rebase, push, retarget,
 re-register — and never by discarding the stack and rebuilding it: a branch that another worktree is
 mid-`/green` on cannot be recreated, and closing a PR to reopen it loses its review history.
+
+### Reordering a registered stack
+
+GitHub locks the base of every PR in a registered stack. `PATCH …/pulls/<N> base=…` fails with
+**422** ("part of a stack"), and `gh stack link` in a new order fails the same way. Reorder in this
+order:
+
+1. In a worktree that pins none of the stack's branches, record every branch's current tip. Then
+   rebuild each branch whose predecessor changes, bottom-up, with `git rebase --onto <new
+   predecessor tip> <recorded old base tip> <branch>`. **Do not push yet.**
+2. `gh stack checkout <top PR>`, then `gh stack unstack`. This deletes only the GitHub stack object
+   and the local tracking. PRs and branches stay.
+3. Repoint every moved PR to its new predecessor with `gh api -X PATCH
+   repos/{owner}/{repo}/pulls/<N> -f base=<new predecessor branch>`, **before any push**. A PR whose
+   base is force-pushed to contain all its head commits is auto-marked **MERGED** and cannot be
+   reopened.
+4. Force-push the rebuilt branches with lease, bottom-up.
+5. Renumber every `K` that changed. That covers titles and also commit subjects, PR bodies and doc
+   headers carrying `#<slug> K/N`. See [Renumbering](#renumbering-when-the-stack-changes-shape).
+6. `gh stack link --base <trunk> <PRs in the new order>`, then restore the borrowed worktree's
+   branch.
+
+Never reorder a branch another worktree has pinned mid-`/green`. Stop and coordinate.
 
 ## The PR boundary contract — every node is self-contained
 

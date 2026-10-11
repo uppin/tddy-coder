@@ -116,6 +116,11 @@ Run the interview from `.agents/skills/planning/references/planning-phase.md` **
    - The line is the **waves concatenated**: all of wave 1, then all of wave 2, and so on.
    - **Inside a wave, blockers lead.** Sort by what waits on the node — most transitive dependents
      first, nodes nothing depends on last, remaining ties by the most foundational first.
+   - **The waves never step back along the line.** Read bottom to top, the wave numbers form a
+     non-decreasing run (`1 1 1 2 2 3`, never `1 2 1`). A wave-2 node below a wave-1 node is
+     **illegal**, even when every real edge is still satisfied: the wave-1 node above it can no
+     longer merge until the wave-2 node does, so a node that was greenable at once now waits on
+     behaviour it does not use. Steps 6 and 7b enforce this rule again after the plan is made.
    - Every node's predecessors sit in a strictly *earlier* wave, so any intra-wave permutation is
      still a valid topological sort. Nothing forces this order, which is precisely why it must be
      chosen rather than inherited from the interview's narration.
@@ -607,6 +612,14 @@ framework-specific reference for the test type. Fluent-tests style is mandatory 
   Still `draft=true`, still based on its parent, and `changedFiles` covering only this node's docs,
   surface and tests. An inherited file or a parent's doc in that list means 6b did not finish cleanly
   — go back to it before moving up.
+- **Re-check the wave order when a node's tests reveal a new edge.** Writing the tests is what
+  settles the real edges, and a new one can push a node into a later wave than a node above it in
+  the line. Example: node 7's tests need nodes 2 and 5, which moves node 7 into wave 2 while nodes
+  8–12 above it stay in wave 1. The line then steps back a wave, which Step 1 question 7 forbids.
+  Record the new edge in both nodes' `## Green wave`, then **stop and reorder before moving up**. Move
+  the node up to its new wave's place in the line, sorted blockers-first. Fixing it now costs less
+  than at Step 7b, because the nodes above have not had their contract commits yet. Validity alone
+  ("its predecessors are still below it") is **not** a reason to keep the order.
 - **Say so in the report when this push unblocks a node** whose document records it as waiting. That
   node's worktree then runs `/pr-stack-rebase` to pick it up; without the message it waits on
   something that is no longer missing.
@@ -640,6 +653,32 @@ it sitting on the top branch, which would pin it.
 
    **Do not delete this worktree.** **Never delete a stack branch** — each is a child's base, and
    deleting one **closes** that child's PR, which cannot then be reopened or re-based via the API.
+
+### Step 7b: Validate the wave order — MANDATORY
+
+Before the cascade, recompute every node's wave from the **final** real edges. These are the
+`## Green wave` sections as wave 2 left them, not the wave-1 guess. Then read the waves off the line,
+bottom to top:
+
+```
+K      1 2 3 4 5 6 7 8 9 10 11 12 13 …
+wave   1 1 1 1 1 1 2 1 1 1  1  1  2  …     ✗ steps back at K=8: wave 1 above a wave-2 node
+```
+
+**The run must never decrease.** If it steps back anywhere, the stack is **not** complete, even
+though every layer is still a valid topological sort. Reorder it before Step 8:
+
+1. Derive the corrected line: the waves concatenated, blockers leading each wave (Step 1
+   question 7). Show the user the old and the new line together, with the edge that moved each node.
+2. Rebuild the branches in the new order, cutting each one from its new predecessor's tip and
+   replaying its own two commits. Follow the `pr-stack` skill § *Reordering a registered stack*:
+   first `gh stack unstack`, then repoint each PR's base with `gh api -X PATCH`, and only after that
+   force-push the rebuilt branches with lease. If you push before repointing, a PR can auto-merge
+   into its old base.
+3. **Renumber** every PR whose `K` changed. That means the title, and also each commit subject and
+   body, PR body and discovery header that carries `#<slug> K/N`, all bottom-up in one pass. Then
+   re-run `gh stack link --base "$TRUNK"` in the new order.
+4. Re-run this check. It must pass before Step 8 runs.
 
 ### Step 8: Cascade `/pr-stack-rebase` over the whole stack — MANDATORY
 
@@ -681,6 +720,8 @@ Present a complete summary:
 - **The sequence** — each node's predecessor, its branch, and its PR base, plus the `gh stack link`
   output confirming the stack is registered. Note explicitly that GitHub enforces no merge order and
   will restack nothing after a merge, registered or not.
+- **The Step 7b wave-order check**: the line's wave run, bottom to top, shown as non-decreasing,
+  plus any reorder it forced and the edge behind it.
 - **The Step 8 cascade verdict per layer** — already current or rebased, and each layer's build/test
   state. This is the line that says the stack is coherent.
 - **This worktree is back on `$ORIGINAL_BRANCH`** (confirm `git branch --show-current`). `/green` on
@@ -786,6 +827,10 @@ actionable the moment some node builds the seam.
   inside each wave a node other waves depend on comes ahead of one nothing waits on (most transitive
   dependents first). Topology permits any intra-wave order; that is why this one must be chosen and
   justified, not left to the order the nodes were named in.
+- **The line never returns to an earlier wave.** Read bottom to top, wave numbers never decrease.
+  This holds at planning (Step 1), whenever wave 2 finds a new edge (Step 6), and at the completion
+  gate (Step 7b). A node pushed into a later wave moves up the line. "Its predecessors are still
+  below it" is not enough to leave it where it is.
 - **Refuse a detached start.** `ORIGINAL_BRANCH` must be a named branch.
 - **Cross-check `docs/dev/todo/` (Step 2b) before decomposing.** Record every relevant item in the
   affected node's `## Prerequisites` with a verdict **and a link to its file**; give a blocking one a
@@ -857,7 +902,9 @@ actionable the moment some node builds the seam.
         git checkout feature/<slug>/<node> → /pr-stack-rebase (single; picks up the parent's surface)
         build + baseline → owned API surface → failing acceptance tests (USER REVIEW)
         → failing unit/integration tests → commit 2 → git push origin HEAD
+        new edge moves a node to a later wave? → reorder now, before the next node
   → git checkout ORIGINAL_BRANCH   # if that was master, this worktree is on master again
+  → wave-order check: line's wave run never decreases, else reorder + renumber + re-link
   → /pr-stack-rebase from #1 to #n   # completion gate: every layer already current, leak-free
   → (per node, in the implementer's own worktree, when its parents have shipped)
         /green            → ALWAYS /pr-stack-rebase first, then the dependency gate; commit + push
