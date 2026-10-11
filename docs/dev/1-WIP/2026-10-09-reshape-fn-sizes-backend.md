@@ -3,7 +3,7 @@
 **Date**: 2026-10-09
 **Status**: 🚧 In Progress
 **Type**: Refactor (behaviour-preserving; engine-driven function extractions) + the function-length gate extended to `backends/`
-**Stack**: `#reshape` 19/19, branch `feature/reshape/fn-sizes-backend`, wave 4. PR title:
+**Stack**: `#reshape` 19/19, branch `feature/reshape/fn-sizes-backend`, wave 4, PR [#616](https://github.com/uppin/tddy-coder/pull/616). PR title:
 `refactor(code-restructuring): cut the sixteen backend functions past 60 lines (#reshape 19/19)`.
 Base in the linear stack: `feature/reshape/backend-session` (K=18). **Real edges**: in `extract-method-clean -> fn-sizes-backend`
 (K=4: comment carry, lint-clean signatures, respelling, guard lift, tail position) and `rust-backend-split -> fn-sizes-backend`
@@ -354,7 +354,46 @@ All decided by the developer on 2026-10-09 (PRD approved with every recommendati
 
 ## Validation Results
 
-Not run yet (planning).
+### Contract commit (2026-10-11, base `feature/reshape/backend-session` commit 2)
+
+Baseline (scoped): `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring
+--all-targets -- -D warnings`, `cargo fmt --all --check` — all clean on the inherited state and after this commit.
+
+`cargo test -p tddy-code-restructuring --test function_length_budget`: 5 passed, 1 failed.
+
+| Test | File:line | State | Why |
+|---|---|---|---|
+| `no_production_function_runs_past_sixty_lines` | `tests/function_length_budget.rs:189` | 🔴 red (intended) | Lists 17 backend functions (below) and node 16's 10, all still uncut at this base |
+| `a_long_function_under_the_backend_is_reported` | `tests/function_length_budget.rs:269` | ✅ green | Red against node 16's file; green as soon as the `backends/` skip is gone, which is this commit's surface |
+| `a_function_of_exactly_sixty_lines_is_within_the_budget` | `tests/function_length_budget.rs:286` | ✅ green pin | Boundary 60/61 |
+
+**Re-measured backend list at this base (17, the gate's own `syn` measure).** Node 17's split and node 18's detachment
+are contract-only at this base, so the seven dispatcher functions are still in `rust.rs`:
+
+| Lines | Function | Change since planning |
+|---|---|---|
+| 163 | `backends/rust.rs:1293 resolve_opening` | lines moved (node 13 dispatch, node 12 deletions); body length same |
+| 124 | `backends/rust.rs:1535 assisted_edit` | — |
+| 93 | `backends/rust.rs:311 assist_for` | — |
+| 91 | `backends/rust/item_move/sites.rs:94 edits_for_file` | — |
+| 87 | `backends/rust.rs:799 start` | — |
+| 82 | `backends/rust/item_move/assemble.rs:72 assemble` | — |
+| 73 | `backends/rust/item_move.rs:59 move_items` | — |
+| 73 | `backends/rust/item_move/assemble.rs:207 visibilities` | 71 → 73 (node 1) |
+| 71 | `backends/rust.rs:1086 offered_assist` | — |
+| 67 | `backends/rust/visibility.rs:37 restore_visibility` | 66 → 67 |
+| 66 | `backends/rust/item_move/sites.rs:324 rewrite_statement` | — |
+| 66 | `backends/rust.rs:1188 check` | — |
+| 65 | `backends/rust/import_text.rs:18 choose_import` | — |
+| 65 | `backends/rust/retarget_impl.rs:81 retarget_impl` | 70 → 65 (node 6: `the_replacement` helper); split that helper's call region, do not regrow |
+| 64 | `backends/rust.rs:887 request` | — |
+| 62 | `backends/rust/imports.rs:103 next_import` | — |
+| 61 | `backends/rust/item_move/assemble.rs:451 into_destination` | **new on the list** (60 → 61; F8, in scope) |
+
+`facade_lines` (claimed record) is **22 lines** at this base: node 3's contract already extracted the `named` arm into
+`named_facade_lines` (37 lines, `facade.rs:181`, with `TODO(reshape-tidy-facades)`). Both measure ≤ 4 indentation
+levels now. What is left for F6 is to re-measure after node 3's green rewrites `named_facade_lines`, cut its tier closure
+only if that pushes it past 4, and close the record at wrap.
 
 ## TODO
 
@@ -363,8 +402,8 @@ Not run yet (planning).
 - [x] Create/update PRD documentation (`docs/ft/coder/1-WIP/PRD-2026-10-09-reshape-fn-sizes-backend.md`)
 - [x] Create changeset (this document)
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code (engine plans, per milestone)

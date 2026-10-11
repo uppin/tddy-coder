@@ -1,4 +1,5 @@
-//! No production function of the engine outside `src/backends/` runs past 60 lines (`#reshape` 15/19).
+//! No production function of the engine runs past 60 lines (`#reshape` 15/19 outside `src/backends/`, extended to
+//! `src/backends/` by `#reshape` 19/19).
 //!
 //! The cap is `/analyze-clean-code`'s "more than 60 lines must be refactored". A function is measured
 //! from the line holding its `fn` keyword to its closing brace, inclusive — doc comments and
@@ -16,10 +17,6 @@ use syn::visit::Visit;
 
 /// The cap, in lines. A function *at* it is within it.
 const CAP: usize = 60;
-
-/// The part of `src/` another node owns: `#reshape` 19 (`fn-sizes-backend`) cuts the functions in it.
-// TODO(reshape-19): fn-sizes-backend removes this exclusion and `the_backend_is_left_to_its_own_node`
-const LEFT_TO_THE_BACKEND_NODE: &str = "backends";
 
 /// One function and its length.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,15 +139,13 @@ fn production_files_under(dir: &Path, found: &mut Vec<PathBuf>) {
     }
 }
 
-/// Every production function under `dir` past the cap, outside its `backends/` directory, in path
-/// and line order.
+/// Every production function under `dir` past the cap, in path and line order.
 fn functions_past_the_cap_under(dir: &Path) -> Vec<Measured> {
     let mut files = Vec::new();
     production_files_under(dir, &mut files);
     files.sort();
     files
         .iter()
-        .filter(|path| !path.starts_with(dir.join(LEFT_TO_THE_BACKEND_NODE)))
         .flat_map(|path| {
             let relative = path
                 .strip_prefix(dir)
@@ -191,7 +186,7 @@ fn names_of(functions: &[Measured]) -> Vec<&str> {
 }
 
 #[test]
-fn no_production_function_outside_the_backend_runs_past_sixty_lines() {
+fn no_production_function_runs_past_sixty_lines() {
     // Given the engine's own sources
     let src = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
 
@@ -204,7 +199,7 @@ fn no_production_function_outside_the_backend_runs_past_sixty_lines() {
     // Then there are none
     assert!(
         past.is_empty(),
-        "production functions past {CAP} lines outside src/{LEFT_TO_THE_BACKEND_NODE}/:\n  src/{}",
+        "production functions past {CAP} lines:\n  src/{}",
         past.join("\n  src/")
     );
 }
@@ -265,16 +260,41 @@ fn test_code_is_not_measured() {
     assert_eq!(names_of(&past), vec!["long_production"]);
 }
 
+/// A function of exactly `lines` lines, from its `fn` line to its closing brace.
+fn a_function_of(name: &str, lines: usize) -> String {
+    a_function_with(name, lines - 2)
+}
+
 #[test]
-fn the_backend_is_left_to_its_own_node() {
+fn a_long_function_under_the_backend_is_reported() {
     // Given a tree whose only function past the cap is under `backends/`
-    let long = a_function_with("long_backend_function", CAP);
-    let short = a_function_with("short_function", 3);
-    let tree = a_source_tree_of(&[("backends/rust.rs", &long), ("plan.rs", &short)]);
+    let long = a_function_of("sample", CAP + 1);
+    let short = a_function_of("short_function", 5);
+    let tree = a_source_tree_of(&[("backends/rust/sample.rs", &long), ("plan.rs", &short)]);
+
+    // When the functions past the cap are listed
+    let past: Vec<String> = functions_past_the_cap_under(tree.path())
+        .iter()
+        .map(Measured::to_string)
+        .collect();
+
+    // Then it is reported with its file, line and length
+    assert_eq!(past, vec!["backends/rust/sample.rs:1 sample (61 lines)"]);
+}
+
+#[test]
+fn a_function_of_exactly_sixty_lines_is_within_the_budget() {
+    // Given a function at the cap and one a line past it
+    let at_the_cap = a_function_of("at_the_cap", CAP);
+    let past_the_cap = a_function_of("past_the_cap", CAP + 1);
+    let tree = a_source_tree_of(&[(
+        "backends/rust/edge.rs",
+        &format!("{at_the_cap}{past_the_cap}"),
+    )]);
 
     // When the functions past the cap are listed
     let past = functions_past_the_cap_under(tree.path());
 
-    // Then none is
-    assert_eq!(past, Vec::<Measured>::new());
+    // Then only the one past it is
+    assert_eq!(names_of(&past), vec!["past_the_cap"]);
 }
