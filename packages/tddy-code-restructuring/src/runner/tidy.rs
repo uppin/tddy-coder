@@ -34,6 +34,11 @@
 mod diagnostics;
 mod format;
 mod gating;
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-extract-method-clean): `tidy` calls `remove_unused_mut` in the green phase"
+)]
+mod unused_mut;
 #[cfg(test)]
 mod wide_facade_tests;
 
