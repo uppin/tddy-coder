@@ -306,6 +306,9 @@ pub(crate) fn declared_in_destination(
             manifest_edits::insert_module_declaration_sorted(
                 &text,
                 &format!("pub mod {};", member.module),
+                // TODO(reshape-tidy-facades): implement — the comments `removed_declaration` read
+                // above the member's declaration in its declaring file.
+                "",
             )
         })
         .collect();

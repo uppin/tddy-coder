@@ -14,7 +14,9 @@ mod harness;
 
 use harness::{
     a_workspace_whose_test_binary_reads_a_file_beside_it,
-    a_workspace_whose_test_binary_stands_alone, applying_a_move_of_the_test_binary, ORIGIN_LIB,
+    a_workspace_whose_test_binary_reads_a_file_beside_it_and_carries_an_unused_import,
+    a_workspace_whose_test_binary_stands_alone, applying_a_move_of_the_test_binary,
+    moving_the_test_binary, ORIGIN_LIB,
 };
 use tddy_code_restructuring::runner::RunSummary;
 
@@ -122,5 +124,52 @@ async fn writes_nothing_to_a_tree_that_did_not_compile_before_the_plan() {
     assert!(
         !workspace.holds(".restructure"),
         "the refusal says nothing was written, but the run's state directory was"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_apply_says_the_tidy_did_not_run_and_how_many_unused_imports_it_left() {
+    // Given a test binary whose move leaves a tree that does not compile, and an unused import
+    let workspace =
+        a_workspace_whose_test_binary_reads_a_file_beside_it_and_carries_an_unused_import();
+
+    // When it is moved by an apply
+    let refusal = applying_a_move_of_the_test_binary(&workspace)
+        .await
+        .expect_err("an apply whose result does not compile is a failed run");
+
+    // Then the refusal says the tidy did not run, and counts what it left
+    assert!(
+        refusal.contains(
+            "the tidy did not run, so the written files were neither tidied nor formatted; the \
+             failing check reported 1 `unused import` warning(s) in them"
+        ),
+        "the refusal does not say the tidy was skipped:\n{refusal}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_successful_apply_says_nothing_about_a_skipped_tidy() {
+    // Given a test binary that compiles wherever it lands
+    let workspace = a_workspace_whose_test_binary_stands_alone();
+
+    // When it is moved by an apply
+    let (summary, said) = moving_the_test_binary(&workspace, false).await;
+
+    // Then the run succeeds and no line speaks of a tidy that did not run
+    assert_eq!(
+        (
+            summary,
+            said.iter()
+                .any(|line| line.contains("the tidy did not run"))
+        ),
+        (
+            Ok(RunSummary {
+                applied: 1,
+                total: 1,
+                stopped_early: false,
+            }),
+            false
+        )
     );
 }
