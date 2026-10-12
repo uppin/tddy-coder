@@ -38,6 +38,7 @@ The assembly is a function of texts, so it is unit-tested without a server.
 | `facade.rs` | the `pub use` a move leaves: `glob` is one line over the destination, `named` and `outside` one grouped line per visibility |
 | `outside.rs` | the one decision `reexport: outside` takes for both operations: which sites lie outside the crate (see below) |
 | `assemble.rs` | the new text of every file, from the original texts and the server's answers |
+| `members.rs` | the fields, methods and associated constants a move splits from their users: `members_of` reads them from the outline (the children of a struct and of an **inherent** `impl`; never a trait `impl`, a trait, an enum, or a member written `pub`/`pub(crate)`/relative), `widen_members` computes each one's scope from the modules of its references, `member_visibility_edit` writes the keyword before the member's name (the one edit `outline::visibility_edit` refuses for a field), `landing_of` adds both to the item visibilities `assemble` computes. Two sets: moved members (widened where they land, for users outside the run) and kept members (widened where they stay, for users inside the run, only when the moved text mentions the name). Users are keyed by owner type and member name |
 | `canonical_paths.rs` | `canonical_paths: true` on a `move_item` line: each `crate::`-headed path in the moved text whose defining path differs is rewritten to it, every path rewritten or left is noted, and a path whose defining module is private is left as written |
 | `doc_links.rs` | the `///` / `//!` link pass: a fully-qualified link that names or reaches a moved item/module is respelled; prose, fenced examples and `self::`/`super::`/bare links are left alone |
 
@@ -51,6 +52,8 @@ The assembly is a function of texts, so it is unit-tested without a server.
 | `declaration.rs` | reading `mod name;` as whole lines (attributes and doc comments above, visibility, `;`), and where a declaration belongs in the new parent |
 | `relocation.rs` | where each file goes: it keeps its place relative to the module, under the new parent's directory |
 | `visibility.rs` | the declaration's visibility respelled for the new parent, as `move_item` respells an item's |
+| `tree_reach.rs` | what the moved tree names in the places it leaves: `modules_to_survey` gives the old parent and each ancestor below the common ancestor of the old and new parents, `reached_by_the_tree` reads each module's own file for root items written private or restricted whose scope does not cover the new module path, keeps the ones the moved files mention, confirms each with `references_at`, and `widenings` widens them with `Scope::widened_to` |
+| `tree_visibility.rs` | every `pub(…)` written in a moved file, read at its old module: `pub(crate)` and a scope inside the tree are left alone, a scope that reached outside is widened until legal under the new parent, an unreadable one is refused naming file and line. No server request |
 | `assemble.rs` | the new text of every file and the `Rename` for every moved file |
 
 `crate_move/module_files.rs` is the shared reading of the files a module spans: `children_directory` (a
@@ -58,6 +61,15 @@ crate root and a `mod.rs` own their directory, any other `a.rs` owns `a/`), `fil
 `<name>/mod.rs`) and `files_of` (the module's file and every file its `mod` declarations lead to,
 inline modules followed, refused when a declaration leads to no file). It is read from the workspace, so
 an earlier operation's pending edits are seen.
+
+## Emptied directories
+
+`apply::remove_emptied_directories` runs at the end of `apply_workspace_edit` over the `from` of every
+`Rename`: for each, it removes the parent chain while a directory exists, lies strictly below the root and
+`read_dir` yields nothing, and stops at the first one that is not empty. `PreImage::restore`
+(`journal/group.rs`) calls it after removing a file a group created, and already recreates the parent of a
+file it restores, so a rolled-back or re-run operation finds the directories it writes into. An I/O error
+other than a missing directory is returned. The dry-run overlay models files, not directories.
 
 ## Plan codec
 
@@ -125,13 +137,18 @@ a generated workspace and a live rust-analyzer, with `assert_compiles_with_its_t
 `move_item_of_an_item_the_destination_imports_acceptance`, `move_item_outside_facade_acceptance`,
 `reparent_module_acceptance`, `reparent_module_beyond_the_basics_acceptance`,
 `reparent_module_through_the_old_parents_import_acceptance`, `same_crate_deep_check_acceptance`,
-`move_fidelity_acceptance` and
-`anchors_package_relative_path`.
+`same_crate_widening_acceptance`, `move_fidelity_acceptance` and
+`anchors_package_relative_path`. `same_crate_widening_acceptance` covers the member and tree widenings and
+the emptied directories; the member widening, the tree visibilities, the survey bound and the sweep are
+also unit-tested in their modules, from outline JSON and texts, with no server. Every live
+rust-analyzer suite of the package is listed in `.config/rust-e2e.filterset` and the `rust-analyzer`
+group of `.config/nextest.toml`, which runs them one server at a time.
 
 ## Limits
 
 Each is a refusal or a compile-gate failure; none is silent. They are listed in the feature doc's
-[Known limitations](../../../docs/ft/coder/rust-code-restructuring.md#known-limitations): fields and `impl`
-members split by a move and the private items of a re-parented tree are not widened, the `use` header is
-copied whole, an aliased import of the moving item reads as a name clash, and `outside` reads the
-default target layout only.
+[Known limitations](../../../docs/ft/coder/rust-code-restructuring.md#known-limitations): members are
+surveyed in the source file only (an `impl` of the moved type in another file, and a tuple-struct field the
+outline does not list, are not), a re-parented tree's reach is surveyed in the root items of the old parent
+and its ancestors (an item inside a sibling module is not), the `use` header is copied whole, an aliased
+import of the moving item reads as a name clash, and `outside` reads the default target layout only.
