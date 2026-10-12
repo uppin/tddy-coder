@@ -10,13 +10,15 @@
 //! The widening is a function of the text and of who uses each member, so it is shared: an
 //! operation that moves members between `impl` blocks widens them the same way.
 
-// TODO(reshape-widen-same-crate): remove once `move_item` surveys members (milestone M4).
-#![allow(dead_code)]
-
-use std::ops::RangeInclusive;
+use std::collections::BTreeMap;
+use std::ops::{Range, RangeInclusive};
 
 use serde_json::Value;
 
+use super::super::{failure, is_identifier, visibility_in, SYMBOL_KIND_IMPL};
+use super::assemble::{visibilities, Landing, Moving};
+use super::outline::{declaration_prefix, visibility_before};
+use super::scope::Scope;
 use super::text::Edit;
 use crate::edit::VisibilityChange;
 use crate::Result;
@@ -54,6 +56,28 @@ pub(crate) struct MemberWidening {
     pub(crate) report: Vec<VisibilityChange>,
 }
 
+/// The visibilities the move changes: the items' (see [`visibilities`]) and the members' the move
+/// splits from the code that uses them. A moved member's edit belongs to the moved text; a kept
+/// member's to the source file.
+pub(super) fn landing_of(
+    moving: &Moving<'_>,
+    texts: &BTreeMap<String, String>,
+    region: &Range<usize>,
+) -> Result<Landing> {
+    let mut landing = visibilities(moving, texts, region)?;
+    let moved = widen_members(moving.source_text, &moving.reached.moved_members)?;
+    landing
+        .claimed
+        .extend(moved.edits.iter().map(|edit| edit.start..edit.end));
+    landing.moved_edits.extend(moved.edits);
+    let kept = widen_members(moving.source_text, &moving.reached.kept_members)?;
+    landing.kept_edits.extend(kept.edits);
+    landing
+        .report
+        .extend(moved.report.into_iter().chain(kept.report));
+    Ok(landing)
+}
+
 /// The private members of the structs and inherent `impl` blocks whose root symbol starts inside
 /// `starting_in` (`inside`), or outside it (`!inside`), in file order.
 ///
@@ -66,9 +90,29 @@ pub(crate) fn members_of(
     starting_in: RangeInclusive<u32>,
     inside: bool,
 ) -> Vec<Member> {
-    let _ = (symbols, text, starting_in, inside);
-    // TODO(reshape-widen-same-crate): implement
-    todo!("read the members of the structs and inherent impls from the outline")
+    symbols
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|symbol| {
+            let first = symbol.pointer("/range/start/line").and_then(Value::as_u64);
+            first.is_some_and(|line| starting_in.contains(&(line as u32 + 1))) == inside
+        })
+        .flat_map(|symbol| {
+            let (owner, kinds) = owner_and_member_kinds(symbol);
+            let children = symbol.get("children").and_then(Value::as_array);
+            children
+                .into_iter()
+                .flatten()
+                .filter(move |child| {
+                    child
+                        .get("kind")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|kind| kinds.contains(&kind))
+                })
+                .filter_map(move |child| member_of(text, &owner, child))
+        })
+        .collect()
 }
 
 /// The edits to `text` that let every user of each member reach it, and the report of each one.
@@ -78,9 +122,41 @@ pub(crate) fn members_of(
 /// member whose scope does not change gets no edit and no report line. The report names the member
 /// by its type: `Counter::count`.
 pub(crate) fn widen_members(text: &str, reached: &[ReachedMember]) -> Result<MemberWidening> {
-    let _ = (text, reached);
-    // TODO(reshape-widen-same-crate): implement
-    todo!("widen each member to the scope its users need")
+    let mut widening = MemberWidening::default();
+    for reached in reached {
+        let member = &reached.member;
+        let written = Scope::parse(&member.visibility, &reached.written_in).ok_or_else(|| {
+            failure(format!(
+                "the visibility `{}` of `{}::{}` is not one this move can read",
+                member.visibility, member.owner, member.name
+            ))
+        })?;
+        let moves = reached.written_in != reached.lands_in;
+        let starts_as = if moves && member.visibility.is_empty() {
+            Scope::Within(reached.lands_in.clone())
+        } else {
+            written
+        };
+        let scope = reached
+            .users
+            .iter()
+            .fold(starts_as.clone(), |scope, user| scope.widened_to(user));
+        if scope == starts_as {
+            continue;
+        }
+        let to = scope.spelled_in(&reached.lands_in);
+        if to != member.visibility {
+            widening
+                .edits
+                .push(member_visibility_edit(text, member, &to)?);
+        }
+        widening.report.push(VisibilityChange {
+            item: format!("{}::{}", member.owner, member.name),
+            from: spelled(&member.visibility),
+            to: spelled(&to),
+        });
+    }
+    Ok(widening)
 }
 
 /// The edit that gives the declaration of `member` the visibility `to`.
@@ -89,9 +165,63 @@ pub(crate) fn widen_members(text: &str, reached: &[ReachedMember]) -> Result<Mem
 /// line: a field has nothing between its visibility and its name, which is what an item's
 /// visibility edit refuses.
 pub(crate) fn member_visibility_edit(text: &str, member: &Member, to: &str) -> Result<Edit> {
-    let _ = (text, member, to);
-    // TODO(reshape-widen-same-crate): implement
-    todo!("write the visibility before the member's name")
+    let (at, prefix) = declaration_prefix(text, &member.position).ok_or_else(|| {
+        failure(format!(
+            "the server's position for `{}::{}` could not be read",
+            member.owner, member.name
+        ))
+    })?;
+    let written = visibility_in(prefix);
+    let after = prefix[written.len()..].len() - prefix[written.len()..].trim_start().len();
+    let replacement = if to.is_empty() {
+        String::new()
+    } else {
+        format!("{to} ")
+    };
+    Ok(Edit::replace(at..at + written.len() + after, replacement))
+}
+
+/// LSP symbol kinds: `Method`, `Function`, `Constant`, `Field` and `Struct`.
+const MEMBER_OF_AN_IMPL: [u64; 3] = [6, 12, 14];
+const MEMBER_OF_A_STRUCT: [u64; 1] = [8];
+const SYMBOL_KIND_STRUCT: u64 = 23;
+
+/// The type a root symbol's members belong to, and the kinds of child that are members. A symbol
+/// whose members are not surveyed (a trait `impl`, an enum, a function) has no kinds.
+fn owner_and_member_kinds(symbol: &Value) -> (String, &'static [u64]) {
+    let name = symbol
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match symbol.get("kind").and_then(Value::as_u64) {
+        Some(SYMBOL_KIND_STRUCT) => (name.to_string(), &MEMBER_OF_A_STRUCT),
+        Some(SYMBOL_KIND_IMPL) => match name.strip_prefix("impl") {
+            Some(rest) if !rest.contains(" for ") => (rest.trim().to_string(), &MEMBER_OF_AN_IMPL),
+            _ => (String::new(), &[]),
+        },
+        _ => (String::new(), &[]),
+    }
+}
+
+/// The member an outline child describes, when it is named and written private.
+fn member_of(text: &str, owner: &str, child: &Value) -> Option<Member> {
+    let name = child.get("name").and_then(Value::as_str)?;
+    let position = child.pointer("/selectionRange/start")?.clone();
+    let visibility = visibility_before(text, &position);
+    (is_identifier(name) && visibility.is_empty()).then(|| Member {
+        owner: owner.to_string(),
+        name: name.to_string(),
+        position,
+        visibility,
+    })
+}
+
+fn spelled(visibility: &str) -> String {
+    if visibility.is_empty() {
+        "private".to_string()
+    } else {
+        visibility.to_string()
+    }
 }
 
 #[cfg(test)]

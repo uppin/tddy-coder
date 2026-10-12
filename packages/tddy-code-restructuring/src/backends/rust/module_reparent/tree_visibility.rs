@@ -7,15 +7,23 @@
 //! the tree keeps everything it covered and is widened until it is legal where the file now sits, so
 //! no caller that could see the item before loses it. No server is asked: the text answers it.
 
-// TODO(reshape-widen-same-crate): remove once `reparent_module` respells the tree (milestone M5).
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
+use super::super::early_return::masked_to_code;
+use super::super::item_move::rebase::visibility_spans;
+use super::super::item_move::scope::Scope;
+use super::super::item_move::text::{enclosing_modules, Edit};
+use super::super::seam_refusal;
 use super::reading::Reparent;
 use super::survey::Survey;
 use super::tree_reach::Widened;
+use crate::edit::VisibilityChange;
 use crate::Result;
+
+/// The words that introduce a declaration whose name follows.
+const DECLARATIONS: [&str; 9] = [
+    "fn", "struct", "enum", "trait", "type", "const", "static", "mod", "union",
+];
 
 /// The edits to the moved files (keyed by each file's path before the move) that keep every
 /// visibility written in them covering what it covered, and the report of each widening.
@@ -30,9 +38,67 @@ pub(super) fn respelled(
     request: &Reparent,
     survey: &Survey,
 ) -> Result<Widened> {
-    let _ = (texts, request, survey);
-    // TODO(reshape-widen-same-crate): implement
-    todo!("read each visibility in the moved files at its old module and respell it")
+    let (old_tree, new_tree) = (request.module_path(), new_tree_of(request, survey));
+    let mut edits = Vec::new();
+    let mut report = Vec::new();
+    for file in &survey.files {
+        let text = &texts[&file.from];
+        let masked = masked_to_code(text);
+        for span in visibility_spans(&masked, &(0..masked.len())) {
+            let written = &text[span.clone()];
+            if written == "pub(crate)" {
+                continue;
+            }
+            let inside = enclosing_modules(text, span.start);
+            let old_at = [old_tree.as_slice(), &file.below, &inside].concat();
+            let old_scope = Scope::parse(written, &old_at).ok_or_else(|| {
+                let line = text[..span.start].matches('\n').count() + 1;
+                seam_refusal(format!(
+                    "{}:{line}: the visibility `{written}` is not one this move can read",
+                    file.from
+                ))
+            })?;
+            if matches!(&old_scope, Scope::Within(path) if path.starts_with(&old_tree)) {
+                continue;
+            }
+            let new_at = [new_tree.as_slice(), &file.below, &inside].concat();
+            let spelled = old_scope.widened_to(&new_at).spelled_in(&new_at);
+            if spelled == written {
+                continue;
+            }
+            report.push(VisibilityChange {
+                item: declared_after(&masked[span.end..]),
+                from: written.to_string(),
+                to: spelled.clone(),
+            });
+            edits.push((file.from.clone(), Edit::replace(span, spelled)));
+        }
+    }
+    Ok((edits, report))
+}
+
+/// The moved module's path below the crate root once it sits under its new parent.
+fn new_tree_of(request: &Reparent, survey: &Survey) -> Vec<String> {
+    let mut path = survey.new_parent.path.clone();
+    path.push(request.name.clone());
+    path
+}
+
+/// What a declaration is called, read from the rest of its line after the visibility: the
+/// identifier after the declaration keyword, or the first identifier of a field.
+fn declared_after(rest: &str) -> String {
+    let line = rest.lines().next().unwrap_or_default();
+    let words: Vec<&str> = line
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let named = words.windows(2).find_map(|pair| {
+        (DECLARATIONS.contains(&pair[0]) && !DECLARATIONS.contains(&pair[1])).then_some(pair[1])
+    });
+    named
+        .or_else(|| words.first().copied())
+        .unwrap_or_default()
+        .to_string()
 }
 
 #[cfg(test)]

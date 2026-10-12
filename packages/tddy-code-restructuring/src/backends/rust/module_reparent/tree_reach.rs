@@ -7,19 +7,20 @@
 //! each candidate the moved files mention, and the item is widened only as far as the module's new
 //! path needs ([`widenings`]), the way `move_item` widens an item it leaves behind.
 
-// TODO(reshape-widen-same-crate): remove once `reparent_module` surveys the tree's reach (M6).
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 
-use super::super::item_move::outline::Item;
-use super::super::item_move::text::Edit;
-use super::super::RustBackend;
+use super::super::item_move::destination::{find_module, Lookup};
+use super::super::item_move::outline::{self, visibility_edit, Item};
+use super::super::item_move::scope::Scope;
+use super::super::item_move::text::{identifiers_in, Edit};
+use super::super::{seam_refusal, uri_of, RustBackend};
 use super::reading::Reparent;
 use super::survey::Survey;
 use crate::edit::VisibilityChange;
+use crate::item_anchor::module_path_of;
 use crate::registry::Workspace;
 use crate::Result;
+use serde_json::Value;
 
 /// Edits to files (keyed by path) and the report of every widening they make.
 pub(super) type Widened = (Vec<(String, Edit)>, Vec<VisibilityChange>);
@@ -38,9 +39,15 @@ pub(super) struct ReachedItem {
 /// `new_parent`: the old parent and every ancestor strictly below the two places' common ancestor,
 /// nearest first.
 pub(super) fn modules_to_survey(old_parent: &[String], new_parent: &[String]) -> Vec<Vec<String>> {
-    let _ = (old_parent, new_parent);
-    // TODO(reshape-widen-same-crate): implement
-    todo!("the old parent and its ancestors below the common ancestor")
+    let shared = old_parent
+        .iter()
+        .zip(new_parent)
+        .take_while(|(old, new)| old == new)
+        .count();
+    (shared + 1..=old_parent.len())
+        .rev()
+        .map(|depth| old_parent[..depth].to_vec())
+        .collect()
 }
 
 /// The edits that widen each reached item, in its own file, until `new_module` can see it, and the
@@ -50,9 +57,56 @@ pub(super) fn widenings(
     reached: &[ReachedItem],
     new_module: &[String],
 ) -> Result<Widened> {
-    let _ = (texts, reached, new_module);
-    // TODO(reshape-widen-same-crate): implement
-    todo!("widen each reached item to cover the module's new path")
+    let mut edits = Vec::new();
+    let mut report = Vec::new();
+    for reached in reached {
+        let item = &reached.item;
+        let written = read_scope(item, &reached.module)?;
+        let widened = written.clone().widened_to(new_module);
+        if widened == written {
+            continue;
+        }
+        let to = widened.spelled_in(&reached.module);
+        let edit = visibility_edit(&texts[&reached.file], &item.position, &item.name, &to)?;
+        edits.push((reached.file.clone(), edit));
+        report.push(VisibilityChange {
+            item: item.name.clone(),
+            from: as_written(&item.visibility),
+            to: as_written(&to),
+        });
+    }
+    Ok((edits, report))
+}
+
+fn read_scope(item: &Item, module: &[String]) -> Result<Scope> {
+    Scope::parse(&item.visibility, module).ok_or_else(|| {
+        seam_refusal(format!(
+            "the visibility `{}` of `{}` is not one this move can read",
+            item.visibility, item.name
+        ))
+    })
+}
+
+fn as_written(visibility: &str) -> String {
+    if visibility.is_empty() {
+        "private".to_string()
+    } else {
+        visibility.to_string()
+    }
+}
+
+/// Whether any of the server's `references` lies in one of the files at `moved_uris`.
+fn from_a_moved_file(references: &Value, moved_uris: &[String]) -> bool {
+    references
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|reference| {
+            reference
+                .get("uri")
+                .and_then(Value::as_str)
+                .is_some_and(|uri| moved_uris.iter().any(|moved| moved == uri))
+        })
 }
 
 impl RustBackend {
@@ -64,9 +118,55 @@ impl RustBackend {
         request: &Reparent,
         survey: &Survey,
     ) -> Result<Vec<ReachedItem>> {
-        let _ = (workspace, request, survey);
-        // TODO(reshape-widen-same-crate): implement
-        todo!("survey the old parent and ancestors for the items the tree names")
+        let moved: String = survey
+            .files
+            .iter()
+            .map(|file| workspace.read(&file.from))
+            .collect::<Result<Vec<_>>>()?
+            .join("\n");
+        let mentioned = identifiers_in(&moved);
+        let moved_uris: Vec<String> = survey
+            .files
+            .iter()
+            .map(|file| uri_of(&workspace.root.join(&file.from)))
+            .collect();
+        let mut new_module = survey.new_parent.path.clone();
+        new_module.push(request.name.clone());
+
+        let mut reached = Vec::new();
+        for module in modules_to_survey(&request.parent, &survey.new_parent.path) {
+            let Lookup::Found(found) = find_module(workspace, &request.named.package, &module)?
+            else {
+                continue;
+            };
+            // Only a module that is a file of its own has root items that are the file's.
+            if module_path_of(workspace.root, &found.file)?.split_off(1) != module {
+                continue;
+            }
+            let text = workspace.read(&found.file)?;
+            let uri = uri_of(&workspace.root.join(&found.file));
+            self.did_open(&uri, &text)?;
+            let symbols = self.settled_outline(&uri)?;
+            for item in outline::root_items(&symbols, &text, None) {
+                let names_the_module = module == request.parent && item.name == request.name;
+                if names_the_module
+                    || !mentioned.contains(&item.name)
+                    || read_scope(&item, &module)?.widened_to(&new_module)
+                        == read_scope(&item, &module)?
+                {
+                    continue;
+                }
+                let references = self.references_at(&uri, &item.position)?;
+                if from_a_moved_file(&references, &moved_uris) {
+                    reached.push(ReachedItem {
+                        file: found.file.clone(),
+                        module: module.clone(),
+                        item,
+                    });
+                }
+            }
+        }
+        Ok(reached)
     }
 }
 

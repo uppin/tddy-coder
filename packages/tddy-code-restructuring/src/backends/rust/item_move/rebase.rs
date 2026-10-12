@@ -72,7 +72,10 @@ fn overlaps(one: &Range<usize>, other: &Range<usize>) -> bool {
 }
 
 /// The spans of the `pub(…)` qualifiers in `region`.
-fn visibility_spans(masked: &str, region: &Range<usize>) -> Vec<Range<usize>> {
+pub(in crate::backends::rust) fn visibility_spans(
+    masked: &str,
+    region: &Range<usize>,
+) -> Vec<Range<usize>> {
     let bytes = masked.as_bytes();
     masked[region.clone()]
         .match_indices("pub(")

@@ -57,11 +57,13 @@ impl RustBackend {
 
         let reexport = op.reexport.unwrap_or(Reexport::None);
         let sites = self.callers_of_the_module(workspace, &request, &survey)?;
+        let reached = self.reached_by_the_tree(workspace, &request, &survey)?;
         let reach = Reach::of(reexport, workspace.root, &request.named.package, sites)?;
         let assembled = assemble(&Reparenting {
             workspace,
             request: &request,
             survey: &survey,
+            reached: &reached,
             sites: &reach.sites,
             outside: &reach.outside,
             reexport,

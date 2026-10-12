@@ -35,7 +35,13 @@ pub fn apply_workspace_edit(
             git_move(root, from, to, spawns)?;
         }
     }
-    Ok(())
+    remove_emptied_directories(
+        root,
+        edit.changes.iter().filter_map(|change| match change {
+            FileEdit::Rename { from, .. } => Some(from.as_str()),
+            _ => None,
+        }),
+    )
 }
 
 /// Confirm `root` is inside a git worktree. `git mv` is mandatory, so this is checked up front.
@@ -161,16 +167,29 @@ pub(crate) fn byte_offset(contents: &str, line: u32, col: u32) -> Result<usize> 
 /// with nothing in it. A directory that still holds anything — a data file no `mod` reaches, a
 /// `.DS_Store` — is left as it is, and so is `root` itself. Whatever writes into a removed directory
 /// later creates it again (`git_move`, a rollback's restore).
-// TODO(reshape-widen-same-crate): remove the allow once `apply_workspace_edit` calls it (M1).
-#[allow(dead_code)]
 pub(crate) fn remove_emptied_directories<'a>(
     root: &Path,
     vacated: impl IntoIterator<Item = &'a str>,
 ) -> Result<()> {
-    let _ = (root, vacated.into_iter());
-    // TODO(reshape-widen-same-crate): implement, and call it at the end of `apply_workspace_edit`
-    // over the `from` of every `Rename`
-    todo!("remove the directories the vacated paths left empty")
+    for path in vacated {
+        for directory in Path::new(path).ancestors().skip(1) {
+            if directory.as_os_str().is_empty() {
+                break;
+            }
+            match std::fs::read_dir(root.join(directory)) {
+                Ok(mut entries) => {
+                    if entries.next().is_some() {
+                        break;
+                    }
+                }
+                // Already swept through another vacated path.
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            }
+            std::fs::remove_dir(root.join(directory))?;
+        }
+    }
+    Ok(())
 }
 
 /// Move a file with `git mv`, creating the destination directory first. Preserves history.

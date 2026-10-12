@@ -19,6 +19,8 @@ use super::super::item_move::text::{applied, qualifier_start, Edit};
 use super::declaration::insertion;
 use super::reading::Reparent;
 use super::survey::Survey;
+use super::tree_reach::{widenings, ReachedItem};
+use super::tree_visibility::respelled;
 use super::visibility::{landing, Landing};
 use crate::edit::VisibilityChange;
 use crate::plan::Reexport;
@@ -30,6 +32,8 @@ pub(super) struct Reparenting<'a> {
     pub(super) workspace: &'a Workspace<'a>,
     pub(super) request: &'a Reparent,
     pub(super) survey: &'a Survey,
+    /// The items of the old parent and its ancestors that the moved files name.
+    pub(super) reached: &'a [ReachedItem],
     /// The callers the move re-points: under `outside`, only the ones in the module's own crate.
     pub(super) sites: &'a [Site],
     /// The module's name when something outside the crate reaches it under `outside`.
@@ -62,6 +66,8 @@ pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
     rebase_the_moved_files(moving, &texts, &mut edits);
     leave_behind(moving, &landing, &mut edits);
     arrive(moving, &landing, &mut edits);
+    let mut report = landing.report;
+    report.extend(widen_the_tree(moving, &texts, &mut edits)?);
     for (path, list) in doc_links::across_the_crate(
         moving.workspace,
         &moving.request.named.package,
@@ -95,7 +101,7 @@ pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
             .iter()
             .map(|file| (file.from.clone(), file.to.clone()))
             .collect(),
-        report: landing.report,
+        report,
         notes,
     })
 }
@@ -112,13 +118,33 @@ fn original_texts(moving: &Reparenting<'_>) -> Result<BTreeMap<String, String>> 
         .files
         .iter()
         .map(|file| &file.from)
-        .chain(moving.sites.iter().map(|site| &site.path));
+        .chain(moving.sites.iter().map(|site| &site.path))
+        .chain(moving.reached.iter().map(|reached| &reached.file));
     for path in wanted {
         if !texts.contains_key(path) {
             texts.insert(path.clone(), moving.workspace.read(path)?);
         }
     }
     Ok(texts)
+}
+
+/// What the moved tree names of the modules it leaves, widened to be visible from its new place,
+/// and the visibilities written in its files, respelled for it. Added to `edits`; the report is
+/// returned.
+fn widen_the_tree(
+    moving: &Reparenting<'_>,
+    texts: &BTreeMap<String, String>,
+    edits: &mut BTreeMap<String, Vec<Edit>>,
+) -> Result<Vec<VisibilityChange>> {
+    let mut new = moving.survey.new_parent.path.clone();
+    new.push(moving.request.name.clone());
+    let (reached, mut report) = widenings(texts, moving.reached, &new)?;
+    let (respelled, respelled_report) = respelled(texts, moving.request, moving.survey)?;
+    for (path, edit) in reached.into_iter().chain(respelled) {
+        edits.entry(path).or_default().push(edit);
+    }
+    report.extend(respelled_report);
+    Ok(report)
 }
 
 /// Every path that named the module, pointed at the module's new home.

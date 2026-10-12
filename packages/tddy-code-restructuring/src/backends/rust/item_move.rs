@@ -202,14 +202,90 @@ impl RustBackend {
     ) -> Result<Reach> {
         let left = outline::left_behind(symbols, source_text, run);
         let items = self.reached_by_the_moved_code(uri, source_text, &left, run)?;
-        // TODO(reshape-widen-same-crate): implement — survey the members `members::members_of`
-        // reads on both sides of the run (rules 1-2 of the changeset).
-        let _ = (workspace, destination);
+        let lines = run.first_line..=run.last_line;
+        let moved = &source_text[text::line_start(source_text, run.first_line)
+            ..text::line_end(source_text, run.last_line)];
+        let mentioned = text::identifiers_in(moved);
+        let moved_members = members::members_of(symbols, source_text, lines.clone(), true);
+        let mut kept_members = members::members_of(symbols, source_text, lines, false);
+        kept_members.retain(|member| mentioned.contains(&member.name));
+        let surveyed = moved_members.len() + kept_members.len();
+        if surveyed > 0 {
+            (self.progress)(&format!(
+                "move_item: surveying {surveyed} member(s) of the types the move splits"
+            ));
+        }
+        let file = relative_to(uri, workspace.root)?;
+        let source = module_path_of(workspace.root, &file)?;
+        let survey = MemberSurvey {
+            uri,
+            file: &file,
+            source_text,
+            run,
+            source: &source[1..],
+            destination: &destination.module.path,
+        };
         Ok(Reach {
             items,
-            moved_members: Vec::new(),
-            kept_members: Vec::new(),
+            moved_members: self.reached_members(workspace, &survey, moved_members, true)?,
+            kept_members: self.reached_members(workspace, &survey, kept_members, false)?,
         })
+    }
+
+    /// Each of `members` with the modules on the other side of the move that use it: for a member
+    /// that moves (`moves`), the modules outside the run; for one that stays, the destination when
+    /// the run uses it.
+    fn reached_members(
+        &mut self,
+        workspace: &Workspace<'_>,
+        survey: &MemberSurvey<'_>,
+        members: Vec<members::Member>,
+        moves: bool,
+    ) -> Result<Vec<ReachedMember>> {
+        let region = text::line_start(survey.source_text, survey.run.first_line)
+            ..text::line_end(survey.source_text, survey.run.last_line);
+        let crate_name = module_path_of(workspace.root, survey.file)?.swap_remove(0);
+        let mut reached = Vec::new();
+        for member in members {
+            let named = [(member.name.as_str(), &member.position)];
+            let sites = self.sites_of(
+                survey.uri,
+                workspace,
+                survey.file,
+                survey.source_text,
+                &named,
+            )?;
+            let inside = |site: &Site| site.path == survey.file && region.contains(&site.offset);
+            let users = if moves {
+                let mut users = Vec::new();
+                for site in sites.iter().filter(|site| !inside(site)) {
+                    let text = workspace.read(&site.path)?;
+                    let base = sites::module_of_file(workspace.root, &crate_name, &site.path);
+                    users.extend(base.map(|base| {
+                        base.into_iter()
+                            .chain(text::enclosing_modules(&text, site.offset))
+                            .collect()
+                    }));
+                }
+                users
+            } else if sites.iter().any(inside) {
+                vec![survey.destination.to_vec()]
+            } else {
+                Vec::new()
+            };
+            reached.push(ReachedMember {
+                member,
+                written_in: survey.source.to_vec(),
+                lands_in: if moves {
+                    survey.destination
+                } else {
+                    survey.source
+                }
+                .to_vec(),
+                users,
+            });
+        }
+        Ok(reached)
     }
 
     /// The items the run leaves behind that the moved code names.
@@ -252,16 +328,23 @@ impl RustBackend {
     }
 }
 
+/// Where a move's members are surveyed from.
+struct MemberSurvey<'a> {
+    uri: &'a str,
+    file: &'a str,
+    source_text: &'a str,
+    run: &'a Run,
+    source: &'a [String],
+    destination: &'a [String],
+}
+
 /// What a move connects across its two sides.
 pub(super) struct Reach {
     /// The items the source module keeps that the moved code names.
     pub(super) items: Vec<Item>,
     /// The private members of the moved structs and `impl`s that code left behind uses.
-    // TODO(reshape-widen-same-crate): read by the assembly's member widening (milestone M4).
-    #[allow(dead_code)]
     pub(super) moved_members: Vec<ReachedMember>,
     /// The private members of the kept structs and `impl`s that the moved code uses.
-    #[allow(dead_code)]
     pub(super) kept_members: Vec<ReachedMember>,
 }
 

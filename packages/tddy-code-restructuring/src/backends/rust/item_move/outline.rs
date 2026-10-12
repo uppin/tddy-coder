@@ -178,7 +178,7 @@ pub(crate) fn root_items(symbols: &Value, text: &str, outside: Option<&Run>) -> 
 
 /// The text of the declaration line up to the name at `position`, past any attributes written on
 /// the same line.
-fn declaration_prefix<'a>(text: &'a str, position: &Value) -> Option<(usize, &'a str)> {
+pub(super) fn declaration_prefix<'a>(text: &'a str, position: &Value) -> Option<(usize, &'a str)> {
     let point = LspPoint {
         line: position.get("line")?.as_u64()? as usize,
         character: position.get("character")?.as_u64()? as usize,
@@ -207,7 +207,12 @@ pub(super) fn visibility_before(text: &str, position: &Value) -> String {
 ///
 /// The keyword goes where the declaration's own text begins. A declaration whose name stands at the
 /// start of its line has its keyword on a line above, which this does not guess at.
-pub(super) fn visibility_edit(text: &str, position: &Value, name: &str, to: &str) -> Result<Edit> {
+pub(in crate::backends::rust) fn visibility_edit(
+    text: &str,
+    position: &Value,
+    name: &str,
+    to: &str,
+) -> Result<Edit> {
     let (at, prefix) = declaration_prefix(text, position).ok_or_else(|| {
         failure(format!(
             "the server's position for `{name}` could not be read"

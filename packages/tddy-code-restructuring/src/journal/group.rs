@@ -43,7 +43,7 @@ impl PreImage {
                 std::fs::write(&file, contents)?;
             }
             None => match std::fs::remove_file(&file) {
-                Ok(()) => {}
+                Ok(()) => crate::apply::remove_emptied_directories(root, [self.path.as_str()])?,
                 // Already absent is the state being restored.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
