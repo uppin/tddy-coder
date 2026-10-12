@@ -59,7 +59,7 @@ Before any operation of a run asks rust-analyzer a question, the Rust backend op
 1. **What is recorded.** After `RustBackend::resolve` returns `Ok`, for each `FileEdit` of its edit, in order: `Create { path }` and `Change { path, .. }` add `path`; `Rename { from, to }` removes `from` and adds `to`. A path is listed once, at the position it was first added. A refused operation records nothing. The record lives as long as the backend, which is one run (one `BackendRegistry` per run in the runner, the rehearsal and the daemon).
 2. **What is shown.** At the start of `resolve`, every recorded path is read through `workspace.read(path)` and staged. The first `did_open` the operation makes sends `textDocument/didOpen` for every staged document except the one being opened, then the requested one. A later `did_open` of a uri already open from the projection sends the requested text as a full `textDocument/didChange` instead of a second `didOpen`. A staged path that `workspace.read` cannot read is an error naming the path (no fallback: a recorded file the run cannot read means the record and the tree disagree).
 3. **What is closed.** Projected documents are pushed onto `opened` like any other, so `closing_what_it_opens` closes them; the staging is cleared there too, so nothing staged for one entry point reaches the next (`anchor_for`, `module_references`, `item_resolver`).
-4. **Nothing else changes in the passes.** `reach_of`, `restore_imports`, `restore_visibility`, `refuse_stranded`, `inline_paths` are unchanged; they get a server that answers for the projected tree.
+4. **Nothing else changes in the passes.** `reach_of`, `restore_imports`, `refuse_stranded`, `inline_paths` are unchanged; they get a server that answers for the projected tree. `restore_visibility` changes in one way only: an item already `pub(crate)` is not reported as a widening.
 5. **Deep-check output.** `Rehearsed` gains `widenings: Vec<VisibilityChange>` (from `Resolution::report`). `rehearsed_lines(index, &Rehearsed)` returns, in order, the survey lines (as today), one `console::visibility(&console::widening(change))` line per widening, then one `console::note` line per note. `check_plan`'s loop prints those lines; findings are unchanged.
 6. **Single-seam plans.** The first operation of a run has an empty record, so it sends exactly what it sends today.
 
@@ -265,7 +265,7 @@ Taken by the developer (brief, 2026-10-09): "All 12 wave-1 PRDs approved. Every 
 
 Unit tests 10–15 (`cargo test -p tddy-code-restructuring --lib -- projection::tests rehearsal::tests`): all 🔴 red, each panicking on the `todo!()` of the surface it exercises; the two pre-existing rehearsal tests pass.
 
-Noticed, not this node's: a dry run reports `` `PtyHandle` pub(crate) -> pub(crate)`` — a "widening" to the same visibility — for an already-`pub(crate)` item a seam moves (seen in tests 3 and 8).
+Resolved here (developer decision 2026-10-12): `restore_visibility` no longer reports an item already written `pub(crate)` as a widening, so neither a dry run nor a deep check prints `` `PtyHandle` pub(crate) -> pub(crate)`` (seen in tests 3 and 8; test 4 asserts exactly one line). This is the one exception to the boundary that leaves `restore_visibility` unchanged.
 
 ## TODO
 
