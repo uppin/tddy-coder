@@ -6,7 +6,9 @@
 
 use std::collections::BTreeMap;
 
-use tddy_code_restructuring::crate_move::{ItemReferences, ModuleReferences, Reference};
+use tddy_code_restructuring::crate_move::{
+    DeclarationKind, ItemReferences, ModuleReferences, Reference,
+};
 use tddy_code_restructuring::registry::Workspace;
 use tddy_code_restructuring::{Position, RestructureError};
 
@@ -38,6 +40,10 @@ impl AKnownReferenceSet {
             .push(ItemReferences {
                 item: item.to_string(),
                 referenced_at,
+                // A top-level item at the file's start: these suites are not about widening.
+                declared_at: Position { line: 1, col: 1 },
+                within: Vec::new(),
+                kind: DeclarationKind::Item,
             });
         self
     }

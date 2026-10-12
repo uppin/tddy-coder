@@ -179,6 +179,7 @@ mod tests {
                 item: "Counter::count".to_string(),
                 from: "private".to_string(),
                 to: "pub(crate)".to_string(),
+                reason: None,
             }]
         );
     }
@@ -208,6 +209,7 @@ mod tests {
                 item: "Counter::peek".to_string(),
                 from: "private".to_string(),
                 to: "pub(crate)".to_string(),
+                reason: None,
             }]
         );
     }
