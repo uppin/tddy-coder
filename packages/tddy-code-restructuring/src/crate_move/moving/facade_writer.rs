@@ -1,7 +1,7 @@
 use super::super::malformed;
 
 use crate::{
-    crate_move::{destination, facade_line, facade_lines_for_plan, header, manifest_edits},
+    crate_move::{facade_line, facade_lines_for_plan, header, manifest_edits, FacadeEntry},
     edit::TextEdit,
     Reexport,
 };
@@ -68,9 +68,15 @@ fn leaving(
         .map(|(member, _)| *member)
         .filter(|member| member.reexport == Reexport::Glob)
         .collect();
-    let moved: Vec<(destination::Destination, String)> = facade_members
+    // TODO(reshape-move-children): implement — the visibility is the member's own declaration's
+    // (`Move::declaration`), not always `pub`.
+    let moved: Vec<FacadeEntry> = facade_members
         .iter()
-        .map(|member| (member.destination.clone(), member.module.clone()))
+        .map(|member| FacadeEntry {
+            destination: member.destination.clone(),
+            visibility: "pub".to_string(),
+            module: member.module.clone(),
+        })
         .collect();
 
     let mut edits = Vec::new();
@@ -111,7 +117,7 @@ fn earlier_facade(
 ) -> Option<WrittenFacade> {
     let first = facade_members.first()?;
     let root = workspace.read(&first.destination_root()).ok()?;
-    written_facade(text, &first.destination.extern_name, &root)
+    written_facade(text, &first.destination.extern_name, "pub", &root)
 }
 
 /// The edit that rewrites an earlier facade line to also name the modules moving now.
@@ -119,13 +125,17 @@ fn extended_facade(
     text: &str,
     earlier: &WrittenFacade,
     facade_members: &[&Move],
-    moved: &[(destination::Destination, String)],
+    moved: &[FacadeEntry],
 ) -> TextEdit {
     let destination = &facade_members[0].destination;
     let all: Vec<_> = earlier
         .modules
         .iter()
-        .map(|module| (destination.clone(), module.clone()))
+        .map(|module| FacadeEntry {
+            destination: destination.clone(),
+            visibility: "pub".to_string(),
+            module: module.clone(),
+        })
         .chain(moved.iter().cloned())
         .collect();
     let line = facade_lines_for_plan(&all).join("\n");
@@ -184,8 +194,12 @@ pub(crate) struct WrittenFacade {
 pub(crate) fn written_facade(
     text: &str,
     extern_name: &str,
+    visibility: &str,
     destination_root: &str,
 ) -> Option<WrittenFacade> {
+    // TODO(reshape-move-children): implement — match `"{visibility} use "` (`"use "` when private)
+    // rather than `pub use` alone, so a later operation extends a facade of its own visibility.
+    let _ = visibility;
     let prefix = format!("pub use {extern_name}::");
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {

@@ -186,6 +186,38 @@ pub fn resolve(
     resolve_cluster(engine, workspace, &cluster::travelling_alone(&moving))
 }
 
+/// [`resolve`], as the [`Resolution`](crate::Resolution) a backend returns: the edit, and a note
+/// naming the files that move with the module when it carries its directory children.
+///
+/// # Errors
+///
+/// Refuses for every reason [`resolve`] does.
+pub fn resolution(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+) -> Result<crate::Resolution> {
+    // TODO(reshape-move-children): implement
+    let _ = (engine, workspace, op);
+    todo!("crate_move::resolution")
+}
+
+/// [`resolve_cluster`], as the [`Resolution`](crate::Resolution) a backend returns, with
+/// [`carried::carried_notes`] in its notes.
+///
+/// # Errors
+///
+/// Refuses for every reason [`resolve_cluster`] does.
+pub fn cluster_resolution(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
+) -> Result<crate::Resolution> {
+    // TODO(reshape-move-children): implement
+    let _ = (engine, workspace, cluster);
+    todo!("crate_move::cluster_resolution")
+}
+
 /// The survey, plus the exact spans each caller rewrite replaces.
 ///
 /// One pass answers both questions, because they are the same question: a caller is only in the
@@ -287,6 +319,8 @@ pub(crate) mod source_scan;
 
 pub(crate) mod module_files;
 
+mod carried;
+
 pub(crate) mod survey;
 
 mod module_home;
@@ -336,32 +370,52 @@ pub fn facade_line(
     }
 }
 
+/// One module a plan moved, as its facade names it: where it went, and the visibility its `mod`
+/// declaration had in the file the facade replaces it in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FacadeEntry {
+    pub(crate) destination: destination::Destination,
+    /// As the declaration wrote it — `pub`, `pub(crate)`, …, or empty for a private one.
+    pub(crate) visibility: String,
+    pub(crate) module: String,
+}
+
 /// The facade lines a whole plan's cross-crate moves leave in the origin's root: **one grouped
-/// `pub use <dest>::{a, b};` per destination crate**, naming the modules that moved there, in the
-/// order destinations are first moved into and with the modules sorted.
+/// `<visibility> use <dest>::{a, b};` per destination crate and visibility**, naming the modules
+/// that moved there, in the order each pair is first moved into and with the modules sorted.
 ///
 /// A root glob per operation re-exported the destination's whole root — shadowing any name the
 /// origin already binds (`hidden_glob_reexports`) and repeating itself once per operation (`unused
-/// import`). Naming what moved can do neither.
-pub(crate) fn facade_lines_for_plan(moved: &[(destination::Destination, String)]) -> Vec<String> {
-    let mut destinations: Vec<(&str, BTreeSet<&str>)> = Vec::new();
-    for (destination, module) in moved {
-        let name = destination.extern_name.as_str();
-        match destinations.iter_mut().find(|(known, _)| *known == name) {
-            Some((_, modules)) => {
-                modules.insert(module);
+/// import`). Naming what moved can do neither. The visibility is the declaration's own, so a facade
+/// never makes a module more visible than it was.
+pub(crate) fn facade_lines_for_plan(moved: &[FacadeEntry]) -> Vec<String> {
+    let mut groups: Vec<(&str, &str, BTreeSet<&str>)> = Vec::new();
+    for entry in moved {
+        let name = entry.destination.extern_name.as_str();
+        let visibility = entry.visibility.as_str();
+        match groups
+            .iter_mut()
+            .find(|(known, seen, _)| *known == name && *seen == visibility)
+        {
+            Some((_, _, modules)) => {
+                modules.insert(&entry.module);
             }
-            None => destinations.push((name, BTreeSet::from([module.as_str()]))),
+            None => groups.push((name, visibility, BTreeSet::from([entry.module.as_str()]))),
         }
     }
 
-    destinations
+    groups
         .into_iter()
-        .map(|(crate_name, modules)| {
+        .map(|(crate_name, visibility, modules)| {
+            let keyword = if visibility.is_empty() {
+                "use".to_string()
+            } else {
+                format!("{visibility} use")
+            };
             let named = modules.into_iter().collect::<Vec<_>>();
             match named.as_slice() {
-                [only] => format!("pub use {crate_name}::{only};"),
-                _ => format!("pub use {crate_name}::{{{}}};", named.join(", ")),
+                [only] => format!("{keyword} {crate_name}::{only};"),
+                _ => format!("{keyword} {crate_name}::{{{}}};", named.join(", ")),
             }
         })
         .collect()
@@ -379,13 +433,22 @@ mod facade_tests {
         }
     }
 
+    /// `module` moved into `extern_name`, declared `visibility` where it was.
+    fn moved_into(extern_name: &str, visibility: &str, module: &str) -> FacadeEntry {
+        FacadeEntry {
+            destination: a_destination(extern_name),
+            visibility: visibility.to_string(),
+            module: module.to_string(),
+        }
+    }
+
     #[test]
     fn three_modules_moved_to_one_destination_leave_one_grouped_line() {
         // Given a plan that moved three modules into `kernel`, in no particular order
         let moved = [
-            (a_destination("kernel"), "config".to_string()),
-            (a_destination("kernel"), "auth".to_string()),
-            (a_destination("kernel"), "paths".to_string()),
+            moved_into("kernel", "pub", "config"),
+            moved_into("kernel", "pub", "auth"),
+            moved_into("kernel", "pub", "paths"),
         ];
 
         // Then the origin is left one line naming all three, sorted
@@ -398,9 +461,9 @@ mod facade_tests {
     #[test]
     fn two_destinations_leave_one_line_each_in_the_order_they_were_first_moved_into() {
         let moved = [
-            (a_destination("sandbox"), "runtime".to_string()),
-            (a_destination("kernel"), "config".to_string()),
-            (a_destination("sandbox"), "jail".to_string()),
+            moved_into("sandbox", "pub", "runtime"),
+            moved_into("kernel", "pub", "config"),
+            moved_into("sandbox", "pub", "jail"),
         ];
 
         assert_eq!(
@@ -408,6 +471,27 @@ mod facade_tests {
             vec![
                 "pub use sandbox::{jail, runtime};".to_string(),
                 "pub use kernel::config;".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn modules_of_two_visibilities_moved_to_one_destination_leave_one_line_per_visibility() {
+        // Given a plan that moved a `pub(crate)`, a private and two `pub` modules into `kernel`
+        let moved = [
+            moved_into("kernel", "pub(crate)", "paths"),
+            moved_into("kernel", "pub", "config"),
+            moved_into("kernel", "", "secrets"),
+            moved_into("kernel", "pub", "auth"),
+        ];
+
+        // Then each visibility keeps its own line, a private one as a plain `use`
+        assert_eq!(
+            facade_lines_for_plan(&moved),
+            vec![
+                "pub(crate) use kernel::paths;".to_string(),
+                "pub use kernel::{auth, config};".to_string(),
+                "use kernel::secrets;".to_string(),
             ]
         );
     }

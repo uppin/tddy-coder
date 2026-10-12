@@ -11,7 +11,9 @@
 mod harness;
 
 use harness::{
-    a_move_of_the_host_registry, a_workspace_a_module_can_move_across, assert_compiles, performing,
+    a_move_of, a_move_of_the_host_registry, a_workspace_a_module_can_move_across,
+    a_workspace_whose_module_has_a_directory_child, applying_keeping_the_account, assert_compiles,
+    assert_compiles_with_its_tests, performing, A_DIRECTORY_CHILD,
 };
 use tddy_code_restructuring::Reexport;
 
@@ -64,4 +66,46 @@ async fn leaves_every_caller_untouched_when_a_facade_is_left_behind() {
         "a faceded move rewrote a caller"
     );
     assert_compiles(&workspace);
+}
+
+/// The file count an operation's account line reports — `[1/1] op 0: … -> N file(s) applied`.
+fn files_reported(account: &[String]) -> Vec<String> {
+    account
+        .iter()
+        .filter_map(|line| line.split_once(" -> "))
+        .filter_map(|(_, rest)| rest.split_once(" file(s)"))
+        .map(|(count, _)| count.to_string())
+        .collect()
+}
+
+/// `#reshape` 5/19 — a module in the `foo.rs` + `foo/` shape moves with its directory child, the
+/// dry run and the apply report the same file count and name the files that move, and every crate
+/// compiles with its tests. `#live-plan` 12/15 stranded the children here (`E0583`).
+#[tokio::test(flavor = "multi_thread")]
+async fn relocates_a_module_with_its_directory_children_and_every_crate_compiles_with_its_tests() {
+    // Given `host_registry`, whose child `clock_face` lives in `host_registry/`
+    let workspace = a_workspace_whose_module_has_a_directory_child();
+    let plan = [a_move_of(MODULE, "host_registry", None)];
+
+    // When the plan is dry-run, then applied
+    let (rehearsed, rehearsal) = applying_keeping_the_account(&workspace, &plan, true).await;
+    let (applied, account) = applying_keeping_the_account(&workspace, &plan, false).await;
+
+    // Then both runs succeed and agree on the count, both name what moves with the module, and
+    // the child arrived beside its module
+    let moves_with_it = "move with `host_registry`, with the directory of its children";
+    assert_eq!(
+        (
+            rehearsed.map(|run| run.applied),
+            applied.map(|run| run.applied),
+            files_reported(&rehearsal) == files_reported(&account),
+            rehearsal.iter().any(|line| line.contains(moves_with_it)),
+            account.iter().any(|line| line.contains(moves_with_it)),
+            workspace.holds("crates/destination/src/host_registry/clock_face.rs"),
+            workspace.holds(A_DIRECTORY_CHILD),
+        ),
+        (Ok(1), Ok(1), true, true, true, true, false),
+        "dry run: {rehearsal:?}\napply: {account:?}"
+    );
+    assert_compiles_with_its_tests(&workspace);
 }
