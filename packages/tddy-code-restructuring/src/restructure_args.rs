@@ -42,6 +42,16 @@ pub enum RestructureCommand {
     /// Load this tree's crate graph into the index daemon, so the first real request does not
     /// pay for it.
     Warm,
+    /// Print the production lines of each file, as `<lines>\t<path>`: every line but those of a
+    /// `#[cfg(test)]` item. Reads the files only — no server, no daemon.
+    Lines(RestructureLinesArgs),
+}
+
+#[derive(Parser)]
+pub struct RestructureLinesArgs {
+    /// The files to measure, relative to the current directory.
+    #[arg(required = true)]
+    pub files: Vec<PathBuf>,
 }
 
 #[derive(Parser)]
@@ -279,6 +289,11 @@ pub(crate) fn options_for(args: RestructureArgs) -> Options {
             command: Command::Warm,
             ..Options::default()
         },
+        RestructureCommand::Lines(lines) => {
+            // TODO(reshape-oversized-files): implement
+            let _ = lines;
+            todo!("restructure lines: carry the named files into Options::files")
+        }
     }
 }
 
@@ -343,6 +358,21 @@ mod tests {
         assert!(options.resume);
         assert_eq!(options.from, Some(3));
         assert_eq!(options.stop_after, Some(7));
+    }
+
+    /// `lines` names files rather than a plan, so they arrive in `files`, in the order given.
+    #[test]
+    fn lines_carries_the_files_it_measures() {
+        // Given a `lines` naming a Rust file and a TypeScript file
+        let options = parse(&["lines", "a.rs", "b.ts"]);
+
+        // Then the runner receives both, in order, and nothing else
+        assert_eq!(options.command, Command::Lines);
+        assert_eq!(
+            options.files,
+            [PathBuf::from("a.rs"), PathBuf::from("b.ts")]
+        );
+        assert_eq!(options.target, None);
     }
 
     #[test]

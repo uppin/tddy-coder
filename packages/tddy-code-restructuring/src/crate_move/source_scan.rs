@@ -334,6 +334,13 @@ pub(crate) use sighting_walk::sightings;
 mod module_items;
 pub(crate) use module_items::{items_of_module, ChildModule, ModuleItems};
 
+mod test_only;
+#[allow(
+    unused_imports,
+    reason = "TODO(reshape-oversized-files): implement — `runner::budget::production_lines` reads the spans"
+)]
+pub(crate) use test_only::test_only_spans;
+
 #[cfg(test)]
 mod tests {
     use super::*;

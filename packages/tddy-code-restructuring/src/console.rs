@@ -23,7 +23,7 @@
 //! [`comparison_refusal`]) and the judgement stays with the caller that has to act on it.
 
 use crate::edit::VisibilityChange;
-use crate::runner::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
+use crate::runner::{FileLines, Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 use crate::verify::{token_difference, Comparison, Excused};
 
 /// Every line a whole run's result amounts to, in the order a reader reads them.
@@ -39,7 +39,17 @@ pub fn outcome(outcome: &Outcome, rehearsal: bool) -> Vec<String> {
         Outcome::ItemAnchored(found) => vec![item_anchor(found)],
         Outcome::Verified(comparison) => self::comparison(comparison),
         Outcome::Snapshotted(rewrite) => snapshot_rewrite(rewrite),
+        Outcome::Measured(measured) => file_lines(measured),
     }
+}
+
+/// What `lines` measured: one `<lines>\t<path>` line per file, in the order the files were named —
+/// the shape `/pr-wrap`'s file-length gate reads.
+pub fn file_lines(measured: &[FileLines]) -> Vec<String> {
+    measured
+        .iter()
+        .map(|file| format!("{}\t{}", file.lines, file.path))
+        .collect()
 }
 
 /// What a `snapshot` did to a plan's header.

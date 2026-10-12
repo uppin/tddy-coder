@@ -34,8 +34,8 @@ use crate::spawn_record::{ColdRunSpawnRecord, SpawnRecorder};
 pub use crate::restructure_args::parse_position_range;
 pub use crate::restructure_args::{
     OpRef, RestructureAnchorsArgs, RestructureArgs, RestructureCheckArgs, RestructureCommand,
-    RestructureLoadArgs, RestructurePlanArgs, RestructureSnapshotArgs, RestructureUnloadArgs,
-    RestructureVerifyArgs,
+    RestructureLinesArgs, RestructureLoadArgs, RestructurePlanArgs, RestructureSnapshotArgs,
+    RestructureUnloadArgs, RestructureVerifyArgs,
 };
 
 pub async fn run(args: RestructureArgs) -> Result<()> {
@@ -296,6 +296,8 @@ fn needs_lsp_client(options: &Options) -> bool {
         }
         // The graph a warm loads is the daemon's to hold; this process has none to load it into.
         Command::Warm => false,
+        // A count of lines in files on disk: nothing to resolve.
+        Command::Lines => false,
     }
 }
 
