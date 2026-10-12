@@ -38,6 +38,8 @@ use tddy_lsp::{
 use tddy_task::TaskRegistry;
 use tokio_util::sync::CancellationToken;
 
+pub mod known_references;
+
 /// How long this harness is willing to wait for rust-analyzer to load the crate graph.
 ///
 /// The library states no such bound any more: a wait ends when the server is ready or when its
@@ -179,6 +181,28 @@ pub fn a_workspace_whose_module_has_a_directory_child() -> AFixtureWorkspace {
         .writing(
             "crates/destination/src/lib.rs",
             "//! The crate the module moves into.\n\n",
+        )
+        .tracked_by_git()
+}
+
+/// The test module [`a_workspace_whose_module_has_a_sibling_test_module`] declares beside
+/// `host_registry`, in the crate root that stays.
+pub const A_SIBLING_TEST_MODULE: &str = "crates/origin/src/host_registry_tests.rs";
+
+/// [`a_workspace_a_module_can_move_across`], whose crate root also declares
+/// `#[cfg(test)] mod host_registry_tests;` — a test module beside `host_registry` that names nothing
+/// else in `origin` (`#reshape` 14/19, the `#carve` 21/21 R9 shape).
+pub fn a_workspace_whose_module_has_a_sibling_test_module() -> AFixtureWorkspace {
+    a_workspace_a_module_can_move_across()
+        .writing(
+            "crates/origin/src/lib.rs",
+            "//! The crate the module leaves.\n\npub mod host_registry;\npub mod runtime;\n\n\
+             /// Tests the registry alone.\n#[cfg(test)]\nmod host_registry_tests;\n",
+        )
+        .writing(
+            A_SIBLING_TEST_MODULE,
+            "use super::host_registry::HostRegistry;\n\n#[test]\n\
+             fn a_new_registry_stamps_zero() {\n    assert_eq!(HostRegistry::new().stamp(), 0);\n}\n",
         )
         .tracked_by_git()
 }

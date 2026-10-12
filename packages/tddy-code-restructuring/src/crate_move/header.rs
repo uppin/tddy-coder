@@ -144,6 +144,64 @@ pub(crate) fn repointed_header_at(
     todo!("repointed_header_at")
 }
 
+/// How the paths of a file the move re-points are read before the header pass decides on them.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-tests-follow): implement — `repointed_header_in` reads it"
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Gate {
+    /// Each path is test code only where the file itself marks it `#[cfg(test)]`.
+    AsWritten,
+    /// The file is reached through a `#[cfg(test)] mod` declaration, so every path in it is test
+    /// code: its crates are `[dev-dependencies]` and it makes no edge back to the origin.
+    Test,
+}
+
+/// Where a file the move re-points sits, for the survey and for the `self::`/`super::` rule.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-tests-follow): implement — `test_modules::follow_changes` builds one per file"
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileInTree {
+    /// The file's own module path in the origin, outermost first: what its `self::` and `super::`
+    /// resolve against.
+    pub(crate) module_path: Vec<String>,
+    /// The module path of the tree the file travels in — the moved module for a carried file, the
+    /// test module itself for a following test module. A `self::`/`super::` path that stays inside
+    /// it is left as written; one that leaves it for a co-moving module is rewritten to `crate::`.
+    pub(crate) tree_root: Vec<String>,
+    pub(crate) gate: Gate,
+}
+
+/// The header pass over a file at an explicit place in a moving tree: [`repointed_header_at`]
+/// for a file below the moved module, and for a test module that follows the move from beside it.
+///
+/// A path is co-moving when what it reaches is inside `co_moving` as written **or** after following
+/// the origin's re-exports (`defined_at`), the reading the body precondition already takes; it then
+/// lands at `crate::<landing>…`. Under [`Gate::Test`] every surveyed path is test code.
+///
+/// # Errors
+///
+/// Refuses for every reason [`repointed_header`] does.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-tests-follow): implement — `repointed_header_at` and the following test \
+              modules call it"
+)]
+pub(crate) fn repointed_header_in(
+    workspace: &Workspace<'_>,
+    text: &str,
+    moving: &Move,
+    file: &FileInTree,
+    co_moving: &BTreeSet<String>,
+) -> Result<Header> {
+    // TODO(reshape-tests-follow): implement
+    let _ = (workspace, text, moving, file, co_moving);
+    todo!("repointed_header_in")
+}
+
 fn push_once(paths: &mut Vec<String>, path: &str) {
     if !paths.iter().any(|known| known == path) {
         paths.push(path.to_string());
