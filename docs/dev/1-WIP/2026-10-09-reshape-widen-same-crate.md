@@ -605,6 +605,25 @@ overlay does not model directories.
   group, as rule 7 lists. `apply_tidy_acceptance` and `apply_compile_gate_acceptance` are in the e2e set
   but not the group: they run `cargo`, not rust-analyzer.
 
+### Green commit and change validation (2026-10-12)
+
+- **Scoped gates:** `./test -p tddy-code-restructuring` gave 1363 passed, 0 failed, 1 ignored (the
+  `ignore`d doc-test). `same_crate_widening_acceptance` gave 15/15 against live rust-analyzer.
+  `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` is clean, `cargo build -p` is
+  clean. Whole-workspace health is CI's.
+- **Stack boundary:** no parent (K=1); the range `origin/master..HEAD` is this PR's three commits only;
+  no `todo!()` remains; no file outside this changeset's list; no deletions.
+- **Production code:** no `unwrap`/`expect`, stdout/stderr, `unsafe` or discarded results outside tests.
+  `item_move/assemble.rs` stays at 509 production lines (no growth).
+- **Wiring the contract commit left out** (found in green): `move_reach` returned no members,
+  `assemble.rs` did not consume them, `reparent_module` did not call the tree reach. All three wired.
+- **Widened beyond the plan's list:** `outline::declaration_prefix` (`pub(super)`),
+  `outline::visibility_edit` and `text::identifiers_in` (`pub(in crate::backends::rust)`).
+- **Open (warning):** `item_move/members.rs` test `a_tuple_struct_contributes_the_fields_the_outline_lists`
+  carries a `TODO(reshape-widen-same-crate)` to replace its hand-written outline with the one
+  rust-analyzer returns, planned for M3. Capture it or defer it with a reason before wrap.
+- **Not run:** `bun test ./scripts/nextest-serial-groups.test.ts` (registration check).
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-widen-same-crate-initial-discovery.md`)
@@ -617,11 +636,11 @@ overlay does not model directories.
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (commit 3; `./test -p tddy-code-restructuring`: 1363 passed, 0 failed, 1 ignored)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
