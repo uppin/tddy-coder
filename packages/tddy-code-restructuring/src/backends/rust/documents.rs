@@ -22,7 +22,16 @@ use crate::Result;
 
 impl RustBackend {
     /// Open `uri` at `text`, and remember that it is this backend's to close.
+    ///
+    /// The operation's first call shows the server the projected tree first (see [`projection`]); a
+    /// projected file already open is sent its text again as a change, not as a second open.
+    ///
+    /// [`projection`]: super::projection
     pub(super) fn did_open(&mut self, uri: &str, text: &str) -> Result<()> {
+        self.open_staged_projection(uri)?;
+        if self.is_open_from_projection(uri) {
+            return self.did_change(uri, text);
+        }
         if !self.opened.iter().any(|open| open == uri) {
             self.opened.push(uri.to_string());
         }
@@ -30,6 +39,13 @@ impl RustBackend {
             "textDocument/didOpen",
             json!({ "textDocument": { "uri": uri, "languageId": "rust", "version": 1, "text": text } }),
         )
+    }
+
+    fn is_open_from_projection(&self, uri: &str) -> bool {
+        self.root
+            .as_deref()
+            .is_some_and(|root| self.projection.lists(root, uri))
+            && self.opened.iter().any(|open| open == uri)
     }
 
     /// Run one entry point, then close every document it opened, whatever it returned.
@@ -48,6 +64,7 @@ impl RustBackend {
 
     /// Close every document this backend has open, handing each file back to what is on disk.
     fn close_opened(&mut self) -> Result<()> {
+        self.staged_projection.clear();
         for uri in std::mem::take(&mut self.opened) {
             self.notify(
                 "textDocument/didClose",

@@ -40,13 +40,6 @@ mod item_path;
 mod module_reparent;
 mod nested_modules;
 mod prelude_shadow;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-multi-seam-extract): `resolve` and `did_open` call this in the green phase"
-    )
-)]
 mod projection;
 mod readiness;
 mod relative_visibility;
@@ -491,23 +484,9 @@ pub struct RustBackend {
     opened: Vec<String>,
     /// The files earlier operations of this run wrote, shown to the server before each later one.
     /// See [`projection`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "TODO(reshape-multi-seam-extract): `resolve` and `did_open` call this in the green phase"
-        )
-    )]
     projection: projection::PlanProjection,
     /// The projected documents read for the operation in flight, as `(uri, text)`, waiting for its
     /// first `did_open`.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "TODO(reshape-multi-seam-extract): `resolve` and `did_open` call this in the green phase"
-        )
-    )]
     staged_projection: Vec<(String, String)>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
@@ -1237,7 +1216,11 @@ impl LanguageBackend for RustBackend {
     }
 
     fn resolve(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Resolution> {
-        self.closing_what_it_opens(|backend| backend.resolve_opening(op, workspace))
+        self.stage_projection(workspace)?;
+        let resolution =
+            self.closing_what_it_opens(|backend| backend.resolve_opening(op, workspace))?;
+        self.projection.record(&resolution.edit);
+        Ok(resolution)
     }
 
     /// This backend *is* the reference engine a cross-crate move surveys through — the same

@@ -11,11 +11,13 @@
 //! So the backend remembers which files its resolutions wrote, and opens each of them, at the text
 //! the run holds for it, before the next operation's first document.
 
-use crate::edit::WorkspaceEdit;
+use std::path::Path;
+
+use crate::edit::{FileEdit, WorkspaceEdit};
 use crate::registry::Workspace;
 use crate::Result;
 
-use super::RustBackend;
+use super::{failure, uri_of, RustBackend};
 
 /// The files this backend's resolutions created, changed or renamed into, in the order the run first
 /// wrote each one.
@@ -28,16 +30,33 @@ impl PlanProjection {
     /// Fold one resolved edit in: a created or changed file is added, a rename follows the file to
     /// its new path and forgets the old one. A path already listed keeps its place.
     pub(super) fn record(&mut self, edit: &WorkspaceEdit) {
-        // TODO(reshape-multi-seam-extract): implement
-        let _ = (&mut self.written, edit);
-        todo!("fold a resolved edit into the projection")
+        for change in &edit.changes {
+            match change {
+                FileEdit::Create { path } | FileEdit::Change { path, .. } => self.add(path),
+                FileEdit::Rename { from, to } => {
+                    self.written.retain(|written| written != from);
+                    self.add(to);
+                }
+            }
+        }
     }
 
     /// Every file the run has written so far, in the order it first wrote it.
     pub(super) fn paths(&self) -> &[String] {
-        // TODO(reshape-multi-seam-extract): implement
-        let _ = &self.written;
-        todo!("the projected paths")
+        &self.written
+    }
+
+    fn add(&mut self, path: &str) {
+        if !self.written.iter().any(|written| written == path) {
+            self.written.push(path.to_string());
+        }
+    }
+
+    /// Whether `uri` names a file this projection lists, under `root`.
+    pub(super) fn lists(&self, root: &Path, uri: &str) -> bool {
+        self.written
+            .iter()
+            .any(|written| uri_of(&root.join(written)) == uri)
     }
 }
 
@@ -45,20 +64,28 @@ impl RustBackend {
     /// Read every projected file through `workspace` and hold it for the operation's first
     /// `did_open`. A recorded file the workspace cannot read is an error naming it.
     pub(super) fn stage_projection(&mut self, workspace: &Workspace<'_>) -> Result<()> {
-        // TODO(reshape-multi-seam-extract): implement
-        let _ = workspace;
-        todo!("stage the projected documents")
+        let mut staged = Vec::with_capacity(self.projection.paths().len());
+        for path in self.projection.paths() {
+            let text = workspace.read(path).map_err(|error| {
+                failure(format!(
+                    "the plan's projected file `{path}` cannot be read: {error}"
+                ))
+            })?;
+            staged.push((uri_of(&workspace.root.join(path)), text));
+        }
+        self.staged_projection = staged;
+        Ok(())
     }
 
     /// Open every staged document but `except`, the one the operation is opening itself.
-    #[expect(
-        dead_code,
-        reason = "TODO(reshape-multi-seam-extract): `did_open` calls this in the green phase"
-    )]
     pub(super) fn open_staged_projection(&mut self, except: &str) -> Result<()> {
-        // TODO(reshape-multi-seam-extract): implement
-        let _ = except;
-        todo!("open the staged projected documents")
+        for (uri, text) in std::mem::take(&mut self.staged_projection) {
+            if uri == except {
+                continue;
+            }
+            self.did_open(&uri, &text)?;
+        }
+        Ok(())
     }
 }
 

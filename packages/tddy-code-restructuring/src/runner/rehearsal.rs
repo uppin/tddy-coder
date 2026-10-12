@@ -25,10 +25,6 @@ pub(super) struct Rehearsed {
     /// `repoint_facade_imports`, one line per path it would rewrite.
     pub(super) notes: Vec<String>,
     /// Every visibility the operation would widen, which `apply` reports and a deep check must too.
-    #[expect(
-        dead_code,
-        reason = "TODO(reshape-multi-seam-extract): `rehearsed_lines` reads it in the green phase"
-    )]
     pub(super) widenings: Vec<VisibilityChange>,
 }
 
@@ -74,8 +70,7 @@ impl Rehearsal {
                     survey,
                     refusal: None,
                     notes: resolved.notes,
-                    // TODO(reshape-multi-seam-extract): carry `resolved.report`
-                    widenings: Vec::new(),
+                    widenings: resolved.report,
                 })
             }
             Err(refusal) => Ok(Rehearsed {
@@ -163,17 +158,25 @@ pub(super) fn survey_lines(index: usize, survey: &Survey) -> Vec<String> {
 
 /// What a deep check prints for one rehearsed operation, in order: the survey's lines, one
 /// `visibility:` line per widening in the form `apply` prints it, then one `note:` line per note.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-multi-seam-extract): `check_plan` prints through this in the green phase"
-    )
-)]
 pub(super) fn rehearsed_lines(index: usize, rehearsed: &Rehearsed) -> Vec<String> {
-    // TODO(reshape-multi-seam-extract): implement
-    let _ = (index, rehearsed);
-    todo!("the lines a deep check prints for a rehearsed operation")
+    let mut lines = rehearsed
+        .survey
+        .as_ref()
+        .map(|survey| survey_lines(index, survey))
+        .unwrap_or_default();
+    lines.extend(
+        rehearsed
+            .widenings
+            .iter()
+            .map(|change| crate::console::visibility(&crate::console::widening(change))),
+    );
+    lines.extend(
+        rehearsed
+            .notes
+            .iter()
+            .map(|note| crate::console::note(note)),
+    );
+    lines
 }
 
 #[cfg(test)]
