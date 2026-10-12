@@ -352,7 +352,7 @@ fn rewrite_statement(
             ));
         }
         let replacement = if drop {
-            String::new()
+            destination_import(head, name, &alias)
         } else {
             format!("{head}use {qualifier}::{name}{alias};")
         };
@@ -386,6 +386,16 @@ fn rewrite_statement(
         );
     }
     Ok(Edit::replace(statement.clone(), lines.join("\n")))
+}
+
+/// What the destination keeps of its own `use` of a name that moves into it: nothing for an
+/// un-renamed import (it now defines the name), `{head}use self::{name}{alias};` for an aliased one,
+/// whose alias the module still names (D1). `alias` is the written ` as other`, or empty.
+fn destination_import(head: &str, name: &str, alias: &str) -> String {
+    // TODO(reshape-move-item-paths): implement D1 (and call it for a group member at green); today
+    // an aliased import is dropped with the rest.
+    let _ = (head, name, alias);
+    String::new()
 }
 
 /// The members of a `use` group, split at the commas that are not inside a nested group.
@@ -452,6 +462,30 @@ mod tests {
                 false
             ),
             "pub(crate) use crate::answers::name as other;"
+        );
+    }
+
+    #[test]
+    fn the_destination_keeps_an_aliased_import_of_the_moved_item_as_a_self_import() {
+        // Given the destination's own imports of the moving `name`: plain, aliased, and an aliased
+        // member of a group
+        let plain = "use crate::pairing::name;";
+        let aliased = "pub(crate) use crate::pairing::name as other;";
+        let grouped = "use crate::pairing::{name as other, kept};";
+
+        // When each is rewritten for the module the item arrives in
+        let (plain, aliased, grouped) = (
+            rewritten(plain, "name", true),
+            rewritten(aliased, "name", true),
+            rewritten(grouped, "name", true),
+        );
+
+        // Then the plain import goes, and each alias stays bound to the item, now the module's own
+        assert_eq!(plain, "");
+        assert_eq!(aliased, "pub(crate) use self::name as other;");
+        assert_eq!(
+            grouped,
+            "use crate::pairing::{kept};\nuse self::name as other;"
         );
     }
 

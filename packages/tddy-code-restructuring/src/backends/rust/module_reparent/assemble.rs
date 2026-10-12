@@ -59,7 +59,7 @@ pub(super) fn assemble(moving: &Reparenting<'_>) -> Result<Assembled> {
 
     let mut edits: BTreeMap<String, Vec<Edit>> = BTreeMap::new();
     let mut notes = repoint_callers(moving, &texts, &mut edits)?;
-    rebase_the_moved_files(moving, &texts, &mut edits);
+    rebase_the_moved_files(moving, &texts, &mut edits)?;
     leave_behind(moving, &landing, &mut edits);
     arrive(moving, &landing, &mut edits);
     for (path, list) in doc_links::across_the_crate(
@@ -177,7 +177,7 @@ fn rebase_the_moved_files(
     moving: &Reparenting<'_>,
     texts: &BTreeMap<String, String>,
     edits: &mut BTreeMap<String, Vec<Edit>>,
-) {
+) -> Result<()> {
     let survey = moving.survey;
     let old = moving.request.module_path();
     let mut new = survey.new_parent.path.clone();
@@ -189,15 +189,17 @@ fn rebase_the_moved_files(
             [old.as_slice(), &file.below].concat(),
             [new.as_slice(), &file.below].concat(),
         );
-        let imported = |module: &[String], name: &str| {
+        let imported = |module: &[String], name: &str, destination: &[String]| {
             bindings::import_target(
                 moving.workspace,
                 &moving.request.named.package,
                 module,
                 name,
+                destination,
             )
         };
         let modules = Modules {
+            file: &file.from,
             from: &from,
             to: &to,
             travelling: Some(&old),
@@ -212,8 +214,9 @@ fn rebase_the_moved_files(
                 &modules,
                 &BTreeSet::new(),
                 &claimed,
-            ));
+            )?);
     }
+    Ok(())
 }
 
 /// The spans of the qualifiers written in front of the module's name in `path`.
