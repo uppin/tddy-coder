@@ -271,6 +271,9 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
         anchor.validate()?;
     }
 
+    // Before the generic field rules, so a member move names the operation in every refusal it makes.
+    impl_move_fields::rules(&op)?;
+
     // Silently ignoring the field would be worse than refusing it: the plan author asked for a
     // facade, would not get one, and would read the resulting stranded-reference refusal as the
     // facade having failed to help.
@@ -457,6 +460,7 @@ mod facade_imports_fields;
 mod file_hint;
 mod groups;
 mod headerless;
+mod impl_move_fields;
 mod rebind_fields;
 mod repoint_call_fields;
 mod retarget_fields;
