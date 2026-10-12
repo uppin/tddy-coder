@@ -7,7 +7,9 @@
 **Metrics:** **47 lines** · **nesting depth 5** · 3 parameters · 5 branch/match lines · 1 early exits
 **Thresholds breached:** nesting 5 > 4 (`/analyze-clean-code`)
 **Restructure:** `extract_method` — `/code-restructuring` territory
-**Status:** Open — **unclaimed**
+**Status:** Open — claimed
+**Claimed by:** #616 — `#reshape 19/19`
+**Lands after:** #615
 **Verified:** ⚠ **not hand-verified** — metrics are machine-measured and re-derivable; the finding itself has not been read by a person
 
 ## Measurement history
