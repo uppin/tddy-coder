@@ -109,3 +109,45 @@ async fn relocates_a_module_with_its_directory_children_and_every_crate_compiles
     );
     assert_compiles_with_its_tests(&workspace);
 }
+
+/// Test 26 (`#reshape` 9) — a move whose line carries `name` creates the crate it moves into: the
+/// manifest, the root and the workspace entry are part of the same edit, and cargo builds the
+/// result. `#carve` built every such skeleton by hand, because a `to` with no `Cargo.toml` was
+/// refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn relocates_a_module_into_a_crate_the_move_creates_and_leaves_every_crate_compiling() {
+    // Given a module and a destination directory that holds no crate yet
+    let workspace = a_workspace_a_module_can_move_across();
+    let mut creating = a_move_of_the_host_registry(None);
+    creating.to = Some("crates/fresh".to_string());
+    creating.name = Some("fresh".to_string());
+
+    // When the move creating `fresh` is performed
+    performing(&workspace, creating).await;
+
+    // Then the crate exists, the workspace lists it, the caller names it, and everything compiles
+    assert!(
+        workspace.holds("crates/fresh/Cargo.toml"),
+        "no manifest was created"
+    );
+    assert!(
+        workspace.holds("crates/fresh/src/host_registry.rs"),
+        "the module file did not arrive"
+    );
+    assert_eq!(
+        workspace.read("crates/fresh/src/lib.rs"),
+        "pub mod host_registry;\n"
+    );
+    assert!(
+        workspace.read("Cargo.toml").contains("\"crates/fresh\","),
+        "the workspace does not list the new crate: {}",
+        workspace.read("Cargo.toml")
+    );
+    assert_eq!(
+        workspace.read(CALLER),
+        "use fresh::host_registry::HostRegistry;\n\npub fn boot() -> u64 {\n    \
+         HostRegistry::new().stamp()\n}\n",
+        "the caller was not re-pointed at the new crate"
+    );
+    assert_compiles(&workspace);
+}

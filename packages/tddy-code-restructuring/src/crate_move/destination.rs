@@ -5,6 +5,8 @@ use super::Result;
 
 use std::path::Path;
 
+use crate::registry::Workspace;
+
 /// Where a module is going, resolved from the plan's `to` and the destination's own manifest.
 ///
 /// The crate *name* is never taken from the directory name: `packages/tddy-daemon-kernel` could
@@ -45,6 +47,19 @@ impl Destination {
             package: package.to_string(),
             extern_name: package.replace('-', "_"),
         })
+    }
+
+    /// [`Destination::read`] through `workspace`'s overlay rather than from disk, so an operation
+    /// reads the crate an earlier operation of the same plan created the way `apply` reads it.
+    ///
+    /// # Errors
+    ///
+    /// Refuses as [`Destination::read`] does; a missing manifest's refusal says that `name` creates
+    /// the crate.
+    pub fn read_in(workspace: &Workspace<'_>, dir: &str) -> Result<Destination> {
+        // TODO(reshape-new-crate): implement
+        let _ = (workspace, dir);
+        todo!("Destination::read_in")
     }
 
     /// The crate this one reaches under `extern_name` by a **path** dependency, if it declares one.

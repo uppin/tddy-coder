@@ -195,6 +195,7 @@ fn a_cluster_of(members: Vec<ModuleHome>, reexport: Reexport) -> MovingCluster {
         members,
         destination: the_destination(),
         reexport,
+        creates: None,
     }
 }
 

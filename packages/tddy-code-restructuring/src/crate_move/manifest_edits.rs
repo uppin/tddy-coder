@@ -383,6 +383,65 @@ pub(crate) fn position_of(text: &str, offset: usize) -> Position {
     }
 }
 
+/// One declaration of a dependency in a target-specific table: the table's header verbatim
+/// (`[target.'cfg(unix)'.dependencies]`) and the declaring line verbatim.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-new-crate): implement — `target_declarations` returns it"
+)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DeclaredIn {
+    pub(crate) header: String,
+    pub(crate) line: String,
+}
+
+/// Every `[target.'<cfg>'.dependencies]` table — `[target.'<cfg>'.dev-dependencies]` when `dev` —
+/// that declares the crate with this extern name, each with its declaring line.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-new-crate): implement — `Move::dependency_lines` reads it"
+)]
+pub(crate) fn target_declarations(manifest: &str, extern_name: &str, dev: bool) -> Vec<DeclaredIn> {
+    // TODO(reshape-new-crate): implement
+    let _ = (manifest, extern_name, dev);
+    todo!("manifest_edits::target_declarations")
+}
+
+/// Whether a manifest declares the crate in any dependency table: plain, dev, or target-specific.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-new-crate): implement — the survey's body-path rule asks it"
+)]
+pub(crate) fn declares_dependency_in_any_table(manifest: &str, extern_name: &str) -> bool {
+    // TODO(reshape-new-crate): implement
+    let _ = (manifest, extern_name);
+    todo!("manifest_edits::declares_dependency_in_any_table")
+}
+
+/// The manifest with `lines` appended to the table whose header is `header` verbatim, or with that
+/// table appended at the end when the manifest has none.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-new-crate): implement — `Move::destination_manifest` writes target tables"
+)]
+pub(crate) fn with_lines_under(manifest: &str, header: &str, lines: &[String]) -> Vec<TextEdit> {
+    // TODO(reshape-new-crate): implement
+    let _ = (manifest, header, lines);
+    todo!("manifest_edits::with_lines_under")
+}
+
+/// The line of a manifest's `[package]` table whose key is `key`, verbatim — `edition = "2021"`,
+/// `version.workspace = true`.
+#[allow(
+    dead_code,
+    reason = "TODO(reshape-new-crate): implement — `NewCrate::skeleton` copies the origin's lines"
+)]
+pub(crate) fn package_line<'a>(manifest: &'a str, key: &str) -> Option<&'a str> {
+    // TODO(reshape-new-crate): implement
+    let _ = (manifest, key);
+    todo!("manifest_edits::package_line")
+}
+
 #[cfg(test)]
 mod sorted_declaration_tests {
     use super::*;
@@ -626,5 +685,99 @@ mod declared_module_tests {
             crate::apply::edited(root.to_string(), &[edit]).expect("the edit applies"),
             "pub(crate) mod alpha;\npub mod beta;\npub(super) mod zeta;\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod target_table_tests {
+    use super::*;
+    use crate::apply::edited;
+
+    const UNIX_DEPENDENCIES: &str = "[target.'cfg(unix)'.dependencies]";
+    const A_MANIFEST_WITH_A_UNIX_TABLE: &str =
+        "[package]\nname = \"origin\"\nversion = \"0.1.0\"\n\
+         edition = \"2021\"\n\n[dependencies]\nlog = \"0.4\"\n\n\
+         [target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n";
+
+    #[test]
+    fn a_crate_declared_under_a_target_table_is_read_with_its_header_and_line() {
+        // When the unix table is asked for `libc`
+        let declared = target_declarations(A_MANIFEST_WITH_A_UNIX_TABLE, "libc", false);
+
+        // Then it answers with the header and the line verbatim
+        assert_eq!(
+            declared,
+            [DeclaredIn {
+                header: UNIX_DEPENDENCIES.to_string(),
+                line: "libc = \"0.2\"".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_crate_counts_as_declared_in_a_plain_or_a_target_table_and_not_otherwise() {
+        assert!(declares_dependency_in_any_table(
+            A_MANIFEST_WITH_A_UNIX_TABLE,
+            "log"
+        ));
+        assert!(declares_dependency_in_any_table(
+            A_MANIFEST_WITH_A_UNIX_TABLE,
+            "libc"
+        ));
+        assert!(!declares_dependency_in_any_table(
+            A_MANIFEST_WITH_A_UNIX_TABLE,
+            "serde"
+        ));
+    }
+
+    #[test]
+    fn lines_are_appended_to_a_target_table_or_the_table_is_appended() {
+        // Given one manifest with the unix table and one without
+        let without = "[package]\nname = \"destination\"\n";
+
+        // When a line is added under the unix header to each
+        let extended = edited(
+            A_MANIFEST_WITH_A_UNIX_TABLE.to_string(),
+            &with_lines_under(
+                A_MANIFEST_WITH_A_UNIX_TABLE,
+                UNIX_DEPENDENCIES,
+                &["nix = \"0.29\"".to_string()],
+            ),
+        )
+        .expect("the edits apply");
+        let created = edited(
+            without.to_string(),
+            &with_lines_under(without, UNIX_DEPENDENCIES, &["libc = \"0.2\"".to_string()]),
+        )
+        .expect("the edits apply");
+
+        // Then the existing table grows, and the missing one is written at the end
+        assert!(
+            extended.ends_with("libc = \"0.2\"\nnix = \"0.29\"\n"),
+            "{extended}"
+        );
+        assert_eq!(
+            created,
+            "[package]\nname = \"destination\"\n\n[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n"
+        );
+    }
+
+    #[test]
+    fn a_package_line_is_read_verbatim_from_the_package_table_only() {
+        // Given a manifest inheriting its version, with a dependency carrying its own `version`
+        let manifest =
+            "[package]\nname = \"origin\"\nversion.workspace = true\nedition = \"2024\"\n\n\
+                        [dependencies]\nserde = { version = \"1\" }\n";
+
+        // When / Then
+        assert_eq!(
+            package_line(manifest, "version"),
+            Some("version.workspace = true")
+        );
+        assert_eq!(
+            package_line(manifest, "edition"),
+            Some("edition = \"2024\"")
+        );
+        assert_eq!(package_line(manifest, "description"), None);
     }
 }
