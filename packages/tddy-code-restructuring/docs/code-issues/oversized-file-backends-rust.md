@@ -5,6 +5,8 @@
 **Detected:** 2026-09-19 by the `/pr-wrap` file-length gate on #498
 **Metrics:** **3,008 production lines** (2026-10-07, `#sharpen` 8/8 repoint-facade; 2,997 at 2026-10-07, `#sharpen` 7/8 repoint-call; 2,986 at 2026-10-07, `#sharpen` 6/8 retarget-impl; 2,975 at 2026-10-06, `#sharpen` 4/8 apply-heartbeat; 2,864 at 2026-10-06, `#sharpen` 3/8 spawn-record; 2,853 at 2026-10-05, same-crate moves; 2,831 at 2026-10-04, #567; 2,705 at #569; 2,666 after #539; 4,475 before; 4,475 after #542, 4,433 after #537; 4,360 after #526, 4,342 after #524, 4,788 before #527) · budget 500
 **Restructure:** required
+**Claimed by:** #614 — `#reshape 17/19`
+**Lands after:** #613
 **Status:** Open — partially fixed (the impl-member seams remain). #539 (`#live-plan` 7/15) moved the free-item runs out (4,475 to 2,666); #527 had already taken 472 net
 
 ## Measurement history
