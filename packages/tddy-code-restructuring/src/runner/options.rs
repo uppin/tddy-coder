@@ -94,6 +94,8 @@ pub struct Options {
     pub repoints: Vec<String>,
     /// The `self` rebinds `verify` is told of (`--rebind NAME`, repeatable).
     pub rebinds: Vec<String>,
+    /// The `TYPE=NAME` detaches `verify` is told of (`--detach`, repeatable).
+    pub detaches: Vec<String>,
     /// Where the language server's own indexing lines go while an operation waits for an index.
     ///
     /// Progress happens *while* a call is in flight and has nowhere to wait, so it needs a sink
@@ -148,6 +150,7 @@ impl Default for Options {
             retargets: Vec::new(),
             repoints: Vec::new(),
             rebinds: Vec::new(),
+            detaches: Vec::new(),
             progress: discard(),
             account: discard(),
             trace: untraced,
@@ -224,6 +227,11 @@ impl Options {
             "--rebind" => self.rebinds.push(
                 rest.next()
                     .ok_or_else(|| usage("--rebind needs NAME"))?
+                    .clone(),
+            ),
+            "--detach" => self.detaches.push(
+                rest.next()
+                    .ok_or_else(|| usage("--detach needs TYPE=NAME"))?
                     .clone(),
             ),
             flag if flag.starts_with("--") => return Err(usage(format!("unknown flag `{flag}`"))),
