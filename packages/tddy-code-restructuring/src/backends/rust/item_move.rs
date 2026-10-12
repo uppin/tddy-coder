@@ -257,17 +257,7 @@ impl RustBackend {
             )?;
             let inside = |site: &Site| site.path == survey.file && region.contains(&site.offset);
             let users = if moves {
-                let mut users = Vec::new();
-                for site in sites.iter().filter(|site| !inside(site)) {
-                    let text = workspace.read(&site.path)?;
-                    let base = sites::module_of_file(workspace.root, &crate_name, &site.path);
-                    users.extend(base.map(|base| {
-                        base.into_iter()
-                            .chain(text::enclosing_modules(&text, site.offset))
-                            .collect()
-                    }));
-                }
-                users
+                Self::users_outside(workspace, &crate_name, &sites, inside)?
             } else if sites.iter().any(inside) {
                 vec![survey.destination.to_vec()]
             } else {
@@ -286,6 +276,26 @@ impl RustBackend {
             });
         }
         Ok(reached)
+    }
+
+    /// The modules, other than the run itself, that hold one of `sites`.
+    fn users_outside(
+        workspace: &Workspace<'_>,
+        crate_name: &str,
+        sites: &[Site],
+        inside: impl Fn(&Site) -> bool,
+    ) -> Result<Vec<Vec<String>>> {
+        let mut users = Vec::new();
+        for site in sites.iter().filter(|site| !inside(site)) {
+            let text = workspace.read(&site.path)?;
+            let base = sites::module_of_file(workspace.root, crate_name, &site.path);
+            users.extend(base.map(|base| {
+                base.into_iter()
+                    .chain(text::enclosing_modules(&text, site.offset))
+                    .collect()
+            }));
+        }
+        Ok(users)
     }
 
     /// The items the run leaves behind that the moved code names.

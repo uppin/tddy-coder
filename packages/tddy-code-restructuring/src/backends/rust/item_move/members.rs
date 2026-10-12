@@ -459,9 +459,10 @@ mod tests {
     #[test]
     fn a_tuple_struct_contributes_the_fields_the_outline_lists() {
         // Given a tuple struct, whose outline symbol carries no field children
-        // TODO(reshape-widen-same-crate): replace this outline with the one rust-analyzer returns
-        // for `struct Id(u32);`, captured at milestone M3 (see the tuple-field todo of
-        // `#reshape` 7).
+        // TODO(reshape-widen-same-crate): deferred, not captured here. This outline is hand-written;
+        // the real one for `struct Id(u32);` belongs to the tuple-field follow-up (see this
+        // changeset's Boundaries: `2026-10-09-restructure-moves-do-not-widen-tuple-struct-fields.md`,
+        // owned by `feature/reshape/move-widen`).
         let text = "pub struct Id(u32);\n";
         let outline = json!([a_symbol("Id", STRUCT, (0, 0), 11, vec![])]);
 

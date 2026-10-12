@@ -619,10 +619,32 @@ overlay does not model directories.
   `assemble.rs` did not consume them, `reparent_module` did not call the tree reach. All three wired.
 - **Widened beyond the plan's list:** `outline::declaration_prefix` (`pub(super)`),
   `outline::visibility_edit` and `text::identifiers_in` (`pub(in crate::backends::rust)`).
-- **Open (warning):** `item_move/members.rs` test `a_tuple_struct_contributes_the_fields_the_outline_lists`
-  carries a `TODO(reshape-widen-same-crate)` to replace its hand-written outline with the one
-  rust-analyzer returns, planned for M3. Capture it or defer it with a reason before wrap.
-- **Not run:** `bun test ./scripts/nextest-serial-groups.test.ts` (registration check).
+- **Deferred (warning, reason recorded):** `item_move/members.rs` test
+  `a_tuple_struct_contributes_the_fields_the_outline_lists` keeps its `TODO(reshape-widen-same-crate)`.
+  Capturing rust-analyzer's real outline for `struct Id(u32);` belongs to the tuple-field follow-up
+  (Boundaries: owned by `feature/reshape/move-widen`; its todo
+  `docs/dev/todo/2026-10-09-restructure-moves-do-not-widen-tuple-struct-fields.md` is not on this
+  branch). Developer said "continue" without choosing, so the marker stays and now names that owner;
+  no outline is invented here.
+
+### Pre-wrap validation (2026-10-12)
+
+- **validate-tests:** `tests/same_crate_widening_acceptance.rs` and the new unit tests (apply, members,
+  tree_reach, tree_visibility, journal/group) follow fluent-tests: Given/When/Then, intent-revealing names,
+  no sleeps, no `#[ignore]`, `unwrap` only in test code. No findings.
+- **validate-prod-ready:** no mock code, `println!`/`eprintln!`/`dbg!`, `todo!()`, `unwrap` or
+  `allow(dead_code)` in production code this PR adds. One TODO (above), deferred.
+- **File length gate:** every touched non-test file is under 500 production lines except
+  `item_move/assemble.rs` (509, unchanged by this PR). Alert only; tracked by
+  `docs/dev/todo/2026-10-06-restructure-item-move-assemble-past-500.md` (claimed by
+  `feature/reshape/oversized-files`). No duplicate record, no split.
+- **analyze-clean-code:** one real finding in added code, fixed: `reached_members` nested a `for`, an `if`
+  and a `for` over a closure; the "users outside the run" loop is now `RustBackend::users_outside`. No
+  added function exceeds 60 lines (`move_items` stays at its 73, no growth). No magic values or duplication.
+- **Boundaries:** the diff is within this changeset's file list; no plan field, no refusal change, no
+  `backends/rust.rs` or `extract_module` edit.
+- **Gates (scoped):** `cargo fmt -p tddy-code-restructuring`, `cargo clippy -p tddy-code-restructuring
+  --all-targets -- -D warnings` clean; `bun test ./scripts/nextest-serial-groups.test.ts` 22 pass, 0 fail.
 
 ## TODO
 
