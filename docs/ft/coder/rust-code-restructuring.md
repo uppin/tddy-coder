@@ -198,7 +198,7 @@ operations that must compile only together by giving them the same `"group"`:
   group's members edited, once, after the last member. A group that compiles is kept; its members then
   reach the plan store together, in plan order (they are not refreshed while the group is open).
 - **Rolled back exactly.** A group that does not compile is undone byte for byte — edited files
-  rewritten, files the group created removed, renames reversed — from the contents the journal holds,
+  rewritten, files the group created removed along with any directory that leaves empty, renames reversed — from the contents the journal holds,
   and the run stops with ``group `<name>` does not compile at its end, so it was rolled back:`` followed
   by the compiler's errors. Everything before the group stays applied. **Any** failure inside a group
   (a member that cannot be resolved or committed, a check that cannot run) rolls the whole group back
@@ -385,8 +385,32 @@ cannot move alone; move the `impl` block), an anchor that cuts an item in half, 
 
 **Visibility.** Widening is not a refusal: a private item the moved code reaches is widened where it
 stays, and a moved private item its callers need is widened where it lands, only as far as they need and
-each reported. `reparent_module` respells the `mod` declaration's visibility the same way and rebases the
-relative paths in the moved files (`super::x`, `use super::*;`) so they reach what they reached.
+each reported. `move_item` does the same for the **members** a move splits from the code that uses them.
+A private field or an inherent `impl` method (or associated constant) that the other half of a split
+reads, calls or builds with a struct literal is widened to the narrowest scope that covers its users, on
+the side where it is written, and reported as `Type::member`. A member of a trait `impl`, of a trait or
+of an enum, and a member already written `pub` or `pub(crate)`, is never touched, and a move into a
+child of the source module widens no member. Only the members the moved text mentions, or that belong to
+a type whose declaration moves, cost a references request; the progress line counts them. Members are
+surveyed in the source file only.
+
+`reparent_module` respells the `mod` declaration's visibility the same way and rebases the relative
+paths in the moved files (`super::x`, `use super::*;`) so they reach what they reached. It also widens
+what the moved tree names in the places it leaves: a private or restricted item of the old parent, and of
+each ancestor below the common ancestor of the old and new parents (a private `mod` declaration
+included), that the tree reaches. Each is widened to cover the module's new path and reported. A
+restriction written in a moved file is read at the place it was written: `pub(crate)` is left alone;
+a `pub(super)` or `pub(in path)` that lies inside the moved tree keeps its meaning and is left as
+written (an absolute `pub(in crate::host::attachments)` is respelled with the callers' paths); one
+that reached outside the tree is widened until it is legal under the new parent (`pub(super) fn
+materialize` becomes `pub(crate)` when the old parent still calls it). A restriction the engine cannot
+read is refused naming the file and line.
+
+**Directories.** `apply` removes each directory a `git mv` leaves empty, walking up from the moved
+file and stopping at the first directory that still holds anything, or at the workspace root. A
+directory the move did not empty, one holding a file no `mod` declaration reaches, and an empty
+directory no move vacated are left alone. A group's rollback removes the directories its restored
+files vacated in the same way, and recreates the directory of a file it puts back.
 
 **Imports.** The source module's top-level `use` items travel to the destination (a head written from the
 crate root, anything the destination already binds left out, an import of a module the destination cannot
@@ -856,7 +880,6 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
 - **A foreign edit overlapping an operation the plan already ran** marks that operation stale in
   `ListPlans`; `apply` ignores it, since it refuses only operations at or after its start. The
   applied plan's own v2 `files` hints are not rewritten by its own apply.
-- **A rolled-back group leaves an empty directory** it created a file in; the file is removed, the directory is not.
 - **An apply consumes its plan file.** A run rewrites the plan as it goes, so a plan whose apply
   failed and was rolled back is stale; re-running it is refused as an item that changed. Regenerate
   the plan.
@@ -972,11 +995,10 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   what a string holds is data the suite asserts on, and rewriting it would change the assertion.
 - **`check` has no static preflight for `move_test_binary_to_crate`.** The plan's vocabulary refusals
   are reported; the anchor's path shape and the facade walk are resolved at apply time.
-- **`move_item` widens module-level items, not the fields and `impl` members that go with them.** A
-  private field of a moved struct that an `impl` left behind reads, a private method of an `impl` left
-  behind that the moved code calls, and the reverse, are not surveyed (the outline gives such a member
-  no module path). The edit is applied, the compile gate stops the run at the `E0616`/`E0624` site, and
-  the edit stays on disk to roll back.
+- **`move_item` widens the members of a split type only where the source file shows them.** A private
+  member used through an `impl` of the moved type that sits in **another file** is not surveyed, and a
+  tuple-struct field is widened only if the outline lists it. The edit is applied, the compile gate
+  stops the run at the `E0616`/`E0624` site, and the edit stays on disk to roll back.
 - **`move_item` copies the source module's whole `use` header.** A trait import has no name in the moved
   text, so no reading of it can say which imports to leave out. A complete run's tidy removes the unused
   ones on the compiler's evidence; a run stopped early with `--stop-after` leaves `unused_imports`
@@ -992,16 +1014,16 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   several lines. A created module's declaration is widened by a later move into it only along the
   `mod` declarations on the path to the destination: a `pub use` chain that re-exports the destination
   under another name is not followed.
-- **`reparent_module` widens the module's declaration, not what its tree reaches.** A private item of the
-  old parent or an ancestor that the moved tree names (`super::host_name()`), a `pub(super)` or
-  `pub(in path)` item of the moved module that its old parent names, and an absolute
-  `pub(in crate::host::attachments)` written into the tree are not respelled. The compile gate stops the
-  run at the `E0603` site.
+- **`reparent_module` widens the root items of the old parent and its ancestors, not the items of their
+  other children.** An item inside a sibling module that the moved tree reaches through a restricted
+  visibility (`pub(super) fn f` in `host::sibling`, called as `super::sibling::f()`) is not widened, and
+  the survey of `move_item`'s reach stops at the source file's root items in the same way. The compile
+  gate stops the run at the `E0603` site.
 - **`reparent_module` limits.** `reexport: glob` writes the module's own re-export, not a glob of the new
   parent, and a facade leaves the new parent changed (the declaration is written there). The new parent
   must be a module with a file of its own. The declaration must sit on lines of its own. A file in the
-  module's directory that no `mod` reaches (an `include_str!` data file) stays behind, and the directories
-  the move empties stay on disk. A `use` that starts with the module's own name inside a group, or
+  module's directory that no `mod` reaches (an `include_str!` data file) stays behind, and so does the
+  directory that holds it. A `use` that starts with the module's own name inside a group, or
   unqualified (`use attachments::x;`), is refused: write the path in full. References under an inactive
   `cfg` are surveyed as the server evaluated them. A module with both `a.rs` and `a/mod.rs` is read as
   `a.rs`.

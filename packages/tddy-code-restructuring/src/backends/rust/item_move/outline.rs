@@ -12,21 +12,21 @@ use crate::Result;
 
 /// One named module-level item, with what a move needs to know about its declaration.
 #[derive(Debug, Clone)]
-pub(super) struct Item {
-    pub(super) name: String,
+pub(crate) struct Item {
+    pub(crate) name: String,
     /// Where the server reports the item's name, which is where a reference query asks about it.
-    pub(super) position: Value,
+    pub(crate) position: Value,
     /// The visibility as written: `pub`, `pub(crate)`, or empty for private.
-    pub(super) visibility: String,
+    pub(crate) visibility: String,
 }
 
 /// The items a move relocates, and the whole lines that hold them.
 #[derive(Debug)]
-pub(super) struct Run {
-    pub(super) first_line: u32,
-    pub(super) last_line: u32,
+pub(crate) struct Run {
+    pub(crate) first_line: u32,
+    pub(crate) last_line: u32,
     /// The named items. An `impl` block is part of the lines and has no name to list.
-    pub(super) items: Vec<Item>,
+    pub(crate) items: Vec<Item>,
 }
 
 fn first_line_of(symbol: &Value) -> Option<u32> {
@@ -148,13 +148,21 @@ fn refuse_what_cannot_move(moved: &[&Value], last: u32) -> Result<()> {
 
 /// The named root items the run leaves behind, in file order.
 pub(super) fn left_behind(symbols: &Value, text: &str, run: &Run) -> Vec<Item> {
+    root_items(symbols, text, Some(run))
+}
+
+/// The named root items of the outline, in file order: all of them, or with `outside`, the ones
+/// that do not start inside that run.
+pub(crate) fn root_items(symbols: &Value, text: &str, outside: Option<&Run>) -> Vec<Item> {
     symbols
         .as_array()
         .into_iter()
         .flatten()
         .filter(|symbol| {
-            !first_line_of(symbol)
-                .is_some_and(|line| (run.first_line..=run.last_line).contains(&line))
+            !outside.is_some_and(|run| {
+                first_line_of(symbol)
+                    .is_some_and(|line| (run.first_line..=run.last_line).contains(&line))
+            })
         })
         .filter(|symbol| is_identifier(name_of(symbol)))
         .filter_map(|symbol| {
@@ -170,7 +178,7 @@ pub(super) fn left_behind(symbols: &Value, text: &str, run: &Run) -> Vec<Item> {
 
 /// The text of the declaration line up to the name at `position`, past any attributes written on
 /// the same line.
-fn declaration_prefix<'a>(text: &'a str, position: &Value) -> Option<(usize, &'a str)> {
+pub(super) fn declaration_prefix<'a>(text: &'a str, position: &Value) -> Option<(usize, &'a str)> {
     let point = LspPoint {
         line: position.get("line")?.as_u64()? as usize,
         character: position.get("character")?.as_u64()? as usize,
@@ -199,7 +207,12 @@ pub(super) fn visibility_before(text: &str, position: &Value) -> String {
 ///
 /// The keyword goes where the declaration's own text begins. A declaration whose name stands at the
 /// start of its line has its keyword on a line above, which this does not guess at.
-pub(super) fn visibility_edit(text: &str, position: &Value, name: &str, to: &str) -> Result<Edit> {
+pub(in crate::backends::rust) fn visibility_edit(
+    text: &str,
+    position: &Value,
+    name: &str,
+    to: &str,
+) -> Result<Edit> {
     let (at, prefix) = declaration_prefix(text, position).ok_or_else(|| {
         failure(format!(
             "the server's position for `{name}` could not be read"

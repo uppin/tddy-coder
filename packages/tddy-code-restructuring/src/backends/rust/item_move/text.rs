@@ -91,7 +91,7 @@ pub(in crate::backends::rust) fn is_identifier_byte(byte: u8) -> bool {
 }
 
 /// Every identifier the code of `text` writes, comments and literals excluded.
-pub(super) fn identifiers_in(text: &str) -> BTreeSet<String> {
+pub(in crate::backends::rust) fn identifiers_in(text: &str) -> BTreeSet<String> {
     let masked = masked_to_code(text);
     masked
         .split(|character: char| !(character.is_alphanumeric() || character == '_'))

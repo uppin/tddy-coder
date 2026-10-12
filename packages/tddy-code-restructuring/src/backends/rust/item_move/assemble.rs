@@ -25,6 +25,7 @@ use super::rebase::{self, Modules};
 use super::scope::Scope;
 use super::sites::{edits_for_file, module_of_file, Context, Qualifiers, Site};
 use super::text::{applied, enclosing_modules, line_end, line_start, use_insertion, Edit};
+use super::Reach;
 use crate::edit::VisibilityChange;
 use crate::plan::Reexport;
 use crate::registry::Workspace;
@@ -39,8 +40,8 @@ pub(super) struct Moving<'a> {
     /// The source module, below the crate root.
     pub(super) source: &'a [String],
     pub(super) run: &'a Run,
-    /// The items the source module keeps that the moved code names.
-    pub(super) reached: &'a [Item],
+    /// What the source module keeps that the moved code names, and the members the move splits.
+    pub(super) reached: &'a Reach,
     pub(super) destination: &'a Module,
     /// The parent that declares the destination, and its name, when the move creates it.
     pub(super) created: Option<(&'a Module, &'a str)>,
@@ -72,7 +73,7 @@ pub(super) fn assemble(moving: &Moving<'_>) -> Result<Assembled> {
     let mut texts = original_texts(moving)?;
     let region = line_start(moving.source_text, moving.run.first_line)
         ..line_end(moving.source_text, moving.run.last_line);
-    let landing = visibilities(moving, &texts, &region)?;
+    let landing = super::members::landing_of(moving, &texts, &region)?;
 
     let mut edits: BTreeMap<String, Vec<Edit>> = BTreeMap::new();
     edits
@@ -172,18 +173,18 @@ fn original_texts(moving: &Moving<'_>) -> Result<BTreeMap<String, String>> {
 }
 
 /// The visibilities the move changes, as edits to the source file, and the report of them.
-struct Landing {
+pub(super) struct Landing {
     /// The visibilities of the moved items, which are edits to the moved text.
-    moved_edits: Vec<Edit>,
+    pub(super) moved_edits: Vec<Edit>,
     /// The visibilities of the items left behind that the moved code reaches.
-    kept_edits: Vec<Edit>,
+    pub(super) kept_edits: Vec<Edit>,
     /// The spans of the moved items' own visibility, which no other edit may touch.
-    claimed: Vec<Range<usize>>,
+    pub(super) claimed: Vec<Range<usize>>,
     /// The scope each moved item has where it lands, in the order of the run.
-    scopes: Vec<(String, Scope)>,
+    pub(super) scopes: Vec<(String, Scope)>,
     /// What each moved item's visibility was written as, as a scope in the source module.
-    written: Vec<(String, Scope)>,
-    report: Vec<VisibilityChange>,
+    pub(super) written: Vec<(String, Scope)>,
+    pub(super) report: Vec<VisibilityChange>,
 }
 
 fn spelled(visibility: &str) -> String {
@@ -203,7 +204,7 @@ fn read_scope(item: &Item, module: &[String]) -> Result<Scope> {
     })
 }
 
-fn visibilities(
+pub(super) fn visibilities(
     moving: &Moving<'_>,
     texts: &BTreeMap<String, String>,
     region: &Range<usize>,
@@ -254,7 +255,7 @@ fn visibilities(
         landing.written.push((item.name.clone(), written));
     }
 
-    for item in moving.reached {
+    for item in &moving.reached.items {
         let written = read_scope(item, source)?;
         let widened = written.clone().widened_to(destination);
         if widened != written {
@@ -459,6 +460,7 @@ fn into_destination(
 
     let kept: Vec<String> = moving
         .reached
+        .items
         .iter()
         .map(|item| item.name.clone())
         .collect();
