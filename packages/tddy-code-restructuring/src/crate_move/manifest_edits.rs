@@ -2,20 +2,9 @@ use crate::{edit::Position, Range};
 
 use crate::edit::TextEdit;
 
-/// The span of the `mod <module>;` line in a crate root, newline included.
+/// The span of the `[<visibility>] mod <module>;` line in a crate root, newline included.
 pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::Range<usize>> {
-    let mut offset = 0usize;
-    for line in text.split_inclusive('\n') {
-        let start = offset;
-        offset += line.len();
-
-        let declaration = line.trim();
-        let declaration = declaration.strip_prefix("pub ").unwrap_or(declaration);
-        if declaration == format!("mod {module};") {
-            return Some(start..offset);
-        }
-    }
-    None
+    declared_module(text, module).map(|found| found.span)
 }
 
 /// A `[<visibility>] mod <module>;` line: where it is, and the visibility it was written with.
@@ -32,15 +21,44 @@ pub(crate) struct ModuleDeclaration {
 ///
 /// [`module_declaration`] and `declared_module_name` read through this, so a `pub(crate) mod x;`
 /// is the declaration of `x` everywhere a crate move looks for one.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-move-children): implement — `module_declaration`, \
-              `declared_module_name` and `Move::declaration` read through it"
-)]
 pub(crate) fn declared_module(text: &str, module: &str) -> Option<ModuleDeclaration> {
-    // TODO(reshape-move-children): implement
-    let _ = (text, module);
-    todo!("declared_module")
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let start = offset;
+        offset += line.len();
+
+        let (visibility, declaration) = split_visibility(line.trim());
+        if declaration == format!("mod {module};") {
+            return Some(ModuleDeclaration {
+                span: start..offset,
+                visibility: visibility.to_string(),
+            });
+        }
+    }
+    None
+}
+
+/// A declaration split into its visibility (`pub`, `pub(crate)`, `pub(in …)`; empty when private)
+/// and what follows it.
+pub(crate) fn split_visibility(declaration: &str) -> (&str, &str) {
+    let Some(rest) = declaration.strip_prefix("pub") else {
+        return ("", declaration);
+    };
+    let after = match rest.strip_prefix('(') {
+        Some(restriction) => restriction.split_once(')').map_or("", |(_, after)| after),
+        None => rest,
+    };
+    if after.starts_with(char::is_whitespace) {
+        let visibility = declaration[..declaration.len() - after.len()].trim_end();
+        (visibility, after.trim_start())
+    } else {
+        ("", declaration)
+    }
+}
+
+/// A declaration without its `pub`, `pub(crate)` or `pub(in …)` prefix.
+pub(crate) fn after_visibility(declaration: &str) -> &str {
+    split_visibility(declaration).1
 }
 
 /// A `mod <module>;` declaration as a crate move removes it: its line and the comment lines
@@ -202,11 +220,12 @@ pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str, comments:
     insertion(text, after_last.unwrap_or(header_ends), &documented)
 }
 
-/// The identifier a `[pub ]mod <name>;` line declares.
+/// The identifier a `[<visibility>] mod <name>;` line declares.
 fn declared_module_name(line: &str) -> Option<&str> {
-    let line = line.trim();
-    let line = line.strip_prefix("pub ").unwrap_or(line);
-    line.strip_prefix("mod ")?.strip_suffix(';').map(str::trim)
+    after_visibility(line.trim())
+        .strip_prefix("mod ")?
+        .strip_suffix(';')
+        .map(str::trim)
 }
 
 /// A line inserted at a byte offset, on a line of its own.

@@ -313,7 +313,7 @@ pub(crate) fn parent_reexports_of(text: &str, module: &str) -> Vec<usize> {
             continue;
         }
 
-        let Some(tree) = after_visibility(line)
+        let Some(tree) = manifest_edits::after_visibility(line)
             .strip_prefix("use ")
             .map(str::trim_start)
         else {
@@ -330,22 +330,6 @@ pub(crate) fn parent_reexports_of(text: &str, module: &str) -> Vec<usize> {
         }
     }
     found
-}
-
-/// A declaration without its `pub`, `pub(crate)` or `pub(in …)` prefix.
-fn after_visibility(declaration: &str) -> &str {
-    let Some(rest) = declaration.strip_prefix("pub") else {
-        return declaration;
-    };
-    let rest = match rest.strip_prefix('(') {
-        Some(restriction) => restriction.split_once(')').map_or("", |(_, after)| after),
-        None => rest,
-    };
-    if rest.starts_with(char::is_whitespace) {
-        rest.trim_start()
-    } else {
-        declaration
-    }
 }
 
 /// The destination crate root, declaring every module it is about to receive.
