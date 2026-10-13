@@ -173,12 +173,12 @@ async fn a_run_of_none_guards_in_an_option_function_is_lifted_to_option_unit() {
     // Then they are a function returning `Option<()>`, called with `?`
     let lib = workspace.read(ORIGIN_LIB);
     assert!(
-        lib.contains("    usable(n, b)?;\n"),
+        lib.contains("    usable(b, n)?;\n"),
         "the guards are not called with `?`:\n{lib}"
     );
     let usable = the_function_named(&lib, "usable");
     assert!(
-        usable.starts_with("fn usable(n: u32, b: Option<u32>) -> Option<()> {")
+        usable.starts_with("fn usable(b: Option<u32>, n: u32) -> Option<()> {")
             && usable.ends_with("    Some(())\n}"),
         "the lifted function is not `Option<()>`:\n{usable}"
     );

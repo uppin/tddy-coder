@@ -240,17 +240,17 @@ mod tests {
     /// being retried until the budget runs out and reported as an absent assist.
     #[test]
     fn reports_any_other_server_error_verbatim() {
-        // Given the server answering with an internal error
+        // Given the server answering with an error that is neither a panic nor a retryable state
         let error = map_lsp_error(LspError::Server {
-            code: -32603,
-            message: "internal error".to_string(),
+            code: -32000,
+            message: "request failed".to_string(),
         });
 
         // Then the code and message survive into the reported failure
         match error {
             RestructureError::MalformedPlan(message) => {
-                assert!(message.contains("-32603"), "{message}");
-                assert!(message.contains("internal error"), "{message}");
+                assert!(message.contains("-32000"), "{message}");
+                assert!(message.contains("request failed"), "{message}");
             }
             other => panic!("expected MalformedPlan, got {other:?}"),
         }
