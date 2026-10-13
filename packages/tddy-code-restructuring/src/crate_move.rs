@@ -868,7 +868,7 @@ mod tests {
         // Then
         assert_eq!(
             applied(&edit, ORIGIN_ROOT, &workspace),
-            "//! The daemon.\n\npub use tddy_host_service::host_registry;\nmod runtime;\n"
+            "//! The daemon.\n\nuse tddy_host_service::host_registry;\nmod runtime;\n"
         );
     }
 
