@@ -15,8 +15,8 @@ use crate::plan::Reexport;
 
 use super::module_home;
 
-use super::malformed;
-use crate::crate_move::{header, moving, refusals};
+use super::{malformed, Survey};
+use crate::crate_move::{carried, header, module_files, moving, refusals};
 use crate::edit::{FileEdit, TextEdit};
 
 /// A set of modules that move to one destination **as a single unit**.
@@ -114,38 +114,41 @@ pub fn resolve_cluster(
     cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
     let members = read_members(workspace, cluster)?;
-    let co_moving = cluster.co_moving();
-    let travelling: BTreeSet<String> = members.iter().map(|member| member.source.clone()).collect();
+    let carried = members
+        .iter()
+        .map(|member| member.carried(workspace))
+        .collect::<Result<Vec<_>>>()?;
+    let the_set = TheSet {
+        co_moving: members
+            .iter()
+            .map(|member| member.home.path.join("::"))
+            .collect(),
+        travelling: carried
+            .iter()
+            .flatten()
+            .map(|file| file.from.clone())
+            .collect(),
+    };
 
     let mut merged = MergedChanges::default();
-    let mut crates_named = BTreeSet::new();
-    let mut dev_crates_named = BTreeSet::new();
-    let mut keeps_naming_it = BTreeSet::new();
-    let mut surveys = Vec::new();
-
-    for member in &members {
-        let (survey, rewrites) = super::surveyed(engine, workspace, member, &travelling)?;
-        let moved = workspace.read(&member.source)?;
-        let header = header::repointed_header(workspace, &moved, member, &co_moving)?;
-        let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
-        refusals::refuse_a_dependency_cycle(member, &header, &naming_it)?;
-
-        merged.absorb(FileEdit::Rename {
-            from: member.source.clone(),
-            to: member.moved_to(),
-        });
-        crates_named.extend(header.crates_named);
-        dev_crates_named.extend(header.dev_crates_named);
-        merged.add(member.source.clone(), header.edits);
-        if member.reexport == Reexport::None {
-            for change in moving::caller_changes(workspace, rewrites)? {
-                merged.absorb(change);
-            }
-        }
-
-        keeps_naming_it.extend(naming_it);
-        surveys.push(survey);
+    let mut totals = SetTotals::default();
+    for (member, files) in members.iter().zip(&carried) {
+        member_changes(
+            engine,
+            workspace,
+            member,
+            files,
+            &the_set,
+            &mut merged,
+            &mut totals,
+        )?;
     }
+    let SetTotals {
+        surveys,
+        crates_named,
+        mut dev_crates_named,
+        keeps_naming_it,
+    } = totals;
 
     for change in moving::left_behind(workspace, &members, &surveys)? {
         merged.absorb(change);
@@ -175,6 +178,76 @@ pub fn resolve_cluster(
     })
 }
 
+/// What every member of a cluster is read against: the module paths moving together, and every
+/// file that moves, each member's carried files included.
+struct TheSet {
+    co_moving: BTreeSet<String>,
+    travelling: BTreeSet<String>,
+}
+
+/// What the members contribute to the edits that belong to the set rather than to a member.
+#[derive(Default)]
+struct SetTotals {
+    surveys: Vec<Survey>,
+    crates_named: BTreeSet<String>,
+    dev_crates_named: BTreeSet<String>,
+    keeps_naming_it: BTreeSet<String>,
+}
+
+/// What one member adds to the edit: a rename and a re-pointed header for each file it carries,
+/// the callers of everything in its tree that something outside the set names, and the refusals
+/// that are about the member as a whole.
+///
+/// A reference from one carried file to another is no caller: both move, and the header pass
+/// re-points it.
+fn member_changes(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    member: &moving::Move,
+    files: &[module_files::MovedFile],
+    the_set: &TheSet,
+    merged: &mut MergedChanges,
+    totals: &mut SetTotals,
+) -> Result<()> {
+    let mut rewrites = Vec::new();
+    let mut origin_paths = Vec::new();
+    for file in files {
+        let (survey, file_rewrites) =
+            super::surveyed_in(engine, workspace, member, &file.from, &the_set.travelling)?;
+        let text = workspace.read(&file.from)?;
+        let header =
+            header::repointed_header_at(workspace, &text, member, &file.below, &the_set.co_moving)?;
+
+        merged.absorb(FileEdit::Rename {
+            from: file.from.clone(),
+            to: file.to.clone(),
+        });
+        merged.add(file.from.clone(), header.edits);
+        totals.crates_named.extend(header.crates_named);
+        totals.dev_crates_named.extend(header.dev_crates_named);
+        for path in header.origin_paths {
+            if !origin_paths.contains(&path) {
+                origin_paths.push(path);
+            }
+        }
+        if file.below.is_empty() {
+            totals.surveys.push(survey);
+        }
+        rewrites.extend(file_rewrites);
+    }
+
+    let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
+    refusals::refuse_a_dependency_cycle(member, &origin_paths, &naming_it)?;
+    carried::restricted_children_reached(workspace, member, &rewrites)?;
+    if member.reexport == Reexport::None {
+        for change in moving::caller_changes(workspace, rewrites)? {
+            merged.absorb(change);
+        }
+    }
+    totals.keeps_naming_it.extend(naming_it);
+    Ok(())
+}
+
 /// Every member as the move it is, refusing a set that cannot be resolved as one.
 fn read_members(workspace: &Workspace<'_>, cluster: &MovingCluster) -> Result<Vec<moving::Move>> {
     let Some(first) = cluster.members.first() else {
@@ -190,7 +263,7 @@ fn read_members(workspace: &Workspace<'_>, cluster: &MovingCluster) -> Result<Ve
     }
 
     let mut members = Vec::new();
-    for home in &cluster.members {
+    for home in &carried::fold_carried_members(cluster.members.clone()) {
         if home.crate_dir != first.crate_dir {
             return Err(malformed(format!(
                 "`{}` and `{}` are in different crates, so the set has no one crate root for its \

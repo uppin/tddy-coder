@@ -15,7 +15,8 @@ use crate::Result;
 
 use super::declaration::{self, has_path_attribute, Declaration};
 use super::reading::Reparent;
-use super::relocation::{self, MovedFile};
+use super::relocation;
+use crate::crate_move::module_files::MovedFile;
 
 /// What a move needs to know about the tree it is made in.
 pub(super) struct Survey {

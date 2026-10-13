@@ -1,6 +1,6 @@
 use super::PlannedRewrite;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, ffi::OsStr, path::Path};
 
 use crate::{
     crate_move::{destination, manifest_edits, module_files, module_home},
@@ -83,9 +83,15 @@ impl Move {
         })
     }
 
-    /// Where the module file lands.
+    /// Where the module file lands: `a.rs` as `a.rs`, and `a/mod.rs` as `a/mod.rs`, so the
+    /// directory of its children stays beside it.
     pub(crate) fn moved_to(&self) -> String {
-        format!("{}/src/{}.rs", self.destination.dir, self.module)
+        let layout = if Path::new(&self.source).file_name() == Some(OsStr::new("mod.rs")) {
+            format!("{}/mod.rs", self.module)
+        } else {
+            format!("{}.rs", self.module)
+        };
+        format!("{}/src/{layout}", self.destination.dir)
     }
 
     /// Every file the module spans — its own first, then each file its `mod` declarations lead to
@@ -95,18 +101,24 @@ impl Move {
     /// # Errors
     ///
     /// Refuses when a declaration leads to no file, as [`module_files::files_of`] does.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-children): implement — `resolve_cluster` and the \
-                  preconditions read every carried file"
-    )]
     pub(crate) fn carried(
         &self,
         workspace: &Workspace<'_>,
     ) -> Result<Vec<module_files::MovedFile>> {
-        // TODO(reshape-move-children): implement
-        let _ = workspace;
-        todo!("Move::carried")
+        let files = module_files::files_of(workspace, &self.source)?;
+        let module_file = Path::new(&self.source);
+        let directory = module_file.parent().unwrap_or_else(|| Path::new(""));
+        let parent_directory = if module_file.file_name() == Some(OsStr::new("mod.rs")) {
+            directory.parent().unwrap_or_else(|| Path::new(""))
+        } else {
+            directory
+        };
+        Ok(module_files::relocated(
+            parent_directory,
+            &Path::new(&self.destination.dir).join("src"),
+            &self.module,
+            &files,
+        ))
     }
 
     /// The module's `mod` declaration in the file that declares it, with its visibility.
@@ -114,17 +126,24 @@ impl Move {
     /// # Errors
     ///
     /// Refuses when that file declares no such module.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-children): implement — the facade writer keeps its visibility"
-    )]
     pub(crate) fn declaration(
         &self,
         workspace: &Workspace<'_>,
     ) -> Result<manifest_edits::ModuleDeclaration> {
-        // TODO(reshape-move-children): implement
-        let _ = workspace;
-        todo!("Move::declaration")
+        let declared_in = &self.home.declared_in;
+        let text = workspace.read(declared_in)?;
+        manifest_edits::declared_module(&text, &self.module).ok_or_else(|| {
+            let where_declared = if self.home.is_top_level() {
+                "crate root"
+            } else {
+                "parent module"
+            };
+            malformed(format!(
+                "{declared_in} declares no `mod {}` — a module this {where_declared} does not \
+                 declare is not this crate's to move",
+                self.module
+            ))
+        })
     }
 
     /// The crate root that has to declare it afterwards.

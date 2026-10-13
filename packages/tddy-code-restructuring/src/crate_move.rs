@@ -197,9 +197,8 @@ pub fn resolution(
     workspace: &Workspace<'_>,
     op: &RefactorOp,
 ) -> Result<crate::Resolution> {
-    // TODO(reshape-move-children): implement
-    let _ = (engine, workspace, op);
-    todo!("crate_move::resolution")
+    let moving = moving::Move::read(workspace, op)?;
+    cluster_resolution(engine, workspace, &cluster::travelling_alone(&moving))
 }
 
 /// [`resolve_cluster`], as the [`Resolution`](crate::Resolution) a backend returns, with
@@ -213,9 +212,11 @@ pub fn cluster_resolution(
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
 ) -> Result<crate::Resolution> {
-    // TODO(reshape-move-children): implement
-    let _ = (engine, workspace, cluster);
-    todo!("crate_move::cluster_resolution")
+    let edit = resolve_cluster(engine, workspace, cluster)?;
+    Ok(crate::Resolution {
+        notes: carried::carried_notes(workspace, cluster)?,
+        ..crate::Resolution::of(edit)
+    })
 }
 
 /// The survey, plus the exact spans each caller rewrite replaces.
@@ -246,11 +247,24 @@ pub(crate) fn surveyed(
     moving: &moving::Move,
     travelling: &BTreeSet<String>,
 ) -> Result<(Survey, Vec<PlannedRewrite>)> {
+    surveyed_in(engine, workspace, moving, &moving.source, travelling)
+}
+
+/// [`surveyed`] for one file of the module's tree: the module's own, or a child it carries. The
+/// survey names the module's `source` whichever file is asked about, because it describes the
+/// move; the rewrites are the file's own callers.
+pub(crate) fn surveyed_in(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    moving: &moving::Move,
+    file: &str,
+    travelling: &BTreeSet<String>,
+) -> Result<(Survey, Vec<PlannedRewrite>)> {
     let mut reached = Vec::new();
     let mut callers = Vec::new();
     let mut rewrites = Vec::new();
 
-    for item in engine.outside_references(workspace, &moving.source)? {
+    for item in engine.outside_references(workspace, file)? {
         let outside_the_set: Vec<Reference> = item
             .referenced_at
             .into_iter()

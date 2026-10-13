@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use super::malformed;
 
-use crate::crate_move::{cluster, header, manifest_edits, module_home, moving, survey};
+use crate::crate_move::{carried, cluster, header, manifest_edits, module_home, moving, survey};
 
 use super::Result;
 
@@ -57,8 +57,14 @@ pub(crate) fn unrunnable(
         }
         for anchor in op.anchors() {
             let earlier = moved_by_earlier_operations(workspace, ops, index, anchor);
-            if let Err(refusal) = move_preconditions(workspace, &member_op(op, anchor), &earlier) {
-                findings.push((index, refusal.to_string()));
+            let member = member_op(op, anchor);
+            match move_preconditions(workspace, &member, &earlier) {
+                Err(refusal) => findings.push((index, refusal.to_string())),
+                Ok(()) => findings.extend(
+                    carried::uncarriable(workspace, ops, index, &member)?
+                        .into_iter()
+                        .map(|finding| (index, finding)),
+                ),
             }
         }
     }
@@ -88,13 +94,45 @@ pub(crate) fn stays_behind_through_a_body(
     earlier: &BTreeSet<String>,
 ) -> Result<Option<String>> {
     let moving = moving::Move::read(workspace, op)?;
+    let travelling = travelling_modules(workspace, op, earlier)?;
+    body_path_left_behind(
+        workspace,
+        &moving,
+        &moving.source,
+        &moving.home.path,
+        &travelling,
+    )
+}
+
+/// The modules `op` moves with, as `crate::`-relative paths: every anchor of the operation, and
+/// `earlier`, which an earlier operation of the plan already moved to the same destination.
+pub(crate) fn travelling_modules(
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+    earlier: &BTreeSet<String>,
+) -> Result<BTreeSet<String>> {
     let mut travelling = earlier.clone();
     for anchor in op.anchors() {
         travelling.insert(home_of_anchor(workspace, anchor)?.path.join("::"));
     }
+    Ok(travelling)
+}
 
-    let text = workspace.read(&moving.source)?;
-    let survey = survey::survey_moved_file(workspace, &text, &moving.origin, &moving.home.path)?;
+/// [`stays_behind_through_a_body`] for one file the move carries: `file`, whose module is
+/// `module_path` (the moved module's own, or one of its children), read against `travelling`.
+///
+/// # Errors
+///
+/// Refuses when the survey does.
+pub(crate) fn body_path_left_behind(
+    workspace: &Workspace<'_>,
+    moving: &moving::Move,
+    file: &str,
+    module_path: &[String],
+    travelling: &BTreeSet<String>,
+) -> Result<Option<String>> {
+    let text = workspace.read(file)?;
+    let survey = survey::survey_moved_file(workspace, &text, &moving.origin, module_path)?;
     let origin = &moving.origin.extern_name;
 
     let left_behind = survey
@@ -102,15 +140,14 @@ pub(crate) fn stays_behind_through_a_body(
         .iter()
         .filter(|path| path.in_body && !path.in_test && path.defining_crate == *origin)
         .find_map(|path| {
-            module_left_behind(&path.defined_at, origin, &travelling).map(|module| (path, module))
+            module_left_behind(&path.defined_at, origin, travelling).map(|module| (path, module))
         });
     Ok(left_behind.map(|(path, module)| {
         format!(
-            "`{source}` reaches `{written}` in a body at line {line}, and `{module}` stays behind \
+            "`{file}` reaches `{written}` in a body at line {line}, and `{module}` stays behind \
              in `{origin}` — after the move that path names nothing in `{destination}`, and naming \
              `{origin}` from there is a cycle. Cut the body's dependency on `{module}` before moving \
              the module.",
-            source = moving.source,
             written = path.written,
             line = path.site.line,
             origin = moving.origin.package,
@@ -141,7 +178,10 @@ fn module_left_behind<'a>(
 /// # Errors
 ///
 /// Refuses when the anchor's file names no module or lies in no crate.
-fn home_of_anchor(workspace: &Workspace<'_>, anchor: &Anchor) -> Result<module_home::ModuleHome> {
+pub(super) fn home_of_anchor(
+    workspace: &Workspace<'_>,
+    anchor: &Anchor,
+) -> Result<module_home::ModuleHome> {
     let module = module_home::module_name(anchor.file())?;
     module_home::module_home(workspace, anchor.file(), &module)
 }

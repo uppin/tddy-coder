@@ -1,9 +1,6 @@
 use std::path::Path;
 
-use crate::{
-    crate_move::{header, moving},
-    plan::Reexport,
-};
+use crate::{crate_move::moving, plan::Reexport};
 
 use super::PlannedRewrite;
 
@@ -24,10 +21,10 @@ use crate::registry::Workspace;
 /// names both, and names every path that forced it.
 pub(crate) fn refuse_a_dependency_cycle(
     moving: &moving::Move,
-    header: &header::Header,
+    origin_paths: &[String],
     keeps_naming_it: &BTreeSet<String>,
 ) -> Result<()> {
-    if !keeps_naming_it.contains(&moving.origin.dir) || header.origin_paths.is_empty() {
+    if !keeps_naming_it.contains(&moving.origin.dir) || origin_paths.is_empty() {
         return Ok(());
     }
 
@@ -37,7 +34,7 @@ pub(crate) fn refuse_a_dependency_cycle(
          module's own dependencies with it",
         moving.source,
         moving.origin.package,
-        header.origin_paths.join(", ")
+        origin_paths.join(", ")
     )))
 }
 

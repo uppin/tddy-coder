@@ -1,5 +1,3 @@
-use super::super::malformed;
-
 use crate::{
     crate_move::{facade_line, facade_lines_for_plan, header, manifest_edits, FacadeEntry},
     edit::TextEdit,
@@ -57,39 +55,58 @@ pub(crate) fn left_behind(
 }
 
 /// The edits one declaring file needs for the members it declares.
+///
+/// A facade is written with the visibility its member's own declaration had, so a `pub(crate) mod`
+/// leaves a `pub(crate) use` and a private one a private `use`: a `pub use` would publish what the
+/// origin kept to itself. One line is kept per visibility.
 fn leaving(
     workspace: &Workspace<'_>,
     path: &str,
     text: &str,
     members: &[(&Move, &Survey)],
 ) -> Result<Vec<TextEdit>> {
-    let facade_members: Vec<&Move> = members
+    let mut declarations = Vec::new();
+    for (member, _) in members {
+        declarations.push(member.declaration(workspace)?);
+    }
+    let moved: Vec<FacadeEntry> = members
         .iter()
-        .map(|(member, _)| *member)
-        .filter(|member| member.reexport == Reexport::Glob)
-        .collect();
-    // TODO(reshape-move-children): implement — the visibility is the member's own declaration's
-    // (`Move::declaration`), not always `pub`.
-    let moved: Vec<FacadeEntry> = facade_members
-        .iter()
-        .map(|member| FacadeEntry {
+        .zip(&declarations)
+        .filter(|((member, _), _)| member.reexport == Reexport::Glob)
+        .map(|((member, _), declaration)| FacadeEntry {
             destination: member.destination.clone(),
-            visibility: "pub".to_string(),
+            visibility: declaration.visibility.clone(),
             module: member.module.clone(),
         })
         .collect();
 
     let mut edits = Vec::new();
-    let mut facade_written = false;
-    if let Some(earlier) = earlier_facade(workspace, text, &facade_members) {
-        edits.push(extended_facade(text, &earlier, &facade_members, &moved));
-        facade_written = true;
+    // The visibilities whose facade line is already written: extended in place, or at an earlier
+    // member's declaration.
+    let mut written: Vec<&str> = Vec::new();
+    for entry in &moved {
+        let visibility = entry.visibility.as_str();
+        if written.contains(&visibility) {
+            continue;
+        }
+        if let Some(earlier) = earlier_facade(workspace, text, members[0].0, visibility) {
+            edits.push(extended_facade(text, &earlier, &moved, visibility));
+            written.push(visibility);
+        }
     }
 
     let removals = removals_with_separators(path, text, members)?;
 
-    for ((member, survey), (removal, separated)) in members.iter().zip(removals) {
-        let facade = facade_for(member, survey, &moved, &mut facade_written);
+    for (((member, survey), declaration), (removal, separated)) in
+        members.iter().zip(&declarations).zip(removals)
+    {
+        let facade = facade_for(
+            member,
+            survey,
+            &moved,
+            declaration.visibility.as_str(),
+            &mut written,
+        );
         edits.push(manifest_edits::replacement(
             text,
             removal.span,
@@ -101,18 +118,24 @@ fn leaving(
 }
 
 /// The facade that takes the place of `member`'s declaration, if it gets one: a glob member shares
-/// one facade for the plan, written at the first of them (`facade_written` records it).
-fn facade_for(
+/// one facade per visibility for the plan, written at the first of them (`written` records it).
+fn facade_for<'a>(
     member: &Move,
     survey: &Survey,
-    moved: &[(destination::Destination, String)],
-    facade_written: &mut bool,
+    moved: &[FacadeEntry],
+    visibility: &'a str,
+    written: &mut Vec<&'a str>,
 ) -> Option<String> {
     match member.reexport {
-        Reexport::Glob if *facade_written => None,
+        Reexport::Glob if written.contains(&visibility) => None,
         Reexport::Glob => {
-            *facade_written = true;
-            Some(facade_lines_for_plan(moved).join("\n"))
+            written.push(visibility);
+            let entries: Vec<FacadeEntry> = moved
+                .iter()
+                .filter(|entry| entry.visibility == visibility)
+                .cloned()
+                .collect();
+            Some(facade_lines_for_plan(&entries).join("\n"))
         }
         // `outside` is refused for a cross-crate move when the plan is read.
         Reexport::Named | Reexport::None | Reexport::Outside => facade_line(
@@ -155,34 +178,40 @@ fn left_in_place_of(carries_separator: bool, facade: Option<String>) -> String {
     }
 }
 
-/// The facade an earlier operation of the plan wrote for the first facade member's destination.
+/// The facade of `visibility` an earlier operation of the plan wrote for `first`'s destination,
+/// which every member of the set shares.
 fn earlier_facade(
     workspace: &Workspace<'_>,
     text: &str,
-    facade_members: &[&Move],
+    first: &Move,
+    visibility: &str,
 ) -> Option<WrittenFacade> {
-    let first = facade_members.first()?;
     let root = workspace.read(&first.destination_root()).ok()?;
-    written_facade(text, &first.destination.extern_name, "pub", &root)
+    written_facade(text, &first.destination.extern_name, visibility, &root)
 }
 
-/// The edit that rewrites an earlier facade line to also name the modules moving now.
+/// The edit that rewrites an earlier facade line to also name the modules of `visibility` moving
+/// now.
 fn extended_facade(
     text: &str,
     earlier: &WrittenFacade,
-    facade_members: &[&Move],
     moved: &[FacadeEntry],
+    visibility: &str,
 ) -> TextEdit {
-    let destination = &facade_members[0].destination;
+    let now: Vec<&FacadeEntry> = moved
+        .iter()
+        .filter(|entry| entry.visibility == visibility)
+        .collect();
+    let destination = &now[0].destination;
     let all: Vec<_> = earlier
         .modules
         .iter()
         .map(|module| FacadeEntry {
             destination: destination.clone(),
-            visibility: "pub".to_string(),
+            visibility: visibility.to_string(),
             module: module.clone(),
         })
-        .chain(moved.iter().cloned())
+        .chain(now.into_iter().cloned())
         .collect();
     let line = facade_lines_for_plan(&all).join("\n");
     manifest_edits::replacement(text, earlier.span.clone(), &format!("{line}\n"))
@@ -248,10 +277,11 @@ pub(crate) fn written_facade(
     visibility: &str,
     destination_root: &str,
 ) -> Option<WrittenFacade> {
-    // TODO(reshape-move-children): implement — match `"{visibility} use "` (`"use "` when private)
-    // rather than `pub use` alone, so a later operation extends a facade of its own visibility.
-    let _ = visibility;
-    let prefix = format!("pub use {extern_name}::");
+    let prefix = if visibility.is_empty() {
+        format!("use {extern_name}::")
+    } else {
+        format!("{visibility} use {extern_name}::")
+    };
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
         let start = offset;

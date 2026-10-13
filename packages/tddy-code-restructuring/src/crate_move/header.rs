@@ -70,7 +70,26 @@ pub(crate) fn repointed_header(
     moving: &Move,
     co_moving: &BTreeSet<String>,
 ) -> Result<Header> {
-    let survey = survey::survey_moved_file(workspace, text, &moving.origin, &moving.home.path)?;
+    repointed_header_at(workspace, text, moving, &[], co_moving)
+}
+
+/// [`repointed_header`] for a file the move **carries** below its module: `below` is the modules
+/// between the moved module and the file (`["b"]` for `a/b.rs`), so the survey resolves its
+/// `self::` and `super::` paths against `moving.home.path ++ below`, and one that stays inside the
+/// carried tree is left as written. `repointed_header` is this with `below` empty.
+///
+/// # Errors
+///
+/// Refuses for every reason [`repointed_header`] does.
+pub(crate) fn repointed_header_at(
+    workspace: &Workspace<'_>,
+    text: &str,
+    moving: &Move,
+    below: &[String],
+    co_moving: &BTreeSet<String>,
+) -> Result<Header> {
+    let module_path: Vec<String> = moving.home.path.iter().chain(below).cloned().collect();
+    let survey = survey::survey_moved_file(workspace, text, &moving.origin, &module_path)?;
     let header_lines: BTreeSet<u32> = use_declarations(text)
         .into_iter()
         .map(|(at, _)| manifest_edits::position_of(text, at).line)
@@ -118,30 +137,6 @@ pub(crate) fn repointed_header(
         .dev_crates_named
         .retain(|named| !header.crates_named.contains(named));
     Ok(header)
-}
-
-/// [`repointed_header`] for a file the move **carries** below its module: `below` is the modules
-/// between the moved module and the file (`["b"]` for `a/b.rs`), so the survey resolves its
-/// `self::` and `super::` paths against `moving.home.path ++ below`, and one that stays inside the
-/// carried tree is left as written. `repointed_header` is this with `below` empty.
-///
-/// # Errors
-///
-/// Refuses for every reason [`repointed_header`] does.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-move-children): implement — `resolve_cluster` re-points every carried file"
-)]
-pub(crate) fn repointed_header_at(
-    workspace: &Workspace<'_>,
-    text: &str,
-    moving: &Move,
-    below: &[String],
-    co_moving: &BTreeSet<String>,
-) -> Result<Header> {
-    // TODO(reshape-move-children): implement
-    let _ = (workspace, text, moving, below, co_moving);
-    todo!("repointed_header_at")
 }
 
 fn push_once(paths: &mut Vec<String>, path: &str) {
