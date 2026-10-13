@@ -421,7 +421,15 @@ tests stays on the `pub` line; a facade between two runs is followed by a blank 
 (empty)
 
 ### From @validate-tests (Test Quality)
-(empty)
+Run 2026-10-13, 0 critical, 4 warnings, all handled:
+- ✅ one unit test held three scenarios — split into three single-behaviour tests
+  (`two_adjacent_removals_*`, `two_removals_with_a_blank_line_between_them_*`);
+- ✅ the new live test inlined a fixture the file already had a helper pattern for — extracted
+  `an_origin_whose_use_runs_alpha_and_beta_separate`, and the repeated run-below literal became
+  `THE_RUN_BELOW_KEPT_APART`;
+- ⚠ kept: tests 5, 6, 18 and 21 assert a tuple of facts about one outcome (their names are the planned ones);
+  splitting them would not add a behaviour, only repeat the Given.
+No `#[ignore]`, sleeps, tautologies, or meaningless fixture values were found in the added tests.
 
 ### From @prod-ready (Production Readiness)
 (empty)

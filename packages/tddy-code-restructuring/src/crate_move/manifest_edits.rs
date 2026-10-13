@@ -577,29 +577,49 @@ mod removed_declaration_tests {
         assert_eq!((between, beside), (true, false));
     }
 
+    /// Which of `m1` and `m2`, declared in `text`, carries the blank line that keeps two `use` runs apart.
+    fn the_separator_carriers_of_m1_and_m2_in(text: &str) -> Vec<bool> {
+        let spans: Vec<_> = ["m1", "m2"]
+            .iter()
+            .map(|module| the_removal_of(text, module).span)
+            .collect();
+        separator_carriers(text, &spans)
+    }
+
     #[test]
-    fn adjacent_removals_between_two_use_runs_are_weighed_together_and_one_carries_the_separator() {
-        // Given two adjacent declarations that are the only lines between two `use` runs, two
-        // adjacent ones between a `use` run and a blank line, and two apart
-        let joined = "pub use a::x;\npub mod m1;\npub mod m2;\npub use b::y;\n";
-        let apart_below = "pub use a::x;\npub mod m1;\npub mod m2;\n\npub use b::y;\n";
-        let spaced = "pub use a::x;\npub mod m1;\n\npub mod m2;\npub use b::y;\n";
+    fn two_adjacent_removals_between_two_use_runs_leave_one_separator_carried_by_the_last() {
+        // Given two adjacent declarations that are the only lines between two `use` runs
+        let text = "pub use a::x;\npub mod m1;\npub mod m2;\npub use b::y;\n";
 
-        // When each file's removals are weighed
-        let carriers = |text: &str| {
-            let spans: Vec<_> = ["m1", "m2"]
-                .iter()
-                .map(|module| the_removal_of(text, module).span)
-                .collect();
-            separator_carriers(text, &spans)
-        };
+        // When their removals are weighed
+        let carriers = the_separator_carriers_of_m1_and_m2_in(text);
 
-        // Then only the last of an abutting pair that joins the runs carries the line, once, and a
-        // blank line anywhere already keeps the runs apart
-        assert_eq!(
-            (carriers(joined), carriers(apart_below), carriers(spaced)),
-            (vec![false, true], vec![false, false], vec![false, false])
-        );
+        // Then only the last carries the line, so it appears once
+        assert_eq!(carriers, [false, true]);
+    }
+
+    #[test]
+    fn two_adjacent_removals_above_a_blank_line_carry_no_separator() {
+        // Given two adjacent declarations with a blank line below them, before the next `use` run
+        let text = "pub use a::x;\npub mod m1;\npub mod m2;\n\npub use b::y;\n";
+
+        // When their removals are weighed
+        let carriers = the_separator_carriers_of_m1_and_m2_in(text);
+
+        // Then the runs are already apart and nothing is added
+        assert_eq!(carriers, [false, false]);
+    }
+
+    #[test]
+    fn two_removals_with_a_blank_line_between_them_carry_no_separator() {
+        // Given two declarations a blank line apart, between two `use` runs
+        let text = "pub use a::x;\npub mod m1;\n\npub mod m2;\npub use b::y;\n";
+
+        // When their removals are weighed
+        let carriers = the_separator_carriers_of_m1_and_m2_in(text);
+
+        // Then each is weighed alone and neither joins the runs
+        assert_eq!(carriers, [false, false]);
     }
 
     #[test]

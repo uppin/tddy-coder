@@ -383,6 +383,10 @@ fn an_origin_whose_use_runs_beta_separates() -> harness::AFixtureWorkspace {
     ])
 }
 
+/// The run below a facade that took the place of a declaration, still a run of its own.
+const THE_RUN_BELOW_KEPT_APART: &str =
+    "pub use std::rc::Rc;\n\npub use std::collections::HashMap;\npub use std::sync::Arc;\n";
+
 /// The two `use` runs of [`an_origin_whose_use_runs_beta_separates`], as they stand when kept apart.
 const THE_USE_RUNS_KEPT_APART: &str =
     "pub use std::cell::Cell;\npub use std::rc::Rc;\n\npub use std::collections::HashMap;\n\
@@ -432,19 +436,16 @@ async fn a_facade_that_replaces_a_declaration_between_two_use_runs_leaves_the_ru
     assert_eq!(summary.map(|run| run.applied), Ok(1));
     let origin = workspace.read(ORIGIN_LIB);
     assert!(
-        origin.contains(
-            "pub use std::rc::Rc;\n\npub use std::collections::HashMap;\npub use std::sync::Arc;\n"
-        ),
+        origin.contains(THE_RUN_BELOW_KEPT_APART),
         "the run below the facade was merged into the one above:\n{origin}"
     );
     assert_lints_clean(&workspace);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn two_adjacent_declarations_that_are_the_only_lines_between_two_use_runs_leave_the_runs_apart(
-) {
-    // Given two `use` runs that two adjacent declarations alone separate
-    let workspace = a_workspace_of(&[
+/// An origin whose root holds two `use` runs with `pub mod alpha;` and `pub mod beta;` the only lines
+/// between them.
+fn an_origin_whose_use_runs_alpha_and_beta_separate() -> harness::AFixtureWorkspace {
+    a_workspace_of(&[
         ("crates/origin/Cargo.toml", ORIGIN_OVER_SHARED),
         (
             ORIGIN_LIB,
@@ -461,7 +462,14 @@ async fn two_adjacent_declarations_that_are_the_only_lines_between_two_use_runs_
             "pub fn two() -> u32 {\n    2\n}\n",
         ),
         (DESTINATION_LIB, ""),
-    ]);
+    ])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_adjacent_declarations_that_are_the_only_lines_between_two_use_runs_leave_the_runs_apart(
+) {
+    // Given two `use` runs that two adjacent declarations alone separate
+    let workspace = an_origin_whose_use_runs_alpha_and_beta_separate();
 
     // When both move with one facade, through an apply that formats what it wrote
     let summary = applying_a_plan_of(
@@ -478,9 +486,7 @@ async fn two_adjacent_declarations_that_are_the_only_lines_between_two_use_runs_
     let origin = workspace.read(ORIGIN_LIB);
     assert!(
         origin.contains("pub use destination::{alpha, beta};\n")
-            && origin.contains(
-                "pub use std::rc::Rc;\n\npub use std::collections::HashMap;\npub use std::sync::Arc;\n"
-            ),
+            && origin.contains(THE_RUN_BELOW_KEPT_APART),
         "the runs were joined and re-sorted:\n{origin}"
     );
     assert_lints_clean(&workspace);
