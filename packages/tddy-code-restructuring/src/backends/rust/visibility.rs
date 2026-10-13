@@ -83,19 +83,7 @@ pub(crate) fn restore_visibility(
             || reaches_through_module(&outside, module, &item.name)
             || escaping.contains(&item.name)
         {
-            // An item already written `pub(crate)` is not widened: reporting it would print a
-            // change from `pub(crate)` to `pub(crate)`.
-            if item.visibility != "pub(crate)" {
-                report.push(VisibilityChange {
-                    item: item.name.clone(),
-                    from: if item.visibility.is_empty() {
-                        "private".to_string()
-                    } else {
-                        item.visibility.clone()
-                    },
-                    to: "pub(crate)".to_string(),
-                });
-            }
+            report.extend(widening_of(item));
             continue;
         }
 
@@ -103,6 +91,23 @@ pub(crate) fn restore_visibility(
     }
 
     Ok((source.join("\n"), report))
+}
+
+/// What reporting `item` as widened says, or nothing for an item already written `pub(crate)`:
+/// reporting that would print a change from `pub(crate)` to `pub(crate)`.
+fn widening_of(item: &MovedItem) -> Option<VisibilityChange> {
+    if item.visibility == "pub(crate)" {
+        return None;
+    }
+    Some(VisibilityChange {
+        item: item.name.clone(),
+        from: if item.visibility.is_empty() {
+            "private".to_string()
+        } else {
+            item.visibility.clone()
+        },
+        to: "pub(crate)".to_string(),
+    })
 }
 
 /// Everything in `source` that is not inside `block`, as one text.

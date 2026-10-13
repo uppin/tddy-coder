@@ -267,6 +267,15 @@ Unit tests 10–15 (`cargo test -p tddy-code-restructuring --lib -- projection::
 
 Resolved here (developer decision 2026-10-12): `restore_visibility` no longer reports an item already written `pub(crate)` as a widening, so neither a dry run nor a deep check prints `` `PtyHandle` pub(crate) -> pub(crate)`` (seen in tests 3 and 8; test 4 asserts exactly one line). This is the one exception to the boundary that leaves `restore_visibility` unchanged.
 
+**/pr-wrap validation (2026-10-13)**, scoped to `tddy-code-restructuring`.
+
+- **validate-changes**: the diff over `origin/master` is the changeset's files only (projection, documents, visibility, rehearsal, `check_entry_points`, harness, acceptance binary, the two registrations, three todos, PRD, this changeset and its discovery). No `todo!()`, `expect(dead_code)` or `TODO(reshape-multi-seam-extract)` remains. `resolve_opening` and `assisted_edit` untouched; no `Workspace`/`Overlay`/apply-loop/plan-format change. Rule 4 and the Validation Results entry above both state the `pub(crate)` non-widening exception consistently; the discovery's "Not this node's, noticed on the way" list does not mention it (it is a list of other nodes' items, so nothing to update).
+- **validate-tests**: no sleeps, `#[ignore]`, prints or stray unwraps; names state behaviour, Given/When/Then comments present. Test count 15 of 15 contract rows exist and pass. Gap noted, not fixed: the `pub(crate)` non-widening has no unit test of its own, only acceptance test 4's exact-one-line assertion.
+- **validate-prod-ready**: no mock, debug output, `unwrap`/`expect` in the added production code; no TODO/FIXME added by this PR (the ones in `members.rs` and `crate_move/header.rs` pre-exist, from other nodes).
+- **File-length gate**: `src/backends/rust.rs` grew by 15 raw lines (5566 to 5581; about 3,0xx production lines against a 500 budget), all wiring: `mod projection;`, two fields in two constructors, and `resolve`. It is recorded in `docs/code-issues/oversized-file-backends-rust.md`, which carries **no `Claimed by:`**. Its Metrics line was not updated; left to the developer. Other touched files stay under 500 production lines (`projection.rs` 91, `documents.rs` 76, `rehearsal.rs` 181, `check_entry_points.rs` 377, `visibility.rs` about 220).
+- **analyze-clean-code**: one finding fixed. `restore_visibility` (over 60 lines) had grown by 4 lines with the nested `pub(crate)` guard; the report construction moved into a new `widening_of(item) -> Option<VisibilityChange>`, so the function is now 8 lines shorter than on master. No other function over 60 lines grew; no magic values or duplication in the added code.
+- **Gates**: `cargo fmt -p tddy-code-restructuring` clean; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` clean; `./test -p tddy-code-restructuring` **1378 passed, 0 failed**; `bun test ./scripts/nextest-serial-groups.test.ts` 22 pass, 0 fail. Nothing run workspace-wide.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-multi-seam-extract-initial-discovery.md`)
@@ -295,3 +304,7 @@ Resolved here (developer decision 2026-10-12): `restore_visibility` no longer re
 - [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — deletes the 09-18 todo and this node's discovery file, narrows the 09-24 todo (removes H and J), adds history rows to the two DURING items
 - [ ] USER REVIEW — work complete, decide next steps
+
+### File-length deferral (2026-10-13)
+
+`backends/rust.rs` grew by 15 production lines (2,983 to 2,998, counted to the first inline `#[cfg(test)] mod`): wiring only, with the logic in `projection.rs` and `documents.rs`. The file is far over the 500-line budget and its record, `oversized-file-backends-rust.md`, carries no claim. Decomposing it is deferred with the developer's consent: the impl-member seams still need an engine move and later `#reshape` nodes edit this file. The record's Measurement history has the new row.
