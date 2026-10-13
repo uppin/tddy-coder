@@ -441,6 +441,52 @@ async fn a_facade_that_replaces_a_declaration_between_two_use_runs_leaves_the_ru
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn two_adjacent_declarations_that_are_the_only_lines_between_two_use_runs_leave_the_runs_apart(
+) {
+    // Given two `use` runs that two adjacent declarations alone separate
+    let workspace = a_workspace_of(&[
+        ("crates/origin/Cargo.toml", ORIGIN_OVER_SHARED),
+        (
+            ORIGIN_LIB,
+            "pub use std::cell::Cell;\npub use std::rc::Rc;\npub mod alpha;\npub mod beta;\n\
+             pub use std::collections::HashMap;\npub use std::sync::Arc;\n\n\
+             pub fn boot() -> u32 {\n    alpha::one() + beta::two()\n}\n",
+        ),
+        (
+            "crates/origin/src/alpha.rs",
+            "pub fn one() -> u32 {\n    1\n}\n",
+        ),
+        (
+            "crates/origin/src/beta.rs",
+            "pub fn two() -> u32 {\n    2\n}\n",
+        ),
+        (DESTINATION_LIB, ""),
+    ]);
+
+    // When both move with one facade, through an apply that formats what it wrote
+    let summary = applying_a_plan_of(
+        &workspace,
+        &[
+            a_glob_move_of("crates/origin/src/alpha.rs", "alpha"),
+            a_glob_move_of("crates/origin/src/beta.rs", "beta"),
+        ],
+    )
+    .await;
+
+    // Then the facade names both, and the run below it is still a run of its own
+    assert_eq!(summary.map(|run| run.applied), Ok(2));
+    let origin = workspace.read(ORIGIN_LIB);
+    assert!(
+        origin.contains("pub use destination::{alpha, beta};\n")
+            && origin.contains(
+                "pub use std::rc::Rc;\n\npub use std::collections::HashMap;\npub use std::sync::Arc;\n"
+            ),
+        "the runs were joined and re-sorted:\n{origin}"
+    );
+    assert_lints_clean(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_moved_declaration_carrying_a_cfg_attribute_is_refused_by_check_and_by_apply_and_nothing_is_written(
 ) {
     // Given a module declared under an attribute a move can neither keep nor drop

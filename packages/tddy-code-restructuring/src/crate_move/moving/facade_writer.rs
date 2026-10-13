@@ -80,8 +80,9 @@ fn leaving(
         facade_written = true;
     }
 
-    for (member, survey) in members {
-        let removal = declaration_of(path, text, member)?;
+    let removals = removals_with_separators(path, text, members)?;
+
+    for ((member, survey), (removal, separated)) in members.iter().zip(removals) {
         let facade = match member.reexport {
             Reexport::Glob if facade_written => None,
             Reexport::Glob => {
@@ -97,28 +98,40 @@ fn leaving(
         };
         edits.push(manifest_edits::replacement(
             text,
-            removal.span.clone(),
-            &left_in_place_of(text, &removal, facade),
+            removal.span,
+            &left_in_place_of(separated, facade),
         ));
         edits.extend(parent_reexport_edits(text, member));
     }
     Ok(edits)
 }
 
+/// Each member's declaration as a move removes it, with whether it carries the blank line that keeps
+/// two `use` runs apart (see [`manifest_edits::separator_carriers`]).
+fn removals_with_separators(
+    path: &str,
+    text: &str,
+    members: &[(&Move, &Survey)],
+) -> Result<Vec<(manifest_edits::RemovedDeclaration, bool)>> {
+    let removals = members
+        .iter()
+        .map(|(member, _)| declaration_of(path, text, member))
+        .collect::<Result<Vec<_>>>()?;
+    let spans: Vec<_> = removals
+        .iter()
+        .map(|removal| removal.span.clone())
+        .collect();
+    let carriers = manifest_edits::separator_carriers(text, &spans);
+    Ok(removals.into_iter().zip(carriers).collect())
+}
+
 /// What takes the place of a removed declaration: the facade on a line of its own, or nothing.
 ///
-/// Where the declaration is the only thing between two `use` runs, one blank line stays (after the
-/// facade, when there is one) so rustfmt keeps sorting the two apart.
-fn left_in_place_of(
-    text: &str,
-    removal: &manifest_edits::RemovedDeclaration,
-    facade: Option<String>,
-) -> String {
-    let separator = if manifest_edits::separates_use_runs(text, removal.span.clone()) {
-        "\n"
-    } else {
-        ""
-    };
+/// Where the declaration (or the run of adjacent ones it ends) is the only thing between two `use`
+/// runs, one blank line stays (after the facade, when there is one) so rustfmt keeps sorting the
+/// two apart.
+fn left_in_place_of(carries_separator: bool, facade: Option<String>) -> String {
+    let separator = if carries_separator { "\n" } else { "" };
     match facade {
         Some(facade) => format!("{facade}\n{separator}"),
         None => separator.to_string(),

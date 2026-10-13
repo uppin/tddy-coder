@@ -111,6 +111,10 @@ eight unused globs and stranded doc comments in `#carve 21/21` (one still on mas
 `child` module, and `moved` is empty → `seam_refusal`:
 `` the range <start>-<end> of <file> declares `<first name>` (and N more), and the server's outline lists none of them — a facade written now would name nothing. Re-run once the index has loaded ``.
 A range of `impl` blocks only lists nothing in `items_of_module` and is not refused.
+`survey_moved_items` calls it **only when the outline lists no member of the range at all**
+(`seam_survey::items_relocated_within` is empty): a range cutting into an `impl` is answered by an outline that lists
+its members, which no module path names, so `items_of_module` reads `fn doubled` as a declared item while `moved` is
+legitimately empty. Refusing there broke `impl_seam_acceptance` and `import_pass_acceptance`.
 
 **2. Named facade lines** for `module` `m` (order is the contract):
 
@@ -136,6 +140,9 @@ A `pub` item reached only from tests stays on the `pub` line (its public path is
 **4. Use-run separation** (`manifest_edits::separates_use_runs(text, span)`): true iff the nearest non-blank line
 above `span` is the last line of a `use` item and the first line below `span` starts a `use` item or a comment line
 directly above one. `leaving` then writes `"\n"` for an empty replacement and `"<facade>\n\n"` for a facade.
+Declarations whose spans abut (adjacent lines, comments included) are judged **as one span**
+(`manifest_edits::separator_carriers`): only the last of the group carries the blank line, so two adjacent
+declarations between two `use` runs leave exactly one.
 
 **5. Repair evidence** (`gating::to_gate_in_a_repair`): `named_by_errors(...)` ∪ `unused.read_by_a_unit`, deduplicated,
 in `Span` order. `MAX_REPAIRS`, `keeps_improving` and the undo-and-fail path are unchanged.
@@ -481,12 +488,15 @@ Scoped gates (`tddy-code-restructuring`): `./test -p` — 72 targets `ok`, none 
 | `runner/tidy.rs` boundary | ✅ production lines 36 → 36 (one call swapped) |
 | Package docs, wrap | 🔲 not started (`/wrap-context-docs`) |
 
-Warnings, to be recorded or fixed before ready:
+Warnings (all three resolved; 1 in the rule text above, 2 in code, 3 recorded here):
 1. **Rule 1 deviation** — `survey_moved_items` calls `refuse_unsurveyed_range` only when `items_relocated_within`
    finds nothing, because a range cutting into an `impl` read as declaring `doubled` with no module path (broke
    `impl_seam_acceptance` and `import_pass_acceptance`). The rule text above says "`moved` is empty"; wrap should say so.
-2. **Known gap** — `separates_use_runs` weighs each declaration against the original text, so two adjacent removed
-   declarations between two `use` runs would each report false and the runs would still join. Needs a todo entry.
+2. **Adjacent removals** — ~~`separates_use_runs` judged each declaration alone~~ **fixed in this PR**:
+   `separator_carriers` groups abutting spans and the last of a group carries the separator. Pinned by
+   `adjacent_removals_between_two_use_runs_are_weighed_together_and_one_carries_the_separator` (unit) and
+   `two_adjacent_declarations_that_are_the_only_lines_between_two_use_runs_leave_the_runs_apart` (live,
+   `move_facades_acceptance`; asserts the run *below* stays apart, since a facade line sorts into the run above).
 3. **Existing test rewritten** — `names_only_the_items_something_outside_the_module_reaches` (`backends/rust.rs`)
    pinned the behaviour test 1 reverses; its unreached item is now `pub(crate)`, which keeps what it protects.
 

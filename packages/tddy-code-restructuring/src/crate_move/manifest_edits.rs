@@ -81,6 +81,30 @@ pub(crate) fn separates_use_runs(text: &str, span: std::ops::Range<usize>) -> bo
             .is_some_and(begins_a_use_item)
 }
 
+/// Which of `spans` (each a removed declaration of `text`) carries the blank line that keeps two
+/// `use` runs apart, one flag per span, in order.
+///
+/// Declarations that abut (one starts where another ends) go together, so each is not judged alone:
+/// the group is weighed as one by [`separates_use_runs`], and only its last member carries the line,
+/// which makes it appear once.
+pub(crate) fn separator_carriers(text: &str, spans: &[std::ops::Range<usize>]) -> Vec<bool> {
+    spans
+        .iter()
+        .map(|span| {
+            let last_of_group = !spans.iter().any(|other| other.start == span.end);
+            last_of_group && separates_use_runs(text, group_start(spans, span.start)..span.end)
+        })
+        .collect()
+}
+
+/// Where the run of abutting `spans` that starts at or before `start` begins.
+fn group_start(spans: &[std::ops::Range<usize>], mut start: usize) -> usize {
+    while let Some(before) = spans.iter().find(|other| other.end == start) {
+        start = before.start;
+    }
+    start
+}
+
 /// Whether the last of `lines` closes a `use` item: it ends in `;` and the item it ends starts with
 /// `use`, however many lines a grouped one runs over.
 fn ends_a_use_item(lines: &[&str]) -> bool {
@@ -551,6 +575,31 @@ mod removed_declaration_tests {
 
         // Then only the first would join two runs
         assert_eq!((between, beside), (true, false));
+    }
+
+    #[test]
+    fn adjacent_removals_between_two_use_runs_are_weighed_together_and_one_carries_the_separator() {
+        // Given two adjacent declarations that are the only lines between two `use` runs, two
+        // adjacent ones between a `use` run and a blank line, and two apart
+        let joined = "pub use a::x;\npub mod m1;\npub mod m2;\npub use b::y;\n";
+        let apart_below = "pub use a::x;\npub mod m1;\npub mod m2;\n\npub use b::y;\n";
+        let spaced = "pub use a::x;\npub mod m1;\n\npub mod m2;\npub use b::y;\n";
+
+        // When each file's removals are weighed
+        let carriers = |text: &str| {
+            let spans: Vec<_> = ["m1", "m2"]
+                .iter()
+                .map(|module| the_removal_of(text, module).span)
+                .collect();
+            separator_carriers(text, &spans)
+        };
+
+        // Then only the last of an abutting pair that joins the runs carries the line, once, and a
+        // blank line anywhere already keeps the runs apart
+        assert_eq!(
+            (carriers(joined), carriers(apart_below), carriers(spaced)),
+            (vec![false, true], vec![false, false], vec![false, false])
+        );
     }
 
     #[test]
