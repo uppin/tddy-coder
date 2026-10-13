@@ -18,10 +18,14 @@ mod return_type;
 mod signature;
 mod span;
 
-use super::early_return::refuse_early_returns;
-use super::{imports, ProgressSink, RustBackend};
+use super::early_return::{byte_offset, masked_to_code, refuse_early_returns};
+use super::lsp_edits::offset_of;
+use super::{imports, server_defect, LspPoint, ProgressSink, RustBackend};
 use crate::edit::Range;
 use crate::Result;
+use ptr_args::Narrowing;
+use serde_json::json;
+use std::ops::Range as Bytes;
 
 /// The text of the file after the clean-up, and what the engine has to say about it — a parameter
 /// it kept as written, a parameter count clippy will flag.
@@ -54,14 +58,17 @@ impl RustBackend {
         range: Range,
         name: &str,
     ) -> Result<Cleaned> {
-        let _ = uri;
         let carried = imports::carry_function_local_uses(original, named, range, name);
         let (commented, _) = comments::restored(original, range, &carried, name)?;
-        let unwrapped = lints::unit_tail_unwrapped(&commented, name);
+        let respelled = self.respelled_signature_types(uri, original, &commented, range, name)?;
+        let narrowed = self.verified_narrowings(uri, &respelled, name)?;
+        let unwrapped = lints::unit_tail_unwrapped(&narrowed.text, name);
         let shorthand = lints::field_shorthand(&unwrapped, name);
+        let mut notes = narrowed.notes;
+        notes.extend(lints::shape_notes(&shorthand, name));
         Ok(Cleaned {
-            notes: lints::shape_notes(&shorthand, name),
             text: shorthand,
+            notes,
         })
     }
 
@@ -74,9 +81,46 @@ impl RustBackend {
         text: &str,
         name: &str,
     ) -> Result<Cleaned> {
-        let _ = (uri, text, name);
-        // TODO(reshape-extract-method-clean): implement
-        todo!("verified_narrowings")
+        let chosen = ptr_args::narrowings(text, name);
+        if chosen.is_empty() {
+            return Ok(Cleaned::unchanged(text.to_string()));
+        }
+        let all = ptr_args::narrowed(text, name, &chosen);
+        let rejected = self.mismatches_in(uri, &all, name)?;
+        if rejected.is_empty() {
+            return Ok(Cleaned::unchanged(all));
+        }
+
+        // Undo the narrowings whose parameter the rejected lines name; when none is named, the
+        // answer cannot say which is wrong, so all are.
+        let mut undone = ptr_args::blamed(&chosen, &all, &rejected);
+        if undone.is_empty() {
+            undone = chosen.iter().collect();
+        }
+        let kept: Vec<Narrowing> = chosen
+            .iter()
+            .filter(|narrowing| !undone.contains(narrowing))
+            .cloned()
+            .collect();
+        let retried = ptr_args::narrowed(text, name, &kept);
+        let sound = kept.is_empty() || self.mismatches_in(uri, &retried, name)?.is_empty();
+        let (text, undone) = if sound {
+            (retried, undone)
+        } else {
+            (text.to_string(), chosen.iter().collect())
+        };
+        Ok(Cleaned {
+            text,
+            notes: undone
+                .iter()
+                .map(|narrowing| {
+                    format!(
+                        "kept `{}: {}`: the body needs the type rust-analyzer wrote",
+                        narrowing.parameter, narrowing.from
+                    )
+                })
+                .collect(),
+        })
     }
 
     /// `text` with every type `name`'s signature names that the server reports unresolved — and
@@ -90,9 +134,65 @@ impl RustBackend {
         range: Range,
         name: &str,
     ) -> Result<String> {
-        let _ = (uri, original, text, range, name);
-        // TODO(reshape-extract-method-clean): implement
-        todo!("respelled_signature_types")
+        let Some(span) = span::function_span(text, name) else {
+            return Ok(text.to_string());
+        };
+        let signature = span.keyword..span.open;
+        let unresolved = self.unresolved_within(uri, text, signature)?;
+        if unresolved.is_empty() {
+            return Ok(text.to_string());
+        }
+        let before = self.unresolved_within(uri, original, 0..original.len())?;
+        let new: Vec<(String, usize)> = unresolved
+            .into_iter()
+            .filter(|(name, _)| !before.iter().any(|(known, _)| known == name))
+            .collect();
+        let masked_original = masked_to_code(original);
+        let origin = byte_offset(original, range.start)
+            .and_then(|from| span::enclosing_function(masked_original.as_bytes(), from))
+            .map_or("", |origin| &original[origin.keyword..=origin.close]);
+
+        let respelled = respell::respelled(text, &new, origin)?;
+        let after = span::function_span(&respelled, name).map_or(0..0, |s| s.keyword..s.open);
+        let still = self.unresolved_within(uri, &respelled, after)?;
+        for (spelled, _) in &new {
+            if still.iter().any(|(left, _)| left == spelled) {
+                return Err(server_defect(format!(
+                    "rust-analyzer still cannot resolve `{spelled}` in `{name}`'s signature once it \
+                     is spelled the way the function it came from spells it"
+                )));
+            }
+        }
+        Ok(respelled)
+    }
+
+    /// The names the server cannot resolve in `text` within bytes `within`, with their offsets.
+    fn unresolved_within(
+        &mut self,
+        uri: &str,
+        text: &str,
+        within: Bytes<usize>,
+    ) -> Result<Vec<(String, usize)>> {
+        self.did_change(uri, text)?;
+        let mut found = Vec::new();
+        for unresolved in self.unresolved_names(uri, text)? {
+            let at = offset_of(text, LspPoint::read(Some(&unresolved.position))?);
+            if within.contains(&at) {
+                found.push((unresolved.text, at));
+            }
+        }
+        Ok(found)
+    }
+
+    /// The zero-based lines of `text` — which the server is shown — that it raises an `E0308` on,
+    /// inside `name`'s function or on the line calling it.
+    fn mismatches_in(&mut self, uri: &str, text: &str, name: &str) -> Result<Vec<usize>> {
+        self.did_change(uri, text)?;
+        let report = self.request_settled(
+            "textDocument/diagnostic",
+            json!({ "textDocument": { "uri": uri } }),
+        )?;
+        Ok(ptr_args::mismatch_lines(&report, text, name))
     }
 }
 
