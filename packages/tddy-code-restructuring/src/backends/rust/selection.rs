@@ -8,43 +8,55 @@
 
 use crate::edit::{Position, Range};
 
-/// The first position of `range` that can carry a hover: past leading `&`, `&mut`, `*`, `!`, `-`
-/// and `(`, and past whitespace after them.
+/// The first position of `range` that can carry a hover: past leading `{`, `&`, `&mut`, `*`, `!`,
+/// `-` and `(`, past comments, and past whitespace after them — across lines, never past the
+/// range's end.
 ///
-/// Read on the range's first line only, and never past the range's end. A range that is nothing
-/// but such punctuation has no better position than its start, and keeps it.
+/// A hover on a `{` or inside a comment is `null` for ever, and a range opening on one would wait
+/// for an answer that cannot come. A range that is nothing but such punctuation has no better
+/// position than its start, and keeps it.
 pub(super) fn hover_bearing_position(text: &str, range: Range) -> Position {
-    let Some(line) = line_chars(text, range.start.line) else {
+    let chars: Vec<char> = text.chars().collect();
+    let (Some(from), Some(to)) = (offset_of(text, range.start), offset_of(text, range.end)) else {
         return range.start;
     };
-    let limit = if range.end.line == range.start.line {
-        (range.end.col as usize - 1).min(line.len())
-    } else {
-        line.len()
-    };
 
-    let mut at = range.start.col as usize - 1;
+    let mut at = from;
     let mut after_ampersand = false;
-    while at < limit {
-        match line[at] {
+    while at < to {
+        if let Some(end) = comment_end(&chars, at, to) {
+            at = end;
+            continue;
+        }
+        match chars[at] {
             '&' => after_ampersand = true,
-            '*' | '!' | '-' | '(' => after_ampersand = false,
+            '*' | '!' | '-' | '(' | '{' => after_ampersand = false,
             character if character.is_whitespace() => {}
-            _ if after_ampersand && word_at(&line, at, "mut") => {
+            _ if after_ampersand && word_at(&chars, at, "mut") => {
                 at += "mut".len();
                 after_ampersand = false;
                 continue;
             }
-            _ => {
-                return Position {
-                    line: range.start.line,
-                    col: at as u32 + 1,
-                }
-            }
+            _ => return position_of(&chars, at),
         }
         at += 1;
     }
     range.start
+}
+
+/// Where the `//` or `/* */` comment opening at `at` ends, never past `limit`.
+fn comment_end(chars: &[char], at: usize, limit: usize) -> Option<usize> {
+    let rest = &chars[at..limit];
+    match rest {
+        ['/', '/', ..] => Some(rest.iter().position(|c| *c == '\n').map_or(limit, |n| at + n)),
+        ['/', '*', ..] => Some(
+            rest[2..]
+                .windows(2)
+                .position(|pair| pair == ['*', '/'])
+                .map_or(limit, |n| at + 2 + n + 2),
+        ),
+        _ => None,
+    }
 }
 
 /// `range` widened to the borrow around it when it selects a place (a field access or a path)
@@ -178,12 +190,6 @@ fn is_a_place_across_lines(selected: &[char]) -> bool {
         .filter(|character| !character.is_whitespace())
         .collect();
     words_are_whole && is_a_place(&compact)
-}
-
-/// The characters of the one-based `line`.
-fn line_chars(text: &str, line: u32) -> Option<Vec<char>> {
-    let wanted = text.split('\n').nth(line.checked_sub(1)? as usize)?;
-    Some(wanted.chars().collect())
 }
 
 /// Whether the word `word` starts at `at`, as a whole word.

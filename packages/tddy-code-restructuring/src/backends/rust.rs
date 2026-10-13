@@ -300,7 +300,7 @@ fn assist_for(kind: RefactorKind) -> Option<Assist> {
             at_caret: false,
             placeholder: Some(Placeholder {
                 keyword: "fn",
-                name: Some("fun_name"),
+                name: None,
             }),
             multi_file: false,
             needs_inference: true,

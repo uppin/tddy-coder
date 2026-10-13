@@ -34,7 +34,7 @@ pub(super) fn introduced_by(
     moved: &[MovedItem],
 ) -> Result<(String, Introduced)> {
     let Some(name) = placeholder.name else {
-        let introduced = introduced_binding(original, &extracted)?;
+        let introduced = introduced_declaration(placeholder.keyword, original, &extracted)?;
         return Ok((extracted, introduced));
     };
 
@@ -59,34 +59,24 @@ pub(super) fn introduced_by(
     ))
 }
 
-/// The one declaration of `keyword` (`fn`, `let`) `extracted` gained over `original`: declared more
-/// often after the assist than before, inside the span the assist changed. Replaces
-/// [`introduced_binding`] once `extract_method`'s placeholder is the server's own name, as
-/// rust-analyzer names a function extracted from a `let` initializer after the binding.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-extract-method-clean): implement, and replace `introduced_binding` with it"
-)]
+/// The one declaration of `keyword` (`fn`, `let`) `extracted` gained over `original`.
+///
+/// A declaration is new when its name is declared more often than before, and when its name sits in
+/// the span the assist changed. The count keeps an existing `let` the assist merely rewrote (its
+/// initializer now reads the new binding) from being taken for the new one, and the span picks the
+/// right declaration when the new one shadows an older one of the same name. Comments and literals
+/// are masked first, so a keyword written in one declares nothing.
+///
+/// rust-analyzer names a function extracted from a `let` initializer after the binding, so an
+/// `extract_method` cannot look for a fixed `fun_name` any more than an `extract_variable` can look
+/// for `var_name`.
 pub(super) fn introduced_declaration(
     keyword: &str,
     original: &str,
     extracted: &str,
 ) -> Result<Introduced> {
-    let _ = (keyword, original, extracted);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("introduced_declaration")
-}
-
-/// The one `let` binding `extracted` gained over `original`.
-///
-/// A binding is new when its name is declared more often than before, and when its name sits in
-/// the span the assist changed. The count keeps an existing `let` the assist merely rewrote (its
-/// initializer now reads the new binding) from being taken for the new one, and the span picks the
-/// right declaration when the new binding shadows an older one of the same name. Comments and
-/// literals are masked first, so a `let` written in one is not a binding.
-fn introduced_binding(original: &str, extracted: &str) -> Result<Introduced> {
-    let before = bindings(original);
-    let after = bindings(extracted);
+    let before = declarations(original, keyword);
+    let after = declarations(extracted, keyword);
     let (changed_from, changed_to) = changed_span(original, extracted);
 
     let declared = |set: &[Introduced], name: &str| set.iter().filter(|b| b.name == name).count();
@@ -102,15 +92,19 @@ fn introduced_binding(original: &str, extracted: &str) -> Result<Introduced> {
         })
         .collect();
 
+    let (noun, plural) = if keyword == "let" {
+        (" binding", "bindings")
+    } else {
+        ("", "declarations")
+    };
     match introduced.len() {
         1 => Ok(introduced.remove(0)),
-        0 => Err(server_defect(
-            "rust-analyzer's extraction introduced no `let` binding to name",
-        )),
-        _ => Err(server_defect(format!(
-            "rust-analyzer's extraction introduced {} `let` bindings ({}), and one variable was \
+        0 => Err(server_defect(format!(
+            "rust-analyzer's extraction introduced no `{keyword}`{noun} to name"
+        ))),
+        count => Err(server_defect(format!(
+            "rust-analyzer's extraction introduced {count} `{keyword}` {plural} ({}), and one was \
              asked for, so which to name is not known",
-            introduced.len(),
             introduced
                 .iter()
                 .map(|binding| format!("`{}`", binding.name))
@@ -120,17 +114,24 @@ fn introduced_binding(original: &str, extracted: &str) -> Result<Introduced> {
     }
 }
 
-/// Every `let name` and `let mut name` in the code of `text`, with the offset of the name.
+/// The one `let` binding `extracted` gained over `original`.
+#[cfg(test)]
+fn introduced_binding(original: &str, extracted: &str) -> Result<Introduced> {
+    introduced_declaration("let", original, extracted)
+}
+
+/// Every `<keyword> name` in the code of `text` — and `let mut name` — with the offset of the name.
 ///
-/// A pattern that is not a single identifier (`let (a, b)`, `let _`) binds no name to rename.
-fn bindings(text: &str) -> Vec<Introduced> {
+/// A pattern that is not a single identifier (`let (a, b)`, `let _`) binds no name to rename, and
+/// `fn(` is a pointer type, not a declaration.
+fn declarations(text: &str, keyword: &str) -> Vec<Introduced> {
     let code = masked_to_code(text);
     let bytes = code.as_bytes();
     let mut found = Vec::new();
     let mut from = 0;
 
-    while let Some(at) = code[from..].find("let").map(|offset| from + offset) {
-        from = at + "let".len();
+    while let Some(at) = code[from..].find(keyword).map(|offset| from + offset) {
+        from = at + keyword.len();
         let opens = at == 0 || !is_identifier_byte(bytes[at - 1]);
         if !opens
             || bytes
@@ -141,7 +142,7 @@ fn bindings(text: &str) -> Vec<Introduced> {
         }
 
         let mut name_at = skip_whitespace(bytes, from);
-        if let Some(after_mut) = keyword_at(bytes, name_at, "mut") {
+        if let Some(after_mut) = keyword_at(bytes, name_at, "mut").filter(|_| keyword == "let") {
             name_at = skip_whitespace(bytes, after_mut);
         }
         let name_end = identifier_end(bytes, name_at);
