@@ -34,10 +34,6 @@
 mod diagnostics;
 mod format;
 mod gating;
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-extract-method-clean): `tidy` calls `remove_unused_mut` in the green phase"
-)]
 mod unused_mut;
 #[cfg(test)]
 mod wide_facade_tests;
@@ -87,6 +83,13 @@ pub(super) fn tidy(tidying: &Tidying<'_>) -> Result<Tidied> {
     let mut report = Report::default();
     let mut checked = tidy_imports(tidying, &mut report)?;
     report.say(tidying);
+    if let Checked::Compiles(diagnostics) = &checked {
+        checked = match unused_mut::remove_unused_mut(tidying, diagnostics)? {
+            unused_mut::Removed::Nothing => checked,
+            unused_mut::Removed::Compiles(rechecked) => Checked::Compiles(rechecked),
+            unused_mut::Removed::Broken(failure) => Checked::Broken(failure),
+        };
+    }
     if matches!(checked, Checked::Compiles(_)) && format_touched_files(tidying)? {
         checked = check(tidying)?;
     }

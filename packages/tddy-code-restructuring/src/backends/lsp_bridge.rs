@@ -130,10 +130,6 @@ const CONTENT_MODIFIED: i64 = -32801;
 
 /// JSON-RPC `InternalError` — what rust-analyzer answers when a request handler panicked. The
 /// server's defect, not the plan's.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-extract-method-clean): implement — its arm in `map_lsp_error`"
-)]
 const INTERNAL_ERROR: i64 = -32603;
 
 /// Classify a transport failure by whether waiting can fix it.
@@ -157,6 +153,14 @@ fn map_lsp_error(error: LspError) -> RestructureError {
         // has gone is the opposite of what cancelling meant. It is also not a failure of the
         // server, so it must not read as one.
         LspError::Abandoned => RestructureError::CallerStopped,
+        // The server's handler panicked. Reading it as a malformed plan sends the author to edit a
+        // plan that was correct.
+        LspError::Server {
+            code: INTERNAL_ERROR,
+            message,
+        } => RestructureError::ServerDefect(format!(
+            "rust-analyzer failed answering this request: {message}"
+        )),
         other => RestructureError::MalformedPlan(format!("lsp: {other}")),
     }
 }

@@ -51,10 +51,16 @@ pub(super) fn shadowed_imports(parent: &str, child: &str) -> Vec<String> {
     unavailable.extend(identifiers(&code, true));
 
     let mut lines = Vec::new();
-    for binding in parent_bindings(parent) {
+    for binding in parent_bindings(parent).iter().filter(|b| b.name != "_") {
         let wanted = used.contains(&binding.name) && !unavailable.contains(&binding.name);
-        if wanted && !lines.contains(&use_line(&binding)) {
-            lines.push(use_line(&binding));
+        if wanted && !lines.contains(&use_line(binding)) {
+            lines.push(use_line(binding));
+        }
+    }
+    for line in anonymous_trait_imports(parent) {
+        let held = child.lines().any(|held| held.trim() == line);
+        if !held && !lines.contains(&line) {
+            lines.push(line);
         }
     }
     lines
@@ -63,14 +69,12 @@ pub(super) fn shadowed_imports(parent: &str, child: &str) -> Vec<String> {
 /// Every `use <path> as _;` of `parent` — including a group member `<path> as _`, flattened — as a
 /// `use` line rebased for the module one level deeper. Such an import binds no name, so it can only
 /// be there for a trait's methods, which the moved code may call without ever naming the trait.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-extract-method-clean): implement, and chain it into `shadowed_imports`"
-)]
 pub(super) fn anonymous_trait_imports(parent: &str) -> Vec<String> {
-    let _ = parent;
-    // TODO(reshape-extract-method-clean): implement
-    todo!("anonymous_trait_imports")
+    parent_bindings(parent)
+        .iter()
+        .filter(|binding| binding.name == "_")
+        .map(use_line)
+        .collect()
 }
 
 /// `use <path>;`, rebased for the module one level deeper, with the alias if the parent had one.
@@ -134,7 +138,8 @@ fn code_before(bytes: &[u8], at: usize) -> &[u8] {
     &bytes[..end]
 }
 
-/// Every explicit binding the parent's top-level `use` declarations make, in file order.
+/// Every binding the parent's top-level `use` declarations make, in file order — an `as _` one
+/// under the name `_`, which names nothing the code can use.
 fn parent_bindings(parent: &str) -> Vec<Binding> {
     let mut bindings = Vec::new();
 
@@ -168,7 +173,7 @@ fn starts_a_line(statement: &str) -> bool {
         .is_some_and(|line| !line.starts_with(char::is_whitespace))
 }
 
-/// Walk a `use` tree, recording what each leaf binds. Globs and `_` bind nothing readable.
+/// Walk a `use` tree, recording what each leaf binds. A glob binds nothing readable.
 fn collect(tree: &str, prefix: &str, bindings: &mut Vec<Binding>) {
     let tree = tree.trim();
 
@@ -197,7 +202,7 @@ fn leaf(tree: &str, prefix: &str) -> Option<Binding> {
         .clone()
         .unwrap_or_else(|| path.rsplit("::").next().unwrap_or("").to_string());
 
-    let readable = !name.is_empty() && name != "_" && !name.ends_with('*');
+    let readable = !name.is_empty() && !name.ends_with('*');
     readable.then_some(Binding { name, path, alias })
 }
 
