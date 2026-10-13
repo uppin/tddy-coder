@@ -15,6 +15,7 @@ mod lints;
 mod ptr_args;
 mod respell;
 mod return_type;
+mod signature;
 mod span;
 
 use super::early_return::refuse_early_returns;
@@ -56,7 +57,12 @@ impl RustBackend {
         let _ = uri;
         let carried = imports::carry_function_local_uses(original, named, range, name);
         let (commented, _) = comments::restored(original, range, &carried, name)?;
-        Ok(Cleaned::unchanged(commented))
+        let unwrapped = lints::unit_tail_unwrapped(&commented, name);
+        let shorthand = lints::field_shorthand(&unwrapped, name);
+        Ok(Cleaned {
+            notes: lints::shape_notes(&shorthand, name),
+            text: shorthand,
+        })
     }
 
     /// `text` with each `&PathBuf` / `&String` / `&Vec<T>` parameter of `name` narrowed, keeping

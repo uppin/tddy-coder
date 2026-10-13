@@ -143,6 +143,61 @@ pub(super) fn skip_whitespace(code: &[u8], from: usize) -> usize {
         .map_or(code.len(), |length| from + length)
 }
 
+/// A top-level statement of a region of code: from its first character to its terminator.
+pub(super) struct Statement {
+    pub start: usize,
+    pub end: usize,
+    /// Whether it ends in `;` or a closing brace, rather than being an expression left as a tail.
+    pub terminated: bool,
+}
+
+/// The top-level statements of masked `code`, whose first byte is at `base` in the file. A closing
+/// brace ends one when nothing continues it: a `;`, a method call, an `else` do.
+pub(super) fn statements(code: &[u8], base: usize) -> Vec<Statement> {
+    let mut found = Vec::new();
+    let (mut depth, mut start) = (0usize, None);
+    for (at, byte) in code.iter().enumerate() {
+        if start.is_none() && !byte.is_ascii_whitespace() {
+            start = Some(at);
+        }
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' => depth = depth.saturating_sub(1),
+            b'}' | b';' => {
+                depth = if *byte == b'}' { depth.saturating_sub(1) } else { depth };
+                if depth == 0 && start.is_some() && (*byte == b';' || ends_a_block(code, at + 1)) {
+                    found.push(Statement {
+                        start: base + start.take().unwrap_or(at),
+                        end: base + at + 1,
+                        terminated: true,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(start) = start {
+        let end = code.iter().rposition(|byte| !byte.is_ascii_whitespace());
+        found.push(Statement {
+            start: base + start,
+            end: base + end.map_or(start, |at| at + 1),
+            terminated: false,
+        });
+    }
+    found
+}
+
+/// Whether the code after a closing brace starts something else, rather than continuing the
+/// statement the brace closed.
+fn ends_a_block(code: &[u8], after: usize) -> bool {
+    let next = skip_whitespace(code, after);
+    match code.get(next) {
+        None => true,
+        Some(b';' | b'.' | b'?' | b',' | b')') => false,
+        Some(_) => &code[next..word_end(code, next)] != b"else",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
