@@ -103,8 +103,8 @@ rewrites the call with `?`; no such operation exists.
 
 ## T — the two CLI spawns stop where they name the PR-stack parent
 
-**Why deferred:** engine gap. The engine side is already filed as **T** in
-[the extract TODO](./2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md#item-4-of-the-2026-09-24-run-524-three-more-refusals-and-a-stale-index);
+**Why deferred:** engine gap. The engine side was filed as **T** in the extract-method TODO of the same date, which
+#reshape 4 resolved and deleted (the inferred-placeholder check no longer reads `'_` as `_`);
 this section is the lifecycle side, the functions it blocks.
 
 The inferred-placeholder check reads the anonymous lifetime `'_` in `SpawnStackParent<'_>` as the
@@ -149,8 +149,9 @@ functions re-measured under 150. A hand extract is the alternative, with the dev
 
 ## U — the runner-argv ranges stay inline
 
-**Why deferred:** engine gap (rust-analyzer panics). The engine side is **U** in
-[the extract TODO](./2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md#item-4-of-the-2026-09-24-run-524-three-more-refusals-and-a-stale-index).
+**Why deferred:** engine gap (rust-analyzer panics). The engine side was **U** in the extract-method TODO of the same date, which
+#reshape 4 resolved and deleted: a server panic is now reported as the server's defect, and the range itself
+still panics rust-analyzer.
 
 Plan `16` op 3 (`relaunch_sandboxed_runner`) and plan `18`'s argv op (the sandboxed Claude handler)
 each asked rust-analyzer to extract the runner's argv, and the server panicked:

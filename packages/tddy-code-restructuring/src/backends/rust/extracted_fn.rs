@@ -4,8 +4,8 @@
 //! The assist's output compiles and still leaves CI's lint job red, loses the comments that say
 //! *why*, and names types the file does not import. Every rule here acts on **the introduced
 //! function only** — the `fn <name>` the rename produced, from its keyword to its closing brace —
-//! and on the call line the assist wrote, never on the rest of the file. See the changeset
-//! `docs/dev/1-WIP/2026-10-09-reshape-extract-method-clean.md` § The rules (rules 1-14).
+//! and on the call line the assist wrote, never on the rest of the file. See
+//! `packages/tddy-code-restructuring/docs/assist-output-repairs.md` § The function `extract_method` writes.
 //!
 //! Kept out of `backends/rust.rs`, which is past its size budget: that file only wires this in.
 

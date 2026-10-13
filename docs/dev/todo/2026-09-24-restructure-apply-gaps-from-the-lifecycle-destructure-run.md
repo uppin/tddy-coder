@@ -15,17 +15,19 @@ went like this:
 | `03`, `10a`, `04`, `08` | applied, compiles | — |
 | `06` ports files | 3 of 3 applied, **does not compile** | G |
 | `05` spawn_split_agent | 5 of 5 applied, **does not compile** | L |
-| `02` cli_session_manager (9 seams) | 9 of 9 applied, **does not compile** | G, I |
-| `09` without op 6 | 7 of 7 applied, **does not compile** | K |
+| `02` cli_session_manager (9 seams) | 9 of 9 applied, **does not compile** | G |
+| `09` without op 6 | 7 of 7 applied, **does not compile** | — (K closed) |
 | `01` connection_service (10 seams) | 10 of 10 applied, **the test build does not compile** | M |
 
 In every row the code was moved, and #527's compile gate failed the run with the compiler's errors,
 leaving the edits on disk. Before #527 each of these rows would have been reported as a success.
 
-**Closed since:** H (relative paths in a moved body are rebased by `inline_paths`) and J (a sibling
+**Closed since:** H (relative paths in a moved body are rebased by `inline_paths`), J (a sibling
 seam's private helper goes unresolved: a plan now shows the server every file an earlier seam wrote,
-so the item stays widened and reported). Their sections are removed. What remains is G, I, K, L, M, W
-and the first half of X.
+so the item stays widened and reported), I (an `extract_module` carries every `use <path> as _;` of the
+parent into the new module) and K (an `extract_method` signature naming a type the file does not import
+is respelled as the function the range came from spells it, or refused naming the type). Their sections
+are removed. What remains is G, L, M, W and the first half of X.
 
 ## Why this was deferred
 
@@ -76,54 +78,6 @@ Derive macros and bang macros bound by a `use` are probably the same, but this i
 use serde::Serialize;   #[derive(Serialize)] struct Row { … }
 use tracing::info;      fn f() { info!("…"); }
 ```
-
-### I — `use Trait as _;` is not carried
-
-Plan `02`. Both parents bring `prost::Message` in only for its methods:
-
-```rust
-// before: cli_session_manager.rs, lines 16, 1203 and 1247
-use prost::Message as _;
-
-let frame = TerminalOutput { data: replay }.encode_to_vec();
-if let Ok(input) = TerminalInput::decode(&msg.payload[..]) { … }
-
-// after: cli_session_manager/livekit_bridge.rs has both calls and no `use prost::Message as _;`
-```
-
-```text
-error[E0599]: no method named `encode_to_vec` found for struct `TerminalOutput` in the current scope
-error[E0599]: no function or associated item named `decode` found for struct `TerminalInput`
-```
-
-A trait used only for method resolution never shows up as an unresolved name. Since E1, `as _` also
-binds no name, which is right for the name check but hides the import. A sound signal is still to
-be found. Possibilities are an unresolved-method diagnostic, a parent `use … as _` that goes unused
-after the move, or the design candidate below.
-
-### K — an `extract_method` signature names a type the file never imports
-
-Plan `09`. The import pass never runs for `extract_method`.
-
-```rust
-// before: connection_service/svc_start_sandboxed_claude_cli_session.rs
-managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe>>,   // line 87, the only spelling
-…
-if let Some(recipe) = managed_recipe.clone() { … }                    // line 382, in `managed_jail_env`'s range
-…
-recipe: managed_recipe.as_ref().map(|r| r.name().to_string()),        // line 631, in `write_jail_session_metadata`'s
-
-// after (shape): each new fn takes the recipe under the short name, and nothing imports it
-fn managed_jail_env(…, managed_recipe: Option<Arc<dyn WorkflowRecipe>>, …) -> … { … }
-fn write_jail_session_metadata(…, managed_recipe: Option<Arc<dyn WorkflowRecipe>>, …) -> … { … }
-```
-
-```text
-error[E0405]: cannot find trait `WorkflowRecipe` in this scope     (lines 465 and 642)
-```
-
-The fix is either to qualify the path as the file does, or to import it with the server-offered
-import checked by the occurrence count.
 
 ### L — extract-methods after an `extract_module` in the same plan get `()` types
 
@@ -284,11 +238,9 @@ The widening of a moved private item to `pub(crate)` where `pub(super)` suffices
 
 ## Design candidates, undecided
 
-- **Compiler-guided import repair.** After the gate fails, take rustc's own "not found in this scope"
-  and "trait … not in scope; consider importing" errors in the files the plan wrote. Restore only
-  bindings the **original parent file** declared, rebased for the new module's depth, then re-check.
-  This would close G, I, K and M in one mechanism with the compiler as the oracle. It is a new
-  mechanism beside the RA-driven pass, so it needs the developer's decision.
+- **Compiler-guided import repair.** Deferred to its own entry,
+  [`2026-10-09-restructure-compiler-guided-import-repair.md`](./2026-10-09-restructure-compiler-guided-import-repair.md);
+  it would close G and M with the compiler as the oracle.
 - **Re-index between ops** for L, if stale inference is the cause, waiting on the server's own
   quiescence signal as the readiness wait already does.
 

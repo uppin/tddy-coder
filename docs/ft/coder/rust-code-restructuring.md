@@ -311,7 +311,7 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 
 | Operation | Notes |
 |---|---|
-| `extract_method` | Range → new function. A function-local `use` the range needs is carried into the new function |
+| `extract_method` | Range → new function, named `name`. A function-local `use` the range needs is carried into the new function, the comments the range held stay in it, and its signature and body are written lint-clean. See [`extract_method`](#extract_method) |
 | `extract_variable` | Subexpression → binding. A place selected under a `&` / `&mut` is bound as the borrow (`let x = &self.v;`) |
 | `rename_symbol` | LSP rename, applied to **every** document rust-analyzer returns edits for, not only the anchor's own file |
 | `extract_module` | `reexport`: glob / named / none; optional `to_file` |
@@ -336,6 +336,44 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;` is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was |
 | `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate`. Each member's declaration is removed, and its comments travel, as for a single module |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
+
+### `extract_method`
+
+rust-analyzer's "extract into function" compiles and still loses comments, writes signatures
+`cargo clippy -- -D warnings` rejects, and refuses ranges a person would cut. The function an
+`extract_method` writes is cleaned up before the edit is produced; the operation acts on that function
+and on the call the assist wrote, never on the rest of the file.
+
+- **Comments stay.** A comment the range held and the assist dropped (it drops those between and after
+  the statements of a range holding a `?`) is put back beside the statement it annotated: a full-line
+  comment before it, a trailing comment at the end of its line. When the statements of the range and of
+  the new function cannot be paired one to one, the operation is **refused** naming the comments it
+  would lose, and nothing is written. `check --deep` says `the extracted function will keep N
+  comment(s) rust-analyzer drops`.
+- **Signatures and bodies pass the lint gate.** `&PathBuf`, `&String` and `&Vec<T>` parameters are
+  written `&Path`, `&str` and `&[T]` (and `.clone()` on them `.to_owned()`), a narrowing the server's
+  type diagnostics reject is undone with a note, a unit body is not wrapped as `Ok(if …)`, and
+  `field: field` is written `field`. More than seven parameters, or a tuple return of three or more, is
+  noted, never rewritten: grouping them is the plan's decision. An unused `mut` is removed by
+  [the tidy](#the-tidy).
+- **Types are named the way the file names them.** A type the new signature names that the file does not
+  import is respelled as the function the range came from spells it, with no `use` added; a type with no
+  such spelling, or two, is **refused** naming it.
+- **The return type reads like the caller's.** Where the caller returns a one-argument `Result` alias
+  (`crate::Result<T>`, `anyhow::Result<T>`), the new function returns `Result<X>`, not the
+  `Result<X, E>` that is `E0107` in a file importing the alias.
+- **A run of guards is lifted.** Error guards (`if … { return Err(..); }`, at any depth inside `if`,
+  `match` and loops) in the middle of a function returning `Result` become `fn name(..) -> Result<()>`,
+  called as `name(..)?;`; `return None` guards in an `Option` function lift the same way. A range that
+  is the whole body of a match arm or `if` branch in the function's tail position is extracted with its
+  `return`s as they are. A value `return` in the middle, guards mixed with a value return, and a guard
+  run that declares a binding the code after it reads are each **refused**, naming the line or binding,
+  by `check`, `check --deep` and `apply` alike.
+- **A range opening on `{` or a comment is extracted**, and a range that is a `let`'s initializer is
+  extracted under the plan's name.
+
+How the crate delivers this:
+[assist-output-repairs.md](../../../packages/tddy-code-restructuring/docs/assist-output-repairs.md#the-function-extract_method-writes).
 
 ### Same-crate moves
 
@@ -616,7 +654,7 @@ something about it. Read the class before the text.
 |---|---|---|---|
 | `plan is malformed: …` | The plan says something this executor will not do | Edit the plan | `InvalidArgument` |
 | `this seam cannot be cut here: …` | The plan is well formed and the code will not permit this cut — stranded references, an `impl` cut in half, a module name already taken, an import the file's own bindings cannot disambiguate | Move the seam, or change the code | `FailedPrecondition` |
-| `rust-analyzer's answer was unusable: …` | The server answered and the answer cannot be used — an extraction produced before inference, a mangled rewrite, a response with no edits | Retry against a warm server, or look at the server | `Internal` |
+| `rust-analyzer's answer was unusable: …` | The server answered and the answer cannot be used — an extraction produced before inference, a mangled rewrite, a response with no edits, comments it dropped that cannot be put back, a request handler that panicked (`-32603`) | Retry against a warm server, or look at the server | `Internal` |
 | `rust-analyzer reports its index as degraded …` | The server said its own index is incomplete — usually build scripts or proc macros that failed to link in the environment it was started in | Restart the server (or `./run-index-daemon --stop && ./run-index-daemon`) from the dev shell's whole environment | `Internal` |
 | `rust-analyzer would not settle …` | The wait ended before the index did | Wait, or look at the server | `DeadlineExceeded` |
 | snapshot / journal / anchor mismatches, `the item … changed since the plan was written` | The tree is not in the state the plan was written against, or an anchored item's text is no longer the text its fingerprint names | Repair the tree, re-snapshot, or re-anchor the item with `restructure anchors` | `FailedPrecondition` |
@@ -644,6 +682,7 @@ cannot answer, reads the parent's own `use` tree:
 | A **module** binding (`use crate::tool_engine;`) | reconstructed the same way; `Import` is offered for items, never for a bare module path |
 | A name the seam's own facade will re-export | left to the facade — a named import here would be private and would shadow it |
 | A relative path in a reconstructed declaration (`use super::Failure as HostFailure;`) | rebased for the new module, which is the parent's child: `super::X` → `super::super::X`, `self::X` → `super::X`. `crate::`, `::` and extern-crate paths are unchanged |
+| A trait the parent imports for its methods alone (`use prost::Message as _;`) | carried: every `use <path> as _;` of the parent is written into the new module, rebased one level deeper, in the same lexical pass. Such an import binds no name, so the moved code that calls `encode_to_vec()` never names it and nothing reports it unresolved. It over-imports on purpose and the [tidy](#the-tidy) removes a copy no code uses. A *named* trait import used only for its methods is not carried |
 | A name the parent binds by `use` that shadows a prelude name (`use crate::Result;` over `std::result::Result`) | carried by a lexical pass over the parent's `use` declarations and the moved text. The server never reports such a name unresolved — the prelude resolves it, to a different type — so the compiler would be the first to notice. The pass over-imports on purpose and the [tidy](#the-tidy) removes what is unused |
 | A type widened by the move that a widened item's signature names | stays widened, so the item's signature does not name a type less visible than itself |
 | A name the parent bound in a group the assist emptied (`use tokio::sync::{…, mpsc, …};`) | the choice reads the file as it was before the assist together with the current text, so the binding the assist removed still decides |
@@ -730,7 +769,13 @@ A successful `apply` ends with a **tidy** over the files it wrote, once the tree
 5. **A failed check is repaired while it improves.** A round that does not compile is undone and
    redone with the names the errors quote gated, and again while each redo leaves fewer names
    failing (at most five times). Overlapping edits are an error, never a silent skip.
-6. **Whatever the compiler still warns about is reported**, never fixed.
+6. **An unused `mut` is removed.** rustc's `unused_mut`, which rust-analyzer does not report, is applied
+   after the imports and before formatting, in the files the run wrote and only where the compiler
+   marks the suggestion machine-applicable. This catches the `mut` an `extract_method` copies into the
+   new function and the one it leaves unused in the caller. A removal the re-check rejects is undone
+   and fails the run, as for imports; each file it changes is reported, as ``tidied: removed N unused
+   `mut`(s) from <file>``.
+7. **Whatever the compiler still warns about is reported**, never fixed.
 
 A tidy that cannot repair a round undoes it and fails the run, saying so; it never leaves a broken
 tree, and never touches the plan's own edits.
@@ -939,17 +984,22 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   where `extract_module` needs only the syntax tree — so on a large file in a large workspace the
   module operations succeed while an extraction waits. An expired budget distinguishes the two causes:
   a range that does not support the assist, versus a server that cannot yet type it.
-- **An `extract_method` range may not return from the function around it.** rust-analyzer copies a
-  `return` verbatim into a function of another return type, so such a range is refused, naming the
-  lines, by `check`, `check --deep` and `apply` alike. The one exception is a range that runs to the
-  end of a function that returns a value, ending with its tail expression; a function returning `()`
-  has no such tail, so a range holding a `return` there is refused too. A `return` inside a closure,
-  an `async` block or a nested `fn` does not count. The scan is lexical: a `return` a macro expands to (`bail!`) and a
-  `break`/`continue` leaving the range are not seen, and only `apply`'s compile gate catches them.
-- **An `extract_variable` does not hang.** The type probe asks at the first position of the range
-  that can carry a hover, skipping a leading `&`, `&mut`, `*`, `!`, `-` or `(`, and a hover that stays
-  silent for 30 seconds once the index is ready ends the operation as `rust-analyzer's answer was
-  unusable:`, naming the position, so the warm workspace answers the next request.
+- **An `extract_method` range may not return from the function around it**, except where the
+  extraction can keep the `return`'s meaning. rust-analyzer copies a `return` verbatim into a function
+  of another return type, so a range holding one is refused, naming the lines, by `check`,
+  `check --deep` and `apply` alike, unless it runs to the end of a function that returns a value
+  (ending with its tail expression), is the whole body of a match arm or `if` branch in that tail
+  position, or is a run of `return Err(..)` / `return None` guards that can be [lifted](#extract_method).
+  A function returning `()` has no tail value, so a range holding a `return` there is refused. A
+  `return` inside a closure, an `async` block or a nested `fn` does not count. The scan is lexical: a
+  `return` a macro expands to (`bail!`) and a `break`/`continue` leaving the range are not seen, and
+  only `apply`'s compile gate catches them.
+- **A guard run is lifted only when it declares nothing the code after it reads.** Such a run is
+  refused, naming the binding; end the range before the `let`.
+- **An extraction does not hang on how its range opens.** The type probe asks at the first position of
+  the range that can carry a hover, skipping a leading `{`, `&`, `&mut`, `*`, `!`, `-` or `(`, comments
+  and whitespace, and a hover that stays silent for 30 seconds once the index is ready ends the
+  operation as `rust-analyzer's answer was unusable:`, naming the position, so the warm workspace answers the next request.
 - **An `extract_variable` never binds a borrowed place by value.** A place selected inside `&place`
   or `&mut place` is widened to the borrow when both are on one line; otherwise the selection is
   refused as `rust-analyzer's answer was unusable:`, advising to select the borrow including its `&`.

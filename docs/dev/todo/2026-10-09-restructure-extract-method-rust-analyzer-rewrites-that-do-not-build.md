@@ -1,9 +1,8 @@
 # 2026-10-09 — three `extract_method` rewrites rust-analyzer writes that do not build
 
 **Category:** Bug (upstream rewrites; the compile gate reports them)
-**Source:** #reshape 4/19 (`extract-method-clean`), moved out of
-`2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md` (plan `10b` on #524), which
-#reshape 4 resolves and deletes
+**Source:** #reshape 4/19 (`extract-method-clean`), moved out of the
+#524 `extract_method` clean-up entry (plan `10b`; closed by #reshape 4)
 
 Plan `10b` on #524 applied 15 `extract_method`s, and after the import fix three build breaks remained, each fixed by hand:
 

@@ -1,7 +1,7 @@
 # 2026-10-09 — `extract_module` does not carry a named trait import that the seam uses only for its methods
 
 **Category:** Future enhancement
-**Source:** #reshape 4/19 (`extract-method-clean`), scoping of gap I of
+**Source:** #reshape 4/19 (`extract-method-clean`), scoping of gap I (the `as _` carry, closed by #reshape 4) of
 [the lifecycle-destructure apply gaps](./2026-09-24-restructure-apply-gaps-from-the-lifecycle-destructure-run.md)
 
 #reshape 4 carries every `use <path> as _;` of the parent into a module `extract_module` creates, because such an import

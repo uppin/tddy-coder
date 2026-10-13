@@ -1,9 +1,8 @@
 # 2026-10-09 — the warm index daemon does not see a file edited outside a run
 
 **Category:** Bug (tddy-index-daemon)
-**Source:** #reshape 4/19 (`extract-method-clean`), moved out of item V of
-`2026-09-24-restructure-extract-drops-comments-and-writes-clippy-failing-signatures.md`, which #reshape 4 resolves and
-deletes
+**Source:** #reshape 4/19 (`extract-method-clean`), moved out of item V of the
+#524 `extract_method` clean-up entry (closed by #reshape 4)
 
 On #524, after hand edits added `find_registered_project` to `service_util.rs`, plan `14` was refused with `project: _`
 and `projects_dir: Path` (unsized, by value) in the extracted signatures. After `./run-index-daemon --stop` and a cold start,
