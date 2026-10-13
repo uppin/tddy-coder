@@ -213,14 +213,14 @@ names).
 
 ## Scope
 
-- [ ] **Surveys**: `settled_outline` in both surveys; `refuse_unsurveyed_range`
-- [ ] **Named facade**: `pub` always; test-only tier under `#[cfg(test)]`; `facade_will_bind`; `reach_of` production
-- [ ] **Crate-move declarations**: `removed_declaration`, comment travel, attribute refusal (static + resolve)
-- [ ] **Use runs**: `separates_use_runs` in `leaving`
-- [ ] **Tidy repair**: `to_gate_in_a_repair`
-- [ ] **Gate note**: `Rejection`, `untidied_note`, the line ahead of `errors`
-- [ ] **Engine move**: `attached_trivia_starts_at` to `crate_move/source_scan.rs` via `tddy-tools restructure`
-- [ ] **Registration**: `extract_facade_acceptance` in both config files
+- [x] **Surveys**: `settled_outline` in both surveys; `refuse_unsurveyed_range`
+- [x] **Named facade**: `pub` always; test-only tier under `#[cfg(test)]`; `facade_will_bind`; `reach_of` production
+- [x] **Crate-move declarations**: `removed_declaration`, comment travel, attribute refusal (static + resolve)
+- [x] **Use runs**: `separates_use_runs` in `leaving`
+- [x] **Tidy repair**: `to_gate_in_a_repair`
+- [x] **Gate note**: `Rejection`, `untidied_note`, the line ahead of `errors`
+- [x] **Engine move**: `attached_trivia_starts_at` to `crate_move/source_scan.rs` via `tddy-tools restructure`
+- [x] **Registration**: `extract_facade_acceptance` in both config files
 - [ ] **Package documentation** at wrap (list under Affected Packages)
 - [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
 - [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, clippy `-D warnings`, `cargo fmt`; no
@@ -274,13 +274,13 @@ The rules above hold; every #536 / #539 / #566 hand edit listed in Background is
 
 ## Implementation milestones
 
-- [ ] **M1** named facade rules and `facade_will_bind`, `named_facade_lines`; tests 1-6
-- [ ] **M2** `test_module_lines`, `reach_of` production; tests 4, 9
-- [ ] **M3** surveys on `settled_outline`, `refuse_unsurveyed_range`; tests 7-8, then the live suite 10-12 and its registration
-- [ ] **M4** engine move of `attached_trivia_starts_at` (`tddy-tools restructure`, `check --deep` first); build green
-- [ ] **M5** `removed_declaration`, comment travel, attribute refusal (static + resolve), `separates_use_runs`; tests 13-21
-- [ ] **M6** `to_gate_in_a_repair`; tests 22-24
-- [ ] **M7** gate note; tests 25-26
+- [x] **M1** named facade rules and `facade_will_bind`, `named_facade_lines`; tests 1-6
+- [x] **M2** `test_module_lines`, `reach_of` production; tests 4, 9
+- [x] **M3** surveys on `settled_outline`, `refuse_unsurveyed_range`; tests 7-8, then the live suite 10-12 and its registration
+- [x] **M4** engine move of `attached_trivia_starts_at` (`tddy-tools restructure`, `check --deep` first); build green
+- [x] **M5** `removed_declaration`, comment travel, attribute refusal (static + resolve), `separates_use_runs`; tests 13-21
+- [x] **M6** `to_gate_in_a_repair`; tests 22-24
+- [x] **M7** gate note; tests 25-26
 - [ ] **M8** docs staged, scoped gate, length gate
 
 ## Testing plan
@@ -465,6 +465,35 @@ The surveys still read `request_settled`; `facade_writer` and `move_precondition
 child-module convention, as `runner/tidy/wide_facade_tests.rs`); no `untidied` field (above); `runner/group_gate.rs`
 changed by one destructure; test 4 is a pin; test 24 replaces an existing test; test 12's assertion narrowed.
 
+### Green + `/validate-changes` (2026-10-13)
+
+Stack gate: base `feature/reshape/multi-seam-extract`, already current, `origin/<base>..HEAD` is this PR's three
+commits only, no deletions, no parent-owned file touched. **0 critical, 3 warning, 3 info.**
+
+Scoped gates (`tddy-code-restructuring`): `./test -p` — 72 targets `ok`, none failing (961 `--lib`); clippy
+`-D warnings` and `cargo fmt` clean; `cargo build -p tddy-code-restructuring` ✅; `cargo check -p tddy-index-daemon
+-p tddy-tools --all-targets` ✅. All 26 acceptance tests pass. Rest of the workspace: CI.
+
+| Changeset item | Actual state |
+|---|---|
+| Responsibility (surveys, named facade, `reach_of`, declaration, use runs, repair, gate note) | ✅ delivered; no `TODO(reshape-tidy-facades)` or `todo!()` left |
+| Engine move | ✅ via `tddy-tools restructure`, no refusal; one stray `use` the engine reported was deleted by hand |
+| `runner/tidy.rs` boundary | ✅ production lines 36 → 36 (one call swapped) |
+| Package docs, wrap | 🔲 not started (`/wrap-context-docs`) |
+
+Warnings, to be recorded or fixed before ready:
+1. **Rule 1 deviation** — `survey_moved_items` calls `refuse_unsurveyed_range` only when `items_relocated_within`
+   finds nothing, because a range cutting into an `impl` read as declaring `doubled` with no module path (broke
+   `impl_seam_acceptance` and `import_pass_acceptance`). The rule text above says "`moved` is empty"; wrap should say so.
+2. **Known gap** — `separates_use_runs` weighs each declaration against the original text, so two adjacent removed
+   declarations between two `use` runs would each report false and the runs would still join. Needs a todo entry.
+3. **Existing test rewritten** — `names_only_the_items_something_outside_the_module_reaches` (`backends/rust.rs`)
+   pinned the behaviour test 1 reverses; its unreached item is now `pub(crate)`, which keeps what it protects.
+
+Info: `reached_from_production` also added to the `MovedItem` literals in `nested_modules.rs` and
+`relative_visibility.rs`, plus one base fixture in `visibility.rs` (unlisted above); `lines_in` is a new
+`seam_survey` helper; `untidied_note` prints `0` when the failing check reported no unused import.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-tidy-facades-initial-discovery.md`)
@@ -476,7 +505,7 @@ changed by one destructure; test 4 is a pin; test 24 replaces an existing test; 
 - [x] Run acceptance tests (verify they fail; test 10 is a guard — Validation results)
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests (contract surface published, commit 2)
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
