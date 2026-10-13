@@ -110,7 +110,8 @@ pub(super) fn blamed<'a>(
 fn names_word(line: &str, word: &str) -> bool {
     let bytes = line.as_bytes();
     line.match_indices(word).any(|(at, _)| {
-        (at == 0 || !is_word(bytes[at - 1])) && bytes.get(at + word.len()).is_none_or(|b| !is_word(*b))
+        (at == 0 || !is_word(bytes[at - 1]))
+            && bytes.get(at + word.len()).is_none_or(|b| !is_word(*b))
     })
 }
 
@@ -132,8 +133,12 @@ pub(super) fn mismatch_lines(report: &Value, text: &str, name: &str) -> Vec<usiz
         .filter_map(|item| item.pointer("/range/start/line").and_then(Value::as_u64))
         .map(|line| line as usize)
         .filter(|line| {
-            function.as_ref().is_some_and(|within| within.contains(line))
-                || source.get(*line).is_some_and(|written| written.contains(&call))
+            function
+                .as_ref()
+                .is_some_and(|within| within.contains(line))
+                || source
+                    .get(*line)
+                    .is_some_and(|written| written.contains(&call))
         })
         .collect()
 }

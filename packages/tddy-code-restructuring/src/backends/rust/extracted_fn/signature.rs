@@ -1,7 +1,7 @@
 //! Reading a function's signature over masked code: its parameters and its return type, as byte
 //! ranges of the text they were read from, so a rule can rewrite one without touching the rest.
 
-use super::span::{is_word, keyword_at, skip_whitespace, word_end, FnSpan};
+use super::span::{is_word, keyword_at, matching_parenthesis, skip_whitespace, word_end, FnSpan};
 use std::ops::Range;
 
 /// One parameter of a function.
@@ -24,7 +24,7 @@ pub(super) fn signature(code: &str, span: FnSpan) -> Option<Signature> {
     let bytes = code.as_bytes();
     let name_end = word_end(bytes, skip_whitespace(bytes, span.keyword + "fn".len()));
     let open = (past_generics(bytes, name_end)..span.open).find(|at| bytes[*at] == b'(')?;
-    let close = closing(bytes, open)?;
+    let close = matching_parenthesis(bytes, open)?;
     let parameters = split_top_level(bytes, open + 1..close)
         .into_iter()
         .filter(|piece| !code[piece.clone()].trim().is_empty())
@@ -32,15 +32,13 @@ pub(super) fn signature(code: &str, span: FnSpan) -> Option<Signature> {
         .collect();
 
     let after = skip_whitespace(bytes, close + 1);
-    let returns = bytes[after..span.open]
-        .starts_with(b"->")
-        .then(|| {
-            let from = skip_whitespace(bytes, after + 2);
-            let end = (from..span.open)
-                .find(|at| keyword_at(bytes, *at, "where"))
-                .unwrap_or(span.open);
-            from..from + code[from..end].trim_end().len()
-        });
+    let returns = bytes[after..span.open].starts_with(b"->").then(|| {
+        let from = skip_whitespace(bytes, after + 2);
+        let end = (from..span.open)
+            .find(|at| keyword_at(bytes, *at, "where"))
+            .unwrap_or(span.open);
+        from..from + code[from..end].trim_end().len()
+    });
     Some(Signature {
         parameters,
         returns,
@@ -50,7 +48,9 @@ pub(super) fn signature(code: &str, span: FnSpan) -> Option<Signature> {
 fn parameter(code: &str, piece: Range<usize>) -> Parameter {
     let bytes = code.as_bytes();
     let colon = (piece.start..piece.end).find(|at| {
-        bytes[*at] == b':' && bytes.get(at + 1) != Some(&b':') && (*at == 0 || bytes[at - 1] != b':')
+        bytes[*at] == b':'
+            && bytes.get(at + 1) != Some(&b':')
+            && (*at == 0 || bytes[at - 1] != b':')
     });
     let Some(colon) = colon else {
         return Parameter {
@@ -112,22 +112,21 @@ fn split_top_level(code: &[u8], within: Range<usize>) -> Vec<Range<usize>> {
     pieces
 }
 
-/// The `)` closing the `(` at `open`.
-fn closing(code: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (at, byte) in code.iter().enumerate().skip(open) {
-        match byte {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(at);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+/// The return type a function header — `pub fn f(..) -> T {`, up to and including the `{` — declares.
+pub(super) fn header_return_type(header: &str) -> Option<String> {
+    let masked = crate::backends::rust::early_return::masked_to_code(header);
+    let keyword = (0..masked.len()).find(|at| keyword_at(masked.as_bytes(), *at, "fn"))?;
+    let open = masked.rfind('{')?;
+    let returns = signature(
+        &masked,
+        FnSpan {
+            keyword,
+            open,
+            close: open,
+        },
+    )?
+    .returns?;
+    Some(header[returns].to_string())
 }
 
 /// A generic type read apart: `Result<(u32, u32), String>` is the path `Result` and the arguments

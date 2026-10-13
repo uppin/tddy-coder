@@ -58,8 +58,6 @@ pub use wait::WAIT_HEARTBEAT;
 pub(crate) use wait::human_delta;
 use wait::{heartbeat_line, Beat, WaitStage, WaitedOn, Waiting};
 
-use early_return::refuse_early_returns;
-
 use impl_seam::refuse_impl_sibling_references;
 use imports::names_bound;
 use introduced::{introduced_by, Introduced};
@@ -1278,7 +1276,7 @@ impl RustBackend {
             };
             module_text::refuse_split_attribute_paths(&original, planned)?;
             if op.op == RefactorKind::ExtractMethod {
-                refuse_early_returns(&original, planned)?;
+                extracted_fn::refuse_unliftable_returns(&original, planned)?;
             }
             if op.op == RefactorKind::ExtractModule {
                 if let Some(name) = op.name.as_deref() {

@@ -123,6 +123,24 @@ pub(super) fn matching_close(code: &[u8], open: usize) -> Option<usize> {
     None
 }
 
+/// The `)` that closes the `(` at `open`.
+pub(super) fn matching_parenthesis(code: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, byte) in code.iter().enumerate().skip(open) {
+        match byte {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 pub(super) fn is_word(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80
 }
@@ -164,7 +182,11 @@ pub(super) fn statements(code: &[u8], base: usize) -> Vec<Statement> {
             b'(' | b'[' | b'{' => depth += 1,
             b')' | b']' => depth = depth.saturating_sub(1),
             b'}' | b';' => {
-                depth = if *byte == b'}' { depth.saturating_sub(1) } else { depth };
+                depth = if *byte == b'}' {
+                    depth.saturating_sub(1)
+                } else {
+                    depth
+                };
                 if depth == 0 && start.is_some() && (*byte == b';' || ends_a_block(code, at + 1)) {
                     found.push(Statement {
                         start: base + start.take().unwrap_or(at),

@@ -18,7 +18,10 @@ pub(super) fn spellings(origin_fn: &str, name: &str) -> Vec<String> {
         }
         let mut from = at;
         while from >= 3 && &bytes[from - 2..from] == b"::" && is_word(bytes[from - 3]) {
-            from = (0..from - 2).rev().find(|n| !is_word(bytes[*n])).map_or(0, |n| n + 1);
+            from = (0..from - 2)
+                .rev()
+                .find(|n| !is_word(bytes[*n]))
+                .map_or(0, |n| n + 1);
         }
         let path = &masked[from..at + name.len()];
         if from < at && !found.iter().any(|known| known == path) {

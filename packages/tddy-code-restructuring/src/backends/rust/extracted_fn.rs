@@ -17,10 +17,11 @@ mod respell;
 mod return_type;
 mod signature;
 mod span;
+mod tail;
 
-use super::early_return::{byte_offset, masked_to_code, refuse_early_returns};
+use super::early_return::{byte_offset, masked_to_code};
 use super::lsp_edits::offset_of;
-use super::{imports, server_defect, LspPoint, ProgressSink, RustBackend};
+use super::{imports, seam_refusal, server_defect, LspPoint, ProgressSink, RustBackend};
 use crate::edit::Range;
 use crate::Result;
 use ptr_args::Narrowing;
@@ -59,7 +60,10 @@ impl RustBackend {
         name: &str,
     ) -> Result<Cleaned> {
         let carried = imports::carry_function_local_uses(original, named, range, name);
-        let (commented, _) = comments::restored(original, range, &carried, name)?;
+        let header = origin_header(original, range);
+        let exits = guards::classify(original, range);
+        let lifted = guards::lifted(&header, &carried, name, &exits)?;
+        let (commented, _) = comments::restored(original, range, &lifted, name)?;
         let respelled = self.respelled_signature_types(uri, original, &commented, range, name)?;
         let narrowed = self.verified_narrowings(uri, &respelled, name)?;
         let unwrapped = lints::unit_tail_unwrapped(&narrowed.text, name);
@@ -67,7 +71,7 @@ impl RustBackend {
         let mut notes = narrowed.notes;
         notes.extend(lints::shape_notes(&shorthand, name));
         Ok(Cleaned {
-            text: shorthand,
+            text: return_type::respelled_return_type(&header, &shorthand, name),
             notes,
         })
     }
@@ -196,6 +200,15 @@ impl RustBackend {
     }
 }
 
+/// The signature of the function `range` lies in, from its `fn` to the `{` opening its body.
+fn origin_header(original: &str, range: Range) -> String {
+    let masked = masked_to_code(original);
+    byte_offset(original, range.start)
+        .and_then(|from| span::enclosing_function(masked.as_bytes(), from))
+        .map(|origin| original[origin.keyword..=origin.open].to_string())
+        .unwrap_or_default()
+}
+
 /// What `check` says about an `extract_method` range before any server exists: the early-exit
 /// refusal (or nothing, for a range the guard lift or tail position accepts), the function-local
 /// `use` items the extraction will carry and the comments it will put back, each on the progress
@@ -205,7 +218,7 @@ pub(super) fn extract_method_findings(
     range: Range,
     progress: &ProgressSink,
 ) -> Vec<String> {
-    let refusal = refuse_early_returns(text, range).err();
+    let refusal = refuse_unliftable_returns(text, range).err();
     // Not findings: what `apply` does about them, so the plan is sound.
     for statement in imports::local_uses_to_carry(text, range) {
         progress(&format!(
@@ -218,14 +231,18 @@ pub(super) fn extract_method_findings(
             "the extracted function will keep {at_risk} comment(s) rust-analyzer drops"
         ));
     }
-    refusal.map(|refusal| refusal.to_string()).into_iter().collect()
+    refusal
+        .map(|refusal| refusal.to_string())
+        .into_iter()
+        .collect()
 }
 
 /// Refuse an `extract_method` range holding a `return` that neither the guard lift (rule 12) nor
 /// tail position (rule 13) can carry. Replaces `refuse_early_returns` at its two call sites, one
 /// line for one line.
 pub(super) fn refuse_unliftable_returns(text: &str, range: Range) -> Result<()> {
-    let _ = (text, range);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("refuse_unliftable_returns")
+    match guards::classify(text, range) {
+        guards::Exits::Refused(refusal) => Err(seam_refusal(refusal)),
+        _ => Ok(()),
+    }
 }

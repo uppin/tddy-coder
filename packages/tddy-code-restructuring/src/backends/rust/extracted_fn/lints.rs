@@ -1,7 +1,9 @@
 //! Rules 2-4: the lexical clean-ups of an extracted function, each safe by construction.
 
 use super::signature::{generic, signature};
-use super::span::{function_span, is_word, matching_close, statements, word_end};
+use super::span::{
+    function_span, is_word, matching_close, matching_parenthesis, statements, word_end,
+};
 use crate::backends::rust::early_return::masked_to_code;
 
 /// The most parameters clippy accepts before `too_many_arguments` fires.
@@ -55,24 +57,6 @@ fn is_a_unit_statement(expression: &str) -> bool {
     block_like || expression.starts_with('{')
 }
 
-/// The `)` closing the `(` at `open`.
-fn matching_parenthesis(code: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (at, byte) in code.iter().enumerate().skip(open) {
-        match byte {
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(at);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 fn line_start(text: &str, at: usize) -> usize {
     text[..at].rfind('\n').map_or(0, |newline| newline + 1)
 }
@@ -93,7 +77,12 @@ pub(super) fn field_shorthand(text: &str, name: &str) -> String {
     }
     let mut written = text.to_string();
     for (from, to) in redundant.into_iter().rev() {
-        let field = written[from..to].split(':').next().unwrap_or("").trim().to_string();
+        let field = written[from..to]
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
         written.replace_range(from..to, &field);
     }
     written
@@ -136,11 +125,10 @@ fn redundant_fields(masked: &str, within: std::ops::Range<usize>) -> Vec<(usize,
         let text = masked[entry.clone()].trim();
         if let Some((field, value)) = text.split_once(':') {
             let (field, value) = (field.trim(), value.trim());
-            let is_word = |text: &str| {
-                !text.is_empty() && text.bytes().all(is_word)
-            };
+            let is_word = |text: &str| !text.is_empty() && text.bytes().all(is_word);
             if is_word(field) && field == value && !value.starts_with(':') {
-                let start = entry.start + masked[entry.clone()].len() - masked[entry.clone()].trim_start().len();
+                let start = entry.start + masked[entry.clone()].len()
+                    - masked[entry.clone()].trim_start().len();
                 found.push((start, start + text.len()));
             }
         }
@@ -152,7 +140,8 @@ fn redundant_fields(masked: &str, within: std::ops::Range<usize>) -> Vec<(usize,
 /// three or more, which clippy flags and only the plan can fix.
 pub(super) fn shape_notes(text: &str, name: &str) -> Vec<String> {
     let masked = masked_to_code(text);
-    let Some(signature) = function_span(text, name).and_then(|span| signature(&masked, span)) else {
+    let Some(signature) = function_span(text, name).and_then(|span| signature(&masked, span))
+    else {
         return Vec::new();
     };
     let mut notes = Vec::new();

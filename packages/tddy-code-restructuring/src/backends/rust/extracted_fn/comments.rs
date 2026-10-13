@@ -33,21 +33,23 @@ pub(super) fn dropped(original: &str, range: Range, produced: &str, name: &str) 
     let Some((from, to)) = offsets(original, range) else {
         return Vec::new();
     };
-    let function = function_span(produced, name)
-        .map_or("", |span| &produced[span.keyword..=span.close]);
+    let function =
+        function_span(produced, name).map_or("", |span| &produced[span.keyword..=span.close]);
     let mut kept: Vec<String> = comments_in(function, 0, function.len())
         .into_iter()
         .map(|comment| comment.text)
         .collect();
     comments_in(original, from, to)
         .into_iter()
-        .filter(|comment| match kept.iter().position(|text| *text == comment.text) {
-            Some(at) => {
-                kept.swap_remove(at);
-                false
-            }
-            None => true,
-        })
+        .filter(
+            |comment| match kept.iter().position(|text| *text == comment.text) {
+                Some(at) => {
+                    kept.swap_remove(at);
+                    false
+                }
+                None => true,
+            },
+        )
         .collect()
 }
 
@@ -98,7 +100,10 @@ pub(super) fn at_risk(text: &str, range: Range) -> usize {
 }
 
 fn offsets(text: &str, range: Range) -> Option<(usize, usize)> {
-    Some((byte_offset(text, range.start)?, byte_offset(text, range.end)?))
+    Some((
+        byte_offset(text, range.start)?,
+        byte_offset(text, range.end)?,
+    ))
 }
 
 /// Every comment lying wholly within bytes `from..to` of `text`, in order.
@@ -157,15 +162,23 @@ fn insertions(
         }
         let text = &comment.text;
         if comment.trailing {
-            let at = paired.iter().rposition(|statement| statement.end <= comment.start)?;
+            let at = paired
+                .iter()
+                .rposition(|statement| statement.end <= comment.start)?;
             put.push((line_end(produced, body[at].end - 1), format!(" {text}")));
-        } else if let Some(at) = paired.iter().position(|statement| statement.start >= comment.end) {
+        } else if let Some(at) = paired
+            .iter()
+            .position(|statement| statement.start >= comment.end)
+        {
             let line = line_start(produced, body[at].start);
             put.push((line, format!("{}{text}\n", indentation(produced, line))));
         } else if !tail {
             let last = body.last()?;
             let indent = indentation(produced, line_start(produced, last.start));
-            put.push((line_end(produced, last.end - 1), format!("\n{indent}{text}")));
+            put.push((
+                line_end(produced, last.end - 1),
+                format!("\n{indent}{text}"),
+            ));
         } else {
             return None;
         }
@@ -190,7 +203,9 @@ fn line_start(text: &str, at: usize) -> usize {
 }
 
 fn line_end(text: &str, at: usize) -> usize {
-    text[at..].find('\n').map_or(text.len(), |newline| at + newline)
+    text[at..]
+        .find('\n')
+        .map_or(text.len(), |newline| at + newline)
 }
 
 /// The whitespace the line starting at `line` is indented with.

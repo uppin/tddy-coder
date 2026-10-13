@@ -48,7 +48,11 @@ pub(super) fn hover_bearing_position(text: &str, range: Range) -> Position {
 fn comment_end(chars: &[char], at: usize, limit: usize) -> Option<usize> {
     let rest = &chars[at..limit];
     match rest {
-        ['/', '/', ..] => Some(rest.iter().position(|c| *c == '\n').map_or(limit, |n| at + n)),
+        ['/', '/', ..] => Some(
+            rest.iter()
+                .position(|c| *c == '\n')
+                .map_or(limit, |n| at + n),
+        ),
         ['/', '*', ..] => Some(
             rest[2..]
                 .windows(2)

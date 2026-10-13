@@ -3,13 +3,54 @@
 //! rust-analyzer writes the alias expanded — `Result<X, E>` — which is `E0107` in a file that
 //! imports a one-argument `Result<T>` (this crate's `crate::Result`, `anyhow::Result`).
 
+use super::signature::{generic, header_return_type, signature, Generic};
+use super::span::{function_span, keyword_at};
+use crate::backends::rust::early_return::masked_to_code;
+
 /// `produced` with the return type of `name` written through the caller's one-argument `Result`
 /// alias, when `origin_header` (the caller's signature) returns one and the server wrote a
 /// two-argument `…Result<X, E>`; `produced` unchanged otherwise.
+///
+/// An alias not named `Result` (`Res<T>`) is read the same way when the function propagates —
+/// holds a `?` or a `return` — because rust-analyzer expands every alias it prints, and a function
+/// that propagates into the caller's error returns the caller's alias.
 pub(super) fn respelled_return_type(origin_header: &str, produced: &str, name: &str) -> String {
-    let _ = (origin_header, produced, name);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("respelled_return_type")
+    let masked = masked_to_code(produced);
+    let respelled = function_span(produced, name).and_then(|span| {
+        let returns = signature(&masked, span)?.returns?;
+        let caller = header_return_type(origin_header)?;
+        let alias = generic(&caller).filter(|ty| ty.arguments.len() == 1)?;
+        let written = generic(&produced[returns.clone()]).filter(is_two_argument_result)?;
+        let propagates = (span.open..span.close)
+            .any(|at| masked.as_bytes()[at] == b'?' || keyword_at(masked.as_bytes(), at, "return"));
+        (is_result(&alias) || (propagates && !is_option(&alias)))
+            .then(|| (returns, format!("{}<{}>", alias.path, written.arguments[0])))
+    });
+    match respelled {
+        Some((returns, spelled)) => {
+            let mut written = produced.to_string();
+            written.replace_range(returns, &spelled);
+            written
+        }
+        None => produced.to_string(),
+    }
+}
+
+fn last_segment<'a>(ty: &Generic<'a>) -> &'a str {
+    ty.path.rsplit("::").next().unwrap_or("")
+}
+
+fn is_result(ty: &Generic<'_>) -> bool {
+    last_segment(ty) == "Result"
+}
+
+fn is_option(ty: &Generic<'_>) -> bool {
+    last_segment(ty) == "Option"
+}
+
+/// `Result<X, E>` through some path: what the server writes.
+fn is_two_argument_result(ty: &Generic<'_>) -> bool {
+    is_result(ty) && ty.arguments.len() == 2
 }
 
 #[cfg(test)]
