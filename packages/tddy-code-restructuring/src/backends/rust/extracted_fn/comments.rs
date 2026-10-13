@@ -155,35 +155,44 @@ fn insertions(
         return None;
     }
 
-    let mut put = Vec::new();
-    for comment in lost {
-        if inside_a_statement(&paired, comment) {
-            return None;
-        }
-        let text = &comment.text;
-        if comment.trailing {
-            let at = paired
-                .iter()
-                .rposition(|statement| statement.end <= comment.start)?;
-            put.push((line_end(produced, body[at].end - 1), format!(" {text}")));
-        } else if let Some(at) = paired
+    lost.iter()
+        .map(|comment| {
+            let placed = !inside_a_statement(&paired, comment);
+            placed.then(|| put_back(comment, &paired, &body, produced, tail))?
+        })
+        .collect()
+}
+
+/// Where `comment` goes in `produced`, and what is written there: a trailing comment ends the line
+/// of the statement it trailed, a full-line one stands on a line of its own before the statement it
+/// preceded — or after the last, when the assist added no tail to come between.
+fn put_back(
+    comment: &Comment,
+    paired: &[Statement],
+    body: &[Statement],
+    produced: &str,
+    tail: bool,
+) -> Option<(usize, String)> {
+    let text = &comment.text;
+    if comment.trailing {
+        let at = paired
             .iter()
-            .position(|statement| statement.start >= comment.end)
-        {
-            let line = line_start(produced, body[at].start);
-            put.push((line, format!("{}{text}\n", indentation(produced, line))));
-        } else if !tail {
-            let last = body.last()?;
-            let indent = indentation(produced, line_start(produced, last.start));
-            put.push((
-                line_end(produced, last.end - 1),
-                format!("\n{indent}{text}"),
-            ));
-        } else {
-            return None;
-        }
+            .rposition(|statement| statement.end <= comment.start)?;
+        return Some((line_end(produced, body[at].end - 1), format!(" {text}")));
     }
-    Some(put)
+    if let Some(at) = paired
+        .iter()
+        .position(|statement| statement.start >= comment.end)
+    {
+        let line = line_start(produced, body[at].start);
+        return Some((line, format!("{}{text}\n", indentation(produced, line))));
+    }
+    let last = body.last().filter(|_| !tail)?;
+    let indent = indentation(produced, line_start(produced, last.start));
+    Some((
+        line_end(produced, last.end - 1),
+        format!("\n{indent}{text}"),
+    ))
 }
 
 fn with_insertions(text: &str, mut insertions: Vec<(usize, String)>) -> String {

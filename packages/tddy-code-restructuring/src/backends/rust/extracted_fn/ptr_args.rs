@@ -87,6 +87,14 @@ pub(super) fn narrowed(text: &str, name: &str, chosen: &[Narrowing]) -> String {
     written
 }
 
+/// What the run says about a narrowing it undid.
+pub(super) fn kept_note(narrowing: &Narrowing) -> String {
+    format!(
+        "kept `{}: {}`: the body needs the type rust-analyzer wrote",
+        narrowing.parameter, narrowing.from
+    )
+}
+
 /// The narrowings whose parameter is named on one of the zero-based `lines` of `text`.
 pub(super) fn blamed<'a>(
     chosen: &'a [Narrowing],

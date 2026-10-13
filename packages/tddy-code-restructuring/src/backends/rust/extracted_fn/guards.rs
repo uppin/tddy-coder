@@ -48,6 +48,10 @@ pub(super) fn classify(text: &str, range: Range) -> Exits {
     if lines.is_empty() {
         return Exits::None;
     }
+    // The exception that already held: a range running to the function's own tail.
+    if refuse_early_returns(text, range).is_ok() {
+        return Exits::Tail;
+    }
     let masked = masked_to_code(text);
     let (Some(from), Some(to)) = (byte_offset(text, range.start), byte_offset(text, range.end))
     else {
@@ -56,34 +60,43 @@ pub(super) fn classify(text: &str, range: Range) -> Exits {
     let Some(function) = enclosing_function(masked.as_bytes(), from) else {
         return refused_as_today(text, range);
     };
-    let returns = signature(&masked, function).and_then(|signature| signature.returns);
+    let returns = signature(&masked, function)
+        .and_then(|signature| signature.returns)
+        .map(|returns| masked[returns].to_string());
     if in_tail_position(text, range) && returns.is_some() {
         return Exits::Tail;
     }
 
     let returned = returns_of(text, &masked, from..to, &lines);
-    let has = |kind: Returned| returned.iter().any(|(_, found)| *found == kind);
-    if has(Returned::Value) && returned.len() > 1 {
-        return Exits::Refused(mixed(text, &returned));
+    let guards = returned.iter().filter(|(_, kind)| *kind != Returned::Value);
+    match (guards.count(), returned.len()) {
+        (0, _) => refused_as_today(text, range),
+        (guards, all) if guards < all => Exits::Refused(mixed(text, &returned)),
+        _ => guarded(
+            &masked,
+            from..to,
+            function.close,
+            returns.as_deref(),
+            &returned,
+        ),
     }
-    if has(Returned::Value) {
-        return refused_as_today(text, range);
-    }
-    let want = if has(Returned::Err) {
-        "Result"
-    } else {
-        "Option"
-    };
-    let ret = returns.map(|returns| masked[returns].to_string());
-    if let Some(refusal) =
-        unliftable_guards(&masked, from..to, function.close, ret.as_deref(), want)
-    {
-        return Exits::Refused(refusal);
-    }
-    if want == "Result" {
-        Exits::ErrGuards
-    } else {
-        Exits::NoneGuards
+}
+
+/// A range whose every `return` is a guard: lifted when the function around it returns what `?`
+/// needs and nothing the range declares is read after it, refused otherwise.
+fn guarded(
+    masked: &str,
+    within: std::ops::Range<usize>,
+    function_end: usize,
+    returns: Option<&str>,
+    returned: &[(u32, Returned)],
+) -> Exits {
+    let errs = returned.iter().any(|(_, kind)| *kind == Returned::Err);
+    let want = if errs { "Result" } else { "Option" };
+    match unliftable_guards(masked, within, function_end, returns, want) {
+        Some(refusal) => Exits::Refused(refusal),
+        None if errs => Exits::ErrGuards,
+        None => Exits::NoneGuards,
     }
 }
 
@@ -392,7 +405,18 @@ fn call_statement(
     name: &str,
 ) -> Option<(std::ops::Range<usize>, std::ops::Range<usize>)> {
     let masked = std::str::from_utf8(code).ok()?;
-    let at = masked[..before].find("if let Some(")?;
+    masked[..before]
+        .match_indices("if let Some(")
+        .find_map(|(at, _)| call_at(masked, at, name))
+}
+
+/// The statement starting at `at`, when it is `if let Some(<v>) = <name>(<args>) { return <v>; }`.
+fn call_at(
+    masked: &str,
+    at: usize,
+    name: &str,
+) -> Option<(std::ops::Range<usize>, std::ops::Range<usize>)> {
+    let code = masked.as_bytes();
     let bound_end = at + masked[at..].find(')')?;
     let bound = masked[at + "if let Some(".len()..bound_end].trim();
     let call_start = skip_whitespace(code, skip_whitespace(code, bound_end + 1) + 1);

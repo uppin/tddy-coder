@@ -115,15 +115,7 @@ impl RustBackend {
         };
         Ok(Cleaned {
             text,
-            notes: undone
-                .iter()
-                .map(|narrowing| {
-                    format!(
-                        "kept `{}: {}`: the body needs the type rust-analyzer wrote",
-                        narrowing.parameter, narrowing.from
-                    )
-                })
-                .collect(),
+            notes: undone.into_iter().map(ptr_args::kept_note).collect(),
         })
     }
 
