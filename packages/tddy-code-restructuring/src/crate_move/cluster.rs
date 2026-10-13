@@ -114,25 +114,11 @@ pub fn resolve_cluster(
     cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
     let members = read_members(workspace, cluster)?;
-    let carried = members
-        .iter()
-        .map(|member| member.carried(workspace))
-        .collect::<Result<Vec<_>>>()?;
-    let the_set = TheSet {
-        co_moving: members
-            .iter()
-            .map(|member| member.home.path.join("::"))
-            .collect(),
-        travelling: carried
-            .iter()
-            .flatten()
-            .map(|file| file.from.clone())
-            .collect(),
-    };
+    let the_set = TheSet::of(workspace, &members)?;
 
     let mut merged = MergedChanges::default();
     let mut totals = SetTotals::default();
-    for (member, files) in members.iter().zip(&carried) {
+    for (member, files) in members.iter().zip(&the_set.carried) {
         member_changes(
             engine,
             workspace,
@@ -182,7 +168,30 @@ pub fn resolve_cluster(
 /// file that moves, each member's carried files included.
 struct TheSet {
     co_moving: BTreeSet<String>,
+    /// Each member's carried files, in the members' order.
+    carried: Vec<Vec<module_files::MovedFile>>,
     travelling: BTreeSet<String>,
+}
+
+impl TheSet {
+    fn of(workspace: &Workspace<'_>, members: &[moving::Move]) -> Result<TheSet> {
+        let carried = members
+            .iter()
+            .map(|member| member.carried(workspace))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(TheSet {
+            co_moving: members
+                .iter()
+                .map(|member| member.home.path.join("::"))
+                .collect(),
+            travelling: carried
+                .iter()
+                .flatten()
+                .map(|file| file.from.clone())
+                .collect(),
+            carried,
+        })
+    }
 }
 
 /// What the members contribute to the edits that belong to the set rather than to a member.

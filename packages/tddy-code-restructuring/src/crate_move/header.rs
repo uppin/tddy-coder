@@ -60,27 +60,14 @@ pub(crate) struct Header {
 /// `use crate::roster;` over a module that is only `destination::records` — the new path is bound
 /// `as roster`, so the paths in the body that use the name go on resolving.
 ///
+/// `below` is the modules between the moved module and the file — empty for the module's own file,
+/// `["b"]` for a carried `a/b.rs` — so the survey resolves its `self::` and `super::` paths against
+/// `moving.home.path ++ below`, and one that stays inside the carried tree is left as written.
+///
 /// # Errors
 ///
 /// Refuses a `use` group whose members would need different qualifiers, because one prefix is all a
 /// group has, and for everything the survey refuses.
-pub(crate) fn repointed_header(
-    workspace: &Workspace<'_>,
-    text: &str,
-    moving: &Move,
-    co_moving: &BTreeSet<String>,
-) -> Result<Header> {
-    repointed_header_at(workspace, text, moving, &[], co_moving)
-}
-
-/// [`repointed_header`] for a file the move **carries** below its module: `below` is the modules
-/// between the moved module and the file (`["b"]` for `a/b.rs`), so the survey resolves its
-/// `self::` and `super::` paths against `moving.home.path ++ below`, and one that stays inside the
-/// carried tree is left as written. `repointed_header` is this with `below` empty.
-///
-/// # Errors
-///
-/// Refuses for every reason [`repointed_header`] does.
 pub(crate) fn repointed_header_at(
     workspace: &Workspace<'_>,
     text: &str,

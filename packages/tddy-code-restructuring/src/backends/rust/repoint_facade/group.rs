@@ -3,7 +3,7 @@
 //!
 //! A group has one prefix, so it can only carry one. Rule P applies when replacing the group's
 //! prefix with a single new prefix leaves every member's own path unchanged — the case
-//! `repointed_header` handles today. Otherwise Rule S applies: the members that need a new
+//! `repointed_header_at` handles today. Otherwise Rule S applies: the members that need a new
 //! qualifier leave the group as statements of their own, in member order, and the rest stay.
 //! A nested member is lifted whole when all its leaves share one new prefix, and refused otherwise.
 
