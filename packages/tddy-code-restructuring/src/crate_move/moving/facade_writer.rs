@@ -83,19 +83,7 @@ fn leaving(
     let removals = removals_with_separators(path, text, members)?;
 
     for ((member, survey), (removal, separated)) in members.iter().zip(removals) {
-        let facade = match member.reexport {
-            Reexport::Glob if facade_written => None,
-            Reexport::Glob => {
-                facade_written = true;
-                Some(facade_lines_for_plan(&moved).join("\n"))
-            }
-            // `outside` is refused for a cross-crate move when the plan is read.
-            Reexport::Named | Reexport::None | Reexport::Outside => facade_line(
-                &member.destination,
-                member.reexport,
-                &survey.reached_from_outside,
-            ),
-        };
+        let facade = facade_for(member, survey, &moved, &mut facade_written);
         edits.push(manifest_edits::replacement(
             text,
             removal.span,
@@ -104,6 +92,29 @@ fn leaving(
         edits.extend(parent_reexport_edits(text, member));
     }
     Ok(edits)
+}
+
+/// The facade that takes the place of `member`'s declaration, if it gets one: a glob member shares
+/// one facade for the plan, written at the first of them (`facade_written` records it).
+fn facade_for(
+    member: &Move,
+    survey: &Survey,
+    moved: &[(destination::Destination, String)],
+    facade_written: &mut bool,
+) -> Option<String> {
+    match member.reexport {
+        Reexport::Glob if *facade_written => None,
+        Reexport::Glob => {
+            *facade_written = true;
+            Some(facade_lines_for_plan(moved).join("\n"))
+        }
+        // `outside` is refused for a cross-crate move when the plan is read.
+        Reexport::Named | Reexport::None | Reexport::Outside => facade_line(
+            &member.destination,
+            member.reexport,
+            &survey.reached_from_outside,
+        ),
+    }
 }
 
 /// Each member's declaration as a move removes it, with whether it carries the blank line that keeps

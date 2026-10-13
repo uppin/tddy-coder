@@ -122,14 +122,7 @@ pub fn refuse_a_broken_result(
     }
     let broken = match checked? {
         None => tidy_a_complete_run(root, options, (applied, total), &touched, &packages, cancel)?,
-        Some(rejection) => Some((
-            rejection.checked,
-            format!(
-                "{}{}",
-                untidied_note(&rejection.stderr, &touched),
-                rejection.errors
-            ),
-        )),
+        Some(rejection) => Some(untidied(rejection, &touched)),
     };
     match broken {
         None => Ok(()),
@@ -147,6 +140,13 @@ pub fn refuse_a_broken_result(
             errors,
         }),
     }
+}
+
+/// The check and errors of a failed result check, led by what it says about the tidy it kept from
+/// running.
+fn untidied(rejection: Rejection, touched: &BTreeSet<String>) -> (String, String) {
+    let note = untidied_note(&rejection.stderr, touched);
+    (rejection.checked, format!("{note}{}", rejection.errors))
 }
 
 /// What a failed result check says about the tidy it kept from running: that the written files were
