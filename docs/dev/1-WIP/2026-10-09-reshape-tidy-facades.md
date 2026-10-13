@@ -386,7 +386,11 @@ the red evidence for the glob defect.
 
 ## Technical Debt & Production Readiness
 
-(empty; populated during development)
+Run 2026-10-13 (`/validate-prod-ready`, scoped to `tddy-code-restructuring`): ✅ **Ready** — 0 blockers, 0 warnings.
+No mock or fake code, no fallbacks, no `TODO`/`FIXME`/`TODO(reshape-tidy-facades)` or `expect(dead_code)` in the
+production lines this PR added; no `println!`/`eprintln!`/`dbg!`; no `unwrap`/`expect` outside tests; `clippy -D warnings`
+(which carries `dead_code` and `unused_imports`) is clean. The `#[cfg(test)]` strings in `facade.rs` are the facade
+the engine writes, not test-only branches. No debt left open by this node.
 
 ## Decisions & Trade-offs
 
@@ -471,7 +475,7 @@ Regression check for the surface changes (`failing_check` → `Rejection`, `to_g
 parents' contracts (`item_move::members`, `module_reparent::tree_{reach,visibility}`, `projection`, `apply`,
 `journal::group`, `runner::rehearsal`), not this node's.
 
-**Deferred to green (no caller yet, `expect(dead_code)` with `TODO(reshape-tidy-facades)`, which green must remove):**
+**Was deferred to green (no caller yet, `expect(dead_code)` with `TODO(reshape-tidy-facades)`) — all removed, each now has a caller:**
 `MovedItem.reached_from_production` (field, unconditional `expect`), `refuse_unsurveyed_range`, `test_module_lines`,
 `removed_declaration`, `separates_use_runs`. `Reach.from_production` exists and is copied into the survey, never set.
 The surveys still read `request_settled`; `facade_writer` and `move_preconditions` still call `module_declaration`.
