@@ -333,8 +333,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
 | `repoint_call` | Rewrite the part of a call **in front of** its arguments. Single form: one call's callee. Bulk form: insert hops after the receiver of every call of a method. See [`repoint_call`](#repoint_call) |
 | `repoint_facade_imports` | Re-point every path of one file (or of every file of one module) that goes through a `pub use` of **another crate** to the path where the item is **defined**. A `symbol` anchor names one file; an `items`/`item` anchor on a `mod` declaration names the module. See [`repoint_facade_imports`](#repoint_facade_imports) |
-| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item` |
-| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate` |
+| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate: `git mv` the file, rewrite every path it names — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `pub use <dest_crate>::{a, b};` per destination in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff**; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;` is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was |
+| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate`. Each member's declaration is removed, and its comments travel, as for a single module |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
 
 ### Same-crate moves
@@ -661,6 +661,15 @@ A facade is emitted at the widest visibility the relocated items carry — `pub 
 something moved is `pub`, `pub(crate)` otherwise, since the assist rewrites what it relocates to
 `pub(crate)` and a `pub` glob over none of it re-exports nothing.
 
+The survey behind a facade reads the file's outline the way every other operation does, waiting for the
+server to have loaded: a range that declares items while the survey found none is refused, naming the
+range and the first item, instead of a facade written from nothing. A `named` facade keeps the public
+path: every moved item written `pub` is re-exported whether or not anything references it, and an item
+written narrower is re-exported only when something outside the new module reaches it. The names that
+only the file's own `#[cfg(test)]` module reaches go on a `#[cfg(test)]` line after the production
+lines, so the tidy has nothing to gate there. A reference from another file counts as production; a
+`pub` item that only tests reach stays on the `pub` line.
+
 ### Moved code that changes meaning one module deeper
 
 `extract_module` puts the items in a new child of the module that held them, and text that was correct
@@ -710,7 +719,9 @@ A successful `apply` ends with a **tidy** over the files it wrote, once the tree
    applied, over the files the run wrote, in a bounded number of rounds (removing one import can orphan
    another).
 2. **An import only the parent's tests use is gated** `#[cfg(test)]` instead of removed; a member of a
-   group becomes its own gated item.
+   group becomes its own gated item. This covers a glob (which binds no name an error could quote) and a
+   trait import only a test's method call needs: a repair gates every import one build reads while
+   another reports it unused, quoted by an error or not. A glob no build reads is removed.
 3. **Both compile units are read.** A library checked with its tests is built twice and each build
    reports its own unused set. They are composed per `use` statement: unused in both, removed; unused
    only in the library build, gated; otherwise kept. The compiler's own member spans are never applied
@@ -723,6 +734,10 @@ A successful `apply` ends with a **tidy** over the files it wrote, once the tree
 
 A tidy that cannot repair a round undoes it and fails the run, saying so; it never leaves a broken
 tree, and never touches the plan's own edits.
+
+The tidy runs only on a tree that compiled and an `apply` that applied every operation. When the compile
+gate fails, the refusal opens with one line saying the tidy did not run, so the written files were
+neither tidied nor formatted, and how many `unused import` warnings the failing check reported in them.
 
 ## What a run executes
 

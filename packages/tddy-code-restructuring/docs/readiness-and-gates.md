@@ -270,6 +270,12 @@ the run's `CancellationToken`. On cancel the child is killed and the run returns
 that the applied edits are on disk and unchecked. Cargo's own `rustc` children are not killed; they
 finish the unit they are building into `target/`.
 
+**The tidy did not run.** A failed result check skips the tidy, so the message says so: the first line
+of `AppliedTreeDoesNotCompile`'s `errors` is "the tidy did not run, so the written files were neither
+tidied nor formatted; the failing check reported N `unused import` warning(s) in them" (`untidied_note`;
+N counts the failing check's `short` warnings in the files the run wrote, and is `0` when it reported
+none). A successful apply says nothing about a skipped tidy. The tidy never runs over a broken tree.
+
 **What it reports.** Lines starting `error` and lines holding `: error` (the short format's
 `path:l:c: error[E…]`) are kept. When no line matches, the whole stderr is returned, so a failure is
 reported in full rather than masked.
@@ -350,7 +356,10 @@ another). Whatever the compiler still warns about is reported, never fixed.
 **An import only tests use.** `unused_imports` fires per compilation unit, so an import that only a
 `#[cfg(test)] mod tests { use super::*; … }` reads is reported by the library unit, and removing it breaks
 the test unit. Such an import is gated `#[cfg(test)]` instead; a group member becomes its own gated item
-(`gating.rs`).
+(`gating.rs`). A glob binds no name an error could quote, and an error over a trait method
+(`write_str`) names the method, not the trait. A repair therefore gates every import a build reads while
+another reports it unused (`to_gate_in_a_repair`: the spans the errors name, plus `read_by_a_unit`),
+whether or not an error quotes it. A glob every build reports unused is still removed.
 
 **Statements are rewritten from sets, not from spans.** A library is checked as itself and with its
 tests, and each unit words its removal of one group its own way (`a, ` here, `, b` there), so the member
@@ -367,8 +376,8 @@ Nothing is applied as two overlapping edits, and `apply_fixes` fails loudly on a
 instead of dropping it.
 
 **A repair iterates while it improves.** When a round's edits break the re-check, the round's files are
-restored from the bytes held in memory and redone with every name the errors quote gated (and, in a
-repair, every name some unit reads). The redo is repeated while each redo leaves fewer quoted names
+restored from the bytes held in memory and redone with every import gated that the errors quote or a
+unit reads. The redo is repeated while each redo leaves fewer quoted names
 failing, at most `MAX_REPAIRS` times; a redo that stops improving is undone and **fails the run**,
 saying so. A nested group is left in place and reported. The tidy never leaves a broken tree behind and
 never touches the plan's own edits.
@@ -387,9 +396,6 @@ was never repaired a second time, so the run failed after a correct split.
 
 ## Known limitations
 
-- **An import only a trait method needs, used only by tests,** is not gated: an error that names a
-  method (`write_str`) never names the trait, so the tidy cannot match it and fails the run loudly
-  instead.
 - **A `return` a macro expands to is not seen** (`bail!`, `ensure!`). `apply`'s compile gate catches
   it; `check --deep` does not.
 - **A leading `|` in a match arm** (`match x { | A => … }`) is misread as a closure, so a `return` in
