@@ -1,7 +1,7 @@
 # Changeset: cross-crate moves carry a module's directory children and keep its `mod` visibility
 
 **Date**: 2026-10-09
-**Status**: 🚧 In Progress
+**Status**: 🚧 In Progress (green: M1–M7 done; M8 docs at wrap)
 **Type**: Feature (engine capability for `move_module_to_crate` / `move_cluster_to_crate`) plus defect fixes
 **Stack**: `#reshape` 5/19, branch `feature/reshape/move-children`, green wave 1. PR title:
 `feat(code-restructuring): crate moves carry a module's children and keep its mod visibility (#reshape 5/19)`.
@@ -180,17 +180,17 @@ this node's `cluster_resolution`).
 
 ## Scope
 
-- [ ] **Restricted declarations**: `declared_module`, `module_declaration`, `declared_module_name`; merge check
-- [ ] **`..` paths**: `continues_a_path`
-- [ ] **Carried files**: `relocated`, `Move::carried`, renames, `repointed_header_at`, manifest, travelling set, callers
-- [ ] **`also` folding and no self facade**
-- [ ] **Refusals**: uncarriable findings (static), restricted child reached (resolve-time), carried bodies, cycle refusal and stranded finding over carried files
-- [ ] **Facade visibility**: `FacadeEntry`, grouping, `WrittenFacade.visibility`
-- [ ] **Notes and count parity**: `resolution`, `cluster_resolution`, `carried_notes`, line-neutral wiring in `rust.rs`
+- [x] **Restricted declarations**: `declared_module`, `module_declaration`, `declared_module_name`; merge check
+- [x] **`..` paths**: `continues_a_path`
+- [x] **Carried files**: `relocated`, `Move::carried`, renames, `repointed_header_at`, manifest, travelling set, callers
+- [x] **`also` folding and no self facade**
+- [x] **Refusals**: uncarriable findings (static), restricted child reached (resolve-time), carried bodies, cycle refusal and stranded finding over carried files
+- [x] **Facade visibility**: `FacadeEntry`, grouping, `WrittenFacade.visibility`
+- [x] **Notes and count parity**: `resolution`, `cluster_resolution`, `carried_notes`, line-neutral wiring in `rust.rs`
 - [ ] **Registration**: none needed. The two live binaries touched are already in `.config/rust-e2e.filterset` (lines 46, 62) and the `rust-analyzer` group. The new binaries are server-free
 - [ ] **Package documentation** at wrap (list under Affected Packages)
-- [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring` scoped; CI for the rest
-- [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`; no listed function grows; every touched file stays ≤ 500 production lines
+- [~] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring` scoped; CI for the rest
+- [x] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`; no listed function grows; every touched file stays ≤ 500 production lines
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -239,14 +239,14 @@ A `foo.rs` + `foo/` module moves in one plan line, with every child under `<dest
 
 ## Implementation milestones
 
-- [ ] **M1** restricted declarations and the merge check; tests 21, 22, 19, 20
-- [ ] **M2** `..` paths; tests 23, 24, 25
-- [ ] **M3** `relocated` (reparent suites stay green) and `Move::carried`; renames, headers, manifest; tests 1–5
-- [ ] **M4** travelling set, callers, `also` folding, no self facade; tests 6–11
-- [ ] **M5** refusals: static uncarriable, carried bodies, restricted child; tests 12–18
-- [ ] **M6** facade visibility; tests 26–28
-- [ ] **M7** notes, count parity, live compiled cases; tests 29–31
-- [ ] **M8** docs staged, scoped gate, function-size and file-length check, todos narrowed or deleted at wrap
+- [x] **M1** restricted declarations and the merge check; tests 21, 22, 19, 20
+- [x] **M2** `..` paths; tests 23, 24, 25
+- [x] **M3** `relocated` (reparent suites stay green) and `Move::carried`; renames, headers, manifest; tests 1–5
+- [x] **M4** travelling set, callers, `also` folding, no self facade; tests 6–11
+- [x] **M5** refusals: static uncarriable, carried bodies, restricted child; tests 12–18
+- [x] **M6** facade visibility; tests 26–28
+- [x] **M7** notes, count parity, live compiled cases; tests 29–31
+- [~] **M8** docs staged, scoped gate, function-size and file-length check, todos narrowed or deleted at wrap
 
 ## Testing plan
 
@@ -355,7 +355,10 @@ These are red because the move is refused or every facade is `pub use`.
 
 ## Technical Debt & Production Readiness
 
-(empty; populated during development)
+- **`crate_move::tests::leaves_a_glob_facade_where_the_module_was_declared`** (`crate_move.rs:868`) contradicts decision F2. Its fixture declares `mod host_registry;` privately (`:585`) and asserts `pub use tddy_host_service::host_registry;`, and the facade now mirrors the declaration (`use …;`). The test was not edited (the assertion is the requirement under review). One-line fix for the owner: expect `use tddy_host_service::host_registry;`, or declare the fixture's module `pub mod`.
+- **`left_behind` has no "skip a travelling declaring file" branch.** `read_members` folds every member whose module path lies under another member's, so a member never has a carried file as its `declared_in`; the branch would be unreachable. The behaviour the Responsibility asks for (no self facade) is the folding.
+- **The static `uncarriable` findings run only when `move_preconditions` passes** for the operation (`preconditions::unrunnable`): its signature takes `ops` and `index`, which `move_preconditions` does not have, and a refused operation is already reported once.
+- **A restricted child declared inside an inline module** (`mod i { pub(crate) mod d; }`) is read by name against the nearest carried file, and the inline module's own visibility is not read. A caller cannot reach such a path from outside `a` today, so nothing is lost, but it is not tested.
 
 ## Decisions & Trade-offs
 
@@ -448,6 +451,10 @@ Taken by this plan:
 
 **Live registration:** none needed. Both live tests were added to binaries already in `.config/rust-e2e.filterset` and the `rust-analyzer` group. A new shared fixture is in the harness: `a_workspace_whose_module_has_a_directory_child`, `A_DIRECTORY_CHILD`.
 
+### Green (2026-10-13)
+
+Scoped gate `./test -p tddy-code-restructuring` (whole package, `--no-fail-fast`): 1386 passed, 116 failed, 1 ignored. Every failure is outside this node's tests: `extract_method_clean`, `extract_method_guard_lift`, `multi_seam_extract`, `same_crate_widening` (other nodes' contracts), `move_facades_acceptance` (4), `apply_tidy_acceptance` (2), `apply_compile_gate_acceptance` (1), `extract_facade_acceptance` (2), and `--lib` (63: node 3's `removed_declaration`, extract-method, rust-analyzer and filesystem cases). The four binaries that touch crate moves or the tidy were re-run on the contract commit and fail identically there. The one failure this node causes is `crate_move::tests::leaves_a_glob_facade_where_the_module_was_declared` (see Technical Debt). `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --check` are clean. Both live cases (30, 31) pass.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-move-children-initial-discovery.md`)
@@ -459,8 +466,8 @@ Taken by this plan:
 - [x] Run acceptance tests (verify they fail) — see `## Validation Results`
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests (surface unit tests in commit 2)
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) and verify 100% pass; CI answers for the rest of the workspace
 - [ ] Validate changes (/validate-changes)
