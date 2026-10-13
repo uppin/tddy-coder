@@ -522,29 +522,108 @@ pub fn arms(k: u8, v: Option<u32>) -> Res<u32> {
 
     #[test]
     fn classifies_each_kind_of_range_holding_a_return() {
-        assert_eq!(classify(FUNCTIONS, lines(3, 10)), Exits::ErrGuards);
-        assert_eq!(classify(FUNCTIONS, lines(16, 18)), Exits::NoneGuards);
-        assert_eq!(classify(FUNCTIONS, lines(53, 57)), Exits::Tail);
-        assert_eq!(classify(FUNCTIONS, lines(2, 2)), Exits::None);
-    }
+        // Given ranges of each kind over the fixture functions
+        let error_guards = lines(3, 10);
+        let none_guards = lines(16, 18);
+        let tail_arm = lines(53, 57);
+        let no_return = lines(2, 2);
 
-    #[test]
-    fn a_tail_match_arms_body_is_in_tail_position_and_a_mid_function_run_is_not() {
-        assert!(in_tail_position(FUNCTIONS, lines(53, 57)));
-        assert!(!in_tail_position(FUNCTIONS, lines(3, 10)));
-    }
+        // When each is classified
+        let classified = [
+            classify(FUNCTIONS, error_guards),
+            classify(FUNCTIONS, none_guards),
+            classify(FUNCTIONS, tail_arm),
+            classify(FUNCTIONS, no_return),
+        ];
 
-    #[test]
-    fn a_static_check_accepts_the_ranges_resolve_lifts_and_refuses_the_ranges_resolve_refuses() {
-        let findings = |range: Range| {
-            super::super::extract_method_findings(FUNCTIONS, range, &a_silent_sink())
-        };
-
-        assert_eq!(findings(lines(3, 10)), Vec::<String>::new(), "error guards");
-        assert_eq!(findings(lines(16, 18)), Vec::<String>::new(), "none guards");
-        assert_eq!(findings(lines(53, 57)), Vec::<String>::new(), "a tail arm");
+        // Then each is the kind of exit it holds
         assert_eq!(
-            findings(lines(24, 26)),
+            classified,
+            [
+                Exits::ErrGuards,
+                Exits::NoneGuards,
+                Exits::Tail,
+                Exits::None
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tail_match_arms_body_is_in_tail_position() {
+        // Given the body of the last `match`'s arm
+        let arm_body = lines(53, 57);
+
+        // When its position is asked
+        let in_tail = in_tail_position(FUNCTIONS, arm_body);
+
+        // Then it is in tail position
+        assert!(in_tail);
+    }
+
+    #[test]
+    fn a_mid_function_run_is_not_in_tail_position() {
+        // Given a run of guards in the middle of a function
+        let guards = lines(3, 10);
+
+        // When its position is asked
+        let in_tail = in_tail_position(FUNCTIONS, guards);
+
+        // Then it is not in tail position
+        assert!(!in_tail);
+    }
+
+    /// What the static `check` reports for `range` of [`FUNCTIONS`].
+    fn static_findings(range: Range) -> Vec<String> {
+        super::super::extract_method_findings(FUNCTIONS, range, &a_silent_sink())
+    }
+
+    #[test]
+    fn a_static_check_accepts_a_run_of_error_guards() {
+        // Given a run of error guards, which resolve lifts
+        let range = lines(3, 10);
+
+        // When it is checked statically
+        let findings = static_findings(range);
+
+        // Then nothing is found
+        assert_eq!(findings, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_static_check_accepts_a_run_of_none_guards() {
+        // Given a run of `return None` guards, which resolve lifts
+        let range = lines(16, 18);
+
+        // When it is checked statically
+        let findings = static_findings(range);
+
+        // Then nothing is found
+        assert_eq!(findings, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_static_check_accepts_a_tail_arm() {
+        // Given a tail arm's body, whose returns still return from the caller
+        let range = lines(53, 57);
+
+        // When it is checked statically
+        let findings = static_findings(range);
+
+        // Then nothing is found
+        assert_eq!(findings, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_static_check_refuses_a_range_returning_a_value_from_the_middle() {
+        // Given a range returning a value early
+        let range = lines(24, 26);
+
+        // When it is checked statically
+        let findings = static_findings(range);
+
+        // Then the finding names the value return
+        assert_eq!(
+            findings,
             ["this seam cannot be cut here: the range returns early from the function around it, on line 25 (`return Ok(1);`). \
               An extracted function cannot carry an early exit of its caller: the assist copies \
               the `return` verbatim, so it returns from the new function instead — whose return \
@@ -552,25 +631,44 @@ pub fn arms(k: u8, v: Option<u32>) -> Res<u32> {
               range so it holds no `return`, end it before the first one, or run it to the end of \
               the function's tail expression, where the call becomes the tail and a `return` \
               means what it did."
-                .to_string()],
-            "a value return"
+                .to_string()]
         );
+    }
+
+    #[test]
+    fn a_static_check_refuses_a_range_mixing_error_guards_and_a_value_return() {
+        // Given a range holding an error guard and a value return
+        let range = lines(32, 37);
+
+        // When it is checked statically
+        let findings = static_findings(range);
+
+        // Then the finding names the value return
         assert_eq!(
-            findings(lines(32, 37)),
+            findings,
             ["this seam cannot be cut here: the range holds error guards and a return of a \
               value, on line 36 (`return Ok(3);`). Only a run whose every return is \
               `return Err(..)` can become a function called with `?`; end the range before line 36."
-                .to_string()],
-            "a mix"
+                .to_string()]
         );
+    }
+
+    #[test]
+    fn a_static_check_refuses_a_guard_run_whose_binding_is_read_after_it() {
+        // Given a guard run declaring a binding the tail reads
+        let range = lines(42, 45);
+
+        // When it is checked statically
+        let findings = static_findings(range);
+
+        // Then the finding names the binding
         assert_eq!(
-            findings(lines(42, 45)),
+            findings,
             [
                 "this seam cannot be cut here: the range's guards are followed by code that reads \
               `doubled`, which the range declares. Cut the run so it ends before `let doubled`."
                     .to_string()
-            ],
-            "a guard run with an output"
+            ]
         );
     }
 

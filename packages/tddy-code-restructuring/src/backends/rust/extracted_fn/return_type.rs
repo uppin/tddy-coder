@@ -59,49 +59,51 @@ mod tests {
 
     #[test]
     fn a_two_argument_result_under_a_one_argument_alias_is_written_through_the_alias() {
+        // Given a produced two-argument `Result`, extracted from a caller returning a one-argument alias
         let produced = "fn parsed_pair(b: &str, x: u32) -> Result<(u32, u32), String> {\n    \
                         let y = parse(b)?;\n    Ok((y, x + y))\n}\n";
+        let caller = "pub fn plain_q(a: &str, b: &str) -> Result<u32> {";
 
+        // When the return type is respelled
+        let respelled = respelled_return_type(caller, produced, "parsed_pair");
+
+        // Then it is written through the alias
         assert_eq!(
-            respelled_return_type(
-                "pub fn plain_q(a: &str, b: &str) -> Result<u32> {",
-                produced,
-                "parsed_pair"
-            ),
+            respelled,
             produced.replace("-> Result<(u32, u32), String>", "-> Result<(u32, u32)>")
         );
     }
 
     #[test]
     fn a_qualified_std_result_is_written_through_the_callers_alias_path() {
+        // Given a produced qualified `std::result::Result`, from a caller returning `crate::Result`
         let produced =
             "fn parsed(b: &str) -> std::result::Result<u32, Failure> {\n    parse(b)\n}\n";
+        let caller = "fn run(b: &str) -> crate::Result<u32> {";
 
+        // When the return type is respelled
+        let respelled = respelled_return_type(caller, produced, "parsed");
+
+        // Then it is written through the caller's alias path
         assert_eq!(
-            respelled_return_type(
-                "fn run(b: &str) -> crate::Result<u32> {",
-                produced,
-                "parsed"
-            ),
+            respelled,
             "fn parsed(b: &str) -> crate::Result<u32> {\n    parse(b)\n}\n"
         );
     }
 
     #[test]
     fn a_caller_spelling_both_arguments_or_returning_no_result_changes_nothing() {
+        // Given a produced `Result`, and callers spelling both arguments or returning an `Option`
         let produced = "fn parsed(b: &str) -> Result<u32, String> {\n    parse(b)\n}\n";
+        let spelling_both = "fn run(b: &str) -> Result<u32, String> {";
+        let returning_option = "fn run(b: &str) -> Option<u32> {";
 
-        assert_eq!(
-            respelled_return_type(
-                "fn run(b: &str) -> Result<u32, String> {",
-                produced,
-                "parsed"
-            ),
-            produced
-        );
-        assert_eq!(
-            respelled_return_type("fn run(b: &str) -> Option<u32> {", produced, "parsed"),
-            produced
-        );
+        // When the return type is respelled for each
+        let for_both = respelled_return_type(spelling_both, produced, "parsed");
+        let for_option = respelled_return_type(returning_option, produced, "parsed");
+
+        // Then the function is as it was in both
+        assert_eq!(for_both, produced);
+        assert_eq!(for_option, produced);
     }
 }

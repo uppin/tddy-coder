@@ -312,7 +312,13 @@ let p = dir.join(\"x\");\n        Ok((started, defs, p))\n    }\n}\n";
             ),
             "{refusal}"
         );
-        assert!(refusal.contains("`// trailing note`"), "{refusal}");
+        for comment in [
+            "`// The defs behind those records, which the jail env can only carry for agents this host`",
+            "`// holds — the records above are what carries the rest.`",
+            "`// trailing note`",
+        ] {
+            assert!(refusal.contains(comment), "{comment} is not named:\n{refusal}");
+        }
     }
 
     #[test]

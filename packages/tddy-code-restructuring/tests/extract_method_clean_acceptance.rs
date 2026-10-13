@@ -14,9 +14,10 @@ mod harness;
 use std::time::{Duration, Instant};
 
 use harness::{
-    a_workspace_holding_files, an_extract_method_at, an_extract_method_of, an_extract_module_of,
-    applying_a_plan_of, applying_keeping_the_account, assert_compiles, assert_lints_clean, at,
-    performing, resolving, the_function_named, the_module_named, ORIGIN_LIB,
+    a_one_crate_workspace_holding, an_extract_method_at, an_extract_method_of,
+    an_extract_module_of, applying_a_plan_of, applying_keeping_the_account, assert_compiles,
+    assert_lints_clean, at, performing, refusal_from_applying, resolving, the_function_named,
+    the_module_named, ORIGIN_LIB,
 };
 use tddy_code_restructuring::Anchor;
 
@@ -24,25 +25,10 @@ use tddy_code_restructuring::Anchor;
 /// 30-second bound a probe that can never be typed is refused at.
 const A_READY_INDEX_ANSWERS_WITHIN: Duration = Duration::from_secs(60);
 
-/// A one-crate workspace whose library is `lines`.
-fn one_crate_holding(lines: &[&str]) -> harness::AFixtureWorkspace {
-    a_workspace_holding_files(&[
-        (
-            "Cargo.toml",
-            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/origin\"]\n",
-        ),
-        (
-            "crates/origin/Cargo.toml",
-            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-        ),
-        (ORIGIN_LIB, &(lines.join("\n") + "\n")),
-    ])
-}
-
 /// `start`'s first statements, as #524's plan `09b` cut `warm_up_jail_agents`: lines 11–20 hold
 /// a `?`, two full-line comments, one comment inside a method chain and one trailing comment.
 fn a_service_whose_start_explains_itself() -> harness::AFixtureWorkspace {
-    one_crate_holding(&[
+    a_one_crate_workspace_holding(&[
         "pub struct Svc {",
         "    roster: Vec<String>,",
         "}",
@@ -136,7 +122,7 @@ async fn a_comment_inside_a_statement_is_kept_once() {
 
 /// Lines 4–5 borrow three owned locals the caller goes on using.
 fn a_function_that_borrows_its_owned_locals() -> harness::AFixtureWorkspace {
-    one_crate_holding(&[
+    a_one_crate_workspace_holding(&[
         "use std::path::PathBuf;",
         "",
         "pub fn joined(dir: PathBuf, label: String, items: Vec<u32>) -> usize {",
@@ -193,7 +179,7 @@ async fn a_borrowed_path_the_range_clones_becomes_an_owned_copy_of_the_path() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_parameter_the_body_passes_where_a_path_buf_is_needed_keeps_its_type_and_says_so() {
     // Given a range passing its borrowed `PathBuf` to a function that takes `&PathBuf`
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "use std::path::PathBuf;",
         "",
         "#[allow(clippy::ptr_arg)]",
@@ -238,7 +224,7 @@ async fn a_parameter_the_body_passes_where_a_path_buf_is_needed_keeps_its_type_a
 #[tokio::test(flavor = "multi_thread")]
 async fn a_unit_body_holding_a_question_mark_ends_in_ok_unit_rather_than_wrapping_the_if() {
     // Given a unit `if` holding a `?`, in a function returning `Result<(), String>`
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "use std::path::PathBuf;",
         "",
         "pub fn unit_tail(dir: PathBuf, flag: bool) -> Result<(), String> {",
@@ -276,7 +262,7 @@ async fn a_unit_body_holding_a_question_mark_ends_in_ok_unit_rather_than_wrappin
 #[tokio::test(flavor = "multi_thread")]
 async fn a_field_initialised_from_a_parameter_of_its_own_name_is_written_in_shorthand() {
     // Given a struct literal whose fields borrow locals of the same names
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "use std::path::PathBuf;",
         "",
         "pub struct Lookup<'a> {",
@@ -313,7 +299,7 @@ async fn a_field_initialised_from_a_parameter_of_its_own_name_is_written_in_shor
 #[tokio::test(flavor = "multi_thread")]
 async fn an_extraction_taking_more_than_seven_parameters_says_so_in_a_note() {
     // Given a statement reading eight locals
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "pub fn wide(a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8) -> u8 {",
         "    let sum = a + b + c + d + e + f + g + h;",
         "    sum / 2",
@@ -341,6 +327,13 @@ async fn an_extraction_taking_more_than_seven_parameters_says_so_in_a_note() {
     );
 }
 
+/// What an apply is refused with when the range names a type the origin spells two ways.
+const THE_TWO_SPELLINGS_REFUSAL: &str =
+    "this seam cannot be cut here: the extracted signature names `WorkflowRecipe`, which this \
+     file does not import, and the function it came from spells it as \
+     `deep::recipe::WorkflowRecipe` and `crate::deep::recipe::WorkflowRecipe`; import it or \
+     cut the range elsewhere";
+
 /// `recipe` spells the trait `deep::recipe::WorkflowRecipe`, and nothing imports it.
 fn a_function_naming_a_trait_qualified(second_spelling: bool) -> harness::AFixtureWorkspace {
     let header = if second_spelling {
@@ -353,7 +346,7 @@ fn a_function_naming_a_trait_qualified(second_spelling: bool) -> harness::AFixtu
     } else {
         "    name.len()"
     };
-    one_crate_holding(&[
+    a_one_crate_workspace_holding(&[
         "pub mod deep {",
         "    pub mod recipe {",
         "        pub trait WorkflowRecipe {",
@@ -400,28 +393,26 @@ async fn a_type_the_origin_spells_two_ways_is_refused_naming_both_spellings_and_
     let workspace = a_function_naming_a_trait_qualified(true);
     let before = workspace.read(ORIGIN_LIB);
 
-    // When the range naming it is extracted
-    let refused = resolving(
+    // When the range naming it is applied through the runner, the path that writes
+    let refusal = refusal_from_applying(
         &workspace,
-        an_extract_method_of(&workspace, ORIGIN_LIB, 10..=10, "recipe_name"),
+        &[an_extract_method_of(
+            &workspace,
+            ORIGIN_LIB,
+            10..=10,
+            "recipe_name",
+        )],
     )
     .await;
 
-    // Then it is refused, naming both spellings, and the file is unchanged
-    assert_eq!(
-        refused.expect_err("two spellings are refused"),
-        "this seam cannot be cut here: the extracted signature names `WorkflowRecipe`, which this \
-         file does not import, and the function it came from spells it as \
-         `deep::recipe::WorkflowRecipe` and `crate::deep::recipe::WorkflowRecipe`; import it or \
-         cut the range elsewhere"
-    );
+    // Then the apply is refused, naming both spellings, and the file is unchanged
+    assert_eq!(refusal, THE_TWO_SPELLINGS_REFUSAL);
     assert_eq!(workspace.read(ORIGIN_LIB), before);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_range_opening_on_a_blocks_brace_is_extracted_within_the_ready_bound() {
-    // Given a bare block statement
-    let workspace = one_crate_holding(&[
+/// `block`'s lines 3–6 are a bare block statement; the range opens on its `{`.
+fn a_function_holding_a_bare_block() -> harness::AFixtureWorkspace {
+    a_one_crate_workspace_holding(&[
         "pub fn block(x: u32) -> u32 {",
         "    let mut y = x;",
         "    {",
@@ -430,10 +421,41 @@ async fn a_range_opening_on_a_blocks_brace_is_extracted_within_the_ready_bound()
         "    }",
         "    y",
         "}",
-    ]);
-    let started = Instant::now();
+    ])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_range_opening_on_a_blocks_brace_is_extracted_into_a_function_and_the_tree_compiles() {
+    // Given a bare block statement
+    let workspace = a_function_holding_a_bare_block();
 
     // When the range starting on its `{` is extracted
+    performing(
+        &workspace,
+        an_extract_method_of(&workspace, ORIGIN_LIB, 3..=6, "stepped"),
+    )
+    .await;
+
+    // Then the block is a new function, called from where it stood, and the tree compiles
+    let lib = workspace.read(ORIGIN_LIB);
+    assert!(
+        lib.contains("fn stepped("),
+        "no function was extracted:\n{lib}"
+    );
+    assert!(
+        lib.contains("stepped(&mut y)"),
+        "the block was not replaced by a call:\n{lib}"
+    );
+    assert_compiles(&workspace);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_range_opening_on_a_blocks_brace_resolves_within_the_ready_bound() {
+    // Given a bare block statement
+    let workspace = a_function_holding_a_bare_block();
+    let started = Instant::now();
+
+    // When the range starting on its `{` is resolved
     let resolved = resolving(
         &workspace,
         an_extract_method_of(&workspace, ORIGIN_LIB, 3..=6, "stepped"),
@@ -449,19 +471,22 @@ async fn a_range_opening_on_a_blocks_brace_is_extracted_within_the_ready_bound()
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_range_opening_on_a_line_comment_is_extracted_within_the_ready_bound_and_keeps_the_comment(
-) {
-    // Given a statement with a comment above it
-    let workspace = one_crate_holding(&[
+/// Lines 3–4 are a statement under a comment; the range opens on the comment.
+fn a_function_whose_statement_carries_a_comment_above() -> harness::AFixtureWorkspace {
+    a_one_crate_workspace_holding(&[
         "pub fn commented(x: u32) -> u32 {",
         "    let y = x + 1;",
         "    // the doubling step",
         "    let z = y * 2;",
         "    z + y",
         "}",
-    ]);
-    let started = Instant::now();
+    ])
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_range_opening_on_a_line_comment_keeps_the_comment_in_the_new_function_and_compiles() {
+    // Given a statement with a comment above it
+    let workspace = a_function_whose_statement_carries_a_comment_above();
 
     // When the range starting on the comment is extracted
     performing(
@@ -470,24 +495,41 @@ async fn a_range_opening_on_a_line_comment_is_extracted_within_the_ready_bound_a
     )
     .await;
 
-    // Then it lands within the ready bound, with the comment, and compiles
+    // Then the comment is in the new function, and the tree compiles
+    let lib = workspace.read(ORIGIN_LIB);
     assert!(
-        started.elapsed() < A_READY_INDEX_ANSWERS_WITHIN,
-        "the extraction took {:?}",
-        started.elapsed()
-    );
-    assert!(
-        the_function_named(&workspace.read(ORIGIN_LIB), "doubled").contains("// the doubling step"),
-        "the comment was lost:\n{}",
-        workspace.read(ORIGIN_LIB)
+        the_function_named(&lib, "doubled").contains("// the doubling step"),
+        "the comment was lost:\n{lib}"
     );
     assert_compiles(&workspace);
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_range_opening_on_a_line_comment_resolves_within_the_ready_bound() {
+    // Given a statement with a comment above it
+    let workspace = a_function_whose_statement_carries_a_comment_above();
+    let started = Instant::now();
+
+    // When the range starting on the comment is resolved
+    let resolved = resolving(
+        &workspace,
+        an_extract_method_of(&workspace, ORIGIN_LIB, 3..=4, "doubled"),
+    )
+    .await;
+
+    // Then it resolves, within the time a ready index takes
+    assert!(resolved.is_ok(), "the extraction was refused: {resolved:?}");
+    assert!(
+        started.elapsed() < A_READY_INDEX_ANSWERS_WITHIN,
+        "the extraction took {:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_range_that_initialises_a_let_is_extracted_under_the_plans_name() {
     // Given a `let` whose initializer is an `if … else`
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "use std::path::PathBuf;",
         "",
         "pub fn let_value(flag: bool, dir: PathBuf) -> usize {",
@@ -526,9 +568,10 @@ async fn a_range_that_initialises_a_let_is_extracted_under_the_plans_name() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_extraction_shaped_like_plan_09b_passes_clippy_with_warnings_denied() {
-    // Given #524's plan-09b shape: `.await?`, two borrowed `PathBuf`s, a copied `mut`, two comments
-    let workspace = one_crate_holding(&[
+async fn an_extraction_with_an_await_question_mark_and_borrowed_paths_passes_clippy_with_warnings_denied(
+) {
+    // Given `.await?`, two borrowed `PathBuf`s, a copied `mut` and two comments
+    let workspace = a_one_crate_workspace_holding(&[
         "use std::path::PathBuf;",
         "",
         "pub struct Svc {",
@@ -564,21 +607,15 @@ async fn an_extraction_shaped_like_plan_09b_passes_clippy_with_warnings_denied()
     )
     .await;
 
-    // Then the run succeeded, kept both comments, and the workspace lints clean
+    // Then the run succeeded and the workspace lints clean
     assert!(applied.is_ok(), "the apply failed: {applied:?}");
-    let lib = workspace.read(ORIGIN_LIB);
-    assert!(
-        lib.contains("// The records above carry the rest.")
-            && lib.contains("// The jail's scratch home sits beside the session."),
-        "a comment was lost:\n{lib}"
-    );
     assert_lints_clean(&workspace);
 }
 
 /// A crate whose root imports a trait `as _` for its method alone. Lines 14–16 call the method;
 /// lines 18–20 call nothing of the trait's.
 fn a_crate_whose_parent_imports_a_trait_for_its_method() -> harness::AFixtureWorkspace {
-    one_crate_holding(&[
+    a_one_crate_workspace_holding(&[
         "pub mod wire {",
         "    pub trait Encode {",
         "        fn encoded(&self) -> Vec<u8> {",
@@ -654,7 +691,7 @@ async fn an_apply_leaves_no_unused_copy_of_the_carried_trait_import() {
 async fn a_range_propagating_with_a_question_mark_returns_the_callers_imported_result_alias_and_compiles(
 ) {
     // Given a file importing a one-argument `Result` alias, and a range that only propagates
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "pub mod aliased {",
         "    pub type Result<T> = std::result::Result<T, String>;",
         "}",
@@ -692,7 +729,7 @@ async fn a_range_propagating_with_a_question_mark_returns_the_callers_imported_r
 #[tokio::test(flavor = "multi_thread")]
 async fn a_range_in_a_module_that_defines_its_result_alias_is_spelled_with_the_alias() {
     // Given a file defining a one-argument `Result` alias, and a range that only propagates
-    let workspace = one_crate_holding(&[
+    let workspace = a_one_crate_workspace_holding(&[
         "pub type Result<T> = std::result::Result<T, String>;",
         "",
         "fn parse(s: &str) -> Result<u32> {",

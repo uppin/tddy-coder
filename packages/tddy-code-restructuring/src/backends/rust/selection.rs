@@ -246,32 +246,32 @@ mod tests {
 
     #[test]
     fn a_range_opening_on_a_blocks_brace_is_probed_at_its_first_statement() {
-        // The range opens on the bare block's `{` (3:5); the first typed token is `let`'s, at 5:9,
-        // past the comment on line 4
-        assert_eq!(
-            hover_bearing_position(
-                BLOCK_AND_COMMENT,
-                Range {
-                    start: at(3, 5),
-                    end: at(7, 6)
-                }
-            ),
-            at(5, 9)
-        );
+        // Given a range opening on the bare block's `{` (3:5), with a comment on line 4
+        let range = Range {
+            start: at(3, 5),
+            end: at(7, 6),
+        };
+
+        // When the hover-bearing position is found
+        let probed = hover_bearing_position(BLOCK_AND_COMMENT, range);
+
+        // Then it is `let`'s, at 5:9, past the comment
+        assert_eq!(probed, at(5, 9));
     }
 
     #[test]
     fn a_range_opening_on_a_line_comment_is_probed_at_the_code_after_it() {
-        assert_eq!(
-            hover_bearing_position(
-                BLOCK_AND_COMMENT,
-                Range {
-                    start: at(4, 9),
-                    end: at(6, 19)
-                }
-            ),
-            at(5, 9)
-        );
+        // Given a range opening on the comment at 4:9
+        let range = Range {
+            start: at(4, 9),
+            end: at(6, 19),
+        };
+
+        // When the hover-bearing position is found
+        let probed = hover_bearing_position(BLOCK_AND_COMMENT, range);
+
+        // Then it is the statement's first token, at 5:9
+        assert_eq!(probed, at(5, 9));
     }
 
     #[test]

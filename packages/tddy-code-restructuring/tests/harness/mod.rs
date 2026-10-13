@@ -1474,6 +1474,8 @@ pub fn a_workspace_whose_test_binary_carries_an_unused_mut() -> AFixtureWorkspac
 
 /// The binding [`a_workspace_whose_test_binary_carries_an_unused_mut`] declares `mut`.
 pub const THE_UNUSED_MUT: &str = "let mut doubled";
+/// What that binding reads as once the tidy has removed the `mut`.
+pub const THE_BINDING_WITHOUT_MUT: &str = "let doubled = 2 * 2;";
 
 /// The unused import [`a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use`] holds.
 pub const THE_UNUSED_IMPORT: &str = "use std::collections::HashMap;";
@@ -2707,6 +2709,30 @@ pub async fn applying_from_the_store(
     })
     .await
     .expect("the blocking half of the apply joins")
+}
+
+/// A committed one-crate workspace (`crates/origin`) whose library is `lines`.
+pub fn a_one_crate_workspace_holding(lines: &[&str]) -> AFixtureWorkspace {
+    a_workspace_holding_files(&[
+        (
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/origin\"]\n",
+        ),
+        (
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (ORIGIN_LIB, &(lines.join("\n") + "\n")),
+    ])
+}
+
+/// Apply `ops` through the runner — the path `tddy-tools restructure apply` takes, the one that
+/// writes — and return the refusal it stopped with, or fail saying it applied.
+pub async fn refusal_from_applying(fixture: &AFixtureWorkspace, ops: &[RefactorOp]) -> String {
+    match applying_a_plan_of(fixture, ops).await {
+        Err(refusal) => refusal,
+        Ok(summary) => panic!("the apply was expected to refuse, and applied instead: {summary:?}"),
+    }
 }
 
 /// A committed workspace holding exactly `files` — for a test whose shape no shared fixture has.

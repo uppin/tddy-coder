@@ -71,24 +71,30 @@ mod tests {
 
     #[test]
     fn finds_the_one_qualified_spelling_the_origin_uses() {
+        // Given an origin spelling the trait one way, and a comment spelling it another
         let origin = "pub fn recipe(r: Option<std::sync::Arc<dyn deep::recipe::WorkflowRecipe>>) -> usize {\n    \
                       // a WorkflowRecipe in a comment is not a spelling: crate::nowhere::WorkflowRecipe\n    \
                       r.map(|r| r.name().len()).unwrap_or_default()\n}\n";
 
-        assert_eq!(
-            spellings(origin, "WorkflowRecipe"),
-            ["deep::recipe::WorkflowRecipe"]
-        );
+        // When its spellings are listed
+        let found = spellings(origin, "WorkflowRecipe");
+
+        // Then only the code's spelling is found
+        assert_eq!(found, ["deep::recipe::WorkflowRecipe"]);
     }
 
     #[test]
     fn two_different_spellings_are_both_reported_and_a_bare_name_is_none() {
+        // Given an origin spelling `Thing` two qualified ways and bare
         let origin = "fn f(a: crate::a::Thing, b: other::Thing, c: Thing) {}\n";
+        let only_bare = "fn g(c: Thing) {}\n";
 
-        assert_eq!(
-            spellings(origin, "Thing"),
-            ["crate::a::Thing", "other::Thing"]
-        );
-        assert!(spellings("fn g(c: Thing) {}\n", "Thing").is_empty());
+        // When their spellings are listed
+        let qualified = spellings(origin, "Thing");
+        let bare = spellings(only_bare, "Thing");
+
+        // Then both qualified spellings are reported, and a bare name has none
+        assert_eq!(qualified, ["crate::a::Thing", "other::Thing"]);
+        assert!(bare.is_empty());
     }
 }

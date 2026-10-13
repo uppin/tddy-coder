@@ -179,8 +179,13 @@ mod tests {
 
     #[test]
     fn narrows_borrowed_path_string_and_vec_parameters_and_leaves_a_mutable_borrow() {
+        // Given a function borrowing a `PathBuf`, a `String` and a `Vec<u32>`, and mutably a `PathBuf`
+        // When its parameters are narrowed
+        let chosen = narrowings(PRODUCED, "kept_joined");
+
+        // Then the three shared borrows are narrowed and the mutable one is left
         assert_eq!(
-            narrowings(PRODUCED, "kept_joined"),
+            chosen,
             [
                 narrowing("dir", "&PathBuf", "&std::path::Path"),
                 narrowing("label", "&String", "&str"),
@@ -191,21 +196,26 @@ mod tests {
 
     #[test]
     fn writes_path_bare_where_the_file_binds_it() {
+        // Given a file binding `Path` as well as `PathBuf`
         let binding_path =
             PRODUCED.replace("use std::path::PathBuf;", "use std::path::{Path, PathBuf};");
 
-        assert_eq!(
-            narrowings(&binding_path, "kept_joined")[0],
-            narrowing("dir", "&PathBuf", "&Path")
-        );
+        // When the parameters are narrowed
+        let chosen = narrowings(&binding_path, "kept_joined");
+
+        // Then `dir` narrows to the bare `&Path`
+        assert_eq!(chosen[0], narrowing("dir", "&PathBuf", "&Path"));
     }
 
     #[test]
     fn a_narrowed_parameter_the_body_clones_becomes_an_owned_copy() {
+        // Given the narrowings of a function whose body clones `dir`
         let chosen = narrowings(PRODUCED, "kept_joined");
 
+        // When they are applied
         let text = narrowed(PRODUCED, "kept_joined", &chosen);
 
+        // Then the signature is narrowed and the clone is an owned copy
         assert!(
             text.contains(
                 "fn kept_joined(dir: &std::path::Path, label: &str, items: &[u32], out: &mut PathBuf) -> PathBuf {"

@@ -203,12 +203,17 @@ mod tests {
 
     #[test]
     fn a_unit_tail_wrapped_in_ok_becomes_a_statement_followed_by_ok_unit() {
+        // Given a unit `if` wrapped in `Ok(..)` as the tail
         let produced = "fn guarded(dir: &Path, flag: bool) -> Result<(), String> {\n    \
                         Ok(if flag {\n        let _p = dir.join(\"a\");\n        \
                         Err::<(), String>(\"e\".into())?;\n    })\n}\n";
 
+        // When the tail is unwrapped
+        let unwrapped = unit_tail_unwrapped(produced, "guarded");
+
+        // Then the `if` is a statement, followed by `Ok(())`
         assert_eq!(
-            unit_tail_unwrapped(produced, "guarded"),
+            unwrapped,
             "fn guarded(dir: &Path, flag: bool) -> Result<(), String> {\n    \
              if flag {\n        let _p = dir.join(\"a\");\n        \
              Err::<(), String>(\"e\".into())?;\n    }\n    Ok(())\n}\n"
@@ -217,35 +222,65 @@ mod tests {
 
     #[test]
     fn a_value_tail_in_ok_is_left_alone() {
+        // Given an `Ok(..)` tail holding a value
         let produced =
             "fn counted(n: u32) -> Result<u32, String> {\n    Ok(if n > 1 { n } else { 1 })\n}\n";
 
-        assert_eq!(unit_tail_unwrapped(produced, "counted"), produced);
+        // When the tail is unwrapped
+        let unwrapped = unit_tail_unwrapped(produced, "counted");
+
+        // Then the function is as it was
+        assert_eq!(unwrapped, produced);
     }
 
     #[test]
     fn a_field_initialised_from_a_binding_of_its_own_name_is_written_in_shorthand() {
+        // Given a struct literal whose fields repeat their bindings' names
         let produced = "fn looked_up(base: &Path, root: &Path) -> usize {\n    \
                         let n = consume(&Lookup { base: base, root: root });\n    n\n}\n";
 
+        // When the fields are shortened
+        let shortened = field_shorthand(produced, "looked_up");
+
+        // Then the literal is written in shorthand
         assert_eq!(
-            field_shorthand(produced, "looked_up"),
+            shortened,
             "fn looked_up(base: &Path, root: &Path) -> usize {\n    \
              let n = consume(&Lookup { base, root });\n    n\n}\n"
         );
     }
 
-    #[test]
-    fn notes_more_than_seven_parameters_and_a_three_tuple_return() {
-        let produced = "fn wide(&self, a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8) \
+    /// A method taking `self` and eight parameters, returning a 3-tuple.
+    const WIDE: &str = "fn wide(&self, a: u8, b: u8, c: u8, d: u8, e: u8, f: u8, g: u8, h: u8) \
                         -> (u8, u8, u8) {\n    (a, b, c)\n}\n";
 
-        assert_eq!(
-            shape_notes(produced, "wide"),
-            [
-                "`wide` takes 8 parameters; clippy::too_many_arguments fires above 7",
-                "`wide` returns a 3-tuple; clippy::type_complexity may fire",
-            ]
+    #[test]
+    fn more_than_seven_parameters_are_noted_not_counting_self() {
+        // Given a function taking eight parameters besides `self`
+        // When its shape is noted
+        let notes = shape_notes(WIDE, "wide");
+
+        // Then the parameter count is noted
+        assert!(
+            notes.contains(
+                &"`wide` takes 8 parameters; clippy::too_many_arguments fires above 7".to_string()
+            ),
+            "{notes:#?}"
+        );
+    }
+
+    #[test]
+    fn a_three_tuple_return_is_noted() {
+        // Given a function returning a 3-tuple
+        // When its shape is noted
+        let notes = shape_notes(WIDE, "wide");
+
+        // Then the tuple is noted
+        assert!(
+            notes.contains(
+                &"`wide` returns a 3-tuple; clippy::type_complexity may fire".to_string()
+            ),
+            "{notes:#?}"
         );
     }
 }

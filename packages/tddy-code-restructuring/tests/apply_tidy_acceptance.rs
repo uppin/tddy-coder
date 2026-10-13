@@ -13,7 +13,8 @@ mod harness;
 use harness::{
     a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use,
     a_workspace_whose_test_binary_carries_an_unused_mut, moving_the_test_binary,
-    THE_MOVED_TEST_BINARY, THE_TEST_BINARY, THE_UNUSED_IMPORT, THE_UNUSED_MUT,
+    THE_BINDING_WITHOUT_MUT, THE_MOVED_TEST_BINARY, THE_TEST_BINARY, THE_UNUSED_IMPORT,
+    THE_UNUSED_MUT,
 };
 use tddy_code_restructuring::runner::RunSummary;
 
@@ -111,8 +112,12 @@ async fn removes_an_unused_mut_from_a_file_the_run_wrote() {
     summary.expect("the apply succeeds");
     let moved = workspace.read(THE_MOVED_TEST_BINARY);
     assert!(
-        !moved.contains(THE_UNUSED_MUT) && moved.contains("let doubled = 2 * 2;"),
+        !moved.contains(THE_UNUSED_MUT),
         "the unused `mut` survived:\n{moved}"
+    );
+    assert!(
+        moved.contains(THE_BINDING_WITHOUT_MUT),
+        "the binding is not `{THE_BINDING_WITHOUT_MUT}`:\n{moved}"
     );
 }
 

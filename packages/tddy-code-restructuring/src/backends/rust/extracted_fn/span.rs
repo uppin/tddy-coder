@@ -229,8 +229,11 @@ mod tests {
 
     #[test]
     fn spans_the_named_function_from_its_keyword_to_its_closing_brace() {
+        // Given a file declaring `kept`, which a comment and a call also mention
+        // When the function's span is found
         let span = function_span(TWO_FUNCTIONS, "kept").expect("`kept` is declared");
 
+        // Then it runs from `fn` to the closing brace, and its `open` is the body's `{`
         assert_eq!(
             &TWO_FUNCTIONS[span.keyword..=span.close],
             "fn kept(x: u32) -> u32 {\n    // `fn kept` in a comment\n    x + 1\n}"
@@ -240,10 +243,15 @@ mod tests {
 
     #[test]
     fn a_name_only_a_comment_or_a_call_mentions_has_no_span() {
-        assert_eq!(function_span(TWO_FUNCTIONS, "missing"), None);
-        assert_eq!(
-            function_span("fn a() {\n    // fn b() {}\n    b();\n}\n", "b"),
-            None
-        );
+        // Given a name nothing declares, and a name only a comment and a call mention
+        let commented_and_called = "fn a() {\n    // fn b() {}\n    b();\n}\n";
+
+        // When their spans are looked for
+        let undeclared = function_span(TWO_FUNCTIONS, "missing");
+        let mentioned = function_span(commented_and_called, "b");
+
+        // Then neither has one
+        assert_eq!(undeclared, None);
+        assert_eq!(mentioned, None);
     }
 }

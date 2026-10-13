@@ -218,9 +218,12 @@ mod tests {
         let parent =
             "use prost::Message as _;\nuse std::{fmt::Write as _, io};\nuse super::Codec as _;\n";
 
+        // When they are read
+        let imports = anonymous_trait_imports(parent);
+
         // Then each is a line the child can carry
         assert_eq!(
-            anonymous_trait_imports(parent),
+            imports,
             [
                 "use prost::Message as _;",
                 "use std::fmt::Write as _;",
@@ -231,11 +234,12 @@ mod tests {
 
     #[test]
     fn carries_the_parents_anonymous_trait_import_into_a_child_that_never_names_the_trait() {
-        // When the moved code calls a trait method the parent imports `as _`
-        let imports = shadowed_imports(
-            "use prost::Message as _;\n",
-            "fn frame(out: &TerminalOutput) -> Vec<u8> {\n    out.encode_to_vec()\n}",
-        );
+        // Given a parent importing a trait `as _`, and moved code calling one of its methods
+        let parent = "use prost::Message as _;\n";
+        let child = "fn frame(out: &TerminalOutput) -> Vec<u8> {\n    out.encode_to_vec()\n}";
+
+        // When the imports the child needs are found
+        let imports = shadowed_imports(parent, child);
 
         // Then the child carries the import
         assert_eq!(imports, vec!["use prost::Message as _;"]);
