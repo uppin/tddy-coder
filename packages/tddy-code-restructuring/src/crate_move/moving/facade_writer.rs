@@ -81,7 +81,7 @@ fn leaving(
     }
 
     for (member, survey) in members {
-        let span = declaration_of(path, text, member)?;
+        let removal = declaration_of(path, text, member)?;
         let facade = match member.reexport {
             Reexport::Glob if facade_written => None,
             Reexport::Glob => {
@@ -95,12 +95,34 @@ fn leaving(
                 &survey.reached_from_outside,
             ),
         };
-        // The declaration's line goes entirely, newline included, when nothing replaces it.
-        let line = facade.map_or_else(String::new, |facade| format!("{facade}\n"));
-        edits.push(manifest_edits::replacement(text, span, &line));
+        edits.push(manifest_edits::replacement(
+            text,
+            removal.span.clone(),
+            &left_in_place_of(text, &removal, facade),
+        ));
         edits.extend(parent_reexport_edits(text, member));
     }
     Ok(edits)
+}
+
+/// What takes the place of a removed declaration: the facade on a line of its own, or nothing.
+///
+/// Where the declaration is the only thing between two `use` runs, one blank line stays (after the
+/// facade, when there is one) so rustfmt keeps sorting the two apart.
+fn left_in_place_of(
+    text: &str,
+    removal: &manifest_edits::RemovedDeclaration,
+    facade: Option<String>,
+) -> String {
+    let separator = if manifest_edits::separates_use_runs(text, removal.span.clone()) {
+        "\n"
+    } else {
+        ""
+    };
+    match facade {
+        Some(facade) => format!("{facade}\n{separator}"),
+        None => separator.to_string(),
+    }
 }
 
 /// The facade an earlier operation of the plan wrote for the first facade member's destination.
@@ -132,9 +154,14 @@ fn extended_facade(
     manifest_edits::replacement(text, earlier.span.clone(), &format!("{line}\n"))
 }
 
-/// Where the file declares `member`'s module, or the refusal when it does not.
-fn declaration_of(path: &str, text: &str, member: &Move) -> Result<std::ops::Range<usize>> {
-    manifest_edits::module_declaration(text, &member.module).ok_or_else(|| {
+/// The declaration of `member`'s module as a move removes it, or the refusal when the file declares
+/// none or it carries an attribute.
+fn declaration_of(
+    path: &str,
+    text: &str,
+    member: &Move,
+) -> Result<manifest_edits::RemovedDeclaration> {
+    manifest_edits::removed_declaration(text, path, &member.module)?.ok_or_else(|| {
         let where_declared = if member.home.is_top_level() {
             "crate root"
         } else {
@@ -303,15 +330,22 @@ pub(crate) fn declared_in_destination(
     let edits = members
         .iter()
         .map(|member| {
-            manifest_edits::insert_module_declaration_sorted(
+            let comments = comments_of_declaration(workspace, member)?;
+            Ok(manifest_edits::insert_module_declaration_sorted(
                 &text,
                 &format!("pub mod {};", member.module),
-                // TODO(reshape-tidy-facades): implement — the comments `removed_declaration` read
-                // above the member's declaration in its declaring file.
-                "",
-            )
+                &comments,
+            ))
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     Ok(vec![FileEdit::Change { path, edits }])
+}
+
+/// The comment lines directly above `member`'s declaration in the file that declares it, which
+/// travel to the destination's declaration.
+fn comments_of_declaration(workspace: &Workspace<'_>, member: &Move) -> Result<String> {
+    let declared_in = &member.home.declared_in;
+    let text = workspace.read(declared_in)?;
+    Ok(declaration_of(declared_in, &text, member)?.comments)
 }

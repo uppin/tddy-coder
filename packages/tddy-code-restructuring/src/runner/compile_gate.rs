@@ -153,11 +153,21 @@ pub fn refuse_a_broken_result(
 /// neither tidied nor formatted, and how many `unused import` warnings the failing check reported in
 /// them (`stderr` is the check's `short` output, `touched` the files the run wrote). One line ending
 /// in a newline, written ahead of the compiler's errors.
-///
-/// TODO(reshape-tidy-facades): implement — today it says nothing, as the gate always did.
 fn untidied_note(stderr: &str, touched: &BTreeSet<String>) -> String {
-    let _not_yet_counted = (stderr, touched);
-    String::new()
+    let left = stderr
+        .lines()
+        .filter(|line| {
+            let Some((place, warning)) = line.split_once(": warning: ") else {
+                return false;
+            };
+            let file = place.rsplitn(3, ':').nth(2).unwrap_or(place);
+            warning.starts_with("unused import") && touched.iter().any(|path| file.ends_with(path))
+        })
+        .count();
+    format!(
+        "the tidy did not run, so the written files were neither tidied nor formatted; the failing \
+         check reported {left} `unused import` warning(s) in them\n"
+    )
 }
 
 /// Tidy the tree of a run that applied **every** operation, returning the check and errors when

@@ -324,6 +324,34 @@ pub(crate) use sighting_walk::sightings;
 mod module_items;
 pub(crate) use module_items::{items_of_module, ChildModule, ModuleItems};
 
+/// The first line of the comment block and attributes attached to the item on `line`.
+///
+/// rust-analyzer attaches a preceding comment block to the item below it *unless a blank line
+/// separates them*, so a range that starts at the `pub fn` leaves the doc comment behind in the
+/// parent and the relocated item arrives undocumented. Walking up and stopping at the blank is the
+/// whole rule.
+///
+/// Idempotent where the server already reports an extent that includes the trivia: the walk stops at
+/// the blank line immediately and returns what it was given.
+pub(crate) fn attached_trivia_starts_at(text: &str, line: u32) -> u32 {
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut first = line;
+
+    while first > 1 {
+        let above = lines
+            .get(first as usize - 2)
+            .map(|text| text.trim())
+            .unwrap_or_default();
+        if above.starts_with("///") || above.starts_with("//") || above.starts_with("#[") {
+            first -= 1;
+            continue;
+        }
+        break;
+    }
+
+    first
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

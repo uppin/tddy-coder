@@ -34,37 +34,80 @@ pub(crate) struct RemovedDeclaration {
 /// `None` when [`module_declaration`] finds no such declaration. Refused, naming the attribute, when
 /// an attribute line (`#[…]`) sits directly above it: a move to another crate can neither keep nor
 /// drop a `#[cfg]`, `#[path]` or `#[allow]` without changing what compiles.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-tidy-facades): implement — `facade_writer::leaving` and \
-                  `move_preconditions` call it"
-    )
-)]
 pub(crate) fn removed_declaration(
     text: &str,
     path: &str,
     module: &str,
 ) -> crate::Result<Option<RemovedDeclaration>> {
-    // TODO(reshape-tidy-facades): implement
-    let _ = (text, path, module);
-    todo!("removed_declaration")
+    let Some(declaration) = module_declaration(text, module) else {
+        return Ok(None);
+    };
+
+    let mut start = declaration.start;
+    for line in text[..declaration.start].split_inclusive('\n').rev() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#[") || trimmed.starts_with("#![") {
+            return Err(super::malformed(format!(
+                "`mod {module};` in {path} carries `{}`, which a move to another crate can neither \
+                 keep nor drop without changing what compiles — remove or move it by hand, then \
+                 plan again",
+                trimmed.trim_end()
+            )));
+        }
+        if !trimmed.starts_with("//") {
+            break;
+        }
+        start -= line.len();
+    }
+
+    Ok(Some(RemovedDeclaration {
+        span: start..declaration.end,
+        comments: text[start..declaration.start].to_string(),
+    }))
 }
 
 /// Whether taking `span` out of `text` would make the `use` run above it and the one below it one
 /// run, which rustfmt would then sort as one.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-tidy-facades): implement — `facade_writer::leaving` calls it"
-    )
-)]
+///
+/// True when the nearest non-blank line above `span` ends a `use` item and the first line below it
+/// starts one, or starts the comment lines directly above one.
 pub(crate) fn separates_use_runs(text: &str, span: std::ops::Range<usize>) -> bool {
-    // TODO(reshape-tidy-facades): implement
-    let _ = (text, span);
-    todo!("separates_use_runs")
+    let above: Vec<&str> = text[..span.start].lines().collect();
+    let mut below = text[span.end..].lines();
+
+    ends_a_use_item(&above)
+        && below
+            .find(|line| !line.trim_start().starts_with("//"))
+            .is_some_and(begins_a_use_item)
+}
+
+/// Whether the last of `lines` closes a `use` item: it ends in `;` and the item it ends starts with
+/// `use`, however many lines a grouped one runs over.
+fn ends_a_use_item(lines: &[&str]) -> bool {
+    let Some(last) = lines.last().filter(|line| line.trim_end().ends_with(';')) else {
+        return false;
+    };
+    if begins_a_use_item(last) {
+        return true;
+    }
+    lines[..lines.len() - 1]
+        .iter()
+        .rev()
+        .take_while(|line| !line.trim().is_empty() && !line.trim_end().ends_with(';'))
+        .any(|line| begins_a_use_item(line))
+}
+
+/// Whether `line` opens a `use` item, whatever its visibility.
+fn begins_a_use_item(line: &str) -> bool {
+    let line = line.trim_start();
+    let rest = match line.strip_prefix("pub") {
+        None => line,
+        Some(rest) => match rest.strip_prefix('(') {
+            Some(restriction) => restriction.split_once(')').map_or("", |(_, after)| after),
+            None => rest,
+        },
+    };
+    rest.trim_start().starts_with("use ")
 }
 
 /// The edit that declares `line` (`pub mod host_registry;`) among the root's existing `mod` lines,
@@ -78,8 +121,7 @@ pub(crate) fn separates_use_runs(text: &str, span: std::ops::Range<usize>) -> bo
 /// `comments` are the comment lines that documented the declaration where it was (each ending in a
 /// newline, empty for none); they are written directly above it.
 pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str, comments: &str) -> TextEdit {
-    // TODO(reshape-tidy-facades): implement — write `comments` directly above `line`.
-    let _not_yet_written = comments;
+    let documented = format!("{comments}{line}");
     let named = declared_module_name(line);
     let mut offset = 0usize;
     let mut header_ends = 0usize;
@@ -103,12 +145,12 @@ pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str, comments:
             continue;
         };
         if named.is_some_and(|new| new < declared) {
-            return insertion(text, start, line);
+            return insertion(text, start, &documented);
         }
         after_last = Some(offset);
     }
 
-    insertion(text, after_last.unwrap_or(header_ends), line)
+    insertion(text, after_last.unwrap_or(header_ends), &documented)
 }
 
 /// The identifier a `[pub ]mod <name>;` line declares.

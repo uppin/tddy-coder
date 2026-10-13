@@ -7,7 +7,8 @@
 
 use serde_json::Value;
 
-use super::{attached_trivia_starts_at, failure, server_defect, uri_of, LspPoint, RustBackend};
+use super::{failure, server_defect, uri_of, LspPoint, RustBackend};
+use crate::crate_move::source_scan::attached_trivia_starts_at;
 use crate::edit::{Position, Range};
 use crate::item_anchor::{module_path_of, ItemAtResolver, ItemResolver, ResolvedItem};
 use crate::plan::{Fingerprint, ItemPath, ItemSegment};

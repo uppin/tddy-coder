@@ -1669,15 +1669,13 @@ impl RustBackend {
         text: &str,
         range: Range,
     ) -> Result<Vec<seam_survey::MovedItem>> {
-        let symbols = self.request_settled(
-            "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri } }),
-        )?;
+        let symbols = self.settled_outline(uri)?;
+        let tests = seam_survey::test_module_lines(text);
 
         let mut items = Vec::new();
 
         for found in path_reached_within(&symbols, range) {
-            let reach = self.reach_of(uri, &found.position, range)?;
+            let reach = self.reach_of(uri, &found.position, range, &tests)?;
             items.push(seam_survey::MovedItem {
                 visibility: visibility_at(text, &found.position),
                 name: found.name,
@@ -1689,6 +1687,13 @@ impl RustBackend {
             });
         }
 
+        // An outline that lists members of the range — an `impl`'s, which no module path names — was
+        // answered. Only a range it lists nothing in can be the silence of a server still loading.
+        if seam_survey::items_relocated_within(&symbols, range).is_empty() {
+            let file = path_of(uri)?.display().to_string();
+            let declared = seam_survey::lines_in(text, range);
+            seam_survey::refuse_unsurveyed_range(&declared, &file, range, &items)?;
+        }
         Ok(items)
     }
 
@@ -1771,10 +1776,8 @@ impl RustBackend {
         text: &str,
         range: Range,
     ) -> Result<Vec<seam_survey::MovedItem>> {
-        let symbols = self.request_settled(
-            "textDocument/documentSymbol",
-            json!({ "textDocument": { "uri": uri } }),
-        )?;
+        let symbols = self.settled_outline(uri)?;
+        let tests = seam_survey::test_module_lines(text);
 
         let cut = seam_survey::impls_cut_through(&symbols, range);
         let relocated = seam_survey::items_relocated_within(&symbols, range);
@@ -1794,7 +1797,7 @@ impl RustBackend {
             // resolution wait per member would buy nothing — and `survey_moved_items` paying one per
             // item is already the expensive part of a seam.
             let reach = if cut.contains(holder) {
-                self.reach_of(uri, &found.position, range)?
+                self.reach_of(uri, &found.position, range, &tests)?
             } else {
                 seam_survey::Reach::default()
             };
@@ -1847,11 +1850,15 @@ impl RustBackend {
     }
 
     /// Where the references to one item sit, relative to the range about to be relocated.
+    ///
+    /// `tests` are the lines of this file's own inline test modules: a reference there is outside the
+    /// range but not production code.
     fn reach_of(
         &mut self,
         uri: &str,
         position: &Value,
         range: Range,
+        tests: &[std::ops::RangeInclusive<u32>],
     ) -> Result<seam_survey::Reach> {
         let references = self.references_at(uri, position)?;
 
@@ -1869,6 +1876,7 @@ impl RustBackend {
                     reach.stranded_in.push(file);
                 }
                 reach.from_outside = true;
+                reach.from_production = true;
                 continue;
             }
 
@@ -1878,6 +1886,7 @@ impl RustBackend {
             let line = point.line as u32 + 1;
             if line < range.start.line || line > range.end.line {
                 reach.from_outside = true;
+                reach.from_production |= !tests.iter().any(|lines| lines.contains(&line));
                 if !reach.in_file_outside_at.contains(&line) {
                     reach.in_file_outside_at.push(line);
                 }
@@ -2431,34 +2440,6 @@ fn refuse_non_adjacent(outline: &[OutlineItem], places: &[usize]) -> Result<()> 
     )))
 }
 
-/// The first line of the comment block and attributes attached to the item on `line`.
-///
-/// rust-analyzer attaches a preceding comment block to the item below it *unless a blank line
-/// separates them*, so a range that starts at the `pub fn` leaves the doc comment behind in the
-/// parent and the relocated item arrives undocumented. Walking up and stopping at the blank is the
-/// whole rule.
-///
-/// Idempotent where the server already reports an extent that includes the trivia: the walk stops at
-/// the blank line immediately and returns what it was given.
-fn attached_trivia_starts_at(text: &str, line: u32) -> u32 {
-    let lines: Vec<&str> = text.split('\n').collect();
-    let mut first = line;
-
-    while first > 1 {
-        let above = lines
-            .get(first as usize - 2)
-            .map(|text| text.trim())
-            .unwrap_or_default();
-        if above.starts_with("///") || above.starts_with("//") || above.starts_with("#[") {
-            first -= 1;
-            continue;
-        }
-        break;
-    }
-
-    first
-}
-
 /// The keyword a module declaration opens with, including its trailing space.
 /// Refuse a handshake that settled on any position unit but the one this client counts.
 ///
@@ -2978,6 +2959,7 @@ use module_text::with_facade;
 use module_text::{alias_target, module_bounds, parent_binding, with_module_import, ModuleBlock};
 
 mod visibility;
+use crate::crate_move::source_scan::attached_trivia_starts_at;
 #[cfg(test)]
 use visibility::refuse_partial_relocation;
 #[cfg(test)]
@@ -3533,7 +3515,7 @@ mod tests {
     fn names_only_the_items_something_outside_the_module_reaches() {
         let items = [
             moved("render", "pub", true),
-            moved("normalise", "pub", false),
+            moved("normalise", "pub(crate)", false),
         ];
 
         assert_eq!(

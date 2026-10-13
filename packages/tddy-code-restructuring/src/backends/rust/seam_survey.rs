@@ -10,6 +10,8 @@ use serde_json::Value;
 
 use super::seam_refusal;
 
+use crate::crate_move::source_scan::items_of_module;
+
 use crate::Result;
 
 use crate::edit::Position;
@@ -108,10 +110,6 @@ pub(crate) struct MovedItem {
     /// Whether something outside the range reaches it from production code: from another file, or
     /// from this file outside its own `#[cfg(test)]` module. An item reached only from that module
     /// is re-exported by a `named` facade under `#[cfg(test)]`.
-    #[expect(
-        dead_code,
-        reason = "TODO(reshape-tidy-facades): implement — `named_facade_lines` reads it"
-    )]
     pub(crate) reached_from_production: bool,
     /// One-based lines, in this same file, where a sibling *inside the same `impl`* still references
     /// it after the seam moves.
@@ -128,39 +126,77 @@ pub(crate) struct MovedItem {
 /// answered yet, not a range that moves nothing: a facade written from it names nothing (a glob comes
 /// out `pub(crate)` over `pub` items, a named facade comes out empty). `range_text` is the range's
 /// original lines; a range of `impl` blocks only declares no named item and is not refused.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-tidy-facades): implement — `survey_moved_items` calls it"
-    )
-)]
 pub(crate) fn refuse_unsurveyed_range(
     range_text: &str,
     file: &str,
     range: Range,
     moved: &[MovedItem],
 ) -> Result<()> {
-    // TODO(reshape-tidy-facades): implement
-    let _ = (range_text, file, range, moved);
-    todo!("refuse_unsurveyed_range")
+    if !moved.is_empty() {
+        return Ok(());
+    }
+    let declared = items_of_module(range_text);
+    let mut names = declared
+        .defined
+        .iter()
+        .chain(declared.children.iter().map(|child| &child.name));
+    let Some(first) = names.next() else {
+        return Ok(());
+    };
+    let more = names.count();
+    let and_more = if more == 0 {
+        String::new()
+    } else {
+        format!(" (and {more} more)")
+    };
+
+    Err(seam_refusal(format!(
+        "the range {}-{} of {file} declares `{first}`{and_more}, and the server's outline lists none \
+         of them — a facade written now would name nothing. Re-run once the index has loaded",
+        range.start.line, range.end.line
+    )))
+}
+
+/// The lines of `text` the one-based, inclusive `range` covers.
+pub(crate) fn lines_in(text: &str, range: Range) -> String {
+    text.lines()
+        .skip((range.start.line as usize).saturating_sub(1))
+        .take((range.end.line as usize + 1).saturating_sub(range.start.line as usize))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The one-based line spans of the inline `#[cfg(test)] mod … { … }` modules of `text`.
 ///
 /// An out-of-line `#[cfg(test)] mod x_tests;` declaration spans no lines of this file: what it holds
 /// is another file, whose references count as production.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "TODO(reshape-tidy-facades): implement — `reach_of` calls it"
-    )
-)]
 pub(crate) fn test_module_lines(text: &str) -> Vec<std::ops::RangeInclusive<u32>> {
-    // TODO(reshape-tidy-facades): implement
-    let _ = text;
-    todo!("test_module_lines")
+    let lines: Vec<&str> = text.lines().collect();
+    let line_of = |offset: usize| text[..offset].matches('\n').count();
+
+    items_of_module(text)
+        .children
+        .iter()
+        .filter_map(|child| {
+            let body = child.body.as_ref()?;
+            let opens = line_of(body.start);
+            let first = attributes_above(&lines, opens)
+                .into_iter()
+                .find(|line| lines[*line].trim() == "#[cfg(test)]")?;
+            Some(first as u32 + 1..=line_of(body.end) as u32 + 1)
+        })
+        .collect()
+}
+
+/// The zero-based lines of the attribute and comment run directly above `line`, nearest first.
+fn attributes_above(lines: &[&str], line: usize) -> Vec<usize> {
+    (0..line)
+        .rev()
+        .take_while(|above| {
+            let text = lines[*above].trim_start();
+            text.starts_with("#[") || text.starts_with("//")
+        })
+        .collect()
 }
 
 /// Refuse an extraction that would strand a reference written in another file.

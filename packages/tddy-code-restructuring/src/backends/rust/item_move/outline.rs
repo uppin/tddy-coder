@@ -3,10 +3,11 @@
 use serde_json::Value;
 
 use super::super::{
-    attached_trivia_starts_at, failure, is_identifier, seam_refusal, visibility_in, LspPoint,
-    SYMBOL_KIND_IMPL, SYMBOL_KIND_MODULE,
+    failure, is_identifier, seam_refusal, visibility_in, LspPoint, SYMBOL_KIND_IMPL,
+    SYMBOL_KIND_MODULE,
 };
 use super::text::{line_start, Edit};
+use crate::crate_move::source_scan::attached_trivia_starts_at;
 use crate::edit::Range;
 use crate::Result;
 

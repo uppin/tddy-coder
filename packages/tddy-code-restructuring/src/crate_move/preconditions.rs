@@ -194,7 +194,8 @@ pub(crate) fn move_preconditions(
 ) -> Result<()> {
     let moving = moving::Move::read(workspace, op)?;
     let text = workspace.read(&moving.home.declared_in)?;
-    if manifest_edits::module_declaration(&text, &moving.module).is_none() {
+    let declared_in = &moving.home.declared_in;
+    if manifest_edits::removed_declaration(&text, declared_in, &moving.module)?.is_none() {
         let where_declared = if moving.home.is_top_level() {
             "crate root"
         } else {
