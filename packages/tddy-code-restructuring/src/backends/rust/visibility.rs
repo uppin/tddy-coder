@@ -216,3 +216,63 @@ pub(crate) fn refuse_partial_relocation(
         left_behind.join(", ")
     )))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn moved_item_written_as(visibility: &str) -> MovedItem {
+        MovedItem {
+            name: "helper".to_string(),
+            within: Vec::new(),
+            visibility: visibility.to_string(),
+            stranded_in: Vec::new(),
+            reached_from_outside: true,
+            referenced_in_impl_at: Vec::new(),
+        }
+    }
+
+    fn widening(from: &str) -> VisibilityChange {
+        VisibilityChange {
+            item: "helper".to_string(),
+            from: from.to_string(),
+            to: "pub(crate)".to_string(),
+        }
+    }
+
+    #[test]
+    fn an_item_already_written_pub_crate_is_not_reported_as_widened() {
+        // Given an item the author wrote as `pub(crate)`
+        let item = moved_item_written_as("pub(crate)");
+
+        // When the widening it needs to answer for is asked
+        let reported = widening_of(&item);
+
+        // Then there is none, since `pub(crate)` to `pub(crate)` changes nothing
+        assert_eq!(reported, None);
+    }
+
+    #[test]
+    fn a_private_item_is_reported_as_widened_from_private_to_pub_crate() {
+        // Given an item written with no visibility keyword
+        let item = moved_item_written_as("");
+
+        // When the widening it needs to answer for is asked
+        let reported = widening_of(&item);
+
+        // Then it is reported as private widened to `pub(crate)`
+        assert_eq!(reported, Some(widening("private")));
+    }
+
+    #[test]
+    fn a_relative_visibility_is_reported_as_widened_from_what_was_written() {
+        // Given an item written `pub(super)`
+        let item = moved_item_written_as("pub(super)");
+
+        // When the widening it needs to answer for is asked
+        let reported = widening_of(&item);
+
+        // Then the report names `pub(super)` as the visibility it was widened from
+        assert_eq!(reported, Some(widening("pub(super)")));
+    }
+}
