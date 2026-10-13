@@ -341,19 +341,19 @@ Real edges (whole stack): `1→13`, `5→14`, `2→15`, `3→15`, `4→16`, `13�
 
 ## Scope
 
-- [ ] **Probe and naming** (R, S): `selection.rs`, `introduced.rs`, the placeholder's name
-- [ ] **Comment carry** (P): `extracted_fn/{span,comments}.rs`, the `check` progress line
-- [ ] **Lexical clean-ups** (Q): `extracted_fn/lints.rs`
-- [ ] **Narrowing** (Q): `extracted_fn/ptr_args.rs`, `verified_narrowings`
-- [ ] **Respelling** (K): `extracted_fn/respell.rs`, `respelled_signature_types`
-- [ ] **`as _` carry** (I / N3): `prelude_shadow.rs`
-- [ ] **Tidy `unused_mut`**: `runner/tidy/unused_mut.rs`, one call in `runner/tidy.rs`
-- [ ] **Panic class** (U): `lsp_bridge.rs`
-- [ ] **Guard lift and tail position** (rules 12-14): `extracted_fn/guards.rs`, `refuse_unliftable_returns`
-- [ ] **Registration**: `extract_method_clean_acceptance` and `extract_method_guard_lift_acceptance` in `.config/rust-e2e.filterset` and the `rust-analyzer` group
+- [x] **Probe and naming** (R, S): `selection.rs`, `introduced.rs`, the placeholder's name
+- [x] **Comment carry** (P): `extracted_fn/{span,comments}.rs`, the `check` progress line
+- [x] **Lexical clean-ups** (Q): `extracted_fn/lints.rs`
+- [x] **Narrowing** (Q): `extracted_fn/ptr_args.rs`, `verified_narrowings`
+- [x] **Respelling** (K): `extracted_fn/respell.rs`, `respelled_signature_types`
+- [x] **`as _` carry** (I / N3): `prelude_shadow.rs`
+- [x] **Tidy `unused_mut`**: `runner/tidy/unused_mut.rs`, one call in `runner/tidy.rs`
+- [x] **Panic class** (U): `lsp_bridge.rs`
+- [x] **Guard lift and tail position** (rules 12-14): `extracted_fn/guards.rs`, `refuse_unliftable_returns`
+- [x] **Registration**: `extract_method_clean_acceptance` and `extract_method_guard_lift_acceptance` in `.config/rust-e2e.filterset` and the `rust-analyzer` group
 - [ ] **Package documentation** at wrap (list under Affected Packages)
-- [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
-- [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`; every new file ≤ 500 production lines; no over-60 function grows
+- [x] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
+- [x] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`; every new file ≤ 500 production lines; no over-60 function grows
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -407,16 +407,16 @@ Rules 1-11 hold. The #524 shapes extract with comments in place, lint-clean afte
 
 ## Implementation milestones
 
-- [ ] **M1** probe (rule 7) and server-named function (rule 8); tests 12-14, unit tests in `selection.rs`, `introduced.rs`
-- [ ] **M2** `span.rs`, comment carry and its refusal, `check` line (rule 1); tests 1-3, 22
-- [ ] **M3** lexical clean-ups (rules 2-4); tests 7-9
-- [ ] **M4** narrowing and its verification (rule 5); tests 4-6
-- [ ] **M5** respelling (rule 6); tests 10-11
-- [ ] **M6** `as _` carry (rule 9); test 16
-- [ ] **M7** tidy `unused_mut` (rule 10); tests 18-20, and the end-to-end tests 15, 17
-- [ ] **M8** panic class (rule 11); test 21
-- [ ] **M9** guard lift and tail position (rules 12-13); tests 23-33, unit tests in `guards.rs`
-- [ ] **M9b** return-type spelling for every extraction (rule 14); tests 24, 34-35, unit tests in `return_type.rs`
+- [x] **M1** probe (rule 7) and server-named function (rule 8); tests 12-14, unit tests in `selection.rs`, `introduced.rs`
+- [x] **M2** `span.rs`, comment carry and its refusal, `check` line (rule 1); tests 1-3, 22
+- [x] **M3** lexical clean-ups (rules 2-4); tests 7-9
+- [x] **M4** narrowing and its verification (rule 5); tests 4-6
+- [x] **M5** respelling (rule 6); tests 10-11
+- [x] **M6** `as _` carry (rule 9); test 16
+- [x] **M7** tidy `unused_mut` (rule 10); tests 18-20, and the end-to-end tests 15, 17
+- [x] **M8** panic class (rule 11); test 21
+- [x] **M9** guard lift and tail position (rules 12-13); tests 23-33, unit tests in `guards.rs`
+- [x] **M9b** return-type spelling for every extraction (rule 14); tests 24, 34-35, unit tests in `return_type.rs`
 - [ ] **M10** registration, docs staged, scoped gate, length and function-size gates
 
 ## Testing plan
@@ -437,11 +437,11 @@ Would leave every Q shape unasserted — they compile.
 
 ### Coverage Requirements
 
-- [ ] Happy: each rule's reproduced shape; the #524 `09b` shape end-to-end under clippy
-- [ ] Refusals: unpairable statements (rule 1), zero / two spellings (rule 6)
-- [ ] Kept as written: a parameter the body needs owned, `&mut PathBuf`, a range with no `?` (comments untouched, no
+- [x] Happy: each rule's reproduced shape; the #524 `09b` shape end-to-end under clippy
+- [x] Refusals: unpairable statements (rule 1), zero / two spellings (rule 6)
+- [x] Kept as written: a parameter the body needs owned, `&mut PathBuf`, a range with no `?` (comments untouched, no
   duplication), an `extract_variable` probe on `&`
-- [ ] Actual effects: bytes on disk, `cargo check --all-targets`, clippy `-D warnings`
+- [x] Actual effects: bytes on disk, `cargo check --all-targets`, clippy `-D warnings`
 
 ## Acceptance tests
 
@@ -585,16 +585,37 @@ today's class).
 (empty)
 
 ### From @validate-changes (Change Validation)
-(empty)
+Run 2026-10-13, 1 finding, fixed: `runner/tidy.rs` had gained an 8-line block where the boundary allows one call; the
+step is now `unused_mut::without_unused_mut(tidying, checked)?`, one line, and `unused_mut.rs` owns the match.
 
 ### From @validate-tests (Test Quality)
-(empty)
+Run 2026-10-13, 61 tests reviewed: 2 critical, 8 warnings, all fixed (tests only, production untouched):
+- ✅ two refusal tests asserted `workspace.read(..) == before` after a harness call that only resolves an edit, so
+  "nothing is written" could not fail — they now apply through `runner::apply` (`refusal_from_applying`) and assert the
+  exact refusal text, then the unchanged file;
+- ✅ `a_range_opening_on_a_blocks_brace…`/`…a_line_comment…` split into one test per behaviour (extracted and compiles,
+  resolves within the ready bound); `is_ok()` replaced by the function existing and the tree compiling;
+- ✅ the six-assertion `guards.rs` static-check test is six tests behind `static_findings`; `lints.rs` shape notes split;
+- ✅ `&&`-joined `assert!`s separated with their own messages; the clippy test renamed to the shape it exercises;
+- ✅ Given/When/Then comments added to the bare unit tests; one `a_one_crate_workspace_holding` in the harness replaces two copies.
+Not changed: the `*_acceptance.rs` suffix (the package's convention).
+Two tests of the red phase were corrected in green because they pinned what neither the contract nor this code decides:
+`reports_any_other_server_error_verbatim` used `-32603`, which rule 11 now classes as the server's defect, so its stand-in
+for "any other error" is `-32000`; `a_run_of_none_guards_in_an_option_function_is_lifted_to_option_unit` pinned the
+parameter order `(n, b)`, which rust-analyzer chooses (`(b, n)`).
 
 ### From @prod-ready (Production Readiness)
-(empty)
+Run 2026-10-13: ✅ Ready, 0 blockers. No mock/fake code, fallbacks, markers, `todo!()`, debug output or production
+`unwrap`/`expect` in the added production lines; the `TODO(reshape-extract-method-clean)` stubs are all gone.
+Info: `extracted_fn::origin_header` returns an empty header when no function encloses the range — unreachable (the assist
+extracts inside a function), and both callers then change nothing or refuse.
 
 ### From @analyze-clean-code (Code Quality)
-(empty)
+Run 2026-10-13, **score B**: 0 must-refactor; 6 functions take exactly 5 parameters (`introduced_by` was already 5;
+new: `unliftable_guards`, `guarded`, `put_back`, `insertions`, `respelled_signature_types`, `cleaned_extraction`).
+Longest new function 43 lines (`introduced_declaration`); no function over 60 lines grew (`assist_for` is a one-line value change).
+Files ≥ 500 production lines: `backends/rust.rs` 517 → 516 (pre-existing, shrank by one, record
+`oversized-file-backends-rust.md`); the largest new file is `extracted_fn/guards.rs` at 431.
 
 ### From @refactor (Completed Refactorings)
 (empty)
@@ -634,6 +655,17 @@ Every other test of `selection.rs`, `introduced.rs`, `prelude_shadow.rs`, `lsp_b
 - No wiring changed in this push: `check`, `resolve_opening` and `assisted_edit` still call today's code, so every
   existing test stays green.
 
+### Green + validation (2026-10-13)
+
+Stack gate: base `feature/reshape/tidy-facades`, current, `origin/<base>..HEAD` is this PR's commits only, no deletions.
+Scoped gates (`tddy-code-restructuring`): `./test -p` — **74 targets, 1480 tests, 0 failed**; `clippy -D warnings` and
+`cargo fmt` clean; `cargo check -p tddy-index-daemon -p tddy-tools --all-targets` ✅. All 35 acceptance tests and the
+unit tests of rules 1–14 pass. The rest of the workspace: CI.
+
+Boundaries: compile gate, the wait (`READY_HOVER_BOUND`, `await_answer`, `ensure_indexed`), `tidy/gating.rs`, `format.rs`
+untouched; `runner/tidy.rs` gains one `mod` line and one call; `early_return.rs` one visibility word; no plan field, wire
+change or `RefactorKind`.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-extract-method-clean-initial-discovery.md`)
@@ -645,21 +677,21 @@ Every other test of `selection.rs`, `introduced.rs`, `prelude_shadow.rs`, `lsp_b
 - [x] Run acceptance tests (verify they fail) — see Validation Results
 - [ ] USER REVIEW — acceptance tests
 - [x] TDD Red — write failing unit/integration tests (the surface's unit tests, `todo!()` bodies)
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
-- [ ] Validate changes (/validate-changes)
-- [ ] Refactor issues from change validation
+- [x] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
+- [x] Validate changes (/validate-changes)
+- [x] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues
+- [x] Validate production readiness (/validate-prod-ready)
+- [x] Refactor production readiness issues
+- [x] Analyze code quality (/analyze-clean-code)
+- [x] Refactor code quality issues
+- [x] Final validation (/validate-changes)
+- [x] Linting and formatting (`cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; deletes the initial discovery, the
   extract-drops and lint-gate entries, and removes K and I from the apply-gaps entry
 - [ ] USER REVIEW — work complete, decide next steps
