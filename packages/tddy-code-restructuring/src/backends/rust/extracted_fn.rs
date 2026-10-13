@@ -17,7 +17,8 @@ mod respell;
 mod return_type;
 mod span;
 
-use super::{ProgressSink, RustBackend};
+use super::early_return::refuse_early_returns;
+use super::{imports, ProgressSink, RustBackend};
 use crate::edit::Range;
 use crate::Result;
 
@@ -27,6 +28,16 @@ use crate::Result;
 pub(super) struct Cleaned {
     pub text: String,
     pub notes: Vec<String>,
+}
+
+impl Cleaned {
+    /// `text` as it is, with nothing to say about it.
+    pub(super) fn unchanged(text: String) -> Self {
+        Self {
+            text,
+            notes: Vec::new(),
+        }
+    }
 }
 
 impl RustBackend {
@@ -42,9 +53,10 @@ impl RustBackend {
         range: Range,
         name: &str,
     ) -> Result<Cleaned> {
-        let _ = (uri, original, named, range, name);
-        // TODO(reshape-extract-method-clean): implement
-        todo!("cleaned_extraction")
+        let _ = uri;
+        let carried = imports::carry_function_local_uses(original, named, range, name);
+        let (commented, _) = comments::restored(original, range, &carried, name)?;
+        Ok(Cleaned::unchanged(commented))
     }
 
     /// `text` with each `&PathBuf` / `&String` / `&Vec<T>` parameter of `name` narrowed, keeping
@@ -87,9 +99,20 @@ pub(super) fn extract_method_findings(
     range: Range,
     progress: &ProgressSink,
 ) -> Vec<String> {
-    let _ = (text, range, progress);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("extract_method_findings")
+    let refusal = refuse_early_returns(text, range).err();
+    // Not findings: what `apply` does about them, so the plan is sound.
+    for statement in imports::local_uses_to_carry(text, range) {
+        progress(&format!(
+            "the extracted function will carry the function-local `{statement}`"
+        ));
+    }
+    let at_risk = comments::at_risk(text, range);
+    if at_risk > 0 {
+        progress(&format!(
+            "the extracted function will keep {at_risk} comment(s) rust-analyzer drops"
+        ));
+    }
+    refusal.map(|refusal| refusal.to_string()).into_iter().collect()
 }
 
 /// Refuse an `extract_method` range holding a `return` that neither the guard lift (rule 12) nor

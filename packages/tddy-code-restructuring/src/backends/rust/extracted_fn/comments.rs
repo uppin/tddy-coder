@@ -6,6 +6,10 @@
 //! beside the statement it annotated — or the operation is refused, naming every comment it would
 //! lose.
 
+use super::span::{function_span, skip_whitespace, word_end};
+use crate::backends::rust::early_return::{byte_offset, masked_to_code};
+use crate::backends::rust::server_defect;
+use crate::crate_move::{readable_spans, Prose};
 use crate::edit::Range;
 use crate::Result;
 
@@ -18,14 +22,41 @@ pub(super) struct Comment {
     pub line: u32,
     /// Whether it trails code on its line rather than standing on lines of its own.
     pub trailing: bool,
+    /// The bytes it occupies in the original file.
+    start: usize,
+    end: usize,
+}
+
+/// A top-level statement of a region of code: from its first character to its terminator.
+struct Statement {
+    start: usize,
+    end: usize,
+    /// Whether it ends in `;` or a closing brace, rather than being an expression left as a tail.
+    terminated: bool,
 }
 
 /// The comments of `range` in `original` that the function `name` in `produced` does not hold,
 /// counted as a multiset of trimmed comment text.
 pub(super) fn dropped(original: &str, range: Range, produced: &str, name: &str) -> Vec<Comment> {
-    let _ = (original, range, produced, name);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("dropped")
+    let Some((from, to)) = offsets(original, range) else {
+        return Vec::new();
+    };
+    let function = function_span(produced, name)
+        .map_or("", |span| &produced[span.keyword..=span.close]);
+    let mut kept: Vec<String> = comments_in(function, 0, function.len())
+        .into_iter()
+        .map(|comment| comment.text)
+        .collect();
+    comments_in(original, from, to)
+        .into_iter()
+        .filter(|comment| match kept.iter().position(|text| *text == comment.text) {
+            Some(at) => {
+                kept.swap_remove(at);
+                false
+            }
+            None => true,
+        })
+        .collect()
 }
 
 /// `produced` with every dropped comment put back beside the statement it annotated, and how many
@@ -37,17 +68,193 @@ pub(super) fn restored(
     produced: &str,
     name: &str,
 ) -> Result<(String, usize)> {
-    let _ = (original, range, produced, name);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("restored")
+    let lost = dropped(original, range, produced, name);
+    if lost.is_empty() {
+        return Ok((produced.to_string(), 0));
+    }
+    let Some(insertions) = insertions(original, range, produced, name, &lost) else {
+        let named: Vec<String> = lost
+            .iter()
+            .map(|comment| format!("`{}`", comment.text))
+            .collect();
+        return Err(server_defect(format!(
+            "rust-analyzer dropped {} comment(s) from the extracted function, and its statements \
+             cannot be paired with the range's to put them back: {}",
+            lost.len(),
+            named.join(", ")
+        )));
+    };
+    Ok((with_insertions(produced, insertions), lost.len()))
 }
 
 /// How many comments of `range` rust-analyzer will drop: those between or after the range's
 /// top-level statements, when the range holds a `?`. What `check` reports on its progress line.
 pub(super) fn at_risk(text: &str, range: Range) -> usize {
-    let _ = (text, range);
-    // TODO(reshape-extract-method-clean): implement
-    todo!("at_risk")
+    let Some((from, to)) = offsets(text, range) else {
+        return 0;
+    };
+    let masked = masked_to_code(text);
+    let region = &masked.as_bytes()[from..to];
+    if !region.contains(&b'?') {
+        return 0;
+    }
+    let statements = statements(region, from);
+    comments_in(text, from, to)
+        .iter()
+        .filter(|comment| !inside_a_statement(&statements, comment))
+        .count()
+}
+
+fn offsets(text: &str, range: Range) -> Option<(usize, usize)> {
+    Some((byte_offset(text, range.start)?, byte_offset(text, range.end)?))
+}
+
+/// Every comment lying wholly within bytes `from..to` of `text`, in order.
+fn comments_in(text: &str, from: usize, to: usize) -> Vec<Comment> {
+    readable_spans(text)
+        .into_iter()
+        .filter(|(span, prose)| *prose == Prose::Comment && from <= span.start && span.end <= to)
+        .map(|(span, _)| {
+            let line_start = text[..span.start].rfind('\n').map_or(0, |at| at + 1);
+            Comment {
+                text: text[span.clone()].trim().to_string(),
+                line: text[..span.start].matches('\n').count() as u32 + 1,
+                trailing: !text[line_start..span.start].trim().is_empty(),
+                start: span.start,
+                end: span.end,
+            }
+        })
+        .collect()
+}
+
+fn inside_a_statement(statements: &[Statement], comment: &Comment) -> bool {
+    statements
+        .iter()
+        .any(|statement| statement.start <= comment.start && comment.start < statement.end)
+}
+
+/// The top-level statements of masked `code`, whose first byte is at `base` in the file. A closing
+/// brace ends one when nothing continues it: a `;`, a method call, an `else` do.
+fn statements(code: &[u8], base: usize) -> Vec<Statement> {
+    let mut found = Vec::new();
+    let (mut depth, mut start) = (0usize, None);
+    for (at, byte) in code.iter().enumerate() {
+        if start.is_none() && !byte.is_ascii_whitespace() {
+            start = Some(at);
+        }
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' => depth = depth.saturating_sub(1),
+            b'}' | b';' => {
+                depth = if *byte == b'}' { depth.saturating_sub(1) } else { depth };
+                if depth == 0 && start.is_some() && (*byte == b';' || ends_a_block(code, at + 1)) {
+                    found.push(Statement {
+                        start: base + start.take().unwrap_or(at),
+                        end: base + at + 1,
+                        terminated: true,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Some(start) = start {
+        let end = code.iter().rposition(|byte| !byte.is_ascii_whitespace());
+        found.push(Statement {
+            start: base + start,
+            end: base + end.map_or(start, |at| at + 1),
+            terminated: false,
+        });
+    }
+    found
+}
+
+/// Whether the code after a closing brace starts something else, rather than continuing the
+/// statement the brace closed.
+fn ends_a_block(code: &[u8], after: usize) -> bool {
+    let next = skip_whitespace(code, after);
+    match code.get(next) {
+        None => true,
+        Some(b';' | b'.' | b'?' | b',' | b')') => false,
+        Some(_) => &code[next..word_end(code, next)] != b"else",
+    }
+}
+
+/// The text each dropped comment is written back with, and the byte offset of `produced` it goes
+/// at: before the line of the produced statement a full-line comment preceded, at the end of the
+/// line of the one a trailing comment trailed. `None` when the statements cannot be paired.
+fn insertions(
+    original: &str,
+    range: Range,
+    produced: &str,
+    name: &str,
+    lost: &[Comment],
+) -> Option<Vec<(usize, String)>> {
+    let (from, to) = offsets(original, range)?;
+    let span = function_span(produced, name)?;
+    let (masked, masked_produced) = (masked_to_code(original), masked_to_code(produced));
+    let paired = statements(&masked.as_bytes()[from..to], from);
+    let body = statements(
+        &masked_produced.as_bytes()[span.open + 1..span.close],
+        span.open + 1,
+    );
+    // The assist's tail wraps the outputs, and is the one statement the range did not hold.
+    let tail = body.last().is_some_and(|last| !last.terminated)
+        && paired.last().is_some_and(|last| last.terminated);
+    if body.len() != paired.len() + usize::from(tail) {
+        return None;
+    }
+
+    let mut put = Vec::new();
+    for comment in lost {
+        if inside_a_statement(&paired, comment) {
+            return None;
+        }
+        let text = &comment.text;
+        if comment.trailing {
+            let at = paired.iter().rposition(|statement| statement.end <= comment.start)?;
+            put.push((line_end(produced, body[at].end - 1), format!(" {text}")));
+        } else if let Some(at) = paired.iter().position(|statement| statement.start >= comment.end) {
+            let line = line_start(produced, body[at].start);
+            put.push((line, format!("{}{text}\n", indentation(produced, line))));
+        } else if !tail {
+            let last = body.last()?;
+            let indent = indentation(produced, line_start(produced, last.start));
+            put.push((line_end(produced, last.end - 1), format!("\n{indent}{text}")));
+        } else {
+            return None;
+        }
+    }
+    Some(put)
+}
+
+fn with_insertions(text: &str, mut insertions: Vec<(usize, String)>) -> String {
+    insertions.sort_by_key(|(at, _)| *at);
+    let (mut written, mut cursor) = (String::new(), 0);
+    for (at, inserted) in insertions {
+        written.push_str(&text[cursor..at]);
+        written.push_str(&inserted);
+        cursor = at;
+    }
+    written.push_str(&text[cursor..]);
+    written
+}
+
+fn line_start(text: &str, at: usize) -> usize {
+    text[..at].rfind('\n').map_or(0, |newline| newline + 1)
+}
+
+fn line_end(text: &str, at: usize) -> usize {
+    text[at..].find('\n').map_or(text.len(), |newline| at + newline)
+}
+
+/// The whitespace the line starting at `line` is indented with.
+fn indentation(text: &str, line: usize) -> &str {
+    let width = text[line..]
+        .bytes()
+        .take_while(|byte| *byte == b' ' || *byte == b'\t')
+        .count();
+    &text[line..line + width]
 }
 
 #[cfg(test)]

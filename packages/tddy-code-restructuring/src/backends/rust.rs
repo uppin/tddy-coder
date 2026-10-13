@@ -31,10 +31,6 @@ mod chatter;
 mod documents;
 mod early_return;
 mod escaping_types;
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-extract-method-clean): `check` and `assisted_edit` call this in the green phase"
-)]
 mod extracted_fn;
 mod impl_seam;
 mod imports;
@@ -1168,17 +1164,11 @@ impl LanguageBackend for RustBackend {
             findings.push(refusal.to_string());
         }
         if op.op == RefactorKind::ExtractMethod {
-            findings.extend(
-                refuse_early_returns(&text, planned)
-                    .err()
-                    .map(|e| e.to_string()),
-            );
-            // Not a finding: the carry is what `apply` does about it, so the plan is sound.
-            for statement in imports::local_uses_to_carry(&text, planned) {
-                (self.progress)(&format!(
-                    "the extracted function will carry the function-local `{statement}`"
-                ));
-            }
+            findings.extend(extracted_fn::extract_method_findings(
+                &text,
+                planned,
+                &self.progress,
+            ));
         }
 
         if op.op == RefactorKind::ExtractModule {
@@ -1614,14 +1604,13 @@ impl RustBackend {
         }
 
         if !relocates {
-            // The new function lands outside the one it came from, where that function's own `use`
-            // items are not in scope.
-            let named = if op.op == RefactorKind::ExtractMethod {
-                imports::carry_function_local_uses(original, &named, range, &name)
-            } else {
-                named
+            let cleaned = match op.op {
+                RefactorKind::ExtractMethod => {
+                    self.cleaned_extraction(uri, original, &named, range, &name)?
+                }
+                _ => extracted_fn::Cleaned::unchanged(named),
             };
-            return Ok((named, Vec::new(), Vec::new()));
+            return Ok((cleaned.text, Vec::new(), cleaned.notes));
         }
 
         // Before the import passes, because a seam the assist only half-took is not one those
