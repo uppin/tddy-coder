@@ -29,7 +29,25 @@ pub(super) fn refuse_a_retarget_it_cannot_honour(op: &RefactorOp) -> Result<()> 
     };
     one_path_type(to_type)?;
     anchored_on_an_inherent_impl_by_item(op)?;
-    refuse_a_field_it_does_not_define(op)
+    refuse_a_field_it_does_not_define(op)?;
+    delegator_variant_and_receiver_go_together(op)
+}
+
+/// The delegator is `variant: "leave_delegator"` and `expr`, the receiver it forwards through: one
+/// without the other asks for something the plan does not say.
+fn delegator_variant_and_receiver_go_together(op: &RefactorOp) -> Result<()> {
+    let leaves_a_delegator = op.variant.as_deref() == Some(LEAVE_DELEGATOR);
+    match (leaves_a_delegator, op.expr.is_some()) {
+        (true, false) => Err(malformed(
+            "`variant: \"leave_delegator\"` needs `expr`: the expression that reaches the new \
+             type from `self`",
+        )),
+        (false, true) => Err(malformed(
+            "`expr` on `retarget_impl` is the delegator's receiver, so it needs \
+             `variant: \"leave_delegator\"`",
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// `to_type` as exactly one path type: `app::roster::Roster`, generic arguments allowed on the last

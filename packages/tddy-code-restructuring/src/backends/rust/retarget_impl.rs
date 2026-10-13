@@ -29,28 +29,11 @@ use crate::Result;
 /// P7 (the new type is in another package) and P8 (its module declares no such type) need no
 /// server, so a plain `check` reports them without paying for an index.
 pub(super) fn findings(op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Vec<String>> {
-    let mut findings = preflight::findings(op, workspace)?;
-    findings.extend(deferred_delegator(op));
-    Ok(findings)
+    preflight::findings(op, workspace)
 }
 
-/// The delegator milestone is deferred, so a plan that asks for one is refused rather than
-/// retargeted without the forwarding method it asked for.
-///
-/// TODO(retarget-impl): the `leave_delegator` variant and `expr` are the delegator's; the follow-up
-/// node implements the emitter (P9, S7, R3) and this refusal goes with it. Until then the schema
-/// still names the fields, so a plan that carries them must not read as honoured.
-fn deferred_delegator(op: &RefactorOp) -> Option<String> {
-    (op.variant.is_some() || op.expr.is_some()).then(|| {
-        "`retarget_impl`'s forwarding delegator (`variant: \"leave_delegator\"` with `expr`) is \
-         not implemented yet (node `retarget-impl`, deferred to a follow-up), so the members would \
-         move without the forwarding method the plan asked for"
-            .to_string()
-    })
-}
-
-/// The guard the server never sees: the static findings re-run, the deferred-delegator refusal, and
-/// the `to_type` the plan must name — as the type to retarget, its new self text and its bare name.
+/// The guard the server never sees: the static findings re-run, and the `to_type` the plan must
+/// name — as the type to retarget, its new self text and its bare name.
 fn the_retarget<'a>(
     op: &'a RefactorOp,
     workspace: &Workspace<'_>,
@@ -59,12 +42,6 @@ fn the_retarget<'a>(
     // `check` would have reported — the parity every static preflight in this backend holds.
     if let Some(finding) = preflight::findings(op, workspace)?.into_iter().next() {
         return Err(failure(finding));
-    }
-    if let Some(reason) = deferred_delegator(op) {
-        return Err(crate::RestructureError::UnsupportedOp {
-            backend: reason,
-            op: "RetargetImpl".to_string(),
-        });
     }
     let to_type = op.to_type.as_deref().ok_or_else(|| {
         crate::RestructureError::MalformedPlan(
@@ -203,14 +180,34 @@ fn the_replacement(
         .map(|member| (member.name.as_str(), member_text(text, member)))
         .collect();
     delegator::refuse_unforwardable(&members)?;
-    let delegators = members
+    let mut delegators = members
         .iter()
         .map(|(_, member)| delegator::forwarding_method(member, expr, new_name))
         .collect::<Result<Vec<String>>>()?;
+    // The blank lines that stood between two moved members stand between their delegators.
+    for (at, between) in gaps_between(text, run).into_iter().enumerate() {
+        delegators[at].push_str(&between);
+    }
     let names: Vec<&str> = members.iter().map(|(name, _)| *name).collect();
     let notes =
         delegator::dead_delegators(sites, file, layout.moved.clone(), &names, &run.self_type);
     Ok((layout.with_delegators(&moved_text, &delegators), notes))
+}
+
+/// The blank lines between each moved member and the next, one entry per member but the last.
+fn gaps_between(text: &str, run: &outline::Run) -> Vec<String> {
+    run.moved()
+        .windows(2)
+        .map(|pair| {
+            let gap = &text
+                [line_start(text, pair[0].last_line + 1)..line_start(text, pair[1].first_line)];
+            if gap.trim().is_empty() {
+                gap.to_string()
+            } else {
+                String::new()
+            }
+        })
+        .collect()
 }
 
 /// The edits that move the block: the replacement of the anchored range, plus the `use` of the new

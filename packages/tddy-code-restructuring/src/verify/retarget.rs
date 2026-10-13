@@ -14,7 +14,12 @@
 //!   each declared retarget the original header is read out of the ref's own statements and the
 //!   repeated (old) and rewritten (new) headers it produces are excused from the gained statements.
 //!
-//! Both count into `Excused::repointed`. A rename that was not declared, a changed argument, a lost
+//! - **R3, delegator accounting.** `retarget_impl`'s `leave_delegator` leaves a forwarding method in
+//!   each moved method's slot: a gained `fn` signature line the ref already has, and a gained body
+//!   `<receiver>.<m>(<arguments>)` (or `….await`, or `NEW::<m>(…)`) whose method and argument names
+//!   are exactly those of an excused signature. Each is excused once per signature the ref holds.
+//!
+//! All count into `Excused::repointed`. A rename that was not declared, a changed argument, a lost
 //! statement or a lost comment stay reported.
 
 use std::collections::BTreeMap;
@@ -130,11 +135,202 @@ pub(crate) fn account(
 ) -> Passed {
     let renamed = rename_pairs(missing, added, declared);
     let headed = repeated_headers(renamed.missing, renamed.added, declared, before);
+    let forwarded = delegators(headed.missing, headed.added, declared, before);
     Passed {
-        missing: headed.missing,
-        added: headed.added,
-        pairs: renamed.pairs + headed.pairs,
+        missing: forwarded.missing,
+        added: forwarded.added,
+        pairs: renamed.pairs + headed.pairs + forwarded.pairs,
     }
+}
+
+/// A moved method as its forwarding method names it: the method and its parameters but `self`.
+#[derive(Debug, PartialEq, Eq)]
+struct Forwarded {
+    method: String,
+    arguments: Vec<String>,
+}
+
+/// R3: excuse the delegators a declared retarget leaves. A gained signature line equal to one the
+/// ref has is excused once per such ref statement, and a gained forwarding call naming exactly an
+/// excused signature's method and parameters is excused once per signature.
+fn delegators(
+    missing: Vec<String>,
+    added: Vec<String>,
+    declared: &Declared,
+    before: &[String],
+) -> Passed {
+    if declared.retargets.is_empty() {
+        return Passed {
+            missing,
+            added,
+            pairs: 0,
+        };
+    }
+    let mut ref_signatures: BTreeMap<&str, usize> = BTreeMap::new();
+    for statement in before
+        .iter()
+        .filter(|statement| signature_of(statement).is_some())
+    {
+        *ref_signatures
+            .entry(statements::strip_visibility(statement))
+            .or_default() += 1;
+    }
+
+    let mut pairs = 0;
+    let mut forwardable = Vec::new();
+    let mut rest = Vec::new();
+    for statement in added {
+        let held = ref_signatures
+            .get_mut(statements::strip_visibility(&statement))
+            .filter(|left| **left > 0);
+        match (held, signature_of(&statement)) {
+            (Some(left), Some(signature)) => {
+                *left -= 1;
+                pairs += 1;
+                forwardable.push(signature);
+            }
+            _ => rest.push(statement),
+        }
+    }
+
+    let mut kept = Vec::new();
+    for statement in rest {
+        let slot = forwarding_call(&statement, declared)
+            .and_then(|call| forwardable.iter().position(|signature| *signature == call));
+        match slot {
+            Some(at) => {
+                forwardable.swap_remove(at);
+                pairs += 1;
+            }
+            None => kept.push(statement),
+        }
+    }
+    Passed {
+        missing,
+        added: kept,
+        pairs,
+    }
+}
+
+/// The method and parameter names of a `fn` signature line (one that ends `{`), when `statement`
+/// is one.
+fn signature_of(statement: &str) -> Option<Forwarded> {
+    let line = statement.strip_suffix('{')?.trim_end();
+    let at = line.match_indices("fn ").find_map(|(at, _)| {
+        (at == 0 || line.as_bytes()[at - 1] == b' ').then_some(at + "fn ".len())
+    })?;
+    let rest = &line[at..];
+    let method = &rest[..rest.find(|c: char| !(c.is_alphanumeric() || c == '_'))?];
+    let open = rest.find('(')?;
+    let inner = &rest[open + 1..matching_close(rest, open)?];
+    let arguments = split_top_level(inner)
+        .into_iter()
+        .filter_map(|parameter| {
+            let pattern = parameter
+                .split_once(':')
+                .map_or(parameter, |(head, _)| head);
+            let pattern = pattern.trim();
+            (pattern
+                .split_whitespace()
+                .last()
+                .map(|word| word.trim_start_matches('&'))
+                != Some("self"))
+            .then(|| pattern.strip_prefix("mut ").unwrap_or(pattern).to_string())
+        })
+        .collect();
+    Some(Forwarded {
+        method: method.to_string(),
+        arguments,
+    })
+}
+
+/// The method and arguments of a forwarding call: `<receiver>.<m>(<arguments>)`, its `.await`ed
+/// form, or `<NEW>::<m>(…)` for a `NEW` a declared retarget names.
+fn forwarding_call(statement: &str, declared: &Declared) -> Option<Forwarded> {
+    let call = statement.strip_suffix(".await").unwrap_or(statement);
+    call.ends_with(')').then_some(())?;
+    let open = opening_of_last_paren(call)?;
+    let callee = &call[..open];
+    let (receiver, method) = match callee.rsplit_once('.') {
+        Some(split) => split,
+        None => {
+            let (path, method) = callee.rsplit_once("::")?;
+            let new_type = path.rsplit("::").next()?;
+            declared
+                .retargets
+                .iter()
+                .any(|retarget| retarget.to == new_type)
+                .then_some((path, method))?
+        }
+    };
+    let is_name =
+        |text: &str| !text.is_empty() && text.chars().all(|c| c.is_alphanumeric() || c == '_');
+    (is_name(method) && !receiver.is_empty()).then(|| Forwarded {
+        method: method.to_string(),
+        arguments: split_top_level(&call[open + 1..call.len() - 1])
+            .into_iter()
+            .map(|argument| argument.trim().to_string())
+            .collect(),
+    })
+}
+
+/// The offset of the `(` that the `)` ending `call` closes.
+fn opening_of_last_paren(call: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, byte) in call.bytes().enumerate().rev() {
+        match byte {
+            b')' => depth += 1,
+            b'(' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The offset of the bracket closing the one opened at `open`, when it closes.
+fn matching_close(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, byte) in text.bytes().enumerate().skip(open) {
+        match byte {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `text` split at the commas that sit in no bracket (angle brackets included, a `->` not being
+/// one), empty parts dropped.
+fn split_top_level(text: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let (mut depth, mut start, mut previous) = (0usize, 0, ' ');
+    for (at, character) in text.char_indices() {
+        match character {
+            '(' | '[' | '{' | '<' => depth += 1,
+            ')' | ']' | '}' => depth = depth.saturating_sub(1),
+            '>' if previous != '-' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                parts.push(&text[start..at]);
+                start = at + 1;
+            }
+            _ => {}
+        }
+        previous = character;
+    }
+    parts.push(&text[start..]);
+    parts.retain(|part| !part.trim().is_empty());
+    parts
 }
 
 /// R1: pair each lost statement with a gained one equal to it once every whole-identifier `from`
