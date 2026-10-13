@@ -83,13 +83,7 @@ pub(super) fn tidy(tidying: &Tidying<'_>) -> Result<Tidied> {
     let mut report = Report::default();
     let mut checked = tidy_imports(tidying, &mut report)?;
     report.say(tidying);
-    if let Checked::Compiles(diagnostics) = &checked {
-        checked = match unused_mut::remove_unused_mut(tidying, diagnostics)? {
-            unused_mut::Removed::Nothing => checked,
-            unused_mut::Removed::Compiles(rechecked) => Checked::Compiles(rechecked),
-            unused_mut::Removed::Broken(failure) => Checked::Broken(failure),
-        };
-    }
+    checked = unused_mut::without_unused_mut(tidying, checked)?;
     if matches!(checked, Checked::Compiles(_)) && format_touched_files(tidying)? {
         checked = check(tidying)?;
     }

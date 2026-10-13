@@ -9,28 +9,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::diagnostics::{Diagnostic, Fix};
-use super::{apply_fixes, check, restore, Checked, Failure, Tidying};
+use super::{apply_fixes, check, restore, Checked, Tidying};
 use crate::Result;
 
-/// What the step did.
-pub(super) enum Removed {
-    /// No touched file held an unused `mut`.
-    Nothing,
-    /// Removed, and the re-checked tree compiles; its diagnostics.
-    Compiles(Vec<Diagnostic>),
-    /// Removed, the re-check failed, and the files were restored.
-    Broken(Failure),
-}
-
-/// Remove every `unused_mut` that `diagnostics` (the last check's) reports with a
-/// `MachineApplicable` fix in a file `tidying` touched, then re-check.
-pub(super) fn remove_unused_mut(
-    tidying: &Tidying<'_>,
-    diagnostics: &[Diagnostic],
-) -> Result<Removed> {
+/// `checked` after the step: removes every `unused_mut` that its diagnostics report with a
+/// `MachineApplicable` fix in a file `tidying` touched, then re-checks.
+///
+/// A check that did not compile, or one with no such `mut`, is returned as it was. A re-check that
+/// rejects the removals restores the files and is the failure the run reports.
+pub(super) fn without_unused_mut(tidying: &Tidying<'_>, checked: Checked) -> Result<Checked> {
+    let Checked::Compiles(diagnostics) = &checked else {
+        return Ok(checked);
+    };
     let fixes = unused_mut_fixes(diagnostics, tidying.touched);
     if fixes.is_empty() {
-        return Ok(Removed::Nothing);
+        return Ok(checked);
     }
     let mut before = BTreeMap::new();
     for file in fixes.keys() {
@@ -38,21 +31,19 @@ pub(super) fn remove_unused_mut(
     }
     apply_fixes(tidying.root, &fixes)?;
 
-    match check(tidying)? {
-        Checked::Compiles(rechecked) => {
+    let rechecked = check(tidying)?;
+    match &rechecked {
+        Checked::Compiles(_) => {
             for (file, removed) in &fixes {
                 (tidying.progress)(&format!(
                     "tidied: removed {} unused `mut`(s) from {file}",
                     removed.len()
                 ));
             }
-            Ok(Removed::Compiles(rechecked))
         }
-        Checked::Broken(failure) => {
-            restore(tidying.root, &before)?;
-            Ok(Removed::Broken(failure))
-        }
+        Checked::Broken(_) => restore(tidying.root, &before)?,
     }
+    Ok(rechecked)
 }
 
 /// The removals the compiler offers for an unused `mut` in the touched files. Each target (library,
