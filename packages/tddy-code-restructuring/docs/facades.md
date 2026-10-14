@@ -9,7 +9,8 @@ the code is and what its limits are. The last section covers the facade an `extr
 
 | Concern | Code |
 |---|---|
-| One grouped line per destination | `crate_move.rs` `facade_lines_for_plan` — destinations in first-moved order, modules sorted; a single module is `pub use dest::module;` |
+| One grouped line per destination and visibility | `crate_move.rs` `facade_lines_for_plan(&[FacadeEntry])` — (destination, visibility) pairs in first-moved order, modules sorted; a single `pub` module is `pub use dest::module;` |
+| The visibility a facade keeps | `crate_move/moving.rs` `Move::declaration`, which reads the origin's `mod` line through `manifest_edits::declared_module` (span and visibility); `facade_writer.rs` `glob_entries` builds the `FacadeEntry`s |
 | What a set of moves leaves in a declaring file | `crate_move/moving/facade_writer.rs` `left_behind` → `leaving`, with `earlier_facade`, `extended_facade`, `declaration_of`, `removals_with_separators`, `left_in_place_of`, `parent_reexport_edits` |
 | The span a removed `mod` declaration covers | `crate_move/manifest_edits.rs` `removed_declaration`, `separates_use_runs`, `separator_carriers`; read by `leaving` and by `preconditions.rs` `move_preconditions` |
 | Sorted `pub mod` in the destination root, with the declaration's comments | `crate_move/manifest_edits.rs` `insert_module_declaration_sorted`, called by `facade_writer.rs` `declared_in_destination` (comments read by `comments_of_declaration`) |
@@ -17,6 +18,26 @@ the code is and what its limits are. The last section covers the facade an `extr
 
 `Reexport::Named` and `Reexport::None` do not go through `facade_lines_for_plan`; `facade_line`
 answers them, and answers nothing for `Reexport::Glob`.
+
+## The facade keeps the declaration's visibility
+
+The glob facade is written with the visibility of the `mod` line it replaces, exactly: `pub mod x;` →
+`pub use dest::x;`, `pub(crate) mod x;` → `pub(crate) use dest::x;`, `pub(super)`, `pub(self)` and
+`pub(in …)` the same, and a private `mod x;` → a private `use dest::x;`. A `pub use` over a private module
+would widen the origin's API. `facade_lines_for_plan` groups per (destination, visibility), so two
+`pub(crate)` modules moved to one destination beside a `pub` one leave
+`pub use dest::a;` and `pub(crate) use dest::{b, c};`. `manifest_edits::declared_module` reads a `mod`
+line of any visibility (`module_declaration` and `declared_module_name` delegate to it), so a restricted
+declaration is moved, found by the merge check and sorted in the destination like any other. It matches
+a line of its own: an attribute on the same line (`#[cfg(unix)] mod x;`) is not read as a declaration.
+
+## No facade into a file that moves
+
+A member whose module path lies under another member's (a directory child named in `also`) is folded
+into that member before the facades are written (`carried::fold_carried_members`). Its parent's
+`mod child;` line and any `pub use child::…` stay as written in the moved parent, and the destination
+root declares only the modules the plan moved. No file arriving in the destination is given a `use` that
+names the destination crate.
 
 ## The declaration a move removes
 
@@ -44,11 +65,13 @@ declarations between two runs leave exactly one.
 
 ## Extending a line an earlier operation wrote
 
-`leaving` extends an existing `pub use <dest>::{…};` in the declaring file rather than adding a second.
-It does so only when every module the line names is declared `pub mod` in the destination root, which
-is how a move declares what it carries. **A hand-written `pub use <dest>::alpha;` for a module the
-destination also declares `pub mod` cannot be told from the tool's own line and is extended too.** A
-unit test pins that limit.
+`leaving` extends an existing `<visibility> use <dest>::{…};` in the declaring file rather than adding a
+second, for each visibility that has one; a line of another visibility is left alone and a facade of
+that visibility is added beside it. It does so only when every module the line names is declared `pub mod`
+in the destination root, which is how a move declares what it carries. **A hand-written
+`<visibility> use <dest>::alpha;` for a module the destination also declares `pub mod` cannot be told
+from the tool's own line and is extended too, whatever wrote it; a line naming anything the destination
+does not declare is left alone.** Unit tests pin both.
 
 ## Parent re-exports
 
@@ -102,6 +125,9 @@ and the glob's width rule (`widest_visibility`: `pub` when anything moved is `pu
 of the same file (`seam_survey::test_module_lines`); a reference in another file always does.
 
 ## Verification
+
+`tests/crate_move_restricted_declarations.rs` (library level) pins the facade visibilities and their
+grouping, and the live `pub(crate)` module move in `tests/move_module_to_crate_acceptance.rs` compiles.
 
 `tests/move_facades_acceptance.rs` runs against live rust-analyzer: one grouped facade with a clean
 `cargo clippy -D warnings`, a destination name the origin also binds, sorted declaration, a nested

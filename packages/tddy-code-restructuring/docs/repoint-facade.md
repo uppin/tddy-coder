@@ -83,7 +83,7 @@ A `use` **group** is rewritten by `group::split_or_reprefix`:
 - **Rule P (prefix).** If every leaf agrees on what the group's common prefix becomes, the prefix is
   replaced in place: `use crate::config::{self, X};` → `use kernel::config::{self, X};`, and
   `use crate::{config::A, config::B};` → `use kernel::{config::A, config::B};`. This is the case
-  `repointed_header` handles for a move, produced the same way.
+  `repointed_header_at` handles for a move, produced the same way.
 - **Rule S (split).** Otherwise — the members disagree — each **lifted** member (one with a rewritten
   leaf) leaves the group and becomes its own statement `<visibility> use <new path>;`; the **kept**
   members stay in the original statement under the original prefix, **first**, and the lifted

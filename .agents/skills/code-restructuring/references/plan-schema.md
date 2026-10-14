@@ -415,6 +415,13 @@ leaves reach two crates; a range anchor that covers no `mod` declaration. See
   A path reaching a module **staying behind** is re-pointed at the origin, exactly as a single move
   does. A set of one is refused: that is `move_module_to_crate`.
 
+  **A moved module carries the directory of its children** (`a.rs` with `a/b.rs`, `a/c/mod.rs`, children
+  of an inline `mod i { mod d; }`), each to the same place under the destination, so the plan does not
+  name them. A member of `also` that is a child of another member is folded into it, not refused. A
+  `pub(crate)`, `pub(super)`, `pub(in …)` or private `mod` line is read like a `pub` one, and the facade
+  `reexport: glob` leaves has the same visibility. A restricted child that code outside the moved tree
+  reaches by its own path is refused by `check --deep` and `apply`.
+
   A plain `check` names a **partial** set statically and with no index, which is the refusal that
   used to be discovered only at `apply`. The finding is about a *moved* module whose header still
   names a module staying behind: that makes the destination depend on the crate it left. The crate
