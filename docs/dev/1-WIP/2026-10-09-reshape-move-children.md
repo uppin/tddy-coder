@@ -355,7 +355,7 @@ These are red because the move is refused or every facade is `pub use`.
 
 ## Technical Debt & Production Readiness
 
-- **`crate_move::tests::leaves_a_glob_facade_where_the_module_was_declared`** (`crate_move.rs:868`) contradicts decision F2. Its fixture declares `mod host_registry;` privately (`:585`) and asserts `pub use tddy_host_service::host_registry;`, and the facade now mirrors the declaration (`use …;`). The test was not edited (the assertion is the requirement under review). One-line fix for the owner: expect `use tddy_host_service::host_registry;`, or declare the fixture's module `pub mod`.
+- **`crate_move::tests::leaves_a_glob_facade_where_the_module_was_declared`** (`crate_move.rs`) asserted `pub use` for a privately declared `mod host_registry;`, which decision F2 (the facade mirrors the declaration) makes wrong. Its expectation is now `use tddy_host_service::host_registry;` (commit `af7920233`). It is the only pre-existing test edited.
 - **`left_behind` has no "skip a travelling declaring file" branch.** `read_members` folds every member whose module path lies under another member's, so a member never has a carried file as its `declared_in`; the branch would be unreachable. The behaviour the Responsibility asks for (no self facade) is the folding.
 - **The static `uncarriable` findings run only when `move_preconditions` passes** for the operation (`preconditions::unrunnable`): its signature takes `ops` and `index`, which `move_preconditions` does not have, and a refused operation is already reported once.
 - **A restricted child declared inside an inline module** (`mod i { pub(crate) mod d; }`) is read by name against the nearest carried file, and the inline module's own visibility is not read. A caller cannot reach such a path from outside `a` today, so nothing is lost, but it is not tested.
@@ -454,6 +454,29 @@ Taken by this plan:
 ### Green (2026-10-13)
 
 Scoped gate `./test -p tddy-code-restructuring` (whole package, `--no-fail-fast`): 1386 passed, 116 failed, 1 ignored. Every failure is outside this node's tests: `extract_method_clean`, `extract_method_guard_lift`, `multi_seam_extract`, `same_crate_widening` (other nodes' contracts), `move_facades_acceptance` (4), `apply_tidy_acceptance` (2), `apply_compile_gate_acceptance` (1), `extract_facade_acceptance` (2), and `--lib` (63: node 3's `removed_declaration`, extract-method, rust-analyzer and filesystem cases). The four binaries that touch crate moves or the tidy were re-run on the contract commit and fail identically there. The one failure this node causes is `crate_move::tests::leaves_a_glob_facade_where_the_module_was_declared` (see Technical Debt). `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt --check` are clean. Both live cases (30, 31) pass.
+
+### Rebased green and validation (2026-10-14)
+
+The branch was rebased twice onto a rewritten `feature/reshape/extract-method-clean` (`--onto` the recorded old tips); one conflict, in `crate_move/moving/facade_writer.rs`, was resolved by keeping node 3's `removed_declaration` span and separators and this node's per-visibility facades. Review of the merge found no logic error: `Move::declaration` and `removed_declaration` both read through `declared_module`, so facade visibility and removal span refer to the same line.
+
+**Scoped gate** (`tddy-code-restructuring` only): `cargo check --all-targets`, `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` clean. Whole package: 1516 passed, 2 failed, 1 ignored. The two failures (`extract_method_clean_acceptance::a_range_opening_on_a_line_comment_resolves_within_the_ready_bound`, `extract_method_guard_lift_acceptance::a_range_that_is_a_tail_match_arms_body_is_extracted_with_its_returns_verbatim`) are other nodes' tests; each passes alone in about 10s, so they were load-related. This supersedes the 1386/116 figure under *Green* above, which was taken on the pre-rebase base.
+
+**Validation against the plan (`/validate-changes`):** no critical findings. Every Responsibility and Delta item is implemented; no `TODO(reshape-move-children)`, `todo!()` or `#[allow(dead_code)]` remains. Boundaries held, and nothing owned by nodes 3, 7, 8, 9 or 14 was implemented here.
+
+| Finding | Severity | Where |
+|---|---|---|
+| `Reexport::Named` with carried children: only the own file's survey feeds the facade, so items outside callers reach through a child are not named and nothing refuses it (verified) | WARNING | `cluster.rs` `member_changes`, `if file.below.is_empty()` |
+| `cluster.rs` production lines 260 → 342; Boundaries allow growth only in `member_changes` (`TheSet`/`SetTotals` add about 35 lines) | WARNING | `cluster.rs:167-210` |
+| A private facade `use dest::x;` is indistinguishable from a hand-written one in `written_facade` | WARNING | `facade_writer.rs` |
+| A restricted child is matched by name in its carried file; an inline module's own visibility is not read (already noted, untested) | WARNING | `carried.rs` `restricted_children` |
+| `move_module_to_crate_acceptance`: `files_reported(rehearsal) == files_reported(account)` passes when both are empty | WARNING | `tests/move_module_to_crate_acceptance.rs` |
+| No test for `pub(in …)`/`pub(self)` facades, `Reexport::Named`, an inline-module restricted child, or a live restricted-`mod` move | WARNING | coverage |
+| `repointed_header` was removed rather than delegating; `path-survey.md:14`, `readiness-and-gates.md:203` and `repoint-facade.md:86` still name it | WARNING | docs, fixed at wrap |
+| `leaving` grew 36 → 57 lines | INFO | `facade_writer.rs` |
+| The "declares no `mod`" refusal exists three times (`declaration_of`, `Move::declaration`, `preconditions.rs`) | INFO | duplication |
+| `carried.rs` is 290 production lines, not the planned ~180; `rust.rs` stays at 2997 production lines (pre-existing, not grown) | INFO | size |
+
+**Changeset sync:** M1–M7 ✅ complete in code. M8 ⚠️ in progress (package docs, the PRD hook and todo narrowing remain for the wrap). The Coverage Requirements boxes are proven by tests 1–31 except the gaps in the table above.
 
 ## TODO
 
