@@ -652,3 +652,52 @@ fn a_restricted_child_inside_an_inline_module_is_read_where_it_is_declared() {
          Widen the declaration to `pub mod d;` before moving, or stop naming the child \
          through its own path");
 }
+
+/// A cluster resolved the way a backend returns it names, once per member that carries more than
+/// its own file, how many files move with it.
+#[test]
+fn a_cluster_resolution_notes_how_many_files_move_with_a_member_carrying_its_children() {
+    // Given `x::a` with its four child files and the top-level `top` with one, moving together
+    let workspace = a_workspace_whose_module_has_directory_children();
+    let cluster = a_cluster_of(
+        vec![the_module_a(), a_member(&["top"], ORIGIN_LIB)],
+        Reexport::None,
+    );
+
+    // When the cluster is resolved as a backend returns it
+    let resolution = crate_move::cluster_resolution(
+        &mut nothing_reaches_the_tree(),
+        &workspace.workspace(),
+        &cluster,
+    )
+    .expect("the cluster resolves");
+
+    // Then each member that carries children is named with its file count, in member order
+    assert_eq!(
+        resolution.notes,
+        vec![
+            "5 file(s) move with `a`, with the directory of its children".to_string(),
+            "2 file(s) move with `top`, with the directory of its children".to_string(),
+        ]
+    );
+}
+
+/// A single module resolved the way a backend returns it carries the same note: it is a cluster
+/// of one.
+#[test]
+fn a_single_module_resolution_notes_how_many_files_move_with_it() {
+    // Given a plan moving `x::a` alone
+    let workspace = a_workspace_whose_module_has_directory_children();
+    let op = a_move_of(MODULE, "x::a");
+
+    // When it is resolved as a backend returns it
+    let resolution =
+        crate_move::resolution(&mut nothing_reaches_the_tree(), &workspace.workspace(), &op)
+            .expect("the move resolves");
+
+    // Then the note names the module and its five files
+    assert_eq!(
+        resolution.notes,
+        vec!["5 file(s) move with `a`, with the directory of its children".to_string()]
+    );
+}
