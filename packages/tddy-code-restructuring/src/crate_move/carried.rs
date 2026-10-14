@@ -13,7 +13,12 @@ use crate::registry::Workspace;
 use super::preconditions::{
     body_path_left_behind, home_of_anchor, moved_by_earlier_operations, travelling_modules,
 };
-use super::{malformed, manifest_edits, ModuleHome, Move, MovingCluster, PlannedRewrite, Result};
+use std::collections::BTreeSet;
+
+use super::{
+    malformed, manifest_edits, module_files, ModuleHome, Move, MovingCluster, PlannedRewrite,
+    Result, Survey,
+};
 use crate::RestructureError;
 
 /// The members of a cluster with every member a co-moving member carries taken out.
@@ -287,4 +292,43 @@ fn restricted_children(workspace: &Workspace<'_>, member: &Move) -> Result<Vec<R
         }
     }
     Ok(restricted)
+}
+
+/// What every member of a cluster is read against: the module paths moving together, and every
+/// file that moves, each member's carried files included.
+pub(super) struct TheSet {
+    pub(super) co_moving: BTreeSet<String>,
+    /// Each member's carried files, in the members' order.
+    pub(super) carried: Vec<Vec<module_files::MovedFile>>,
+    pub(super) travelling: BTreeSet<String>,
+}
+
+impl TheSet {
+    pub(super) fn of(workspace: &Workspace<'_>, members: &[Move]) -> Result<TheSet> {
+        let carried = members
+            .iter()
+            .map(|member| member.carried(workspace))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(TheSet {
+            co_moving: members
+                .iter()
+                .map(|member| member.home.path.join("::"))
+                .collect(),
+            travelling: carried
+                .iter()
+                .flatten()
+                .map(|file| file.from.clone())
+                .collect(),
+            carried,
+        })
+    }
+}
+
+/// What the members contribute to the edits that belong to the set rather than to a member.
+#[derive(Default)]
+pub(super) struct SetTotals {
+    pub(super) surveys: Vec<Survey>,
+    pub(super) crates_named: BTreeSet<String>,
+    pub(super) dev_crates_named: BTreeSet<String>,
+    pub(super) keeps_naming_it: BTreeSet<String>,
 }

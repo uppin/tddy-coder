@@ -15,7 +15,7 @@ use crate::plan::Reexport;
 
 use super::module_home;
 
-use super::{malformed, Survey};
+use super::malformed;
 use crate::crate_move::{carried, header, module_files, moving, refusals};
 use crate::edit::{FileEdit, TextEdit};
 
@@ -114,10 +114,10 @@ pub fn resolve_cluster(
     cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
     let members = read_members(workspace, cluster)?;
-    let the_set = TheSet::of(workspace, &members)?;
+    let the_set = carried::TheSet::of(workspace, &members)?;
 
     let mut merged = MergedChanges::default();
-    let mut totals = SetTotals::default();
+    let mut totals = carried::SetTotals::default();
     for (member, files) in members.iter().zip(&the_set.carried) {
         member_changes(
             engine,
@@ -129,7 +129,7 @@ pub fn resolve_cluster(
             &mut totals,
         )?;
     }
-    let SetTotals {
+    let carried::SetTotals {
         surveys,
         crates_named,
         mut dev_crates_named,
@@ -164,45 +164,6 @@ pub fn resolve_cluster(
     })
 }
 
-/// What every member of a cluster is read against: the module paths moving together, and every
-/// file that moves, each member's carried files included.
-struct TheSet {
-    co_moving: BTreeSet<String>,
-    /// Each member's carried files, in the members' order.
-    carried: Vec<Vec<module_files::MovedFile>>,
-    travelling: BTreeSet<String>,
-}
-
-impl TheSet {
-    fn of(workspace: &Workspace<'_>, members: &[moving::Move]) -> Result<TheSet> {
-        let carried = members
-            .iter()
-            .map(|member| member.carried(workspace))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(TheSet {
-            co_moving: members
-                .iter()
-                .map(|member| member.home.path.join("::"))
-                .collect(),
-            travelling: carried
-                .iter()
-                .flatten()
-                .map(|file| file.from.clone())
-                .collect(),
-            carried,
-        })
-    }
-}
-
-/// What the members contribute to the edits that belong to the set rather than to a member.
-#[derive(Default)]
-struct SetTotals {
-    surveys: Vec<Survey>,
-    crates_named: BTreeSet<String>,
-    dev_crates_named: BTreeSet<String>,
-    keeps_naming_it: BTreeSet<String>,
-}
-
 /// What one member adds to the edit: a rename and a re-pointed header for each file it carries,
 /// the callers of everything in its tree that something outside the set names, and the refusals
 /// that are about the member as a whole.
@@ -214,9 +175,9 @@ fn member_changes(
     workspace: &Workspace<'_>,
     member: &moving::Move,
     files: &[module_files::MovedFile],
-    the_set: &TheSet,
+    the_set: &carried::TheSet,
     merged: &mut MergedChanges,
-    totals: &mut SetTotals,
+    totals: &mut carried::SetTotals,
 ) -> Result<()> {
     let mut rewrites = Vec::new();
     let mut origin_paths = Vec::new();
