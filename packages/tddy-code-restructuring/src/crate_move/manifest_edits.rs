@@ -18,6 +18,122 @@ pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::R
     None
 }
 
+/// A `mod <module>;` declaration as a crate move removes it: its line and the comment lines
+/// directly above it, which travel to the destination's declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RemovedDeclaration {
+    /// From the first comment line directly above the declaration (or the declaration's own line) to
+    /// the end of its line, newline included.
+    pub(crate) span: std::ops::Range<usize>,
+    /// The `///` and `//` lines that were directly above it, each with its newline; empty for none.
+    pub(crate) comments: String,
+}
+
+/// The declaration of `module` in `text` (the file at `path`) as a crate move removes it.
+///
+/// `None` when [`module_declaration`] finds no such declaration. Refused, naming the attribute, when
+/// an attribute line (`#[…]`) sits directly above it: a move to another crate can neither keep nor
+/// drop a `#[cfg]`, `#[path]` or `#[allow]` without changing what compiles.
+pub(crate) fn removed_declaration(
+    text: &str,
+    path: &str,
+    module: &str,
+) -> crate::Result<Option<RemovedDeclaration>> {
+    let Some(declaration) = module_declaration(text, module) else {
+        return Ok(None);
+    };
+
+    let mut start = declaration.start;
+    for line in text[..declaration.start].split_inclusive('\n').rev() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#[") || trimmed.starts_with("#![") {
+            return Err(super::malformed(format!(
+                "`mod {module};` in {path} carries `{}`, which a move to another crate can neither \
+                 keep nor drop without changing what compiles — remove or move it by hand, then \
+                 plan again",
+                trimmed.trim_end()
+            )));
+        }
+        if !trimmed.starts_with("//") {
+            break;
+        }
+        start -= line.len();
+    }
+
+    Ok(Some(RemovedDeclaration {
+        span: start..declaration.end,
+        comments: text[start..declaration.start].to_string(),
+    }))
+}
+
+/// Whether taking `span` out of `text` would make the `use` run above it and the one below it one
+/// run, which rustfmt would then sort as one.
+///
+/// True when the nearest non-blank line above `span` ends a `use` item and the first line below it
+/// starts one, or starts the comment lines directly above one.
+pub(crate) fn separates_use_runs(text: &str, span: std::ops::Range<usize>) -> bool {
+    let above: Vec<&str> = text[..span.start].lines().collect();
+    let mut below = text[span.end..].lines();
+
+    ends_a_use_item(&above)
+        && below
+            .find(|line| !line.trim_start().starts_with("//"))
+            .is_some_and(begins_a_use_item)
+}
+
+/// Which of `spans` (each a removed declaration of `text`) carries the blank line that keeps two
+/// `use` runs apart, one flag per span, in order.
+///
+/// Declarations that abut (one starts where another ends) go together, so each is not judged alone:
+/// the group is weighed as one by [`separates_use_runs`], and only its last member carries the line,
+/// which makes it appear once.
+pub(crate) fn separator_carriers(text: &str, spans: &[std::ops::Range<usize>]) -> Vec<bool> {
+    spans
+        .iter()
+        .map(|span| {
+            let last_of_group = !spans.iter().any(|other| other.start == span.end);
+            last_of_group && separates_use_runs(text, group_start(spans, span.start)..span.end)
+        })
+        .collect()
+}
+
+/// Where the run of abutting `spans` that starts at or before `start` begins.
+fn group_start(spans: &[std::ops::Range<usize>], mut start: usize) -> usize {
+    while let Some(before) = spans.iter().find(|other| other.end == start) {
+        start = before.start;
+    }
+    start
+}
+
+/// Whether the last of `lines` closes a `use` item: it ends in `;` and the item it ends starts with
+/// `use`, however many lines a grouped one runs over.
+fn ends_a_use_item(lines: &[&str]) -> bool {
+    let Some(last) = lines.last().filter(|line| line.trim_end().ends_with(';')) else {
+        return false;
+    };
+    if begins_a_use_item(last) {
+        return true;
+    }
+    lines[..lines.len() - 1]
+        .iter()
+        .rev()
+        .take_while(|line| !line.trim().is_empty() && !line.trim_end().ends_with(';'))
+        .any(|line| begins_a_use_item(line))
+}
+
+/// Whether `line` opens a `use` item, whatever its visibility.
+fn begins_a_use_item(line: &str) -> bool {
+    let line = line.trim_start();
+    let rest = match line.strip_prefix("pub") {
+        None => line,
+        Some(rest) => match rest.strip_prefix('(') {
+            Some(restriction) => restriction.split_once(')').map_or("", |(_, after)| after),
+            None => rest,
+        },
+    };
+    rest.trim_start().starts_with("use ")
+}
+
 /// The edit that declares `line` (`pub mod host_registry;`) among the root's existing `mod` lines,
 /// in sorted position: before the first declared module that sorts after it, else after the last
 /// one, and after the file's own header when it declares none.
@@ -25,7 +141,11 @@ pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::R
 /// Sorted rather than appended, because a root whose declarations are in order stays in order, and
 /// one that is not gets no worse — the new line lands where the sort puts it relative to its
 /// neighbours and nothing else is moved.
-pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str) -> TextEdit {
+///
+/// `comments` are the comment lines that documented the declaration where it was (each ending in a
+/// newline, empty for none); they are written directly above it.
+pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str, comments: &str) -> TextEdit {
+    let documented = format!("{comments}{line}");
     let named = declared_module_name(line);
     let mut offset = 0usize;
     let mut header_ends = 0usize;
@@ -49,12 +169,12 @@ pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str) -> TextEd
             continue;
         };
         if named.is_some_and(|new| new < declared) {
-            return insertion(text, start, line);
+            return insertion(text, start, &documented);
         }
         after_last = Some(offset);
     }
 
-    insertion(text, after_last.unwrap_or(header_ends), line)
+    insertion(text, after_last.unwrap_or(header_ends), &documented)
 }
 
 /// The identifier a `[pub ]mod <name>;` line declares.
@@ -319,7 +439,7 @@ mod sorted_declaration_tests {
         let root = "//! The crate.\n\npub mod alpha;\npub mod zeta;\n";
 
         // When `host_registry` is declared
-        let edit = insert_module_declaration_sorted(root, "pub mod host_registry;");
+        let edit = insert_module_declaration_sorted(root, "pub mod host_registry;", "");
 
         // Then it lands between them
         assert_eq!(
@@ -332,7 +452,7 @@ mod sorted_declaration_tests {
     fn a_module_that_sorts_last_is_declared_after_the_last() {
         let root = "pub mod alpha;\npub mod beta;\n";
 
-        let edit = insert_module_declaration_sorted(root, "pub mod gamma;");
+        let edit = insert_module_declaration_sorted(root, "pub mod gamma;", "");
 
         assert_eq!(
             apply_text_edits(root, &[edit]),
@@ -361,5 +481,163 @@ mod lib_path_tests {
 
         // When / Then
         assert_eq!(lib_path(manifest), None);
+    }
+}
+
+#[cfg(test)]
+mod removed_declaration_tests {
+    use super::*;
+    use crate::apply::edited;
+
+    const ROOT: &str = "packages/origin/src/lib.rs";
+
+    fn the_removal_of(text: &str, module: &str) -> RemovedDeclaration {
+        removed_declaration(text, ROOT, module)
+            .expect("the declaration can be removed")
+            .expect("the module is declared")
+    }
+
+    #[test]
+    fn a_removed_declaration_takes_the_doc_and_plain_comments_directly_above_it() {
+        // Given a declaration with a doc comment and a plain comment directly above it
+        let text =
+            "pub use kernel::config;\n\n/// The presenter observer.\n// Spawned per session.\n\
+                    pub mod presenter_observer_task;\npub use rpc::pty_runtime;\n";
+
+        // When its removal is read
+        let removal = the_removal_of(text, "presenter_observer_task");
+
+        // Then the comments go with it, and nothing below it
+        assert_eq!(
+            (&text[removal.span.clone()], removal.comments.as_str()),
+            (
+                "/// The presenter observer.\n// Spawned per session.\npub mod presenter_observer_task;\n",
+                "/// The presenter observer.\n// Spawned per session.\n"
+            )
+        );
+    }
+
+    #[test]
+    fn a_removed_declaration_stops_at_a_blank_line_above_it() {
+        // Given a doc comment separated from the declaration by a blank line
+        let text = "/// About the crate's facades.\n\npub mod agent_list_mapping;\n";
+
+        // When its removal is read
+        let removal = the_removal_of(text, "agent_list_mapping");
+
+        // Then only the declaration's own line goes, and no comment travels
+        assert_eq!(
+            (&text[removal.span.clone()], removal.comments.as_str()),
+            ("pub mod agent_list_mapping;\n", "")
+        );
+    }
+
+    #[test]
+    fn a_declaration_carrying_an_attribute_is_refused_naming_the_attribute() {
+        for attribute in [
+            "#[cfg(test)]",
+            "#[path = \"x.rs\"]",
+            "#[allow(dead_code)]",
+            "#[doc = \"x\"]",
+        ] {
+            // Given a declaration with an attribute directly above it
+            let text = format!("/// Documented.\n{attribute}\npub mod moving;\n");
+
+            // When its removal is read
+            let refusal = removed_declaration(&text, ROOT, "moving")
+                .expect_err("an attribute on a moved declaration is refused")
+                .to_string();
+
+            // Then the refusal names the declaration, the file and the attribute
+            assert!(
+                refusal.contains(&format!(
+                    "`mod moving;` in {ROOT} carries `{attribute}`, which a move to another crate \
+                     can neither keep nor drop without changing what compiles"
+                )),
+                "{refusal}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_removal_between_two_use_runs_is_reported_as_separating_them_and_one_beside_a_blank_line_is_not(
+    ) {
+        // Given a declaration that is the only line between two `use` runs, and one with a blank
+        // line below it
+        let joined = "pub use telegram::active_elicitation;\npub mod agent_list_mapping;\n\
+                      /// Auth.\npub use auth::{auth, github};\n";
+        let apart = "pub use telegram::active_elicitation;\npub mod agent_list_mapping;\n\n\
+                     pub use auth::{auth, github};\n";
+
+        // When each removal is weighed
+        let between = separates_use_runs(joined, the_removal_of(joined, "agent_list_mapping").span);
+        let beside = separates_use_runs(apart, the_removal_of(apart, "agent_list_mapping").span);
+
+        // Then only the first would join two runs
+        assert_eq!((between, beside), (true, false));
+    }
+
+    /// Which of `m1` and `m2`, declared in `text`, carries the blank line that keeps two `use` runs apart.
+    fn the_separator_carriers_of_m1_and_m2_in(text: &str) -> Vec<bool> {
+        let spans: Vec<_> = ["m1", "m2"]
+            .iter()
+            .map(|module| the_removal_of(text, module).span)
+            .collect();
+        separator_carriers(text, &spans)
+    }
+
+    #[test]
+    fn two_adjacent_removals_between_two_use_runs_leave_one_separator_carried_by_the_last() {
+        // Given two adjacent declarations that are the only lines between two `use` runs
+        let text = "pub use a::x;\npub mod m1;\npub mod m2;\npub use b::y;\n";
+
+        // When their removals are weighed
+        let carriers = the_separator_carriers_of_m1_and_m2_in(text);
+
+        // Then only the last carries the line, so it appears once
+        assert_eq!(carriers, [false, true]);
+    }
+
+    #[test]
+    fn two_adjacent_removals_above_a_blank_line_carry_no_separator() {
+        // Given two adjacent declarations with a blank line below them, before the next `use` run
+        let text = "pub use a::x;\npub mod m1;\npub mod m2;\n\npub use b::y;\n";
+
+        // When their removals are weighed
+        let carriers = the_separator_carriers_of_m1_and_m2_in(text);
+
+        // Then the runs are already apart and nothing is added
+        assert_eq!(carriers, [false, false]);
+    }
+
+    #[test]
+    fn two_removals_with_a_blank_line_between_them_carry_no_separator() {
+        // Given two declarations a blank line apart, between two `use` runs
+        let text = "pub use a::x;\npub mod m1;\n\npub mod m2;\npub use b::y;\n";
+
+        // When their removals are weighed
+        let carriers = the_separator_carriers_of_m1_and_m2_in(text);
+
+        // Then each is weighed alone and neither joins the runs
+        assert_eq!(carriers, [false, false]);
+    }
+
+    #[test]
+    fn a_declaration_is_inserted_in_sorted_position_with_its_comments_above_it() {
+        // Given a destination root declaring `alpha` and `zeta`
+        let root = "pub mod alpha;\npub mod zeta;\n";
+
+        // When `observer` is declared with the comment that documented it in the origin
+        let edit = insert_module_declaration_sorted(
+            root,
+            "pub mod observer;",
+            "/// The presenter observer.\n",
+        );
+
+        // Then it lands in sorted position, documented
+        assert_eq!(
+            edited(root.to_string(), &[edit]).expect("the edit applies"),
+            "pub mod alpha;\n/// The presenter observer.\npub mod observer;\npub mod zeta;\n"
+        );
     }
 }

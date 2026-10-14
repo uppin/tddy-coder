@@ -75,6 +75,25 @@ pub(super) fn named_by_errors<'a>(
         .collect()
 }
 
+/// The imports a repair gates for tests: those an error of the failed re-check names, and every one
+/// a build reads while another reports it unused (`unused.read_by_a_unit`).
+///
+/// The second needs no quoted name, which is what a glob binds none of and what an error over a trait
+/// method never quotes — it names the method, not the trait. One build already read the import, so
+/// removing it can only break that build. Each span once, in `Span` order.
+pub(super) fn to_gate_in_a_repair<'a>(
+    unused: &'a UnusedImports,
+    before: &BTreeMap<String, Vec<u8>>,
+    quoted: &BTreeSet<String>,
+) -> Vec<&'a Span> {
+    named_by_errors(&unused.primaries, before, quoted)
+        .into_iter()
+        .chain(&unused.read_by_a_unit)
+        .collect::<BTreeSet<&Span>>()
+        .into_iter()
+        .collect()
+}
+
 /// A `use` statement located around an import's span.
 struct Statement<'a> {
     /// Start of the line the `use` sits on; the replacement covers `line_start..end`.

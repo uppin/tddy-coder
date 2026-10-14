@@ -8,7 +8,8 @@
 
 use serde_json::Value;
 
-use super::super::{attached_trivia_starts_at, seam_refusal, SYMBOL_KIND_IMPL};
+use super::super::{seam_refusal, SYMBOL_KIND_IMPL};
+use crate::crate_move::source_scan::attached_trivia_starts_at;
 use crate::edit::Range;
 use crate::Result;
 

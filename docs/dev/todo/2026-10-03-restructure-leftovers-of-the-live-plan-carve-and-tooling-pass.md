@@ -27,18 +27,6 @@ structs), and because the empty-`impl` shell case is unverified. Close it with t
 sequence, then delete `packages/tddy-code-restructuring/docs/code-issues/oversized-file-backends-rust.md`
 recording the final number.
 
-## 2. The facade over-lists (upstream of the tidy)
-
-A `named` facade re-exports every item "reached from outside the new module", and the parent's own
-tests count as outside, so a split leaves wide `use module::{…}` groups of which most names are unused in
-the library build (13 findings over 11 groups for `plan-rust1`). The tidy now cleans them
-(root cause in `docs/dev/changesets/2026-10-03-index-daemon-live-plans.md`), but the engine
-should not write them. Design (60–90 lines in `rust.rs` plus tests): `reach_of` records whether any
-same-file reference lies outside a `#[cfg(test)]` module; `MovedItem` carries `reached_from_production`;
-`facade_lines` / `facade_will_bind` emit production-reached names as today and the rest under
-`#[cfg(test)]`. A reference in another file still counts as production. Do it **after** item 1, so the
-code it touches is in its final place.
-
 ## 3. `crate_move/test_binary.rs` (966 lines, pre-existing)
 
 Not a regression of the stack, so not carved here. The analysis found three contiguous seams — `prose`
@@ -59,10 +47,6 @@ The skill now documents the behaviour (`code-restructuring` § Testing cadence);
 - **Field and method visibility.** A moved struct's `pub(super)` field is rebased (block-form bodies
   only); a tuple struct whose fields are on one line, and `pub(super)` **methods** inside a moved `impl`
   block, are not covered and were not tested.
-- **A trait import only tests use.** The tidy gates an import by the *names the errors quote*; an error
-  that names a method (`write_str`) never names the trait, so `use std::fmt::Write;` needed only by
-  tests fails the run loudly (the tidy is undone) instead of being gated. Matching the `help` children
-  (`trait Write`) would close it.
 - **Round-by-round iteration** of the tidy's repair is tested at the decision level only; no cheap
   real-cargo case newly quotes names in a second round.
 - **`restructure_args` / daemon `--items`.** Four front ends now share `parse_item_list`; a fifth
@@ -74,20 +58,6 @@ The token pass drops the structural closer lines (`})`) before it counts tokens,
 turned from `.filter(|m| …)` into `.filter(|m| { … })` reports one `)` lost although nothing is. It
 appeared on the `rust.rs` split. Count the parentheses and brackets of the excused structural lines on
 both sides in the token pass, so layout moves them without changing the balance.
-
-## 7. A split drops a `pub` item nothing references from the crate's public path
-
-A named facade lists the items "reached from outside the new module". An item declared `pub` that
-nothing in the workspace calls is not reached, so it is left out, and the moved `pub fn` ends up
-public in a *private* module: unreachable by any path, and a dead-code warning on the library build.
-It showed on the `verify.rs` split (`pub fn statements`, no callers); the tidy reported the warning and
-the apply was clean otherwise. Fixed there by hand (one `pub use`, marked as a post-move fix).
-
-**What would close it.** `facade_lines` / `facade_will_bind` must include every item the moved run
-declares `pub` (and, for a `pub(crate)` run, `pub(crate)` items another module of the crate can see),
-whether or not the reference survey finds a caller — the public path is part of the crate's interface,
-and removing it is not something a move is allowed to do. Test: extract a contiguous run containing an
-unreferenced `pub fn` with `reexport: named` and assert it is still reachable through the old path.
 
 ## 8. Process: tooling fixes were validated on the failing split, not on a corpus
 

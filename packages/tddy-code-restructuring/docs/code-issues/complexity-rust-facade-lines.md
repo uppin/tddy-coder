@@ -17,6 +17,7 @@
 | 2026-09-18 | 47 | 5 | 5 | 1 | first detection |
 | 2026-09-24 | 47 | 5 | 5 | 1 | unchanged; #527 moved it from line 3978 to 3522 by taking code out of `rust.rs` above it, and did not touch the function |
 | 2026-10-05 | 54 | 5 | — | — | touched by the same-crate moves: `reexport: outside` is refused for an extraction, one match arm with a `return Err(…)` (fn line to closing brace: 51 at the merge base, 58 at HEAD, so +7; the record's own count 47 plus 7). Nesting is unchanged at 5 (brace depth 6 counting the function's own, at both). One match arm and one early exit are added; the branch and early-exit columns are the first detection's plus those, not re-derived by the original scan. The finding stands |
+| 2026-10-13 | 22 | 2 | 4 | 1 | `#reshape` 3/19 (`tidy-facades`): the `Reexport::Named` arm moved whole into the private `named_facade_lines` (with `tier_lines` and `is_carried` beside it), so `facade_lines` is now `fn` line 151 to closing brace 172, a dispatch over four arms with one early exit (`reexport: outside` refused). Nesting by the convention of the 2026-10-05 row is 2 (brace depth 3 counting the function's own: function, `match`, the `Outside` arm), against 5. `named_facade_lines` is 16 lines and `tier_lines` 30. The branch and early-exit columns are counted by hand, not by the original scan. Under the `/analyze-clean-code` nesting threshold; the record stays open for `#reshape` 19 to decide its closure |
 
 ## What the tool found
 

@@ -73,9 +73,9 @@ pub fn refuse_a_broken_baseline(
         options.wait_heartbeat,
     )? {
         None => Ok(()),
-        Some((checked, errors)) => {
-            Err(RestructureError::BaselineDoesNotCompile { checked, errors })
-        }
+        Some(Rejection {
+            checked, errors, ..
+        }) => Err(RestructureError::BaselineDoesNotCompile { checked, errors }),
     }
 }
 
@@ -122,7 +122,7 @@ pub fn refuse_a_broken_result(
     }
     let broken = match checked? {
         None => tidy_a_complete_run(root, options, (applied, total), &touched, &packages, cancel)?,
-        Some(broken) => Some(broken),
+        Some(rejection) => Some(untidied(rejection, &touched)),
     };
     match broken {
         None => Ok(()),
@@ -140,6 +140,34 @@ pub fn refuse_a_broken_result(
             errors,
         }),
     }
+}
+
+/// The check and errors of a failed result check, led by what it says about the tidy it kept from
+/// running.
+fn untidied(rejection: Rejection, touched: &BTreeSet<String>) -> (String, String) {
+    let note = untidied_note(&rejection.stderr, touched);
+    (rejection.checked, format!("{note}{}", rejection.errors))
+}
+
+/// What a failed result check says about the tidy it kept from running: that the written files were
+/// neither tidied nor formatted, and how many `unused import` warnings the failing check reported in
+/// them (`stderr` is the check's `short` output, `touched` the files the run wrote). One line ending
+/// in a newline, written ahead of the compiler's errors.
+fn untidied_note(stderr: &str, touched: &BTreeSet<String>) -> String {
+    let left = stderr
+        .lines()
+        .filter(|line| {
+            let Some((place, warning)) = line.split_once(": warning: ") else {
+                return false;
+            };
+            let file = place.rsplitn(3, ':').nth(2).unwrap_or(place);
+            warning.starts_with("unused import") && touched.iter().any(|path| file.ends_with(path))
+        })
+        .count();
+    format!(
+        "the tidy did not run, so the written files were neither tidied nor formatted; the failing \
+         check reported {left} `unused import` warning(s) in them\n"
+    )
 }
 
 /// Tidy the tree of a run that applied **every** operation, returning the check and errors when
@@ -234,7 +262,7 @@ pub(super) fn failing_check(
     cancel: &CancellationToken,
     progress: &ProgressSink,
     wait_heartbeat: Duration,
-) -> Result<Option<(String, String)>> {
+) -> Result<Option<Rejection>> {
     if packages.is_empty() {
         return Ok(None);
     }
@@ -250,10 +278,19 @@ pub(super) fn failing_check(
     if output.succeeded {
         return Ok(None);
     }
-    Ok(Some((
-        described_check(packages),
-        compiler_errors(&output.stderr),
-    )))
+    Ok(Some(Rejection {
+        checked: described_check(packages),
+        errors: compiler_errors(&output.stderr),
+        stderr: output.stderr,
+    }))
+}
+
+/// Why a check failed: the check as a reader runs it, the compiler's errors, and everything the
+/// compiler wrote — which also carries its warnings.
+pub(super) struct Rejection {
+    pub(super) checked: String,
+    pub(super) errors: String,
+    pub(super) stderr: String,
 }
 
 /// What a finished `cargo check` said, on both streams.
@@ -279,13 +316,9 @@ pub(super) fn run_check(
     progress: &ProgressSink,
     wait_heartbeat: Duration,
 ) -> Result<CheckOutput> {
-    let mut arguments = vec!["check", "--all-targets", "--message-format", message_format];
-    for package in packages {
-        arguments.extend(["-p", package.as_str()]);
-    }
     let mut command = spawns.command("cargo");
     command
-        .args(&arguments)
+        .args(check_arguments(packages, message_format))
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -302,6 +335,25 @@ pub(super) fn run_check(
         stdout: stdout.join().unwrap_or_default(),
         stderr: stderr.join().unwrap_or_default(),
     })
+}
+
+/// The arguments of the gate's `cargo check`: every target of `packages`, in `message_format`, and
+/// never in colour. The gate and the tidy read what cargo writes — warnings counted, errors picked
+/// out — and a caller's `CARGO_TERM_COLOR=always` would wrap those words in escape codes no reader
+/// here matches.
+fn check_arguments<'a>(packages: &'a BTreeSet<String>, message_format: &'a str) -> Vec<&'a str> {
+    let mut arguments = vec![
+        "check",
+        "--all-targets",
+        "--message-format",
+        message_format,
+        "--color",
+        "never",
+    ];
+    for package in packages {
+        arguments.extend(["-p", package.as_str()]);
+    }
+    arguments
 }
 
 /// The status `child` exits with, or [`RestructureError::CallerStopped`] once `cancel` fires first
@@ -409,6 +461,32 @@ error: could not compile `demo` (lib) due to 2 previous errors";
             "src/lib.rs:3:5: error[E0308]: mismatched types\n\
              src/lib.rs:9:1: error: cannot find macro `nope` in this scope\n\
              error: could not compile `demo` (lib) due to 2 previous errors"
+        );
+    }
+
+    #[test]
+    fn checks_every_target_of_each_package_without_colour() {
+        // Given two packages to check
+        let packages = BTreeSet::from(["origin".to_string(), "destination".to_string()]);
+
+        // When the check's arguments are written
+        let arguments = check_arguments(&packages, "short");
+
+        // Then colour is off whatever the caller's environment asks for, and each package is named
+        assert_eq!(
+            arguments,
+            [
+                "check",
+                "--all-targets",
+                "--message-format",
+                "short",
+                "--color",
+                "never",
+                "-p",
+                "destination",
+                "-p",
+                "origin",
+            ]
         );
     }
 

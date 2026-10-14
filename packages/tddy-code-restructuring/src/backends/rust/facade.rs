@@ -144,7 +144,7 @@ pub(crate) fn facade_will_bind(
         Reexport::Glob => moved.iter().any(|item| item.name == name),
         Reexport::Named => moved
             .iter()
-            .any(|item| item.name == name && item.reached_from_outside && item.within.is_empty()),
+            .any(|item| item.name == name && is_carried(item)),
     }
 }
 
@@ -167,44 +167,71 @@ pub(crate) fn facade_lines(
         // re-exports nothing — `clippy::unused_imports` calls that out by name, and under
         // `-D warnings` it fails the build the restructure was supposed to leave green.
         Reexport::Glob => vec![format!("{} use {module}::*;", widest_visibility(items))],
-        Reexport::Named => {
-            refuse_uncovered_nesting(items)?;
-            let reached: Vec<&seam_survey::MovedItem> = items
-                .iter()
-                .filter(|item| item.reached_from_outside && item.within.is_empty())
-                .collect();
-
-            let mut tiers: Vec<&str> = Vec::new();
-            for item in &reached {
-                if !tiers.contains(&item.visibility.as_str()) {
-                    tiers.push(item.visibility.as_str());
-                }
-            }
-            // Widest first, and stable within a tier so the order follows the source.
-            tiers.sort_by_key(|tier| match *tier {
-                "pub" => 0,
-                "" => 2,
-                _ => 1,
-            });
-
-            tiers
-                .into_iter()
-                .map(|tier| {
-                    let names: Vec<&str> = reached
-                        .iter()
-                        .filter(|item| item.visibility == tier)
-                        .map(|item| item.name.as_str())
-                        .collect();
-                    let prefix = if tier.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{tier} ")
-                    };
-                    format!("{prefix}use {module}::{{{}}};", names.join(", "))
-                })
-                .collect()
-        }
+        Reexport::Named => named_facade_lines(module, items)?,
     })
+}
+
+/// Whether a `named` facade carries `item`: it holds the top level of the new module and is either
+/// written `pub` — its public path is interface, reached or not — or something outside reaches it.
+fn is_carried(item: &seam_survey::MovedItem) -> bool {
+    item.within.is_empty() && (item.visibility == "pub" || item.reached_from_outside)
+}
+
+/// The lines of a `named` facade: one `use` per visibility tier the carried items were written with,
+/// widest first, then the names only the parent's own `#[cfg(test)]` module reaches under a
+/// `#[cfg(test)]` line.
+///
+/// A `pub` item is carried whether or not anything reaches it, and stays on the production lines even
+/// when only tests do: dropping it would narrow the crate's public path. Any narrower item is carried
+/// only when something outside the seam reaches it.
+fn named_facade_lines(module: &str, items: &[seam_survey::MovedItem]) -> Result<Vec<String>> {
+    refuse_uncovered_nesting(items)?;
+    let (production, tests_only): (Vec<&seam_survey::MovedItem>, Vec<&seam_survey::MovedItem>) =
+        items
+            .iter()
+            .filter(|item| is_carried(item))
+            .partition(|item| item.visibility == "pub" || item.reached_from_production);
+
+    let mut lines = tier_lines(module, &production);
+    let test_lines = tier_lines(module, &tests_only);
+    if !test_lines.is_empty() {
+        lines.push("#[cfg(test)]".to_string());
+        lines.extend(test_lines);
+    }
+    Ok(lines)
+}
+
+/// One `use` line per visibility tier of `carried`, widest first and stable within a tier so the order
+/// follows the source.
+fn tier_lines(module: &str, carried: &[&seam_survey::MovedItem]) -> Vec<String> {
+    let mut tiers: Vec<&str> = Vec::new();
+    for item in carried {
+        if !tiers.contains(&item.visibility.as_str()) {
+            tiers.push(item.visibility.as_str());
+        }
+    }
+    tiers.sort_by_key(|tier| match *tier {
+        "pub" => 0,
+        "" => 2,
+        _ => 1,
+    });
+
+    tiers
+        .into_iter()
+        .map(|tier| {
+            let names: Vec<&str> = carried
+                .iter()
+                .filter(|item| item.visibility == tier)
+                .map(|item| item.name.as_str())
+                .collect();
+            let prefix = if tier.is_empty() {
+                String::new()
+            } else {
+                format!("{tier} ")
+            };
+            format!("{prefix}use {module}::{{{}}};", names.join(", "))
+        })
+        .collect()
 }
 
 /// Refuse a named facade for an item whose own module the facade will not carry.
@@ -260,3 +287,6 @@ pub(crate) fn empty_facade_note(module: &str, lines: &[String], kind: Reexport) 
         )
     })
 }
+
+#[cfg(test)]
+mod facade_tests;
