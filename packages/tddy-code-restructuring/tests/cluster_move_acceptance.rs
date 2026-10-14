@@ -182,18 +182,15 @@ async fn a_cluster_naming_a_child_in_also_nests_it_and_every_crate_compiles() {
     // When it is applied
     let applied = applying_a_plan_of(&workspace, &[op]).await;
 
-    // Then the child sits under its module, nothing sits flat beside it, and the moved parent
-    // does not name its own crate
-    assert_eq!(
-        (
-            applied.map(|run| run.applied),
-            workspace.holds("crates/destination/src/host_registry/clock_face.rs"),
-            workspace.holds("crates/destination/src/clock_face.rs"),
-            workspace
-                .read("crates/destination/src/host_registry.rs")
-                .contains("destination::"),
-        ),
-        (Ok(1), true, false, false)
-    );
+    // Then the operation applies
+    assert_eq!(applied.map(|run| run.applied), Ok(1));
+
+    // and the child sits under its module, with nothing flat beside it
+    assert!(workspace.holds("crates/destination/src/host_registry/clock_face.rs"));
+    assert!(!workspace.holds("crates/destination/src/clock_face.rs"));
+
+    // and the moved parent does not name its own crate
+    let parent = workspace.read("crates/destination/src/host_registry.rs");
+    assert!(!parent.contains("destination::"), "{parent}");
     assert_compiles_with_its_tests(&workspace);
 }

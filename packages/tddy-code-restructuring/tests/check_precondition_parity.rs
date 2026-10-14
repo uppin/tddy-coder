@@ -613,6 +613,20 @@ fn an_origin_whose_moving_module_holds(
     an_origin_holding(&files)
 }
 
+/// The one finding that names every one of `needles`.
+///
+/// # Panics
+///
+/// When no finding, or more than one, names them all.
+fn the_one_finding_naming<'a>(findings: &'a [String], needles: &[&str]) -> &'a str {
+    let naming: Vec<&String> = findings
+        .iter()
+        .filter(|finding| needles.iter().all(|needle| finding.contains(needle)))
+        .collect();
+    assert_eq!(naming.len(), 1, "{needles:?} in {findings:?}");
+    naming[0]
+}
+
 const A_CARRIED_PART: &str = "crates/origin/src/workspace_session/part.rs";
 
 /// A carried `mod missing;` that leads to no file is reported before `apply` — the move cannot
@@ -627,13 +641,12 @@ fn a_static_check_reports_a_carried_mod_line_that_leads_to_no_file() {
 
     // Then the declaration and the directory it was looked for in are named
     assert_eq!(
-        findings
-            .iter()
-            .filter(|finding| finding.contains("`mod missing;`")
-                && finding.contains("crates/origin/src/workspace_session"))
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(
+            &findings,
+            &["`mod missing;`", "crates/origin/src/workspace_session"]
+        ),
+        "`mod missing;` leads to neither `missing.rs` nor `missing/mod.rs` in \
+         crates/origin/src/workspace_session"
     );
 }
 
@@ -654,15 +667,12 @@ fn a_static_check_reports_a_carried_child_placed_with_a_path_attribute() {
 
     // Then the file and the attribute are named
     assert_eq!(
-        findings
-            .iter()
-            .filter(
-                |finding| finding.contains("crates/origin/src/workspace_session.rs")
-                    && finding.contains("#[path]")
-            )
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(
+            &findings,
+            &["crates/origin/src/workspace_session.rs", "#[path]"]
+        ),
+        "`crates/origin/src/workspace_session.rs` places a module with `#[path]`, which a move \
+         cannot follow — the file it names would be left where it is"
     );
 }
 
@@ -687,12 +697,13 @@ fn a_static_check_reports_a_carried_file_whose_target_already_exists_in_the_dest
 
     // Then the target that is in the way is named
     assert_eq!(
-        findings
-            .iter()
-            .filter(|finding| finding.contains("crates/destination/src/workspace_session/part.rs"))
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(
+            &findings,
+            &["crates/destination/src/workspace_session/part.rs"]
+        ),
+        "`destination` already has crates/destination/src/workspace_session/part.rs — carrying \
+         `crates/origin/src/workspace_session/part.rs` there with `workspace_session` would be a \
+         merge, which no operation performs"
     );
 }
 
@@ -715,12 +726,10 @@ fn a_static_check_reports_a_carried_child_another_operation_of_the_plan_moves() 
 
     // Then the child and the operation that moves it again are named
     assert_eq!(
-        findings
-            .iter()
-            .filter(|finding| finding.contains(A_CARRIED_PART) && finding.contains("operation 1"))
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(&findings, &[A_CARRIED_PART, "operation 1"]),
+        "`crates/origin/src/workspace_session/part.rs` moves with `workspace_session` in operation \
+         0, and operation 1 moves it on its own — a child goes where its module goes, so name it \
+         in that operation's `also` or drop operation 1"
     );
 }
 
@@ -739,13 +748,17 @@ fn a_static_check_reports_a_carried_childs_body_reaching_a_module_that_stays_beh
 
     // Then the child, the path and its line are named
     assert_eq!(
-        findings
-            .iter()
-            .filter(|finding| finding.contains(A_CARRIED_PART)
-                && finding.contains("`crate::host::project_root` in a body at line 2"))
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(
+            &findings,
+            &[
+                A_CARRIED_PART,
+                "`crate::host::project_root` in a body at line 2"
+            ]
+        ),
+        "`crates/origin/src/workspace_session/part.rs` reaches `crate::host::project_root` in a \
+         body at line 2, and `host` stays behind in `origin` — after the move that path names \
+         nothing in `destination`, and naming `origin` from there is a cycle. Cut the body's \
+         dependency on `host` before moving the module."
     );
 }
 
@@ -811,12 +824,10 @@ fn a_destination_declaring_the_module_pub_crate_is_reported_as_a_merge() {
 
     // Then the merge is reported
     assert_eq!(
-        findings
-            .iter()
-            .filter(|finding| finding.contains("would be a merge"))
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(&findings, &["would be a merge"]),
+        "plan is malformed: `destination` already declares `workspace_session` in \
+         crates/destination/src/lib.rs — moving `workspace_session` into it would be a merge, \
+         which no operation performs"
     );
 }
 
@@ -836,11 +847,10 @@ fn a_struct_update_path_into_a_module_staying_behind_is_a_finding_naming_the_lin
 
     // Then the path and its line are named
     assert_eq!(
-        findings
-            .iter()
-            .filter(|finding| finding.contains("`crate::host::defaults` in a body at line 4"))
-            .count(),
-        1,
-        "{findings:?}"
+        the_one_finding_naming(&findings, &["`crate::host::defaults` in a body at line 4"]),
+        "plan is malformed: `crates/origin/src/workspace_session.rs` reaches \
+         `crate::host::defaults` in a body at line 4, and `host` stays behind in `origin` — after \
+         the move that path names nothing in `destination`, and naming `origin` from there is a \
+         cycle. Cut the body's dependency on `host` before moving the module."
     );
 }

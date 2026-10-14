@@ -378,14 +378,11 @@ fn a_crate_only_a_child_names_joins_the_destination_dependencies_and_one_only_it
     let edit = resolving(&workspace, &mut nothing_reaches_the_tree(), &cluster);
 
     // Then the destination's manifest declares each in its table
-    let manifest = after(&workspace, &edit, DESTINATION_MANIFEST);
     assert_eq!(
-        (
-            manifest.contains("[dependencies]\nshared = { path = \"../shared\" }\n"),
-            manifest.contains("[dev-dependencies]\nproptest = \"1\"\n"),
-        ),
-        (true, true),
-        "{manifest}"
+        after(&workspace, &edit, DESTINATION_MANIFEST),
+        "[package]\nname = \"destination\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n\
+         [dependencies]\nshared = { path = \"../shared\" }\n\n\
+         [dev-dependencies]\nproptest = \"1\"\n"
     );
 }
 
@@ -442,18 +439,19 @@ fn an_also_member_that_is_a_directory_child_of_another_member_is_carried_at_its_
     let edit = resolving(&workspace, &mut nothing_reaches_the_tree(), &cluster);
 
     // Then `b` lands under `a/`, nothing lands at the root beside `a`, and only `a` is declared
-    let landed: Vec<String> = renames(&edit).into_iter().map(|(_, to)| to).collect();
     assert_eq!(
-        (
-            landed.contains(&"crates/destination/src/a/b.rs".to_string()),
-            landed.contains(&"crates/destination/src/b.rs".to_string()),
-            after(&workspace, &edit, DESTINATION_LIB),
-        ),
-        (
-            true,
-            false,
-            "//! The destination.\n\npub mod a;\n".to_string()
-        )
+        renames(&edit),
+        renamed(&[
+            (MODULE, "crates/destination/src/a.rs"),
+            (CHILD, "crates/destination/src/a/b.rs"),
+            (RESTRICTED_CHILD, "crates/destination/src/a/c/mod.rs"),
+            (GRANDCHILD, "crates/destination/src/a/c/e.rs"),
+            (INLINE_CHILD, "crates/destination/src/a/i/d.rs"),
+        ])
+    );
+    assert_eq!(
+        after(&workspace, &edit, DESTINATION_LIB),
+        "//! The destination.\n\npub mod a;\n"
     );
 }
 
@@ -543,14 +541,11 @@ fn a_restricted_child_reached_from_outside_the_tree_is_refused_naming_the_child_
         .to_string();
 
     // Then the refusal names the child's declaration and the caller
-    assert_eq!(
-        (
-            refusal.contains("pub(crate) mod c"),
-            refusal.contains(CALLER),
-        ),
-        (true, true),
-        "{refusal}"
-    );
+    assert_eq!(refusal, "plan is malformed: `crate::x::a::c::C` reaches the child `pub(crate) mod c` of `a`, which \
+         crates/origin/src/x/a.rs declares that way — after the move that path is private to \
+         `destination`, and crates/origin/src/runtime.rs name(s) it from outside the moved tree. \
+         Widen the declaration to `pub mod c;` before moving, or stop naming the child \
+         through its own path");
 }
 
 /// A carried child that reaches back into the crate the move leaves makes the destination depend
@@ -576,7 +571,13 @@ fn a_carried_childs_path_back_into_the_origin_makes_the_move_refuse_as_a_cycle()
         .to_string();
 
     // Then the refusal names the path that makes it one
-    assert!(refusal.contains("origin::runtime::Tick"), "{refusal}");
+    assert_eq!(
+        refusal,
+        "plan is malformed: `crates/origin/src/x/a.rs` still names `origin` \
+         (origin::runtime::Tick), so the destination would depend on the crate it left while that \
+         crate goes on naming the module it lost — move what those paths reach, or move the \
+         module's own dependencies with it"
+    );
 }
 
 /// A struct update's `..crate::…` base is a path like any other: one into a module the move
@@ -595,30 +596,30 @@ fn a_struct_update_path_into_a_co_moving_module_is_re_pointed() {
     let edit = resolving(&workspace, &mut nothing_reaches_the_tree(), &cluster);
 
     // Then the base names where `a` lands
-    assert!(
-        after(&workspace, &edit, MODULE).contains("        ..crate::a::defaults()\n"),
-        "{}",
-        after(&workspace, &edit, MODULE)
+    assert_eq!(
+        after(&workspace, &edit, MODULE),
+        "pub struct A {\n    pub id: u32,\n}\n\npub fn defaults() -> A {\n    A { id: 0 }\n}\n\n\
+         pub fn first() -> A {\n    A {\n        id: 1,\n        ..crate::a::defaults()\n    }\n}\n"
     );
 }
 
-/// `move_module_to_crate` is a cluster of one, so it carries the children too.
+/// `move_module_to_crate` is a cluster of one, so it carries the same files a cluster of that one
+/// module does.
 #[test]
 fn a_single_module_move_carries_the_same_files_as_a_cluster_of_one() {
-    // Given a plan moving `x::a` alone
+    // Given a plan moving `x::a` alone, and the cluster of `x::a` alone
     let workspace = a_workspace_whose_module_has_directory_children();
     let op = a_move_of(MODULE, "x::a");
+    let cluster = a_cluster_of(vec![the_module_a()], Reexport::None);
 
-    // When it is resolved
-    let edit = crate_move::resolve(&mut nothing_reaches_the_tree(), &workspace.workspace(), &op)
+    // When each is resolved
+    let single = crate_move::resolve(&mut nothing_reaches_the_tree(), &workspace.workspace(), &op)
         .expect("the move resolves");
+    let of_one = resolving(&workspace, &mut nothing_reaches_the_tree(), &cluster);
 
-    // Then the four child files are renamed with it
-    let children_moved = renames(&edit)
-        .into_iter()
-        .filter(|(from, _)| from.starts_with("crates/origin/src/x/a/"))
-        .count();
-    assert_eq!(children_moved, 4);
+    // Then they rename the same files to the same places
+    assert_eq!(renames(&single), renames(&of_one));
+    assert_eq!(renames(&single).len(), 5);
 }
 
 /// A child's name can be declared in two scopes of one file: `pub mod d;` at the module's top level
@@ -645,12 +646,9 @@ fn a_restricted_child_inside_an_inline_module_is_read_where_it_is_declared() {
         .to_string();
 
     // Then the refusal names the `pub(crate)` declaration and the caller
-    assert_eq!(
-        (
-            refusal.contains("pub(crate) mod d"),
-            refusal.contains(CALLER),
-        ),
-        (true, true),
-        "{refusal}"
-    );
+    assert_eq!(refusal, "plan is malformed: `crate::x::a::i::d::inner` reaches the child `pub(crate) mod d` of `a`, which \
+         crates/origin/src/x/a.rs declares that way — after the move that path is private to \
+         `destination`, and crates/origin/src/runtime.rs name(s) it from outside the moved tree. \
+         Widen the declaration to `pub mod d;` before moving, or stop naming the child \
+         through its own path");
 }

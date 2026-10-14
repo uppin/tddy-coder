@@ -97,32 +97,32 @@ async fn relocates_a_module_with_its_directory_children_and_every_crate_compiles
     let (rehearsed, rehearsal) = applying_keeping_the_account(&workspace, &plan, true).await;
     let (applied, account) = applying_keeping_the_account(&workspace, &plan, false).await;
 
-    // Then both runs succeed and agree on the count, both name what moves with the module, and
-    // the child arrived beside its module
-    let moves_with_it = "move with `host_registry`, with the directory of its children";
+    // Then both runs succeed with one operation
     assert_eq!(
-        (
-            rehearsed.map(|run| run.applied),
-            applied.map(|run| run.applied),
-            files_reported(&rehearsal),
-            files_reported(&account),
-            rehearsal.iter().any(|line| line.contains(moves_with_it)),
-            account.iter().any(|line| line.contains(moves_with_it)),
-            workspace.holds("crates/destination/src/host_registry/clock_face.rs"),
-            workspace.holds(A_DIRECTORY_CHILD),
-        ),
-        (
-            Ok(1),
-            Ok(1),
-            vec![SEVEN_FILES.to_string()],
-            vec![SEVEN_FILES.to_string()],
-            true,
-            true,
-            true,
-            false
-        ),
-        "dry run: {rehearsal:?}\napply: {account:?}"
+        rehearsed.map(|run| run.applied),
+        Ok(1),
+        "dry run: {rehearsal:?}"
     );
+    assert_eq!(applied.map(|run| run.applied), Ok(1), "apply: {account:?}");
+
+    // and each reports the seven files that move
+    assert_eq!(files_reported(&rehearsal), vec![SEVEN_FILES.to_string()]);
+    assert_eq!(files_reported(&account), vec![SEVEN_FILES.to_string()]);
+
+    // and each names what moves with the module
+    let moves_with_it = "move with `host_registry`, with the directory of its children";
+    assert!(
+        rehearsal.iter().any(|line| line.contains(moves_with_it)),
+        "{rehearsal:?}"
+    );
+    assert!(
+        account.iter().any(|line| line.contains(moves_with_it)),
+        "{account:?}"
+    );
+
+    // and the child arrived beside its module, leaving none behind
+    assert!(workspace.holds("crates/destination/src/host_registry/clock_face.rs"));
+    assert!(!workspace.holds(A_DIRECTORY_CHILD));
     assert_compiles_with_its_tests(&workspace);
 }
 
