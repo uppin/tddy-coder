@@ -7,10 +7,10 @@
 
 | Where | Function |
 |---|---|
-| `packages/tddy-code-restructuring/src/crate_move/manifest_edits.rs` (after #reshape 5; moved from `facade_writer.rs:270`) | the reader behind `declared_module` |
+| `packages/tddy-code-restructuring/src/crate_move/manifest_edits.rs:43` (moved from `facade_writer.rs` by #reshape 5) | `split_visibility`, the reader behind `declared_module`, with `after_visibility` over it |
 | `packages/tddy-code-restructuring/src/backends/rust/module_text.rs:80` | `strip_visibility` |
 | `packages/tddy-code-restructuring/src/verify/statements.rs:179` | `strip_visibility` |
-| `packages/tddy-code-restructuring/src/backends/rust.rs:2805` | `visibility_in` |
+| `packages/tddy-code-restructuring/src/backends/rust.rs:2793` | `visibility_in` |
 
 They differ in edge cases, such as `pub(in path)` with spaces, `pub(self)` and a missing trailing whitespace. Each module's tests pin its own copy.
 
