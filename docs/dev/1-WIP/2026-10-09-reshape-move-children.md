@@ -465,7 +465,7 @@ The branch was rebased twice onto a rewritten `feature/reshape/extract-method-cl
 
 | Finding | Severity | Where |
 |---|---|---|
-| `Reexport::Named` with carried children: only the own file's survey feeds the facade, so items outside callers reach through a child are not named and nothing refuses it (verified) | WARNING | `cluster.rs` `member_changes`, `if file.below.is_empty()` |
+| `Reexport::Named` with carried children does not name items reached through a child — **not reachable from a plan**: `plan/codec.rs:374` refuses `reexport: named` for every cross-crate module move at decode, because a named facade puts items at the destination root and callers write `crate::<module>::Item`. Only a direct `resolve_cluster` call reaches it. Left as is; a resolve-time refusal would be a new refusal and was not made | INFO (was WARNING) | `cluster.rs` `member_changes` |
 | `cluster.rs` production lines 260 → 342; Boundaries allow growth only in `member_changes` (`TheSet`/`SetTotals` add about 35 lines) | WARNING | `cluster.rs:167-210` |
 | A private facade `use dest::x;` is indistinguishable from a hand-written one in `written_facade` | WARNING | `facade_writer.rs` |
 | A restricted child is matched by name in its carried file; an inline module's own visibility is not read (already noted, untested) | WARNING | `carried.rs` `restricted_children` |
@@ -477,6 +477,10 @@ The branch was rebased twice onto a rewritten `feature/reshape/extract-method-cl
 | `carried.rs` is 290 production lines, not the planned ~180; `rust.rs` stays at 2997 production lines (pre-existing, not grown) | INFO | size |
 
 **Changeset sync:** M1–M7 ✅ complete in code. M8 ⚠️ in progress (package docs, the PRD hook and todo narrowing remain for the wrap). The Coverage Requirements boxes are proven by tests 1–31 except the gaps in the table above.
+
+**Follow-up fixes (2026-10-14):** `TheSet`/`SetTotals` moved to `carried.rs` (`cluster.rs` 342 → 303 production lines; `carried.rs` 290 → 334); the three copies of the "declares no `mod`" refusal share `Move::declared_nowhere`; `leaving` is back to about 35 lines (`glob_entries`, `extended_earlier_facades`). New tests: `pub(in …)` and `pub(self)` facades mirror verbatim; a restricted child inside an inline module is read where it is declared (this fixed a real defect — `restricted_children` read the first `mod d;` in the file, so `pub mod d;` at the top hid `mod i { pub(crate) mod d; }`); the dry run and apply report exactly 7 files; a live `pub(crate)` module move compiles; two pins for `written_facade`'s provenance limit (a facade line naming only modules the destination declares is extended whoever wrote it; one naming anything else is left alone). Scoped results: `--lib` filtered to `crate_move` 268 passed; `crate_move_children` 16, `crate_move_restricted_declarations` 9, `check_precondition_parity` 23, `cluster_move_acceptance` 5, `move_module_to_crate_acceptance` 4, `move_facades_acceptance` 6; clippy `-D warnings`, fmt and `cargo check --all-targets` clean.
+
+**Open marker this PR added:** `carried.rs:269` `TODO` — an enclosing inline module's own visibility (`mod i { pub mod d; }`) is still not read by `restricted_children`. Resolve or record in `docs/dev/todo/` at wrap.
 
 ## TODO
 
