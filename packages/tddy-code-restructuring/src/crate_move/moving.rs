@@ -107,9 +107,9 @@ impl Move {
     ) -> Result<Vec<module_files::MovedFile>> {
         let files = module_files::files_of(workspace, &self.source)?;
         let module_file = Path::new(&self.source);
-        let directory = module_file.parent().unwrap_or_else(|| Path::new(""));
+        let directory = module_file.parent().ok_or_else(|| self.no_directory())?;
         let parent_directory = if module_file.file_name() == Some(OsStr::new("mod.rs")) {
-            directory.parent().unwrap_or_else(|| Path::new(""))
+            directory.parent().ok_or_else(|| self.no_directory())?
         } else {
             directory
         };
@@ -133,6 +133,14 @@ impl Move {
         let declared_in = &self.home.declared_in;
         let text = workspace.read(declared_in)?;
         manifest_edits::declared_module(&text, &self.module).ok_or_else(|| self.declared_nowhere())
+    }
+
+    /// The refusal for a module file that sits in no directory, so its children have none to follow.
+    fn no_directory(&self) -> crate::RestructureError {
+        malformed(format!(
+            "`{}` sits in no directory, so there is no place its children's files are relative to",
+            self.source
+        ))
     }
 
     /// The refusal for a module the file that should declare it does not: the one wording every

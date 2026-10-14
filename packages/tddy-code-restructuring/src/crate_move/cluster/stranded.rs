@@ -201,7 +201,8 @@ fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<
                 destination::Destination::read(workspace.root, op.to.as_deref()?).ok()?;
             let reexport = op.reexport.unwrap_or(Reexport::None);
             let moving = moving::Move::of(workspace, &home, &destination, reexport).ok()?;
-            // A tree that cannot be carried is reported by `uncarriable`, like a refused module.
+            // A tree that cannot be carried is left out: `unrunnable` reports it, and `check` runs
+            // it before this pass and stops on anything it cannot read.
             moving.carried(workspace).ok()?;
             Some(MovingModule {
                 op: index,

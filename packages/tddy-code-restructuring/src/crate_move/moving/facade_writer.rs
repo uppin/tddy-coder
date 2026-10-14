@@ -65,6 +65,9 @@ fn leaving(
     text: &str,
     members: &[(&Move, &Survey)],
 ) -> Result<Vec<TextEdit>> {
+    let Some((first, _)) = members.first() else {
+        return Ok(Vec::new());
+    };
     let mut declarations = Vec::new();
     for (member, _) in members {
         declarations.push(member.declaration(workspace)?);
@@ -73,7 +76,7 @@ fn leaving(
 
     // The visibilities whose facade line is already written: extended in place, or at an earlier
     // member's declaration.
-    let (mut edits, mut written) = extended_earlier_facades(workspace, text, members[0].0, &moved);
+    let (mut edits, mut written) = extended_earlier_facades(workspace, text, first, &moved);
 
     let removals = removals_with_separators(path, text, members)?;
 
