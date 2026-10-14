@@ -34,6 +34,7 @@
 mod diagnostics;
 mod format;
 mod gating;
+mod unused_mut;
 #[cfg(test)]
 mod wide_facade_tests;
 
@@ -82,6 +83,7 @@ pub(super) fn tidy(tidying: &Tidying<'_>) -> Result<Tidied> {
     let mut report = Report::default();
     let mut checked = tidy_imports(tidying, &mut report)?;
     report.say(tidying);
+    checked = unused_mut::without_unused_mut(tidying, checked)?;
     if matches!(checked, Checked::Compiles(_)) && format_touched_files(tidying)? {
         checked = check(tidying)?;
     }

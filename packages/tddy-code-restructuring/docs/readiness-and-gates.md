@@ -12,7 +12,7 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Documents closed after each entry point | `backends/rust/documents.rs` (`closing_what_it_opens`) | (refuses nothing; stops a shared server answering from a finished run's text) |
 | Health gate | `readiness.rs` (`refuse_degraded_index`), `ServerChatter::degraded` | `ServerDefect` |
 | Bounded type probe | `readiness.rs` (`wait_until_resolved_within_bound`, `READY_HOVER_BOUND`) | `ServerDefect` |
-| Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`) | `SeamRefused` |
+| Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`), through `backends/rust/extracted_fn.rs` (`refuse_unliftable_returns`) | `SeamRefused` |
 | Partial-cluster finding | `crate_move/cluster.rs` (`stranded_siblings`) | a static `check` finding: the cycle `apply` refuses (`refusals::refuse_a_dependency_cycle`) |
 | Body-path finding | `crate_move/preconditions.rs` (`stays_behind_through_a_body`) | a static `check` finding: a body path to a module staying behind, which `apply` refuses as a dependency cycle |
 | Merge finding | `crate_move/preconditions.rs` (`destination_already_has_the_module`) | a static `check` finding: the destination already declares or holds the module |
@@ -75,14 +75,16 @@ involved: the server's own answer ends the wait.
 
 ### The probe is bounded
 
-`extract_variable`'s type probe waits through `wait_until_resolved_within_bound`. A hover that stays
+The type probe of an extraction that needs inference (`extract_method`, `extract_variable`) waits
+through `wait_until_resolved_within_bound`. A hover that stays
 `null` after the index is loaded and healthy, and that neither diagnostic above explains, will never
 change, so once the hover has been silent for `READY_HOVER_BOUND` (30 s) the operation ends as
 `rust-analyzer's answer was unusable:`, naming the position. Time spent before the index is ready
 does not count: the bound starts when readiness is declared, and `silent_past` is the decision, kept
 a pure function so it is tested without a server. The probe asks at a position that can carry a hover
-(see [assist-output-repairs.md](assist-output-repairs.md#where-extract_variable-asks-and-what-it-binds)),
-so the bound is the backstop and not the expected path. Waits that carry no bound (`wait_until_answerable`
+(see [assist-output-repairs.md](assist-output-repairs.md#where-an-extraction-asks-and-what-extract_variable-binds)):
+a range opening on a `{` or a comment is probed at the first code inside it, so the bound is the
+backstop and not the expected path. Waits that carry no bound (`wait_until_answerable`
 for a caller survey) end by the server's own diagnostics.
 
 ## Documents are closed when an operation ends
@@ -174,6 +176,23 @@ nothing. A range holding a `return` and running to the end of a `()` function is
 other, in `check`, `check --deep` and `apply`, and the remedy is to start the range after the early
 exit. The rewrite is not repaired. Whether the function returns `()` is read from its header text, a
 `->` outside the parameters and generics and before any `where`.
+
+**What `check`, `check --deep` and `apply` accept is decided by one classification**
+(`extracted_fn::refuse_unliftable_returns`, over `guards::classify`), so the three agree and no server
+is needed to refuse. Beyond the exception above it lets two more shapes through, and refuses every
+other range holding a `return`:
+
+- a range that is the whole body of a match arm or `if`/`else` branch whose construct is itself in
+  tail position, recursively up to the function body, keeps its `return`s verbatim (they still return
+  from the caller);
+- a run of `return Err(..)` guards (or `return None` guards in an `Option` function) in the middle of a
+  function is lifted into a function returning `Result<()>` (`Option<()>`) and called with `?`.
+
+A value `return` in the middle of a function, error guards mixed with a value return, guards in a
+function that returns no `Result`, guards beside a labelled `break` or `continue`, and a guard run
+that declares a binding the code after it reads are each refused naming the line or binding. How the
+lift is written is in
+[assist-output-repairs.md](assist-output-repairs.md#a-run-of-guards-and-tail-position).
 
 ## The partial-cluster finding
 
@@ -381,6 +400,15 @@ unit reads. The redo is repeated while each redo leaves fewer quoted names
 failing, at most `MAX_REPAIRS` times; a redo that stops improving is undone and **fails the run**,
 saying so. A nested group is left in place and reported. The tidy never leaves a broken tree behind and
 never touches the plan's own edits.
+
+**An unused `mut`.** rust-analyzer reports no unused `mut`, not even with its experimental diagnostics,
+so the one an `extract_method` copies into the new function, or leaves in its caller, is the
+compiler's. After the imports are tidied and before `rustfmt`, the diagnostics of the last check are
+filtered to rustc's `unused_mut` with a `MachineApplicable` fix in a file the run wrote
+(`runner/tidy/unused_mut.rs`), and the fixes are applied with the files' bytes held in memory. The tree
+is re-checked: a clean re-check reports ``tidied: removed N unused `mut`(s) from <file>`` per file, and a
+re-check that fails restores the bytes and fails the run, as the import step does. One round is enough:
+removing a `mut` cannot make another unused. A dry run writes nothing, so removes nothing.
 
 **Formatting.** `rustfmt` runs over every file the run wrote, with its package's edition, so the
 `cargo fmt --all --check` step of CI's lint job finds nothing the engine left. Each `rustfmt` and

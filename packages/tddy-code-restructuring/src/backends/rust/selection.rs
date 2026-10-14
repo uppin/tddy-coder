@@ -8,43 +8,59 @@
 
 use crate::edit::{Position, Range};
 
-/// The first position of `range` that can carry a hover: past leading `&`, `&mut`, `*`, `!`, `-`
-/// and `(`, and past whitespace after them.
+/// The first position of `range` that can carry a hover: past leading `{`, `&`, `&mut`, `*`, `!`,
+/// `-` and `(`, past comments, and past whitespace after them — across lines, never past the
+/// range's end.
 ///
-/// Read on the range's first line only, and never past the range's end. A range that is nothing
-/// but such punctuation has no better position than its start, and keeps it.
+/// A hover on a `{` or inside a comment is `null` for ever, and a range opening on one would wait
+/// for an answer that cannot come. A range that is nothing but such punctuation has no better
+/// position than its start, and keeps it.
 pub(super) fn hover_bearing_position(text: &str, range: Range) -> Position {
-    let Some(line) = line_chars(text, range.start.line) else {
+    let chars: Vec<char> = text.chars().collect();
+    let (Some(from), Some(to)) = (offset_of(text, range.start), offset_of(text, range.end)) else {
         return range.start;
     };
-    let limit = if range.end.line == range.start.line {
-        (range.end.col as usize - 1).min(line.len())
-    } else {
-        line.len()
-    };
 
-    let mut at = range.start.col as usize - 1;
+    let mut at = from;
     let mut after_ampersand = false;
-    while at < limit {
-        match line[at] {
+    while at < to {
+        if let Some(end) = comment_end(&chars, at, to) {
+            at = end;
+            continue;
+        }
+        match chars[at] {
             '&' => after_ampersand = true,
-            '*' | '!' | '-' | '(' => after_ampersand = false,
+            '*' | '!' | '-' | '(' | '{' => after_ampersand = false,
             character if character.is_whitespace() => {}
-            _ if after_ampersand && word_at(&line, at, "mut") => {
+            _ if after_ampersand && word_at(&chars, at, "mut") => {
                 at += "mut".len();
                 after_ampersand = false;
                 continue;
             }
-            _ => {
-                return Position {
-                    line: range.start.line,
-                    col: at as u32 + 1,
-                }
-            }
+            _ => return position_of(&chars, at),
         }
         at += 1;
     }
     range.start
+}
+
+/// Where the `//` or `/* */` comment opening at `at` ends, never past `limit`.
+fn comment_end(chars: &[char], at: usize, limit: usize) -> Option<usize> {
+    let rest = &chars[at..limit];
+    match rest {
+        ['/', '/', ..] => Some(
+            rest.iter()
+                .position(|c| *c == '\n')
+                .map_or(limit, |n| at + n),
+        ),
+        ['/', '*', ..] => Some(
+            rest[2..]
+                .windows(2)
+                .position(|pair| pair == ['*', '/'])
+                .map_or(limit, |n| at + 2 + n + 2),
+        ),
+        _ => None,
+    }
 }
 
 /// `range` widened to the borrow around it when it selects a place (a field access or a path)
@@ -180,12 +196,6 @@ fn is_a_place_across_lines(selected: &[char]) -> bool {
     words_are_whole && is_a_place(&compact)
 }
 
-/// The characters of the one-based `line`.
-fn line_chars(text: &str, line: u32) -> Option<Vec<char>> {
-    let wanted = text.split('\n').nth(line.checked_sub(1)? as usize)?;
-    Some(wanted.chars().collect())
-}
-
 /// Whether the word `word` starts at `at`, as a whole word.
 fn word_at(line: &[char], at: usize, word: &str) -> bool {
     let end = at + word.len();
@@ -230,6 +240,39 @@ mod tests {
     }
 
     const BORROWING: &str = "fn f(&self) -> bool {\n    let r = &self.v;\n    r.is_some()\n}\n";
+
+    const BLOCK_AND_COMMENT: &str = "fn block(x: u32) -> u32 {\n    let mut y = x;\n    {\n        \
+                                     // the step\n        let z = y + 1;\n        y = z * 2;\n    }\n    y\n}\n";
+
+    #[test]
+    fn a_range_opening_on_a_blocks_brace_is_probed_at_its_first_statement() {
+        // Given a range opening on the bare block's `{` (3:5), with a comment on line 4
+        let range = Range {
+            start: at(3, 5),
+            end: at(7, 6),
+        };
+
+        // When the hover-bearing position is found
+        let probed = hover_bearing_position(BLOCK_AND_COMMENT, range);
+
+        // Then it is `let`'s, at 5:9, past the comment
+        assert_eq!(probed, at(5, 9));
+    }
+
+    #[test]
+    fn a_range_opening_on_a_line_comment_is_probed_at_the_code_after_it() {
+        // Given a range opening on the comment at 4:9
+        let range = Range {
+            start: at(4, 9),
+            end: at(6, 19),
+        };
+
+        // When the hover-bearing position is found
+        let probed = hover_bearing_position(BLOCK_AND_COMMENT, range);
+
+        // Then it is the statement's first token, at 5:9
+        assert_eq!(probed, at(5, 9));
+    }
 
     #[test]
     fn a_range_opening_with_a_borrow_is_probed_past_the_ampersand() {

@@ -495,6 +495,26 @@ leaves reach two crates; a range anchor that covers no `mod` declaration. See
   rust-analyzer then rewrites every `return` into an `Option` it matches at the call, and the caller
   is left with no tail (`E0317`). Where the types could still differ (an `impl Trait` return the
   assist spells out) nothing lexical can tell, and the compile gate is what catches it.
+
+  **Two more ranges are accepted**, and `check` accepts and refuses them exactly as `apply` does. A range
+  that is the whole body of a match arm or `if`/`else` branch whose construct is itself in tail
+  position (recursively up to the function body) keeps its `return`s verbatim, as above. A run of
+  `return Err(<e>)` guards in the middle of a function returning `Result` — at any depth inside `if`,
+  `match` and loops — is **lifted** into `fn name(..) -> Result<()>` called as `name(..)?;`;
+  `return None` guards in an `Option` function lift to `Option<()>` the same way. Refused, naming the
+  line or binding: a value `return` in the middle of the function, error guards mixed with a value
+  return, guards in a function that returns no `Result`, guards beside a labelled `break`/`continue`,
+  and a guard run that declares a binding the code after it reads (end the range before its `let`).
+
+  **What `extract_method` writes** is cleaned up before the edit is produced, and only in the new
+  function: the comments the assist dropped are put back beside their statements (or the operation is
+  refused naming them); `&PathBuf`/`&String`/`&Vec<T>` parameters are written `&Path`/`&str`/`&[T]`
+  unless the server's diagnostics say the body needs the owned type (a note says which); a unit body is
+  not wrapped as `Ok(if …)`; `field: field` is `field`; a type the signature names that the file does
+  not import is spelled the way the function the range came from spells it (refused when it spells it
+  two ways or none); and where the caller returns a one-argument `Result` alias the new function does
+  too. More than seven parameters, or a tuple return of three or more, is noted, never rewritten.
+  No `use`, type alias or parameter struct is ever written.
 - **`apply` is judged by the compiler.** After its operations, `apply` runs `cargo check
   --all-targets` over every package owning a file it changed (test targets included, because moves
   re-point imports tests use). A failure fails the run with the compiler's errors; the edits stay on
@@ -672,11 +692,13 @@ leaves reach two crates; a range anchor that covers no `mod` declaration. See
   operation that reported success. The operation now refuses when the placeholder occurs more often
   than it did before the assist ran, naming the lines.
 
-  **`extract_variable` has no fixed placeholder.** rust-analyzer names the binding from the
-  expression (a read of `self.clones` becomes `let clones`), so the engine finds the one `let` the
-  assist added and renames that to the plan's `name`. A `name` equal to rust-analyzer's own choice is
-  kept without a rename. The operation is refused as `rust-analyzer's answer was unusable:` only when
-  the assist introduced no `let` binding, or more than one. Two limits are rust-analyzer's: each
+  **`extract_variable` has no fixed placeholder, and neither does `extract_method`.** rust-analyzer
+  names the `extract_variable` binding from the expression (a read of `self.clones` becomes
+  `let clones`), and names the function of an `extract_method` range that initialises a `let` after
+  the binding (`fn managed`), so the engine finds the one `let` (resp. `fn`) the assist added and
+  renames that to the plan's `name`. A `name` equal to rust-analyzer's own choice is kept without a
+  rename. The operation is refused as `rust-analyzer's answer was unusable:` only when the assist
+  introduced no such declaration, or more than one. Two limits are rust-analyzer's: each
   operation replaces **one** occurrence of the expression (a field read three times needs three
   operations), and the assist decides between `&self.x` and `self.x` from the autoref it sees.
 

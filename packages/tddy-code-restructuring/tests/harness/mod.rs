@@ -1457,6 +1457,26 @@ pub fn a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted
     .tracked_by_git()
 }
 
+/// A workspace whose test binary binds a `let mut` it never mutates — the `mut` an extraction copies
+/// into the function it writes, which only rustc's `unused_mut` reports.
+pub fn a_workspace_whose_test_binary_carries_an_unused_mut() -> AFixtureWorkspace {
+    a_workspace_with_a_test_binary(&[
+        "//! Binds a `mut` it never needs.",
+        "",
+        "#[test]",
+        "fn doubles() {",
+        "    let mut doubled = 2 * 2;",
+        "    assert_eq!(doubled, 4);",
+        "}",
+    ])
+    .tracked_by_git()
+}
+
+/// The binding [`a_workspace_whose_test_binary_carries_an_unused_mut`] declares `mut`.
+pub const THE_UNUSED_MUT: &str = "let mut doubled";
+/// What that binding reads as once the tidy has removed the `mut`.
+pub const THE_BINDING_WITHOUT_MUT: &str = "let doubled = 2 * 2;";
+
 /// The unused import [`a_workspace_whose_test_binary_carries_an_unused_import_and_an_unformatted_use`] holds.
 pub const THE_UNUSED_IMPORT: &str = "use std::collections::HashMap;";
 
@@ -1893,6 +1913,41 @@ pub fn the_module_named(text: &str, name: &str) -> String {
         .unwrap_or_else(|| panic!("`{header}` is never closed in:\n{text}"));
 
     lines[opened..=closed].join("\n")
+}
+
+/// The text of `fn name`, from its `fn` keyword to the brace that closes its body.
+///
+/// Lexical, and enough for fixtures this harness writes: braces are counted outside string
+/// literals and line comments.
+pub fn the_function_named(text: &str, name: &str) -> String {
+    let header = format!("fn {name}(");
+    let start = text
+        .find(&header)
+        .unwrap_or_else(|| panic!("no `{header}` in:\n{text}"));
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut at = start;
+    let mut in_string = false;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'\\' if in_string => at += 1,
+            b'"' => in_string = !in_string,
+            b'/' if !in_string && bytes.get(at + 1) == Some(&b'/') => {
+                at = text[at..].find('\n').map_or(bytes.len(), |end| at + end);
+                continue;
+            }
+            b'{' if !in_string => depth += 1,
+            b'}' if !in_string => {
+                depth -= 1;
+                if depth == 0 {
+                    return text[start..=at].to_string();
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    panic!("`{header}` is never closed in:\n{text}")
 }
 
 /// The non-root module file the relative-import fixtures split: a child of `service`.
@@ -2654,6 +2709,30 @@ pub async fn applying_from_the_store(
     })
     .await
     .expect("the blocking half of the apply joins")
+}
+
+/// A committed one-crate workspace (`crates/origin`) whose library is `lines`.
+pub fn a_one_crate_workspace_holding(lines: &[&str]) -> AFixtureWorkspace {
+    a_workspace_holding_files(&[
+        (
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"crates/origin\"]\n",
+        ),
+        (
+            "crates/origin/Cargo.toml",
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        ),
+        (ORIGIN_LIB, &(lines.join("\n") + "\n")),
+    ])
+}
+
+/// Apply `ops` through the runner — the path `tddy-tools restructure apply` takes, the one that
+/// writes — and return the refusal it stopped with, or fail saying it applied.
+pub async fn refusal_from_applying(fixture: &AFixtureWorkspace, ops: &[RefactorOp]) -> String {
+    match applying_a_plan_of(fixture, ops).await {
+        Err(refusal) => refusal,
+        Ok(summary) => panic!("the apply was expected to refuse, and applied instead: {summary:?}"),
+    }
 }
 
 /// A committed workspace holding exactly `files` — for a test whose shape no shared fixture has.

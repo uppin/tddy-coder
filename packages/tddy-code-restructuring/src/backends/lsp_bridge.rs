@@ -128,6 +128,10 @@ impl LspClientBridge {
 /// LSP `ContentModified` — rust-analyzer's "the document changed under this request, ask again".
 const CONTENT_MODIFIED: i64 = -32801;
 
+/// JSON-RPC `InternalError` — what rust-analyzer answers when a request handler panicked. The
+/// server's defect, not the plan's.
+const INTERNAL_ERROR: i64 = -32603;
+
 /// Classify a transport failure by whether waiting can fix it.
 ///
 /// Only [`RestructureError::ServerCatchingUp`] is retried by the backend's assist and settle
@@ -149,6 +153,14 @@ fn map_lsp_error(error: LspError) -> RestructureError {
         // has gone is the opposite of what cancelling meant. It is also not a failure of the
         // server, so it must not read as one.
         LspError::Abandoned => RestructureError::CallerStopped,
+        // The server's handler panicked. Reading it as a malformed plan sends the author to edit a
+        // plan that was correct.
+        LspError::Server {
+            code: INTERNAL_ERROR,
+            message,
+        } => RestructureError::ServerDefect(format!(
+            "rust-analyzer failed answering this request: {message}"
+        )),
         other => RestructureError::MalformedPlan(format!("lsp: {other}")),
     }
 }
@@ -190,6 +202,25 @@ mod tests {
         );
     }
 
+    /// rust-analyzer panicking inside a request handler (`-32603`) is the server's defect. Read as
+    /// `plan is malformed`, it sent the author of #524's plan 16 to edit a plan that was correct.
+    #[test]
+    fn a_server_that_panics_answering_is_the_servers_defect_not_a_malformed_plan() {
+        // Given the server answering a request with a panic
+        let error = map_lsp_error(LspError::Server {
+            code: -32603,
+            message: "request handler panicked: called `Option::unwrap()` on a `None` value"
+                .to_string(),
+        });
+
+        // Then it reads as the server's answer being unusable, quoting the panic
+        assert_eq!(
+            error.to_string(),
+            "rust-analyzer's answer was unusable: rust-analyzer failed answering this request: \
+             request handler panicked: called `Option::unwrap()` on a `None` value"
+        );
+    }
+
     /// A cancelled run must not be reported as a defective plan, and must not be *retried*:
     /// `ServerCatchingUp` is the only refusal the settle loop re-asks on, and re-asking a server
     /// for a caller who has gone is the opposite of what cancelling meant.
@@ -209,17 +240,17 @@ mod tests {
     /// being retried until the budget runs out and reported as an absent assist.
     #[test]
     fn reports_any_other_server_error_verbatim() {
-        // Given the server answering with an internal error
+        // Given the server answering with an error that is neither a panic nor a retryable state
         let error = map_lsp_error(LspError::Server {
-            code: -32603,
-            message: "internal error".to_string(),
+            code: -32000,
+            message: "request failed".to_string(),
         });
 
         // Then the code and message survive into the reported failure
         match error {
             RestructureError::MalformedPlan(message) => {
-                assert!(message.contains("-32603"), "{message}");
-                assert!(message.contains("internal error"), "{message}");
+                assert!(message.contains("-32000"), "{message}");
+                assert!(message.contains("request failed"), "{message}");
             }
             other => panic!("expected MalformedPlan, got {other:?}"),
         }
