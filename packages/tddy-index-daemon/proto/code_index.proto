@@ -286,6 +286,8 @@ message VerifyRequest {
   repeated string retargets = 3;
   // Call re-points (`repoint_call`) the author declares, `OLD=NEW` callee texts each.
   repeated string repoints = 4;
+  // `self` rebinds (`read_fields_through`) the author declares, one binding `NAME` each.
+  repeated string rebinds = 5;
 }
 
 message VerifyResponse {

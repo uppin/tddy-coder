@@ -2,13 +2,13 @@
 
 **Product area:** Coder / tddy-tools  
 **Status:** Active  
-**Updated:** 2026-10-05
+**Updated:** 2026-10-14
 
 ## Summary
 
 `tddy-tools restructure` replays a JSONL **plan of named intents** (never source text, apart from one type or one expression where an operation needs it) against rust-analyzer through `tddy-lsp`. The library crate is `tddy-code-restructuring`; there is no separate binary.
 
-**v1 scope:** Rust only — twenty-five operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
+**v1 scope:** Rust only — twenty-six operations, ten subcommands. No TypeScript sidecar. Agents use [`.agents/skills/code-restructuring`](../../../.agents/skills/code-restructuring/SKILL.md) after [analyze-code-issues](rust-code-analysis.md).
 
 A green baseline is required; a red tree is a stop.
 
@@ -58,7 +58,7 @@ tddy-tools restructure check <plan.jsonl> [--deep] [--budget LINES]
 tddy-tools restructure snapshot <plan.jsonl>
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at L:C[-L:C]
-tddy-tools restructure verify --against <git-ref>
+tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]... [--repoint OLD=NEW]... [--rebind NAME]...
 tddy-tools restructure warm
 ```
 
@@ -82,7 +82,7 @@ same path `apply` takes and writes nothing, so it is the only form that reports 
 refusal before an index has been paid for. `no findings` from a plain `check` has been followed by an
 apply that refused more than once — see
 [§ Known limitations](#known-limitations).
-| `verify` | Logical-statement comparison against a git ref; see [Verify](#verify) |
+| `verify` | Logical-statement comparison against a git ref; see [Verify](#verify). `--retarget OLD=NEW`, `--repoint OLD=NEW` and `--rebind NAME` (each repeatable) declare a `retarget_impl`, a `repoint_call` and a `read_fields_through` the author made, so the comparison accounts for them. The declarations also travel to the index daemon's `Verify` RPC |
 
 ## Plan format
 
@@ -318,7 +318,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `extract_module_to_file` | Move items to new file |
 | `move_item` | Move a contiguous run of module-level items into **another module of the same crate**, in any file. See [Same-crate moves](#same-crate-moves) |
 | `reparent_module` | Move a module's file, and the directory of its children, under **another parent of the same crate**. See [Same-crate moves](#same-crate-moves) |
-| `retarget_impl` | Rewrite an inherent `impl`'s self type to **another type of the same crate** — the whole block, or the run of members its anchor names. See [`retarget_impl`](#retarget_impl) |
+| `retarget_impl` | Rewrite an inherent `impl`'s self type to **another type of the same crate** — the whole block, or the run of members its anchor names. See [`retarget_impl`](#retarget_impl). With `variant: "leave_delegator"` and `expr`, each moved method leaves a forwarding method on the old type |
+| `read_fields_through` | Rebind the `self` a **range** of a method reads to a local inserted before it: `let <name> = <expr>;`, then `<name>.<field>` for every field read (field mode) or `<name>` for every `self` (self mode), so a following `extract_method` writes a free function. See [`read_fields_through`](#read_fields_through) |
 | `extract_trait` | Extract trait from impl |
 | `inline_method` | Inline callee |
 | `remove_unused_param` | Remove a parameter the body never reads, from the declaration and from **every call site in every file**. The anchor names the function and `name` is the parameter. rust-analyzer offers the removal only for an unused parameter, so naming a used one is refused — the refusal names the parameter and says it is used, and nothing is written. A `name` that is not a parameter of the function is refused as well |
@@ -502,10 +503,62 @@ the new type lacks (S4), a declaration whose fields cannot be read (S5), a retar
 block already is (S3), a `use` that would clash with a name the file already binds (S6), and an anchor
 whose members sit in two blocks (S1) are all refused before anything is written. Callers of a moved
 member are **not** re-pointed: an outside caller breaks (`E0599`) and the compile gate names it, which
-is the documented outcome — pair the operation with `repoint_call` in one `group`, or run `move_item`
-over `<New>` afterwards to put the new block in the new type's module. The forwarding delegator
-(`variant: "leave_delegator"` with `expr`) is named by the schema and **refused** by the engine; it is
-a follow-up. Behaviour and limits: [`docs/retarget-impl.md`](../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
+is the documented outcome — pair the operation with `repoint_call` in one `group`, leave a delegator, or
+run `move_item` over `<New>` afterwards to put the new block in the new type's module.
+
+**The forwarding delegator.** With `variant: "leave_delegator"` and `expr`, the members move as above and
+each moved method leaves a forwarding method in its slot of the old block, so callers keep compiling.
+`expr` reaches the new type from the old type's `self` (`self.roster`). The two fields go together:
+either one alone is a malformed plan. The old block keeps its header, the members that stay and one
+delegator per moved method; `impl New { … }` with the moved members follows it. A whole-block retarget
+gives `impl Old { <delegators> }` then `impl New { <members> }`. A delegator copies the member's
+signature and outer attributes (not its doc comment, which stays on the moved member) and its body is
+`<expr>.<name>(<arguments>)`, `.await`ed for an `async fn`; a member with no receiver forwards as
+`New::<name>(<arguments>)`. A parameter written as a pattern, an associated const or type, and a
+`const fn` cannot be forwarded and are refused, all listed, before anything is written. A delegator
+nothing in the workspace calls is still written, and the run notes it, because a `pub` method may have
+callers outside the workspace. Behaviour and limits: [`docs/retarget-impl.md`](../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
+
+### `read_fields_through`
+
+A method of a type that cannot leave its crate can have a range of its body moved only when the range
+names no `self`. `read_fields_through` is anchored on a **range** inside a method (a `range` anchor, or
+an `item` anchor with a relative range). It inserts `let <name> = <expr>;` at the range's start, at the
+line's indentation, and rebinds `self` in the range to `<name>`. `name` is one identifier other than
+`self`; `expr` is one expression. The operation writes no state type, builder or function and moves
+nothing: extraction is `extract_method`'s, and the two compose in one `group`.
+
+- **Field mode** (`expr` is anything but `self`, `&*self` or `&mut *self`: a borrowed view of the host's
+  fields, `self.agent_roster_state()`). Only `self.<field>` reads are rewritten, to `<name>.<field>`.
+  Each field is checked against the view's type, from the server's answers on a trial text, which works
+  when the view's type is declared in another crate. A `&` written before a read is dropped when the
+  view's field is a reference to the host field's type (so clippy's `needless_borrow` does not fire) and
+  kept when both are the same type. A method call on `self`, or a bare `self`, is refused.
+- **Self mode** (`expr` is `self`, `&*self` or `&mut *self`). Every `self` in the range becomes `<name>`,
+  method receivers included, and every `Self` becomes the enclosing `impl`'s self type. A following
+  `extract_method` then writes a free function whose parameter is `<name>`.
+
+Comments, strings and everything outside the range are byte-identical.
+
+**Refused before anything is written**, naming the file and the line. A plain `check` reports a missing
+or malformed `name` or `expr`, a wrong anchor kind, a field the operation does not define (`to`,
+`to_type`, `variant`, `callee`, …), and, for a `range` anchor, the four refusals read from text: a range
+that does not start at a statement, a range that names no `self`, a method call or bare `self` in field
+mode (every site listed), and a `name` the enclosing function already writes (it would shadow it).
+`check --deep` and `apply` add what needs the server: a range in no method with a `self` receiver; in
+field mode, a field the view lacks (every one listed) and a field whose type differs from the host's by
+more than one reference (both types named). A field of the same type is accepted whether the view holds
+it by value or by clone. A hover the engine cannot read is refused as `rust-analyzer's answer was
+unusable:`.
+
+`apply` and `check --deep` print the same note: ``rebound 4 reads of self through `state` (fields a, b);
+dropped 1 borrow`` in field mode, ``rebound every self (7 sites) through `backend` `` in self mode.
+
+**Limits.** In field mode `Self` is not rewritten; in self mode a generic `impl`'s `Self::X` is written
+with the `impl`'s self type as its header spells it (`W<T>::X`), which is not valid in expression
+position, so the compile gate refuses it. A borrow conflict, or a `!Send` borrow alive across `.await`,
+is left to the compile gate. A field read a macro generates is not seen. One `expr` serves the whole
+range. Behaviour and structure: [`docs/read-fields-through.md`](../../../packages/tddy-code-restructuring/docs/read-fields-through.md).
 
 ### `repoint_call`
 
@@ -841,6 +894,20 @@ rename that was not declared, a changed argument, and any lost statement or comm
 `verify` proves only that the differences are of the shape a declared retarget produces, not that the
 plan made them — a hand edit that renames `OLD` to `NEW` is excused too, because the author declared
 it.
+
+With a declared `--retarget`, the delegators `leave_delegator` writes are excused too (rule R3): a gained
+signature line equal to one the ref already has, once per such ref statement, and a gained forwarding
+statement `<receiver>.<m>(<parameter names>)`, its `.await` form, or `New::<m>(…)`, when the method and
+parameter names are exactly those of an excused signature. No further declaration is needed. A forwarding
+method whose arguments differ from the moved signature stays reported.
+
+`--rebind NAME` (repeatable) tells `verify` that `self` was rebound to `NAME` by `read_fields_through`.
+A lost and a gained statement pair when the gained one equals the lost one with every whole-identifier
+`self` (outside strings, comments and lifetimes) written `NAME`, allowing one `&` directly before a
+rebound `self.` to have gone; and one gained `let NAME = …;` is excused per declaration. Both count into
+`repointed`. `NAME` is one identifier other than `self`. A rebind nobody declared, a second `let` and a
+changed argument stay reported. As with `--retarget`, `verify` proves the differences have the shape the
+declaration produces, not that the plan produced them.
 
 `--repoint OLD=NEW` (repeatable) tells `verify` of a call re-point the author made. It pairs a lost
 statement with a gained one equal to it once every call written `OLD` becomes `NEW` — an `OLD`

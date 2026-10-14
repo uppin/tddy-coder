@@ -88,6 +88,8 @@ pub struct Options {
     pub retargets: Vec<String>,
     /// The `OLD=NEW` call re-points `verify` is told of (`--repoint`, repeatable).
     pub repoints: Vec<String>,
+    /// The `self` rebinds `verify` is told of (`--rebind NAME`, repeatable).
+    pub rebinds: Vec<String>,
     /// Where the language server's own indexing lines go while an operation waits for an index.
     ///
     /// Progress happens *while* a call is in flight and has nowhere to wait, so it needs a sink
@@ -140,6 +142,7 @@ impl Default for Options {
             against: None,
             retargets: Vec::new(),
             repoints: Vec::new(),
+            rebinds: Vec::new(),
             progress: discard(),
             account: discard(),
             trace: untraced,
@@ -211,6 +214,11 @@ impl Options {
             "--repoint" => self.repoints.push(
                 rest.next()
                     .ok_or_else(|| usage("--repoint needs OLD=NEW"))?
+                    .clone(),
+            ),
+            "--rebind" => self.rebinds.push(
+                rest.next()
+                    .ok_or_else(|| usage("--rebind needs NAME"))?
                     .clone(),
             ),
             flag if flag.starts_with("--") => return Err(usage(format!("unknown flag `{flag}`"))),

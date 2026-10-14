@@ -88,6 +88,26 @@ impl<'a> Layout<'a> {
         out.pop();
         out
     }
+
+    /// The text that replaces [`Layout::replaced`] when the plan asks for delegators: the old block
+    /// keeps its shape with each moved member's slot holding its delegator (in `delegators`, in
+    /// member order), and `impl <New> { <moved> }` follows it after one blank line.
+    pub(super) fn with_delegators(&self, moved: &str, delegators: &[String]) -> String {
+        let mut out = String::new();
+        out.push_str(&self.old_header);
+        out.push_str(&self.text[self.body_start..self.cut_before]);
+        for delegator in delegators {
+            out.push_str(delegator);
+        }
+        out.push_str(&self.text[self.cut_after..self.close_start]);
+        out.push_str("}\n\n");
+        out.push_str(&self.new_header);
+        out.push_str(moved);
+        out.push_str("}\n");
+        // The replaced span ends at the closing `}` itself: the new block's own `}` is the one left.
+        out.pop();
+        out
+    }
 }
 
 /// The offset of the `}` that closes the `impl`, on the line the outline says it ends on.

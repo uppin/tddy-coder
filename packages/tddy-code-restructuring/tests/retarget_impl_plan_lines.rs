@@ -309,3 +309,39 @@ fn a_whole_block_anchor_is_one_operation() {
     // Then the generic arguments of the new type are kept as written
     assert_eq!(op.to_type.as_deref(), Some("app::roster::Pair<T>"));
 }
+
+#[test]
+fn a_delegator_variant_without_an_expression_is_malformed_and_an_expression_without_it_too() {
+    // Given a retarget asking for delegators with no receiver, and one naming a receiver without asking
+    let variant_alone = a_plan_of_one(
+        "retarget_impl",
+        ITEMS,
+        ",\"to_type\":\"app::roster::Roster\",\"variant\":\"leave_delegator\"",
+    );
+    let expr_alone = a_plan_of_one(
+        "retarget_impl",
+        ITEMS,
+        ",\"to_type\":\"app::roster::Roster\",\"expr\":\"self.roster()\"",
+    );
+
+    // When each is read
+    let refusals = [refusal_of(&variant_alone), refusal_of(&expr_alone)];
+
+    // Then each is malformed, and says what the other half is for
+    assert!(
+        refusals[0].starts_with("plan is malformed:")
+            && refusals[0].contains(
+                "`variant: \"leave_delegator\"` needs `expr`: the expression that reaches the new type from `self`"
+            ),
+        "unexpected refusal: {}",
+        refusals[0]
+    );
+    assert!(
+        refusals[1].starts_with("plan is malformed:")
+            && refusals[1].contains(
+                "`expr` on `retarget_impl` is the delegator's receiver, so it needs `variant: \"leave_delegator\"`"
+            ),
+        "unexpected refusal: {}",
+        refusals[1]
+    );
+}

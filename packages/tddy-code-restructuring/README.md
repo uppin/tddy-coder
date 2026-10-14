@@ -14,7 +14,7 @@ Exposed via `tddy-tools restructure`:
 - `check <plan.jsonl> [--deep] [--budget LINES]` — `--deep` also reports the blast radius of every cross-crate move and prints each operation's own notes (for `repoint_facade_imports`, the paths it would rewrite); `--budget` reports the files the plan names that have more than LINES **production lines** (before the first `#[cfg(test)]` that opens a `mod`), as a record rather than a gate
 - `snapshot <plan.jsonl>` — rewrites the plan's header, or writes one when the plan has none (its first line is an operation); for a plan of item anchors it also re-resolves them against the current tree
 - `anchors <file.rs> --items A,B,C | --at L:C[-L:C]` — emits the anchor a plan carries; `--items` takes bare names, `krate::module::Alpha`, and `<Type>` / `<Type>#N` for an inherent `impl` block (`item_anchor::parse_item_list` is the one rule for every front end)
-- `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes; `--retarget OLD=NEW` (repeatable) makes it account for a declared `retarget_impl`, and `--repoint OLD=NEW` (repeatable) for a declared `repoint_call`
+- `verify --against <git-ref>` — compares logical statements, and excuses and counts what an `extract_module` always causes; `--retarget OLD=NEW` (repeatable) makes it account for a declared `retarget_impl`, `--repoint OLD=NEW` (repeatable) for a declared `repoint_call`, and `--rebind NAME` (repeatable) for a declared `read_fields_through`
 - `warm` — loads the tree's crate graph into the index daemon (it needs the daemon)
 
 A run waits until the server is ready or until its caller stops waiting; there is no budget flag.
@@ -121,12 +121,18 @@ bypass the recorder.
 `convert_tuple_return_to_struct` (`name`: the new struct), `move_module_to_crate` (`to`,
 `reexport`), `move_cluster_to_crate` (`also`, `to`, `reexport`), `move_test_binary_to_crate` (`to`), `move_item` (`to`,
 `name`, `reexport`), `reparent_module` (`to`, `reexport`), `retarget_impl` (`to_type`),
-`repoint_call` (`callee`) and `repoint_facade_imports` (no field: an anchor only).
+`repoint_call` (`callee`), `repoint_facade_imports` (no field: an anchor only) and `read_fields_through` (`name`, `expr`).
 
 `retarget_impl` rewrites an inherent `impl`'s self type to another type of the same crate — the whole
 block, or the run of members its anchor names (the block is split at the run, in place). It re-points
 the `Old::` paths the moved members wrote, adds one `use`, and refuses before writing when a moved
-member reads a field the new type lacks; see [docs/retarget-impl.md](docs/retarget-impl.md).
+member reads a field the new type lacks. With `variant: "leave_delegator"` and `expr` it leaves a forwarding method on the old type for each moved method; see [docs/retarget-impl.md](docs/retarget-impl.md).
+
+`read_fields_through` is anchored on a range inside a method. It inserts `let <name> = <expr>;` before the
+range and writes `<name>` where the range read `self`: only `self.<field>` reads when `expr` is a view of
+the host's fields (each field is checked against the view's type, and a `&` the view already provides is
+dropped), or every `self` and `Self` when `expr` is `self`. A following `extract_method` then writes a
+free function; see [docs/read-fields-through.md](docs/read-fields-through.md).
 
 `repoint_call` rewrites the part of a call **in front of** its argument list, keeping the arguments
 byte for byte: one call's callee (an `item` anchor with a relative range over the call and `callee` =
@@ -189,13 +195,13 @@ leaves no record on this path. The daemon's own record is always open and has no
 
 | Area | Modules |
 |---|---|
-| Plan vocabulary | `plan.rs`, `plan/refactor_kind.rs` (`RefactorKind`), `plan/codec.rs` with `plan/codec/{file_hint,groups}.rs`, `plan/item_path.rs` |
+| Plan vocabulary | `plan.rs`, `plan/refactor_kind.rs` (`RefactorKind`), `plan/codec.rs` with `plan/codec/{file_hint,groups,rebind_fields}.rs`, `plan/item_path.rs` |
 | Journal | `journal.rs`, `journal/group.rs` (`PreImage`, `OpenGroup`) |
 | Process record | `spawn_record.rs` with `spawn_record/{jsonl,deferred,redact}.rs` (`SpawnRecorder`, `JsonlSpawnRecord`, `ColdRunSpawnRecord`, `redacted`) |
 | Plan store | `plan_store.rs`, `plan_store/refresh.rs`, `plan_store/live.rs`, `plan_store/live/fold.rs` |
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
-| Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs`, `verify/retarget.rs` (`Declared`, R1 and R2), `verify/repoint.rs` (`Repoint`, R-call) |
-| Rust backend | `backends/rust.rs`, and beside it `item_move/` (with `canonical_paths.rs`, `doc_links.rs`), `retarget_impl/` (with `outline.rs`, `rewrite.rs`, `fields.rs`, `imports.rs`, `preflight.rs`), `repoint_call/` (with `single.rs`, `sites.rs`, `receivers.rs`), `repoint_facade/` (with `scope.rs`, `rewrite.rs`, `group.rs`, `refusals.rs`), `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
+| Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs`, `verify/retarget.rs` (`Declared`, R1, R2 and R3), `verify/rebind.rs` (`Rebind`, R-rebind), `verify/repoint.rs` (`Repoint`, R-call) |
+| Rust backend | `backends/rust.rs`, and beside it `item_move/` (with `canonical_paths.rs`, `doc_links.rs`), `retarget_impl/` (with `outline.rs`, `rewrite.rs`, `fields.rs`, `imports.rs`, `preflight.rs`, `delegator.rs`), `read_fields_through/` (with `range.rs`, `method.rs`, `typing.rs`, `edits.rs`), `repoint_call/` (with `single.rs`, `sites.rs`, `receivers.rs`), `repoint_facade/` (with `scope.rs`, `rewrite.rs`, `group.rs`, `refusals.rs`), `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
 | Cross-crate moves | `crate_move/{moving,cluster,source_scan,carried,module_files}.rs` with `moving/facade_writer.rs`, `cluster/{stranded,gathering}.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs`. `crate_move::survey` and `crate_move::reexports` are `pub(crate)`, read by `item_move`'s canonical-path pass |
 
 Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream
