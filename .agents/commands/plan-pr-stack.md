@@ -9,7 +9,7 @@ then build the stack in **two waves**, both in the **current worktree**, one bra
 
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — it defines the stack model,
 **registering the stack with `gh stack`**, the **PR boundary contract**, the `## Draft PR contract`,
-base tracking, forward-only doc linking, the worktree-pinning constraint, PR titles, and the landing
+base tracking, doc linking by branch or PR number, the worktree-pinning constraint, PR titles, and the landing
 rules. This command assumes those definitions and never contradicts them.
 
 > **Not the `pr-stack` workflow recipe.** `tddy-coder` ships a product feature by a similar name —

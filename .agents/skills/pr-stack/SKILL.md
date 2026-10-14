@@ -9,7 +9,7 @@ description: >-
   mergeable — splitting by layer is forbidden, a stubs-only PR is not a valid node), the per-PR
   documents in `docs/dev/1-WIP/` with their five headings `## Responsibility`, `## Boundaries`,
   `## Dependencies` (do not implement a predecessor's surface here) and `## Draft PR contract`, base
-  tracking, forward-only doc linking, the golden rules for bottom-up landing (a deleted base branch
+  tracking, doc linking by branch or PR number, the golden rules for bottom-up landing (a deleted base branch
   CLOSES its dependent PR), the worktree rules (plan in the current worktree, one branch checked out
   at a time, restore the original branch when done, delete a temporary worktree as soon as its
   branch is pushed), per-worktree rebase versus a stack-wide cascade, the in-stack implementation
