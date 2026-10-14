@@ -1,7 +1,7 @@
 # 2026-10-09 — hand fixes after the engine moved the group rule into `crate_move::use_group`
 
 **Category:** Manual fix after an engine move (build fixes only, each marked `TODO(reshape-8-hand-fix)` where code remains)
-**Source:** `#reshape` 7/19 (PR #605), milestone M1 — [changeset](../1-WIP/2026-10-09-reshape-move-grouped-use.md)
+**Source:** `#reshape` 7/19 (PR #605), milestone M1 — [change history](../../../packages/tddy-code-restructuring/docs/changesets/2026-10-14-reshape-move-grouped-use.md)
 
 The group rule (`split_or_reprefix` and its helpers) was moved down into `crate_move::use_group` with
 `tddy-tools restructure` `move_item`, in this order: `attribute_above_a_split` (creating
@@ -36,3 +36,11 @@ not do. Each was repaired by hand before the next move:
 - Move a `#[cfg(test)] mod tests` along with the items it exercises when every test in it names only moved items.
 
 Delete this file once those are fixed or the markers above are gone.
+
+## Status at `#reshape` 7/19's wrap (2026-10-14)
+
+Four `TODO(reshape-8-hand-fix)` markers remain, deferred with the developer's consent: `backends/rust/repoint_facade.rs`
+(`use_statement_edits`, `plain_path`), `crate_move/use_group.rs` (`Leaf` in place of `Rewrite`) and
+`crate_move/use_group/refusals.rs` (`malformed`). Each marks code that is correct and tested; what the marker records is the
+shape the engine should have produced (see the list above). They go when the engine fixes those three limits, or when a later
+node reshapes `repoint_facade`'s `Rewrite` into `Leaf`.

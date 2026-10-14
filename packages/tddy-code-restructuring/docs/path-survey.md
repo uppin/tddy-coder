@@ -19,7 +19,7 @@ what the file names:
 
 `move_cluster_to_crate` surveys each member and passes the set of co-moving members, so a path reaching
 a sibling that travels with it is `crate::`, not an edge. `check` reads the survey too, through
-`Header::header_origin_paths`, but only the file's top-level `use` header (see Limits).
+`Header::origin_paths`, the paths of every carried file that would become an edge.
 
 ## Carried files
 
@@ -93,9 +93,19 @@ The rewrite (`header.rs`, `reach`) decides by where a path ends up: a path to a 
 module is left as written); a path whose defining crate is the destination becomes `crate::` plus the
 rest of `defined_at`; anything else is written as its `defined_at`, and is an **edge back** when the
 defining crate is the origin. A `use` tree is replaced by its prefix, which every member must agree on;
-members that would need different qualifiers are `MalformedPlan` ("write one `use` per path"), and a path
-spelled across whitespace or comments is refused as one the rewrite cannot address. A plain `use` whose
-last segment changes is rewritten `as` the old name.
+members that would need different qualifiers are rewritten as a whole statement by `crate_move::use_group`
+(`split_or_reprefix`, Rule S: the kept members stay in the group, each lifted member follows as a `use`
+of its own; a nested member whose leaves disagree is flattened; an attribute or doc comment above a
+statement that must split is a `MalformedPlan` naming file and line), and a path spelled across
+whitespace or comments is refused as one the rewrite cannot address. A plain `use` whose last segment
+changes is rewritten `as` the old name.
+
+`reach` also follows a path through a glob facade of the origin to the member it names, so a facade to a
+co-mover is co-moving and one to a module that stays is an edge. A `pub(in crate::<module>)` restriction
+is carried as `SurveyedPath.restriction` (read by `Sighting.in_visibility`): never an edge, never a
+manifest line, respelled `pub(crate)` when the module stays and `pub(in crate::<landing>)` when it moves.
+A cluster's callers are collected across its members (`SetTotals.callers`) and written together by
+`moving::caller_changes`, one edit per statement.
 
 Edges are collected outside `#[cfg(test)]` only. The manifest pass puts a crate in `[dev-dependencies]`
 when only `#[cfg(test)]` code names it (and drops it when the rest of the file names it too). The
@@ -122,16 +132,18 @@ records.
 - **`#[cfg(test)]` is recognised as `#[cfg(test)]` and `#[cfg(all(test, …))]` only.** `any(test, …)`,
   `not(…)` and `cfg_attr` read as ordinary code, which errs the safe way: a crate lands in
   `[dependencies]` rather than missing from the build.
-- **`pub(in …)` visibility is not interpreted, `#[path = "…"]` modules are not followed, and items a
-  macro generates, or paths inside a macro's arguments, are not seen.** The compile gate catches what
+- **`#[path = "…"]` modules are not followed, and items a macro generates, or paths inside a macro's
+  arguments, are not seen.** The compile gate catches what
   results.
 - **Only the origin's re-exports are followed.** A path through another crate's re-export is left at
   that crate.
-- **`check`'s stranded-sibling finding reads the top-level `use` header only,** of every carried file
-  (`cluster/stranded.rs` `paths_naming_the_origin`).
-  `Header::header_origin_paths` is the header subset of the edges, kept for that finding. The
-  body-path finding (`stays_behind_through_a_body`) reads the survey's body paths of every carried file
-  directly; a `use` nested in a function is `in_use`, not `in_body`, so neither reads it.
+- **`check`'s stranded-sibling finding reads `Header::origin_paths` of every carried file**
+  (`cluster/stranded.rs` `paths_naming_the_origin`), the same edges `apply`'s cycle refusal reads, so a
+  nested `use` is read too; `remedy_for` names a crate-root item with "cut the dependency" and a module
+  with the cluster remedy. The body-path finding (`stays_behind_through_a_body`) reads the survey's body
+  paths of every carried file directly.
+- **A restricted `use` that must both narrow its restriction and split is only narrowed** (`header/rewrite.rs`
+  `rewrite_of` returns the narrowing edit first). No input has met it.
 - **`survey.rs` is `pub(crate)`.** Its consumers are inside this crate.
 
 ## Testing

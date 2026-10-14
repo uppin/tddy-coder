@@ -39,8 +39,9 @@ failure that destroys information.
 3. **The `pub(crate)` widening a cross-crate move forces is not reported.** `extract_module` reports
    its widenings; a cross-crate move, where the question actually bites, does not — it surfaced as
    four `E0603`s at the next build.
-4. **A caller re-point can be spliced inside a grouped import**, producing
-   `use crate::{a, tddy_daemon_livekit::x::Y, b};`, which never resolves.
+4. ~~**A caller re-point can be spliced inside a grouped import**, producing
+   `use crate::{a, tddy_daemon_livekit::x::Y, b};`, which never resolves.~~ Fixed by `#reshape` 7/19 (PR #605): a caller's
+   group is rewritten as one statement edit, split or re-prefixed by the same rule as a moved header.
 
 Also unresolved in kind: **the refusals are still mostly unit-tested**, though `facade_cycle_acceptance`
 and the new `cluster_move_acceptance` now prove two of them against a live server.

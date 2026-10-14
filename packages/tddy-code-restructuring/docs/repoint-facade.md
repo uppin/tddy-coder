@@ -29,7 +29,6 @@ Because resolution is textual, a library-level test drives `RustBackend::resolve
 | `repoint_facade.rs` | the run: `findings` (the static refusals, from the plan and the text of a `symbol` anchor's file), `resolve_files` (the walk over the files), the `use`-statement and body-path edits, and `notes_of` (the account `check --deep` and `apply` print) |
 | `scope.rs` | which files an anchor names — one file for a `symbol` anchor, every file of the module for an `items`/`item` anchor lowered to the `mod` declaration's range (`module_files::files_of`) |
 | `rewrite.rs` | `path_edits`: which surveyed paths go through a facade of another crate (`goes_through_a_facade`), and the four preconditions a rewrite is held to; `Rewrite { written, defined_at, line, split_from_group }` |
-| `group.rs` | `split_or_reprefix`: one `use` statement's replacement — Rule P in place, Rule S by splitting |
 | `refusals.rs` | the refusals that need the code, each naming the path, the file and the line |
 
 ## Which paths are rewritten
@@ -92,7 +91,13 @@ A `use` **group** is rewritten by `group::split_or_reprefix`:
   (rustfmt, which `apply` runs over every file it wrote, writes `use crate::b::Thing;`). A group with
   no kept member disappears into its lifted statements.
 - A **nested** group member (`a::{x, y}`) is lifted whole when all its leaves share one new prefix, and
-  refused otherwise (`nested_member_reaches_two_crates`).
+  flattened into the split otherwise: each leaf becomes its own statement, the kept leaves staying in the
+  group.
+
+The rule itself, `split_or_reprefix` and its helpers, lives in `crate_move/use_group.rs` (with its
+refusals in `use_group/refusals.rs`), because `move_module_to_crate` and `move_cluster_to_crate` apply it
+to the headers they move and to their callers' groups; this module calls it with a `Leaf` for each
+surveyed path.
 
 ## Refusal classes
 
