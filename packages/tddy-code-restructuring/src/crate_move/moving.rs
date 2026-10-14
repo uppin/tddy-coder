@@ -132,18 +132,22 @@ impl Move {
     ) -> Result<manifest_edits::ModuleDeclaration> {
         let declared_in = &self.home.declared_in;
         let text = workspace.read(declared_in)?;
-        manifest_edits::declared_module(&text, &self.module).ok_or_else(|| {
-            let where_declared = if self.home.is_top_level() {
-                "crate root"
-            } else {
-                "parent module"
-            };
-            malformed(format!(
-                "{declared_in} declares no `mod {}` — a module this {where_declared} does not \
-                 declare is not this crate's to move",
-                self.module
-            ))
-        })
+        manifest_edits::declared_module(&text, &self.module).ok_or_else(|| self.declared_nowhere())
+    }
+
+    /// The refusal for a module the file that should declare it does not: the one wording every
+    /// reader of the declaration gives.
+    pub(crate) fn declared_nowhere(&self) -> crate::RestructureError {
+        let where_declared = if self.home.is_top_level() {
+            "crate root"
+        } else {
+            "parent module"
+        };
+        malformed(format!(
+            "{} declares no `mod {}` — a module this {where_declared} does not declare is not \
+             this crate's to move",
+            self.home.declared_in, self.module
+        ))
     }
 
     /// The crate root that has to declare it afterwards.

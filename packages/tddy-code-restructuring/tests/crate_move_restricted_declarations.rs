@@ -273,3 +273,49 @@ fn a_pub_self_module_moved_with_a_glob_facade_leaves_a_pub_self_facade() {
         "pub(self) use destination::config;\npub mod runtime;\n"
     );
 }
+
+#[test]
+fn a_facade_line_naming_only_modules_the_destination_declares_is_extended_whoever_wrote_it() {
+    // Given an origin root whose own `pub use destination::existing;` names a module the
+    // destination declares `pub mod`, and `config` still to move
+    let origin = an_origin_whose_root_is(
+        "pub use destination::existing;\npub mod config;\n",
+        &[
+            ("crates/origin/src/config.rs", "pub struct Settings;\n"),
+            ("crates/destination/src/lib.rs", "pub mod existing;\n"),
+        ],
+    );
+
+    // When `config` moves with a glob facade
+    let root = after_moving(
+        &origin,
+        &a_glob_move_of(&[&["config"]], ORIGIN_LIB),
+        ORIGIN_LIB,
+    );
+
+    // Then that line is indistinguishable from one the tool wrote, and is extended
+    assert_eq!(root, "pub use destination::{config, existing};\n");
+}
+
+#[test]
+fn a_facade_line_naming_something_the_destination_does_not_declare_is_left_alone() {
+    // Given an origin root whose `pub use destination::Settings;` names an item, not a module the
+    // destination declares
+    let origin = an_origin_whose_root_is(
+        "pub use destination::Settings;\npub mod config;\n",
+        &[("crates/origin/src/config.rs", "pub struct Settings;\n")],
+    );
+
+    // When `config` moves with a glob facade
+    let root = after_moving(
+        &origin,
+        &a_glob_move_of(&[&["config"]], ORIGIN_LIB),
+        ORIGIN_LIB,
+    );
+
+    // Then the line stays as written and the facade is a line of its own
+    assert_eq!(
+        root,
+        "pub use destination::Settings;\npub use destination::config;\n"
+    );
+}

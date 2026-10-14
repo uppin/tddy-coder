@@ -1,5 +1,3 @@
-use super::super::malformed;
-
 use crate::{
     crate_move::{facade_line, facade_lines_for_plan, header, manifest_edits, FacadeEntry},
     edit::TextEdit,
@@ -71,31 +69,11 @@ fn leaving(
     for (member, _) in members {
         declarations.push(member.declaration(workspace)?);
     }
-    let moved: Vec<FacadeEntry> = members
-        .iter()
-        .zip(&declarations)
-        .filter(|((member, _), _)| member.reexport == Reexport::Glob)
-        .map(|((member, _), declaration)| FacadeEntry {
-            destination: member.destination.clone(),
-            visibility: declaration.visibility.clone(),
-            module: member.module.clone(),
-        })
-        .collect();
+    let moved = glob_entries(members, &declarations);
 
-    let mut edits = Vec::new();
     // The visibilities whose facade line is already written: extended in place, or at an earlier
     // member's declaration.
-    let mut written: Vec<&str> = Vec::new();
-    for entry in &moved {
-        let visibility = entry.visibility.as_str();
-        if written.contains(&visibility) {
-            continue;
-        }
-        if let Some(earlier) = earlier_facade(workspace, text, members[0].0, visibility) {
-            edits.push(extended_facade(text, &earlier, &moved, visibility));
-            written.push(visibility);
-        }
-    }
+    let (mut edits, mut written) = extended_earlier_facades(workspace, text, members[0].0, &moved);
 
     let removals = removals_with_separators(path, text, members)?;
 
@@ -117,6 +95,46 @@ fn leaving(
         edits.extend(parent_reexport_edits(text, member));
     }
     Ok(edits)
+}
+
+/// The modules moving with a glob facade, each with the visibility its declaration had.
+fn glob_entries(
+    members: &[(&Move, &Survey)],
+    declarations: &[manifest_edits::ModuleDeclaration],
+) -> Vec<FacadeEntry> {
+    members
+        .iter()
+        .zip(declarations)
+        .filter(|((member, _), _)| member.reexport == Reexport::Glob)
+        .map(|((member, _), declaration)| FacadeEntry {
+            destination: member.destination.clone(),
+            visibility: declaration.visibility.clone(),
+            module: member.module.clone(),
+        })
+        .collect()
+}
+
+/// The edits that extend a facade line an earlier operation wrote, one per visibility that has
+/// one, and the visibilities they cover.
+fn extended_earlier_facades<'a>(
+    workspace: &Workspace<'_>,
+    text: &str,
+    first: &Move,
+    moved: &'a [FacadeEntry],
+) -> (Vec<TextEdit>, Vec<&'a str>) {
+    let mut edits = Vec::new();
+    let mut written: Vec<&str> = Vec::new();
+    for entry in moved {
+        let visibility = entry.visibility.as_str();
+        if written.contains(&visibility) {
+            continue;
+        }
+        if let Some(earlier) = earlier_facade(workspace, text, first, visibility) {
+            edits.push(extended_facade(text, &earlier, moved, visibility));
+            written.push(visibility);
+        }
+    }
+    (edits, written)
 }
 
 /// The facade that takes the place of `member`'s declaration, if it gets one: a glob member shares
@@ -226,18 +244,8 @@ fn declaration_of(
     text: &str,
     member: &Move,
 ) -> Result<manifest_edits::RemovedDeclaration> {
-    manifest_edits::removed_declaration(text, path, &member.module)?.ok_or_else(|| {
-        let where_declared = if member.home.is_top_level() {
-            "crate root"
-        } else {
-            "parent module"
-        };
-        malformed(format!(
-            "{path} declares no `mod {}` — a module this {where_declared} does not declare is \
-             not this crate's to move",
-            member.module
-        ))
-    })
+    manifest_edits::removed_declaration(text, path, &member.module)?
+        .ok_or_else(|| member.declared_nowhere())
 }
 
 /// The edits that point a moved-without-facade module's parent re-exports at the destination.

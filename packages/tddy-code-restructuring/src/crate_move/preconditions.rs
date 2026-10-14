@@ -236,18 +236,7 @@ pub(crate) fn move_preconditions(
     let text = workspace.read(&moving.home.declared_in)?;
     let declared_in = &moving.home.declared_in;
     if manifest_edits::removed_declaration(&text, declared_in, &moving.module)?.is_none() {
-        let where_declared = if moving.home.is_top_level() {
-            "crate root"
-        } else {
-            "parent module"
-        };
-        return Err(malformed(format!(
-            "{declared_in} declares no `mod {module}` — a module this {where_declared} does not \
-             declare is not this crate's to move",
-            declared_in = moving.home.declared_in,
-            module = moving.module,
-            where_declared = where_declared
-        )));
+        return Err(moving.declared_nowhere());
     }
     if let Some(finding) = destination_already_has_the_module(workspace, op)? {
         return Err(malformed(finding));
