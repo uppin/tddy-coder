@@ -79,46 +79,75 @@ pub(crate) fn uncarriable(
 
     let mut findings = Vec::new();
     for file in &files {
-        if workspace.read(&file.from)?.lines().any(places_a_module) {
-            findings.push(format!(
-                "`{}` places a module with `#[path]`, which a move cannot follow — the file it \
-                 names would be left where it is",
-                file.from
-            ));
-        }
+        findings.extend(path_placed_module(workspace, &file.from)?);
     }
 
     let earlier = moved_by_earlier_operations(workspace, ops, index, &op.anchor);
     let travelling = travelling_modules(workspace, op, &earlier)?;
-    for file in files.iter().skip(1) {
-        if workspace.root.join(&file.to).exists() {
-            findings.push(format!(
-                "`{destination}` already has {target} — carrying `{from}` there with `{module}` \
-                 would be a merge, which no operation performs",
-                destination = moving.destination.package,
-                target = file.to,
-                from = file.from,
-                module = moving.module,
-            ));
-        }
+    for file in children_of(&files) {
+        findings.extend(target_already_present(workspace, &moving, file));
         findings.extend(moved_on_its_own(ops, index, &moving, &file.from));
-
-        let module_path: Vec<String> = moving
-            .home
-            .path
-            .iter()
-            .chain(&file.below)
-            .cloned()
-            .collect();
-        findings.extend(body_path_left_behind(
+        findings.extend(body_reaching_left_behind(
             workspace,
             &moving,
-            &file.from,
-            &module_path,
+            file,
             &travelling,
         )?);
     }
     Ok(findings)
+}
+
+/// The files a module carries below its own: the first file of a carried set is the module's, and
+/// every one after it is a file of one of its directory children.
+fn children_of(
+    files: &[module_files::MovedFile],
+) -> impl Iterator<Item = &module_files::MovedFile> {
+    files.iter().skip(1)
+}
+
+/// The finding for a file that places a module with `#[path]`.
+fn path_placed_module(workspace: &Workspace<'_>, file: &str) -> Result<Option<String>> {
+    Ok(workspace.read(file)?.lines().any(places_a_module).then(|| {
+        format!(
+            "`{file}` places a module with `#[path]`, which a move cannot follow — the file \
+                 it names would be left where it is"
+        )
+    }))
+}
+
+/// The finding for a child whose target the destination already has.
+fn target_already_present(
+    workspace: &Workspace<'_>,
+    moving: &Move,
+    file: &module_files::MovedFile,
+) -> Option<String> {
+    workspace.root.join(&file.to).exists().then(|| {
+        format!(
+            "`{destination}` already has {target} — carrying `{from}` there with `{module}` \
+             would be a merge, which no operation performs",
+            destination = moving.destination.package,
+            target = file.to,
+            from = file.from,
+            module = moving.module,
+        )
+    })
+}
+
+/// The finding for a child's body reaching a module that stays behind.
+fn body_reaching_left_behind(
+    workspace: &Workspace<'_>,
+    moving: &Move,
+    file: &module_files::MovedFile,
+    travelling: &BTreeSet<String>,
+) -> Result<Option<String>> {
+    let module_path: Vec<String> = moving
+        .home
+        .path
+        .iter()
+        .chain(&file.below)
+        .cloned()
+        .collect();
+    body_path_left_behind(workspace, moving, &file.from, &module_path, travelling)
 }
 
 /// Whether `op`'s own module is a directory child of another module its operation moves.

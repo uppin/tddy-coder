@@ -16,7 +16,7 @@ use crate::plan::Reexport;
 use super::module_home;
 
 use super::malformed;
-use crate::crate_move::{carried, header, module_files, moving, refusals};
+use crate::crate_move::{carried, moving};
 use crate::edit::{FileEdit, TextEdit};
 
 /// A set of modules that move to one destination **as a single unit**.
@@ -116,25 +116,25 @@ pub fn resolve_cluster(
     let members = read_members(workspace, cluster)?;
     let the_set = carried::TheSet::of(workspace, &members)?;
 
-    let mut merged = MergedChanges::default();
-    let mut totals = carried::SetTotals::default();
+    let mut gathering = gathering::Gathering {
+        the_set: &the_set,
+        merged: MergedChanges::default(),
+        totals: carried::SetTotals::default(),
+    };
     for (member, files) in members.iter().zip(&the_set.carried) {
-        member_changes(
-            engine,
-            workspace,
-            member,
-            files,
-            &the_set,
-            &mut merged,
-            &mut totals,
-        )?;
+        gathering.member_changes(engine, workspace, member, files)?;
     }
-    let carried::SetTotals {
-        surveys,
-        crates_named,
-        mut dev_crates_named,
-        keeps_naming_it,
-    } = totals;
+    let gathering::Gathering {
+        mut merged,
+        totals:
+            carried::SetTotals {
+                surveys,
+                crates_named,
+                mut dev_crates_named,
+                keeps_naming_it,
+            },
+        ..
+    } = gathering;
 
     for change in moving::left_behind(workspace, &members, &surveys)? {
         merged.absorb(change);
@@ -162,56 +162,6 @@ pub fn resolve_cluster(
     Ok(WorkspaceEdit {
         changes: merged.changes(),
     })
-}
-
-/// What one member adds to the edit: a rename and a re-pointed header for each file it carries,
-/// the callers of everything in its tree that something outside the set names, and the refusals
-/// that are about the member as a whole.
-///
-/// A reference from one carried file to another is no caller: both move, and the header pass
-/// re-points it.
-fn member_changes(
-    engine: &mut dyn ModuleReferences,
-    workspace: &Workspace<'_>,
-    member: &moving::Move,
-    files: &[module_files::MovedFile],
-    the_set: &carried::TheSet,
-    merged: &mut MergedChanges,
-    totals: &mut carried::SetTotals,
-) -> Result<()> {
-    let mut rewrites = Vec::new();
-    let mut origin_paths = Vec::new();
-    for file in files {
-        let (survey, file_rewrites) =
-            super::surveyed_in(engine, workspace, member, &file.from, &the_set.travelling)?;
-        let text = workspace.read(&file.from)?;
-        let header =
-            header::repointed_header_at(workspace, &text, member, &file.below, &the_set.co_moving)?;
-
-        merged.absorb(FileEdit::Rename {
-            from: file.from.clone(),
-            to: file.to.clone(),
-        });
-        merged.add(file.from.clone(), header.edits);
-        totals.crates_named.extend(header.crates_named);
-        totals.dev_crates_named.extend(header.dev_crates_named);
-        header::extend_once(&mut origin_paths, header.origin_paths);
-        if file.below.is_empty() {
-            totals.surveys.push(survey);
-        }
-        rewrites.extend(file_rewrites);
-    }
-
-    let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
-    refusals::refuse_a_dependency_cycle(member, &origin_paths, &naming_it)?;
-    carried::restricted_children_reached(workspace, member, &rewrites)?;
-    if member.reexport == Reexport::None {
-        for change in moving::caller_changes(workspace, rewrites)? {
-            merged.absorb(change);
-        }
-    }
-    totals.keeps_naming_it.extend(naming_it);
-    Ok(())
 }
 
 /// Every member as the move it is, refusing a set that cannot be resolved as one.
@@ -293,6 +243,7 @@ impl MergedChanges {
     }
 }
 
+mod gathering;
 mod stranded;
 pub use stranded::siblings_left_behind;
 pub(crate) use stranded::stranded_siblings;
