@@ -126,6 +126,13 @@ pub(crate) fn repointed_header_at(
     Ok(header)
 }
 
+/// Adds each of `paths` to `into` unless it is already there, keeping the order they first appear in.
+pub(crate) fn extend_once(into: &mut Vec<String>, paths: Vec<String>) {
+    for path in &paths {
+        push_once(into, path);
+    }
+}
+
 fn push_once(paths: &mut Vec<String>, path: &str) {
     if !paths.iter().any(|known| known == path) {
         paths.push(path.to_string());

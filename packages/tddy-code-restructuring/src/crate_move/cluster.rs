@@ -195,11 +195,7 @@ fn member_changes(
         merged.add(file.from.clone(), header.edits);
         totals.crates_named.extend(header.crates_named);
         totals.dev_crates_named.extend(header.dev_crates_named);
-        for path in header.origin_paths {
-            if !origin_paths.contains(&path) {
-                origin_paths.push(path);
-            }
-        }
+        header::extend_once(&mut origin_paths, header.origin_paths);
         if file.below.is_empty() {
             totals.surveys.push(survey);
         }

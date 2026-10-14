@@ -142,11 +142,7 @@ fn paths_naming_the_origin(
         let text = workspace.read(&file.from)?;
         let header =
             header::repointed_header_at(workspace, &text, &module.moving, &file.below, &co_moving)?;
-        for path in header.header_origin_paths {
-            if !names_the_origin.contains(&path) {
-                names_the_origin.push(path);
-            }
-        }
+        header::extend_once(&mut names_the_origin, header.header_origin_paths);
     }
     Ok(names_the_origin)
 }
