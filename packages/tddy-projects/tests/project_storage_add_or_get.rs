@@ -18,6 +18,7 @@ fn a_project(name: &str, repo_path: &str) -> ProjectData {
         remote_name: None,
         host_repo_paths: HashMap::new(),
         accounts: Vec::new(),
+        local_gh: false,
     }
 }
 

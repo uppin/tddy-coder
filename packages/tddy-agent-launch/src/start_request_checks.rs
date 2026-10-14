@@ -12,6 +12,18 @@ use tddy_service::proto::session::StartSessionResponse;
 use tddy_service::proto::session::StartSessionRequest;
 
 use crate::launch_ports::LaunchSessions;
+use tddy_projects::project_storage::ProjectData;
+
+/// The request a start is forwarded to a peer with: a request that names no GitHub source names
+/// this host's own project setting (`local_row`), so the peer acts the same way even if its copy of
+/// the project was never set. A request that already names one keeps it; with no local row there is
+/// nothing to name.
+pub fn forwarded_start_request(
+    req: &StartSessionRequest,
+    local_row: Option<&ProjectData>,
+) -> StartSessionRequest {
+    todo!("forwarded_start_request")
+}
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 impl LaunchSessions {

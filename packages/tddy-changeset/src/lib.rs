@@ -11,6 +11,7 @@ pub mod elapsed_format;
 pub mod session_activity;
 pub mod session_agent;
 pub mod session_context;
+pub mod session_github_source;
 pub mod session_label;
 pub mod session_lifecycle;
 pub mod session_metadata;
@@ -42,6 +43,10 @@ pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,
     validate_session_id_segment, SessionIdValidationError, SessionLifecycleBootstrap,
     UnifiedSessionTreeBootstrap,
+};
+pub use session_github_source::{
+    read_session_github_source, write_session_github_source, SessionGithubSource,
+    SESSION_GITHUB_SOURCE_FILENAME,
 };
 pub use session_metadata::{
     paired_agent, read_session_metadata, repo_root_for_session, update_activity_status,

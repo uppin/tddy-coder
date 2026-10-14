@@ -73,5 +73,6 @@ pub(super) fn project_entry_from(
                 account_id: a.account_id.clone(),
             })
             .collect(),
+        local_gh: p.local_gh,
     }
 }

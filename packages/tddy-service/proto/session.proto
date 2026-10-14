@@ -401,6 +401,16 @@ message StartSessionEvent {
   }
 }
 
+// Where a session takes its GitHub identity from.
+enum GithubSource {
+  // Not stated: the serving host decides from its own project row.
+  GITHUB_SOURCE_UNSPECIFIED = 0;
+  // The account the project assigns, from the signed-in person's credential vault.
+  GITHUB_SOURCE_VAULT = 1;
+  // The host's own GitHub CLI login, as the session's OS user.
+  GITHUB_SOURCE_LOCAL_GH = 2;
+}
+
 message StartSessionRequest {
   string session_token = 1;
   // Path to the binary to spawn for this session only (from daemon allowlist). Not stored on the project.
@@ -574,6 +584,11 @@ message StartSessionRequest {
   // managed_codebase (which jails the agent instead), with sandbox (same), and with
   // codebase_daemon_instance_id (that is the same inversion across two hosts, already served).
   bool sandboxed_codebase = 39;
+  // Where the session takes its GitHub identity from. UNSPECIFIED (what every direct caller sends)
+  // means this host's own project setting. A daemon forwarding a start to a peer fills it from its
+  // own project row, so the peer acts the same way even if its copy of the project was never set.
+  // A start that names a source keeps it on resume. See docs/ft/daemon/github-identity.md.
+  GithubSource github_source = 40;
   // Removed: discovery_subagent (single-name alias), fastcontext_url/fastcontext_model/
   // fastcontext_max_turns/subagent_replaces. All specialized-agent configuration (name, model,
   // base_url, max_turns, replaces) now comes exclusively from `specialized_agents` resolved

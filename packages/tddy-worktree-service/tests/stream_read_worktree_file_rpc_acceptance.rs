@@ -92,6 +92,7 @@ fn a_served_worktree_capped_at(cap: u64) -> ServedWorktree {
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         },
     )
     .expect("register project");

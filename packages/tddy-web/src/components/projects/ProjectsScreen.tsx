@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectEntry } from "../../gen/session_pb";
+import type { HostGithubCli } from "../../gen/host_pb";
 import type { DaemonHost } from "../../lib/participantRole";
 
 /**
@@ -41,8 +42,19 @@ export interface ProjectsScreenProps {
   onSetProjectAccounts: (input: {
     projectId: string;
     accounts: { provider: string; accountId: string }[];
+    /** The project's whole Local gh setting, written with `accounts`; never true beside a github
+     *  assignment. */
+    localGh: boolean;
     daemonInstanceId: string;
   }) => void;
+  /**
+   * What one host's `gh` says about the project's GitHub host (`GetHostTooling` with
+   * `githubHostname`). Asked for each host of a Local gh project.
+   */
+  loadHostGithubCli: (input: {
+    daemonInstanceId: string;
+    githubHostname: string;
+  }) => Promise<HostGithubCli>;
 }
 
 /**

@@ -169,6 +169,9 @@ message GetHostToolingRequest {
   string session_token = 1;
   // The host to probe. Empty means the daemon serving the call.
   string daemon_instance_id = 2;
+  // GitHub host to ask `gh` about (e.g. "github.com", "github.example.com"). Empty asks about every
+  // host `gh` is logged in to, as before.
+  string github_hostname = 3;
 }
 
 message GetHostToolingResponse {

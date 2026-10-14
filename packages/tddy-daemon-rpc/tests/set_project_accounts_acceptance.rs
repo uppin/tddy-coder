@@ -76,6 +76,7 @@ fn given_a_registered_project(data_dir: &std::path::Path, os_user: &str, project
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         },
     )
     .expect("seed project");
@@ -94,6 +95,7 @@ fn a_set_request(accounts: Vec<AccountAssignment>) -> SetProjectAccountsRequest 
         project_id: PROJECT_ID.to_string(),
         accounts,
         daemon_instance_id: String::new(),
+        local_gh: false,
     }
 }
 
@@ -323,6 +325,7 @@ async fn assigning_accounts_without_a_valid_session_is_unauthenticated() {
             project_id: PROJECT_ID.to_string(),
             accounts: vec![an_assignment("github", "acct-octocat")],
             daemon_instance_id: String::new(),
+            local_gh: false,
         }))
         .await;
 

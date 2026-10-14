@@ -17,6 +17,8 @@ import {
   projectDefaultBranchSelect,
   projectAccountRow,
   projectAccountSelect,
+  projectLocalGhToggle,
+  projectHostGh,
   TEST_IDS,
 } from "../testIds";
 
@@ -173,6 +175,23 @@ export const projectsScreenPage = {
   assignAccount(projectId: string, provider: string, accountId: string) {
     byTestId(projectAccountSelect(projectId, provider)).select(accountId);
   },
+
+  // ---------------------------------------------------------------------------
+  // Local gh
+  // ---------------------------------------------------------------------------
+
+  /** The Local gh checkbox on a project card. */
+  localGhToggle: (projectId: string, options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(projectLocalGhToggle(projectId), { timeout: 5000, ...options }),
+
+  /** Turn Local gh on for a project (the checkbox submits on change). */
+  turnLocalGhOn(projectId: string) {
+    byTestId(projectLocalGhToggle(projectId)).check();
+  },
+
+  /** What a Local gh project's host row says about that host's `gh`. */
+  hostGhState: (projectId: string, daemonInstanceId: string): Cypress.Chainable<string> =>
+    byTestId(projectHostGh(projectId, daemonInstanceId), { timeout: 5000 }).invoke("text"),
 
   // ---------------------------------------------------------------------------
   // Create project

@@ -82,6 +82,12 @@ pub trait HostToolingProbe: Send + Sync {
     fn probe(&self, os_user: &str) -> HostTooling;
 }
 
+/// The arguments `gh auth status` is run with: about `github_hostname` alone when one is named (a
+/// project's GitHub host), about every host `gh` is logged in to otherwise.
+pub fn gh_auth_status_args(github_hostname: Option<&str>) -> Vec<String> {
+    todo!("gh_auth_status_args")
+}
+
 /// Classify the output of `gh auth status`.
 ///
 /// Split out from the subprocess call so the classification — the part that is easy to get wrong and
@@ -760,6 +766,26 @@ impl RunningProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gh_probe_for_a_named_host_asks_gh_about_that_host() {
+        // Given a Local gh project on an Enterprise host
+        // When the probe's gh arguments are built for it
+        let args = gh_auth_status_args(Some("github.example.com"));
+
+        // Then gh is asked about that host only
+        assert_eq!(args, ["auth", "status", "--hostname", "github.example.com"]);
+    }
+
+    #[test]
+    fn the_gh_probe_with_no_host_named_asks_gh_about_every_host() {
+        // Given the Hosts screen, which names no GitHub host
+        // When the probe's gh arguments are built
+        let args = gh_auth_status_args(None);
+
+        // Then gh is asked about every host it is logged in to, as before
+        assert_eq!(args, ["auth", "status"]);
+    }
 
     /// The OS user this test process already runs as — the one account it can start a child as
     /// without privilege, and the same one `run_capture_as_user`'s tests use.

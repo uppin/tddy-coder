@@ -27,6 +27,7 @@ fn a_project(project_id: &str) -> ProjectData {
         remote_name: None,
         host_repo_paths: HashMap::new(),
         accounts: Vec::new(),
+        local_gh: false,
     }
 }
 
@@ -107,7 +108,7 @@ fn setting_a_projects_accounts_replaces_the_whole_set_rather_than_merging_into_i
     ];
     project_storage::write_projects(dir.path(), &[project]).expect("seed registry");
 
-    project_storage::set_project_accounts(dir.path(), ALPHA, &[an_assignment("github", "bob")])
+    project_storage::set_project_accounts(dir.path(), ALPHA, &[an_assignment("github", "bob")], false)
         .expect("set accounts succeeds");
 
     assert_eq!(
@@ -123,7 +124,7 @@ fn setting_an_empty_set_returns_a_project_to_unassigned() {
     project.accounts = vec![an_assignment("github", "ada")];
     project_storage::write_projects(dir.path(), &[project]).expect("seed registry");
 
-    project_storage::set_project_accounts(dir.path(), ALPHA, &[]).expect("clear accounts succeeds");
+    project_storage::set_project_accounts(dir.path(), ALPHA, &[], false).expect("clear accounts succeeds");
 
     assert_eq!(
         stored_accounts(dir.path(), ALPHA),
@@ -143,6 +144,7 @@ fn two_accounts_at_one_provider_are_refused_and_the_reason_names_that_provider()
             an_assignment("github", "ada"),
             an_assignment("github", "bob"),
         ],
+        false,
     );
 
     assert_eq!(
@@ -165,6 +167,7 @@ fn a_refused_assignment_leaves_the_stored_set_exactly_as_it_was() {
             an_assignment("github", "bob"),
             an_assignment("github", "cid"),
         ],
+        false,
     );
 
     assert_eq!(
@@ -180,7 +183,7 @@ fn setting_one_projects_accounts_leaves_every_other_row_untouched() {
     beta.accounts = vec![an_assignment("github", "zoe")];
     project_storage::write_projects(dir.path(), &[a_project(ALPHA), beta]).expect("seed registry");
 
-    project_storage::set_project_accounts(dir.path(), ALPHA, &[an_assignment("github", "ada")])
+    project_storage::set_project_accounts(dir.path(), ALPHA, &[an_assignment("github", "ada")], false)
         .expect("set accounts succeeds");
 
     assert_eq!(
@@ -195,7 +198,7 @@ fn setting_accounts_on_a_project_the_registry_does_not_know_is_an_error() {
     project_storage::write_projects(dir.path(), &[a_project(ALPHA)]).expect("seed registry");
 
     let outcome =
-        project_storage::set_project_accounts(dir.path(), BETA, &[an_assignment("github", "ada")]);
+        project_storage::set_project_accounts(dir.path(), BETA, &[an_assignment("github", "ada")], false);
 
     assert_eq!(outcome.is_err(), true);
 }

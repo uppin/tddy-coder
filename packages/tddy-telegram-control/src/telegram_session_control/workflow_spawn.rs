@@ -351,6 +351,19 @@ fn telegram_spawn_options<'a>(
 /// What a Telegram-started session's chat is told when its project acts as a GitHub account: that
 /// the account's commit identity and the agent's GitHub tools are unavailable here, and why.
 /// `None` for a project that assigns no account — nothing is lost, so nothing is said.
+/// The commit identity a Telegram start of `project` carries, as `os_user`.
+///
+/// A Telegram start has no signed-in web session, so a vault account cannot be resolved and this is
+/// empty. A **Local gh** project needs no vault: its identity is the host's own `gh` login, asked as
+/// `os_user` — the same four pairs and `TDDY_GITHUB_SOURCE` a dashboard start carries.
+pub(super) fn telegram_git_environment(
+    project: &ProjectData,
+    os_user: &str,
+    github_cli: &tddy_host_service::GithubCli,
+) -> Vec<(String, String)> {
+    todo!("telegram_git_environment")
+}
+
 pub(super) fn account_identity_unavailable_notice(project: &ProjectData) -> Option<String> {
     let account = project.accounts.first()?;
     Some(format!(
@@ -431,4 +444,75 @@ pub(super) fn claude_cli_branch_name_from_changeset(cs: &Changeset) -> Option<St
             .join("-");
         format!("feature/{}", slug)
     })
+}
+
+#[cfg(test)]
+mod local_gh_tests {
+    use std::collections::HashMap;
+
+    use tddy_projects::project_storage::{AccountAssignment, ProjectData};
+
+    use super::{account_identity_unavailable_notice, telegram_git_environment};
+
+    fn a_local_gh_project_assigned_cloudflare() -> ProjectData {
+        ProjectData {
+            project_id: "11111111-2222-4333-8444-555555555555".to_string(),
+            name: "alpha".to_string(),
+            git_url: "https://github.com/acme/alpha.git".to_string(),
+            main_repo_path: "/home/dev/repos/alpha".to_string(),
+            main_branch_ref: None,
+            remote_name: None,
+            host_repo_paths: HashMap::new(),
+            accounts: vec![AccountAssignment {
+                provider: "cloudflare".to_string(),
+                account_id: "acct-edge".to_string(),
+            }],
+            local_gh: true,
+        }
+    }
+
+    #[test]
+    fn a_telegram_start_of_a_local_gh_project_commits_as_the_hosts_gh_login() {
+        // Given a Local gh project, and gh logged in to github.com as ada
+        let dir = tempfile::tempdir().unwrap();
+        let gh = tddy_testing_commons::gh_cli::a_gh_cli(dir.path())
+            .logged_in_as("ada", 101)
+            .build();
+        let os_user = std::env::var("USER").expect("USER must be set");
+
+        // When a Telegram start's identity is resolved
+        let mut environment = telegram_git_environment(
+            &a_local_gh_project_assigned_cloudflare(),
+            &os_user,
+            &tddy_host_service::GithubCli::at(gh),
+        )
+        .into_iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>();
+        environment.sort_unstable();
+
+        // Then it acts as ada, told to ask gh, exactly as a dashboard start would
+        assert_eq!(
+            environment,
+            [
+                "GIT_AUTHOR_EMAIL=101+ada@users.noreply.github.com",
+                "GIT_AUTHOR_NAME=ada",
+                "GIT_COMMITTER_EMAIL=101+ada@users.noreply.github.com",
+                "GIT_COMMITTER_NAME=ada",
+                "TDDY_GITHUB_SOURCE=local-gh:github.com",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_telegram_start_of_a_local_gh_project_is_not_told_to_start_from_the_dashboard() {
+        // Given a Local gh project that also assigns a Cloudflare account
+        let project = a_local_gh_project_assigned_cloudflare();
+
+        // When the chat would be told the project's account is unavailable
+        let notice = account_identity_unavailable_notice(&project);
+
+        // Then there is nothing to tell: gh is the identity, and needs no web session
+        assert_eq!(notice, None);
+    }
 }

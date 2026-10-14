@@ -102,6 +102,7 @@ async fn tooling_reported_by(service: &HostServiceImpl) -> GetHostToolingRespons
             session_token: "valid".to_string(),
             // Empty means "the daemon serving the call", so nothing is routed to a peer.
             daemon_instance_id: String::new(),
+            github_hostname: String::new(),
         }))
         .await
         .expect("get_host_tooling should succeed for a valid session")

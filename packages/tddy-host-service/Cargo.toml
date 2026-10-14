@@ -45,6 +45,8 @@ libc = "0.2"
 
 [dev-dependencies]
 futures-util = "0.3"
+# `gh_cli::a_gh_cli`: the `gh` stub `github_cli`'s tests ask. Workspace-internal.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
 serial_test = "3"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }

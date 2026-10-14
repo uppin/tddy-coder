@@ -119,6 +119,10 @@ message ProjectEntry {
   // final answer rather than an invitation to guess: with no assignment the daemon resolves no
   // credential and the operation that wanted one fails. At most one entry per provider.
   repeated AccountAssignment accounts = 8;
+  // The project's sessions take their GitHub identity from the host's own GitHub CLI (`gh auth
+  // login` on each host, as the session's OS user) instead of from a vault account. A project with
+  // this set has no github entry in `accounts`. See docs/ft/daemon/github-identity.md.
+  bool local_gh = 9;
 }
 
 message SetProjectDefaultBranchRequest {
@@ -140,6 +144,9 @@ message SetProjectAccountsRequest {
   repeated AccountAssignment accounts = 3;
   // Host to apply this to. Empty or matching the local instance = local; otherwise forwarded.
   string daemon_instance_id = 4;
+  // The project's whole Local gh setting after this call, written together with `accounts`. Set
+  // together with a github entry in `accounts` is refused: a project has one GitHub source.
+  bool local_gh = 5;
 }
 
 message SetProjectAccountsResponse {

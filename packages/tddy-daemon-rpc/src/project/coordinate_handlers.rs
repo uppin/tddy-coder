@@ -164,6 +164,7 @@ impl ProjectRpcHandler {
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         };
         let repo_root = PathBuf::from(&project.main_repo_path);
         let default_remote = entries::resolve_default_remote_or_empty(
@@ -344,6 +345,7 @@ impl ProjectRpcHandler {
             remote_name: None,
             host_repo_paths: std::collections::HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         };
         let (stored, _created) = project_storage::add_or_get_project(&projects_dir, project)
             .map_err(|e| Status::internal(e.to_string()))?;
@@ -557,7 +559,7 @@ impl ProjectRpcHandler {
                 account_id: a.account_id.clone(),
             })
             .collect();
-        project_storage::set_project_accounts(&projects_dir, project_id, &accounts)
+        project_storage::set_project_accounts(&projects_dir, project_id, &accounts, req.local_gh)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let stored = project_storage::find_project(&projects_dir, project_id)

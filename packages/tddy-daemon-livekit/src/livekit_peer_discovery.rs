@@ -2246,6 +2246,7 @@ mod tests {
             main_branch_ref: String::new(),
             default_remote: String::new(),
             accounts: Vec::new(),
+            local_gh: false,
         }
     }
 

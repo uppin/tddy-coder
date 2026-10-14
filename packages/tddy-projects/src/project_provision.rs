@@ -105,6 +105,7 @@ where
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         },
     )
     .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
@@ -184,6 +185,7 @@ where
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         },
     )
     .map_err(|e| Status::internal(format!("register provisioned project: {e}")))?;
@@ -235,6 +237,7 @@ mod tests {
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         }
     }
 

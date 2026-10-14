@@ -649,3 +649,209 @@ async fn the_commit_pairs_and_the_token_derive_from_one_record() {
         .await;
     assert_eq!(token, Ok("ghp_grace_token".to_string()));
 }
+
+// ---------------------------------------------------------------------------
+// Local gh: the host's own `gh` login instead of a vault account
+// ---------------------------------------------------------------------------
+
+const GITHUB_COM_URL: &str = "https://github.com/acme/alpha.git";
+
+fn the_current_os_user() -> String {
+    std::env::var("USER").expect("USER must be set to resolve the session's OS user")
+}
+
+/// Sorted `KEY=value` lines, so a whole environment compares as one value.
+fn lines_of(pairs: &[(String, String)]) -> Vec<String> {
+    let mut lines: Vec<String> = pairs.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    lines.sort_unstable();
+    lines
+}
+
+/// Session access whose `gh` is logged in to github.com as ada (GitHub user 101).
+fn access_where_gh_is_logged_in_as_ada(dir: &std::path::Path) -> SessionAccountAccess {
+    let gh = tddy_testing_commons::gh_cli::a_gh_cli(dir)
+        .logged_in_as("ada", 101)
+        .with_token("gho_ada_from_the_hosts_gh")
+        .build();
+    SessionAccountAccess::none().with_github_cli(tddy_host_service::GithubCli::at(gh))
+}
+
+/// Session access whose `gh` is logged in to nothing.
+fn access_where_gh_is_logged_out(dir: &std::path::Path) -> SessionAccountAccess {
+    let gh = tddy_testing_commons::gh_cli::a_gh_cli(dir).build();
+    SessionAccountAccess::none().with_github_cli(tddy_host_service::GithubCli::at(gh))
+}
+
+fn a_local_gh_project_at<'a>(os_user: &'a str, git_url: &'a str) -> Option<ProjectGithub<'a>> {
+    Some(ProjectGithub::LocalGh { os_user, git_url })
+}
+
+#[test]
+fn a_local_gh_project_yields_the_gh_logins_four_pairs_and_its_github_source() {
+    // Given a Local gh project on github.com, and gh logged in there as ada
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_in_as_ada(dir.path());
+    let os_user = the_current_os_user();
+
+    // When the session's identity is resolved
+    let identity =
+        access.project_session_identity("s1", a_local_gh_project_at(&os_user, GITHUB_COM_URL));
+
+    // Then it is her four pairs, and the source naming the host — no token
+    assert_eq!(
+        lines_of(&identity.git_environment),
+        [
+            "GIT_AUTHOR_EMAIL=101+ada@users.noreply.github.com",
+            "GIT_AUTHOR_NAME=ada",
+            "GIT_COMMITTER_EMAIL=101+ada@users.noreply.github.com",
+            "GIT_COMMITTER_NAME=ada",
+            "TDDY_GITHUB_SOURCE=local-gh:github.com",
+        ]
+    );
+}
+
+#[test]
+fn a_local_gh_project_whose_gh_is_logged_out_carries_its_source_and_no_pairs() {
+    // Given a Local gh project on a host whose gh is logged in to nothing
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_out(dir.path());
+    let os_user = the_current_os_user();
+
+    // When the session's identity is resolved
+    let identity =
+        access.project_session_identity("s1", a_local_gh_project_at(&os_user, GITHUB_COM_URL));
+
+    // Then the session starts under the checkout's identity, still told to ask gh
+    assert_eq!(
+        lines_of(&identity.git_environment),
+        ["TDDY_GITHUB_SOURCE=local-gh:github.com"]
+    );
+}
+
+#[test]
+fn a_local_gh_project_whose_git_url_names_no_host_carries_neither() {
+    // Given a Local gh project registered with no git URL
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_in_as_ada(dir.path());
+    let os_user = the_current_os_user();
+
+    // When the session's identity is resolved
+    let identity = access.project_session_identity("s1", a_local_gh_project_at(&os_user, ""));
+
+    // Then there is no host to ask gh about: no pairs, no source
+    assert_eq!(lines_of(&identity.git_environment), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_local_gh_sessions_host_never_hands_out_a_token() {
+    // Given a Local gh session whose gh holds a token
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_in_as_ada(dir.path());
+    let os_user = the_current_os_user();
+    let identity =
+        access.project_session_identity("s1", a_local_gh_project_at(&os_user, GITHUB_COM_URL));
+
+    // When something asks the session's host for a token over its socket
+    let answer = identity
+        .github_credential
+        .expect("a project row binds a handler")
+        .github_token()
+        .await;
+
+    // Then it is refused, saying the token is gh's to give
+    let refusal = answer.expect_err("a Local gh session's host hands out no token");
+    assert!(refusal.contains("local gh"), "got: {refusal}");
+}
+
+#[test]
+fn a_local_gh_identity_relayed_by_another_os_user_carries_only_a_logged_out_gh() {
+    // Given a Local gh session's identity
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_in_as_ada(dir.path());
+    let os_user = the_current_os_user();
+    let identity =
+        access.project_session_identity("s1", a_local_gh_project_at(&os_user, GITHUB_COM_URL));
+    let logged_out = dir.path().join("logged-out-gh");
+
+    // When a relay running as another OS user applies it
+    let relayed = identity.relayed_by(RelayUser::OtherUser, &logged_out);
+
+    // Then that relay's gh is logged out, and no commit identity is claimed
+    assert_eq!(
+        relayed,
+        vec![("GH_CONFIG_DIR".to_string(), logged_out.display().to_string())]
+    );
+}
+
+#[test]
+fn a_local_gh_identity_relayed_by_the_session_user_keeps_its_identity() {
+    // Given a Local gh session's identity
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_in_as_ada(dir.path());
+    let os_user = the_current_os_user();
+    let identity =
+        access.project_session_identity("s1", a_local_gh_project_at(&os_user, GITHUB_COM_URL));
+    let expected = lines_of(&identity.git_environment);
+
+    // When a relay running as the session's own user applies it
+    let relayed = identity.relayed_by(RelayUser::SessionUser, &dir.path().join("logged-out-gh"));
+
+    // Then it is applied unchanged
+    assert_eq!(lines_of(&relayed), expected);
+}
+
+#[test]
+fn a_vault_identity_relayed_by_another_os_user_is_unchanged() {
+    // Given a session whose project is assigned ada's vault account
+    let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
+    let accounts = assigned("acct-ada");
+    let identity = access.session_identity("s1", Some(&accounts));
+    let expected = lines_of(&identity.git_environment);
+    let scratch = tempfile::tempdir().unwrap();
+
+    // When a relay running as another OS user applies it
+    let relayed = identity.relayed_by(RelayUser::OtherUser, &scratch.path().join("logged-out-gh"));
+
+    // Then it is applied unchanged: a vault identity carries no credential to protect
+    assert_eq!(lines_of(&relayed), expected);
+}
+
+#[test]
+fn a_daemon_side_operation_on_a_local_gh_session_reads_the_token_from_gh() {
+    // Given gh logged in to github.com, holding a token
+    let dir = tempfile::tempdir().unwrap();
+    let gh = tddy_testing_commons::gh_cli::a_gh_cli(dir.path())
+        .logged_in_as("ada", 101)
+        .with_token("gho_ada_from_the_hosts_gh")
+        .build();
+
+    // When the daemon asks for a Local gh project's token as the session's OS user
+    let token = local_gh_github_token(
+        &tddy_host_service::GithubCli::at(gh),
+        &the_current_os_user(),
+        GITHUB_COM_URL,
+    );
+
+    // Then it is gh's
+    assert_eq!(token, Ok("gho_ada_from_the_hosts_gh".to_string()));
+}
+
+#[test]
+fn a_daemon_side_operation_on_a_local_gh_project_naming_no_host_is_refused_naming_its_url() {
+    // Given gh logged in, and a Local gh project whose git URL is a local path
+    let dir = tempfile::tempdir().unwrap();
+    let gh = tddy_testing_commons::gh_cli::a_gh_cli(dir.path())
+        .logged_in_as("ada", 101)
+        .build();
+
+    // When the daemon asks for its token
+    let token = local_gh_github_token(
+        &tddy_host_service::GithubCli::at(gh),
+        &the_current_os_user(),
+        "/srv/git/alpha.git",
+    );
+
+    // Then it is refused, naming the URL
+    let refusal = token.expect_err("a path names no GitHub host");
+    assert!(refusal.contains("/srv/git/alpha.git"), "got: {refusal}");
+}

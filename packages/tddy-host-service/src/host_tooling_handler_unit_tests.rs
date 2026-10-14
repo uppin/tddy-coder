@@ -178,6 +178,7 @@ async fn tooling_asked_of(
         .get_host_tooling(Request::direct(GetHostToolingRequest {
             session_token: session_token.to_string(),
             daemon_instance_id: host.to_string(),
+            github_hostname: String::new(),
         }))
         .await
         .map(|answered| answered.into_inner())

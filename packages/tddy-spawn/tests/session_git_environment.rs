@@ -120,6 +120,22 @@ fn a_planned_child_with_no_commit_identity_is_given_no_environment_of_its_own() 
 }
 
 #[test]
+fn a_planned_child_may_carry_its_github_source_beside_its_commit_identity() {
+    // Given a Local gh project's identity: ada's pairs and where the session asks for its token
+    let mut identity = pairs(&ADA);
+    identity.push((
+        tddy_core::toolcall::GITHUB_SOURCE_ENV.to_string(),
+        "local-gh:github.com".to_string(),
+    ));
+
+    // When the child is planned
+    let plan = plan_with(&identity).expect("a GitHub source is not a credential");
+
+    // Then its environment is exactly those five
+    assert_eq!(plan.env, identity);
+}
+
+#[test]
 fn a_github_token_is_refused_as_session_environment() {
     // Given ada's pairs with the account's token among them
     let mut identity = pairs(&ADA);
