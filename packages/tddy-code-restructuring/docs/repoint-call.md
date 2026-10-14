@@ -106,12 +106,12 @@ A plain `check` judges only a range anchor, so it says nothing about an item-anc
   are refused, not rewritten. References in code rust-analyzer evaluates as inactive (it reports only
   the active `cfg`) and macro-generated call sites are out of reach; the compile gate names what
   results.
-- **Calls and receivers only.** `self.<field>` → `state.<field>` is a field read, not a call, and
-  stays the open
-  [state-parameter todo](../../../docs/dev/todo/2026-09-25-restructure-has-no-operation-to-read-a-methods-fields-through-a-state-parameter.md).
-  This operation adds a hop to a method call's receiver; it never rewrites a field read.
+- **Calls and receivers only.** `self.<field>` → `state.<field>` is a field read, not a call. It is
+  [`read_fields_through`](read-fields-through.md)'s. This operation adds a hop to a method call's
+  receiver; it never rewrites a field read.
 - **Not the delegator, not `retarget_impl`.** No forwarding method is written, no `impl` is edited,
-  the method's declaration is untouched.
+  the method's declaration is untouched. A forwarding method on the old type is
+  [`retarget_impl`](retarget-impl.md#the-forwarding-delegator)'s `leave_delegator`.
 - **No argument edits and no rename.** `add_call_arg` and its siblings edit arguments; a rename is
   `rename_symbol`.
 - **No `check --deep` site listing.** `Rehearsal` drops `Resolution.notes`; carrying them is

@@ -128,7 +128,8 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `move_test_binary_to_crate` | the test binary's path | `to` | — | ✅ |
 | `move_item` | `items` anchor (or one `item` anchor) over whole module-level items of one file | `to` (the destination module; with `name`, its parent), `name` (creates the destination), `reexport` = `glob` \| `named` \| `none` \| `outside` | — | ✅ |
 | `reparent_module` | `items` anchor on the module's `mod` declaration | `to` (the new parent), `reexport` = `glob` \| `none` \| `outside` | — | ✅ |
-| `retarget_impl` | `item` anchor on `<Type>` (or `<Type>#N`), or `items`/`item` on members `c::m::Type::member` of one inherent `impl` | `to_type` (the new self type) | — | ✅ |
+| `retarget_impl` | `item` anchor on `<Type>` (or `<Type>#N`), or `items`/`item` on members `c::m::Type::member` of one inherent `impl` | `to_type` (the new self type); `variant` = `leave_delegator` with `expr` (the receiver the delegators forward through) | — | ✅ |
+| `read_fields_through` | `range`, or `item` with a relative range, inside a method with a `self` receiver | `name` (the new binding), `expr` (its value; `self`, `&*self` or `&mut *self` select self mode) | — | ✅ |
 | `extract_trait` | range at the `impl` keyword | `name` | — | ✅ |
 | `inline_method` | symbol | — | — | ✅ |
 | `remove_unused_param` | symbol or item (the function) | `name` (the parameter) | — | ✅ |
@@ -293,11 +294,13 @@ and the directories the move empties stay on disk.
 ```jsonl
 {"op":"retarget_impl","anchor":{"kind":"items","file":"src/host.rs","items":["app::host::Host::put","app::host::Host::last"],"fingerprints":["sha256:…","sha256:…"]},"to_type":"app::roster::Roster"}
 {"op":"retarget_impl","anchor":{"kind":"item","item":"app::host::<Host>","file":"src/host.rs","fingerprint":"sha256:…"},"to_type":"app::roster::Roster"}
+{"op":"retarget_impl","anchor":{"kind":"items","file":"src/host.rs","items":["app::host::Host::get","app::host::Host::put"],"fingerprints":["sha256:…","sha256:…"]},"to_type":"app::roster::Roster","variant":"leave_delegator","expr":"self.roster"}
 ```
 
 | Field | Meaning |
 |---|---|
 | `anchor` | **Whole block**: one `item` anchor on `<Type>` (or `<Type>#N`, the Nth in source order), no relative range. **Member run**: one `items` anchor whose items are members `c::m::Type::member` of **one** inherent `impl` and contiguous (only blank lines between), or one `item` anchor on a single member. A `range` or `symbol` anchor, or an `item` anchor with a relative range, is refused |
+| `variant`, `expr` | Together or not at all (`plan is malformed:` otherwise). `variant: "leave_delegator"` leaves a forwarding method in each moved method's slot of the old block, and `expr` reaches the new type from `self` |
 | `to_type` | The new self type: an item path rooted at the package name (`-` read as `_`) with optional generic arguments on the last segment — `app::roster::Roster`, `app::roster::Pair<T>`. Exactly one `syn::Type`, and a path type (no `&`, `dyn`, tuple, array, `impl`). The engine writes `crate::…` in the `use` it adds and the bare last segment (generics as written) in the header |
 
 The members, their attributes and comments are byte ranges of the source; the engine authors only the
@@ -319,12 +322,54 @@ type the block already is (S3); a moved member that reads a field the new type l
 naming every member/field pair); a declaration whose fields cannot be read (S5); and a `use` that would
 clash with a name the file already binds (S6).
 
-**Not done.** Callers of a moved member are not re-pointed — pair the operation with `repoint_call` in
-one `group`, or accept the `E0599` the compile gate names. Fields are refused, not rewritten. The block
-stays in its file (run `move_item` over `<New>` afterwards to move it). The forwarding delegator
-(`variant: "leave_delegator"` with `expr`) is named by the schema and **refused** by the engine; it is a
-follow-up. See
+**The delegator.** Each moved member's slot in the old block holds a forwarding method, and `impl New { … }`
+with the moved members follows the old block. A delegator copies the member's signature and outer
+attributes (not the doc comment) and its body is `<expr>.<name>(<argument names>)`, `.await`ed for an
+`async fn`, or `New::<name>(…)` for a member with no receiver. A parameter written as a pattern, an
+associated const or type, and a `const fn` are refused (S7, all listed, before anything is written). A
+delegator nothing in the workspace calls is written and noted.
+
+**Not done.** Without a delegator, callers of a moved member are not re-pointed — pair the operation with
+`repoint_call` in one `group`, or accept the `E0599` the compile gate names. Fields are refused, not
+rewritten (see `read_fields_through`). The block stays in its file (run `move_item` over `<New>`
+afterwards to move it). See
 [`docs/retarget-impl.md`](../../../../packages/tddy-code-restructuring/docs/retarget-impl.md).
+
+### `read_fields_through`
+
+```jsonl
+{"op":"read_fields_through","anchor":{"kind":"range","file":"src/svc.rs","start":{"line":375,"col":9},"end":{"line":392,"col":15}},"name":"state","expr":"self.agent_roster_state()"}
+{"op":"read_fields_through","anchor":{"kind":"range","file":"src/backend.rs","start":{"line":9,"col":9},"end":{"line":69,"col":10}},"name":"backend","expr":"self"}
+```
+
+| Field | Meaning |
+|---|---|
+| `anchor` | A `range`, or an `item` anchor with a relative range. A `symbol` anchor, an `items` anchor, or an `item` anchor with no range is refused |
+| `name` | The new binding: one identifier, not `self`, not a keyword |
+| `expr` | One expression, the `let`'s initialiser. `self`, `&*self` or `&mut *self` select **self mode**; anything else selects **field mode** |
+
+It inserts `let <name> = <expr>;` at the range's start and rebinds `self` in the range to `<name>`.
+**Field mode:** only `self.<field>` reads are rewritten; each field is checked against the view's type
+(from the server's answers on a trial text), a `&` the view already provides is dropped, and a method
+call or bare `self` is refused. **Self mode:** every `self` is rewritten, method calls included, and
+every `Self` becomes the enclosing `impl`'s self type. Comments and strings are untouched. It composes
+with `extract_method` over the same lines in one `group`: the range names no `self` and is
+extracted as a free function.
+
+**Refused** (`plan is malformed:`, from the plan alone): `name` or `expr` missing, `name` not one
+identifier other than `self`, a wrong anchor kind, and any field the operation does not define (`to`,
+`to_type`, `variant`, `callee`, `type`, `order`, `reexport`, `also`, `to_file`, `canonical_paths`,
+`with_private_deps`). **Refused before anything is written** (`this seam cannot be cut here:`): a range
+that does not start at a statement, a range that names no `self`, a method call or bare `self` in field
+mode, a `name` the enclosing function already writes; and, from `check --deep` and `apply`, a range in
+no method with a `self` receiver, a field the view lacks, and a field whose type differs from the
+host's by more than one reference. The first four are also reported by a plain `check`.
+
+**Not done.** It writes no state type, builder or function. A borrow conflict or a `!Send` borrow
+across `.await` is left to the compile gate. In field mode `Self` is not rewritten; in self mode a
+generic `impl`'s `Self::X` is written `W<T>::X`, which the compile gate refuses. See
+[`docs/read-fields-through.md`](../../../../packages/tddy-code-restructuring/docs/read-fields-through.md).
+`verify --rebind NAME` declares the rebind.
 
 ### `repoint_call`
 

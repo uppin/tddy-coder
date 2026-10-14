@@ -7,7 +7,7 @@ description: Restructure Rust code without writing moved code by hand — split 
 
 **You never write the moved or extracted code.** You write a plan of *intents*. `tddy-tools restructure` resolves each intent through rust-analyzer (via `tddy-lsp`).
 
-**v1 scope:** Rust only — twenty-five operations, ten subcommands. No TypeScript.
+**v1 scope:** Rust only — twenty-six operations, ten subcommands. No TypeScript.
 
 ## CLI
 
@@ -18,7 +18,7 @@ tddy-tools restructure check  <plan.jsonl> [--deep] [--budget LINES]   # LINES c
 tddy-tools restructure snapshot <plan.jsonl>          # item anchors: answered by the warm daemon when TDDY_INDEX_SOCKET is set
 tddy-tools restructure anchors <file.rs> --items A,B,C
 tddy-tools restructure anchors <file.rs> --at LINE:COL[-LINE:COL]
-tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]...
+tddy-tools restructure verify --against <git-ref> [--retarget OLD=NEW]... [--repoint OLD=NEW]... [--rebind NAME]...
 tddy-tools restructure load   <plan.jsonl>...        # needs the index daemon (TDDY_INDEX_SOCKET)
 tddy-tools restructure unload <plan.jsonl>... | --all
 tddy-tools restructure plans
@@ -67,7 +67,9 @@ record's.
    one type's `impl` into another type of the same crate is `retarget_impl`, and a file or module whose
    paths go through a `pub use` facade of another crate (a `crate::<facade>::…` that must be named by
    the crate that defines it) is `repoint_facade_imports`; see
-   [Gathering a topic module](#gathering-a-topic-module).
+   [Gathering a topic module](#gathering-a-topic-module). A method body that must leave a type that
+   stays (`E0116` anywhere else) is prepared with `read_fields_through`; see
+   [Moving a method body out of its type](#moving-a-method-body-out-of-its-type).
 4. **Changeset** — `Type: Refactor` at `docs/dev/1-WIP/YYYY-MM-DD-<name>.md`; see `references/restructure-changeset.md`.
 5. **Anchor** — `restructure anchors <file.rs> --items A,B,C` emits an `items` anchor over whole
    items (over a module's `mod` declaration, for `reparent_module`: name the module and pass its old
@@ -125,6 +127,22 @@ facade only a hand edit can remove.
    or in the engine, and a hand edit after an apply is neither: record it as a backlog entry or fix the
    engine. The one thing a move does not do is widen a private field or method of a type it splits,
    or the private items of a re-parented tree; the compile gate names those.
+
+## Moving a method body out of its type
+
+A method of a type that cannot leave its crate can have its body moved only when the range moved names no
+`self`. Three operations, in one `group` and in this order:
+
+1. **`read_fields_through`** over the range: `name` is the binding, `expr` the value it is bound to. With
+   `expr` a borrowed view of the host's fields (`self.agent_roster_state()`) only field reads are
+   rewritten, each checked against the view's type; with `expr` `self`, every `self` is rewritten and
+   method calls are admitted. The state type and its builder are wiring, written by hand first.
+2. **`extract_method`** over the same lines, which name no `self`, so the result is a free function.
+3. **`extract_module`**, then a move (`move_item`, `move_module_to_crate`).
+
+To keep the old type's callers compiling, `retarget_impl` takes `variant: "leave_delegator"` with `expr`
+and leaves a forwarding method per moved method. Declare what you did to `verify`: `--rebind NAME` for the
+rebind, `--retarget OLD=NEW` for the retarget (its delegators need nothing more).
 
 ## Testing cadence
 

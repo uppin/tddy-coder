@@ -6,7 +6,7 @@
 //! view's type on a trial text, and a `&` the view already provides is dropped. **Self mode**
 //! (`expr` is `self`, `&*self` or `&mut *self`): every `self` becomes `<name>`, method receivers
 //! included, and every `Self` becomes the enclosing impl's self type. See
-//! `docs/dev/1-WIP/2026-10-09-reshape-methods-leave-type.md` for the rules (RS1-RS7).
+//! the package's `docs/read-fields-through.md` for the rules (RS1-RS4 on the text, RS5-RS7 with the server).
 //!
 //! `range` and `edits` are `pub(crate)`: `#reshape` 18's `detach_method` reuses the self-mode
 //! rewrite and the shadowing refusal from a sibling module.

@@ -1,9 +1,9 @@
 # 2026-10-09 — a `pub` wrapper that loses its last caller in a restructure run is not reported
 
 **Category:** Future enhancement (missing report; nothing breaks, dead code is left behind)
-**Source:** #reshape 6/19 (`feature/reshape/methods-leave-type`). Narrowed out of
-`2026-10-05-restructure-no-operation-re-points-a-calls-receiver-or-writes-a-delegator.md`
-("then report any wrapper with no caller left"), which that node resolves and deletes.
+**Source:** #reshape 6/19 (`feature/reshape/methods-leave-type`). Narrowed out of the 2026-10-05 entry
+"`restructure` cannot re-point a call's receiver or leave a forwarding delegator" ("then report any
+wrapper with no caller left"), which that node resolved and deleted.
 
 ## What is covered already
 
