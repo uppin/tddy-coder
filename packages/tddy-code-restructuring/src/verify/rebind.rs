@@ -84,19 +84,7 @@ pub(crate) fn account(
             None => unpaired.push(statement),
         }
     }
-    for rebind in &declared.rebinds {
-        let binding = format!("let {} = ", rebind.name);
-        let one_let = added.iter().find(|statement| {
-            statement.starts_with(&binding)
-                && statement.ends_with(';')
-                && available.get(statement.as_str()).copied().unwrap_or(0)
-                    > consumed.get(*statement).copied().unwrap_or(0)
-        });
-        if let Some(statement) = one_let {
-            *consumed.entry(statement.clone()).or_default() += 1;
-            pairs += 1;
-        }
-    }
+    pairs += excuse_declaration_lets(&added, &available, &mut consumed, declared);
 
     let added = added
         .into_iter()
@@ -113,6 +101,30 @@ pub(crate) fn account(
         added,
         pairs,
     }
+}
+
+/// One gained `let NAME = …;` per declaration, taken from what no pair used; how many were.
+fn excuse_declaration_lets(
+    added: &[String],
+    available: &BTreeMap<&str, usize>,
+    consumed: &mut BTreeMap<String, usize>,
+    declared: &super::Declared,
+) -> usize {
+    let mut excused = 0;
+    for rebind in &declared.rebinds {
+        let binding = format!("let {} = ", rebind.name);
+        let one_let = added.iter().find(|statement| {
+            statement.starts_with(&binding)
+                && statement.ends_with(';')
+                && available.get(statement.as_str()).copied().unwrap_or(0)
+                    > consumed.get(*statement).copied().unwrap_or(0)
+        });
+        if let Some(statement) = one_let {
+            *consumed.entry(statement.clone()).or_default() += 1;
+            excused += 1;
+        }
+    }
+    excused
 }
 
 /// `statement` with every `self` written `name`: as it stands, then with each combination of the

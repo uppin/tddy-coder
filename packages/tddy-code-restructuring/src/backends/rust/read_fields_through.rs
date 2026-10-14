@@ -12,27 +12,26 @@
 //! rewrite and the shadowing refusal from a sibling module.
 
 pub(crate) mod edits;
+mod method;
 pub(crate) mod range;
 mod typing;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
-use serde_json::{json, Value};
+use serde_json::json;
 
-use super::early_return::{byte_offset, masked_to_code};
-use super::lsp_edits::{offset_of, position_at};
-use super::{failure, seam_refusal, uri_of, LspPoint, RustBackend, SYMBOL_KIND_IMPL};
+use super::early_return::byte_offset;
+use super::lsp_edits::position_at;
+use super::{failure, seam_refusal, uri_of, RustBackend};
 use crate::edit::{FileEdit, Position, Range as TextRange, Resolution, TextEdit, WorkspaceEdit};
 use crate::item_anchor::unlowered_item_anchor;
 use crate::plan::{Anchor, RefactorOp};
 use crate::registry::Workspace;
 use crate::Result;
+use method::{the_method_around, Method};
 use range::{Mode, SelfSite, SelfUse};
 use typing::Agreement;
-
-/// The outline kinds of a function an `impl` holds: a method and an associated function.
-const SYMBOL_KINDS_OF_FUNCTIONS: [u64; 2] = [6, 12];
 
 /// What a `read_fields_through` line says, with the text it reads.
 struct Rebind<'a> {
@@ -135,72 +134,15 @@ impl RustBackend {
         let Rebind {
             text, name, expr, ..
         } = rebind;
-        let reads: Vec<(&SelfSite, &str)> = sites
-            .iter()
-            .filter_map(|site| match &site.usage {
-                SelfUse::Field { name, .. } => Some((site, name.as_str())),
-                _ => None,
-            })
-            .collect();
-        let mut fields: Vec<&str> = Vec::new();
-        for (_, field) in &reads {
-            if !fields.contains(field) {
-                fields.push(field);
-            }
-        }
+        let reads = field_reads(sites);
+        let fields = distinct_fields(&reads);
 
         let host_types = self.hovered_types(uri, text, &first_reads(text, &reads, &fields))?;
-
-        let trial = edits::rebound(
-            text,
-            rebind.range.clone(),
-            name,
-            expr,
-            "",
-            sites,
-            &BTreeSet::new(),
-        );
-        let shift = name.len() as isize - "self".len() as isize;
-        let inserted = trial.len() as isize - text.len() as isize - shift * reads.len() as isize;
-        let in_the_trial =
-            |at: usize, nth: usize| (at as isize + inserted + shift * (nth as isize + 1)) as usize;
-        let state_reads: Vec<(String, usize)> = fields
-            .iter()
-            .map(|field| {
-                let nth = reads
-                    .iter()
-                    .position(|(_, read)| read == field)
-                    .unwrap_or(0);
-                let at = field_name_offset(text, reads[nth].0);
-                (field.to_string(), in_the_trial(at, nth))
-            })
-            .collect();
-
+        let (trial, state_reads) = trial_text(rebind, sites, &reads, &fields);
         self.did_change(uri, &trial)?;
         let state_types = self.state_types(uri, rebind, &trial, &state_reads);
         self.did_change(uri, text)?;
-        let state_types = state_types?;
-
-        let mut drop_borrow = BTreeSet::new();
-        let mut differing = Vec::new();
-        for (field, host) in fields.iter().zip(&host_types) {
-            let state = &state_types[*field];
-            match typing::agreement(host, state) {
-                Agreement::Same => {}
-                Agreement::ByReference => {
-                    drop_borrow.insert(field.to_string());
-                }
-                Agreement::Differs => differing.push(format!(
-                    "`self.{field}` is `{}` and `{name}.{field}` is `{}`: they differ by more than \
-                     one reference",
-                    typing::without_lifetimes(host),
-                    typing::without_lifetimes(state)
-                )),
-            }
-        }
-        if !differing.is_empty() {
-            return Err(seam_refusal(differing.join("; ")));
-        }
+        let drop_borrow = borrows_the_state_provides(name, &fields, &host_types, &state_types?)?;
 
         let rewrites = edits::rewrites(
             text,
@@ -319,6 +261,97 @@ fn rebind_every_self(
     Ok((text_edits(&rebind.text, &rewrites), note))
 }
 
+/// The field reads among `sites`, each with the field it names.
+fn field_reads(sites: &[SelfSite]) -> Vec<(&SelfSite, &str)> {
+    sites
+        .iter()
+        .filter_map(|site| match &site.usage {
+            SelfUse::Field { name, .. } => Some((site, name.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The fields `reads` name, each once, in the order first read.
+fn distinct_fields<'a>(reads: &[(&SelfSite, &'a str)]) -> Vec<&'a str> {
+    let mut fields: Vec<&str> = Vec::new();
+    for (_, field) in reads {
+        if !fields.contains(field) {
+            fields.push(field);
+        }
+    }
+    fields
+}
+
+/// The text with every read rebound through the state value, and where the first read of each of
+/// `fields` stands in it.
+fn trial_text(
+    rebind: &Rebind<'_>,
+    sites: &[SelfSite],
+    reads: &[(&SelfSite, &str)],
+    fields: &[&str],
+) -> (String, Vec<(String, usize)>) {
+    let Rebind {
+        text, name, expr, ..
+    } = rebind;
+    let trial = edits::rebound(
+        text,
+        rebind.range.clone(),
+        name,
+        expr,
+        "",
+        sites,
+        &BTreeSet::new(),
+    );
+    let shift = name.len() as isize - "self".len() as isize;
+    let inserted = trial.len() as isize - text.len() as isize - shift * reads.len() as isize;
+    let in_the_trial =
+        |at: usize, nth: usize| (at as isize + inserted + shift * (nth as isize + 1)) as usize;
+    let state_reads = fields
+        .iter()
+        .map(|field| {
+            let nth = reads
+                .iter()
+                .position(|(_, read)| read == field)
+                .unwrap_or(0);
+            let at = field_name_offset(text, reads[nth].0);
+            (field.to_string(), in_the_trial(at, nth))
+        })
+        .collect();
+    (trial, state_reads)
+}
+
+/// RS7: the fields whose host type is the state's type behind one more reference, whose borrows
+/// are dropped; a field the two types differ on by more is refused.
+fn borrows_the_state_provides(
+    name: &str,
+    fields: &[&str],
+    host_types: &[String],
+    state_types: &BTreeMap<String, String>,
+) -> Result<BTreeSet<String>> {
+    let mut drop_borrow = BTreeSet::new();
+    let mut differing = Vec::new();
+    for (field, host) in fields.iter().zip(host_types) {
+        let state = &state_types[*field];
+        match typing::agreement(host, state) {
+            Agreement::Same => {}
+            Agreement::ByReference => {
+                drop_borrow.insert(field.to_string());
+            }
+            Agreement::Differs => differing.push(format!(
+                "`self.{field}` is `{}` and `{name}.{field}` is `{}`: they differ by more than \
+                 one reference",
+                typing::without_lifetimes(host),
+                typing::without_lifetimes(state)
+            )),
+        }
+    }
+    if !differing.is_empty() {
+        return Err(seam_refusal(differing.join("; ")));
+    }
+    Ok(drop_borrow)
+}
+
 /// The rewrites as edits, each at its own place: a span stays a span of its own so that the ledger
 /// can translate the positions between them.
 fn text_edits(text: &str, rewrites: &[(Range<usize>, String)]) -> Vec<TextEdit> {
@@ -384,120 +417,4 @@ fn first_reads(text: &str, reads: &[(&SelfSite, &str)], fields: &[&str]) -> Vec<
                 .map(|(site, _)| (field.to_string(), field_name_offset(text, site)))
         })
         .collect()
-}
-
-/// What the outline says of the method a range sits in.
-struct Method {
-    /// The enclosing `impl`'s self type as its header writes it, generics included.
-    self_type: Option<String>,
-}
-
-/// RS5: the deepest function of the outline around the range must take a `self` receiver.
-fn the_method_around(symbols: &Value, rebind: &Rebind<'_>) -> Result<Method> {
-    let line = |offset: usize| rebind.text[..offset].matches('\n').count();
-    let (start, end) = (line(rebind.range.start), line(rebind.range.end));
-    let mut found = None;
-    around(symbols, start, end, None, &mut found);
-
-    let refusal = || seam_refusal("the range is in no method with a `self` receiver");
-    let (function, label) = found.ok_or_else(refusal)?;
-    let name_at = function
-        .pointer("/selectionRange/start")
-        .map(|start| LspPoint::read(Some(start)))
-        .transpose()?
-        .map(|point| offset_of(&rebind.text, point))
-        .ok_or_else(refusal)?;
-    if !takes_self(&masked_to_code(&rebind.text), name_at) {
-        return Err(refusal());
-    }
-    Ok(Method {
-        self_type: label.and_then(|label| self_type_of(&label)),
-    })
-}
-
-/// Descend through the outline's nodes that hold lines `start..=end` (zero-based), noting the last
-/// function met and the label of the `impl` it sits in.
-fn around<'a>(
-    nodes: &'a Value,
-    start: usize,
-    end: usize,
-    label: Option<String>,
-    found: &mut Option<(&'a Value, Option<String>)>,
-) {
-    for node in nodes.as_array().into_iter().flatten() {
-        let line = |which: &str| {
-            node.pointer(&format!("/range/{which}/line"))
-                .and_then(Value::as_u64)
-                .map(|line| line as usize)
-        };
-        let (Some(first), Some(last)) = (line("start"), line("end")) else {
-            continue;
-        };
-        if first > start || last < end {
-            continue;
-        }
-        let kind = node.get("kind").and_then(Value::as_u64);
-        let mut label = label.clone();
-        if kind == Some(SYMBOL_KIND_IMPL) {
-            label = node.get("name").and_then(Value::as_str).map(str::to_string);
-        } else if kind.is_some_and(|kind| SYMBOL_KINDS_OF_FUNCTIONS.contains(&kind)) {
-            *found = Some((node, label.clone()));
-        }
-        if let Some(children) = node.get("children") {
-            around(children, start, end, label, found);
-        }
-    }
-}
-
-/// The self type an `impl`'s outline label writes: `Host` of `impl Host`, `Wrapper<T>` of
-/// `impl<T> Wrapper<T>`, `Host` of `impl Display for Host`.
-fn self_type_of(label: &str) -> Option<String> {
-    let rest = label.strip_prefix("impl")?.trim_start();
-    let rest = if rest.starts_with('<') {
-        let mut depth = 0usize;
-        let mut previous = ' ';
-        let end = rest.char_indices().find_map(|(at, character)| {
-            match character {
-                '<' => depth += 1,
-                '>' if previous != '-' => depth = depth.saturating_sub(1),
-                _ => {}
-            }
-            previous = character;
-            (depth == 0).then_some(at + 1)
-        })?;
-        rest[end..].trim_start()
-    } else {
-        rest
-    };
-    let written = rest.rsplit(" for ").next()?;
-    let written = written.split(" where").next()?.trim();
-    (!written.is_empty()).then(|| written.to_string())
-}
-
-/// Whether the function whose name is at `name_at` of `masked` takes `self` as its first parameter.
-fn takes_self(masked: &str, name_at: usize) -> bool {
-    let rest = &masked[name_at..];
-    let after_name = rest
-        .find(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .unwrap_or(rest.len());
-    let mut at = after_name;
-    let bytes = rest.as_bytes();
-    let mut depth = 0usize;
-    // Past the generics, to the parenthesis that opens the parameters.
-    while at < bytes.len() {
-        match bytes[at] {
-            b'<' => depth += 1,
-            b'>' if at > 0 && bytes[at - 1] != b'-' => depth = depth.saturating_sub(1),
-            b'(' if depth == 0 => break,
-            _ => {}
-        }
-        at += 1;
-    }
-    let parameters = &rest[(at + 1).min(rest.len())..];
-    let first = parameters.split([',', ')']).next().unwrap_or_default();
-    let pattern = first.split(':').next().unwrap_or_default();
-    pattern
-        .split_whitespace()
-        .last()
-        .is_some_and(|word| word.trim_start_matches('&') == "self")
 }
