@@ -34,8 +34,9 @@ If it is:
   `docs/dev/todo/` entries its own changeset claims; never a predecessor's. See `/wrap-context-docs`
   § Stack Mode.
 - **Correct the PR title before marking ready** (step 8) — this is the last moment it can be fixed.
-- **Mark ready per-PR and bottom-up** (`gh pr ready <N>`). Never flip a whole stack ready at once:
-  dependents further up may still be being implemented.
+- **Mark ready per-PR, on this PR's own gate** (`gh pr ready <N>`). A parent's state — draft, ready,
+  wrapped — is not part of it. Never flip the stack ready as one batch: each node is readied by its own
+  `/pr-wrap`, when that node is done.
 - **A stacked PR goes up for review only with nothing of its own still in flight** — own docs wrapped,
   own boxes ticked, own temporary markers resolved. Parent-owned code and markers are not this PR's WIP;
   **do not delete them**.
@@ -260,7 +261,7 @@ cargo test
 - **Stack branch**: it runs in **Stack Mode** (see `/wrap-context-docs` § Stack Mode) — it wraps only the
   documents this PR owns in `docs/dev/1-WIP/` and `docs/ft/*/1-WIP/`, never a parent's, and never the
   `docs/dev/1-WIP/` pair, and it deletes only the backlog entries **this PR's own** changeset claims.
-  In a stack, wrap **bottom-up**
+  In a stack, each node wraps itself — never waiting on a parent, never touching one's documents
 
 ### 7.5. Reconcile the code issues — re-measure, then delete, narrow or reopen
 
@@ -306,8 +307,8 @@ all, since it will otherwise read as a first detection.
 ⚠ **Delete on a number, never on the changeset's claim.** The changeset says where to look; the
 re-measurement is the evidence.
 
-**Stack branches:** reconcile only what **this PR's own** changeset claims, bottom-up. A record
-claimed by a node further up the stack is left alone — the claim is still true.
+**Stack branches:** reconcile only what **this PR's own** changeset claims. A record claimed by
+another node is left alone — the claim is still true.
 
 ### 8. Stack Only: Correct the Title & Mark Ready for Review
 
@@ -398,9 +399,9 @@ gh pr ready <N>                                   # this PR only
 gh pr view <N> --json isDraft,baseRefName,title   # expect isDraft=false, base still the parent branch
 ```
 
-- **Bottom-up**: a parent's PR is readied (and wrapped) before its dependents'. Do not mark a whole stack
-  ready at once — dependents further up may still be being implemented, and publishing them puts
-  unfinished work in front of reviewers.
+- **Independent**: this PR is readied (and wrapped) on its own gate, whether or not its parents are.
+  Do not mark other nodes ready from here — a dependent further up may still be being implemented, and
+  publishing it puts unfinished work in front of reviewers. Each node's own `/pr-wrap` readies it.
 - **Do not merge from here.** Merging the stack and repointing each base after a merge is the
   landing step's job (`/merge-pr-stack`, or an `#automerge` comment per
   [ci.md § Automerge](../../docs/dev/guides/ci.md)). A child session readies its own PR and stops.
@@ -498,8 +499,8 @@ Create TODO list and mark each step complete:
 Next step: Use `/pr` command to create pull request
 
 [If fit to ship, stack branch with a draft PR already open:]
-✅ **PR #N marked ready for review** — its dependents are readied only after this one, bottom-up.
-Merging and repointing belong to `/merge-pr-stack`.
+✅ **PR #N marked ready for review.** Each other node is readied by its own `/pr-wrap`. Merging
+(bottom-up) and repointing belong to `/merge-pr-stack`.
 
 [If needs refinement:]
 ⚠️ **Refinements needed:**
@@ -515,7 +516,7 @@ Merging and repointing belong to `/merge-pr-stack`.
 - Track progress with TODOs
 - Provide changeset/PRD context to subagents
 - **Stack branches**: run `/pr-stack-rebase` before every code diff, correct the title before readying,
-  and ready bottom-up
+  and ready this PR on its own gate — never wait for a parent to ready or wrap
 - **Let step 3.5's alert reach the user** — a file at or over 500 production lines is reported in the
   summary even when it was decomposed, claimed by another PR, or legitimately deferred; growth this PR
   caused is never silently deferred

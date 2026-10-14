@@ -78,8 +78,9 @@ Prerequisites for wrapping — **all** must be true:
 - Every Scope checkbox marked `[x]` — or deferred with the user's approval (see above)
 - All acceptance criteria met — or deferred with the user's approval
 - Document status is Complete
-- **On a stack branch**: this PR is being set ready for review, its parent has already wrapped, and the
-  document being wrapped is one this PR owns — see [Stack Mode](#stack-mode--wrapping-one-pr-of-a-stack)
+- **On a stack branch**: this PR is being set ready for review and the document being wrapped is one
+  this PR owns — see [Stack Mode](#stack-mode--wrapping-one-pr-of-a-stack). The state of the parent PRs
+  is **not** a prerequisite: a node wraps on its own scope, whatever order its siblings finish in
 
 **If all checkboxes are `[x]`** -> Proceed with wrapping.
 
@@ -276,8 +277,9 @@ anybody planned it.
 ### Stack mode
 
 A code issue is shared across every branch, like a TODO — so **only the PR whose own changeset
-claims it** reconciles it, and in a stack that means **bottom-up**. A node that deletes a record its
-parent also touches puts the parent's cleanup in its own diff, and collides when the parent wraps.
+claims it** reconciles it, and in a stack that means **only that node, in whatever order the nodes
+wrap**. A node that deletes a record another node claims puts that node's cleanup in its own diff, and
+collides when the claimant wraps.
 
 A record whose `**Claimed by:**` names a node **further up this stack** stays untouched: the claim
 is still true and the work is still coming.
@@ -306,7 +308,7 @@ These files do **not** get their own changelog entries; the changeset/PRD wrap a
 ## Stack Mode — wrapping one PR of a stack
 
 **Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first** — it owns the document
-ownership rules and the bottom-up wrap order summarised below.
+ownership rules summarised below. Each node wraps itself; no node waits for another.
 
 **Detect first.** This branch is in a stack when its PR is based on another open PR's branch:
 
@@ -326,7 +328,7 @@ because a stacked branch inherits their commits. Only this PR's are wrapped:
 
 | Document | Where it lives | Wrapped by |
 |---|---|---|
-| A **predecessor's** changeset / PRD | `docs/dev/1-WIP/`, inherited through the branch's history | **That PR**, when it is set ready for review. Never wrap or delete one from here — it would show as a deletion in that PR's own diff |
+| A **predecessor's** changeset / PRD | `docs/dev/1-WIP/`, inherited through the branch's history | **That PR**, when it is set ready for review — before or after this one. Never wrap or delete one from here — it would show as a deletion in that PR's own diff |
 | This branch's changeset | `docs/dev/1-WIP/YYYY-MM-DD-*.md` | **this PR** — the wrap this command performs |
 | This branch's PRD | `docs/ft/*/1-WIP/PRD-YYYY-MM-DD-*.md` | **this PR** |
 | A `docs/dev/todo/` entry | the shared backlog, present on every branch | **the one PR whose own changeset marks it ✅ RESOLVED HERE** |
@@ -351,7 +353,8 @@ every node can see every entry:
   inherited changeset claims is that PR's to delete; removing it here puts the parent's cleanup in
   this PR's diff and collides when the parent wraps.
 - If two nodes' changesets both claim the same entry, the **lowest** node deletes it and the others
-  downgrade their verdict to a reference — the same reason wraps run bottom-up.
+  downgrade their verdict to a reference — the lowest node merges first, so its deletion lands first
+  and the others never re-delete a file the base already dropped.
 - An entry already deleted on the base and still present here is `/pr-stack-rebase`'s to clear, not
   this wrap's. Do not re-delete it.
 
@@ -379,13 +382,15 @@ Files this branch's own commits added are this PR's. Everything else in those di
 - ✅ Wrap exactly the set whose scope matches this PR's `## Responsibility` — equivalently, this
   branch's own commits.
 
-### S3. Link dependents by PR number and URL, never by document path
+### S3. Link other nodes by PR number and URL, never by document path
 
-- Forward links to dependent PRs go into the permanent docs as **PR number + URL** plus the stack name.
-  A `docs/dev/1-WIP/` path disappears the moment that dependent wraps, so it must never be carried into
-  permanent documentation.
-- Never add a link back to a **parent's** working document: the parent wraps first, so the link dangles
-  immediately. Reference the parent's PR number/URL, or the permanent doc its wrap produced.
+Nodes wrap in whatever order they finish, so **any** `docs/dev/1-WIP/` or `docs/ft/*/1-WIP/` path to
+another node's document can dangle — in either direction.
+
+- Links to other nodes — dependents or parents — go into any document as **PR number + URL** (or the
+  branch name) plus the stack name. A working-document path disappears the moment that node wraps, so it
+  must never be written into permanent documentation, nor into another node's working document.
+- To point at what a wrapped node produced, name the permanent doc its wrap created.
 - Changelog and changeset entries follow
   [changelog-merge-hygiene.md](../../docs/dev/guides/changelog-merge-hygiene.md) — **one new file
   per directory**: `packages/*/docs/changesets/`, `docs/dev/changesets/` for cross-package work, and
@@ -394,15 +399,20 @@ Files this branch's own commits added are this PR's. Everything else in those di
   a distinct slug** — several nodes of one stack land on the same day, and `-2` suffixes make the
   history unreadable. Never rewrite another node's entry.
 
-### S4. In a stack, wrap bottom-up
+### S4. Each node wraps on its own scope — never on its parents' state
 
-Each parent's docs leave `docs/dev/1-WIP/` before its dependents' do. Forward-only linking depends on
-that ordering — a forward link from a parent to a dependent's working document dangles if the dependent
-wrapped first.
+A node wraps and is set ready for review as soon as **its own** planned scope is developed and its own
+gaps are approved (see *When to wrap*). Whether a parent has been readied, wrapped or merged is **not**
+a gate: no cross-node document link exists to dangle (S3), and a node's wrap touches only its own
+documents (S2).
 
-So a dependent that finishes ahead of its parent **stays a draft with its changeset in
-`docs/dev/1-WIP/`** until the parent has been readied and wrapped. Report that as the reason rather than
-wrapping out of order.
+What the order does change, and what to do about it:
+
+- **The parent wraps later.** Its changeset is still in `1-WIP` here, inherited. Leave it (S2); when the
+  parent wraps and the base moves, `/pr-stack-rebase` brings that deletion in.
+- **The parent wraps first.** Nothing to do here but rebase; the deletion arrives with the base.
+- **Landing is still bottom-up.** Merge order is the landing step's concern (`/merge-pr-stack`), not
+  the wrap's: a node that is wrapped and ready still waits for everything below it to merge.
 
 ### S5. The wrap is not the whole readiness gate
 
@@ -488,7 +498,9 @@ Reason: complete the remaining work before wrapping.
   document to wrap — it is a read-only session artifact, not a repo file
 - **WRONG** (stack): carrying a `docs/dev/1-WIP/` path for a dependent into permanent docs instead of its
   PR number and URL
-- **WRONG** (stack): wrapping a dependent before its parent has wrapped
+- **WRONG** (stack): holding a node's wrap or `gh pr ready` back because a parent has not wrapped or
+  been readied — a node's own scope is the only gate
+- **WRONG** (stack): linking another node's working document by path instead of its PR number and URL
 - **CORRECT**: extract from PRD/changeset → update feature/dev docs → add changelog entry → delete source
 
 ## Related

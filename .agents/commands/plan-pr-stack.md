@@ -9,7 +9,7 @@ then build the stack in **two waves**, both in the **current worktree**, one bra
 
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — it defines the stack model,
 **registering the stack with `gh stack`**, the **PR boundary contract**, the `## Draft PR contract`,
-base tracking, forward-only doc linking, the worktree-pinning constraint, PR titles, and the landing
+base tracking, doc linking by branch or PR number, the worktree-pinning constraint, PR titles, and the landing
 rules. This command assumes those definitions and never contradicts them.
 
 > **Not the `pr-stack` workflow recipe.** `tddy-coder` ships a product feature by a similar name —
@@ -362,11 +362,12 @@ branch that is already pushed. **Wave 1 writes docs only** — no `src/`, no tes
   tests need only its own surface plus its predecessors' *published* surface, and not when a test
   exercises a predecessor's **behaviour**. Always give the reason — "no" is actionable only when it
   names the behaviour that must exist first.
-- **Forward-only doc linking, own files only.** A parent's PRD/changeset MAY link forward to its
-  children's (`## Successor PRs`, naming the child **branches**). A child's MUST NOT link back — the
-  parent is wrapped and removed from `1-WIP` first, so a backward link would dangle immediately. Do
-  **not** edit a parent's changeset or PRD from a child branch: those files are inherited, and a
-  commit here puts the parent's docs in this PR's diff and conflicts when the parent wraps.
+- **Reference other nodes by branch or PR number, never by document path; own files only.** Nodes wrap
+  in whatever order they finish, so a path into another node's `1-WIP` document can dangle in either
+  direction. A node's PRD/changeset names the nodes it relates to (`## Successor PRs`, `## Dependencies`)
+  by **branch** and, once it exists, PR number — never `docs/dev/1-WIP/…`. Do **not** edit a parent's
+  changeset or PRD from a child branch: those files are inherited, and a commit here puts the parent's
+  docs in this PR's diff and conflicts when the parent wraps.
 - Check off the first TODO items in this node's changeset (`Record initial discovery`,
   `Create/update PRD documentation`, `Create changeset`). This node's `{slug}-initial-discovery.md`
   must exist next to the changeset — copy the Step 2 whole-work file into it as Exploration 1 (full
@@ -777,9 +778,10 @@ is invisible to everyone above you. **Push at every milestone**, not only at the
 milestone is production code whose own tests already pass. A **signature change is the urgent one** —
 push it on its own, immediately, ahead of the implementation behind it.
 
-**Ready the stack bottom-up.** Wrapping is triggered by setting a PR ready for review, so the ready
-order *is* the wrap order — and the forward-only doc-linking rule only survives if a parent's
-documents leave `1-WIP` before its children's.
+**Ready each node on its own gate.** Wrapping is triggered by setting a PR ready for review, and each
+node wraps and is readied by its own `/pr-wrap` when its planned scope is done — independent of the
+state of its parents. Nodes link to each other by branch/PR number only, so wrap order never leaves a
+dangling reference. *Landing* is the part that stays bottom-up.
 
 **To pick up a moved base, each worktree rebases itself with `/pr-stack-rebase`** (single mode) —
 bottom-up, one branch at a time. Never `git rebase --update-refs` from a per-node worktree.

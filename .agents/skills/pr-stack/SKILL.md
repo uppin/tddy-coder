@@ -9,7 +9,7 @@ description: >-
   mergeable — splitting by layer is forbidden, a stubs-only PR is not a valid node), the per-PR
   documents in `docs/dev/1-WIP/` with their five headings `## Responsibility`, `## Boundaries`,
   `## Dependencies` (do not implement a predecessor's surface here) and `## Draft PR contract`, base
-  tracking, forward-only doc linking, the golden rules for bottom-up landing (a deleted base branch
+  tracking, doc linking by branch or PR number, the golden rules for bottom-up landing (a deleted base branch
   CLOSES its dependent PR), the worktree rules (plan in the current worktree, one branch checked out
   at a time, restore the original branch when done, delete a temporary worktree as soon as its
   branch is pushed), per-worktree rebase versus a stack-wide cascade, the in-stack implementation
@@ -894,30 +894,27 @@ Commands MUST resolve a branch's base in this order:
 > *changes* a base — and after a predecessor merges, that change is mandatory, because
 > nothing performs it for you.
 
-## Document linking rule (forward-only)
+## Document linking rule (by branch or PR number, never by path)
 
 Each PR carries its **own** PRD + changeset in `docs/dev/1-WIP/`. Because a stacked branch inherits
 its parents' commits, a child's tree contains its parents' working documents — but the reverse is not
-true, and PRs are **wrapped when they are set ready for review**, bottom-up, so a parent's documents
-leave `docs/dev/1-WIP/` before its children's.
+true. PRs are **wrapped when they are set ready for review**, and each node is wrapped and readied on
+its own gate, in whatever order the nodes finish: a parent's state is not a precondition.
 
-To avoid dangling links in `1-WIP` as PRs land, references flow **parent → child only**:
+So that no link dangles whichever node wraps first, **a working document never links another node's
+working document by path**, in either direction:
 
-- ✅ A parent's PRD/changeset MAY link forward to its children's PRD/changeset (add a
-  `## Successor PRs` section listing the next node's documents).
-- ❌ A child's PRD/changeset MUST NOT link back to a parent's documents.
+- ✅ Name another node by its **branch** (`feature/<slug>/<node>`) and, once it exists, its **PR number
+  and URL** — a `## Successor PRs` section lists the next nodes that way, and `## Dependencies` names
+  its parents that way.
+- ❌ Never write `docs/dev/1-WIP/…` or `docs/ft/*/1-WIP/…` of another node into a document. That path
+  disappears the moment that node wraps.
+- ✅ A wrapped node's result is reachable through the permanent doc its wrap created; name that.
 
-Rationale: the parent is wrapped and removed from `1-WIP` first. A backward link from a still-open
-child would immediately dangle. A forward link lives only in the document that is itself about to be
-wrapped, so nothing left in `1-WIP` ever points at a removed file.
-
-**This is why readying a stack bottom-up matters.** Wrapping is triggered by setting a PR ready for
-review (see [`.agents/commands/wrap-context-docs.md`](../../commands/wrap-context-docs.md)), so the
-ready order *is* the wrap order. Ready a child before its parent and the child's documents leave
-`1-WIP` first, which is exactly the case the forward-only rule cannot survive.
-
-This rule is why readying a stack **bottom-up** matters: wrapping is triggered by setting a PR ready
-for review, so the ready order *is* the wrap order.
+**What stays bottom-up is landing**, not wrapping: merge order is set by the base refs (golden rules
+below), so a node that is wrapped and ready still merges only after everything beneath it. Wrapping
+earlier than a parent costs nothing: the parent's changeset sits inherited in this tree until the
+parent wraps, and `/pr-stack-rebase` brings that deletion in when the base moves.
 
 ## Golden rules for landing (read before merging anything)
 
@@ -1080,7 +1077,7 @@ pick the next genuinely free number), then ask whether an assertion that merely 
 computed input is worth keeping at all.
 
 Documents are **not** wrapped here — each PR's changeset and PRD were already wrapped when that PR
-was set ready for review, bottom-up. By the time a PR merges its documents have left `1-WIP`.
+was set ready for review. By the time a PR merges its documents have left `1-WIP`.
 
 Between steps, re-read the live PR state. If it disagrees with a PR's document, **live status is
 right** and the document needs updating.

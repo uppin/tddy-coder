@@ -7,7 +7,7 @@ Turn **one** branch/PR into a **stack** of smaller PRs, each based on its predec
 `master`. This is the stacked counterpart of `/split-branch`.
 
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — it collects the stack model,
-base tracking, the per-PR documents, the forward-only doc linking rule, the golden rules (a deleted
+base tracking, the per-PR documents, the doc linking rule (branch or PR number, never a `1-WIP` path), the golden rules (a deleted
 base branch **closes** its dependent PR), and the worktree-pinning constraint. The authoritative
 product specs are the `pr-stack` skill (stack data model, PR-management tools, the PR
 boundary contract), the `pr-stack` skill § *Per-PR documents* (the per-PR `PRD.md` / `changeset.md`), and
