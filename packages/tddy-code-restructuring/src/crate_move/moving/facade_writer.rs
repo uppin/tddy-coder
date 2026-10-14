@@ -1,3 +1,5 @@
+use super::super::malformed;
+
 use crate::{
     crate_move::{facade_line, facade_lines_for_plan, header, manifest_edits, FacadeEntry},
     edit::TextEdit,
