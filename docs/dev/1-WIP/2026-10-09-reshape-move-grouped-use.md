@@ -231,15 +231,15 @@ is not part of `#reshape`.)
 
 ## Scope
 
-- [ ] **Relocation**: the group rule and its helpers into `crate_move::use_group` by engine `move_item`; `repoint_facade` green on
+- [x] **Relocation**: the group rule and its helpers into `crate_move::use_group` by engine `move_item`; `repoint_facade` green on
   its existing tests (except the F6 test)
-- [ ] **Nested flattening** (R5)
-- [ ] **Header pass**: statement edits through the rule (R1–R4, R6); `one_use_per_path` deleted
-- [ ] **Glob facade** co-movement (R7)
-- [ ] **`pub(in …)`** flag and respelling (R8)
-- [ ] **Callers** collected across the cluster, statement edits (R9)
-- [ ] **Stranded finding** reads `origin_paths`; root-item remedy; `header_origin_paths` and the TODO marker deleted (R10)
-- [ ] **Pinned tests** rewritten (21, 22, 23)
+- [x] **Nested flattening** (R5)
+- [x] **Header pass**: statement edits through the rule (R1–R4, R6); `one_use_per_path` deleted
+- [x] **Glob facade** co-movement (R7)
+- [x] **`pub(in …)`** flag and respelling (R8)
+- [x] **Callers** collected across the cluster, statement edits (R9)
+- [x] **Stranded finding** reads `origin_paths`; root-item remedy; `header_origin_paths` and the TODO marker deleted (R10)
+- [x] **Pinned tests** rewritten (21, 22, 23)
 - [ ] **Package documentation** at wrap (list under Affected Packages)
 - [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
 - [ ] **Code quality**: `cargo check -p tddy-code-restructuring --all-targets`, clippy `-D warnings`, `cargo fmt`; no file past 500
@@ -293,15 +293,15 @@ A cluster with lifecycle's import shape passes `check --deep` and applies with n
 
 ## Implementation milestones
 
-- [ ] **M1** Relocation by engine `move_item` (plan in a Refactor changeset under the `code-restructuring` skill). Build fixes only;
+- [x] **M1** Relocation by engine `move_item` (plan in a Refactor changeset under the `code-restructuring` skill). Build fixes only;
   each fix gets `TODO(reshape-8-hand-fix)` and a line in todo `2026-10-09-reshape-8-hand-fixes-after-the-group-rule-move.md`
   (written only if any fix was needed). Existing `repoint_facade` tests green.
-- [ ] **M2** `Leaf` and nested flattening (R5); tests 5, 23.
-- [ ] **M3** Header statement edits (R1–R4, R6); tests 1–4, 6, 9, 22.
-- [ ] **M4** Glob facade (R7); tests 7, 8, 16 (probe), 19.
-- [ ] **M5** `pub(in …)` (R8); tests 10–12, 20.
-- [ ] **M6** Callers (R9); tests 13–15.
-- [ ] **M7** Stranded finding (R10); tests 17, 18, 21.
+- [x] **M2** `Leaf` and nested flattening (R5); tests 5, 23.
+- [x] **M3** Header statement edits (R1–R4, R6); tests 1–4, 6, 9, 22.
+- [x] **M4** Glob facade (R7); tests 7, 8, 16 (probe), 19.
+- [x] **M5** `pub(in …)` (R8); tests 10–12, 20.
+- [x] **M6** Callers (R9); tests 13–15.
+- [x] **M7** Stranded finding (R10); tests 17, 18, 21.
 - [ ] **M8** Live R6 test 24; docs staged; scoped gate; length and function-size checks.
 
 ## Testing plan
@@ -501,7 +501,7 @@ is the moved module itself, so the restriction is a co-moving path and keeps its
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests (incl. F6)
 - [ ] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace

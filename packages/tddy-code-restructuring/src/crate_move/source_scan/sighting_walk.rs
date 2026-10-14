@@ -15,10 +15,6 @@ pub(crate) struct Sighting {
     /// The inline modules enclosing it, outermost first.
     pub(crate) modules: Vec<String>,
     /// Whether it is the path of a `pub(in …)` visibility restriction rather than a path to an item.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-grouped-use): read by the survey's `restriction` in the green phase"
-    )]
     pub(crate) in_visibility: bool,
 }
 
@@ -121,9 +117,7 @@ pub(crate) fn sightings(text: &str) -> Vec<Sighting> {
                         in_use: false,
                         in_test: in_test || pending_test,
                         modules: modules(),
-                        // TODO(reshape-move-grouped-use): implement — set when the tokens before
-                        // the path are `pub` `(` `in`.
-                        in_visibility: false,
+                        in_visibility: scan.names_a_restriction(at),
                     });
                 }
                 at = last + 1;

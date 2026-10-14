@@ -15,6 +15,7 @@ use crate::crate_move::survey::{PathSurvey, SurveyedPath};
 use crate::Result;
 
 use super::refusals;
+use crate::crate_move::use_group::last_segment;
 
 /// One path to rewrite.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,11 +132,6 @@ fn spelled_on_one_line(text: &str, at: usize, written: &str) -> bool {
     actual_segments.len() < written_segments.len()
         && written_segments.starts_with(&actual_segments)
         && text[at + actual.len()..].starts_with("::{")
-}
-
-/// The last segment of a path.
-pub(super) fn last_segment(path: &str) -> &str {
-    path.rsplit("::").next().unwrap_or(path)
 }
 
 /// One `use` leaf, as the duplicate-binding check reads it.

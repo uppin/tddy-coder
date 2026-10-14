@@ -138,7 +138,9 @@ pub(crate) fn body_path_left_behind(
     let left_behind = survey
         .paths
         .iter()
-        .filter(|path| path.in_body && !path.in_test && path.defining_crate == *origin)
+        .filter(|path| {
+            path.in_body && !path.in_test && !path.restriction && path.defining_crate == *origin
+        })
         .find_map(|path| {
             module_left_behind(&path.defined_at, origin, travelling).map(|module| (path, module))
         });

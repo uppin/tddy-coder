@@ -4,7 +4,6 @@ use super::ModuleReferences;
 use crate::crate_move::{carried, header, module_files, moving, refusals};
 use crate::edit::FileEdit;
 use crate::registry::Workspace;
-use crate::Reexport;
 
 /// What gathering a cluster's members accumulates: the set they are read against, the merged edit
 /// and the totals that belong to the set.
@@ -69,11 +68,7 @@ impl Gathering<'_> {
         let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
         refusals::refuse_a_dependency_cycle(member, &origin_paths, &naming_it)?;
         carried::restricted_children_reached(workspace, member, &rewrites)?;
-        if member.reexport == Reexport::None {
-            for change in moving::caller_changes(workspace, rewrites)? {
-                merged.absorb(change);
-            }
-        }
+        totals.callers.extend(rewrites);
         totals.keeps_naming_it.extend(naming_it);
         Ok(())
     }

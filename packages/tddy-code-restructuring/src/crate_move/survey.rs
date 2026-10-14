@@ -45,10 +45,6 @@ pub(crate) struct SurveyedPath {
     pub(crate) site: Position,
     /// Whether it is the path of a `pub(in …)` restriction: a visibility the header pass respells,
     /// never an edge back and never a crate for the manifest.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-move-grouped-use): read by `header::reach` in the green phase"
-    )]
     pub(crate) restriction: bool,
 }
 
@@ -120,8 +116,7 @@ pub(crate) fn survey_moved_file(
             in_test: sighting.in_test,
             in_body: !sighting.in_use,
             site: manifest_edits::position_of(text, sighting.head_at),
-            // TODO(reshape-move-grouped-use): implement — `sighting.in_visibility`.
-            restriction: false,
+            restriction: sighting.in_visibility,
         });
     }
 
