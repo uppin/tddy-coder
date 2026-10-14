@@ -620,3 +620,37 @@ fn a_single_module_move_carries_the_same_files_as_a_cluster_of_one() {
         .count();
     assert_eq!(children_moved, 4);
 }
+
+/// A child's name can be declared in two scopes of one file: `pub mod d;` at the module's top level
+/// and `pub(crate) mod d;` inside the inline module `i`. They are two modules (`a/d.rs` and
+/// `a/i/d.rs`), so what is read for the one in `i` is the declaration inside `i`, not the first line
+/// of the file that spells `mod d;`.
+#[test]
+fn a_restricted_child_inside_an_inline_module_is_read_where_it_is_declared() {
+    // Given `a` declaring a public `d` at its top level and, in `i`, a `pub(crate)` one; `runtime`
+    // names an item of the one in `i`
+    let workspace = a_workspace_whose_module_has_directory_children()
+        .with(MODULE, "pub mod d;\n\nmod i {\n    pub(crate) mod d;\n}\n")
+        .with("crates/origin/src/x/a/d.rs", "pub fn outer() {}\n")
+        .with(
+            CALLER,
+            "use crate::x::a::i::d::inner;\n\npub fn boot() {\n    inner();\n}\n",
+        );
+    let mut engine = nothing_reaches_the_tree().reaching("inner", INLINE_CHILD, CALLER, &workspace);
+    let cluster = a_cluster_of(vec![the_module_a()], Reexport::None);
+
+    // When the move is resolved
+    let refusal = crate_move::resolve_cluster(&mut engine, &workspace.workspace(), &cluster)
+        .expect_err("the `pub(crate)` child is reached from outside")
+        .to_string();
+
+    // Then the refusal names the `pub(crate)` declaration and the caller
+    assert_eq!(
+        (
+            refusal.contains("pub(crate) mod d"),
+            refusal.contains(CALLER),
+        ),
+        (true, true),
+        "{refusal}"
+    );
+}

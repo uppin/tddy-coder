@@ -15,6 +15,7 @@ use super::preconditions::{
 };
 use std::collections::BTreeSet;
 
+use super::source_scan::items_of_module;
 use super::{
     malformed, manifest_edits, module_files, ModuleHome, Move, MovingCluster, PlannedRewrite,
     Result, Survey,
@@ -260,6 +261,30 @@ impl RestrictedChild {
     }
 }
 
+/// The declaration of `name` in the scope the inline modules `inline_modules` open inside `text`.
+///
+/// A name declared in two scopes of one file (`mod d;` beside `mod i { pub(crate) mod d; }`) is two
+/// modules, so each is read where it is declared.
+///
+/// TODO: an enclosing inline module's own visibility (`mod i { pub mod d; }`) is not read, so a
+/// child that is `pub` inside a private inline module is not found restricted.
+fn declared_within(
+    text: &str,
+    inline_modules: &[String],
+    name: &str,
+) -> Option<manifest_edits::ModuleDeclaration> {
+    let mut scope = 0..text.len();
+    for module in inline_modules {
+        let body = items_of_module(&text[scope.clone()])
+            .children
+            .into_iter()
+            .find(|child| &child.name == module)?
+            .body?;
+        scope = scope.start + body.start..scope.start + body.end;
+    }
+    manifest_edits::declared_module(&text[scope], name)
+}
+
 /// Every file-backed child of the moved module whose declaration is not `pub`.
 ///
 /// A child's parent is the carried file for the nearest module above it that has a file; an inline
@@ -279,7 +304,8 @@ fn restricted_children(workspace: &Workspace<'_>, member: &Move) -> Result<Vec<R
         };
         let name = file.below[file.below.len() - 1].clone();
         let text = workspace.read(&parent.from)?;
-        let Some(declaration) = manifest_edits::declared_module(&text, &name) else {
+        let inline_modules = &file.below[parent.below.len()..file.below.len() - 1];
+        let Some(declaration) = declared_within(&text, inline_modules, &name) else {
             continue;
         };
         if declaration.visibility != "pub" {

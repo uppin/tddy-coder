@@ -220,3 +220,56 @@ fn a_pub_module_moved_with_a_glob_facade_still_leaves_pub_use() {
     // Then the facade is `pub use`, as before
     assert_eq!(root, "pub use destination::config;\npub mod runtime;\n");
 }
+
+#[test]
+fn a_pub_in_path_module_moved_with_a_glob_facade_leaves_a_facade_with_the_same_path() {
+    // Given `outer::inner`, declared `pub(in crate::outer)` by `outer`
+    let origin = an_origin_whose_root_is(
+        "pub mod outer;\n",
+        &[
+            (
+                OUTER,
+                "pub(in crate::outer) mod inner;\n\npub struct Outer;\n",
+            ),
+            ("crates/origin/src/outer/inner.rs", "pub struct Inner;\n"),
+        ],
+    );
+
+    // When it moves with a glob facade
+    let outer = after_moving(
+        &origin,
+        &a_glob_move_of(&[&["outer", "inner"]], OUTER),
+        OUTER,
+    );
+
+    // Then the facade is restricted to the same path, not widened to `pub`
+    assert_eq!(
+        outer,
+        "pub(in crate::outer) use destination::inner;\n\npub struct Outer;\n"
+    );
+}
+
+#[test]
+fn a_pub_self_module_moved_with_a_glob_facade_leaves_a_pub_self_facade() {
+    // Given `config`, declared `pub(self)` by the root
+    let origin = an_origin_whose_root_is(
+        "pub(self) mod config;\npub mod runtime;\n",
+        &[
+            ("crates/origin/src/config.rs", "pub struct Settings;\n"),
+            ("crates/origin/src/runtime.rs", "\n"),
+        ],
+    );
+
+    // When it moves with a glob facade
+    let root = after_moving(
+        &origin,
+        &a_glob_move_of(&[&["config"]], ORIGIN_LIB),
+        ORIGIN_LIB,
+    );
+
+    // Then the facade is `pub(self)` too, as the declaration was
+    assert_eq!(
+        root,
+        "pub(self) use destination::config;\npub mod runtime;\n"
+    );
+}

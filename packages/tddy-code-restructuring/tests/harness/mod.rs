@@ -137,6 +137,14 @@ pub fn a_workspace_a_module_can_move_across() -> AFixtureWorkspace {
         .tracked_by_git()
 }
 
+/// [`a_workspace_a_module_can_move_across`], whose root declares `host_registry` `pub(crate)`.
+pub fn a_workspace_whose_module_is_declared_pub_crate() -> AFixtureWorkspace {
+    a_workspace_a_module_can_move_across().writing(
+        "crates/origin/src/lib.rs",
+        "//! The crate the module leaves.\n\npub(crate) mod host_registry;\npub mod runtime;\n",
+    )
+}
+
 /// The child [`a_workspace_whose_module_has_a_directory_child`]'s `host_registry` declares, in the
 /// directory beside its file.
 pub const A_DIRECTORY_CHILD: &str = "crates/origin/src/host_registry/clock_face.rs";
