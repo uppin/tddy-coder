@@ -316,13 +316,9 @@ pub(super) fn run_check(
     progress: &ProgressSink,
     wait_heartbeat: Duration,
 ) -> Result<CheckOutput> {
-    let mut arguments = vec!["check", "--all-targets", "--message-format", message_format];
-    for package in packages {
-        arguments.extend(["-p", package.as_str()]);
-    }
     let mut command = spawns.command("cargo");
     command
-        .args(&arguments)
+        .args(check_arguments(packages, message_format))
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -339,6 +335,25 @@ pub(super) fn run_check(
         stdout: stdout.join().unwrap_or_default(),
         stderr: stderr.join().unwrap_or_default(),
     })
+}
+
+/// The arguments of the gate's `cargo check`: every target of `packages`, in `message_format`, and
+/// never in colour. The gate and the tidy read what cargo writes — warnings counted, errors picked
+/// out — and a caller's `CARGO_TERM_COLOR=always` would wrap those words in escape codes no reader
+/// here matches.
+fn check_arguments<'a>(packages: &'a BTreeSet<String>, message_format: &'a str) -> Vec<&'a str> {
+    let mut arguments = vec![
+        "check",
+        "--all-targets",
+        "--message-format",
+        message_format,
+        "--color",
+        "never",
+    ];
+    for package in packages {
+        arguments.extend(["-p", package.as_str()]);
+    }
+    arguments
 }
 
 /// The status `child` exits with, or [`RestructureError::CallerStopped`] once `cancel` fires first
@@ -446,6 +461,32 @@ error: could not compile `demo` (lib) due to 2 previous errors";
             "src/lib.rs:3:5: error[E0308]: mismatched types\n\
              src/lib.rs:9:1: error: cannot find macro `nope` in this scope\n\
              error: could not compile `demo` (lib) due to 2 previous errors"
+        );
+    }
+
+    #[test]
+    fn checks_every_target_of_each_package_without_colour() {
+        // Given two packages to check
+        let packages = BTreeSet::from(["origin".to_string(), "destination".to_string()]);
+
+        // When the check's arguments are written
+        let arguments = check_arguments(&packages, "short");
+
+        // Then colour is off whatever the caller's environment asks for, and each package is named
+        assert_eq!(
+            arguments,
+            [
+                "check",
+                "--all-targets",
+                "--message-format",
+                "short",
+                "--color",
+                "never",
+                "-p",
+                "destination",
+                "-p",
+                "origin",
+            ]
         );
     }
 
