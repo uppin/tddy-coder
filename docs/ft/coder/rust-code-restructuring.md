@@ -71,7 +71,7 @@ there is no budget to state. See [Waiting](#waiting).
 | | Run state is **keyed by the plan** — `<root>/.restructure/<plan stem>-<digest>/` — so a completed plan does not block the next one under the same root, and `--resume` resumes the plan it was given rather than whichever ran last. Every multi-layer restructuring is several plans in one repository, which is why this is not an implementation detail. A journal left at `<root>/.restructure/` by an older run is adopted when resuming, and otherwise refused by name; it is never silently taken over by a different plan |
 | `load` / `unload` / `plans` | Hold plans in the index daemon's [plan store](#plan-store): `load` reads each plan once and gives every operation an id, `unload` writes changed plans back and drops them (`--all` for every plan of the tree), `plans` lists what is held. All three need the index daemon (`TDDY_INDEX_SOCKET`) and are refused without one |
 | `status` | completed / in_flight / pending / failed |
-| `check` | All findings, no writes; `--deep` resolves through the same path as apply and prints each operation's own notes — for `repoint_facade_imports`, the paths it would rewrite; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many **production lines** — lines before the first `#[cfg(test)]` that opens a `mod`, so a file's inline tests are not counted; other languages count every line — a report, never a gate |
+| `check` | All findings, no writes; `--deep` resolves through the same path as apply and prints each operation's own notes — for `repoint_facade_imports`, the paths it would rewrite — and each visibility widening an `apply` would report, in the same `visibility:` form; `--budget LINES` additionally reports which of the files the plan names — every member of a cluster, not only its anchor — exceed that many **production lines** — lines before the first `#[cfg(test)]` that opens a `mod`, so a file's inline tests are not counted; other languages count every line — a report, never a gate |
 | `snapshot` | Rewrite the plan's line-1 header from the working tree, or write one when the plan has none — its first line is an operation, and the header is computed from the files the operations' anchors name (see [Plan format](#plan-format)). A plan of range and symbol anchors keeps every operation line byte-identical and needs no index, and is answered in process. A plan of **item** anchors is also re-resolved against the current tree through rust-analyzer: hints and the fingerprints of unchanged items are rewritten, and each operation whose item changed or is gone is reported and left as written (see [Live plans](#live-plans)). With `TDDY_INDEX_SOCKET` set that re-resolution runs on the daemon's warm index (the `Snapshot` RPC); without it the command starts a rust-analyzer of its own |
 | `warm` | Load this tree's crate graph into the index daemon and narrate its progress until the graph is queryable, so the first real request does not pay for the load. A daemon-only command: with no daemon configured it is refused, naming `./run-index-daemon` as what starts one. It ends only on the daemon's final `ready` message, and a stream that closes without one is an error, not a warm root. `./run-index-daemon` runs it for its own checkout (see [Warm code-intelligence daemon](warm-code-intelligence-daemon.md#running-it)) |
 | `anchors` | Emit an anchor a plan can carry. `--items A,B` emits an `items` anchor covering the named adjacent items (trivia included); `--at L:C[-L:C]` emits an `item` anchor for the innermost item enclosing that position, with its relative range, fingerprint and hint filled in. See [Item anchors](#item-anchors) |
@@ -676,6 +676,30 @@ there can mean something else one level down. Three rewrites keep the meaning:
   bind that name itself.
 
 A run that re-roots paths says so in one note line, `paths: N path(s) re-rooted for the new module`.
+
+### A seam cut after another one
+
+A plan can cut several seams out of one file, and each one is resolved against the tree the seams
+before it produced. Before an operation asks rust-analyzer anything, the backend opens every file the
+earlier operations of the run created or changed, with the text the run holds for it: the in-memory
+text for `check --deep` and `apply --dry-run`, the text on disk for `apply`. A file an earlier operation
+renamed is shown under its new path only. Every operation the Rust backend resolves through the server
+sees them, and they are closed when the operation ends, like every other document an operation opens.
+
+So a reference from an earlier seam's file to an item a later seam moves is a reference from outside:
+
+- **The item stays widened, and is reported.** With a glob facade, `pub use that_module::*;` then
+  re-exports it, and the run prints `` `strip_resize` private -> pub(crate) ``.
+- **A name the later seam needs from an earlier seam's module is imported** like any other lost name,
+  with the import verified as for any other.
+- **With `reexport: none` the seam is refused**, naming the item and the earlier seam's file, because
+  the reference there would be stranded. The engine rewrites no reference in a file other than the
+  anchor's.
+
+`check --deep`, `apply --dry-run` and `apply` therefore reach the same refusals and print the same
+widenings for a multi-seam plan. The first operation of a run has nothing written before it and sends
+the server exactly what a single-seam plan does. An item already written `pub(crate)` is never reported
+as widened.
 
 ## The tidy
 

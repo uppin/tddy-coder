@@ -15,6 +15,7 @@ vouch for.
 | `prelude_shadow.rs` | the lexical carry of a parent's `use`-bound name the moved code uses, even when it shadows a prelude name |
 | `relative_visibility.rs` | rebasing a relative visibility one module deeper |
 | `inline_paths.rs` | re-rooting inline `super::` / `self::` paths and paths through a module the parent declares |
+| `projection.rs` | the files an earlier operation of the run wrote, and showing them to the server before the next operation's first document |
 | `impl_seam.rs` | `refuse_impl_sibling_references`, `is_inherent_impl`, `with_method_calls_restored`, `reached_through_the_type` |
 | `nested_modules.rs` | `with_nested_references_restored`, and the brace-depth module reader behind it |
 | `introduced.rs` | finding the `let` binding `extract_variable`'s assist introduced, so it can be renamed to the plan's `name` |
@@ -181,6 +182,31 @@ When a placeholder is still left over after the repairs, the refusal names both 
 apart lexically: reorder the plan for a module an earlier operation extracted; for a module the file
 already had, reach the item through `use super::*;` or cut the seam elsewhere.
 
+## A seam after a seam
+
+The passes above read the tree around the anchor: `reach_of` counts a reference in another file as
+one from outside, `restore_imports` skips a name already unresolved before the cut, and
+`restore_visibility` keeps an item widened that something outside the new module reaches. They are
+only as good as the server's picture of that tree, and the server is shown the anchor's file alone. A
+seam cut after another one is about a tree whose first seam's file the server has never been shown: in
+a rehearsal that file exists only in the overlay, and in an apply rust-analyzer's own watcher does not
+see it within one request.
+
+`projection.rs` closes that. `RustBackend` holds a `PlanProjection`, the paths its resolutions created,
+changed or renamed into, in the order the run first wrote each. After a successful `resolve`, the
+edit is folded in: a created or changed path is added once, and a rename removes the old path and adds
+the new. A refused operation records nothing. At the start of `resolve`, every recorded path is read
+through the workspace (so the overlay's text in a rehearsal and the disk's in an apply) and staged. The
+first `did_open` of the operation sends `textDocument/didOpen` for every staged document except the
+one it is opening. A later `did_open` of a uri already open from the projection sends the requested
+text as `textDocument/didChange` rather than a second `didOpen`. A recorded path the workspace cannot
+read is an error naming it. `closing_what_it_opens` closes the projected documents with the rest and
+clears the staging, so nothing staged for one entry point reaches the next on a shared server.
+
+Nothing in the passes changes for it: they get a server that answers for the projected tree.
+`restore_visibility` reports a widening only for an item that was not already `pub(crate)`
+(`widening_of`), since a change from `pub(crate)` to `pub(crate)` is not one.
+
 ## Naming the binding `extract_variable` introduced
 
 Most assists write a fixed placeholder the engine renames to the plan's name (`fun_name`, `modname`,
@@ -249,5 +275,11 @@ operand and is not refused.
   for the module tree, so a shape the lexer does not know (a brace a macro produces, for example)
   could mislead it. The compile gate on `apply` (see [readiness-and-gates.md](readiness-and-gates.md))
   catches what that leaves.
+- **The projection is not compiled.** `check --deep` shows the server the tree the plan would produce
+  and answers its questions for it, but does not type-check that tree; only `apply`'s gate does.
+- **A file an earlier operation renamed away is not hidden from the server** in a rehearsal, where it
+  is still on disk.
+- **Widening is to `pub(crate)`**, where `pub(super)` would suffice for a reference from the original
+  parent and below.
 - Attribute macros, `use Trait as _;` and other gaps the compile gate reports are recorded in the
   backlog, not here.

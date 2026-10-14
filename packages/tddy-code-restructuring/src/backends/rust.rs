@@ -40,6 +40,7 @@ mod item_path;
 mod module_reparent;
 mod nested_modules;
 mod prelude_shadow;
+mod projection;
 mod readiness;
 mod relative_visibility;
 mod repoint_call;
@@ -481,6 +482,12 @@ pub struct RustBackend {
     claimed: Vec<(String, String)>,
     /// The documents this backend has opened and not yet closed. See [`documents`].
     opened: Vec<String>,
+    /// The files earlier operations of this run wrote, shown to the server before each later one.
+    /// See [`projection`].
+    projection: projection::PlanProjection,
+    /// The projected documents read for the operation in flight, as `(uri, text)`, waiting for its
+    /// first `did_open`.
+    staged_projection: Vec<(String, String)>,
     /// The workspace root a self-spawned server was started in. A bridged client carries its own.
     root: Option<PathBuf>,
     /// Where the language server this backend starts itself is recorded, when a run asks for it.
@@ -536,6 +543,8 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            projection: projection::PlanProjection::default(),
+            staged_projection: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
@@ -628,6 +637,8 @@ impl RustBackend {
             doc_version: 1,
             claimed: Vec::new(),
             opened: Vec::new(),
+            projection: projection::PlanProjection::default(),
+            staged_projection: Vec::new(),
             root: None,
             spawns: SpawnRecorder::discard(),
             wait_heartbeat: WAIT_HEARTBEAT,
@@ -1205,7 +1216,11 @@ impl LanguageBackend for RustBackend {
     }
 
     fn resolve(&mut self, op: &RefactorOp, workspace: &Workspace<'_>) -> Result<Resolution> {
-        self.closing_what_it_opens(|backend| backend.resolve_opening(op, workspace))
+        self.stage_projection(workspace)?;
+        let resolution =
+            self.closing_what_it_opens(|backend| backend.resolve_opening(op, workspace))?;
+        self.projection.record(&resolution.edit);
+        Ok(resolution)
     }
 
     /// This backend *is* the reference engine a cross-crate move surveys through — the same

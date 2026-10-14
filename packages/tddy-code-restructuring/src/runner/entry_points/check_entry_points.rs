@@ -4,7 +4,7 @@ use super::super::budget::measured;
 
 use super::super::budget::budget_report;
 
-use super::super::rehearsal::survey_lines;
+use super::super::rehearsal::rehearsed_lines;
 
 use crate::{crate_move, item_anchor, Anchor, Overlay, Plan};
 
@@ -293,13 +293,8 @@ pub fn check_plan(
             op.anchor.file()
         ));
         let rehearsed = rehearsal.rehearse(root, &mut registry, op)?;
-        if let Some(survey) = &rehearsed.survey {
-            for line in survey_lines(index, survey) {
-                (options.account)(&line);
-            }
-        }
-        for note in &rehearsed.notes {
-            (options.account)(&crate::console::note(note));
+        for line in rehearsed_lines(index, &rehearsed) {
+            (options.account)(&line);
         }
         if let Some(refusal) = rehearsed.refusal {
             findings.push(Finding {

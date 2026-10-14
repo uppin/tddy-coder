@@ -350,6 +350,13 @@ its container ports in ICE candidates. `stop` is safe to run twice. The unit leg
 The image is pinned in one file, `.config/livekit-server.image`, read by the script,
 `./run-livekit-testkit-server` and (compiled in) the testkit. It is never `:master`. Changing it is
 a one-line edit.
+
+`Web tests` starts no shared server: `tddy-livekit-web`'s Cypress specs start their own container
+through `cypress/support/livekitDockerTestkit.ts`, which still names `livekit/livekit-server:master`
+rather than the pinned image. The job pulls that image in its own step (`Pull the LiveKit image for
+tddy-livekit-web`) before the component tests, because the `startEchoServer` task's 60s Cypress
+timeout would otherwise also cover the pull on a fresh runner, and a slow pull failed both specs'
+`before all` hooks.
 `./run-livekit-testkit-server --stop` removes the local reusable server.
 
 The LiveKit override of the `ci` profile in `.config/nextest.toml` carries a `slow-timeout` with `terminate-after`, so a

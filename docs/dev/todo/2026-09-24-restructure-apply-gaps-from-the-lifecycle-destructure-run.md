@@ -14,14 +14,18 @@ went like this:
 |---|---|---|
 | `03`, `10a`, `04`, `08` | applied, compiles | — |
 | `06` ports files | 3 of 3 applied, **does not compile** | G |
-| `07` host builders | 1 of 1 applied, **does not compile** | H |
 | `05` spawn_split_agent | 5 of 5 applied, **does not compile** | L |
-| `02` cli_session_manager (9 seams) | 9 of 9 applied, **does not compile** | G, I, J |
+| `02` cli_session_manager (9 seams) | 9 of 9 applied, **does not compile** | G, I |
 | `09` without op 6 | 7 of 7 applied, **does not compile** | K |
 | `01` connection_service (10 seams) | 10 of 10 applied, **the test build does not compile** | M |
 
 In every row the code was moved, and #527's compile gate failed the run with the compiler's errors,
 leaving the edits on disk. Before #527 each of these rows would have been reported as a success.
+
+**Closed since:** H (relative paths in a moved body are rebased by `inline_paths`) and J (a sibling
+seam's private helper goes unresolved: a plan now shows the server every file an earlier seam wrote,
+so the item stays widened and reported). Their sections are removed. What remains is G, I, K, L, M, W
+and the first half of X.
 
 ## Why this was deferred
 
@@ -73,38 +77,6 @@ use serde::Serialize;   #[derive(Serialize)] struct Row { … }
 use tracing::info;      fn f() { info!("…"); }
 ```
 
-### H — relative paths in the moved body are not rebased
-
-Plan `07`. The assist does not rebase `super::`/`self::` in the code it moves. Gap A fixed only the
-`use` lines that the import pass reconstructs.
-
-```rust
-// before: connection_service/svc_resolve_tddy_tools_path.rs, line 163
-let handler: Arc<dyn tddy_sandbox_runner::HostRpcHandler> =
-    Arc::new(super::DaemonRpcHandler { conn: Arc::downgrade(self) });
-
-// after: connection_service/svc_resolve_tddy_tools_path/svc_host_builders.rs, one module deeper
-    Arc::new(super::DaemonRpcHandler { conn: Arc::downgrade(self) });
-//           ^^^^^^^ now names svc_resolve_tddy_tools_path; must become `super::super::`
-```
-
-```text
-error[E0422]: cannot find struct, variant or union type `DaemonRpcHandler` in module `super`
-```
-
-A `super::` inside a nested module of the moved code that stays within the moved code must **not**
-change:
-
-```rust
-mod moved {                // the seam
-    fn helper() {}
-    #[cfg(test)]
-    mod tests {
-        use super::helper; // still `super::`: it points inside the moved code
-    }
-}
-```
-
 ### I — `use Trait as _;` is not carried
 
 Plan `02`. Both parents bring `prost::Message` in only for its methods:
@@ -128,33 +100,6 @@ A trait used only for method resolution never shows up as an unresolved name. Si
 binds no name, which is right for the name check but hides the import. A sound signal is still to
 be found. Possibilities are an unresolved-method diagnostic, a parent `use … as _` that goes unused
 after the move, or the design candidate below.
-
-### J — a sibling seam's private helper goes unresolved after plan `02`'s nine seams
-
-```rust
-// before: cli_session_manager.rs
-impl PtyHandle {
-    pub fn send_input(&self, data: bytes::Bytes, input_offset: u64) {
-        let (resize, remaining) = strip_resize(&data);   // line 115
-        …
-    }
-}
-
-fn strip_resize(data: &[u8]) -> (Option<(u16, u16)>, Bytes) { … }   // line 1126, private
-
-// after: cli_session_manager/pty_handle.rs
-use super::strip_resize;
-```
-
-```text
-error[E0432]: unresolved import `super::strip_resize`: no `strip_resize` in `cli_session_manager`
-error[E0282]: type annotations needed        (pty_handle.rs:104, follows from the above)
-```
-
-The cause is not investigated. The suspicion is cross-op composition. Another of the nine seams also
-moves `strip_resize` into a module of its own, and narrows it back to private because nothing
-outside needed it at the time. The glob facade `pub use that_module::*;` then does not re-export it,
-and a later op's reconstructed `use super::strip_resize;` names a parent that no longer has it.
 
 ### K — an `extract_method` signature names a type the file never imports
 
@@ -333,13 +278,9 @@ svc_resume_session.rs:132:14: error[E0624]: method `spawn_tddy_coder` is private
 ```
 
 By hand (#524): `pub(in crate::connection_service)`, which is what `pub(super)` meant where the item
-was. The engine should rewrite a relative visibility the way H needs relative paths rewritten.
+was. The engine should rewrite a relative visibility the way `inline_paths` rewrites a relative path.
 
-**The widening itself is a second gap.** A private item widened to `pub(crate)` also exceeds a
-private type in its signature (`CliStart`, `JailSession`, `JailDirs`, …), which is
-`private_interfaces` under `-D warnings`. In every #524 apply the reach the item needed was
-`pub(super)` (the parent and its children, which is where private reached). The hand fix was
-`pub(super)` each time, in plans `12`, `13`, `17` and `21`.
+The widening of a moved private item to `pub(crate)` where `pub(super)` suffices is its own entry, `2026-10-09-restructure-extract-module-widens-to-pub-crate-where-pub-super-suffices.md`.
 
 ## Design candidates, undecided
 

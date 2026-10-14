@@ -535,6 +535,14 @@ jobs:
           ./dev bun run --filter tddy-tauri-web test:ci || status=1
           exit $status
 
+      # tddy-livekit-web's livekitDockerTestkit.ts starts this image inside a
+      # Cypress task whose 60s timeout also covered pulling it on a fresh
+      # runner, and a slow pull failed both specs' `before all` hooks. Pulled
+      # here, the task only starts the container. Keep the tag in step with
+      # LIVEKIT_IMAGE in that file.
+      - name: Pull the LiveKit image for tddy-livekit-web
+        run: docker pull livekit/livekit-server:master
+
       - name: Component tests
         id: component
         continue-on-error: true

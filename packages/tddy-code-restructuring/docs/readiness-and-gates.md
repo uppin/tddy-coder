@@ -103,9 +103,12 @@ the close both fail, the entry point's error is the one returned. The live test 
 a real `check --deep` of two seams on a settled server, then a seam naming the parent's type through
 `super`, resolved on a fresh backend on the same server.
 
-**What this does not change.** Within one `check --deep`, an operation after the first is still
-resolved against overlay text whose new files the server cannot see. The server forgets that text
-when the operation ends, so it does not reach the next run.
+**Within one run.** Within one run, the files earlier operations wrote are the
+exception: the backend opens them, at the text the run holds for them, before an operation's first
+document (see [A seam after a seam](assist-output-repairs.md#a-seam-after-a-seam)), so an operation
+after the first is resolved against the tree the plan has produced. The projected documents are closed
+with every other when the operation ends, so the server forgets that text and it does not reach the next
+run.
 
 A file written **between** requests — a module an earlier `apply` created, or a hand edit — reaches a
 warm server because `tddy-index-daemon` tells it: before handing a warm server to a request, the
