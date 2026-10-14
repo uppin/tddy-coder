@@ -54,7 +54,8 @@ before any write. See [docs/plan-store.md](docs/plan-store.md#live-plans).
 A cross-crate move (`move_module_to_crate`, `move_cluster_to_crate`) reads every path the moved file
 names — `use` items at any depth and bodies — from one **path survey** (`crate_move/survey.rs`), resolved
 by segment and followed through the origin's re-exports to the defining crate; the rewrite, the
-dependency-back test and the destination's manifest are all derived from it. See
+dependency-back test and the destination's manifest are all derived from it. A moved module carries
+every file its `mod` declarations lead to, at the same place under the destination. See
 [docs/path-survey.md](docs/path-survey.md).
 
 Plans hold intents only — no source text (`text` / `code` / `content` refused). Unsupported operations are hard errors.
@@ -195,7 +196,7 @@ leaves no record on this path. The daemon's own record is always open and has no
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
 | Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs`, `verify/retarget.rs` (`Declared`, R1 and R2), `verify/repoint.rs` (`Repoint`, R-call) |
 | Rust backend | `backends/rust.rs`, and beside it `item_move/` (with `canonical_paths.rs`, `doc_links.rs`), `retarget_impl/` (with `outline.rs`, `rewrite.rs`, `fields.rs`, `imports.rs`, `preflight.rs`), `repoint_call/` (with `single.rs`, `sites.rs`, `receivers.rs`), `repoint_facade/` (with `scope.rs`, `rewrite.rs`, `group.rs`, `refusals.rs`), `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
-| Cross-crate moves | `crate_move/{moving,cluster,source_scan}.rs` with `moving/facade_writer.rs`, `cluster/stranded.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs`. `crate_move::survey` and `crate_move::reexports` are `pub(crate)`, read by `item_move`'s canonical-path pass |
+| Cross-crate moves | `crate_move/{moving,cluster,source_scan,carried,module_files}.rs` with `moving/facade_writer.rs`, `cluster/{stranded,gathering}.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs`. `crate_move::survey` and `crate_move::reexports` are `pub(crate)`, read by `item_move`'s canonical-path pass |
 
 Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream
 (`ServerChatter`'s default); a host that serves structured events builds `ServerChatter::unthrottled()`

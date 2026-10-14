@@ -59,8 +59,10 @@ The assembly is a function of texts, so it is unit-tested without a server.
 `crate_move/module_files.rs` is the shared reading of the files a module spans: `children_directory` (a
 crate root and a `mod.rs` own their directory, any other `a.rs` owns `a/`), `file_of_child` (`<name>.rs` or
 `<name>/mod.rs`) and `files_of` (the module's file and every file its `mod` declarations lead to,
-inline modules followed, refused when a declaration leads to no file). It is read from the workspace, so
-an earlier operation's pending edits are seen.
+inline modules followed, refused when a declaration leads to no file), and `relocated`, the one rule for
+where each of those files lands under a new directory (`MovedFile { from, to, below }`). `reparent_module`
+(`module_reparent/relocation.rs`) and the cross-crate moves (`Move::carried`) both call it. It is read
+from the workspace, so an earlier operation's pending edits are seen.
 
 ## Emptied directories
 

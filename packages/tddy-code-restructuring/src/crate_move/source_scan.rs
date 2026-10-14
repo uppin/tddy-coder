@@ -135,12 +135,15 @@ impl<'a> Scan<'a> {
     /// Whether the identifier at `at` continues what precedes it rather than opening a path: it is
     /// behind `::` a segment of a longer path, behind `.` a field or method, behind `$` a macro
     /// variable and behind `'` a lifetime.
+    ///
+    /// A `.` that is itself behind a `.` is the range or struct-update operator (`..`), which
+    /// precedes an expression and so opens a path.
     fn continues_a_path(&self, at: usize) -> bool {
-        at > 0
-            && matches!(
-                self.kind(at - 1),
-                Some(Kind::Separator | Kind::Punct(b'.' | b'$' | b'\''))
-            )
+        match at.checked_sub(1).and_then(|previous| self.kind(previous)) {
+            Some(Kind::Punct(b'.')) => !(at >= 2 && self.kind(at - 2) == Some(Kind::Punct(b'.'))),
+            Some(Kind::Separator | Kind::Punct(b'$' | b'\'')) => true,
+            _ => false,
+        }
     }
 
     /// The path of identifiers joined by `::` that starts at `at`, and the index of its last token.
@@ -487,6 +490,31 @@ mod tests {
         assert_eq!(
             found.iter().map(|path| path.in_test).collect::<Vec<_>>(),
             vec![true, false]
+        );
+    }
+
+    #[test]
+    fn reads_a_path_after_a_struct_update_or_a_range_operator_as_a_path() {
+        // Given a struct update, an exclusive range and an inclusive range, each followed by a
+        // crate-rooted path, beside a method called on a field
+        let text = "fn f(state: State) -> Meta {\n    \
+                    let _ = state.registry.len();\n    \
+                    let _ = 0..crate::limits::MAX;\n    \
+                    let _ = 1..=crate::limits::MIN;\n    \
+                    Meta {\n        id: 1,\n        \
+                    ..crate::connection_service::starting_session_metadata()\n    }\n}\n";
+
+        // When
+        let found = sighting_walk::sightings(text);
+
+        // Then each path after `..` and `..=` is sighted, and the field access is not
+        assert_eq!(
+            written(&found),
+            vec![
+                "crate::limits::MAX",
+                "crate::limits::MIN",
+                "crate::connection_service::starting_session_metadata",
+            ]
         );
     }
 }

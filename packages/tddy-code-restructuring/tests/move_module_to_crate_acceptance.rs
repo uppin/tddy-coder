@@ -11,7 +11,10 @@
 mod harness;
 
 use harness::{
-    a_move_of_the_host_registry, a_workspace_a_module_can_move_across, assert_compiles, performing,
+    a_move_of, a_move_of_the_host_registry, a_workspace_a_module_can_move_across,
+    a_workspace_whose_module_has_a_directory_child, a_workspace_whose_module_is_declared_pub_crate,
+    applying_keeping_the_account, assert_compiles, assert_compiles_with_its_tests, performing,
+    A_DIRECTORY_CHILD,
 };
 use tddy_code_restructuring::Reexport;
 
@@ -62,6 +65,86 @@ async fn leaves_every_caller_untouched_when_a_facade_is_left_behind() {
         workspace.read(CALLER),
         before,
         "a faceded move rewrote a caller"
+    );
+    assert_compiles(&workspace);
+}
+
+/// The file count an operation's account line reports — `[1/1] op 0: … -> N file(s) applied`.
+fn files_reported(account: &[String]) -> Vec<String> {
+    account
+        .iter()
+        .filter_map(|line| line.split_once(" -> "))
+        .filter_map(|(_, rest)| rest.split_once(" file(s)"))
+        .map(|(count, _)| count.to_string())
+        .collect()
+}
+
+/// The file count the move of `host_registry` and its child reports, measured on this workspace: the
+/// two files that move (`host_registry.rs` and `clock_face.rs`) and the five others the edit touches.
+/// Pinned exactly, because two empty reports would also agree with each other.
+const SEVEN_FILES: &str = "7";
+
+/// `#reshape` 5/19 — a module in the `foo.rs` + `foo/` shape moves with its directory child, the
+/// dry run and the apply report the same file count and name the files that move, and every crate
+/// compiles with its tests. `#live-plan` 12/15 stranded the children here (`E0583`).
+#[tokio::test(flavor = "multi_thread")]
+async fn relocates_a_module_with_its_directory_children_and_every_crate_compiles_with_its_tests() {
+    // Given `host_registry`, whose child `clock_face` lives in `host_registry/`
+    let workspace = a_workspace_whose_module_has_a_directory_child();
+    let plan = [a_move_of(MODULE, "host_registry", None)];
+
+    // When the plan is dry-run, then applied
+    let (rehearsed, rehearsal) = applying_keeping_the_account(&workspace, &plan, true).await;
+    let (applied, account) = applying_keeping_the_account(&workspace, &plan, false).await;
+
+    // Then both runs succeed with one operation
+    assert_eq!(
+        rehearsed.map(|run| run.applied),
+        Ok(1),
+        "dry run: {rehearsal:?}"
+    );
+    assert_eq!(applied.map(|run| run.applied), Ok(1), "apply: {account:?}");
+
+    // and each reports the seven files that move
+    assert_eq!(files_reported(&rehearsal), vec![SEVEN_FILES.to_string()]);
+    assert_eq!(files_reported(&account), vec![SEVEN_FILES.to_string()]);
+
+    // and each names what moves with the module
+    let moves_with_it = "move with `host_registry`, with the directory of its children";
+    assert!(
+        rehearsal.iter().any(|line| line.contains(moves_with_it)),
+        "{rehearsal:?}"
+    );
+    assert!(
+        account.iter().any(|line| line.contains(moves_with_it)),
+        "{account:?}"
+    );
+
+    // and the child arrived beside its module, leaving none behind
+    assert!(workspace.holds("crates/destination/src/host_registry/clock_face.rs"));
+    assert!(!workspace.holds(A_DIRECTORY_CHILD));
+    assert_compiles_with_its_tests(&workspace);
+}
+
+/// A module its crate declares `pub(crate)` moves with a facade as visible as the declaration was,
+/// and the crate — whose `runtime` still names the module through its own path — compiles.
+#[tokio::test(flavor = "multi_thread")]
+async fn relocates_a_pub_crate_module_leaving_a_pub_crate_facade_and_every_crate_compiles() {
+    // Given `host_registry`, declared `pub(crate)` by the origin's root
+    let workspace = a_workspace_whose_module_is_declared_pub_crate();
+
+    // When it moves with a glob facade
+    performing(
+        &workspace,
+        a_move_of_the_host_registry(Some(Reexport::Glob)),
+    )
+    .await;
+
+    // Then the root keeps a facade no more visible than the declaration, and everything compiles
+    assert_eq!(
+        workspace.read("crates/origin/src/lib.rs"),
+        "//! The crate the module leaves.\n\npub(crate) use destination::host_registry;\n\
+         pub mod runtime;\n"
     );
     assert_compiles(&workspace);
 }

@@ -60,17 +60,23 @@ pub(crate) struct Header {
 /// `use crate::roster;` over a module that is only `destination::records` — the new path is bound
 /// `as roster`, so the paths in the body that use the name go on resolving.
 ///
+/// `below` is the modules between the moved module and the file — empty for the module's own file,
+/// `["b"]` for a carried `a/b.rs` — so the survey resolves its `self::` and `super::` paths against
+/// `moving.home.path ++ below`, and one that stays inside the carried tree is left as written.
+///
 /// # Errors
 ///
 /// Refuses a `use` group whose members would need different qualifiers, because one prefix is all a
 /// group has, and for everything the survey refuses.
-pub(crate) fn repointed_header(
+pub(crate) fn repointed_header_at(
     workspace: &Workspace<'_>,
     text: &str,
     moving: &Move,
+    below: &[String],
     co_moving: &BTreeSet<String>,
 ) -> Result<Header> {
-    let survey = survey::survey_moved_file(workspace, text, &moving.origin, &moving.home.path)?;
+    let module_path: Vec<String> = moving.home.path.iter().chain(below).cloned().collect();
+    let survey = survey::survey_moved_file(workspace, text, &moving.origin, &module_path)?;
     let header_lines: BTreeSet<u32> = use_declarations(text)
         .into_iter()
         .map(|(at, _)| manifest_edits::position_of(text, at).line)
@@ -118,6 +124,13 @@ pub(crate) fn repointed_header(
         .dev_crates_named
         .retain(|named| !header.crates_named.contains(named));
     Ok(header)
+}
+
+/// Adds each of `paths` to `into` unless it is already there, keeping the order they first appear in.
+pub(crate) fn extend_once(into: &mut Vec<String>, paths: Vec<String>) {
+    for path in &paths {
+        push_once(into, path);
+    }
 }
 
 fn push_once(paths: &mut Vec<String>, path: &str) {

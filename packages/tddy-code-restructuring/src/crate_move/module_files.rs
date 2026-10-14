@@ -97,6 +97,58 @@ fn below(
     Ok(())
 }
 
+/// One file of a moved module, and where it lands.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MovedFile {
+    pub(crate) from: String,
+    pub(crate) to: String,
+    /// The modules between the moved module and this file, outermost first; empty for the
+    /// module's own file.
+    pub(crate) below: Vec<String>,
+}
+
+/// The files of the module `name` (`files` as [`files_of`] found them, the module's own first),
+/// moved from the children directory `old` of the module's parent to `new`: each keeps its place
+/// relative to the module.
+///
+/// The one relocation rule: a cross-crate move lands its module under the destination's `src/`, a
+/// same-crate reparent under the new parent's directory.
+pub(crate) fn relocated(old: &Path, new: &Path, name: &str, files: &[String]) -> Vec<MovedFile> {
+    let (old_stem, new_stem) = (old.join(name), new.join(name));
+    let own_file = format!("{}.rs", old_stem.to_string_lossy());
+    files
+        .iter()
+        .filter_map(|file| {
+            if *file == own_file {
+                return Some(MovedFile {
+                    from: file.clone(),
+                    to: format!("{}.rs", new_stem.to_string_lossy()),
+                    below: Vec::new(),
+                });
+            }
+            let inside = Path::new(file).strip_prefix(&old_stem).ok()?;
+            Some(MovedFile {
+                from: file.clone(),
+                to: new_stem.join(inside).to_string_lossy().to_string(),
+                below: module_below(inside),
+            })
+        })
+        .collect()
+}
+
+/// The modules between the moved module and the file at `inside` (relative to its directory).
+fn module_below(inside: &Path) -> Vec<String> {
+    let mut modules: Vec<String> = inside
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy().to_string())
+        .collect();
+    let file = modules.pop().unwrap_or_default();
+    if file != "mod.rs" {
+        modules.push(file.trim_end_matches(".rs").to_string());
+    }
+    modules
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +210,45 @@ mod tests {
         let refusal = files_below(&root, "src/a.rs").unwrap_err().to_string();
 
         assert!(refusal.contains("missing"), "{refusal}");
+    }
+
+    #[test]
+    fn relocates_each_file_of_a_module_to_the_same_place_under_the_new_directory() {
+        // Given the files of `a`, found under its parent's directory `crates/origin/src/x`
+        let files = [
+            "crates/origin/src/x/a.rs".to_string(),
+            "crates/origin/src/x/a/b.rs".to_string(),
+            "crates/origin/src/x/a/c/mod.rs".to_string(),
+        ];
+
+        // When they are relocated under the destination's `src/`
+        let moved = relocated(
+            Path::new("crates/origin/src/x"),
+            Path::new("crates/destination/src"),
+            "a",
+            &files,
+        );
+
+        // Then each keeps its place relative to `a`, and knows the modules above it
+        assert_eq!(
+            moved,
+            [
+                MovedFile {
+                    from: files[0].clone(),
+                    to: "crates/destination/src/a.rs".to_string(),
+                    below: vec![],
+                },
+                MovedFile {
+                    from: files[1].clone(),
+                    to: "crates/destination/src/a/b.rs".to_string(),
+                    below: vec!["b".to_string()],
+                },
+                MovedFile {
+                    from: files[2].clone(),
+                    to: "crates/destination/src/a/c/mod.rs".to_string(),
+                    below: vec!["c".to_string()],
+                },
+            ]
+        );
     }
 }

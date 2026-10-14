@@ -2,20 +2,63 @@ use crate::{edit::Position, Range};
 
 use crate::edit::TextEdit;
 
-/// The span of the `mod <module>;` line in a crate root, newline included.
+/// The span of the `[<visibility>] mod <module>;` line in a crate root, newline included.
 pub(crate) fn module_declaration(text: &str, module: &str) -> Option<std::ops::Range<usize>> {
+    declared_module(text, module).map(|found| found.span)
+}
+
+/// A `[<visibility>] mod <module>;` line: where it is, and the visibility it was written with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleDeclaration {
+    /// The line, newline included.
+    pub(crate) span: std::ops::Range<usize>,
+    /// The visibility as written (`pub`, `pub(crate)`, `pub(super)`, `pub(self)`,
+    /// `pub(in crate::a)`), empty for a private declaration.
+    pub(crate) visibility: String,
+}
+
+/// The declaration of `module` in `text`, whatever visibility it is written with.
+///
+/// [`module_declaration`] and `declared_module_name` read through this, so a `pub(crate) mod x;`
+/// is the declaration of `x` everywhere a crate move looks for one.
+pub(crate) fn declared_module(text: &str, module: &str) -> Option<ModuleDeclaration> {
     let mut offset = 0usize;
     for line in text.split_inclusive('\n') {
         let start = offset;
         offset += line.len();
 
-        let declaration = line.trim();
-        let declaration = declaration.strip_prefix("pub ").unwrap_or(declaration);
+        let (visibility, declaration) = split_visibility(line.trim());
         if declaration == format!("mod {module};") {
-            return Some(start..offset);
+            return Some(ModuleDeclaration {
+                span: start..offset,
+                visibility: visibility.to_string(),
+            });
         }
     }
     None
+}
+
+/// A declaration split into its visibility (`pub`, `pub(crate)`, `pub(in …)`; empty when private)
+/// and what follows it.
+pub(crate) fn split_visibility(declaration: &str) -> (&str, &str) {
+    let Some(rest) = declaration.strip_prefix("pub") else {
+        return ("", declaration);
+    };
+    let after = match rest.strip_prefix('(') {
+        Some(restriction) => restriction.split_once(')').map_or("", |(_, after)| after),
+        None => rest,
+    };
+    if after.starts_with(char::is_whitespace) {
+        let visibility = declaration[..declaration.len() - after.len()].trim_end();
+        (visibility, after.trim_start())
+    } else {
+        ("", declaration)
+    }
+}
+
+/// A declaration without its `pub`, `pub(crate)` or `pub(in …)` prefix.
+pub(crate) fn after_visibility(declaration: &str) -> &str {
+    split_visibility(declaration).1
 }
 
 /// A `mod <module>;` declaration as a crate move removes it: its line and the comment lines
@@ -177,11 +220,12 @@ pub(crate) fn insert_module_declaration_sorted(text: &str, line: &str, comments:
     insertion(text, after_last.unwrap_or(header_ends), &documented)
 }
 
-/// The identifier a `[pub ]mod <name>;` line declares.
+/// The identifier a `[<visibility>] mod <name>;` line declares.
 fn declared_module_name(line: &str) -> Option<&str> {
-    let line = line.trim();
-    let line = line.strip_prefix("pub ").unwrap_or(line);
-    line.strip_prefix("mod ")?.strip_suffix(';').map(str::trim)
+    after_visibility(line.trim())
+        .strip_prefix("mod ")?
+        .strip_suffix(';')
+        .map(str::trim)
 }
 
 /// A line inserted at a byte offset, on a line of its own.
@@ -638,6 +682,79 @@ mod removed_declaration_tests {
         assert_eq!(
             edited(root.to_string(), &[edit]).expect("the edit applies"),
             "pub mod alpha;\n/// The presenter observer.\npub mod observer;\npub mod zeta;\n"
+        );
+    }
+}
+
+#[cfg(test)]
+mod declared_module_tests {
+    use super::*;
+
+    /// What `declared_module` reads off `text` for `module`, as the line and the visibility.
+    fn the_declaration_in<'a>(text: &'a str, module: &str) -> Option<(&'a str, String)> {
+        declared_module(text, module).map(|found| (&text[found.span], found.visibility))
+    }
+
+    #[test]
+    fn finds_a_module_declared_with_any_visibility_with_its_span_and_visibility() {
+        for (line, visibility) in [
+            ("mod moving;\n", ""),
+            ("pub mod moving;\n", "pub"),
+            ("pub(crate) mod moving;\n", "pub(crate)"),
+            ("pub(super) mod moving;\n", "pub(super)"),
+            ("pub(self) mod moving;\n", "pub(self)"),
+            ("pub(in crate::outer) mod moving;\n", "pub(in crate::outer)"),
+        ] {
+            // Given a root declaring `moving` with that visibility between two other lines
+            let text = format!("pub mod before;\n{line}pub use after::Thing;\n");
+
+            // When its declaration is read
+            let found = the_declaration_in(&text, "moving");
+
+            // Then it is that line, with that visibility
+            assert_eq!(found, Some((line, visibility.to_string())), "{line}");
+        }
+    }
+
+    #[test]
+    fn a_comment_or_a_longer_name_is_not_a_declaration() {
+        // Given a commented-out declaration and one of a name `moving` is a prefix of
+        let text = "// mod moving;\npub(crate) mod moving_parts;\n";
+
+        // When `moving`'s declaration is read
+        let found = the_declaration_in(text, "moving");
+
+        // Then there is none
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn module_declaration_finds_a_restricted_declaration() {
+        // Given a parent declaring its child `pub(crate)`
+        let text = "pub use self::helper::Helper;\npub(crate) mod daemon_hook_urls;\n";
+
+        // When the move looks for the declaration
+        let span = module_declaration(text, "daemon_hook_urls");
+
+        // Then it is found, as its line
+        assert_eq!(
+            span.map(|span| &text[span]),
+            Some("pub(crate) mod daemon_hook_urls;\n")
+        );
+    }
+
+    #[test]
+    fn places_a_new_declaration_in_sorted_position_among_restricted_ones() {
+        // Given a root whose declarations are all restricted
+        let root = "pub(crate) mod alpha;\npub(super) mod zeta;\n";
+
+        // When `beta` is declared
+        let edit = insert_module_declaration_sorted(root, "pub mod beta;", "");
+
+        // Then it lands between them, read as neighbours
+        assert_eq!(
+            crate::apply::edited(root.to_string(), &[edit]).expect("the edit applies"),
+            "pub(crate) mod alpha;\npub mod beta;\npub(super) mod zeta;\n"
         );
     }
 }

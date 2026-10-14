@@ -16,7 +16,7 @@ use crate::plan::Reexport;
 use super::module_home;
 
 use super::malformed;
-use crate::crate_move::{header, moving, refusals};
+use crate::crate_move::{carried, moving};
 use crate::edit::{FileEdit, TextEdit};
 
 /// A set of modules that move to one destination **as a single unit**.
@@ -114,38 +114,27 @@ pub fn resolve_cluster(
     cluster: &MovingCluster,
 ) -> Result<WorkspaceEdit> {
     let members = read_members(workspace, cluster)?;
-    let co_moving = cluster.co_moving();
-    let travelling: BTreeSet<String> = members.iter().map(|member| member.source.clone()).collect();
+    let the_set = carried::TheSet::of(workspace, &members)?;
 
-    let mut merged = MergedChanges::default();
-    let mut crates_named = BTreeSet::new();
-    let mut dev_crates_named = BTreeSet::new();
-    let mut keeps_naming_it = BTreeSet::new();
-    let mut surveys = Vec::new();
-
-    for member in &members {
-        let (survey, rewrites) = super::surveyed(engine, workspace, member, &travelling)?;
-        let moved = workspace.read(&member.source)?;
-        let header = header::repointed_header(workspace, &moved, member, &co_moving)?;
-        let naming_it = refusals::crates_still_naming_the_module(workspace, member, &rewrites)?;
-        refusals::refuse_a_dependency_cycle(member, &header, &naming_it)?;
-
-        merged.absorb(FileEdit::Rename {
-            from: member.source.clone(),
-            to: member.moved_to(),
-        });
-        crates_named.extend(header.crates_named);
-        dev_crates_named.extend(header.dev_crates_named);
-        merged.add(member.source.clone(), header.edits);
-        if member.reexport == Reexport::None {
-            for change in moving::caller_changes(workspace, rewrites)? {
-                merged.absorb(change);
-            }
-        }
-
-        keeps_naming_it.extend(naming_it);
-        surveys.push(survey);
+    let mut gathering = gathering::Gathering {
+        the_set: &the_set,
+        merged: MergedChanges::default(),
+        totals: carried::SetTotals::default(),
+    };
+    for (member, files) in members.iter().zip(&the_set.carried) {
+        gathering.member_changes(engine, workspace, member, files)?;
     }
+    let gathering::Gathering {
+        mut merged,
+        totals:
+            carried::SetTotals {
+                surveys,
+                crates_named,
+                mut dev_crates_named,
+                keeps_naming_it,
+            },
+        ..
+    } = gathering;
 
     for change in moving::left_behind(workspace, &members, &surveys)? {
         merged.absorb(change);
@@ -190,7 +179,7 @@ fn read_members(workspace: &Workspace<'_>, cluster: &MovingCluster) -> Result<Ve
     }
 
     let mut members = Vec::new();
-    for home in &cluster.members {
+    for home in &carried::fold_carried_members(cluster.members.clone()) {
         if home.crate_dir != first.crate_dir {
             return Err(malformed(format!(
                 "`{}` and `{}` are in different crates, so the set has no one crate root for its \
@@ -254,6 +243,7 @@ impl MergedChanges {
     }
 }
 
+mod gathering;
 mod stranded;
 pub use stranded::siblings_left_behind;
 pub(crate) use stranded::stranded_siblings;

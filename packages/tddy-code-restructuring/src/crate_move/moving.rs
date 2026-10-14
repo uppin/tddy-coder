@@ -1,9 +1,9 @@
 use super::PlannedRewrite;
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, ffi::OsStr, path::Path};
 
 use crate::{
-    crate_move::{destination, manifest_edits, module_home},
+    crate_move::{destination, manifest_edits, module_files, module_home},
     edit::FileEdit,
 };
 
@@ -83,9 +83,79 @@ impl Move {
         })
     }
 
-    /// Where the module file lands.
+    /// Where the module file lands: `a.rs` as `a.rs`, and `a/mod.rs` as `a/mod.rs`, so the
+    /// directory of its children stays beside it.
     pub(crate) fn moved_to(&self) -> String {
-        format!("{}/src/{}.rs", self.destination.dir, self.module)
+        let layout = if Path::new(&self.source).file_name() == Some(OsStr::new("mod.rs")) {
+            format!("{}/mod.rs", self.module)
+        } else {
+            format!("{}.rs", self.module)
+        };
+        format!("{}/src/{layout}", self.destination.dir)
+    }
+
+    /// Every file the module spans — its own first, then each file its `mod` declarations lead to
+    /// — with where each lands under the destination's `src/`, keeping its place relative to the
+    /// module.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when a declaration leads to no file, as [`module_files::files_of`] does.
+    pub(crate) fn carried(
+        &self,
+        workspace: &Workspace<'_>,
+    ) -> Result<Vec<module_files::MovedFile>> {
+        let files = module_files::files_of(workspace, &self.source)?;
+        let module_file = Path::new(&self.source);
+        let directory = module_file.parent().ok_or_else(|| self.no_directory())?;
+        let parent_directory = if module_file.file_name() == Some(OsStr::new("mod.rs")) {
+            directory.parent().ok_or_else(|| self.no_directory())?
+        } else {
+            directory
+        };
+        Ok(module_files::relocated(
+            parent_directory,
+            &Path::new(&self.destination.dir).join("src"),
+            &self.module,
+            &files,
+        ))
+    }
+
+    /// The module's `mod` declaration in the file that declares it, with its visibility.
+    ///
+    /// # Errors
+    ///
+    /// Refuses when that file declares no such module.
+    pub(crate) fn declaration(
+        &self,
+        workspace: &Workspace<'_>,
+    ) -> Result<manifest_edits::ModuleDeclaration> {
+        let declared_in = &self.home.declared_in;
+        let text = workspace.read(declared_in)?;
+        manifest_edits::declared_module(&text, &self.module).ok_or_else(|| self.declared_nowhere())
+    }
+
+    /// The refusal for a module file that sits in no directory, so its children have none to follow.
+    fn no_directory(&self) -> crate::RestructureError {
+        malformed(format!(
+            "`{}` sits in no directory, so there is no place its children's files are relative to",
+            self.source
+        ))
+    }
+
+    /// The refusal for a module the file that should declare it does not: the one wording every
+    /// reader of the declaration gives.
+    pub(crate) fn declared_nowhere(&self) -> crate::RestructureError {
+        let where_declared = if self.home.is_top_level() {
+            "crate root"
+        } else {
+            "parent module"
+        };
+        malformed(format!(
+            "{} declares no `mod {}` — a module this {where_declared} does not declare is not \
+             this crate's to move",
+            self.home.declared_in, self.module
+        ))
     }
 
     /// The crate root that has to declare it afterwards.
@@ -313,7 +383,7 @@ mod tests {
 
         // When the written facade is read
         let facade =
-            facade_writer::written_facade(text, "dest", DESTINATION_ROOT).expect("a facade");
+            facade_writer::written_facade(text, "dest", "pub", DESTINATION_ROOT).expect("a facade");
 
         // Then both modules are in it
         assert_eq!(facade.modules, ["alpha", "beta"]);
@@ -326,7 +396,7 @@ mod tests {
         let text = "pub use dest::HostRegistry;\n";
 
         // When the written facade is read
-        let facade = facade_writer::written_facade(text, "dest", DESTINATION_ROOT);
+        let facade = facade_writer::written_facade(text, "dest", "pub", DESTINATION_ROOT);
 
         // Then there is none
         assert!(facade.is_none());
@@ -340,7 +410,7 @@ mod tests {
         let text = "pub use dest::alpha;\n";
 
         // When the written facade is read
-        let facade = facade_writer::written_facade(text, "dest", DESTINATION_ROOT);
+        let facade = facade_writer::written_facade(text, "dest", "pub", DESTINATION_ROOT);
 
         // Then it is taken for ours
         assert!(facade.is_some());
@@ -353,10 +423,34 @@ mod tests {
         let text = "pub use dest::alpha;\n";
 
         // When the written facade is read
-        let facade = facade_writer::written_facade(text, "dest", "mod alpha;\n");
+        let facade = facade_writer::written_facade(text, "dest", "pub", "mod alpha;\n");
 
         // Then there is none
         assert!(facade.is_none());
+    }
+
+    /// A later operation extends the facade an earlier one wrote with the same visibility, and
+    /// leaves a line of another visibility to itself.
+    #[test]
+    fn extends_an_earlier_facade_of_the_same_visibility_and_leaves_one_of_another_visibility_alone()
+    {
+        // Given a `pub(crate)` facade an earlier operation wrote, beside a `pub` one
+        let text = "pub use dest::alpha;\npub(crate) use dest::beta;\n";
+
+        // When the facade a `pub(crate)` move would extend is read, and the one a private move would
+        let restricted =
+            facade_writer::written_facade(text, "dest", "pub(crate)", DESTINATION_ROOT)
+                .map(|facade| (&text[facade.span], facade.modules));
+        let private = facade_writer::written_facade(text, "dest", "", DESTINATION_ROOT);
+
+        // Then the `pub(crate)` line is the one, and no private line exists to extend
+        assert_eq!(
+            (restricted, private.is_none()),
+            (
+                Some(("pub(crate) use dest::beta;\n", vec!["beta".to_string()])),
+                true
+            )
+        );
     }
 
     /// The parent's own glob over the moved module is re-pointed.

@@ -1291,7 +1291,7 @@ impl RustBackend {
         // is deliberately not opened here first.
         if op.op == RefactorKind::MoveModuleToCrate {
             (self.progress)("cross-crate move: surveying callers and building edits");
-            return Ok(Resolution::of(crate_move::resolve(self, workspace, op)?));
+            return crate_move::resolution(self, workspace, op);
         }
 
         // Moves items between modules of one crate: authored here and informed by the server, like
@@ -1333,9 +1333,7 @@ impl RustBackend {
                 "cross-crate move of {} modules: surveying callers and building edits",
                 cluster.members.len()
             ));
-            return Ok(Resolution::of(crate_move::resolve_cluster(
-                self, workspace, &cluster,
-            )?));
+            return crate_move::cluster_resolution(self, workspace, &cluster);
         }
 
         // The same move with the reference survey taken out of it: cargo builds each `tests/*.rs`

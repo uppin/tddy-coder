@@ -16,6 +16,8 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Partial-cluster finding | `crate_move/cluster.rs` (`stranded_siblings`) | a static `check` finding: the cycle `apply` refuses (`refusals::refuse_a_dependency_cycle`) |
 | Body-path finding | `crate_move/preconditions.rs` (`stays_behind_through_a_body`) | a static `check` finding: a body path to a module staying behind, which `apply` refuses as a dependency cycle |
 | Merge finding | `crate_move/preconditions.rs` (`destination_already_has_the_module`) | a static `check` finding: the destination already declares or holds the module |
+| Uncarriable-child findings | `crate_move/carried.rs` (`uncarriable`), run by `preconditions.rs` (`unrunnable`) | a static `check` finding per child a move cannot carry (see below) |
+| Restricted child reached from outside | `crate_move/carried.rs` (`restricted_children_reached`), called by `cluster/gathering.rs` (`member_changes`) | `MalformedPlan`, at resolve time: `check --deep` and `apply` |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
 | Compile gate | `runner/compile_gate.rs` | `BaselineDoesNotCompile`, `AppliedTreeDoesNotCompile` |
 | Group gate | `runner/group_gate.rs` | `GroupDoesNotCompile` (the group is rolled back) |
@@ -200,9 +202,9 @@ lift is written is in
 the destination would depend on the crate it left, while the crate it left names the destination
 back — through the facade, or, with `reexport: none`, from each caller `apply` re-points. A plain
 `check` predicts that refusal statically, with no index (`stranded_siblings`), from the same pieces
-`apply` uses: `header::repointed_header` and `refusals::origin_named_dependencies`, with the plan's
+`apply` uses: `header::repointed_header_at` and `refusals::origin_named_dependencies`, with the plan's
 co-moving set and re-export resolution, so a path the origin only re-exports from another crate is
-not an edge. The paths it reads are the file's top-level `use` header, taken from the [path survey](path-survey.md); bodies and nested `use` items are `apply`'s alone. With a facade the finding fires whenever such a header path exists; with
+not an edge. The paths it reads are the top-level `use` header of each file the module carries, taken from the [path survey](path-survey.md); bodies and nested `use` items are `apply`'s alone. With a facade the finding fires whenever such a header path exists; with
 `reexport: none`, only when some file staying behind names the moved module, and it lists them.
 
 **A module staying behind that names the moved one is not a finding.** A facade keeps its
@@ -221,8 +223,8 @@ already refuses is left out of the set. The plan-level rule is in
 Both run in `move_preconditions`, which the static `check` tier and the partial-cluster analysis
 share, so `check` and `check --deep` report them without an index.
 
-**Body path.** `stays_behind_through_a_body` reads the moved file from the [path survey](path-survey.md)
-and takes the first path that is in a body, outside `#[cfg(test)]`, defined in the origin crate, and
+**Body path.** `stays_behind_through_a_body` reads each carried file (the module's own and its directory
+children) from the [path survey](path-survey.md) and takes the first path that is in a body, outside `#[cfg(test)]`, defined in the origin crate, and
 inside a module that stays behind. A path to an item at the crate root is inside no module and is not
 named; a path the origin only re-exports from another crate is defined elsewhere; a path under
 `#[cfg(test)]` is no edge. The finding names the file, the path as written, its line, the module and
@@ -238,6 +240,29 @@ question `gone_by_then` answers for the header, asked of the plan's operations d
 **Merge.** `destination_already_has_the_module` reports a destination whose root already declares
 `mod <name>;`, or which already has a file at the target path. Moving into it would be a merge, which
 no operation performs, so the finding says that rather than suggesting a cluster.
+
+## The uncarriable-child findings and the restricted child
+
+A moved module carries its directory children ([path survey](path-survey.md#carried-files)).
+`carried::uncarriable` reports, statically and one finding per child, naming its file, each way a child
+cannot be carried: a `mod x;` that leads to neither `x.rs` nor `x/mod.rs`; a carried file that places a
+`mod` with `#[path]`; a target in the destination that already exists, which would be a merge; a child
+that another operation of the plan moves on its own, whether to another destination or after its parent
+has left; and a child whose body reaches a module that stays behind. It runs for an operation only once
+`move_preconditions` passes, because a refused operation is already reported once. A member that another
+member of the same operation carries is not read on its own.
+
+**A restricted child reached from outside** needs the reference set, so it is refused at resolve time, by
+`check --deep` and `apply`, and not by plain `check`. A carried child declared `pub(crate)`, `pub(super)`,
+`pub(in …)` or private, that a file outside the moved tree names through the child's own path
+(`crate::a::b::Item`), would be private to the destination after the move (`E0603`). The refusal names the
+child and each referring file, and nothing is written. A child's restriction is read where the child is
+declared, including inside an inline module of a carried file; an enclosing inline module's own
+visibility is not read.
+
+**The cycle refusal and the carried tree.** The edges of every carried file reach
+`refusals::refuse_a_dependency_cycle`, which lists the paths that forced the refusal and names the
+module's own file as the one that "still names" the origin, whichever carried file holds the path.
 
 ## The inferred-placeholder post-condition
 

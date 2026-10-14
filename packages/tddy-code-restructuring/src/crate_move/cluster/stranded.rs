@@ -128,7 +128,7 @@ pub(crate) fn stranded_siblings(
 /// Read by the header pass and the re-export resolution `apply` itself uses, so the check and the
 /// refusal agree about which paths count: one reaching a module that has left this crate by the
 /// time `module`'s operation runs is not an edge, nor is one the origin only re-exports from a
-/// third crate.
+/// third crate. Every file the module carries is read, its directory children included.
 fn paths_naming_the_origin(
     workspace: &Workspace<'_>,
     module: &MovingModule,
@@ -137,9 +137,14 @@ fn paths_naming_the_origin(
     let co_moving: BTreeSet<String> = gone_by_then(module, moving)
         .map(|other| other.path().join("::"))
         .collect();
-    let text = workspace.read(&module.source)?;
-    let header = header::repointed_header(workspace, &text, &module.moving, &co_moving)?;
-    Ok(header.header_origin_paths)
+    let mut names_the_origin: Vec<String> = Vec::new();
+    for file in module.moving.carried(workspace)? {
+        let text = workspace.read(&file.from)?;
+        let header =
+            header::repointed_header_at(workspace, &text, &module.moving, &file.below, &co_moving)?;
+        header::extend_once(&mut names_the_origin, header.header_origin_paths);
+    }
+    Ok(names_the_origin)
 }
 
 /// One module a plan moves out of the crate that holds it.
@@ -168,10 +173,10 @@ impl MovingModule {
 /// operation, not only the one its anchor names, so a set moving together is not read as
 /// stranding itself.
 ///
-/// A module [`move_preconditions`](super::move_preconditions) refuses is left out rather than
-/// reported: `check` already names it, and naming it again here would report one defect twice
-/// under two descriptions. It is not moving, either, so it is not counted as travelling with the
-/// rest.
+/// A module [`move_preconditions`](super::move_preconditions) refuses, or whose directory children
+/// cannot be carried, is left out rather than reported: `check` already names it, and naming it
+/// again here would report one defect twice under two descriptions. It is not moving, either, so
+/// it is not counted as travelling with the rest.
 fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<MovingModule> {
     ops.iter()
         .enumerate()
@@ -191,10 +196,14 @@ fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<
             let destination =
                 destination::Destination::read(workspace.root, op.to.as_deref()?).ok()?;
             let reexport = op.reexport.unwrap_or(Reexport::None);
+            let moving = moving::Move::of(workspace, &home, &destination, reexport).ok()?;
+            // A tree that cannot be carried is left out: `unrunnable` reports it, and `check` runs
+            // it before this pass and stops on anything it cannot read.
+            moving.carried(workspace).ok()?;
             Some(MovingModule {
                 op: index,
                 source: source.to_string(),
-                moving: moving::Move::of(workspace, &home, &destination, reexport).ok()?,
+                moving,
             })
         })
         .collect()

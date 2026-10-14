@@ -11,7 +11,7 @@ what the file names:
 
 | Consumer | Reads | Writes |
 |---|---|---|
-| `header::repointed_header` | every surveyed path | the edits that re-point each path, headers and bodies; the crates the file names; the edges back to the origin |
+| `header::repointed_header_at` | every surveyed path | the edits that re-point each path, headers and bodies; the crates the file names; the edges back to the origin |
 | `refusals::refuse_a_dependency_cycle` | the edges | the cycle refusal, listing every path that forced it |
 | `moving::Move::destination_manifest` | the crates named, split by `#[cfg(test)]` | `[dependencies]` and `[dev-dependencies]` lines, copied from the origin's manifest |
 | `item_move::canonical_paths` (through `crate_move::survey`, now `pub(crate)`) | each `crate::`-headed path whose `defined_at` differs from what is written | the rewritten moved text, and a note naming every path rewritten or left |
@@ -20,6 +20,26 @@ what the file names:
 `move_cluster_to_crate` surveys each member and passes the set of co-moving members, so a path reaching
 a sibling that travels with it is `crate::`, not an edge. `check` reads the survey too, through
 `Header::header_origin_paths`, but only the file's top-level `use` header (see Limits).
+
+## Carried files
+
+A moved module is a set of files: its own and every file its `mod` declarations lead to
+(`module_files::files_of`, inline modules followed). `Move::carried` returns that set, the module's
+own file first, with each file's destination and its module path **below** the moved module
+(`MovedFile.below`). Every carried file is surveyed by `repointed_header_at`, whose survey module path
+is the module's path followed by `below`, and then feeds the same consumers as the module's own file:
+its crates reach the destination manifest, its edges reach the cycle refusal, and its outside references
+are surveyed for callers. A file's `self::` or `super::` path that stays inside the carried tree is left
+as written, because the tree's root, not the file, is what `stays_inside_the_module` keys on.
+
+The carried files join the travelling set, so a reference from inside the tree is not a caller. A
+member of a cluster whose module path lies under another member's is folded into that member
+(`carried::fold_carried_members`, applied in `read_members`), so it is carried at its nested position
+rather than renamed to the destination's root. A nested member whose parent does **not** move still
+lands at the destination root under its last segment (`header.rs`).
+
+`module_files::relocated` is the one rule for where a carried file lands relative to the module: the
+cross-crate move and `reparent_module` (`backends/rust/module_reparent/relocation.rs`) both call it.
 
 ## The surface
 
@@ -87,7 +107,9 @@ the survey reads the destination's own items as `crate::`.
 The token reading under the survey. The file is masked first — comments and literals blanked byte for
 byte, so offsets still address the original text — and tokenised; what is read out is shapes only:
 `a::b::c` sequences (`sightings`), `use` trees with groups expanded (`UseLeaf`), `mod` blocks, and the
-item attribute that marks `cfg(test)`. `items_of_module` returns a module's top level: its `mod`s, its
+item attribute that marks `cfg(test)`. An identifier behind `..` or `..=` opens a path (a struct update
+`..crate::a::f()`, a range `0..crate::a::MAX`); an identifier behind a single `.` is a field access and
+does not (`Scan::continues_a_path`). `items_of_module` returns a module's top level: its `mod`s, its
 `use`s, the names it defines. Nothing in it resolves a name.
 
 `test_binary.rs` keeps its own line-based scanner (`readable_spans`, `names_bound_in`,
@@ -105,10 +127,11 @@ records.
   results.
 - **Only the origin's re-exports are followed.** A path through another crate's re-export is left at
   that crate.
-- **`check`'s stranded-sibling finding reads the top-level `use` header only.**
+- **`check`'s stranded-sibling finding reads the top-level `use` header only,** of every carried file
+  (`cluster/stranded.rs` `paths_naming_the_origin`).
   `Header::header_origin_paths` is the header subset of the edges, kept for that finding. The
-  body-path finding (`stays_behind_through_a_body`) reads the survey's body paths directly; a `use`
-  nested in a function is `in_use`, not `in_body`, so neither reads it.
+  body-path finding (`stays_behind_through_a_body`) reads the survey's body paths of every carried file
+  directly; a `use` nested in a function is `in_use`, not `in_body`, so neither reads it.
 - **`survey.rs` is `pub(crate)`.** Its consumers are inside this crate.
 
 ## Testing
