@@ -373,16 +373,16 @@ Real dependency edges (whole stack): `1→13`, `5→14`, `2→15`, `3→15`, `4�
 
 ## Scope
 
-- [ ] **Plan surface**: variant, `rebind_fields.rs` (RP1-RP4), P9, `signature_fields.rs` admitting `expr`
-- [ ] **Lexical rules**: `range.rs` (sites, RS1-RS4) as static findings and in `resolve`
-- [ ] **Field mode**: trial text, RS5-RS7, hover typing, the `&` rule, the note
-- [ ] **Self mode**
-- [ ] **Delegator**: S7, the forwarding text, `Layout::with_delegators`, `the_replacement`, the dead-delegator note, `deferred_delegator` removed
-- [ ] **`verify`**: R3, R-rebind, `Rebind`, carriers through the CLI, `tddy-tools` and the daemon
-- [ ] **Registration**: the two new live binaries in `.config/rust-e2e.filterset` and the `rust-analyzer` group of `.config/nextest.toml`
+- [x] **Plan surface**: variant, `rebind_fields.rs` (RP1-RP4), P9, `signature_fields.rs` admitting `expr`
+- [x] **Lexical rules**: `range.rs` (sites, RS1-RS4) as static findings and in `resolve`
+- [x] **Field mode**: trial text, RS5-RS7, hover typing, the `&` rule, the note
+- [x] **Self mode**
+- [x] **Delegator**: S7, the forwarding text, `Layout::with_delegators`, `the_replacement`, the dead-delegator note, `deferred_delegator` removed
+- [x] **`verify`**: R3, R-rebind, `Rebind`, carriers through the CLI, `tddy-tools` and the daemon
+- [x] **Registration**: the two new live binaries in `.config/rust-e2e.filterset` and the `rust-analyzer` group of `.config/nextest.toml`
 - [ ] **Package documentation** at wrap (list under Affected Packages)
-- [ ] **Testing**: `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools` (scoped); CI for the rest
-- [ ] **Code quality**: `cargo check --all-targets` on the three packages, scoped clippy `-D warnings`, `cargo fmt`. Every new file ≤ 500 production lines and every new function ≤ 60; `retarget_impl()` ≤ 70 and `parse_op` + 1 line
+- [~] **Testing**: `./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools` (scoped); CI for the rest
+- [~] **Code quality**: `cargo check --all-targets` on the three packages, scoped clippy `-D warnings`, `cargo fmt`. Every new file ≤ 500 production lines and every new function ≤ 60; `retarget_impl()` ≤ 70 and `parse_op` + 1 line
 
 **Status indicators**: `[ ]` not started · `[~]` in progress · `[x]` complete ✅
 
@@ -456,13 +456,13 @@ Real dependency edges (whole stack): `1→13`, `5→14`, `2→15`, `3→15`, `4�
 
 ## Implementation milestones
 
-- [ ] **M1** Plan surface (variant, `rebind_fields.rs`, P9); tests 1-5, 20
-- [ ] **M2** Lexical rules as static findings; test 6
-- [ ] **M3** Field mode, live (trial text, typing, `&` rule, note); tests 7-12, 15-16
-- [ ] **M4** Self mode; tests 13-14
-- [ ] **M5** Delegator (S7, text, placement, dead note, `the_replacement`); tests 21-26, 28
-- [ ] **M6** `verify` R3 and R-rebind, plus the carriers; tests 17-19, 27, 29-30
-- [ ] **M7** Register the two live binaries; docs staged; scoped gate; length gate
+- [x] **M1** Plan surface (variant, `rebind_fields.rs`, P9); tests 1-5, 20
+- [x] **M2** Lexical rules as static findings; test 6
+- [x] **M3** Field mode, live (trial text, typing, `&` rule, note); tests 7-12, 15-16
+- [x] **M4** Self mode; tests 13-14
+- [x] **M5** Delegator (S7, text, placement, dead note, `the_replacement`); tests 21-26, 28
+- [x] **M6** `verify` R3 and R-rebind, plus the carriers; tests 17-19, 27, 29-30
+- [x] **M7** Register the two live binaries; docs staged; scoped gate; length gate
 
 ## Testing plan
 
@@ -690,6 +690,31 @@ suite was not re-run (the node-1 baseline is 1334 passed, 0 failed).
 - **Harness change.** `tests/harness/mod.rs`: `a_range_over` is now `pub` (it was private), and two live binaries use it.
 - **Risk for green: the ledger and an insertion at the range start.** Test 13 groups `read_fields_through` with an `extract_method` anchored on the same original lines. The `let` is inserted at the range-start offset, so the ledger must translate the later anchor to start **after** the insertion. If it does not, the extraction takes the `let` in. Insert at the start of the range's line instead if needed.
 
+### Green and validation (2026-10-14)
+
+Scoped to `tddy-code-restructuring`, `tddy-index-daemon`, `tddy-tools`; CI answers for the rest.
+
+- **Tests.** All 29 acceptance tests plus the 15 surface unit tests pass: the plan-line, verify and daemon
+  targets, and the two live binaries (`read_fields_through_acceptance` 10/10,
+  `retarget_impl_delegator_acceptance` 6/6), with `retarget_impl_acceptance` 13/13 as the regression pin.
+  `read_fields_through_acceptance` was re-run after the size refactor (10/10); the delegator binary was
+  last run before it, and the refactor touched neither `retarget_impl` nor the delegator.
+- **Gates.** `cargo check --all-targets`, `cargo clippy -D warnings` and `cargo fmt --check`: clean.
+- **Boundaries.** Nothing from the node's `## Boundaries` crept in; no parent-owned symbol or file was
+  touched; no deletions; no new `TODO`/`FIXME`, debug output or `unwrap`. The two
+  `TODO(reshape-…)` markers still in `backends/rust.rs` belong to nodes 2 and 4.
+- **Size.** `read_fields_through.rs` 503 → 420 production lines (the outline helpers moved to the new
+  `read_fields_through/method.rs`, 128); `rebind_fields` 99 → ~35 lines; `verify/rebind.rs::account`
+  67 → ~50. Longest new functions are 42-56 lines, inside the 60-line budget.
+- **Deferred with the developer's consent (2026-10-14).** `verify/retarget.rs` grew 341 → 555 production
+  lines (R3). `backend-session` and `fn-sizes-backend` also edit it, so the split follows the stack:
+  `docs/dev/todo/2026-10-14-restructure-verify-retarget-rs-exceeds-the-500-line-budget.md` and
+  `packages/tddy-code-restructuring/docs/code-issues/oversized-file-verify-retarget.md`.
+- **Known limit.** In self mode a generic impl's `Self::X` is written as `W<T>::X`, which is not valid in
+  expression position; the compile gate refuses it and no test covers it.
+- **Not wrapped yet.** The parent chain (#599-#602) has not wrapped, so this node stays a draft with its
+  documents in `1-WIP`; the code-issue and backlog reconciliation happens at its wrap.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-methods-leave-type-initial-discovery.md`)
@@ -700,12 +725,12 @@ suite was not re-run (the node-1 baseline is 1334 passed, 0 failed).
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Red — write failing unit/integration tests
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run the scoped tests (`./test -p tddy-code-restructuring -p tddy-index-daemon -p tddy-tools`) — verify 100% pass; CI answers for the rest of the workspace
-- [ ] Validate changes (/validate-changes)
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)
