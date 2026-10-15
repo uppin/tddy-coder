@@ -86,3 +86,37 @@ fn a_gh_login_commits_under_its_noreply_address() {
         }
     );
 }
+
+#[test]
+fn a_host_that_is_not_a_hostname_is_refused_rather_than_handed_to_gh() {
+    // Given URLs whose host position holds something no GitHub host can be
+    let git_urls = [
+        "ssh://-oProxyCommand=x/acme/alpha.git",
+        "https://bad host/acme/alpha.git",
+        "-flag:acme/alpha.git",
+        "https://git hub.com/acme/alpha.git",
+    ];
+
+    for git_url in git_urls {
+        // When the GitHub host is read
+        let host = github_hostname_of(git_url);
+
+        // Then it is refused, naming the URL
+        assert_eq!(
+            host,
+            Err(LocalGhError::UnreadableGitUrl {
+                git_url: git_url.to_string()
+            }),
+            "{git_url}"
+        );
+    }
+}
+
+#[test]
+fn a_bracketed_ipv6_literal_host_is_a_host() {
+    // Given an https URL on an IPv6 literal
+    let host = github_hostname_of("https://[::1]/acme/alpha.git");
+
+    // Then the literal is kept without its port handling splitting it
+    assert_eq!(host, Ok("[::1]".to_string()));
+}

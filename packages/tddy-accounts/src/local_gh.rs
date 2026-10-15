@@ -44,9 +44,16 @@ pub fn github_hostname_of(git_url: &str) -> Result<String, LocalGhError> {
         }
         let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
         let host_and_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
-        host_and_port
-            .split_once(':')
-            .map_or(host_and_port, |(h, _)| h)
+        if host_and_port.starts_with('[') {
+            // An IPv6 literal keeps its brackets; a port can only follow the closing one.
+            host_and_port
+                .find(']')
+                .map_or(host_and_port, |end| &host_and_port[..=end])
+        } else {
+            host_and_port
+                .split_once(':')
+                .map_or(host_and_port, |(h, _)| h)
+        }
     } else {
         // scp-style `[user@]host:path`; a path with no colon before its first slash names no host.
         let (before_colon, _path) = url.split_once(':').ok_or_else(unreadable)?;
@@ -57,13 +64,29 @@ pub fn github_hostname_of(git_url: &str) -> Result<String, LocalGhError> {
             .rsplit_once('@')
             .map_or(before_colon, |(_, h)| h)
     };
-    if host.is_empty() {
+    if !is_hostname(host) {
         return Err(unreadable());
     }
     Ok(host.to_string())
 }
 
 /// The commit identity of the GitHub login `login`, whose immutable user id is `id`.
+/// A DNS name (labels of ASCII letters, digits, `-` and `_`, never starting with `-`) or a bracketed
+/// IPv6 literal. The host reaches `gh --hostname` and `TDDY_GITHUB_SOURCE`, so nothing else passes.
+fn is_hostname(host: &str) -> bool {
+    if let Some(inner) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+        return !inner.is_empty()
+            && inner
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.');
+    }
+    !host.is_empty()
+        && !host.starts_with('-')
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
 pub fn local_gh_git_identity(login: &str, id: u64) -> GitIdentity {
     GitIdentity {
         name: login.to_string(),
