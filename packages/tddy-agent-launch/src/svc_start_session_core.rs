@@ -113,7 +113,9 @@ impl LaunchSessions {
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Forward {
                 peer_instance_id,
             } => {
-                let inner = self.forward_start_session(&req, peer_instance_id).await?;
+                let inner = self
+                    .forward_start_naming_local_source(&req, os_user, peer_instance_id)
+                    .await?;
                 return Ok(Response::new(inner));
             }
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Local => {}

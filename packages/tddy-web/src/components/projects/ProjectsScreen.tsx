@@ -1,6 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectEntry } from "../../gen/session_pb";
 import type { DaemonHost } from "../../lib/participantRole";
+import {
+  assignmentRowsFor,
+  withAssignment,
+  type AssignableAccount,
+} from "./ProjectAccountAssignment";
+import {
+  githubHostnameOf,
+  HostGithubState,
+  LocalGhToggle,
+  type LoadHostGithubCli,
+} from "./ProjectLocalGh";
+
+export type { AssignableAccount };
 
 /**
  * Presentational Projects screen: lists projects grouped by logical `projectId` (a project may
@@ -41,18 +54,16 @@ export interface ProjectsScreenProps {
   onSetProjectAccounts: (input: {
     projectId: string;
     accounts: { provider: string; accountId: string }[];
+    /** The project's whole Local gh setting, written with `accounts`; never true beside a github
+     *  assignment. */
+    localGh: boolean;
     daemonInstanceId: string;
   }) => void;
-}
-
-/**
- * One account a project can be assigned, flattened from `ListAccountsResponse`. An account id is
- * unique only **within** its provider, so both halves travel together everywhere.
- */
-export interface AssignableAccount {
-  provider: string;
-  accountId: string;
-  label: string;
+  /**
+   * What one host's `gh` says about the project's GitHub host (`GetHostTooling` with
+   * `githubHostname`). Asked for each host of a Local gh project.
+   */
+  loadHostGithubCli: LoadHostGithubCli;
 }
 
 interface ProjectGroup {
@@ -61,6 +72,7 @@ interface ProjectGroup {
   gitUrl: string;
   mainBranchRef: string;
   accounts: { provider: string; accountId: string }[];
+  localGh: boolean;
   hosts: { daemonInstanceId: string; mainRepoPath: string }[];
 }
 
@@ -77,6 +89,7 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
         gitUrl: p.gitUrl,
         mainBranchRef: p.mainBranchRef,
         accounts: p.accounts.map((a) => ({ provider: a.provider, accountId: a.accountId })),
+        localGh: p.localGh,
         hosts: [],
       };
       byId.set(p.projectId, group);
@@ -85,52 +98,6 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
     group.hosts.push({ daemonInstanceId: p.daemonInstanceId, mainRepoPath: p.mainRepoPath });
   }
   return groups;
-}
-
-interface AssignmentRow {
-  provider: string;
-  /** "" when the project holds no assignment at this provider. */
-  assignedAccountId: string;
-  /** The assigned account is not among this host's vault accounts for the provider. */
-  assignedUnavailable: boolean;
-  options: AssignableAccount[];
-}
-
-/**
- * One row per provider the vault holds an account at, in vault order, plus a row for any provider
- * the project is assigned at whose account this host does not know — that assignment is still real
- * and must be visible, as "unavailable", never silently shown as unassigned.
- */
-function assignmentRowsFor(
-  assigned: { provider: string; accountId: string }[],
-  vault: AssignableAccount[],
-): AssignmentRow[] {
-  const providers = [...new Set([...vault.map((a) => a.provider), ...assigned.map((a) => a.provider)])];
-  return providers.map((provider) => {
-    const options = vault.filter((a) => a.provider === provider);
-    const assignedAccountId = assigned.find((a) => a.provider === provider)?.accountId ?? "";
-    return {
-      provider,
-      assignedAccountId,
-      assignedUnavailable:
-        assignedAccountId !== "" && !options.some((a) => a.accountId === assignedAccountId),
-      options,
-    };
-  });
-}
-
-/** The whole assignment set with one provider's entry replaced, or removed when `accountId` is "". */
-function withAssignment(
-  assigned: { provider: string; accountId: string }[],
-  provider: string,
-  accountId: string,
-): { provider: string; accountId: string }[] {
-  const others = assigned.filter((a) => a.provider !== provider);
-  if (accountId === "") return others;
-  const existing = assigned.some((a) => a.provider === provider);
-  return existing
-    ? assigned.map((a) => (a.provider === provider ? { provider, accountId } : a))
-    : [...others, { provider, accountId }];
 }
 
 /**
@@ -155,6 +122,7 @@ export function ProjectsScreen({
   loadProjectBranches,
   accounts,
   onSetProjectAccounts,
+  loadHostGithubCli,
 }: ProjectsScreenProps) {
   const groups = useMemo(() => groupByProject(projects), [projects]);
 
@@ -235,6 +203,7 @@ export function ProjectsScreen({
             loadProjectBranches={loadProjectBranches}
             accounts={accounts}
             onSetProjectAccounts={onSetProjectAccounts}
+            loadHostGithubCli={loadHostGithubCli}
           />
         ))}
       </div>
@@ -250,6 +219,7 @@ function ProjectCard({
   loadProjectBranches,
   accounts,
   onSetProjectAccounts,
+  loadHostGithubCli,
 }: {
   group: ProjectGroup;
   daemons: DaemonHost[];
@@ -258,6 +228,7 @@ function ProjectCard({
   loadProjectBranches: ProjectsScreenProps["loadProjectBranches"];
   accounts: ProjectsScreenProps["accounts"];
   onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
+  loadHostGithubCli: LoadHostGithubCli;
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
@@ -294,16 +265,29 @@ function ProjectCard({
     [daemons],
   );
 
+  // A project has one GitHub source: while Local gh is on, no GitHub account can be assigned.
   const assignmentRows = useMemo(
-    () => assignmentRowsFor(group.accounts, accounts),
-    [group.accounts, accounts],
+    () =>
+      assignmentRowsFor(group.accounts, accounts).filter(
+        (row) => !(group.localGh && row.provider === "github"),
+      ),
+    [group.accounts, group.localGh, accounts],
   );
   const assignAccount = (provider: string, accountId: string) =>
     onSetProjectAccounts({
       projectId: group.projectId,
       accounts: withAssignment(group.accounts, provider, accountId),
+      localGh: group.localGh,
       daemonInstanceId: primaryHost,
     });
+  const setLocalGh = (localGh: boolean) =>
+    onSetProjectAccounts({
+      projectId: group.projectId,
+      accounts: localGh ? withAssignment(group.accounts, "github", "") : group.accounts,
+      localGh,
+      daemonInstanceId: primaryHost,
+    });
+  const githubHostname = githubHostnameOf(group.gitUrl);
 
   const [addOpen, setAddOpen] = useState(false);
   const [selectedHost, setSelectedHost] = useState("");
@@ -342,6 +326,8 @@ function ProjectCard({
           ))}
         </select>
       </div>
+
+      <LocalGhToggle projectId={group.projectId} checked={group.localGh} onChange={setLocalGh} />
 
       <div className="mb-3 flex flex-col gap-1">
         {assignmentRows.map((row) => (
@@ -399,6 +385,14 @@ function ProjectCard({
                 >
                   base: {baseLocation}
                 </span>
+              ) : null}
+              {group.localGh ? (
+                <HostGithubState
+                  projectId={group.projectId}
+                  daemonInstanceId={host.daemonInstanceId}
+                  githubHostname={githubHostname}
+                  loadHostGithubCli={loadHostGithubCli}
+                />
               ) : null}
             </div>
           );

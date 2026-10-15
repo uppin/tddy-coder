@@ -45,6 +45,28 @@ forwarded to them (`forward_set_project_accounts_via_livekit` in
 to a peer names an account that peer's vault may not hold; the resolver reports that state as
 `UnknownOnThisHost`, not as unassigned.
 
+### Local gh
+
+`ProjectData.local_gh: bool` marks a project whose sessions take their GitHub identity from the
+host's own `gh` login instead of a vault account. It is `#[serde(default, skip_serializing_if =
+"is_false")]`: a project not using it writes no `local_gh` key, and a row without the key reads as
+not using it, so rows written before the field existed read unchanged.
+
+`SetProjectAccounts` carries the flag beside the list (`SetProjectAccountsRequest.local_gh`), and
+`project_storage::set_project_accounts(dir, id, accounts, local_gh)` writes both in one replace. The
+two sources can never both be in effect: a list that assigns a GitHub account together with
+`local_gh` is refused with `InvalidArgument`, the message naming both and what to do ("a project that
+uses local gh is assigned no github account; turn local gh off to assign one"). A refused call
+leaves the row exactly as it was. Other providers' assignments are kept as sent. There is no
+separate RPC for the toggle. `ProjectEntry.local_gh` (field 9) returns it on every response that
+returns a project.
+
+Like the accounts, the flag is stored on the host the request names. The assignment does not reach
+the other hosts owning the project; see
+[the open TODO](../../../docs/dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md).
+A session start forwarded to another host carries the source instead
+([session identity](../../tddy-session-lifecycle/docs/session-identity.md#which-source-a-session-uses)).
+
 `ProjectEntry.accounts` carries each project's assignments on every response that returns a
 project, so `ListProjects` renders them without a second round trip.
 

@@ -22,6 +22,8 @@ use crate::conversation_spawn_relay::{
 pub struct ToolHostHandlers {
     conversation_spawn: Option<Arc<dyn ConversationSpawnHandler>>,
     github_credential: Option<Arc<dyn GithubCredentialHandler>>,
+    /// The session's project uses Local gh: its tools read the token from `gh` themselves.
+    local_gh: bool,
 }
 
 impl ToolHostHandlers {
@@ -43,13 +45,33 @@ impl ToolHostHandlers {
                 Arc::clone(&host),
             ))),
             github_credential: Some(Arc::new(DaemonRelayGithubCredential::new(host))),
+            local_gh: false,
+        }
+    }
+
+    /// This session's GitHub source, as its `TDDY_GITHUB_SOURCE` names it (builder). A Local gh
+    /// session's tools read the token from the host's own `gh`, so they can authenticate without a
+    /// credential handler; a value that is not a source changes nothing.
+    pub fn with_github_source(self, github_source: Option<&str>) -> Self {
+        let Some(value) = github_source else {
+            return self;
+        };
+        match tddy_core::toolcall::parse_github_source(value) {
+            Ok(_) => Self {
+                local_gh: true,
+                ..self
+            },
+            Err(reason) => {
+                log::warn!("tddy-coder: the GitHub PR tools are not offered: {reason}");
+                self
+            }
         }
     }
 
     /// Whether the agent's PR tools can authenticate: true exactly when a credential handler is
     /// bound. This is the value the workflow's context is seeded with.
     pub fn github_pr_tools_available(&self) -> bool {
-        self.github_credential.is_some()
+        self.github_credential.is_some() || self.local_gh
     }
 
     /// The handlers as the toolcall listener binds them.
@@ -87,6 +109,26 @@ mod tests {
         assert!(!handlers.github_pr_tools_available());
         let bound = handlers.into_listener_handlers();
         assert!(bound.github_credential.is_none() && bound.conversation_spawn.is_none());
+    }
+
+    #[test]
+    fn a_local_gh_session_is_offered_the_github_pr_tools_without_a_host_socket() {
+        // Given a session told its project uses Local gh, and handed no host socket
+        let handlers = ToolHostHandlers::from_flags(None, Some("s-1"))
+            .with_github_source(Some("local-gh:github.com"));
+
+        // Then its PR tools can authenticate, through gh
+        assert!(handlers.github_pr_tools_available());
+    }
+
+    #[test]
+    fn a_malformed_github_source_offers_no_github_pr_tools() {
+        // Given a session with no host socket and a GitHub source nothing in tddy writes
+        let handlers =
+            ToolHostHandlers::from_flags(None, Some("s-1")).with_github_source(Some("github.com"));
+
+        // Then its PR tools are not offered: nothing could answer them
+        assert!(!handlers.github_pr_tools_available());
     }
 
     #[test]

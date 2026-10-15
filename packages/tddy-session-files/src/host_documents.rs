@@ -608,6 +608,7 @@ mod tests {
                 remote_name: None,
                 host_repo_paths: std::collections::HashMap::new(),
                 accounts: Vec::new(),
+                local_gh: false,
             }],
         )
         .unwrap();

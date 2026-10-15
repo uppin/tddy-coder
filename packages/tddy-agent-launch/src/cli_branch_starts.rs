@@ -104,6 +104,10 @@ impl LaunchSessions {
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
         let session_id = Uuid::now_v7().to_string();
+        crate::start_request_checks::record_requested_github_source(
+            req,
+            &tddy_core::session_lifecycle::unified_session_dir_path(&sessions_base, &session_id),
+        )?;
         let initial_prompt = attached_initial_prompt(
             &self.attachment_state(),
             req,

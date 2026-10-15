@@ -574,6 +574,7 @@ fn a_project_at(repo: &Path) -> ProjectData {
         remote_name: None,
         host_repo_paths: Default::default(),
         accounts: Vec::new(),
+        local_gh: false,
     }
 }
 

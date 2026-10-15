@@ -29,9 +29,19 @@ budget.
 | `changeset` | `changeset.yaml`: `model`, `stack` (the PR-stack DAG), `io` (atomic reads and writes), `merge` (what a stored changeset means for the run about to start) |
 | `branch_worktree_intent` | `BranchWorktreeIntent`: whether a session works on a new branch cut from a base or on a selected existing one |
 | `session_lifecycle` | the unified session directory and its id rules |
+| `session_github_source` | the session's recorded GitHub source: `SessionGithubSource { Vault, LocalGh }`, `write_session_github_source`, `read_session_github_source` (`Ok(None)` when none was recorded) |
 | `session_metadata`, `session_agent`, `session_activity`, `session_label`, `session_participant_metadata`, `session_context` | the per-session files beside the changeset |
 | `agent_activity` | the agent tool-call activity log |
 | `elapsed_format`, `source_path` | small formatting and path helpers |
+
+## Session GitHub source (`session_github_source`)
+
+The file is `github-source.yaml` in the session directory, kept **outside** `.session.yaml` because
+that file rejects unknown fields (an older daemon would refuse the session) and because the daemon, not
+the child, owns it. The daemon writes it only when a start *carried* a source
+(`StartSessionRequest.github_source`); a start that named none records nothing, so a resume re-reads the
+host's project row, as an account assignment is re-read. See
+[session identity](../../tddy-session-lifecycle/docs/session-identity.md#which-source-a-session-uses).
 
 ## Changeset (`changeset`)
 

@@ -488,9 +488,12 @@ impl HostService for HostServiceImpl {
         // runtime worker for however long `gh` takes to reach the network.
         let probe = Arc::clone(&self.host_tooling);
         let probed_user = os_user.to_string();
-        let tooling = tokio::task::spawn_blocking(move || probe.probe(&probed_user))
-            .await
-            .map_err(|e| Status::internal(format!("host tooling probe panicked: {e}")))?;
+        let github_hostname = Some(req.github_hostname.clone()).filter(|h| !h.is_empty());
+        let tooling = tokio::task::spawn_blocking(move || {
+            probe.probe(&probed_user, github_hostname.as_deref())
+        })
+        .await
+        .map_err(|e| Status::internal(format!("host tooling probe panicked: {e}")))?;
 
         Ok(Response::new(GetHostToolingResponse {
             daemon_instance_id: local_instance_id_for_config(&self.config),

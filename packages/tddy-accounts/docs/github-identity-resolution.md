@@ -48,6 +48,24 @@ operations (`RepointPlannedPr`) call `project_github_token` directly.
 `tddy-accounts` names `tddy-credentials`, `tddy-rpc` and `tddy-service` and nothing about sessions or
 LiveKit: the crate deciding which account a project acts as does not know who asks.
 
+## Local gh
+
+A project set to Local gh does not go through `acting_identity`. The `local_gh` module
+(`src/local_gh.rs`) holds the two pure steps that need no vault:
+
+- `github_hostname_of(git_url)` gives the GitHub host the project's git URL names, for the https,
+  scp-style ssh (`git@host:org/repo.git`) and `ssh://` forms, without user, port or path. The host
+  must be a DNS name or a bracketed IPv6 literal; anything else, including an empty host or one
+  starting with `-`, is `LocalGhError::UnreadableGitUrl`, whose message tells the person to set a
+  git URL such as `https://github.com/<owner>/<repo>.git`. The host is never assumed to be
+  `github.com`, because the value reaches `gh --hostname` and the `TDDY_GITHUB_SOURCE` entry.
+- `local_gh_git_identity(login, id)` gives the same noreply identity shape as a vault account:
+  name `login`, email `<id>+<login>@users.noreply.github.com`.
+
+Asking `gh` who it is logged in as, and for its token, is
+[`GithubCli`](../../tddy-host-service/docs/host-tooling-probe.md#the-github-cli) in
+`tddy-host-service`; this crate stays free of subprocesses.
+
 ## No environment
 
 Nothing in `tddy-github` or `tddy-workflow-recipes` reads `GITHUB_TOKEN` or `GH_TOKEN`; a token
@@ -60,7 +78,8 @@ behaviourally by the `GITHUB_TOKEN`-is-set tests at every seam.
 
 A project that resolves no account does not stop a session starting: it starts with no `GIT_*`
 variables, under the checkout's own identity, and the reason is logged at `warn`. It is not a token
-fallback — no credential is delivered on any path.
+fallback — no credential is delivered on any path. The same holds for a Local gh project whose `gh`
+cannot answer.
 
 ## Not identity-bearing
 

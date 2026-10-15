@@ -3,6 +3,7 @@ import type { Client } from "@connectrpc/connect";
 import { type ProjectEntry } from "../../gen/project_pb";
 import { ProjectService } from "../../gen/project_pb";
 import { AccountsService } from "../../gen/accounts_pb";
+import { HostService } from "../../gen/host_pb";
 import { useAuthContext } from "../../hooks/authProvider";
 import { useHostConnector } from "../../rpc/connections/registry";
 import { useDaemonClient, useDaemons } from "../../rpc/selectedDaemon";
@@ -92,6 +93,7 @@ function useProjectsRpc(
     (input: {
       projectId: string;
       accounts: { provider: string; accountId: string }[];
+      localGh: boolean;
       daemonInstanceId: string;
     }) => {
       if (!client) return;
@@ -169,6 +171,17 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
     [connectHost],
   );
   const accounts = useAssignableAccounts(sessionToken ?? "");
+  const hostClient = useDaemonClient(HostService);
+  // Each host is asked about its own `gh`: the serving daemon relays to `daemonInstanceId`.
+  const loadHostGithubCli = useCallback(
+    async (input: { daemonInstanceId: string; githubHostname: string }) => {
+      if (!hostClient) throw new Error("no daemon selected to ask about the host's gh");
+      const res = await hostClient.getHostTooling({ sessionToken: sessionToken ?? "", ...input });
+      if (!res.githubCli) throw new Error("the host's tooling report carries no gh state");
+      return res.githubCli;
+    },
+    [hostClient, sessionToken],
+  );
   const {
     projects,
     createProject,
@@ -189,6 +202,7 @@ export function ProjectsAppPage({ onNavigate }: { onNavigate: (path: string) => 
         loadProjectBranches={loadProjectBranches}
         accounts={accounts}
         onSetProjectAccounts={setProjectAccounts}
+        loadHostGithubCli={loadHostGithubCli}
       />
     </AppShell>
   );

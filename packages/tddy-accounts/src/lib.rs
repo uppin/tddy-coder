@@ -19,6 +19,7 @@ mod attempts;
 mod deadline;
 mod identity;
 mod linking;
+pub mod local_gh;
 mod resolver;
 mod service;
 mod store;

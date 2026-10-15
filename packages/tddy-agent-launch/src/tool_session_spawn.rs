@@ -88,6 +88,17 @@ impl LaunchSessions {
             })
             .await?;
         }
+        crate::start_request_checks::record_requested_github_source(
+            &req,
+            &tddy_core::session_lifecycle::unified_session_dir_path(
+                &tddy_daemon_kernel::user_paths::sessions_base_for_user(
+                    &os_user,
+                    Some(&self.tddy_data_dir),
+                )
+                .ok_or_else(|| Status::internal("could not resolve sessions path"))?,
+                &tool_session_id,
+            ),
+        )?;
         // The commit identity of the account this project acts as, and the handler that answers its
         // tools' token requests: one lookup over the project's assignments, the same one every other
         // session path makes. A project that does not resolve adds no pairs (logged) and the session

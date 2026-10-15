@@ -181,7 +181,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     )?;
 
     let timeout = config.spawn_worker_request_timeout();
-    let (worktree_path, project_accounts) = match session_worktree_source(repo_path, project_id) {
+    let (worktree_path, project_row) = match session_worktree_source(repo_path, project_id) {
         WorktreeSource::Project(pid) => {
             if pid.is_empty() {
                 return Err(Status::invalid_argument(
@@ -195,7 +195,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
                     &pid,
                 )?;
             let repo_root = tddy_session_split::service_util::project_repo_root(&project)?;
-            let project_accounts = project.accounts.clone();
+            let project_row = project.clone();
             let chain_base_ref = stack_parent
                 .chain_base_ref(
                     &pid,
@@ -242,7 +242,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
                     session_id,
                 )
                 .await;
-            (wt, Some(project_accounts))
+            (wt, Some(project_row))
         }
         WorktreeSource::RepoPath(path) => {
             let canonical = std::fs::canonicalize(&path).map_err(|e| {
@@ -315,7 +315,7 @@ pub(crate) async fn spawn_cursor_cli_session_reporting(
     // under the checkout's own, with the reason logged.
     session_env.extend(
         account_access
-            .session_identity(session_id, project_accounts.as_deref())
+            .session_identity_in(session_id, os_user, &session_dir, project_row.as_ref())
             .git_environment,
     );
 

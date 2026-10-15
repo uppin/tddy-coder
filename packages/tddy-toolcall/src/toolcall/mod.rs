@@ -24,7 +24,10 @@ pub use client_wire::{
     ListActionsRelayRequest, ListActionsRelayResponse, SubmitRequest, SubmitResponse,
     TransitionRequest,
 };
-pub use github_token_client::{request_github_token, request_github_token_from_session};
+pub use github_token_client::{
+    local_gh_source_value, parse_github_source, request_github_token, request_github_token_from,
+    request_github_token_from_session, SessionTokenSource, GITHUB_SOURCE_ENV,
+};
 pub use listener::{
     set_toolcall_log_dir, start_toolcall_listener,
     start_toolcall_listener_with_conversation_handler, start_toolcall_listener_with_handlers,

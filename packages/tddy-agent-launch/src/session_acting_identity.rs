@@ -8,15 +8,20 @@
 //! the session's own toolcall socket, per call. Nothing in this module reads `GITHUB_TOKEN` or
 //! `GH_TOKEN`.
 
+use std::path::Path;
 use std::sync::Arc;
 
+use tddy_accounts::local_gh::{github_hostname_of, local_gh_git_identity};
 use tddy_accounts::{
     acting_identity, AccountStore, AccountsError, ActingIdentity, IdentityError,
     SessionSubjectResolver, SessionVaultAccountStore, PROVIDER_GITHUB,
 };
+use tddy_core::toolcall::{local_gh_source_value, GITHUB_SOURCE_ENV};
+use tddy_core::{read_session_github_source, SessionGithubSource};
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SessionVaults};
-use tddy_daemon_livekit::session_git::session_git_environment;
-use tddy_projects::project_storage::AccountAssignment;
+use tddy_daemon_livekit::session_git::{session_git_environment, session_git_environment_of};
+use tddy_host_service::GithubCli;
+use tddy_projects::project_storage::{AccountAssignment, ProjectData};
 
 /// A session's answer to its tools' `github-token`, shared between the listener's connections.
 pub(crate) type SharedGithubCredential = Arc<dyn tddy_core::toolcall::GithubCredentialHandler>;
@@ -112,6 +117,9 @@ pub struct SessionAccountAccess {
     vaults: Option<Arc<SessionVaults>>,
     subject_of: SessionSubjectResolver,
     session_token: String,
+    /// The `gh` a Local gh project's identity is asked of; the one on a spawned child's `PATH`
+    /// unless [`Self::with_github_cli`] names another.
+    github_cli: GithubCli,
 }
 
 impl SessionAccountAccess {
@@ -124,6 +132,7 @@ impl SessionAccountAccess {
             vaults,
             subject_of,
             session_token: session_token.to_string(),
+            github_cli: GithubCli::on_spawn_child_path(),
         }
     }
 
@@ -169,6 +178,69 @@ pub struct SessionIdentity {
     /// `None` only when the project could not be read; a project that does not resolve still binds
     /// a handler, which refuses each request with the resolver's own message.
     pub github_credential: Option<SharedGithubCredential>,
+    /// The GitHub host a **Local gh** session asks `gh` about; `None` for a vault-backed session.
+    /// Set even when `gh` could not answer at start, so the steps that later need a token fail in
+    /// `gh`'s own words.
+    pub local_gh_hostname: Option<String>,
+    /// Whether the session's GitHub identity is the host's `gh` login. Independent of the
+    /// hostname: a project whose git URL names no host is Local gh with no hostname, and its
+    /// relay must still carry a logged-out `gh`.
+    pub is_local_gh: bool,
+}
+
+/// Where a project's sessions take their GitHub identity from, as the session start resolved it.
+#[derive(Debug, Clone, Copy)]
+pub enum ProjectGithub<'a> {
+    /// The project's account assignments, resolved over the signed-in person's vault.
+    Vault(&'a [AccountAssignment]),
+    /// The host's own `gh` login, asked as `os_user` about the GitHub host `git_url` names.
+    LocalGh { os_user: &'a str, git_url: &'a str },
+}
+
+/// Who runs the host-side commands a session's identity is applied to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayUser {
+    /// The session's own OS user — a co-located agent, or a daemon that runs as that user.
+    SessionUser,
+    /// Another OS user: the daemon's, relaying a sandboxed session's commands on a multi-user host.
+    OtherUser,
+}
+
+impl SessionIdentity {
+    /// The environment the host-side relay of a sandboxed session runs its commands under, when
+    /// that relay runs as `relay`.
+    ///
+    /// A Local gh identity is the **session user's** `gh` login. A relay running as another user
+    /// would reach that user's `gh` instead, so it carries no commit identity and only
+    /// `GH_CONFIG_DIR=<logged_out_gh_config>`: `gh` there is logged out rather than the wrong
+    /// account. A vault identity carries no credential and is relayed unchanged.
+    pub fn relayed_by(
+        self,
+        relay: RelayUser,
+        logged_out_gh_config: &Path,
+    ) -> Vec<(String, String)> {
+        match (self.is_local_gh, relay) {
+            (true, RelayUser::OtherUser) => vec![(
+                "GH_CONFIG_DIR".to_string(),
+                logged_out_gh_config.display().to_string(),
+            )],
+            _ => self.git_environment,
+        }
+    }
+}
+
+/// The token of the host's `gh` login, asked as `os_user` about the GitHub host `git_url` names —
+/// for an operation the daemon performs itself on behalf of a Local gh session (re-pointing a
+/// planned PR). `Err` carries the reason there is none, in `gh`'s or the resolver's own words.
+pub fn local_gh_github_token(
+    github_cli: &GithubCli,
+    os_user: &str,
+    git_url: &str,
+) -> Result<String, String> {
+    let hostname = github_hostname_of(git_url).map_err(|e| e.to_string())?;
+    github_cli
+        .auth_token(os_user, &hostname)
+        .map_err(|refusal| refusal.to_string())
 }
 
 impl SessionAccountAccess {
@@ -184,6 +256,8 @@ impl SessionAccountAccess {
             return SessionIdentity {
                 git_environment: Vec::new(),
                 github_credential: None,
+                local_gh_hostname: None,
+                is_local_gh: false,
             };
         };
         // The one resolution of this start: the commit pairs and the handler both derive from its
@@ -211,7 +285,139 @@ impl SessionAccountAccess {
                 access: self.clone(),
                 pinned,
             })),
+            local_gh_hostname: None,
+            is_local_gh: false,
         }
+    }
+
+    /// Ask `github_cli` for a Local gh project's identity (builder).
+    pub fn with_github_cli(mut self, github_cli: GithubCli) -> Self {
+        self.github_cli = github_cli;
+        self
+    }
+
+    /// The identity a session is launched with, from wherever its project takes its GitHub identity
+    /// from — `None` when there is no project row to read (nothing is resolved then: no pairs, no
+    /// handler).
+    ///
+    /// For [`ProjectGithub::LocalGh`]: the `gh` login's four commit pairs plus `TDDY_GITHUB_SOURCE`
+    /// naming the GitHub host, and a handler that never hands out a token — a session's tools read
+    /// theirs from `gh`. When `gh` cannot answer, the source is still named, no pairs are added and
+    /// the reason is logged; when the git URL names no host, neither is added.
+    pub fn project_session_identity(
+        &self,
+        session_id: &str,
+        project: Option<ProjectGithub<'_>>,
+    ) -> SessionIdentity {
+        match project {
+            None => self.session_identity(session_id, None),
+            Some(ProjectGithub::Vault(accounts)) => {
+                self.session_identity(session_id, Some(accounts))
+            }
+            Some(ProjectGithub::LocalGh { os_user, git_url }) => {
+                self.local_gh_identity(session_id, os_user, git_url)
+            }
+        }
+    }
+
+    /// The identity a session is launched with, over `project` — this host's row of the session's
+    /// project, `None` when it could not be read (nothing is resolved then: no pairs, no handler).
+    ///
+    /// Which source the session uses is the one recorded in `session_dir` (a start that named one,
+    /// kept for its resumes), otherwise the row's: Local gh when the row says so, the vault
+    /// assignment otherwise. A record that cannot be read is logged and resolves nothing: the
+    /// session never silently takes the row's source in place of the one it was started with.
+    pub fn session_identity_in(
+        &self,
+        session_id: &str,
+        os_user: &str,
+        session_dir: &Path,
+        project: Option<&ProjectData>,
+    ) -> SessionIdentity {
+        let Some(project) = project else {
+            return self.project_session_identity(session_id, None);
+        };
+        let source = match read_session_github_source(session_dir) {
+            Ok(recorded) => recorded.unwrap_or(if project.local_gh {
+                SessionGithubSource::LocalGh
+            } else {
+                SessionGithubSource::Vault
+            }),
+            Err(error) => {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "session {session_id} has no account identity: its recorded GitHub source \
+                     could not be read: {error}"
+                );
+                return self.project_session_identity(session_id, None);
+            }
+        };
+        self.project_session_identity(
+            session_id,
+            Some(match source {
+                SessionGithubSource::Vault => ProjectGithub::Vault(&project.accounts),
+                SessionGithubSource::LocalGh => ProjectGithub::LocalGh {
+                    os_user,
+                    git_url: &project.git_url,
+                },
+            }),
+        )
+    }
+
+    fn local_gh_identity(&self, session_id: &str, os_user: &str, git_url: &str) -> SessionIdentity {
+        let github_credential: Option<SharedGithubCredential> = Some(Arc::new(LocalGhCredential));
+        let hostname = match github_hostname_of(git_url) {
+            Ok(hostname) => hostname,
+            Err(error) => {
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "session {session_id} starts without a local gh identity: {error}"
+                );
+                return SessionIdentity {
+                    git_environment: Vec::new(),
+                    github_credential,
+                    local_gh_hostname: None,
+                    is_local_gh: true,
+                };
+            }
+        };
+        let mut git_environment = match self.github_cli.logged_in_user(os_user, &hostname) {
+            Ok(user) => session_git_environment_of(&local_gh_git_identity(&user.login, user.id)),
+            Err(refusal) => {
+                // The session still starts, under the checkout's own commit identity, and is still
+                // told its source: a later step that needs a token then fails in `gh`'s words.
+                log::warn!(
+                    target: "tddy_daemon::connection_service",
+                    "session {session_id} starts without a local gh identity: {refusal}"
+                );
+                Vec::new()
+            }
+        };
+        git_environment.push((
+            GITHUB_SOURCE_ENV.to_string(),
+            local_gh_source_value(&hostname),
+        ));
+        SessionIdentity {
+            git_environment,
+            github_credential,
+            local_gh_hostname: Some(hostname),
+            is_local_gh: true,
+        }
+    }
+}
+
+/// The `github-token` answer of a Local gh session's host: a refusal. The token is `gh`'s, read by
+/// the process that needs it, as the session's OS user; it never crosses the session's socket.
+struct LocalGhCredential;
+
+#[async_trait::async_trait]
+impl tddy_core::toolcall::GithubCredentialHandler for LocalGhCredential {
+    async fn github_token(&self) -> Result<String, String> {
+        Err(
+            "this session's project uses local gh: its GitHub token is read from the host's gh \
+             login by the process that needs it, and is never handed out by the session host"
+                .to_string(),
+        )
     }
 }
 

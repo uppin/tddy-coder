@@ -93,6 +93,7 @@ impl DaemonSessionHost {
                 crate::session_agent_inference::SessionAgentInferenceStore::new(),
             ),
             credential_vaults: None,
+            github_cli: tddy_host_service::GithubCli::on_spawn_child_path(),
             session_tokens: None,
             staging_base_dir: crate::session_attachment_staging::default_staging_base_dir(),
             session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
@@ -215,6 +216,13 @@ impl DaemonSessionHost {
     pub fn with_credential_vaults(mut self, vaults: Arc<tddy_daemon_auth::SessionVaults>) -> Self {
         self.debug_assert_rpc_families_not_installed("with_credential_vaults");
         self.credential_vaults = Some(vaults);
+        self
+    }
+
+    /// Ask this `gh` for a Local gh project's identity and token (builder), instead of the one on
+    /// the spawned child's `PATH`.
+    pub fn with_github_cli(mut self, github_cli: tddy_host_service::GithubCli) -> Self {
+        self.github_cli = github_cli;
         self
     }
 

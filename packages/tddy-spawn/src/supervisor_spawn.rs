@@ -71,7 +71,7 @@ pub fn spawn_session_request(
 /// `request` with the commit identity a session is spawned under ([`SpawnOptions::git_environment`])
 /// added to its `env`.
 ///
-/// Like `PATH`, every one of these keys must be listed in the supervisor's
+/// Like `PATH`, every one of these keys (the commit identity and `TDDY_GITHUB_SOURCE`) must be listed in the supervisor's
 /// `spawn_policy.allowed_env_keys` or the spawn is refused outright — which is the point: a session
 /// that silently started under the machine's identity instead of its project's account is the
 /// failure this exists to prevent. A project that resolves to no account adds no key, so the shipped

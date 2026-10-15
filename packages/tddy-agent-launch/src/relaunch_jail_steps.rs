@@ -30,13 +30,14 @@ impl LaunchSessions {
         managed_recipe: Option<Arc<dyn tddy_core::workflow::recipe::WorkflowRecipe + 'static>>,
         context_dir: &Path,
         tddy_tools_path: &str,
+        os_user: &str,
         identity: SessionIdentity,
     ) -> Result<RelaunchManagedEnv, Status> {
         let mut managed: Option<tddy_cli_sessions::session_toolcall::ManagedWorkflow> = None;
         let mut append_system_prompt_file: Option<PathBuf> = None;
         // As at the start: the relayed host-side commands run under the project's account
         // identity whether or not the session is managed.
-        let mut session_env: Vec<(String, String)> = identity.git_environment;
+        let (mut session_env, github_credential) = self.jail_relay_identity(identity, os_user)?;
         if let Some(recipe) = managed_recipe {
             let resume_goal = Self::managed_resume_goal(session_dir, &recipe);
             let launch = self.prepare_managed_workflow(
@@ -48,7 +49,7 @@ impl LaunchSessions {
                 tddy_tools_path,
                 Some(resume_goal),
                 None,
-                identity.github_credential,
+                github_credential,
             )?;
             append_system_prompt_file = Some(launch.prompt_file);
             session_env.extend(launch.env);

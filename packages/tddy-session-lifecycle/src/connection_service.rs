@@ -143,6 +143,9 @@ pub struct DaemonSessionHost {
     /// sealed — the credential the PR-status reads act with. `None` (no `auth_storage` configured)
     /// means a real login's PR status reads as *unavailable*, never as "no PR".
     credential_vaults: Option<Arc<tddy_daemon_auth::SessionVaults>>,
+    /// The host's GitHub CLI, asked as a session's OS user for a **Local gh** project's identity
+    /// and token. Production looks `gh` up on the spawned child's `PATH` at each call.
+    github_cli: tddy_host_service::GithubCli,
     /// This daemon's session-token signer and the verifier for every daemon's tokens — the same
     /// value `tddy_daemon_auth::build_auth_entries_with` built the RPC gate from. What mints an
     /// agent's own credential for a split or jailed-codebase session. `None` means this daemon
@@ -211,7 +214,7 @@ pub use seeded_clone_guard::*;
 
 pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 
-pub use session_acting_identity::project_github_token;
+pub use session_acting_identity::{local_gh_github_token, project_github_token};
 
 pub use hooks_and_urls::*;
 

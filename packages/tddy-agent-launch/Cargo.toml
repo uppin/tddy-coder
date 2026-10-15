@@ -45,3 +45,5 @@ uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
 tempfile = "3"
+# `gh_cli::a_gh_cli`: the `gh` stub a Local gh identity is resolved against. Workspace-internal.
+tddy-testing-commons = { path = "../tddy-testing-commons" }

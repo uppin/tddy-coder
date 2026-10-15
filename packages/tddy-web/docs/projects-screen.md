@@ -45,9 +45,34 @@ Each project card carries a per-provider account control, rendered by `ProjectsS
   `ProjectsAppPage`). Choosing sends `SetProjectAccounts` with the **full** assignment list for the
   project, the other providers' entries unchanged, and the daemon replaces the whole set.
 
+Account assignment is rendered by `ProjectAccountAssignment.tsx` (`assignmentRowsFor`,
+`withAssignment`), split out of `ProjectsScreen.tsx`.
+
 Test IDs: `project-account-row-<projectId>-<provider>`, `project-account-select-<projectId>-<provider>`,
 `project-account-unavailable-<projectId>-<provider>`. Acceptance:
 `cypress/component/ProjectAccountsAcceptance.cy.tsx`.
+
+## Local gh
+
+`components/projects/ProjectLocalGh.tsx` holds the card's **Local gh** controls:
+
+- **`LocalGhToggle`** — a checkbox on the card. Turning it on sends `SetProjectAccounts` with the
+  project's assignments minus the GitHub one and `localGh: true`; turning it off sends `localGh:
+  false` and leaves no GitHub account assigned. `onSetProjectAccounts`' input carries `localGh`.
+- While it is on, the GitHub account row is **hidden** (the picker is not offered); other providers'
+  rows stay.
+- **`HostGithubState`** — one line per host row, shown while the toggle is on. It calls the
+  `loadHostGithubCli({ daemonInstanceId, githubHostname })` prop (`ProjectsAppPage` wires it to
+  `HostService.getHostTooling` on that host) for the project's GitHub host, which
+  `githubHostnameOf(gitUrl)` reads from the git URL (https, `ssh://`, scp-like; `null` when none, and
+  the line then says so instead of asking about a guessed host). It shows *checking*, *logged in to H
+  as login*, *not logged in to H*, *gh: not installed*, *could not be read (reason)*, or *could not be
+  read on this host*.
+
+Test IDs: `project-local-gh-toggle-<projectId>`, `project-host-gh-<projectId>-<daemonInstanceId>`;
+page-object helpers `localGhToggle`, `turnLocalGhOn`, `hostGhState`. Acceptance:
+`cypress/component/ProjectLocalGh.cy.tsx`. The card is the first production caller of
+`GetHostTooling`.
 
 ## Role derivation
 

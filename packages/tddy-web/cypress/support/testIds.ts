@@ -1412,6 +1412,15 @@ export const projectAccountSelect = (projectId: string, provider: string) =>
 export const projectAccountUnavailable = (projectId: string, provider: string) =>
   `project-account-unavailable-${projectId}-${provider}`;
 
+/** `[data-testid="project-local-gh-toggle-<projectId>"]` — the checkbox that sets a project to take
+ *  its GitHub identity from each host's own `gh` login instead of a vault account. */
+export const projectLocalGhToggle = (projectId: string) => `project-local-gh-toggle-${projectId}`;
+
+/** `[data-testid="project-host-gh-<projectId>-<daemonInstanceId>"]` — on a Local gh project's host
+ *  row: whether that host's `gh` is logged in for the project's GitHub host, and as whom. */
+export const projectHostGh = (projectId: string, daemonInstanceId: string) =>
+  `project-host-gh-${projectId}-${daemonInstanceId}`;
+
 // ---------------------------------------------------------------------------
 // Daemon selector dynamic helpers
 // ---------------------------------------------------------------------------

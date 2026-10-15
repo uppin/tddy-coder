@@ -75,6 +75,7 @@ fn given_a_registered_project(data_dir: &std::path::Path, os_user: &str) {
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         },
     )
     .expect("seed project");

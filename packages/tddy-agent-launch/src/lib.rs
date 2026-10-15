@@ -52,3 +52,5 @@ mod conversation_spawn_wiring_tests;
 mod host_session_socket_tests;
 #[cfg(test)]
 mod session_acting_identity_tests;
+#[cfg(test)]
+mod start_request_checks_unit_tests;

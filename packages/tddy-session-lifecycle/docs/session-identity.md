@@ -51,6 +51,54 @@ enforced: the agent's commits use the checkout's inherited `user.name` / `user.e
 token fallback — no credential is delivered, so a push cannot succeed as the wrong GitHub account
 through this seam.
 
+## Which source a session uses
+
+A project's sessions take their GitHub identity from the vault account it assigns (above) or, when
+the project row has `local_gh`, from the host's own GitHub CLI. The source is decided at start and at
+resume, in this order:
+
+1. `StartSessionRequest.github_source`, when set (a forwarded start fills it from the forwarding
+   host's row), is used and recorded in the session's directory as `github-source.yaml`;
+2. otherwise, on resume, the recorded file if present;
+3. otherwise this host's row (`local_gh` selects Local gh, else the vault assignment).
+
+A recorded source that cannot be read resolves nothing, logged; the session does not silently take
+the row's source instead. `LaunchHost::session_identity` implements this through
+`SessionAccountAccess::session_identity_in`, and `DaemonSessionHost::with_github_cli(GithubCli)`
+injects the `gh` it asks (production resolves `gh` on the spawned child's `PATH` per call, so one
+installed after the daemon started is found).
+
+### Local gh
+
+The identity is read once per start or resume, as the session's OS user, about the GitHub host the
+project's git URL names
+([host derivation](../../tddy-accounts/docs/github-identity-resolution.md#local-gh)):
+
+- `gh api user --hostname H` gives the login and id, from which the four commit pairs derive;
+- `TDDY_GITHUB_SOURCE=local-gh:H` is added beside them: not a secret, it tells the session's
+  processes which host's `gh` to ask;
+- `github_credential` is a handler that **refuses** with a Local gh reason, so the host-session
+  socket never answers a token. The token is read from `gh` by the process that needs it
+  ([toolcall](../../tddy-toolcall/docs/architecture.md#the-github_source_env-variable-and-local-gh)).
+
+When `gh` is missing, logged out for that host or failing, the session still starts, under the
+checkout's own identity, with the source entry present and the reason logged at `warn`; a step that
+later needs a token fails with `gh`'s own reason. This is the same consented exception as a refused
+vault resolution. A Local gh identity is read as the identity `gh` reports at the start, so a
+`gh auth login` as someone else takes effect at the next start or resume.
+
+**Sandboxed sessions.** The jailed agent's commands run host-side under the relay's environment. When
+the daemon runs as the session's OS user the identity is applied as for a vault account. When it
+serves several OS users, the relay would reach the daemon user's `gh`, so the session carries no
+identity there and the relay gets only `GH_CONFIG_DIR` pointing at an empty directory: `gh` in its
+commands is logged out
+([`relayed_by`](../../tddy-agent-launch/docs/module-layout.md#github-identity-of-a-session)). PR tools
+inside a jail cannot reach GitHub, which has no network.
+
+**Limit.** Child sessions (stack children and conversations) read this host's row, not the parent's
+forwarded source, and carry no `github-source.yaml`; see
+[the open TODO](../../../docs/dev/todo/2026-10-15-local-gh-child-sessions-and-telegram-gh.md).
+
 ## Which path carries what
 
 | Path | Commit pairs | Token handler | Where the pairs go |
@@ -151,8 +199,9 @@ desktop).
 
 ## Not available
 
-- A tool session started from Telegram gets no host-session socket and no commit identity from the
-  account — see the [telegram-control architecture](../../tddy-telegram-control/docs/architecture.md).
+- A tool session started from Telegram gets no host-session socket, and no commit identity from a
+  vault account; a Local gh project's start carries the `gh` identity — see the
+  [telegram-control architecture](../../tddy-telegram-control/docs/architecture.md).
 - Plain cursor-cli has no PR-tool token: it has no toolcall listener.
 - A running tool session is not re-registered after a daemon restart; it must be resumed.
 
@@ -163,4 +212,8 @@ records its environment), `tests/tool_session_host_socket.rs` (every recipe gets
 socket, token over the real socket, two sessions two accounts, no cross-session token, verbatim
 refusals, `GITHUB_TOKEN` rescues nothing, delete unregisters, stop and restart),
 `src/connection_service/session_acting_identity_tests.rs` (pinning), `host_session_socket_tests.rs`,
-`inherited_host_sockets_tests.rs`.
+`inherited_host_sockets_tests.rs`. Local gh: `tests/tool_session_local_gh.rs` (the real start and
+resume into a recording tool, driven by the `a_gh_cli` stub: the `gh` login's commit pairs, an
+Enterprise host, the source entry, a logged-out `gh`, a start naming the source on a host whose row was
+never set, resume from the recorded source and from the row, and no daemon token variable reaching
+`gh`).

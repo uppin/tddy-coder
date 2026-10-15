@@ -52,6 +52,16 @@ the web dashboard acts as the account; the same text is logged at `warn`. A proj
 is told nothing, since nothing is lost. Product view:
 [per-project GitHub identity](../../../docs/ft/daemon/github-identity.md).
 
+A **Local gh** project needs no vault, so its Telegram start does carry an identity:
+`workflow_spawn::telegram_git_environment(project, os_user, &GithubCli)` resolves the host's `gh` login
+as the OS user (`ProjectGithub::LocalGh`) into the same four pairs and `TDDY_GITHUB_SOURCE` a dashboard
+start carries, and `account_identity_unavailable_notice` returns `None` for it: nothing is
+unavailable, so the "start from the web dashboard" notice is not sent. A project that is not Local gh
+keeps the behaviour above. Limit: the `GithubCli` is built here (`GithubCli::on_spawn_child_path()`),
+so the host's injected one does not reach it; see
+[the open TODO](../../../docs/dev/todo/2026-10-15-local-gh-child-sessions-and-telegram-gh.md).
+This crate depends on `tddy-host-service` for it.
+
 A Telegram-started *tool* session is also started with **no host-session socket**: the socket answers
 from a registration the daemon's own session host makes at start, and this crate does not hold that
 host. Without a registration the socket would only refuse, so the flag is left off and the agent's

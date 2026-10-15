@@ -31,7 +31,7 @@ struct FakeToolingProbe {
 }
 
 impl HostToolingProbe for FakeToolingProbe {
-    fn probe(&self, os_user: &str) -> HostTooling {
+    fn probe(&self, os_user: &str, _github_hostname: Option<&str>) -> HostTooling {
         self.asked_about
             .lock()
             .expect("the recording lock is only held to push a name")
@@ -102,6 +102,7 @@ async fn tooling_reported_by(service: &HostServiceImpl) -> GetHostToolingRespons
             session_token: "valid".to_string(),
             // Empty means "the daemon serving the call", so nothing is routed to a peer.
             daemon_instance_id: String::new(),
+            github_hostname: String::new(),
         }))
         .await
         .expect("get_host_tooling should succeed for a valid session")

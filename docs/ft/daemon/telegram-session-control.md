@@ -216,7 +216,9 @@ PTY output is not streamed into Telegram; attach via web terminal or `pty-relay`
 
 ## GitHub account in Telegram-started sessions
 
-A Telegram start has an OS user and a Telegram-to-GitHub-login link, but **no session token**, and a vault opens only by an owner's session token. A Telegram-started session therefore starts under the checkout's own identity and **no GitHub token is ever available to it**. When the project assigns an account, the session's chat is told, after the start message on the workflow, Claude and Cursor paths, that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account is told nothing. See [per-project GitHub identity](github-identity.md).
+A Telegram start has an OS user and a Telegram-to-GitHub-login link, but **no session token**, and a vault opens only by an owner's session token. A Telegram-started session therefore starts under the checkout's own identity and **no GitHub token is ever available to it**. When the project assigns an account, the session's chat is told, after the start message on the workflow, Claude and Cursor paths, that the account's commits and the agent's GitHub tools are unavailable and why, and that starting from the web dashboard acts as the account; the same text is logged at `warn`. A project assigning no account is told nothing.
+
+A project set to **Local gh** needs no vault, so a Telegram start of it acts as the host's `gh` login: the session's commits carry that login's identity and its GitHub steps read the token from `gh`, exactly as for a dashboard start. The chat is not sent the "start from the web dashboard" notice for these projects, since nothing is unavailable. If `gh` is missing or logged out on that host the session starts under the checkout's identity and the reason is logged. See [per-project GitHub identity](github-identity.md#local-gh).
 
 ## Related documentation
 

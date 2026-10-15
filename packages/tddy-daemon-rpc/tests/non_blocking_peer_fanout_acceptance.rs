@@ -111,6 +111,7 @@ impl EligibleDaemonSource for AsyncPeerProjectsSource {
             main_branch_ref: String::new(),
             default_remote: String::new(),
             accounts: Vec::new(),
+            local_gh: false,
         }]
     }
 }
@@ -174,6 +175,7 @@ fn a_project_entry(project_id: &str) -> ProtoProjectEntry {
         main_branch_ref: String::new(),
         default_remote: String::new(),
         accounts: Vec::new(),
+        local_gh: false,
     }
 }
 

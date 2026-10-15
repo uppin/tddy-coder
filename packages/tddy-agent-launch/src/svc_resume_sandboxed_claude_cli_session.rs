@@ -44,6 +44,7 @@ impl LaunchSessions {
                 .session_identity(os_user, session_id, &meta.project_id, session_token);
         let pid = self
             .relaunch_sandboxed_runner(
+                os_user,
                 session_id,
                 &session_dir,
                 &worktree_path,

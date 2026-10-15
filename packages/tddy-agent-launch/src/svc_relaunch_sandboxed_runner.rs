@@ -60,6 +60,7 @@ impl LaunchSessions {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn relaunch_sandboxed_runner(
         &self,
+        os_user: &str,
         session_id: &str,
         session_dir: &Path,
         worktree_path: &Path,
@@ -122,6 +123,7 @@ impl LaunchSessions {
             managed_recipe,
             &context_dir,
             &tddy_tools_path,
+            os_user,
             identity,
         )?;
 

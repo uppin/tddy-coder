@@ -43,6 +43,15 @@ pub struct ProjectData {
     /// fields above do.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub accounts: Vec<AccountAssignment>,
+    /// The project's sessions take their GitHub identity from the host's own GitHub CLI login, as
+    /// the session's OS user, instead of from a vault account. A row with this set has no github
+    /// entry in `accounts`. Absent reads as `false`, and `false` is never written.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub local_gh: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -261,16 +270,38 @@ pub fn set_project_default_branch(
     write_projects(projects_dir, &projects)
 }
 
+/// A project asked to use local gh and a vault GitHub account at once.
+///
+/// Returned (inside the [`anyhow::Error`]) by [`set_project_accounts`] so a caller can tell this
+/// refusal of the request from a failure of the registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalGhWithGithubAccount;
+
+impl std::fmt::Display for LocalGhWithGithubAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "a project that uses local gh is assigned no github account; turn local gh off to assign one",
+        )
+    }
+}
+
+impl std::error::Error for LocalGhWithGithubAccount {}
+
 /// Replaces `project_id`'s whole account assignment set.
 ///
 /// Replace, never merge: two people editing a project's accounts concurrently cannot interleave
 /// into a set neither of them chose. An empty `accounts` clears every assignment, which is how a
 /// project is returned to unassigned. Refuses two entries naming the same provider, and errors when
 /// `project_id` is unknown.
+///
+/// `local_gh` is the project's whole Local gh setting, written in the same replace. A project that
+/// uses local gh takes its GitHub identity from each host's `gh`, so `local_gh` together with a
+/// `github` entry is refused and the row is left exactly as it was.
 pub fn set_project_accounts(
     projects_dir: &Path,
     project_id: &str,
     accounts: &[AccountAssignment],
+    local_gh: bool,
 ) -> anyhow::Result<()> {
     log::info!(
         "set_project_accounts: project_id={} accounts={}",
@@ -286,12 +317,16 @@ pub fn set_project_accounts(
             );
         }
     }
+    if local_gh && accounts.iter().any(|a| a.provider == "github") {
+        return Err(LocalGhWithGithubAccount.into());
+    }
     let mut projects = read_projects(projects_dir)?;
     let project = projects
         .iter_mut()
         .find(|p| p.project_id == project_id)
         .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
     project.accounts = accounts.to_vec();
+    project.local_gh = local_gh;
     write_projects(projects_dir, &projects)
 }
 
@@ -347,6 +382,7 @@ mod per_host_path_unit_tests {
             remote_name: None,
             host_repo_paths,
             accounts: Vec::new(),
+            local_gh: false,
         };
         write_projects(&projects_dir, &[project]).unwrap();
         let px = main_repo_path_for_host(&projects_dir, "p1", "unit-host-x")
@@ -578,6 +614,7 @@ mod project_integration_base_acceptance_tests {
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         };
         let r = add_project(&projects_dir, project);
         assert!(
@@ -607,6 +644,7 @@ mod project_integration_base_acceptance_tests {
             remote_name: None,
             host_repo_paths: HashMap::new(),
             accounts: Vec::new(),
+            local_gh: false,
         };
         add_project(&projects_dir, project).expect(
             "a safe <remote>/<path> must be accepted at the boundary regardless of the remote name",
@@ -644,6 +682,7 @@ mod set_project_default_branch_unit_tests {
                 remote_name: None,
                 host_repo_paths: HashMap::new(),
                 accounts: Vec::new(),
+                local_gh: false,
             },
         )
         .expect("seed project");

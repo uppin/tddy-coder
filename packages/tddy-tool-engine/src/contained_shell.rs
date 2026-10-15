@@ -26,6 +26,14 @@ use std::time::Duration;
 #[cfg(unix)]
 const TERMINATION_GRACE: Duration = Duration::from_millis(200);
 
+/// The variables `gh` honours ahead of its own login.
+const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
+
 /// Why a contained shell command produced no output.
 #[derive(Debug)]
 pub(crate) enum ContainedShellError {
@@ -73,6 +81,11 @@ pub(crate) async fn run_contained_argv(
     budget: Option<Duration>,
 ) -> Result<Output, ContainedShellError> {
     let mut spawn = tokio::process::Command::new(program);
+    // The environment is never a credential: a daemon that has one of these exported must not hand
+    // it to a relayed command, or `gh` would act as whoever exported it.
+    for token_variable in GITHUB_TOKEN_VARIABLES {
+        spawn.env_remove(token_variable);
+    }
     spawn
         .args(args)
         .current_dir(root)

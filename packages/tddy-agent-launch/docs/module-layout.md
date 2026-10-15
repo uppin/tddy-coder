@@ -71,6 +71,37 @@ The Claude and relaunch paths are cut into matching steps; the three paths remai
 launch sequence, and merging them waits on test coverage
 ([`docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md`](../../../docs/dev/todo/2026-09-24-lifecycle-shared-sandboxed-jail-launch-needs-coverage-first.md)).
 
+## GitHub identity of a session
+
+`session_acting_identity.rs` resolves what a session acts as, from one of two sources, into a
+`SessionIdentity { git_environment, github_credential, local_gh_hostname, is_local_gh }`
+(behaviour: [session identity](../../tddy-session-lifecycle/docs/session-identity.md)).
+
+- `ProjectGithub::{Vault(&[AccountAssignment]), LocalGh { os_user, git_url }}` names the source.
+  `SessionAccountAccess::project_session_identity` resolves it; `session_identity_in` picks the source
+  (the session's recorded `github-source.yaml`, else the row's `local_gh`) and resolves it.
+- `SessionAccountAccess::with_github_cli(GithubCli)` injects the `gh` the Local gh resolution asks;
+  the default is `GithubCli::on_spawn_child_path()`.
+- A Local gh identity carries the four commit pairs of the `gh` login plus `TDDY_GITHUB_SOURCE`, and a
+  `github_credential` that only refuses. When `gh` cannot answer the pairs are absent and the source
+  entry is still present; when the git URL names no host, neither is.
+- `is_local_gh` is set independently of the hostname, so the relay guard cannot be bypassed by a
+  project whose git URL names no host.
+- `SessionIdentity::relayed_by(RelayUser, logged_out_gh_config)` is what the jail launch and relaunch
+  (`jail_launch_steps.rs`) apply to the host-side relay: the identity unchanged when the relay runs as
+  the session's OS user (`RelayUser::SessionUser`, compared by uid) and for any vault identity;
+  otherwise, for a Local gh identity, only `GH_CONFIG_DIR=<empty dir under the data dir>`, so `gh` in
+  the relay's commands is logged out instead of acting as another user's login.
+- `local_gh_github_token(&GithubCli, os_user, git_url)` is what daemon-side operations use
+  (`RepointPlannedPr`): the host's `gh` token as the session's OS user, refused in `gh`'s or the
+  resolver's words.
+
+`start_request_checks.rs` holds the forwarding half: `forwarded_start_request(req, local_row)` fills an
+unset `StartSessionRequest.github_source` from this host's row before a start is forwarded to a peer
+(a request that already names one keeps it; no row names none), and `record_requested_github_source`
+writes the source a start named into the new session's directory (`github-source.yaml`, owned by
+`tddy-changeset`). A start that named none records nothing.
+
 ## Session RPC handlers
 
 `session_coordinate_handlers.rs` holds list, start, connect, the worktree snapshot and the streamed start,

@@ -232,6 +232,7 @@ async fn a_served_project(suffix: &str) -> AServedProject {
             remote_name: None,
             host_repo_paths: Default::default(),
             accounts: Vec::new(),
+            local_gh: false,
         }],
     )
     .expect("write projects.yaml");

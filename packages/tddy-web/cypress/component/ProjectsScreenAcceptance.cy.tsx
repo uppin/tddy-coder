@@ -171,6 +171,7 @@ it("adds a project to the selected host reusing the project's existing id", () =
       loadProjectBranches={noBranches}
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -197,6 +198,7 @@ it("offers only hosts that do not already host the project as add-to-host target
       loadProjectBranches={noBranches}
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -248,6 +250,7 @@ it("adds the project to the chosen host at the entered clone location", () => {
       loadProjectBranches={noBranches}
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -279,6 +282,7 @@ it("shows the base clone location advertised by a hosting daemon", () => {
       loadProjectBranches={noBranches}
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -304,6 +308,7 @@ it("shows the project's stored default branch as the selected branch", () => {
       }
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -325,6 +330,7 @@ it("pre-selects origin/master when a project has no stored default and master ex
       }
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -344,6 +350,7 @@ it("pre-selects origin/main when a project has no stored default and no master e
       loadProjectBranches={() => Promise.resolve({ branches: ["origin/dev", "origin/main"], defaultRemote: "origin" })}
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -365,6 +372,7 @@ it("offers every remote branch, including slash-containing names, as a selectabl
       }
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 
@@ -410,6 +418,7 @@ it("pre-selects <remote>/master for a project whose default remote is not origin
       }
       accounts={[]}
       onSetProjectAccounts={cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />,
   );
 

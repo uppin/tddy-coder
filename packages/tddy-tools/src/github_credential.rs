@@ -8,8 +8,10 @@
 //! PR tool returns to the agent. Nothing here reads `GITHUB_TOKEN` or `GH_TOKEN`, and with no socket
 //! there is no token: the absence of a host to ask is an error, not a cue to look elsewhere.
 
+#[cfg(test)]
 use std::path::Path;
 
+use tddy_core::toolcall::{request_github_token_from, SessionTokenSource};
 use tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi;
 
 /// The token of the account the session's project acts as, from the host listening on `socket`.
@@ -17,22 +19,46 @@ use tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi;
 /// `Err` carries the reason there is none, verbatim from the host when it refused. The PR tools are
 /// synchronous and run on the MCP server's runtime, so the request runs on a thread of its own with
 /// a runtime of its own rather than blocking inside the caller's.
+#[cfg(test)]
 pub(crate) fn github_token_from(socket: Option<&Path>) -> Result<String, String> {
+    github_token_of(&SessionTokenSource::HostSocket(
+        socket.map(Path::to_path_buf),
+    ))
+}
+
+/// The token of the source the calling process's own session names: the host's `gh` for a Local gh
+/// session, the `TDDY_SOCKET` host otherwise. A malformed source is an error.
+pub(crate) fn github_token_for_session() -> Result<String, String> {
+    github_token_of(&SessionTokenSource::from_environment()?)
+}
+
+fn github_token_of(source: &SessionTokenSource) -> Result<String, String> {
     std::thread::scope(|scope| {
         scope
             .spawn(|| {
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                    .map_err(|e| format!("could not start a runtime to ask the session host: {e}"))?
-                    .block_on(tddy_core::toolcall::request_github_token(socket))
+                    .map_err(|e| {
+                        format!("could not start a runtime to ask for a GitHub token: {e}")
+                    })?
+                    .block_on(request_github_token_from(source))
             })
             .join()
-            .map_err(|_| "asking the session host for a GitHub token panicked".to_string())?
+            .map_err(|_| "asking for a GitHub token panicked".to_string())?
     })
 }
 
 /// A GitHub client for `repo` that authenticates as the session's project account.
+pub(crate) fn github_api_for_session(repo: String) -> Result<RealGithubPrApi, String> {
+    Ok(RealGithubPrApi::with_token(
+        repo,
+        github_token_for_session()?,
+    ))
+}
+
+/// [`github_api_for_session`] against the host listening on `socket`.
+#[cfg(test)]
 pub(crate) fn github_api_for(
     repo: String,
     socket: Option<&Path>,

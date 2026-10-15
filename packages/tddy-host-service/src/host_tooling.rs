@@ -79,7 +79,21 @@ pub struct HostTooling {
 /// to be installed on the machine running them.
 pub trait HostToolingProbe: Send + Sync {
     /// Read both facts as `os_user`, bounded by [`PROBE_TIMEOUT`].
-    fn probe(&self, os_user: &str) -> HostTooling;
+    ///
+    /// `github_hostname` names the GitHub host `gh` is asked about (a Local gh project's); `None`
+    /// asks about every host `gh` is logged in to.
+    fn probe(&self, os_user: &str, github_hostname: Option<&str>) -> HostTooling;
+}
+
+/// The arguments `gh auth status` is run with: about `github_hostname` alone when one is named (a
+/// project's GitHub host), about every host `gh` is logged in to otherwise.
+pub fn gh_auth_status_args(github_hostname: Option<&str>) -> Vec<String> {
+    let mut args = vec!["auth".to_string(), "status".to_string()];
+    if let Some(hostname) = github_hostname {
+        args.push("--hostname".to_string());
+        args.push(hostname.to_string());
+    }
+    args
 }
 
 /// Classify the output of `gh auth status`.
@@ -154,7 +168,7 @@ fn parse_gh_login(output: &str) -> Option<&str> {
 }
 
 /// A one-line excerpt of unrecognised output, for an operator reading a failure reason.
-fn summarise(output: &str) -> String {
+pub(crate) fn summarise(output: &str) -> String {
     const MAX: usize = 200;
     let trimmed = output.trim();
     match trimmed.char_indices().nth(MAX) {
@@ -225,7 +239,7 @@ impl SubprocessHostToolingProbe {
 
 impl HostToolingProbe for SubprocessHostToolingProbe {
     #[cfg(unix)]
-    fn probe(&self, os_user: &str) -> HostTooling {
+    fn probe(&self, os_user: &str, github_hostname: Option<&str>) -> HostTooling {
         // Resolve both programs to absolute paths *before* spawning anything.
         // `start_output_as_user` deliberately anchors a relative program to the daemon's own
         // toolchain root and never consults `PATH` (see `spawner::resolve_tool_path`), so a bare
@@ -254,9 +268,11 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
         let email = git_program
             .as_deref()
             .map(|git| start_probe(os_user, git, &["config", "--global", "--get", "user.email"]));
-        let github_cli = gh_program
-            .as_deref()
-            .map(|gh| start_probe(os_user, gh, &["auth", "status"]));
+        let gh_args = gh_auth_status_args(github_hostname);
+        let github_cli = gh_program.as_deref().map(|gh| {
+            let gh_args: Vec<&str> = gh_args.iter().map(String::as_str).collect();
+            start_probe(os_user, gh, &gh_args)
+        });
 
         // Collected before the two commands for the reason it was started before them: a struct
         // literal evaluates its fields in order, and a probe still in flight when it is collected is
@@ -305,7 +321,7 @@ impl HostToolingProbe for SubprocessHostToolingProbe {
     /// the platform, not a failure of this host's tooling, and it says so rather than surfacing an
     /// internal error an operator would try to fix.
     #[cfg(not(unix))]
-    fn probe(&self, _os_user: &str) -> HostTooling {
+    fn probe(&self, _os_user: &str, _github_hostname: Option<&str>) -> HostTooling {
         // The desktop block is the one thing here that is *not* unsupported off Unix, so it is
         // probed rather than declared away. Nothing it does needs `start_output_as_user`: it is a
         // TCP connect to this machine's own loopback plus an existence check on a path, and both
@@ -577,10 +593,10 @@ fn github_cli_of(probed: Result<ProbeOutput, String>) -> GithubCliStatus {
 
 /// What one probe command produced: how it exited, and everything it wrote.
 #[cfg(unix)]
-struct ProbeOutput {
-    status: std::process::ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+pub(crate) struct ProbeOutput {
+    pub(crate) status: std::process::ExitStatus,
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
 /// The bytes a probe command wrote, once both of its pipes reached EOF.
@@ -592,7 +608,7 @@ struct Written {
 
 /// One probe command, started as `os_user`, with its output being read on a thread of its own.
 #[cfg(unix)]
-struct StartedProbe {
+pub(crate) struct StartedProbe {
     /// The command line, for a failure reason an operator can act on.
     command: String,
     /// `Err` when the command never started: there is nothing to wait for, and nothing to kill.
@@ -620,7 +636,7 @@ struct RunningProbe {
 /// Starting is not waiting: this returns as soon as the child exists, so `probe` can start all
 /// three commands before collecting any of them and spend one deadline on the lot.
 #[cfg(unix)]
-fn start_probe(os_user: &str, program: &std::path::Path, args: &[&str]) -> StartedProbe {
+pub(crate) fn start_probe(os_user: &str, program: &std::path::Path, args: &[&str]) -> StartedProbe {
     let owned_args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
     let command = format!("{} {}", program.display(), args.join(" "));
     StartedProbe {
@@ -695,7 +711,7 @@ impl StartedProbe {
     ///
     /// A command that ran out of time reports a failure, never a finding: nothing was read, so
     /// there is nothing this probe is entitled to say about the host.
-    fn collect(self, deadline: std::time::Instant) -> Result<ProbeOutput, String> {
+    pub(crate) fn collect(self, deadline: std::time::Instant) -> Result<ProbeOutput, String> {
         let StartedProbe { command, running } = self;
         let running = running?;
         let remaining = deadline.saturating_duration_since(std::time::Instant::now());
@@ -760,6 +776,26 @@ impl RunningProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gh_probe_for_a_named_host_asks_gh_about_that_host() {
+        // Given a Local gh project on an Enterprise host
+        // When the probe's gh arguments are built for it
+        let args = gh_auth_status_args(Some("github.example.com"));
+
+        // Then gh is asked about that host only
+        assert_eq!(args, ["auth", "status", "--hostname", "github.example.com"]);
+    }
+
+    #[test]
+    fn the_gh_probe_with_no_host_named_asks_gh_about_every_host() {
+        // Given the Hosts screen, which names no GitHub host
+        // When the probe's gh arguments are built
+        let args = gh_auth_status_args(None);
+
+        // Then gh is asked about every host it is logged in to, as before
+        assert_eq!(args, ["auth", "status"]);
+    }
 
     /// The OS user this test process already runs as — the one account it can start a child as
     /// without privilege, and the same one `run_capture_as_user`'s tests use.
@@ -890,7 +926,7 @@ mod tests {
             ]));
 
         // When
-        let tooling = probe.probe(&the_current_os_user());
+        let tooling = probe.probe(&the_current_os_user(), None);
 
         // Then — each protocol reports both facts, and the two disagree in opposite directions
         let vnc = the_reading_for(&tooling, DesktopProtocol::Vnc);
@@ -932,7 +968,7 @@ mod tests {
             ]));
 
         // When
-        let tooling = probe.probe(&the_current_os_user());
+        let tooling = probe.probe(&the_current_os_user(), None);
 
         // Then — the desktop block reports one reading per probed protocol ...
         assert_eq!(

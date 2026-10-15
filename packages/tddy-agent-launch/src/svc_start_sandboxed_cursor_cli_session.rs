@@ -232,7 +232,7 @@ impl LaunchSessions {
         let identity = self
             .host
             .session_identity(os_user, session_id, project_id, session_token);
-        let mut session_env: Vec<(String, String)> = identity.git_environment;
+        let (mut session_env, github_credential) = self.jail_relay_identity(identity, os_user)?;
         if let Some(recipe) = managed_recipe.clone() {
             let launch = self.prepare_managed_workflow(
                 session_id,
@@ -243,7 +243,7 @@ impl LaunchSessions {
                 &tddy_tools_path,
                 None,
                 None,
-                identity.github_credential,
+                github_credential,
             )?;
             if let Ok(prompt) = std::fs::read_to_string(&launch.prompt_file) {
                 let rules_dir = worktree_path.join(".cursor").join("rules");

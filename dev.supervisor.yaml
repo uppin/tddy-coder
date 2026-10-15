@@ -69,8 +69,9 @@ shutdown_grace_secs: 5
 #   # execution as the session user).
 #   # A project assigned a GitHub account also has its tool sessions spawned with GIT_AUTHOR_NAME,
 #   # GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL (its commit identity; never a
-#   # token) — list them too, or those spawns are refused.
-#   allowed_env_keys: [RUST_LOG, GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL]
+#   # token) — list them too, or those spawns are refused. So does a Local gh project's tool session,
+#   # which is also spawned with TDDY_GITHUB_SOURCE (which GitHub host's `gh` it asks; not a secret).
+#   allowed_env_keys: [RUST_LOG, GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL, TDDY_GITHUB_SOURCE]
 
 # ACTIVE, not commented out, and it has to be for a dev run to start at all. At startup the supervisor
 # moves itself into `<base>/<supervisor_leaf>` and delegates `controllers` into the base's
