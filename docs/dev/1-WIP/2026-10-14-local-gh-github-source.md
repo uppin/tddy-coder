@@ -569,6 +569,14 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 ## Validation Results
 
 ### /validate-changes
+
+**2026-10-15 — non-stack branch (base `master`), no Critical.** Risk summary: Critical 0 · Warning 1 · Info 1.
+- ✅ `cargo check --all-targets` on all 22 touched Rust packages (excl. `tddy-web`, generated TS): no errors, no warnings.
+- ✅ No `todo!()` / `unimplemented!()` left in `packages/*/src`; no `println!`/`eprintln!`/`dbg!` added; every added `unwrap`/`expect` is inside a test module or the `tddy-testing-commons` stub builder; no real secrets (the `gho_…`/`ghp_…` strings are fixture values).
+- ✅ Changeset items M1–M10 implemented; the deferrals are recorded in [2026-10-15-local-gh-child-sessions-and-telegram-gh.md](../todo/2026-10-15-local-gh-child-sessions-and-telegram-gh.md) and [2026-10-15-local-gh-oversized-files-deferred.md](../todo/2026-10-15-local-gh-oversized-files-deferred.md).
+- ⚠ **WARNING** `tddy-accounts/src/local_gh.rs::github_hostname_of` returns whatever sits in the host position without validating it as a hostname (empty is refused; a leading `-`, whitespace or `=` is not). The value reaches `gh ... --hostname H` as its own argv element, so it is not shell-injectable, and it is also written into `TDDY_GITHUB_SOURCE=local-gh:H`. Tighten to a DNS-name/IPv6-literal check and refuse otherwise (`UnreadableGitUrl`).
+- ℹ **INFO** `github_token_from` / `github_api_for` in `tddy-tools/src/github_credential.rs` are now `#[cfg(test)]`-only helpers beside the `_for_session` production variants; consider folding them.
+
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
