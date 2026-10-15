@@ -29,3 +29,7 @@ The file is one inherent `impl ProjectRpcHandler` (L26–528), so its methods ca
 From this first reading, Seam A alone brings the file to about 355 lines. Prove the seams with `restructure check --deep` before applying them.
 
 **Stack constraint:** `#keyring` dependents #510–#516 are still open, so no split lands until that stack does. No dependent is known to touch this file. #510 does edit its session-lifecycle counterpart, `connection_service/project_coordinate_handlers.rs`.
+
+## Measurement update 2026-10-15 — #622 (local gh)
+
+**Regressed, split deferred with consent:** 650 → 658 production lines. `SetProjectAccounts` carries `local_gh` and maps the storage refusal to `InvalidArgument`. See [2026-10-15-local-gh-oversized-files-deferred.md](../../../../docs/dev/todo/2026-10-15-local-gh-oversized-files-deferred.md).

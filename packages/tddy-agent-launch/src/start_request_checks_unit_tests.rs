@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use tddy_projects::project_storage::ProjectData;
 use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
-use crate::start_request_checks::forwarded_start_request;
+use crate::start_request_checks::{forwarded_start_request, record_requested_github_source};
 
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
 
@@ -98,4 +98,35 @@ fn a_forwarded_start_is_otherwise_the_request_as_received() {
         },
         req
     );
+}
+
+#[test]
+fn a_start_that_carried_a_source_records_it_in_the_sessions_github_source_file() {
+    // Given a start naming Local gh and a session directory that does not exist yet
+    let scratch = tempfile::tempdir().unwrap();
+    let session_dir = scratch.path().join("session-1");
+    let req = a_start_naming(GithubSource::LocalGh);
+
+    // When the start's source is recorded
+    record_requested_github_source(&req, &session_dir).unwrap();
+
+    // Then the sidecar file exists and reads back as Local gh
+    assert!(session_dir.join("github-source.yaml").is_file());
+    assert_eq!(
+        tddy_core::read_session_github_source(&session_dir).unwrap(),
+        Some(tddy_core::SessionGithubSource::LocalGh)
+    );
+}
+
+#[test]
+fn a_start_that_named_no_source_writes_no_github_source_file() {
+    // Given a start naming no source
+    let scratch = tempfile::tempdir().unwrap();
+    let req = a_start_naming(GithubSource::Unspecified);
+
+    // When the start's source is recorded
+    record_requested_github_source(&req, scratch.path()).unwrap();
+
+    // Then nothing is written: resumes read this host's row again
+    assert!(!scratch.path().join("github-source.yaml").exists());
 }

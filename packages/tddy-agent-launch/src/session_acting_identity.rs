@@ -182,6 +182,10 @@ pub struct SessionIdentity {
     /// Set even when `gh` could not answer at start, so the steps that later need a token fail in
     /// `gh`'s own words.
     pub local_gh_hostname: Option<String>,
+    /// Whether the session's GitHub identity is the host's `gh` login. Independent of the
+    /// hostname: a project whose git URL names no host is Local gh with no hostname, and its
+    /// relay must still carry a logged-out `gh`.
+    pub is_local_gh: bool,
 }
 
 /// Where a project's sessions take their GitHub identity from, as the session start resolved it.
@@ -215,8 +219,8 @@ impl SessionIdentity {
         relay: RelayUser,
         logged_out_gh_config: &Path,
     ) -> Vec<(String, String)> {
-        match (&self.local_gh_hostname, relay) {
-            (Some(_), RelayUser::OtherUser) => vec![(
+        match (self.is_local_gh, relay) {
+            (true, RelayUser::OtherUser) => vec![(
                 "GH_CONFIG_DIR".to_string(),
                 logged_out_gh_config.display().to_string(),
             )],
@@ -253,6 +257,7 @@ impl SessionAccountAccess {
                 git_environment: Vec::new(),
                 github_credential: None,
                 local_gh_hostname: None,
+                is_local_gh: false,
             };
         };
         // The one resolution of this start: the commit pairs and the handler both derive from its
@@ -281,6 +286,7 @@ impl SessionAccountAccess {
                 pinned,
             })),
             local_gh_hostname: None,
+            is_local_gh: false,
         }
     }
 
@@ -371,6 +377,7 @@ impl SessionAccountAccess {
                     git_environment: Vec::new(),
                     github_credential,
                     local_gh_hostname: None,
+                    is_local_gh: true,
                 };
             }
         };
@@ -394,6 +401,7 @@ impl SessionAccountAccess {
             git_environment,
             github_credential,
             local_gh_hostname: Some(hostname),
+            is_local_gh: true,
         }
     }
 }

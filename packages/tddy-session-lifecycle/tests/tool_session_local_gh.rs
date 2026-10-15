@@ -23,8 +23,7 @@ use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_host_service::GithubCli;
 use tddy_rpc::Request;
 use tddy_service::proto::session::{
-    GithubSource, ResumeSessionRequest, SessionService as SessionServiceTrait,
-    StartSessionRequest,
+    GithubSource, ResumeSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
 };
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
@@ -102,7 +101,11 @@ fn a_project_this_host_never_set() -> ProjectRow {
 fn register_project(data_dir: &Path, repo: &Path, row: ProjectRow) {
     let projects_dir = data_dir.join("projects");
     std::fs::create_dir_all(&projects_dir).unwrap();
-    let local_gh = if row.local_gh { "    local_gh: true\n" } else { "" };
+    let local_gh = if row.local_gh {
+        "    local_gh: true\n"
+    } else {
+        ""
+    };
     std::fs::write(
         projects_dir.join("projects.yaml"),
         format!(
@@ -174,7 +177,10 @@ impl ChildEnvironment {
     }
 
     fn lines_containing(&self, needle: &str) -> Vec<&str> {
-        self.0.lines().filter(|line| line.contains(needle)).collect()
+        self.0
+            .lines()
+            .filter(|line| line.contains(needle))
+            .collect()
     }
 }
 
@@ -192,7 +198,9 @@ struct World {
 /// `gh_as` builds the host's `gh` stub in the directory it is given.
 fn a_host_where(
     row: ProjectRow,
-    gh_as: impl FnOnce(tddy_testing_commons::gh_cli::GhCliStub) -> tddy_testing_commons::gh_cli::GhCliStub,
+    gh_as: impl FnOnce(
+        tddy_testing_commons::gh_cli::GhCliStub,
+    ) -> tddy_testing_commons::gh_cli::GhCliStub,
 ) -> World {
     // The commit identity under test is the daemon's to add; one inherited from whoever runs the
     // suite would be indistinguishable from it.
@@ -228,7 +236,8 @@ fn a_host_where(
 
 impl World {
     async fn start_a_tool_session(&self) {
-        self.start_a_tool_session_naming(GithubSource::Unspecified).await;
+        self.start_a_tool_session_naming(GithubSource::Unspecified)
+            .await;
     }
 
     async fn start_a_tool_session_naming(&self, github_source: GithubSource) {
@@ -350,7 +359,8 @@ async fn a_local_gh_tool_session_is_told_its_github_source_and_host() {
 async fn a_local_gh_tool_session_starts_with_no_token_in_any_variable() {
     // Given a Local gh project, and gh logged in as ada holding a token
     let world = a_host_where(a_local_gh_project_at(GITHUB_COM_URL), |gh| {
-        gh.logged_in_as("ada", 101).with_token("gho_ada_from_the_hosts_gh")
+        gh.logged_in_as("ada", 101)
+            .with_token("gho_ada_from_the_hosts_gh")
     });
 
     // When a tool session is started

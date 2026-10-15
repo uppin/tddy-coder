@@ -3,14 +3,24 @@
 **Date**: 2026-10-14
 **Status**: 🚧 In Progress — 🟡 implementation written for M1–M10; **WIP draft, checks skipped** — scoped runs reported passing per package by the implementing agents, not yet confirmed by CI
 
-> **Implementation state (2026-10-15).** M1–M10 are implemented. Open items, marked ⚠:
-> - ⚠ **Relay guard hole:** a Local gh project whose git URL is unreadable gets `local_gh_hostname: None`, so `relayed_by` cannot tell it is Local gh and a jail relay run by another user carries no logged-out `GH_CONFIG_DIR`. Needs a hostname-independent Local gh marker on `SessionIdentity`.
-> - ⚠ Child sessions (conversations, stack children) read this host's row, not the parent's forwarded source.
-> - ⚠ Telegram builds its own `GithubCli`; `with_github_cli` does not reach it.
-> - ⚠ No tests for the sidecar write on start, or the Local gh branch of the repoint closure.
-> - ⚠ Red-phase test files not rustfmt-clean (`session_acting_identity_tests.rs`, `tool_session_local_gh.rs`); `set_project_local_gh.rs` fails `clippy --all-targets` on `assert_eq!(x, true/false)`.
-> - ⚠ 16 `tddy-session-lifecycle` sandbox tests fail with "sandbox RPC bridge not installed" (known harness gap, predates this change); `session_sync_livekit_acceptance` needs `tddy-remote-git-repo` built.
-> - ⚠ One unidentified flake seen once in `ProjectLocalGh.cy.tsx`.
+> **Implementation state (2026-10-15, after /pr-wrap gate work).** M1–M10 are implemented.
+> Scoped runs: `tddy-agent-launch` + `tddy-daemon-rpc` + `tddy-session-lifecycle` 739 passed / 16 failed;
+> the 16 are the known "sandbox RPC bridge not installed" harness gap (sandbox suites), not this change.
+> Cypress: `ProjectLocalGh` 6/6, `ProjectsScreenAcceptance` 13/13, `ProjectAccountsAcceptance` 8/8.
+> Scoped clippy `--all-targets -D warnings` clean on agent-launch, session-lifecycle, daemon-rpc.
+>
+> **Fixed since the draft:** the relay-guard hole (`SessionIdentity.is_local_gh`, test-first); sidecar-write and
+> repoint tests added (`repoint_local_gh_token.rs`); red-phase test fmt/clippy hygiene;
+> `svc_start_session_core.rs` 504 → 493 and `ProjectsScreen.tsx` 585 → 458 production lines.
+>
+> **Still open (⚠):**
+> - Child sessions (conversations, stack children) read this host's row, not the parent's forwarded source.
+> - Telegram builds its own `GithubCli`; `with_github_cli` does not reach it.
+> - One unidentified flake seen once in `ProjectLocalGh.cy.tsx` (not reproduced in later runs).
+> - `session_sync_livekit_acceptance` needs `tddy-remote-git-repo` built (unrelated).
+> - Oversized files this change grew, deferred with consent: see
+>   [2026-10-15-local-gh-oversized-files-deferred.md](../todo/2026-10-15-local-gh-oversized-files-deferred.md).
+> - Validation steps (/validate-changes, /validate-tests, /validate-prod-ready, /analyze-clean-code) and the docs wrap have **not** run.
 **Type**: Feature
 
 ## Initial Discovery

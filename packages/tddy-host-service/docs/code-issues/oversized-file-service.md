@@ -29,3 +29,7 @@
 Seams B, C and D sit inside a trait impl. Their bodies move to free functions and the impl keeps delegating stubs. From this first reading, A+B+C take it to about 510 lines with stubs, so D is also needed to get under budget. Prove the seams with `restructure check --deep` before applying them.
 
 **Stack constraint:** `#keyring` dependents #510–#516 are still open, so no split lands until that stack does. `#keyring` 3/9 (#510) touches this file, so a split now would conflict with it.
+
+## Measurement update 2026-10-15 — #622 (local gh)
+
+**Regressed, split deferred with consent:** 934 → 937 production lines. `get_host_tooling` forwards `github_hostname` to the probe. See [2026-10-15-local-gh-oversized-files-deferred.md](../../../../docs/dev/todo/2026-10-15-local-gh-oversized-files-deferred.md).

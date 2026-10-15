@@ -1,7 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ProjectEntry } from "../../gen/session_pb";
-import { ProbeOutcome, type HostGithubCli } from "../../gen/host_pb";
 import type { DaemonHost } from "../../lib/participantRole";
+import {
+  assignmentRowsFor,
+  withAssignment,
+  type AssignableAccount,
+} from "./ProjectAccountAssignment";
+import {
+  githubHostnameOf,
+  HostGithubState,
+  LocalGhToggle,
+  type LoadHostGithubCli,
+} from "./ProjectLocalGh";
+
+export type { AssignableAccount };
 
 /**
  * Presentational Projects screen: lists projects grouped by logical `projectId` (a project may
@@ -51,20 +63,7 @@ export interface ProjectsScreenProps {
    * What one host's `gh` says about the project's GitHub host (`GetHostTooling` with
    * `githubHostname`). Asked for each host of a Local gh project.
    */
-  loadHostGithubCli: (input: {
-    daemonInstanceId: string;
-    githubHostname: string;
-  }) => Promise<HostGithubCli>;
-}
-
-/**
- * One account a project can be assigned, flattened from `ListAccountsResponse`. An account id is
- * unique only **within** its provider, so both halves travel together everywhere.
- */
-export interface AssignableAccount {
-  provider: string;
-  accountId: string;
-  label: string;
+  loadHostGithubCli: LoadHostGithubCli;
 }
 
 interface ProjectGroup {
@@ -99,67 +98,6 @@ function groupByProject(projects: ProjectEntry[]): ProjectGroup[] {
     group.hosts.push({ daemonInstanceId: p.daemonInstanceId, mainRepoPath: p.mainRepoPath });
   }
   return groups;
-}
-
-interface AssignmentRow {
-  provider: string;
-  /** "" when the project holds no assignment at this provider. */
-  assignedAccountId: string;
-  /** The assigned account is not among this host's vault accounts for the provider. */
-  assignedUnavailable: boolean;
-  options: AssignableAccount[];
-}
-
-/**
- * One row per provider the vault holds an account at, in vault order, plus a row for any provider
- * the project is assigned at whose account this host does not know — that assignment is still real
- * and must be visible, as "unavailable", never silently shown as unassigned.
- */
-function assignmentRowsFor(
-  assigned: { provider: string; accountId: string }[],
-  vault: AssignableAccount[],
-): AssignmentRow[] {
-  const providers = [...new Set([...vault.map((a) => a.provider), ...assigned.map((a) => a.provider)])];
-  return providers.map((provider) => {
-    const options = vault.filter((a) => a.provider === provider);
-    const assignedAccountId = assigned.find((a) => a.provider === provider)?.accountId ?? "";
-    return {
-      provider,
-      assignedAccountId,
-      assignedUnavailable:
-        assignedAccountId !== "" && !options.some((a) => a.accountId === assignedAccountId),
-      options,
-    };
-  });
-}
-
-/** The whole assignment set with one provider's entry replaced, or removed when `accountId` is "". */
-function withAssignment(
-  assigned: { provider: string; accountId: string }[],
-  provider: string,
-  accountId: string,
-): { provider: string; accountId: string }[] {
-  const others = assigned.filter((a) => a.provider !== provider);
-  if (accountId === "") return others;
-  const existing = assigned.some((a) => a.provider === provider);
-  return existing
-    ? assigned.map((a) => (a.provider === provider ? { provider, accountId } : a))
-    : [...others, { provider, accountId }];
-}
-
-/**
- * The GitHub host a git URL names: `https://H/..`, `ssh://git@H[:port]/..` or scp-like `git@H:..`.
- * `null` when the URL names none, so the caller can say so instead of asking about a guessed host.
- */
-function githubHostnameOf(gitUrl: string): string | null {
-  const url = gitUrl.trim();
-  const scpLike = /^[^/@\s]+@([^/:\s]+):(?!\/\/)/.exec(url);
-  if (scpLike) return scpLike[1];
-  try {
-    return new URL(url).hostname || null;
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -290,7 +228,7 @@ function ProjectCard({
   loadProjectBranches: ProjectsScreenProps["loadProjectBranches"];
   accounts: ProjectsScreenProps["accounts"];
   onSetProjectAccounts: ProjectsScreenProps["onSetProjectAccounts"];
-  loadHostGithubCli: ProjectsScreenProps["loadHostGithubCli"];
+  loadHostGithubCli: LoadHostGithubCli;
 }) {
   const hostingIds = useMemo(
     () => new Set(group.hosts.map((h) => h.daemonInstanceId)),
@@ -389,15 +327,7 @@ function ProjectCard({
         </select>
       </div>
 
-      <label className="mb-3 flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          data-testid={`project-local-gh-toggle-${group.projectId}`}
-          checked={group.localGh}
-          onChange={(e) => setLocalGh(e.target.checked)}
-        />
-        <span>Local gh</span>
-      </label>
+      <LocalGhToggle projectId={group.projectId} checked={group.localGh} onChange={setLocalGh} />
 
       <div className="mb-3 flex flex-col gap-1">
         {assignmentRows.map((row) => (
@@ -524,62 +454,5 @@ function ProjectCard({
         ) : null}
       </div>
     </div>
-  );
-}
-
-/** What one host's own `gh` says about the project's GitHub host, for a Local gh project. */
-function HostGithubState({
-  projectId,
-  daemonInstanceId,
-  githubHostname,
-  loadHostGithubCli,
-}: {
-  projectId: string;
-  daemonInstanceId: string;
-  githubHostname: string | null;
-  loadHostGithubCli: ProjectsScreenProps["loadHostGithubCli"];
-}) {
-  const [cli, setCli] = useState<HostGithubCli | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    if (githubHostname === null) return;
-    let cancelled = false;
-    setFailed(false);
-    loadHostGithubCli({ daemonInstanceId, githubHostname })
-      .then((loaded) => {
-        if (!cancelled) setCli(loaded);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [loadHostGithubCli, daemonInstanceId, githubHostname]);
-
-  let text: string;
-  if (githubHostname === null) {
-    text = "gh: the project's git URL names no GitHub host";
-  } else if (failed) {
-    text = `gh: could not be read on this host for ${githubHostname}`;
-  } else if (cli === null) {
-    text = "gh: checking...";
-  } else if (cli.outcome !== ProbeOutcome.OK) {
-    text = `gh: could not be read${cli.failureReason ? ` (${cli.failureReason})` : ""}`;
-  } else if (!cli.installed) {
-    text = "gh: not installed";
-  } else if (!cli.authenticated) {
-    text = `gh: not logged in to ${githubHostname}`;
-  } else {
-    text = `gh: logged in to ${githubHostname} as ${cli.login}`;
-  }
-
-  return (
-    <span
-      data-testid={`project-host-gh-${projectId}-${daemonInstanceId}`}
-      className="text-muted-foreground"
-    >
-      {text}
-    </span>
   );
 }

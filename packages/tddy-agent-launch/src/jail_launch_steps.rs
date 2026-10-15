@@ -39,7 +39,7 @@ impl LaunchSessions {
         os_user: &str,
     ) -> Result<JailRelayIdentity, Status> {
         // Only a Local gh identity depends on whose `gh` the relay reaches.
-        if identity.local_gh_hostname.is_none() {
+        if !identity.is_local_gh {
             let github_credential = identity.github_credential.clone();
             return Ok((identity.git_environment, github_credential));
         }

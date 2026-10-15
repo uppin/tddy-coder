@@ -97,6 +97,26 @@ impl LaunchSessions {
         Ok(inner)
     }
 
+    /// Forward a start to a peer, naming the GitHub source this host's own row of the project gives
+    /// it: the peer may hold no (or a stale) copy of the project. No row here: nothing to name.
+    pub(super) async fn forward_start_naming_local_source(
+        &self,
+        req: &StartSessionRequest,
+        os_user: &str,
+        peer_instance_id: String,
+    ) -> Result<StartSessionResponse, Status> {
+        let local_row = service_util::find_registered_project(
+            &self.tddy_data_dir,
+            os_user,
+            req.project_id.trim(),
+        )
+        .ok()
+        .map(|(_, project)| project);
+        let forwarded = forwarded_start_request(req, local_row.as_ref());
+        self.forward_start_session(&forwarded, peer_instance_id)
+            .await
+    }
+
     pub(super) async fn provision_project_for_start(
         &self,
         req: &StartSessionRequest,

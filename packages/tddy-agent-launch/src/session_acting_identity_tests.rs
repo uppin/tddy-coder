@@ -779,7 +779,33 @@ fn a_local_gh_identity_relayed_by_another_os_user_carries_only_a_logged_out_gh()
     // Then that relay's gh is logged out, and no commit identity is claimed
     assert_eq!(
         relayed,
-        vec![("GH_CONFIG_DIR".to_string(), logged_out.display().to_string())]
+        vec![(
+            "GH_CONFIG_DIR".to_string(),
+            logged_out.display().to_string()
+        )]
+    );
+}
+
+#[test]
+fn an_unreadable_git_url_local_gh_identity_relayed_by_another_os_user_carries_only_a_logged_out_gh()
+{
+    // Given a Local gh session whose project's git URL names no host
+    let dir = tempfile::tempdir().unwrap();
+    let access = access_where_gh_is_logged_in_as_ada(dir.path());
+    let os_user = the_current_os_user();
+    let identity = access.project_session_identity("s1", a_local_gh_project_at(&os_user, ""));
+    let logged_out = dir.path().join("logged-out-gh");
+
+    // When a relay running as another OS user applies it
+    let relayed = identity.relayed_by(RelayUser::OtherUser, &logged_out);
+
+    // Then that relay's gh is still logged out: the session is Local gh with or without a host
+    assert_eq!(
+        relayed,
+        vec![(
+            "GH_CONFIG_DIR".to_string(),
+            logged_out.display().to_string()
+        )]
     );
 }
 

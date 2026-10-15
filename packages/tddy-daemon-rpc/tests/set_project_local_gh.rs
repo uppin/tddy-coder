@@ -203,8 +203,8 @@ async fn turning_local_gh_on_stores_it_and_list_projects_carries_it() {
         .expect("the setting is accepted");
 
     // Then the registry and the listing both say so
-    assert_eq!(world.stored_row().local_gh, true);
-    assert_eq!(world.listed_project().await.local_gh, true);
+    assert!(world.stored_row().local_gh);
+    assert!(world.listed_project().await.local_gh);
 }
 
 #[tokio::test]
@@ -231,7 +231,7 @@ async fn turning_local_gh_on_keeps_every_other_providers_assignment() {
         stored.accounts,
         vec![an_assignment("cloudflare", "acct-edge")]
     );
-    assert_eq!(stored.local_gh, true);
+    assert!(stored.local_gh);
 }
 
 #[tokio::test]
@@ -252,7 +252,7 @@ async fn a_local_gh_project_assigned_a_github_account_is_refused_naming_both() {
         "the refusal must name both GitHub sources, got: {}",
         refusal.message()
     );
-    assert_eq!(world.stored_row().local_gh, false);
+    assert!(!world.stored_row().local_gh);
     assert_eq!(world.stored_row().accounts, Vec::new());
 }
 
@@ -268,7 +268,7 @@ async fn turning_local_gh_off_leaves_the_project_with_no_github_account() {
         .expect("the setting is accepted");
 
     // Then the project uses the vault again, with no GitHub account assigned
-    assert_eq!(world.stored_row().local_gh, false);
+    assert!(!world.stored_row().local_gh);
     assert_eq!(
         world.stored_row().accounts,
         vec![a_stored_assignment("cloudflare", "acct-edge")]
