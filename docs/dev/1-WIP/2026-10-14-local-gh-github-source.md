@@ -13,6 +13,8 @@
 > repoint tests added (`repoint_local_gh_token.rs`); red-phase test fmt/clippy hygiene;
 > `svc_start_session_core.rs` 504 → 493 and `ProjectsScreen.tsx` 585 → 458 production lines.
 >
+> **Deferred with consent (2026-10-15), see [2026-10-15-local-gh-child-sessions-and-telegram-gh.md](../todo/2026-10-15-local-gh-child-sessions-and-telegram-gh.md):** child sessions, Telegram `GithubCli`, the Cypress flake, blocking `gh` calls.
+>
 > **Still open (⚠):**
 > - Child sessions (conversations, stack children) read this host's row, not the parent's forwarded source.
 > - Telegram builds its own `GithubCli`; `with_github_cli` does not reach it.
