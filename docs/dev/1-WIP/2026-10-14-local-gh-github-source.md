@@ -561,6 +561,9 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 ### From /validate-changes
 ### From /validate-tests
 
+- Serialize or isolate the env-mutating tests listed under Validation Results → /validate-tests (agent-launch, session-lifecycle `tool_session_local_gh.rs`, pty `runtime.rs`).
+- Add a probe-forwarding test for `GetHostTooling.github_hostname`.
+
 - `tddy-toolcall`'s two test files carry their own small `gh` stubs instead of `tddy_testing_commons::gh_cli`, because `tddy-testing-commons` depends on `tddy-core`, which depends on `tddy-toolcall`. If the stub wording changes, change all three together.
 - `ProjectsScreen.loadHostGithubCli` is a required prop. `ProjectsScreenAcceptance.cy.tsx` and `ProjectAccountsAcceptance.cy.tsx` do not pass it yet: tsc is not a gate here, but green should add it to their mounts.
 ### From /validate-prod-ready
@@ -578,6 +581,16 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 - ℹ **INFO** `github_token_from` / `github_api_for` in `tddy-tools/src/github_credential.rs` are now `#[cfg(test)]`-only helpers beside the `_for_session` production variants; consider folding them.
 
 ### /validate-tests
+
+**2026-10-15 — 66 changed test-bearing files scanned; ~90 new tests; Critical 0 · Warning 3 · Info 1.**
+- ✅ No `#[ignore]`, `.skip`/`.only`, sleeps/`cy.wait`, tautologies, or `is_ok()`-only assertions in added lines.
+- ✅ Every new integration test file has one Given / Then comment pair per test (8 files counted: tests = given = then); names state behaviour; fixtures are semantic (`ada`, `github.example.com`, `gho_ada_from_the_hosts_gh`).
+- ✅ The Cypress spec drives the card through page-object helpers (`turnLocalGhOn`, `hostGhState`, `localGhToggle`); its only raw `cy.get` calls are `cy.get("@alias")` stub assertions. No `cy.intercept`.
+- ⚠ **WARNING** — unserialized process-env mutation: `tddy-agent-launch/src/session_acting_identity_tests.rs:167,333,472,569`, `tddy-session-lifecycle/tests/tool_session_local_gh.rs:213,413` and `tddy-pty/src/runtime.rs:432` call `set_var`/`remove_var` in test binaries that run tests on parallel threads, with no `#[serial]` or lock. The changeset's Testing Plan requires isolation (own binary or `#[serial]`). Consequence: a concurrent `remove_var` can make the "inherits none of the daemon's tokens" assertions pass vacuously, and `set_var` while other threads read the environment is unsound. Fix with a shared env lock, or move each into its own binary like `tddy-host-service/tests/github_cli_environment.rs`. (`serial_test` is already a dev-dependency of `tddy-session-lifecycle`; adding it elsewhere needs consent.)
+- ⚠ **WARNING** — `tddy-toolcall`'s two test files carry their own `gh` stubs beside `tddy_testing_commons::gh_cli` (already noted below); three copies drift.
+- ⚠ **WARNING** — `an_unreadable_git_url…` and the host-validation test loop four inputs in one test (`local_gh_unit.rs`): one behaviour, but a failure names the input only through the message string. Acceptable; split if it grows.
+- ℹ **INFO** — no test asserts that `GetHostTooling` forwards `github_hostname` to the probe (the fakes ignore it).
+
 ### /validate-prod-ready
 ### /analyze-clean-code
 
