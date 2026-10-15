@@ -39,7 +39,7 @@ struct RecordingHostToolingProbe {
 }
 
 impl HostToolingProbe for RecordingHostToolingProbe {
-    fn probe(&self, os_user: &str) -> HostTooling {
+    fn probe(&self, os_user: &str, _github_hostname: Option<&str>) -> HostTooling {
         self.probed_os_users
             .lock()
             .expect("the probe recorder is never held across a panic")

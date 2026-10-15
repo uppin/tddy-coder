@@ -73,6 +73,13 @@ impl DaemonSessionHost {
         self.credential_vaults.clone()
     }
 
+    /// The `gh` this host asks for a Local gh project's identity and token, for a handler sharing
+    /// this host's state.
+    #[must_use]
+    pub fn github_cli(&self) -> tddy_host_service::GithubCli {
+        self.github_cli.clone()
+    }
+
     /// The idle tracker this host bumps on every RPC, shared rather than copied, so a handler's
     /// calls keep the same relay alive the host's own do.
     #[must_use]

@@ -270,6 +270,23 @@ pub fn set_project_default_branch(
     write_projects(projects_dir, &projects)
 }
 
+/// A project asked to use local gh and a vault GitHub account at once.
+///
+/// Returned (inside the [`anyhow::Error`]) by [`set_project_accounts`] so a caller can tell this
+/// refusal of the request from a failure of the registry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalGhWithGithubAccount;
+
+impl std::fmt::Display for LocalGhWithGithubAccount {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(
+            "a project that uses local gh is assigned no github account; turn local gh off to assign one",
+        )
+    }
+}
+
+impl std::error::Error for LocalGhWithGithubAccount {}
+
 /// Replaces `project_id`'s whole account assignment set.
 ///
 /// Replace, never merge: two people editing a project's accounts concurrently cannot interleave
@@ -300,12 +317,16 @@ pub fn set_project_accounts(
             );
         }
     }
+    if local_gh && accounts.iter().any(|a| a.provider == "github") {
+        return Err(LocalGhWithGithubAccount.into());
+    }
     let mut projects = read_projects(projects_dir)?;
     let project = projects
         .iter_mut()
         .find(|p| p.project_id == project_id)
         .ok_or_else(|| anyhow::anyhow!("unknown project: {}", project_id))?;
     project.accounts = accounts.to_vec();
+    project.local_gh = local_gh;
     write_projects(projects_dir, &projects)
 }
 

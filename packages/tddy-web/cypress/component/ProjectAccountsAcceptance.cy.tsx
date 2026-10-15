@@ -75,6 +75,7 @@ function aProjectsScreen(options: {
   onSetProjectAccounts?: (input: {
     projectId: string;
     accounts: { provider: string; accountId: string }[];
+    localGh: boolean;
     daemonInstanceId: string;
   }) => void;
 }) {
@@ -88,6 +89,7 @@ function aProjectsScreen(options: {
       loadProjectBranches={noBranches}
       accounts={options.accounts}
       onSetProjectAccounts={options.onSetProjectAccounts ?? cy.stub()}
+      loadHostGithubCli={cy.stub()}
     />
   );
 }

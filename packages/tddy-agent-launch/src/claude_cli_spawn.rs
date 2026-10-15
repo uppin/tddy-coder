@@ -87,14 +87,14 @@ pub(crate) async fn spawn_claude_cli_session_inner(
     // start: the agent then commits under the checkout's own identity, and the reason is logged.
     // The token half of the same assignments goes to the agent's tools over the session's toolcall
     // socket, per call — never into the commit pairs or any file.
-    let identity = account_access.session_identity(session_id, Some(&project.accounts));
-    let git_environment = identity.git_environment;
-    let github_credential_handler = identity.github_credential;
-
     // Create session directory under sessions_base/sessions/<id>/.
     let session_dir = sessions_base.join(SESSIONS_SUBDIR).join(session_id);
     std::fs::create_dir_all(&session_dir)
         .map_err(|e| Status::internal(format!("failed to create session dir: {}", e)))?;
+    let identity =
+        account_access.session_identity_in(session_id, os_user, &session_dir, Some(&project));
+    let git_environment = identity.git_environment;
+    let github_credential_handler = identity.github_credential;
 
     // Build branch intent and write a minimal changeset so the worktree setup fn can read it. A
     // legacy project (no stored default branch) leaves the base `None` so worktree setup resolves

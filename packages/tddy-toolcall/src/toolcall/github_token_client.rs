@@ -20,15 +20,32 @@ use std::path::{Path, PathBuf};
 /// the session host (`TDDY_SOCKET`); [`local_gh_source_value`] means the host's own `gh`.
 pub const GITHUB_SOURCE_ENV: &str = "TDDY_GITHUB_SOURCE";
 
+const LOCAL_GH_PREFIX: &str = "local-gh:";
+
+/// The variables `gh` honours ahead of its own login; a `gh` asked for its stored token must not
+/// see whichever of them the asking process inherited.
+const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
+
 /// The [`GITHUB_SOURCE_ENV`] value for a Local gh session whose project lives on `hostname`.
 pub fn local_gh_source_value(hostname: &str) -> String {
-    todo!("local_gh_source_value")
+    format!("{LOCAL_GH_PREFIX}{hostname}")
 }
 
 /// The GitHub host a [`GITHUB_SOURCE_ENV`] value names, or why the value is not one this code
 /// writes. A malformed value is an error, never a reason to ask somewhere else.
 pub fn parse_github_source(value: &str) -> Result<String, String> {
-    todo!("parse_github_source")
+    match value.strip_prefix(LOCAL_GH_PREFIX).map(str::trim) {
+        Some(hostname) if !hostname.is_empty() => Ok(hostname.to_string()),
+        _ => Err(format!(
+            "{GITHUB_SOURCE_ENV} is set to {value:?}, which is not a GitHub source; expected \
+             \"{LOCAL_GH_PREFIX}<github host>\""
+        )),
+    }
 }
 
 /// Where the calling process gets its GitHub token from.
@@ -48,7 +65,9 @@ impl SessionTokenSource {
     /// `gh` looked up on `PATH`), the `TDDY_SOCKET` host otherwise. [`Self::resolve`] over the
     /// process environment.
     pub fn from_environment() -> Result<Self, String> {
-        todo!("SessionTokenSource::from_environment")
+        let github_source = std::env::var(GITHUB_SOURCE_ENV).ok();
+        let socket = std::env::var_os("TDDY_SOCKET").map(PathBuf::from);
+        Self::resolve(github_source.as_deref(), socket, find_on_path("gh"))
     }
 
     /// The source a session's environment names: `github_source` (the [`GITHUB_SOURCE_ENV`] value)
@@ -59,7 +78,13 @@ impl SessionTokenSource {
         tddy_socket: Option<PathBuf>,
         gh_program: Option<PathBuf>,
     ) -> Result<Self, String> {
-        todo!("SessionTokenSource::resolve")
+        match github_source {
+            Some(value) => Ok(Self::LocalGh {
+                hostname: parse_github_source(value)?,
+                gh_program,
+            }),
+            None => Ok(Self::HostSocket(tddy_socket)),
+        }
     }
 }
 
@@ -67,18 +92,75 @@ impl SessionTokenSource {
 /// `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` withheld from it;
 /// the session host is not asked. `Err` carries the reason there is none, in the answerer's words.
 pub async fn request_github_token_from(source: &SessionTokenSource) -> Result<String, String> {
-    todo!("request_github_token_from")
+    match source {
+        SessionTokenSource::HostSocket(socket) => request_github_token(socket.as_deref()).await,
+        SessionTokenSource::LocalGh {
+            hostname,
+            gh_program,
+        } => token_from_gh(hostname, gh_program.as_deref()).await,
+    }
+}
+
+/// `gh auth token --hostname <hostname>`, with gh's own words as the refusal.
+async fn token_from_gh(hostname: &str, gh_program: Option<&Path>) -> Result<String, String> {
+    let gh = gh_program.ok_or_else(|| {
+        format!(
+            "gh is not installed (not found on PATH), so there is no GitHub token for {hostname}; \
+             install the GitHub CLI and run `gh auth login --hostname {hostname}`"
+        )
+    })?;
+    let mut command = tokio::process::Command::new(gh);
+    command.args(["auth", "token", "--hostname", hostname]);
+    for variable in GITHUB_TOKEN_VARIABLES {
+        command.env_remove(variable);
+    }
+    let output = command
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .map_err(|e| format!("could not run {}: {e}", gh.display()))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        return Err(if stderr.is_empty() {
+            format!(
+                "gh auth token --hostname {hostname} failed ({}); run `gh auth login --hostname \
+                 {hostname}`",
+                output.status
+            )
+        } else {
+            format!("gh auth token --hostname {hostname}: {stderr}")
+        });
+    }
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        return Err(format!(
+            "gh printed no token for {hostname}; run `gh auth login --hostname {hostname}`"
+        ));
+    }
+    Ok(token)
+}
+
+/// The first executable file named `program` in a `PATH` directory.
+fn find_on_path(program: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(program))
+        .find(|candidate| {
+            std::fs::metadata(candidate)
+                .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+                .unwrap_or(false)
+        })
 }
 
 use super::dispatch_toolcall;
 
-/// [`request_github_token`] of the host the calling process's own session names in `TDDY_SOCKET` —
-/// for code running inside a managed session that is not handed the socket.
+/// The token from the source the calling process's own session names ([`SessionTokenSource::from_environment`])
+/// — for code running inside a managed session that is not handed the socket.
 ///
-/// The variable names a *host to ask*, not a credential. With none set there is no token.
+/// The variables name a *source to ask*, not a credential. With neither set there is no token.
 pub async fn request_github_token_from_session() -> Result<String, String> {
-    let socket = std::env::var_os("TDDY_SOCKET").map(std::path::PathBuf::from);
-    request_github_token(socket.as_deref()).await
+    request_github_token_from(&SessionTokenSource::from_environment()?).await
 }
 
 /// The token of the account the session's project acts as, from the host listening on `socket`.
@@ -121,7 +203,10 @@ mod tests {
         // Then it is that exact wire value, naming that host
         assert_eq!(
             (value.as_str(), hostname),
-            ("local-gh:github.example.com", Ok("github.example.com".to_string()))
+            (
+                "local-gh:github.example.com",
+                Ok("github.example.com".to_string())
+            )
         );
     }
 

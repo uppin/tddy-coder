@@ -431,12 +431,14 @@ pub struct SpawnOptions<'a> {
 }
 
 /// The only environment variables a session spawn may be given beyond its fixed `HOME` and `PATH`:
-/// the commit identity ([`SpawnOptions::git_environment`]).
-pub const SESSION_GIT_ENVIRONMENT_KEYS: [&str; 4] = [
+/// the commit identity and the non-secret entry naming where the session's GitHub identity comes from
+/// ([`SpawnOptions::git_environment`]).
+pub const SESSION_GIT_ENVIRONMENT_KEYS: [&str; 5] = [
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
     "GIT_COMMITTER_NAME",
     "GIT_COMMITTER_EMAIL",
+    tddy_core::toolcall::GITHUB_SOURCE_ENV,
 ];
 
 /// Refuse a spawn environment that carries anything but commit identity. The key is named; the
@@ -447,7 +449,7 @@ fn require_commit_identity_only(git_environment: &[(String, String)]) -> anyhow:
         .find(|(key, _)| !SESSION_GIT_ENVIRONMENT_KEYS.contains(&key.as_str()))
     {
         Some((key, _)) => anyhow::bail!(
-            "a session spawn's environment may carry only the commit identity variables \
+            "a session spawn's environment may carry only the commit identity and GitHub source variables \
              ({}); refusing `{key}`",
             SESSION_GIT_ENVIRONMENT_KEYS.join(", ")
         ),

@@ -39,14 +39,14 @@ pub use session_activity::{
     activity_status_from_hook, parse_hook_event, HookEvent, SessionActivityStatus,
 };
 pub use session_agent::{AgentId, AgentIdError, SessionAgentRecord};
+pub use session_github_source::{
+    read_session_github_source, write_session_github_source, SessionGithubSource,
+    SESSION_GITHUB_SOURCE_FILENAME,
+};
 pub use session_lifecycle::{
     materialize_unified_session_directory, resolve_effective_session_id, unified_session_dir_path,
     validate_session_id_segment, SessionIdValidationError, SessionLifecycleBootstrap,
     UnifiedSessionTreeBootstrap,
-};
-pub use session_github_source::{
-    read_session_github_source, write_session_github_source, SessionGithubSource,
-    SESSION_GITHUB_SOURCE_FILENAME,
 };
 pub use session_metadata::{
     paired_agent, read_session_metadata, repo_root_for_session, update_activity_status,

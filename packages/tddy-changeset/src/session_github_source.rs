@@ -33,14 +33,32 @@ pub fn write_session_github_source(
     session_dir: &Path,
     source: SessionGithubSource,
 ) -> Result<(), crate::WorkflowError> {
-    todo!("write_session_github_source")
+    let yaml = serde_yaml::to_string(&source).map_err(|e| {
+        crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
+    })?;
+    std::fs::write(session_dir.join(SESSION_GITHUB_SOURCE_FILENAME), yaml).map_err(|e| {
+        crate::WorkflowError::WriteFailed(format!("{SESSION_GITHUB_SOURCE_FILENAME}: {e}"))
+    })
 }
 
 /// The source recorded for the session in `session_dir`; `None` when its start named none.
 pub fn read_session_github_source(
     session_dir: &Path,
 ) -> Result<Option<SessionGithubSource>, crate::WorkflowError> {
-    todo!("read_session_github_source")
+    let path = session_dir.join(SESSION_GITHUB_SOURCE_FILENAME);
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(crate::WorkflowError::ChangesetInvalid(format!(
+                "{}: {e}",
+                path.display()
+            )))
+        }
+    };
+    serde_yaml::from_str(&contents)
+        .map(Some)
+        .map_err(|e| crate::WorkflowError::ChangesetInvalid(format!("{}: {e}", path.display())))
 }
 
 #[cfg(test)]
@@ -53,7 +71,8 @@ mod tests {
         let session_dir = tempfile::tempdir().unwrap();
 
         // When its source is read
-        let source = read_session_github_source(session_dir.path()).expect("an absent record reads");
+        let source =
+            read_session_github_source(session_dir.path()).expect("an absent record reads");
 
         // Then there is none, and the host's project row decides
         assert_eq!(source, None);

@@ -26,6 +26,8 @@ pub struct PrStackRpcHandler {
     user_resolver: SessionUserResolver,
     tddy_data_dir: PathBuf,
     credential_vaults: Option<Arc<SessionVaults>>,
+    /// The `gh` a Local gh orchestrator's repoint reads its token from.
+    github_cli: tddy_host_service::GithubCli,
     rpc_activity: RpcActivity,
     peer_routing: PeerRouting,
 }
@@ -39,6 +41,7 @@ impl PrStackRpcHandler {
             user_resolver: host.user_resolver(),
             tddy_data_dir: host.tddy_data_dir().to_path_buf(),
             credential_vaults: host.credential_vaults(),
+            github_cli: host.github_cli(),
             rpc_activity: host.rpc_activity(),
             peer_routing: host.peer_routing(),
         }

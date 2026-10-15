@@ -1,17 +1,16 @@
 # Changeset: Local gh as a project's GitHub source
 
 **Date**: 2026-10-14
-**Status**: 🚧 In Progress — 🔴 the failing tests and the contract surface are written; implementation (`/green`) has not started
+**Status**: 🚧 In Progress — 🟡 implementation written for M1–M10; **WIP draft, checks skipped** — scoped runs reported passing per package by the implementing agents, not yet confirmed by CI
 
-> **Implementation state (2026-10-14).** Every new function has a `todo!()` body, or ignores its new
-> parameter. That is all of the surface listed under *Acceptance Tests* and *Unit / Integration
-> Tests*. The proto fields, the regenerated TypeScript code and the mechanical `local_gh: false`
-> literal edits are real.
->
-> 🔴 **76 of the 80 new tests fail by design.** The 4 that pass are absence pins.
->
-> No milestone below is started. The Cypress spec has not been added to the other specs' mounts
-> (`loadHostGithubCli`).
+> **Implementation state (2026-10-15).** M1–M10 are implemented. Open items, marked ⚠:
+> - ⚠ **Relay guard hole:** a Local gh project whose git URL is unreadable gets `local_gh_hostname: None`, so `relayed_by` cannot tell it is Local gh and a jail relay run by another user carries no logged-out `GH_CONFIG_DIR`. Needs a hostname-independent Local gh marker on `SessionIdentity`.
+> - ⚠ Child sessions (conversations, stack children) read this host's row, not the parent's forwarded source.
+> - ⚠ Telegram builds its own `GithubCli`; `with_github_cli` does not reach it.
+> - ⚠ No tests for the sidecar write on start, or the Local gh branch of the repoint closure.
+> - ⚠ Red-phase test files not rustfmt-clean (`session_acting_identity_tests.rs`, `tool_session_local_gh.rs`); `set_project_local_gh.rs` fails `clippy --all-targets` on `assert_eq!(x, true/false)`.
+> - ⚠ 16 `tddy-session-lifecycle` sandbox tests fail with "sandbox RPC bridge not installed" (known harness gap, predates this change); `session_sync_livekit_acceptance` needs `tddy-remote-git-repo` built.
+> - ⚠ One unidentified flake seen once in `ProjectLocalGh.cy.tsx`.
 **Type**: Feature
 
 ## Initial Discovery
@@ -324,16 +323,16 @@ from the planning interview, are listed in `## Decisions & Trade-offs`.
 
 ## Implementation Milestones
 
-- [ ] M1 Env hygiene in `tddy-pty`, `tddy-tool-engine`, `spawn_as_user` (tests pass)
-- [ ] M2 Proto fields + `ProjectData.local_gh` (mechanical literal commit) + `SetProjectAccounts` refusal
-- [ ] M3 `tddy-accounts::local_gh` + `tddy-host-service::GithubCli` + `session_git_environment_of`
-- [ ] M4 `SessionAccountAccess` Local gh identity; tool / claude-cli / cursor starts and resumes carry it
-- [ ] M5 Token readers: `SessionTokenSource`, `tddy-tools`, `tddy-coder`, repoint
-- [ ] M6 `StartSessionRequest.github_source`, forwarding fill, sidecar, resume
-- [ ] M7 Sandbox relay guard
-- [ ] M8 Telegram
-- [ ] M9 Web toggle and per-host `gh` state
-- [ ] M10 Docs: correct `project-concept.md` "every host" and `github-identity.md` "pushes" claims
+- [x] M1 Env hygiene in `tddy-pty`, `tddy-tool-engine`, `spawn_as_user` (tests pass)
+- [x] M2 Proto fields + `ProjectData.local_gh` (mechanical literal commit) + `SetProjectAccounts` refusal
+- [x] M3 `tddy-accounts::local_gh` + `tddy-host-service::GithubCli` + `session_git_environment_of`
+- [x] M4 `SessionAccountAccess` Local gh identity; tool / claude-cli / cursor starts and resumes carry it
+- [x] M5 Token readers: `SessionTokenSource`, `tddy-tools`, `tddy-coder`, repoint
+- [x] M6 `StartSessionRequest.github_source`, forwarding fill, sidecar, resume
+- [x] M7 Sandbox relay guard
+- [x] M8 Telegram
+- [x] M9 Web toggle and per-host `gh` state
+- [x] M10 Docs: correct `project-concept.md` "every host" and `github-identity.md` "pushes" claims
 
 ## Testing Plan
 
@@ -572,7 +571,7 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (approved 2026-10-14)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code (⚠ open items in the status block)
 - [ ] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run scoped tests per touched package (`./test -p <pkg>`); full run on CI

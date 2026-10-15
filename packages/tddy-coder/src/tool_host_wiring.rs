@@ -22,6 +22,8 @@ use crate::conversation_spawn_relay::{
 pub struct ToolHostHandlers {
     conversation_spawn: Option<Arc<dyn ConversationSpawnHandler>>,
     github_credential: Option<Arc<dyn GithubCredentialHandler>>,
+    /// The session's project uses Local gh: its tools read the token from `gh` themselves.
+    local_gh: bool,
 }
 
 impl ToolHostHandlers {
@@ -43,6 +45,7 @@ impl ToolHostHandlers {
                 Arc::clone(&host),
             ))),
             github_credential: Some(Arc::new(DaemonRelayGithubCredential::new(host))),
+            local_gh: false,
         }
     }
 
@@ -50,13 +53,25 @@ impl ToolHostHandlers {
     /// session's tools read the token from the host's own `gh`, so they can authenticate without a
     /// credential handler; a value that is not a source changes nothing.
     pub fn with_github_source(self, github_source: Option<&str>) -> Self {
-        todo!("ToolHostHandlers::with_github_source")
+        let Some(value) = github_source else {
+            return self;
+        };
+        match tddy_core::toolcall::parse_github_source(value) {
+            Ok(_) => Self {
+                local_gh: true,
+                ..self
+            },
+            Err(reason) => {
+                log::warn!("tddy-coder: the GitHub PR tools are not offered: {reason}");
+                self
+            }
+        }
     }
 
     /// Whether the agent's PR tools can authenticate: true exactly when a credential handler is
     /// bound. This is the value the workflow's context is seeded with.
     pub fn github_pr_tools_available(&self) -> bool {
-        self.github_credential.is_some()
+        self.github_credential.is_some() || self.local_gh
     }
 
     /// The handlers as the toolcall listener binds them.

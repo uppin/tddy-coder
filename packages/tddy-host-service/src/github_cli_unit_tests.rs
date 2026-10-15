@@ -18,7 +18,11 @@ fn the_current_os_user() -> String {
 /// A `gh` that answers `api user` with output no `gh` release prints.
 fn a_gh_answering_something_unrecognised(dir: &Path) -> PathBuf {
     let path = dir.join("gh");
-    std::fs::write(&path, "#!/bin/sh\nprintf '%s\\n' 'Welcome to gh!'\nexit 0\n").unwrap();
+    std::fs::write(
+        &path,
+        "#!/bin/sh\nprintf '%s\\n' 'Welcome to gh!'\nexit 0\n",
+    )
+    .unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     path
 }

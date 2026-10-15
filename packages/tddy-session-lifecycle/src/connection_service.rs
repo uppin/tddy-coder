@@ -214,7 +214,7 @@ pub use seeded_clone_guard::*;
 
 pub use svc_resolve_tddy_tools_path::resolve_tddy_tools_path;
 
-pub use session_acting_identity::project_github_token;
+pub use session_acting_identity::{local_gh_github_token, project_github_token};
 
 pub use hooks_and_urls::*;
 

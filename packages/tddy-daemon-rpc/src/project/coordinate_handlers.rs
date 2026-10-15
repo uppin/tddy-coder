@@ -560,7 +560,13 @@ impl ProjectRpcHandler {
             })
             .collect();
         project_storage::set_project_accounts(&projects_dir, project_id, &accounts, req.local_gh)
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| {
+            if e.is::<project_storage::LocalGhWithGithubAccount>() {
+                Status::invalid_argument(e.to_string())
+            } else {
+                Status::internal(e.to_string())
+            }
+        })?;
 
         let stored = project_storage::find_project(&projects_dir, project_id)
             .map_err(|e| Status::internal(e.to_string()))?

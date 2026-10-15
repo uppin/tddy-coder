@@ -1824,6 +1824,11 @@ fn run_daemon(args: &Args, shutdown: Arc<AtomicBool>) -> anyhow::Result<()> {
         let tool_host = crate::tool_host_wiring::ToolHostHandlers::from_flags(
             args.host_session_socket.as_deref(),
             args.session_id.as_deref(),
+        )
+        .with_github_source(
+            std::env::var(tddy_core::toolcall::GITHUB_SOURCE_ENV)
+                .ok()
+                .as_deref(),
         );
         presenter.set_github_pr_tools_available(tool_host.github_pr_tools_available());
         let (toolcall_socket_path, tool_call_rx) =

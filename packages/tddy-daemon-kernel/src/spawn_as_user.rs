@@ -19,6 +19,14 @@
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
+/// The variables `gh` honours ahead of its own login.
+const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
+
 /// Resolve `tool_path` (from `dev.daemon.yaml`'s `allowed_tools`, e.g. `"target/debug/tddy-coder"`)
 /// to an absolute path anchored to the **daemon's own toolchain root** — never to the target
 /// session's `repo_path`.
@@ -194,6 +202,11 @@ fn as_user_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // The environment is never a credential: a daemon that has one of these exported must not hand
+    // it to a child run as a user, or `gh` would act as whoever exported it.
+    for token_variable in GITHUB_TOKEN_VARIABLES {
+        cmd.env_remove(token_variable);
+    }
 
     if !same_user {
         let home_dir_pre = home_dir.clone();

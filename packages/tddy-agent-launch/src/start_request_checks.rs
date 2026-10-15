@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use tddy_core::{write_session_github_source, SessionGithubSource};
+
 use crate::stack_seed_validation::validate_stack_seed_base_session;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
@@ -9,7 +11,7 @@ use tddy_rpc::Status;
 
 use tddy_service::proto::session::StartSessionResponse;
 
-use tddy_service::proto::session::StartSessionRequest;
+use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
 use crate::launch_ports::LaunchSessions;
 use tddy_projects::project_storage::ProjectData;
@@ -22,8 +24,35 @@ pub fn forwarded_start_request(
     req: &StartSessionRequest,
     local_row: Option<&ProjectData>,
 ) -> StartSessionRequest {
-    todo!("forwarded_start_request")
+    let mut forwarded = req.clone();
+    if req.github_source() == GithubSource::Unspecified {
+        if let Some(row) = local_row {
+            forwarded.set_github_source(if row.local_gh {
+                GithubSource::LocalGh
+            } else {
+                GithubSource::Vault
+            });
+        }
+    }
+    forwarded
 }
+/// Record the GitHub source a start named in the new session's directory, so its resumes act the
+/// same way; a start that named none records nothing, and its resumes read this host's row again.
+pub(crate) fn record_requested_github_source(
+    req: &StartSessionRequest,
+    session_dir: &Path,
+) -> Result<(), Status> {
+    let source = match req.github_source() {
+        GithubSource::Unspecified => return Ok(()),
+        GithubSource::Vault => SessionGithubSource::Vault,
+        GithubSource::LocalGh => SessionGithubSource::LocalGh,
+    };
+    std::fs::create_dir_all(session_dir)
+        .map_err(|e| Status::internal(format!("failed to create session dir: {e}")))?;
+    write_session_github_source(session_dir, source)
+        .map_err(|e| Status::internal(format!("failed to record the session's GitHub source: {e}")))
+}
+
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 impl LaunchSessions {

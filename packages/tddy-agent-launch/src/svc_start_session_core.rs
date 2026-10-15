@@ -113,7 +113,20 @@ impl LaunchSessions {
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Forward {
                 peer_instance_id,
             } => {
-                let inner = self.forward_start_session(&req, peer_instance_id).await?;
+                // The peer may hold no (or a stale) copy of the project, so the request names the
+                // GitHub source this host's own row gives it. No row here: nothing to name.
+                let local_row = service_util::find_registered_project(
+                    &self.tddy_data_dir,
+                    os_user,
+                    req.project_id.trim(),
+                )
+                .ok()
+                .map(|(_, project)| project);
+                let forwarded =
+                    crate::start_request_checks::forwarded_start_request(&req, local_row.as_ref());
+                let inner = self
+                    .forward_start_session(&forwarded, peer_instance_id)
+                    .await?;
                 return Ok(Response::new(inner));
             }
             tddy_daemon_livekit::livekit_peer_discovery::StartSessionPeerRoute::Local => {}

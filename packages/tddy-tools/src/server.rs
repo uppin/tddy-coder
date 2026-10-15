@@ -1053,14 +1053,11 @@ fn repo_slug() -> Result<String, String> {
 /// Not an environment variable and not a file — see [`crate::github_credential`]. `Err` is the
 /// host's own refusal (or the absence of a host), returned to the agent as the tool's error.
 fn github_token_for_agent() -> Result<String, String> {
-    crate::github_credential::github_token_from(permission_relay_socket_path().as_deref())
+    crate::github_credential::github_token_for_session()
 }
 
 fn real_gh() -> Result<tddy_workflow_recipes::orchestrate_pr_stack::RealGithubPrApi, String> {
-    crate::github_credential::github_api_for(
-        repo_slug()?,
-        permission_relay_socket_path().as_deref(),
-    )
+    crate::github_credential::github_api_for_session(repo_slug()?)
 }
 
 /// Default branch of the repo (`origin/HEAD` target). Returns an error rather than guessing a name:
@@ -1325,10 +1322,7 @@ fn pr_search_impl(p: PrSearchInput) -> Result<serde_json::Value, String> {
     let repo = repo_slug()?;
     // Built from the slug already resolved above rather than through `real_gh()`, which would run
     // `git remote get-url origin` a second time for the same answer.
-    let gh = crate::github_credential::github_api_for(
-        repo.clone(),
-        permission_relay_socket_path().as_deref(),
-    )?;
+    let gh = crate::github_credential::github_api_for_session(repo.clone())?;
     let hits = pr_insight::search_repository_prs(
         &gh,
         &repo,

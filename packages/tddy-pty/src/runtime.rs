@@ -23,6 +23,14 @@ pub const DEFAULT_TERM_COLS: u16 = 220;
 /// PTY reader buffer size.
 const PTY_READ_BUF: usize = 4096;
 
+/// The variables `gh` honours ahead of its own login.
+const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+];
+
 /// Specification for spawning a process inside a PTY.
 ///
 /// `argv` and `env` are final: the caller has already applied any host-specific transforms (e.g.
@@ -265,6 +273,11 @@ fn open_pty_and_pump(
     cmd.cwd(&spec.worktree_path);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // The environment is never a credential: a daemon that has one of these exported must not hand
+    // it to the agent by inheritance, or `gh` would act as whoever exported it.
+    for token_variable in GITHUB_TOKEN_VARIABLES {
+        cmd.env_remove(token_variable);
+    }
 
     for (key, value) in &spec.env {
         cmd.env(key, value);

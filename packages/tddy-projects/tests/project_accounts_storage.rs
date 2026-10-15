@@ -108,8 +108,13 @@ fn setting_a_projects_accounts_replaces_the_whole_set_rather_than_merging_into_i
     ];
     project_storage::write_projects(dir.path(), &[project]).expect("seed registry");
 
-    project_storage::set_project_accounts(dir.path(), ALPHA, &[an_assignment("github", "bob")], false)
-        .expect("set accounts succeeds");
+    project_storage::set_project_accounts(
+        dir.path(),
+        ALPHA,
+        &[an_assignment("github", "bob")],
+        false,
+    )
+    .expect("set accounts succeeds");
 
     assert_eq!(
         stored_accounts(dir.path(), ALPHA),
@@ -124,7 +129,8 @@ fn setting_an_empty_set_returns_a_project_to_unassigned() {
     project.accounts = vec![an_assignment("github", "ada")];
     project_storage::write_projects(dir.path(), &[project]).expect("seed registry");
 
-    project_storage::set_project_accounts(dir.path(), ALPHA, &[], false).expect("clear accounts succeeds");
+    project_storage::set_project_accounts(dir.path(), ALPHA, &[], false)
+        .expect("clear accounts succeeds");
 
     assert_eq!(
         stored_accounts(dir.path(), ALPHA),
@@ -183,8 +189,13 @@ fn setting_one_projects_accounts_leaves_every_other_row_untouched() {
     beta.accounts = vec![an_assignment("github", "zoe")];
     project_storage::write_projects(dir.path(), &[a_project(ALPHA), beta]).expect("seed registry");
 
-    project_storage::set_project_accounts(dir.path(), ALPHA, &[an_assignment("github", "ada")], false)
-        .expect("set accounts succeeds");
+    project_storage::set_project_accounts(
+        dir.path(),
+        ALPHA,
+        &[an_assignment("github", "ada")],
+        false,
+    )
+    .expect("set accounts succeeds");
 
     assert_eq!(
         stored_accounts(dir.path(), BETA),
@@ -197,8 +208,12 @@ fn setting_accounts_on_a_project_the_registry_does_not_know_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
     project_storage::write_projects(dir.path(), &[a_project(ALPHA)]).expect("seed registry");
 
-    let outcome =
-        project_storage::set_project_accounts(dir.path(), BETA, &[an_assignment("github", "ada")], false);
+    let outcome = project_storage::set_project_accounts(
+        dir.path(),
+        BETA,
+        &[an_assignment("github", "ada")],
+        false,
+    );
 
     assert_eq!(outcome.is_err(), true);
 }

@@ -27,8 +27,8 @@ fn a_command_run_as_a_user_inherits_none_of_the_daemons_github_tokens() {
     let os_user = std::env::var("USER").expect("USER must be set to run this test");
 
     // When a command is run as the daemon's own OS user
-    let run = run_output_as_user(&os_user, Path::new("/usr/bin/env"), &[])
-        .expect("the command starts");
+    let run =
+        run_output_as_user(&os_user, Path::new("/usr/bin/env"), &[]).expect("the command starts");
     let output = run.result.expect("the command runs");
 
     // Then it was started with none of them

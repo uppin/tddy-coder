@@ -197,7 +197,10 @@ async fn turning_local_gh_on_stores_it_and_list_projects_carries_it() {
     let world = a_daemon_with_a_registered_project();
 
     // When Local gh is turned on
-    world.set(using_local_gh()).await.expect("the setting is accepted");
+    world
+        .set(using_local_gh())
+        .await
+        .expect("the setting is accepted");
 
     // Then the registry and the listing both say so
     assert_eq!(world.stored_row().local_gh, true);
@@ -224,7 +227,10 @@ async fn turning_local_gh_on_keeps_every_other_providers_assignment() {
         .expect("the setting is accepted");
 
     // Then the Cloudflare assignment is all that remains, beside Local gh
-    assert_eq!(stored.accounts, vec![an_assignment("cloudflare", "acct-edge")]);
+    assert_eq!(
+        stored.accounts,
+        vec![an_assignment("cloudflare", "acct-edge")]
+    );
     assert_eq!(stored.local_gh, true);
 }
 

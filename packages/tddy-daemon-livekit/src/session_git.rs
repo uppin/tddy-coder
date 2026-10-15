@@ -28,7 +28,14 @@ use tddy_accounts::{ActingIdentity, GitIdentity};
 /// can read without running `git`.
 #[must_use]
 pub fn session_git_environment(acting: &ActingIdentity) -> Vec<(String, String)> {
-    let GitIdentity { name, email } = &acting.git;
+    session_git_environment_of(&acting.git)
+}
+
+/// [`session_git_environment`] for a bare [`GitIdentity`] — the one a Local gh project derives from
+/// the host's `gh` login, which has no vault account to build an [`ActingIdentity`] from.
+#[must_use]
+pub fn session_git_environment_of(git: &GitIdentity) -> Vec<(String, String)> {
+    let GitIdentity { name, email } = git;
     [
         ("GIT_AUTHOR_NAME", name),
         ("GIT_AUTHOR_EMAIL", email),

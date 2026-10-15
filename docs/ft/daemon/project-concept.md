@@ -24,7 +24,7 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 A project names the credential-vault account it uses for each provider. Different projects may use
 different accounts, and several projects may share one. A project uses **one
 account per provider**; assigning two for the same provider is refused, naming the provider.
-Setting accounts replaces the whole list and applies to every host owning the same `project_id`.
+Setting accounts replaces the whole list. It is written to the one host the request names; other hosts owning the same `project_id` keep their own rows (see [the open TODO](../../dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md)).
 
 A project with no account assigned for a provider resolves to **no account**. Operations that need
 one fail saying so; they never fall back to the caller's own login, to the only account in the vault,

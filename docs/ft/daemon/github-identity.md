@@ -17,7 +17,7 @@ daemon or in a session, and exporting them rescues nothing.
 |---|---|
 | Commit author and committer name | the account's GitHub login |
 | Commit author and committer email | `<GitHub id>+<login>@users.noreply.github.com` |
-| Token for GitHub API calls and pushes | the account's record in the signed-in person's vault |
+| Token for GitHub API calls made by tddy | the account's record in the signed-in person's vault |
 
 The account is the one the project assigns ([project concept](project-concept.md#account-assignment)),
 looked up among the accounts the person's own vault holds. It is chosen **once**, when the session

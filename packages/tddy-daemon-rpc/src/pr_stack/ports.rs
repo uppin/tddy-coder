@@ -19,7 +19,8 @@ use tddy_service::proto::pr_stack::{
 };
 use tddy_service::proto::types::BranchSession;
 use tddy_session_lifecycle::connection_service::{
-    project_github_token, resolve_os_user, spawn_blocking_with_timeout, wire_same,
+    local_gh_github_token, project_github_token, resolve_os_user, spawn_blocking_with_timeout,
+    wire_same,
 };
 use tddy_session_lifecycle::session_list_enrichment;
 use tddy_session_lifecycle::session_reader::DaemonSessionListing;
@@ -553,6 +554,16 @@ impl PrStackHandler for PrStackRpcHandler {
                 .ok_or_else(|| {
                     format!("the orchestrator's project '{project_id}' is not registered")
                 })?;
+            // The session's own source (its sidecar), else this host's row of its project.
+            let local_gh = match tddy_core::read_session_github_source(&session_dir)
+                .map_err(|e| format!("the orchestrator's GitHub source could not be read: {e}"))?
+            {
+                Some(source) => source == tddy_core::SessionGithubSource::LocalGh,
+                None => project.local_gh,
+            };
+            if local_gh {
+                return local_gh_github_token(&self.github_cli, os_user, &project.git_url);
+            }
             project_github_token(
                 self.credential_vaults.clone(),
                 Arc::clone(&self.user_resolver),

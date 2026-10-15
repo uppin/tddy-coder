@@ -31,7 +31,7 @@ struct FakeToolingProbe {
 }
 
 impl HostToolingProbe for FakeToolingProbe {
-    fn probe(&self, os_user: &str) -> HostTooling {
+    fn probe(&self, os_user: &str, _github_hostname: Option<&str>) -> HostTooling {
         self.asked_about
             .lock()
             .expect("the recording lock is only held to push a name")
