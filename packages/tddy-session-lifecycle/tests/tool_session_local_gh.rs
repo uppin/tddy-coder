@@ -11,7 +11,7 @@
 //! `StartSession` / `ResumeSession`. `gh` is a stub that answers only for the host it is logged in
 //! to (`tddy_testing_commons::gh_cli`).
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-14-local-gh-github-source.md
+//! Feature: docs/ft/daemon/github-identity.md
 
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};

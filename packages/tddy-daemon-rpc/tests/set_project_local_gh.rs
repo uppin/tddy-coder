@@ -6,7 +6,7 @@
 //! provider's assignment stays, and a write naming both GitHub sources is refused rather than one of
 //! them silently winning.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-14-local-gh-github-source.md
+//! Feature: docs/ft/daemon/github-identity.md
 
 use std::collections::HashMap;
 use std::path::PathBuf;

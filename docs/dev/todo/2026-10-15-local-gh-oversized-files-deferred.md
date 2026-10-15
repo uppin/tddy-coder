@@ -1,7 +1,7 @@
 # 2026-10-15 — Files #622 (local gh) grew while already over the 500-line budget
 
 **Category:** Deferred decomposition (developer consent given at `/pr-wrap` step 3.5, 2026-10-15)
-**Source:** [2026-10-14-local-gh-github-source.md](../1-WIP/2026-10-14-local-gh-github-source.md)
+**Source:** [2026-10-15-local-gh-github-source.md](../changesets/2026-10-15-local-gh-github-source.md)
 
 | File | Production lines | Record |
 |---|---|---|

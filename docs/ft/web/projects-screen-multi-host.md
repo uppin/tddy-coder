@@ -65,9 +65,24 @@ vault lacks). A row is in one of three states, shown distinctly:
 - **Unavailable on this host** — an account is assigned, but this host's vault does not hold it.
 
 The choices come from the accounts list of the [accounts screen](accounts-screen.md). Choosing sends
-**`SetProjectAccounts`** with the project's whole assignment list; as with the default branch, the
-assignment is a property of the logical project and is applied to every host owning the same
-`project_id`. A locked or missing vault shows no account rows. See
+**`SetProjectAccounts`** with the project's whole assignment list, to the host the request names; the
+other hosts owning the same `project_id` keep their own rows (see
+[the open TODO](../../dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md)). A locked or
+missing vault shows no account rows.
+
+### Local gh
+
+Each project card also has a **Local gh** checkbox ([project concept § Local
+gh](../daemon/project-concept.md#local-gh)).
+
+- Turning it on sends `SetProjectAccounts` with the GitHub assignment removed and Local gh set; the
+  other providers' assignments are kept. Turning it off leaves no GitHub account assigned.
+- While it is on, the **GitHub account picker is hidden**: the two sources never coexist.
+- Each host row of the project then shows **that host's `gh` state** for the project's GitHub host (read
+  from its git URL): *logged in to H as login*, *not logged in to H*, *gh not installed*, or *could not
+  be read* with the reason. Each host is asked about its own `gh`, using the same host tooling probe the
+  Hosts screen's [tooling cells](hosts-screen-tooling.md) use, asked for one GitHub host. A git URL that
+  names no GitHub host is said so, not guessed. See
 [Project concept § Account assignment](../daemon/project-concept.md#account-assignment).
 
 ## Adding a project to a host

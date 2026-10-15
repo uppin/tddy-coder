@@ -1,7 +1,7 @@
 # 2026-10-15 — Local gh: child sessions ignore the parent's source; Telegram cannot override `gh`
 
 **Category:** Deferred scope (developer consent at `/pr-wrap`, 2026-10-15)
-**Source:** [2026-10-14-local-gh-github-source.md](../1-WIP/2026-10-14-local-gh-github-source.md)
+**Source:** [2026-10-15-local-gh-github-source.md](../changesets/2026-10-15-local-gh-github-source.md)
 
 ## 1. Child sessions read this host's row, not the parent's forwarded source
 Conversations and stack children spawned from a session use `session_account_access(token)`, which carries

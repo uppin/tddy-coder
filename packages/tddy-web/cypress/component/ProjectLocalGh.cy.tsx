@@ -7,7 +7,7 @@
  * provider's, and hides the GitHub account picker. Each host of a Local gh project shows whether its
  * `gh` is logged in for the project's GitHub host — the host named by the project's git URL.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-14-local-gh-github-source.md
+ * Feature: docs/ft/daemon/github-identity.md
  */
 
 import React from "react";

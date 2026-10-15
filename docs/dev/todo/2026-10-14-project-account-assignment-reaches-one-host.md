@@ -1,7 +1,7 @@
 # 2026-10-14 — A project's account assignment reaches only the host it was written to
 
 **Category:** Defect / deferred scope
-**Source:** [2026-10-14-local-gh-github-source.md](../1-WIP/2026-10-14-local-gh-github-source.md) (planning discovery, Exploration 2 gap A)
+**Source:** [2026-10-15-local-gh-github-source.md](../changesets/2026-10-15-local-gh-github-source.md) (planning discovery, Exploration 2 gap A)
 
 ## What is wrong
 

@@ -11,3 +11,11 @@
   could never have exec'd anything, and a `gh` `NotFound` mapped to "not installed") were both
   invisible to a green test run. Nothing exercises the assembled path until the row mounts the
   section.
+
+## Narrowed 2026-10-15 (local gh)
+
+The Projects card is now the first production caller of `GetHostTooling`: for each host owning a Local gh
+project it asks `GetHostTooling { daemonInstanceId, githubHostname }` and shows that host's `gh` state
+(`ProjectLocalGh.cy.tsx`, `ProjectsAppPage` wiring). **What stays open:** the Hosts screen still does not mount
+`HostRowTooling`, so the Hosts-row path is not proven end to end.
+

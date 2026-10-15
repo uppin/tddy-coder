@@ -17,6 +17,7 @@ A **Project** is a named configuration linking a **git URL** to a **main reposit
 | `main_repo_path` | Absolute path to the cloned repository |
 | `main_branch_ref` | Optional. Remote-tracking ref (`origin/<path>`) used as the integration base for worktree fetch and checkout (e.g. `origin/main`, `origin/release/2025`). Set/updated from the Projects UI. Omitted (legacy) rows resolve live at resolution time (`origin/master` → `origin/main` → `origin/HEAD`); see [Git integration base ref](../coder/git-integration-base-ref.md). |
 | `accounts` | Optional. The accounts the project uses, as provider and account id pairs, at most one per provider. Ids are minted by the credential vault of the host that stored them. Empty means no account is assigned. Set from the Projects UI; see [Account assignment](#account-assignment). |
+| `local_gh` | Optional, off by default. The project's sessions take their GitHub identity from the host's own `gh` login instead of an account; see [Local gh](#local-gh). |
 | `host_repo_paths` | Per-host (or per-daemon-instance) checkout paths keyed by host key; see multi-host daemon docs. |
 
 ## Account assignment
@@ -32,6 +33,25 @@ or to an unauthenticated request. An assignment can name an account that a given
 not hold; that host reports the assignment as present but unavailable on this host, which is
 distinct from not assigned. The assignment is stored by the project registry and interpreted by the
 accounts service against the host's vault.
+
+## Local gh
+
+A project can be switched to **Local gh** from its card. Its sessions then act as the host's GitHub CLI
+login rather than a vault account ([per-project GitHub identity](github-identity.md#local-gh)).
+
+- **Setting it replaces the GitHub assignment.** Turning it on removes the project's GitHub account
+  assignment in the same write; other providers' assignments stay. Turning it off leaves the project
+  with no GitHub account assigned.
+- **The two sources never coexist.** A project with a GitHub account assigned together with Local gh
+  is refused (`InvalidArgument`), naming both and saying to turn Local gh off first.
+- **The setting travels with the account list** in `SetProjectAccounts`; there is no separate request.
+  Like the assignment it is written to the one host the request names, so another host owning the same
+  `project_id` keeps its own row (see [the open TODO](../../dev/todo/2026-10-14-project-account-assignment-reaches-one-host.md)).
+- **Which source a session uses.** A session started with an explicit source (a start forwarded from
+  another host carries the forwarding host's) uses it, and remembers it for its resumes. Otherwise it
+  uses this host's row: Local gh when set, the vault assignment as before.
+- **Local gh needs a readable git URL**: its host decides which `gh` login is asked, and one that
+  cannot be read is refused rather than assumed to be `github.com`.
 
 ## Storage
 
@@ -68,7 +88,7 @@ The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bund
 
 ## Related
 
-- [Per-project GitHub identity](github-identity.md) — what a session does with the account its project assigns.
+- [Per-project GitHub identity](github-identity.md) — what a session does with the account its project assigns, or with the host's `gh` login for a Local gh project.
 - [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
 - [gRPC remote control](../coder/grpc-remote-control.md) — daemon and transport roles.
 - [Web terminal](../web/web-terminal.md) — Connection screen UI.

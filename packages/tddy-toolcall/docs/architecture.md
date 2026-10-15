@@ -47,3 +47,26 @@ an environment variable or a file.
   ([coder wiring](../../tddy-coder/docs/host-session-wiring.md)).
 
 Pinned by `tests/github_token_request_acceptance.rs`.
+
+### The `GITHUB_SOURCE_ENV` variable and Local gh
+
+For a project set to Local gh the token is not asked of the session host at all. The session is told
+where its token comes from by one non-secret variable, `TDDY_GITHUB_SOURCE` (`GITHUB_SOURCE_ENV`),
+whose value `local_gh_source_value(host)` / `parse_github_source` write and read as `local-gh:<host>`.
+
+- **`SessionTokenSource::from_environment()`** gives `LocalGh { hostname, gh_program }` when the
+  variable is set, and `HostSocket(TDDY_SOCKET)` otherwise. A malformed value is an error and never a
+  reason to ask the host instead.
+- **`request_github_token_from(&source)`** runs `gh auth token --hostname H` in the calling process,
+  with `GH_TOKEN`, `GITHUB_TOKEN`, `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` withheld, and
+  never touches the socket. A logged-out or missing `gh` is reported in `gh`'s own words. For a
+  host-socket source it is the call above.
+- **`request_github_token_from_session()`** goes through the source, so `tddy-tools`, the workflow
+  actions and `tddy-coder`'s tool availability (`github_pr_tools_available`) read `gh` when the session
+  is Local gh, as the session's OS user, each time a step needs a token. No token crosses a session
+  socket.
+
+Pinned by `tests/github_token_from_local_gh.rs` and `tests/github_source_from_environment.rs` (a
+process-environment lock serializes them) and the unit tests in `github_token_client.rs`. They carry
+their own small `gh` stubs rather than `tddy_testing_commons::a_gh_cli`, because that crate depends on
+`tddy-core`, which depends on this one; change the three stubs together.

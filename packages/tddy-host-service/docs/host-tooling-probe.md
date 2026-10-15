@@ -26,11 +26,15 @@ list, because "no aliases" is a real operator choice in later session flows.
 
 ```rust
 pub trait HostToolingProbe: Send + Sync {
-    fn probe(&self, os_user: &str) -> HostTooling;
+    fn probe(&self, os_user: &str, github_hostname: Option<&str>) -> HostTooling;
 }
 ```
 
-One method, taking the OS user to answer for. `SubprocessHostToolingProbe` is the live
+One method, taking the OS user to answer for and, optionally, the GitHub host the `gh` fact is about.
+`github_hostname` is `None` for the Hosts screen, which asks `gh auth status` about every host it
+knows. A Local gh project's card names its GitHub host, and the probe then runs
+`gh auth status --hostname H` (`gh_auth_status_args`), so the answer is about that host's login.
+`GetHostToolingRequest.github_hostname` (field 3) carries it, and the handler passes it to the probe. `SubprocessHostToolingProbe` is the live
 implementation; `HostServiceImpl::with_host_tooling` substitutes a deterministic double, the
 same shape as `with_host_stats` and for the same reason: **a test must never depend on what happens
 to be installed on the machine running it**, and asserting against the developer's own git identity
@@ -80,6 +84,36 @@ and found nothing. That is the sole evidence this code accepts for "not installe
 
 `parse_git_identity(name_output, email_output)` is the equivalent for git: both values trimmed, an
 identity only when both are non-empty.
+
+## The GitHub CLI
+
+`github_cli.rs` holds `GithubCli`, the questions a Local gh session needs answered by the host's own
+`gh`, always as an OS user and always about one host (`--hostname`):
+
+| Call | Runs | Answers |
+|---|---|---|
+| `logged_in_user(os_user, hostname)` | `gh api user --hostname H` | `GhUser { login, id }` |
+| `auth_token(os_user, hostname)` | `gh auth token --hostname H` | the token |
+
+`GithubCli::on_spawn_child_path()` looks `gh` up on the spawned child's `PATH` at each call, so a
+`gh` installed after the daemon started is found; `GithubCli::at(path)` names an executable
+explicitly (tests). Each call is bounded by `PROBE_TIMEOUT`, and the child is ended on overrun.
+
+An answer that is not a login is a refusal that names what to do (`GithubCliRefusal`):
+
+| Refusal | Meaning |
+|---|---|
+| `NotInstalled` | no `gh` executable on the host |
+| `NotLoggedIn { hostname, os_user }` | `gh` says it has no login for that host; the message names `gh auth login --hostname H` as that user |
+| `Failed(reason)` | `gh` could not run, timed out, or answered something unrecognised (`gh api user` output without a login and numeric id) |
+
+`refusal_for_exit` maps a non-zero exit to `NotLoggedIn` by the words `gh` uses for it, and to
+`Failed` carrying what `gh` said otherwise. As with the probe, unrecognised output is a failure and
+never a login.
+
+The environment is never a credential: `spawn_as_user` removes `GH_TOKEN`, `GITHUB_TOKEN`,
+`GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN`, so `gh` answers from its own login. A test must
+not rely on the machine's `gh`: it uses the `a_gh_cli` stub builder from `tddy-testing-commons`.
 
 ## Resolving `git` and `gh`
 

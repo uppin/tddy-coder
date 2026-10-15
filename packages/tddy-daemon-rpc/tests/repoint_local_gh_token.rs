@@ -8,7 +8,7 @@
 //! Every case here is **refused** before any GitHub call: the `gh` stub is logged out, so the
 //! refusal names which credential was asked, and nothing reaches the network or rewrites the plan.
 //!
-//! Changeset: docs/dev/1-WIP/2026-10-14-local-gh-github-source.md.
+//! Feature: docs/ft/daemon/github-identity.md.
 
 use std::fs;
 use std::path::{Path, PathBuf};

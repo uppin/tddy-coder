@@ -36,10 +36,21 @@ inheritance. The forked worker goes through the same function. The supervisor pa
 the supervisor's own environment plus the request's `env`; the supervisor's environment is the
 operator's configuration and is not touched here.
 
+A Local gh session carries one more entry beside the pairs: `TDDY_GITHUB_SOURCE=local-gh:<host>`,
+telling the child's processes which host's `gh` to ask for a token. It is not a credential, so
+`plan_session_child` admits it (`require_commit_identity_only` allows `GITHUB_SOURCE_ENV`), and only
+that key beyond the four pairs. The token itself is read from `gh` in the process that needs it.
+
+`spawn_as_user` removes `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` as well, since `gh`
+honours them ahead of its own login for an Enterprise host; the host-side shell relay and PTY agent
+spawns remove the same four variables.
+
 ## Operator consequence
 
 The supervisor's `spawn_policy.allowed_env_keys` refuses a request naming an unlisted key, so on a
-supervised host the four keys must be listed ([host sockets](../../tddy-supervisor/docs/host-sockets.md#configuration)).
+supervised host the four keys must be listed ([host sockets](../../tddy-supervisor/docs/host-sockets.md#configuration)),
+and `TDDY_GITHUB_SOURCE` too for projects that use Local gh (`dev.supervisor.yaml` and the rendered
+configs list it).
 
 ## Tests
 
@@ -48,4 +59,7 @@ token and a loader variable are refused as session environment; a spawned child 
 its environment and is not handed the daemon's `GITHUB_TOKEN` / `GH_TOKEN` by inheritance) and
 `spawn_worker.rs` (the request carries the pairs, round-trips over the worker pipe, and an old payload
 decodes empty). That the account's token is in no variable a tool session starts with is pinned in
-`tddy-session-lifecycle/tests/tool_session_git_identity.rs`.
+`tddy-session-lifecycle/tests/tool_session_git_identity.rs`. A planned child may carry its GitHub source
+beside its pairs (`a_planned_child_may_carry_its_github_source_beside_its_commit_identity`), and the
+spawn-as-user, relayed-shell and PTY token scrubs are pinned in `tddy-daemon-kernel`,
+`tddy-tool-engine` and `tddy-pty` tests.

@@ -137,6 +137,14 @@ never refused and never opens the vault (`guards::token_for_repoint`). A refusal
 `FAILED_PRECONDITION` carrying the resolver's words, returned **before** the plan is rewritten, so a
 refused repoint changes nothing.
 
+`RepointPlannedPr` of a **Local gh** session (its recorded `github-source.yaml`, else the project row's
+`local_gh`) has no vault to open: the repoint closure calls
+`local_gh_github_token(&GithubCli, os_user, git_url)`, asking the host's `gh` as the session's OS user,
+with the same refusal-before-rewrite behaviour. `SetProjectAccounts` maps `local_gh` both ways and
+returns the storage refusal of a GitHub assignment together with it as `InvalidArgument`
+(`entries::project_entry_from` maps it onto `ProjectEntry`); there is no separate toggle RPC.
+`GetHostTooling` passes `github_hostname` to the probe.
+
 ### Module layout
 
 | Module | Holds |
