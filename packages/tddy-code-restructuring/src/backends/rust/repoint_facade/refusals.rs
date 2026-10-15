@@ -58,29 +58,3 @@ pub(super) fn binds_a_name_twice(
          through `{other}`, which is `E0252` — remove one of the two"
     ))
 }
-
-/// A `use` group an attribute or doc comment gates would have to be split into several statements,
-/// repeating the attribute.
-pub(super) fn attribute_above_a_split(file: &str, line: u32) -> RestructureError {
-    malformed(format!(
-        "{file}:{line}: this `use` group carries an attribute or doc comment and would have to be \
-         split into one statement per member, which would repeat the attribute — write one `use` \
-         per path"
-    ))
-}
-
-/// A nested group member whose leaves reach two crates cannot be lifted whole under one prefix.
-pub(super) fn nested_member_reaches_two_crates(member: &str) -> RestructureError {
-    malformed(format!(
-        "the member `{member}` of a grouped `use` reaches two crates, so the group cannot carry \
-         one prefix — write one `use` per path"
-    ))
-}
-
-/// A `use` item this operation cannot read as one statement, left as it is rather than guessed at.
-pub(super) fn unreadable_use(statement: &str) -> RestructureError {
-    malformed(format!(
-        "`{statement}` is a `use` this operation cannot read, so it is left as it is rather than \
-         guessed at"
-    ))
-}

@@ -129,6 +129,7 @@ pub fn resolve_cluster(
         totals:
             carried::SetTotals {
                 surveys,
+                callers,
                 crates_named,
                 mut dev_crates_named,
                 keeps_naming_it,
@@ -136,12 +137,13 @@ pub fn resolve_cluster(
         ..
     } = gathering;
 
-    for change in moving::left_behind(workspace, &members, &surveys)? {
-        merged.absorb(change);
+    // Every member's callers are written together: two members named in one `use` group of a
+    // caller are one edit of that statement, not two over spans of the same group.
+    if cluster.reexport == Reexport::None {
+        merged.absorb_all(moving::caller_changes(workspace, callers)?);
     }
-    for change in moving::declared_in_destination(workspace, &members)? {
-        merged.absorb(change);
-    }
+    merged.absorb_all(moving::left_behind(workspace, &members, &surveys)?);
+    merged.absorb_all(moving::declared_in_destination(workspace, &members)?);
 
     // Read off the first member because every member shares them: `read_members` refuses a set
     // whose members leave different crates, and the destination is the set's own field.
@@ -152,12 +154,8 @@ pub fn resolve_cluster(
         &crates_named,
         &dev_crates_named,
     )?);
-    for change in across_the_set.dependents_on_the_destination(workspace, &keeps_naming_it)? {
-        merged.absorb(change);
-    }
-    for change in across_the_set.workspace_members(workspace)? {
-        merged.absorb(change);
-    }
+    merged.absorb_all(across_the_set.dependents_on_the_destination(workspace, &keeps_naming_it)?);
+    merged.absorb_all(across_the_set.workspace_members(workspace)?);
 
     Ok(WorkspaceEdit {
         changes: merged.changes(),
@@ -218,6 +216,12 @@ impl MergedChanges {
             self.order.push(path.clone());
         }
         self.edits.entry(path).or_default().extend(edits);
+    }
+
+    fn absorb_all(&mut self, changes: Vec<FileEdit>) {
+        for change in changes {
+            self.absorb(change);
+        }
     }
 
     fn absorb(&mut self, change: FileEdit) {

@@ -9,6 +9,7 @@ use std::ops::Range;
 use super::super::early_return::masked_to_code;
 use super::super::seam_refusal;
 use crate::crate_move::source_scan::items_of_module;
+use crate::crate_move::use_group::use_statements;
 use crate::Result;
 
 /// One replacement over the original text of a file.
@@ -86,10 +87,6 @@ pub(in crate::backends::rust) fn next_line_start(text: &str, offset: usize) -> u
         .map_or(text.len(), |index| offset + index + 1)
 }
 
-pub(in crate::backends::rust) fn is_identifier_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_' || !byte.is_ascii()
-}
-
 /// Every identifier the code of `text` writes, comments and literals excluded.
 pub(in crate::backends::rust) fn identifiers_in(text: &str) -> BTreeSet<String> {
     let masked = masked_to_code(text);
@@ -109,64 +106,6 @@ pub(in crate::backends::rust) fn depth_at(masked: &str, offset: usize) -> usize 
             b'}' => depth.saturating_sub(1),
             _ => depth,
         })
-}
-
-/// The span of every `use` item in the masked text, from its visibility (or the keyword) to the `;`
-/// that ends it, at whatever depth it is written.
-pub(in crate::backends::rust) fn use_statements(masked: &str) -> Vec<Range<usize>> {
-    let bytes = masked.as_bytes();
-    let mut found = Vec::new();
-    for (at, _) in masked.match_indices("use") {
-        let end = at + "use".len();
-        let whole = (at == 0 || !is_identifier_byte(bytes[at - 1]))
-            && bytes
-                .get(end)
-                .is_some_and(|next| !is_identifier_byte(*next));
-        let precise_capture = masked[end..].trim_start().starts_with('<');
-        if !whole || precise_capture {
-            continue;
-        }
-        let Some(semicolon) = masked[end..].find(';') else {
-            continue;
-        };
-        found.push(with_visibility_before(masked, at)..end + semicolon + 1);
-    }
-    found
-}
-
-/// Where a `pub`, `pub(crate)` or `pub(in path)` written just before `at` begins, else `at`.
-fn with_visibility_before(masked: &str, at: usize) -> usize {
-    let before = masked[..at].trim_end();
-    let keyword_end = if before.ends_with(')') {
-        before
-            .rfind("pub(")
-            .map_or(before.len(), |open| open + "pub".len())
-    } else {
-        before.len()
-    };
-    let head = &before[..keyword_end];
-    let is_pub = head.ends_with("pub")
-        && (head.len() == 3 || !is_identifier_byte(head.as_bytes()[head.len() - 4]));
-    if is_pub {
-        head.len() - "pub".len()
-    } else {
-        at
-    }
-}
-
-/// A `use` item split into what precedes the keyword (its visibility) and its tree, without the `;`.
-pub(in crate::backends::rust) fn split_use(statement: &str) -> Option<(&str, &str)> {
-    let keyword = statement
-        .match_indices("use")
-        .map(|(at, _)| at)
-        .find(|at| {
-            let before = statement[..*at].bytes().next_back();
-            let after = statement[at + 3..].chars().next();
-            before.is_none_or(|byte| !is_identifier_byte(byte))
-                && after.is_some_and(|character| character.is_whitespace() || character == '{')
-        })?;
-    let tree = statement[keyword + 3..].trim_end().strip_suffix(';')?;
-    Some((&statement[..keyword], tree.trim()))
 }
 
 /// The names of the inline modules that enclose `offset`, outermost first.
@@ -256,6 +195,7 @@ pub(in crate::backends::rust) fn qualifier_start(text: &str, at: usize) -> usize
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crate_move::use_group::use_statements;
 
     #[test]
     fn applies_edits_that_address_the_original_text_whatever_their_order() {

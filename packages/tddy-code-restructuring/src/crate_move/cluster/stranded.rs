@@ -1,4 +1,5 @@
 use crate::crate_move::destination;
+use crate::crate_move::source_scan::items_of_module;
 use std::path::Path;
 
 use std::collections::BTreeSet;
@@ -85,36 +86,18 @@ pub(crate) fn stranded_siblings(
             "the facade it leaves there names the destination".to_string()
         };
 
-        let whereabouts = match moved_later(&names_the_origin, module, &moving).as_slice() {
-            [] => format!("stays behind in `{}`", module.crate_dir()),
-            [later] => format!(
-                "is still in `{}` at that point (operation {later} moves it only afterwards)",
-                module.crate_dir()
-            ),
-            later => format!(
-                "is still in `{}` at that point (operations {} move it only afterwards)",
-                module.crate_dir(),
-                later
-                    .iter()
-                    .map(usize::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        };
-
         findings.push((
             module.op,
             format!(
                 "`{source}`, which operation {op} moves to `{destination}`, names `{paths}`, which \
                  {whereabouts}. So the destination would depend on the crate it left, while \
-                 {origin_names_it_back}: a cycle `apply` refuses. Move them in one \
-                 `move_cluster_to_crate`, with this module as its anchor and what those paths \
-                 reach in `also`, or leave `{named}` where it is",
+                 {origin_names_it_back}: a cycle `apply` refuses. {remedy}",
                 source = module.source,
                 op = module.op,
                 destination = module.moving.destination.dir,
                 paths = names_the_origin.join("`, `"),
-                named = module.path().join("::"),
+                whereabouts = whereabouts_of(&names_the_origin, module, &moving),
+                remedy = remedy_for(workspace, module, &names_the_origin)?,
             ),
         ));
     }
@@ -122,13 +105,14 @@ pub(crate) fn stranded_siblings(
     Ok(findings)
 }
 
-/// The paths `module`'s header names the crate it left by once it is re-pointed — its
-/// `destination → origin` edges.
+/// The paths `module` names the crate it left by once it is re-pointed — its `destination → origin`
+/// edges, wherever the file writes them: a header `use`, a `use` nested in a function, a body path.
 ///
 /// Read by the header pass and the re-export resolution `apply` itself uses, so the check and the
 /// refusal agree about which paths count: one reaching a module that has left this crate by the
 /// time `module`'s operation runs is not an edge, nor is one the origin only re-exports from a
-/// third crate. Every file the module carries is read, its directory children included.
+/// third crate, nor is a `pub(in …)` restriction, which is a visibility and not a path. Every file
+/// the module carries is read, its directory children included.
 fn paths_naming_the_origin(
     workspace: &Workspace<'_>,
     module: &MovingModule,
@@ -142,9 +126,90 @@ fn paths_naming_the_origin(
         let text = workspace.read(&file.from)?;
         let header =
             header::repointed_header_at(workspace, &text, &module.moving, &file.below, &co_moving)?;
-        header::extend_once(&mut names_the_origin, header.header_origin_paths);
+        header::extend_once(&mut names_the_origin, header.origin_paths);
     }
     Ok(names_the_origin)
+}
+
+/// Where the modules `paths` reach are when `module`'s operation runs: staying behind, or still in
+/// the origin until a later operation moves them.
+fn whereabouts_of(paths: &[String], module: &MovingModule, moving: &[MovingModule]) -> String {
+    match moved_later(paths, module, moving).as_slice() {
+        [] => format!("stays behind in `{}`", module.crate_dir()),
+        [later] => format!(
+            "is still in `{}` at that point (operation {later} moves it only afterwards)",
+            module.crate_dir()
+        ),
+        later => format!(
+            "is still in `{}` at that point (operations {} move it only afterwards)",
+            module.crate_dir(),
+            later
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// What to do about `paths`: modules can travel with `module` in one cluster, while an item of the
+/// origin's crate root is no module — only cutting the dependency on it helps.
+///
+/// # Errors
+///
+/// Refuses when the origin's crate root cannot be read.
+fn remedy_for(
+    workspace: &Workspace<'_>,
+    module: &MovingModule,
+    paths: &[String],
+) -> Result<String> {
+    let root_items = items_of_the_crate_root(workspace, module, paths)?;
+    let named = module.path().join("::");
+    let cluster = format!(
+        "Move them in one `move_cluster_to_crate`, with this module as its anchor and what those \
+         paths reach in `also`, or leave `{named}` where it is"
+    );
+    let cut = format!(
+        "cut its dependency on `{}` before moving it",
+        root_items.join("`, `")
+    );
+    Ok(if root_items.is_empty() {
+        cluster
+    } else if root_items.len() == paths.len() {
+        format!(
+            "Cut its dependency on `{}` before moving it, or leave `{named}` where it is",
+            root_items.join("`, `")
+        )
+    } else {
+        format!("{cluster}; for the items of the crate root among them, which no cluster can carry, {cut}")
+    })
+}
+
+/// The members of `paths` that are items of the crate `module` leaves — defined in its root, in no
+/// module — as opposed to a module, or something inside one.
+fn items_of_the_crate_root(
+    workspace: &Workspace<'_>,
+    module: &MovingModule,
+    paths: &[String],
+) -> Result<Vec<String>> {
+    let root = workspace.read(&format!("{}/src/lib.rs", module.crate_dir()))?;
+    let declared: BTreeSet<String> = items_of_module(&root)
+        .children
+        .into_iter()
+        .map(|child| child.name)
+        .collect();
+    let origin = &module.moving.origin.extern_name;
+
+    Ok(paths
+        .iter()
+        .filter(|path| {
+            path.strip_prefix(origin.as_str())
+                .and_then(|inside| inside.strip_prefix("::"))
+                .and_then(|inside| inside.split("::").next())
+                .is_some_and(|first| !declared.contains(first))
+        })
+        .cloned()
+        .collect())
 }
 
 /// One module a plan moves out of the crate that holds it.

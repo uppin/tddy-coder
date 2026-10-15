@@ -13,10 +13,11 @@ use std::path::Path;
 use super::super::early_return::masked_to_code;
 use super::super::seam_refusal;
 use super::destination::Module;
-use super::text::{
-    enclosing_modules, qualifier_start, scope_of, split_use, use_insertion, use_statements, Edit,
-};
+use super::text::{enclosing_modules, qualifier_start, scope_of, use_insertion, Edit};
 use crate::crate_move::source_scan::items_of_module;
+use crate::crate_move::use_group::members_of;
+use crate::crate_move::use_group::split_use;
+use crate::crate_move::use_group::use_statements;
 use crate::item_anchor::module_path_of;
 use crate::Result;
 
@@ -386,26 +387,6 @@ fn rewrite_statement(
         );
     }
     Ok(Edit::replace(statement.clone(), lines.join("\n")))
-}
-
-/// The members of a `use` group, split at the commas that are not inside a nested group.
-pub(in crate::backends::rust) fn members_of(inner: &str) -> Vec<&str> {
-    let mut members = Vec::new();
-    let (mut depth, mut from) = (0usize, 0usize);
-    for (at, character) in inner.char_indices() {
-        match character {
-            '{' => depth += 1,
-            '}' => depth = depth.saturating_sub(1),
-            ',' if depth == 0 => {
-                members.push(inner[from..at].trim());
-                from = at + 1;
-            }
-            _ => {}
-        }
-    }
-    members.push(inner[from..].trim());
-    members.retain(|member| !member.is_empty());
-    members
 }
 
 #[cfg(test)]

@@ -130,7 +130,7 @@ fn spelling_the_name(workspace: &Workspace<'_>, sites: Vec<Site>, name: &str) ->
             !rest
                 .bytes()
                 .next()
-                .is_some_and(super::item_move::text::is_identifier_byte)
+                .is_some_and(crate::crate_move::use_group::is_identifier_byte)
         });
         if spelled {
             named.push(site);

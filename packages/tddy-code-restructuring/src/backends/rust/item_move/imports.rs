@@ -17,8 +17,10 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 
 use super::super::early_return::masked_to_code;
-use super::text::{depth_at, split_use, use_statements};
+use super::text::depth_at;
 use crate::crate_move::source_scan::{items_of_module, UseLeaf};
+use crate::crate_move::use_group::split_use;
+use crate::crate_move::use_group::use_statements;
 
 /// The source module, as the code being moved sees it.
 pub(super) struct Source<'a> {

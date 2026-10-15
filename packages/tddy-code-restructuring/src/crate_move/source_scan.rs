@@ -146,6 +146,12 @@ impl<'a> Scan<'a> {
         }
     }
 
+    /// Whether the path starting at token `at` is the one a `pub(in …)` visibility names: the three
+    /// tokens before it are `pub`, `(` and `in`.
+    fn names_a_restriction(&self, at: usize) -> bool {
+        at >= 3 && self.spells(at - 3, &["pub", "(", "in"])
+    }
+
     /// The path of identifiers joined by `::` that starts at `at`, and the index of its last token.
     fn path_from(&self, at: usize) -> (Vec<String>, usize) {
         let mut segments = vec![self.text(self.tokens[at]).to_string()];
@@ -268,6 +274,13 @@ impl UseLeaf {
 }
 
 /// `text` with every comment and literal blanked and every other byte kept where it was.
+/// `text` with its comments and literals blanked, byte for byte, so an offset into the result is an
+/// offset into `text`.
+pub(crate) fn masked_code(text: &str) -> String {
+    String::from_utf8(masked(text))
+        .expect("code is copied whole characters at a time and everything else is blanked")
+}
+
 fn masked(text: &str) -> Vec<u8> {
     let mut bytes: Vec<u8> = text
         .bytes()

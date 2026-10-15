@@ -7,19 +7,20 @@
 //! `docs/dev/1-WIP/2026-10-05-sharpen-repoint-facade.md` for the rules.
 //!
 //! The work is split: [`scope`] says which files an anchor names, [`rewrite`] says which surveyed
-//! paths go through a facade of another crate and holds each to its preconditions, and [`group`]
-//! rewrites one `use` statement — in place when every member agrees, by splitting it when they do
-//! not. What is here is the walk over the files, the text edits built from those answers, and the
+//! paths go through a facade of another crate and holds each to its preconditions, and
+//! [`use_group`](crate::crate_move::use_group) rewrites one `use` statement — in place when every
+//! member agrees, by splitting it when they do not: the one rule the cross-crate moves read as well.
+//! What is here is the walk over the files, the text edits built from those answers, and the
 //! account `check --deep` and `apply` print.
 
-mod group;
 mod refusals;
 mod rewrite;
 mod scope;
 
 use super::early_return::masked_to_code;
-use super::item_move::text::{line_end, line_start, split_use, use_statements};
+use super::item_move::text::{line_end, line_start};
 use super::RustBackend;
+use crate::crate_move::use_group::use_statements;
 use crate::crate_move::{manifest_edits, survey, Destination};
 use crate::edit::{FileEdit, Resolution, TextEdit, WorkspaceEdit};
 use crate::item_anchor::{module_path_of, owning_package};
@@ -27,6 +28,8 @@ use crate::plan::{Anchor, RefactorOp};
 use crate::registry::Workspace;
 use crate::Result;
 
+use crate::crate_move::use_group::refusals::unreadable_use;
+use crate::crate_move::use_group::{group_rewrite, is_a_group, last_segment, Leaf};
 use rewrite::Rewrite;
 
 /// What a static check finds wrong with a `repoint_facade_imports`, from the plan and the text of
@@ -138,9 +141,13 @@ fn use_statement_edits(
 
         let statement = &text[span.clone()];
         if is_a_group(statement) {
-            let leaves: Vec<Rewrite> = inside
+            // TODO(reshape-8-hand-fix): the shared group rule reads `Leaf`s, not this module's `Rewrite`.
+            let leaves: Vec<Leaf> = inside
                 .iter()
-                .map(|index| rewrites[*index].clone())
+                .map(|index| Leaf {
+                    written: rewrites[*index].written.clone(),
+                    rewritten: rewrites[*index].defined_at.clone(),
+                })
                 .collect();
             let rewritten = group_rewrite(file, text, span, &leaves)?;
             if rewritten.contains('\n') {
@@ -153,7 +160,7 @@ fn use_statement_edits(
             let at = span.start
                 + statement
                     .find(written)
-                    .ok_or_else(|| refusals::unreadable_use(statement))?;
+                    .ok_or_else(|| unreadable_use(statement))?;
             let new = plain_path(text, at, &rewrites[index]);
             edits.push(manifest_edits::replacement(
                 text,
@@ -190,36 +197,14 @@ fn mark_split_from_group(rewrites: &mut [Rewrite], inside: &[usize]) {
     }
 }
 
-/// One whole `use` item's replacement, with the indentation of the statement it replaced added to
-/// every line after the first, and a refusal when a group that must split carries an attribute.
-fn group_rewrite(
-    file: &str,
-    text: &str,
-    span: &std::ops::Range<usize>,
-    leaves: &[Rewrite],
-) -> Result<String> {
-    let statement = &text[span.clone()];
-    let line = manifest_edits::position_of(text, span.start).line;
-    let rewritten = group::split_or_reprefix(statement, leaves)?;
-    if rewritten.contains('\n') && attribute_above(text, line) {
-        return Err(refusals::attribute_above_a_split(file, line));
-    }
-
-    let indent = indentation(text, span.start);
-    if indent.is_empty() {
-        Ok(rewritten)
-    } else {
-        Ok(rewritten.replace('\n', &format!("\n{indent}")))
-    }
-}
-
 /// The replacement of a plain `use`'s path, keeping the name the import bound when the rewrite
 /// would change its last segment.
 fn plain_path(text: &str, at: usize, rewrite: &Rewrite) -> String {
     let after = at + rewrite.written.len();
     let has_alias = text[after..].trim_start().starts_with("as ");
-    let was = rewrite::last_segment(&rewrite.written);
-    if !has_alias && rewrite::last_segment(&rewrite.defined_at) != was {
+    // TODO(reshape-8-hand-fix): `last_segment` is `use_group`'s now; `rewrite::last_segment` is gone.
+    let was = last_segment(&rewrite.written);
+    if !has_alias && last_segment(&rewrite.defined_at) != was {
         format!("{} as {was}", rewrite.defined_at)
     } else {
         rewrite.defined_at.clone()
@@ -233,12 +218,7 @@ fn offset_on_line(text: &str, line: u32, written: &str) -> Result<usize> {
     text[start..end]
         .find(written)
         .map(|at| start + at)
-        .ok_or_else(|| refusals::unreadable_use(written))
-}
-
-/// Whether a `use` item is a group — its tree carries a `{`.
-fn is_a_group(statement: &str) -> bool {
-    split_use(statement).is_some_and(|(_, tree)| tree.contains('{'))
+        .ok_or_else(|| unreadable_use(written))
 }
 
 /// The one-based first and last line a byte span covers.
@@ -246,31 +226,6 @@ fn span_lines(text: &str, span: &std::ops::Range<usize>) -> (u32, u32) {
     let first = manifest_edits::position_of(text, span.start).line;
     let last = manifest_edits::position_of(text, span.end.saturating_sub(1)).line;
     (first, last)
-}
-
-/// The whitespace that stands between the start of `offset`'s line and `offset`.
-fn indentation(text: &str, offset: usize) -> String {
-    let start = text[..offset].rfind('\n').map_or(0, |at| at + 1);
-    text[start..offset]
-        .chars()
-        .take_while(|character| *character == ' ' || *character == '\t')
-        .collect()
-}
-
-/// Whether the line above one-based `line` is an attribute or a doc comment.
-fn attribute_above(text: &str, line: u32) -> bool {
-    if line <= 1 {
-        return false;
-    }
-    let previous = text
-        .lines()
-        .nth(line as usize - 2)
-        .unwrap_or_default()
-        .trim_start();
-    previous.starts_with("#[")
-        || previous.starts_with("///")
-        || previous.starts_with("//!")
-        || previous.starts_with("/**")
 }
 
 /// The account of what the operation would write, in the format rule 6 of the changeset names.
@@ -307,23 +262,4 @@ fn notes_of(files: &[String], accounted: &[(String, Vec<Rewrite>)]) -> Vec<Strin
         }
     }
     notes
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_the_indentation_of_the_statement_it_replaces() {
-        assert_eq!(indentation("mod a {\n    use x::y;\n}\n", 12), "    ");
-        assert_eq!(indentation("use x::y;\n", 0), "");
-    }
-
-    #[test]
-    fn sees_an_attribute_or_doc_comment_above_a_statement() {
-        assert!(attribute_above("#[cfg(unix)]\nuse a;\n", 2));
-        assert!(attribute_above("/// The limits.\nuse a;\n", 2));
-        assert!(!attribute_above("use a;\nuse b;\n", 2));
-        assert!(!attribute_above("use a;\n", 1));
-    }
 }

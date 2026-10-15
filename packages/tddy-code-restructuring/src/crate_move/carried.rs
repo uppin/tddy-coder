@@ -383,6 +383,8 @@ impl TheSet {
 #[derive(Default)]
 pub(super) struct SetTotals {
     pub(super) surveys: Vec<Survey>,
+    /// The callers' re-points of every member, written together once the whole set is read.
+    pub(super) callers: Vec<PlannedRewrite>,
     pub(super) crates_named: BTreeSet<String>,
     pub(super) dev_crates_named: BTreeSet<String>,
     pub(super) keeps_naming_it: BTreeSet<String>,

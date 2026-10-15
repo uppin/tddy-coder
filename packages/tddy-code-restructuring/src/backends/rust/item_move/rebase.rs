@@ -12,7 +12,8 @@ use std::ops::Range;
 
 use super::super::early_return::masked_to_code;
 use super::scope::Scope;
-use super::text::{enclosing_modules, is_identifier_byte, Edit};
+use super::text::{enclosing_modules, Edit};
+use crate::crate_move::use_group::is_identifier_byte;
 
 /// The module the code leaves and the one it arrives in, below the crate root.
 pub(in crate::backends::rust) struct Modules<'a> {

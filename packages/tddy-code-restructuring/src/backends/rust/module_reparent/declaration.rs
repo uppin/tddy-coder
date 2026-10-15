@@ -9,10 +9,11 @@ use std::ops::Range;
 use serde_json::{json, Value};
 
 use super::super::early_return::masked_to_code;
-use super::super::item_move::text::{depth_at, is_identifier_byte, line_start, next_line_start};
+use super::super::item_move::text::{depth_at, line_start, next_line_start};
 use super::super::{seam_refusal, visibility_in};
 use crate::crate_move::source_scan::attached_trivia_starts_at;
 use crate::crate_move::source_scan::items_of_module;
+use crate::crate_move::use_group::is_identifier_byte;
 use crate::Result;
 
 /// A module declaration of a parent module.

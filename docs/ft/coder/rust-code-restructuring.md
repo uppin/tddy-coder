@@ -973,8 +973,20 @@ left, and the destination's manifest. The three cannot disagree about what the f
   staying in the origin names the origin; one to a third crate names that crate; a path to a co-moving
   member stays `crate::`. Headers and bodies are rewritten alike. A `use` leaf whose last segment
   changes keeps the name the body goes on using with `as` (`use crate::records as roster;`). A `use`
-  group whose members would need different qualifiers is refused with "write one `use` per path", since
-  a group has one prefix to write.
+  group whose members agree on the new prefix has that prefix replaced in place; one whose members would
+  need different qualifiers is split, the way `repoint_facade_imports` splits it — the members that keep
+  their path stay in the group, first, and each of the others follows as a `use` of its own with the
+  statement's visibility and indentation. A nested member (`a::{x, y}`) whose leaves disagree is
+  flattened into the same split. A group that must be split but carries an attribute or doc comment above
+  it is refused, naming the file and the line.
+- **Facades and restrictions.** A path that reaches a co-moving member through a glob facade the origin
+  holds (`pub use <module>::*;`) counts as reaching the member, so it stays `crate::`; one that
+  reaches a module that stays is an edge. A `pub(in crate::<module>)` restriction is a visibility, never an
+  edge and never a manifest line: it becomes `pub(crate)` when the module stays and
+  `pub(in crate::<landing>)` when it moves with the set.
+- **Callers.** `reexport: none` re-points every caller of every member of a cluster once, as one edit per
+  statement, so two members named in one caller's `use` group are one edit; a caller's group splits by the
+  same rule.
 - **What is an edge.** Only a path to an item the **origin** defines that stays behind makes the
   destination depend on the crate it left — in a header or a body. A path the origin merely forwards from
   another crate, a `super::` into the moved set, and anything under `#[cfg(test)]` are not edges: cargo
@@ -1122,19 +1134,17 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   `<module>/mod.rs` cannot be the anchor of a cross-crate move (a `mod.rs` child is carried).
 - **The survey reads tokens, not types.** In code a path is read as a crate only when the origin's
   manifest declares its first segment, so `mpsc::channel` and `PermissionMode::Plan` add no dependency
-  line. Items a macro generates and paths written inside a macro's arguments are not seen, `pub(in …)`
-  visibility written inside a moved file is not interpreted (it is read on the `mod` declaration in the
-  origin, which the facade then mirrors), and a `#[path = "…"]` module is not followed; one in a
-  carried file is a finding. The `cfg(test)` marker is
+  line. Items a macro generates and paths written inside a macro's arguments are not seen, and a
+  `#[path = "…"]` module is not followed; one in a carried file is a finding. The `cfg(test)` marker is
   recognised as `#[cfg(test)]` and `#[cfg(all(test, …))]`; any other spelling (`any(test, …)`,
   `cfg_attr`) reads as ordinary code, which puts a crate in `[dependencies]` instead of leaving it out.
   The build after the move surfaces whatever the survey could not see.
-- **`check` does not read a nested `use`, and a cluster's stranded-sibling finding reads the header only,
-  of each carried file.**
-  A body path to a module staying behind is a finding of its own, but a `use` nested inside a function is
-  read by neither, and the stranded-sibling finding takes only the file's top-level `use` header from the
-  survey. So `check --deep` can pass a move `apply` refuses on a path inside a nested `use`, or on a body
-  path that only that finding would have named with a cluster as the remedy.
+- **`check` reads the paths `apply`'s cycle refusal reads, of each carried file.** The cluster's
+  stranded-sibling finding names every path to the origin that the move would turn into an edge, in a
+  top-level or a nested `use` and in a body. A path to an item at the origin's crate root is named
+  separately, with "cut the dependency" as the remedy, since a root item is not a sibling that can come
+  along; a path to a module keeps the cluster remedy. A `use` in a function body counts as a `use`, not as
+  a body path.
 - **A restricted child inside an inline module is read where it is declared; the inline module's own
   visibility is not read.** `pub(crate) mod i { pub mod d; }` is not found restricted.
 - **A module's sibling test modules do not move with it.** A `#[cfg(test)] mod x_tests;` beside the module,
