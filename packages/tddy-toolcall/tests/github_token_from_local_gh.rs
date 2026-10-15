@@ -25,7 +25,10 @@ fn a_gh_logged_in_to(dir: &Path, hostname: &str, token: &str) -> PathBuf {
 
 /// A `gh` logged in to nothing.
 fn a_logged_out_gh(dir: &Path) -> PathBuf {
-    a_gh_script(dir, "printf 'no oauth token found for %s\\n' \"$4\" >&2\nexit 1\n")
+    a_gh_script(
+        dir,
+        "printf 'no oauth token found for %s\\n' \"$4\" >&2\nexit 1\n",
+    )
 }
 
 fn a_gh_script(dir: &Path, body: &str) -> PathBuf {

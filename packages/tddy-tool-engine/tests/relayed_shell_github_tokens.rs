@@ -39,9 +39,8 @@ async fn a_relayed_shell_command_inherits_none_of_the_daemons_github_tokens() {
         outcome.result_json,
         outcome.error_message
     );
-    assert_eq!(
-        outcome.result_json.contains("from_the_daemons_environment"),
-        false,
+    assert!(
+        !outcome.result_json.contains("from_the_daemons_environment"),
         "a GitHub token variable reached the command: {}",
         outcome.result_json
     );

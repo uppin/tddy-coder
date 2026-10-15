@@ -56,7 +56,7 @@ fn a_row_written_before_local_gh_existed_reads_as_not_using_it() {
     let row = stored_row(dir.path());
 
     // Then it does not use local gh
-    assert_eq!(row.local_gh, false);
+    assert!(!row.local_gh);
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn a_row_not_using_local_gh_writes_no_local_gh_key() {
     let yaml = std::fs::read_to_string(dir.path().join("projects.yaml")).unwrap();
 
     // Then no local_gh key was written
-    assert_eq!(yaml.contains("local_gh"), false);
+    assert!(!yaml.contains("local_gh"));
 }
 
 #[test]
@@ -81,7 +81,7 @@ fn setting_local_gh_stores_it() {
         .expect("the setting is accepted");
 
     // Then the row uses local gh
-    assert_eq!(stored_row(dir.path()).local_gh, true);
+    assert!(stored_row(dir.path()).local_gh);
 }
 
 #[test]

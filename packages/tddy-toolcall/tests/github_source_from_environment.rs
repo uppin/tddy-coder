@@ -10,7 +10,7 @@
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use tddy_toolcall::toolcall::{
@@ -18,7 +18,7 @@ use tddy_toolcall::toolcall::{
     GITHUB_SOURCE_ENV,
 };
 
-static ENVIRONMENT: Mutex<()> = Mutex::new(());
+static ENVIRONMENT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
     "GH_TOKEN",
@@ -89,14 +89,18 @@ fn a_gh_on_path_logged_in_to_github_com(dir: &Path, token: &str) -> PathBuf {
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::env::set_var(
         "PATH",
-        format!("{}:{}", dir.display(), std::env::var("PATH").unwrap_or_default()),
+        format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
     );
     record
 }
 
 #[tokio::test]
 async fn a_session_told_local_gh_never_asks_its_session_host() {
-    let _environment = ENVIRONMENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _environment = ENVIRONMENT.lock().await;
     // Given a session host that would answer, and gh logged in on this host
     let dir = tempfile::tempdir().unwrap();
     let (socket, asked) = a_session_host_that_counts_its_askers(dir.path());
@@ -115,7 +119,7 @@ async fn a_session_told_local_gh_never_asks_its_session_host() {
 
 #[tokio::test]
 async fn a_malformed_github_source_is_an_error_and_not_a_reason_to_ask_the_host() {
-    let _environment = ENVIRONMENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _environment = ENVIRONMENT.lock().await;
     // Given a session host that would answer
     let dir = tempfile::tempdir().unwrap();
     let (socket, asked) = a_session_host_that_counts_its_askers(dir.path());
@@ -137,7 +141,7 @@ async fn a_malformed_github_source_is_an_error_and_not_a_reason_to_ask_the_host(
 
 #[tokio::test]
 async fn the_gh_a_session_runs_for_its_token_inherits_none_of_its_github_token_variables() {
-    let _environment = ENVIRONMENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _environment = ENVIRONMENT.lock().await;
     // Given a session process that inherited every GitHub token variable gh honours
     let dir = tempfile::tempdir().unwrap();
     for variable in GITHUB_TOKEN_VARIABLES {

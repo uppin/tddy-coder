@@ -591,6 +591,12 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 - ✅ **FIXED 2026-10-15** (`host_tooling_hands_the_probe_the_github_host_the_request_names`, `…_no_github_host_when_the_request_names_none`) — was ℹ **INFO** — no test asserts that `GetHostTooling` forwards `github_hostname` to the probe (the fakes ignore it).
 
 ### /validate-prod-ready
+
+**2026-10-15 — ✅ Ready. 54 production files, 1,330 added production lines (to the first `#[cfg(test)]`). Blockers 0 · Warnings 0.**
+- ✅ Mock/fake/stub: only `tddy-testing-commons` (the `a_gh_cli` stub builder and `ProcessEnv`), a test-support crate; none in production crates.
+- ✅ TODO/FIXME/HACK: none added. ✅ Debug output: none. ✅ No env-conditional or test-only branches.
+- ✅ Fallbacks: none. The four `unwrap_or*` hits are benign (`rest.split(..).next().unwrap_or_default()` on an always-present first split item; poison recovery in `ProcessEnv`; `find_on_path`'s metadata check). A malformed `TDDY_GITHUB_SOURCE` is an error, an unreadable git URL is a refusal, never a default.
+- ✅ Scoped `cargo clippy --all-targets -- -D warnings` on all 22 touched Rust packages (`--keep-going`): clean. It found and I fixed 5 red-phase test lints: `await_holding_lock` ×3 (`tddy-toolcall/tests/github_source_from_environment.rs` now uses `tokio::sync::Mutex`) and `assert_eq!(x, bool)` ×4 (`project_local_gh_storage.rs`, `relayed_shell_github_tokens.rs`).
 ### /analyze-clean-code
 
 ## TODO
