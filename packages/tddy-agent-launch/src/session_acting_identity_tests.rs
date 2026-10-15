@@ -12,6 +12,7 @@ use tddy_credentials::{
     FIRST_VERSION,
 };
 use tddy_projects::project_storage::AccountAssignment;
+use tddy_testing_commons::process_env::ProcessEnv;
 
 const ADA: &str = "ada";
 const ADAS_SESSION: &str = "session-token-for-ada";
@@ -58,6 +59,14 @@ fn ada_and_grace_held() -> Vec<CredentialRecord> {
 }
 
 /// A daemon on which Ada has unlocked a vault holding `records`.
+/// The daemon's environment carrying GitHub token variables, held (and put back afterwards) under
+/// the lock every environment-changing test of this binary shares.
+fn a_daemon_exporting_github_tokens() -> ProcessEnv {
+    ProcessEnv::lock()
+        .setting("GITHUB_TOKEN", "ghp_from_the_environment")
+        .setting("GH_TOKEN", "ghp_from_the_environment")
+}
+
 fn a_daemon_where_ada_unlocked(
     records: Vec<CredentialRecord>,
 ) -> (tempfile::TempDir, SessionAccountAccess) {
@@ -164,8 +173,7 @@ fn an_assignment_this_host_does_not_hold_is_refused_distinctly_from_no_assignmen
 #[test]
 fn a_github_token_in_the_process_environment_does_not_change_the_result() {
     // Given GITHUB_TOKEN exported in the daemon's environment
-    std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
-    std::env::set_var("GH_TOKEN", "ghp_from_the_environment");
+    let _env = a_daemon_exporting_github_tokens();
 
     // When an unassigned project and an assigned one are resolved
     let unassigned = git_environment_for(&assignments_of(&[]), &ada_and_grace_held());
@@ -330,8 +338,7 @@ async fn the_credential_handler_tells_an_unheld_assignment_apart_from_no_assignm
 #[tokio::test]
 async fn a_github_token_in_the_daemons_environment_rescues_nothing_and_replaces_nothing() {
     // Given GITHUB_TOKEN exported in the daemon's environment
-    std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
-    std::env::set_var("GH_TOKEN", "ghp_from_the_environment");
+    let _env = a_daemon_exporting_github_tokens();
     let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
 
     // When an unassigned and an assigned project each ask for a token
@@ -469,7 +476,7 @@ fn a_daemon_side_operation_gets_the_token_of_the_account_the_project_assigns() {
 #[test]
 fn a_daemon_side_operation_on_an_unassigned_project_is_refused_with_the_resolvers_message() {
     // Given Ada's unlocked vault and a project assigning no account, with GITHUB_TOKEN exported
-    std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
+    let _env = a_daemon_exporting_github_tokens();
     let (_dir, vaults) = vaults_where_ada_unlocked(ada_and_grace_held());
 
     // When an operation Ada's session asks for resolves the project's token
@@ -566,7 +573,7 @@ async fn a_start_refused_for_an_unheld_account_keeps_refusing_once_the_account_a
 async fn a_start_refused_for_no_assignment_is_not_rescued_by_the_environment_or_a_later_assignment()
 {
     // Given GITHUB_TOKEN exported, and a session started for a project assigning nothing
-    std::env::set_var("GITHUB_TOKEN", "ghp_from_the_environment");
+    let _env = a_daemon_exporting_github_tokens();
     let (_dir, access) = a_daemon_where_ada_unlocked(ada_and_grace_held());
     let handler = credential_handler_over(access, &[]);
 

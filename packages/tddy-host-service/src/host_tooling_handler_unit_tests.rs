@@ -29,21 +29,27 @@ const OTHER_OPERATOR: &str = "monalisa";
 const VERIFIABLE_TOKEN: &str = "valid";
 const EXPIRED_TOKEN: &str = "expired";
 
-/// A probe that answers with a fixed reading and records the OS user it was run as.
+/// A probe that answers with a fixed reading and records the OS user it was run as, and the GitHub
+/// host it was told to ask `gh` about.
 ///
 /// Deterministic by construction: nothing here consults the machine running the suite, so the
 /// answer never depends on which `git` or `gh` happens to be installed on it.
 struct RecordingHostToolingProbe {
     answer: HostTooling,
     probed_os_users: StdMutex<Vec<String>>,
+    probed_github_hostnames: StdMutex<Vec<Option<String>>>,
 }
 
 impl HostToolingProbe for RecordingHostToolingProbe {
-    fn probe(&self, os_user: &str, _github_hostname: Option<&str>) -> HostTooling {
+    fn probe(&self, os_user: &str, github_hostname: Option<&str>) -> HostTooling {
         self.probed_os_users
             .lock()
             .expect("the probe recorder is never held across a panic")
             .push(os_user.to_string());
+        self.probed_github_hostnames
+            .lock()
+            .expect("the probe recorder is never held across a panic")
+            .push(github_hostname.map(str::to_string));
         self.answer.clone()
     }
 }
@@ -53,7 +59,17 @@ impl RecordingHostToolingProbe {
         Arc::new(Self {
             answer,
             probed_os_users: StdMutex::new(Vec::new()),
+            probed_github_hostnames: StdMutex::new(Vec::new()),
         })
+    }
+
+    /// Every GitHub host this probe was told to ask `gh` about, in call order; `None` is "no host
+    /// named".
+    fn probed_github_hostnames(&self) -> Vec<Option<String>> {
+        self.probed_github_hostnames
+            .lock()
+            .expect("the probe recorder is never held across a panic")
+            .clone()
     }
 
     /// Every OS user this probe was run as, in call order.
@@ -174,11 +190,21 @@ async fn tooling_asked_of(
     session_token: &str,
     host: &str,
 ) -> Result<GetHostToolingResponse, Status> {
+    tooling_asked_of_about_github_host(service, session_token, host, "").await
+}
+
+/// As [`tooling_asked_of`], naming the GitHub host `gh` is to be asked about; empty names none.
+async fn tooling_asked_of_about_github_host(
+    service: &HostServiceImpl,
+    session_token: &str,
+    host: &str,
+    github_hostname: &str,
+) -> Result<GetHostToolingResponse, Status> {
     service
         .get_host_tooling(Request::direct(GetHostToolingRequest {
             session_token: session_token.to_string(),
             daemon_instance_id: host.to_string(),
-            github_hostname: String::new(),
+            github_hostname: github_hostname.to_string(),
         }))
         .await
         .map(|answered| answered.into_inner())
@@ -297,4 +323,53 @@ async fn host_tooling_for_another_host_is_routed_to_that_peer() {
         Vec::<String>::new(),
         "a question about server-2 must not be probed locally on workstation-1"
     );
+}
+
+/// A Local gh project's host reaches the probe, so `gh` is asked about that host and not github.com.
+#[tokio::test]
+async fn host_tooling_hands_the_probe_the_github_host_the_request_names() {
+    // Given a daemon whose probe records the GitHub host it is handed
+    let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+        "Ada Lovelace",
+        "ada@example.com",
+        "hubot",
+    ));
+    let service = a_daemon_probing_with(Arc::clone(&probe)).build();
+
+    // When a verified session asks this daemon about itself, naming an enterprise GitHub host
+    tooling_asked_of_about_github_host(
+        &service,
+        VERIFIABLE_TOKEN,
+        THIS_DAEMON,
+        "github.example.com",
+    )
+    .await
+    .expect("a verified session is answered");
+
+    // Then the probe was handed that host
+    assert_eq!(
+        probe.probed_github_hostnames(),
+        vec![Some("github.example.com".to_string())]
+    );
+}
+
+/// An empty `github_hostname` is the protocol's spelling for "none named": the probe is given
+/// `None`, not an empty host.
+#[tokio::test]
+async fn host_tooling_hands_the_probe_no_github_host_when_the_request_names_none() {
+    // Given a daemon whose probe records the GitHub host it is handed
+    let probe = RecordingHostToolingProbe::answering(a_host_committing_as(
+        "Ada Lovelace",
+        "ada@example.com",
+        "hubot",
+    ));
+    let service = a_daemon_probing_with(Arc::clone(&probe)).build();
+
+    // When a verified session asks this daemon about itself, naming no GitHub host
+    tooling_asked_of(&service, VERIFIABLE_TOKEN, THIS_DAEMON)
+        .await
+        .expect("a verified session is answered");
+
+    // Then the probe was handed no host
+    assert_eq!(probe.probed_github_hostnames(), vec![None]);
 }

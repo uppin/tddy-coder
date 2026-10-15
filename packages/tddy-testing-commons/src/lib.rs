@@ -14,6 +14,7 @@ pub mod fakes;
 pub mod fs;
 #[cfg(unix)]
 pub mod gh_cli;
+pub mod process_env;
 pub mod sandbox_fixtures;
 pub mod sandbox_session_channel;
 pub mod stub_http;

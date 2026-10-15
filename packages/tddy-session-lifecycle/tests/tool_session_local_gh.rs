@@ -30,6 +30,7 @@ use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::builders::a_session_metadata;
 use tddy_testing_commons::fs::write_session_yaml;
 use tddy_testing_commons::gh_cli::a_gh_cli;
+use tddy_testing_commons::process_env::ProcessEnv;
 
 const PROJECT_ID: &str = "11111111-2222-4333-8444-555555555555";
 const OWNER: &str = "testuser";
@@ -50,6 +51,14 @@ const GRACE_IDENTITY: [&str; 4] = [
     "GIT_AUTHOR_NAME=grace",
     "GIT_COMMITTER_EMAIL=202+grace@users.noreply.github.com",
     "GIT_COMMITTER_NAME=grace",
+];
+
+/// The variables a commit identity inherited from whoever runs the suite would arrive in.
+const GIT_IDENTITY_VARIABLES: [&str; 4] = [
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
 ];
 
 const GITHUB_TOKEN_VARIABLES: [&str; 4] = [
@@ -186,6 +195,8 @@ impl ChildEnvironment {
 
 /// A host with one project, a `gh` stub, and a tool recording its start environment.
 struct World {
+    /// Held so no other test of this binary changes the environment while this world is alive.
+    _environment: ProcessEnv,
     data_dir: tempfile::TempDir,
     repo: tempfile::TempDir,
     tools: tempfile::TempDir,
@@ -202,16 +213,23 @@ fn a_host_where(
         tddy_testing_commons::gh_cli::GhCliStub,
     ) -> tddy_testing_commons::gh_cli::GhCliStub,
 ) -> World {
+    a_host_in(ProcessEnv::lock(), row, gh_as)
+}
+
+/// As [`a_host_where`], in a daemon environment the test already prepared. The world holds the
+/// environment lock, so no other test of this binary changes it while the world is alive.
+fn a_host_in(
+    environment: ProcessEnv,
+    row: ProjectRow,
+    gh_as: impl FnOnce(
+        tddy_testing_commons::gh_cli::GhCliStub,
+    ) -> tddy_testing_commons::gh_cli::GhCliStub,
+) -> World {
     // The commit identity under test is the daemon's to add; one inherited from whoever runs the
     // suite would be indistinguishable from it.
-    for key in [
-        "GIT_AUTHOR_NAME",
-        "GIT_AUTHOR_EMAIL",
-        "GIT_COMMITTER_NAME",
-        "GIT_COMMITTER_EMAIL",
-    ] {
-        std::env::remove_var(key);
-    }
+    let environment = GIT_IDENTITY_VARIABLES
+        .iter()
+        .fold(environment, |environment, key| environment.without(key));
     let data_dir = tempfile::tempdir().unwrap();
     let repo = tempfile::tempdir().unwrap();
     let tools = tempfile::tempdir().unwrap();
@@ -224,6 +242,7 @@ fn a_host_where(
     register_project(data_dir.path(), repo.path(), row);
     let daemon = a_daemon(data_dir.path(), gh);
     World {
+        _environment: environment,
         data_dir,
         repo,
         tools,
@@ -409,11 +428,13 @@ async fn a_local_gh_tool_session_where_gh_is_logged_out_is_still_told_its_github
 #[tokio::test]
 async fn the_gh_a_local_gh_session_start_asks_never_sees_the_daemons_github_tokens() {
     // Given a daemon whose environment carries every GitHub token variable gh honours
-    for variable in GITHUB_TOKEN_VARIABLES {
-        std::env::set_var(variable, "from_the_daemons_environment");
-    }
+    let environment = GITHUB_TOKEN_VARIABLES
+        .iter()
+        .fold(ProcessEnv::lock(), |environment, variable| {
+            environment.setting(variable, "from_the_daemons_environment")
+        });
     // And a Local gh project, with gh logged in as ada
-    let world = a_host_where(a_local_gh_project_at(GITHUB_COM_URL), |gh| {
+    let world = a_host_in(environment, a_local_gh_project_at(GITHUB_COM_URL), |gh| {
         gh.logged_in_as("ada", 101)
     });
 
