@@ -599,6 +599,11 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 - ✅ Scoped `cargo clippy --all-targets -- -D warnings` on all 22 touched Rust packages (`--keep-going`): clean. It found and I fixed 5 red-phase test lints: `await_holding_lock` ×3 (`tddy-toolcall/tests/github_source_from_environment.rs` now uses `tokio::sync::Mutex`) and `assert_eq!(x, bool)` ×4 (`project_local_gh_storage.rs`, `relayed_shell_github_tokens.rs`).
 ### /analyze-clean-code
 
+**2026-10-15 — Score A for the code this change authored; B overall once the legacy functions it touched are counted.** 84 production functions overlap the diff (54 files, 1,330 added lines).
+- **New functions** (written here): 0 must-refactor; 1 needs-attention — `tddy-testing-commons/src/gh_cli.rs::build` (44 lines, test-support stub writer). `GithubCli::ask` was 46 lines / nesting 4; **fixed** by extracting `refusal_for_exit` (`tddy-host-service` 157 + 1 + 3 passing, clippy clean).
+- **Touched legacy functions** (pre-existing, grew by a few lines; not introduced here, tracked by the existing `complexity-*` / `oversized-file-*` records): `run.rs::run_daemon` 590, `start_sandboxed_cursor_cli_session` 429 (22 params), `start_session_core` 388, `spawn_claude_cli_session_inner` 280 (29 params), `spawn_cursor_cli_session_reporting` 267 (34 params), `add_project_to_host_at_project_coordinate` 176, `open_pty_and_pump` 160 (nesting 9), `relaunch_sandboxed_runner` 156 (15 params), `repoint_planned_pr` 145, `spawn_tool_session` 132, `set_project_accounts_at_project_coordinate` 120, `create_project_at_project_coordinate` 107, `svc_host_builders::new` 94, `as_user_command` 85, `host_tooling::probe` 77, `resume_sandboxed_claude_cli_session` 69. Unchanged class; recorded, not fixed here.
+- **Magic values:** the `gh` stderr phrases in `refusal_for_exit` are `gh`'s own words, kept inline beside their only use. **Duplication:** the `gh` stub exists three times (blocked by the dependency cycle, see /validate-tests).
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-14-local-gh-github-source-initial-discovery.md`)
@@ -623,6 +628,6 @@ Written and verified failing 2026-10-14. There are 50 new tests: 48 fail for mis
 - [ ] Analyze code quality (/analyze-clean-code)
 - [ ] Refactor code quality issues
 - [ ] Final validation (/validate-changes)
-- [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
+- [x] Linting and formatting (scoped `cargo clippy -p <pkg> --all-targets -- -D warnings` on the 22 touched packages, `cargo fmt -p`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-14-local-gh-github-source-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

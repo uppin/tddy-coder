@@ -67,6 +67,32 @@ impl std::fmt::Display for GithubCliRefusal {
     }
 }
 
+/// What a non-zero `gh` exit means: not logged in (by the words `gh` uses for it), or a failure
+/// carrying what `gh` said.
+fn refusal_for_exit(
+    code: i32,
+    stderr: &str,
+    os_user: &str,
+    hostname: &str,
+    args: &[&str],
+) -> GithubCliRefusal {
+    let said = stderr.to_ascii_lowercase();
+    if said.contains("gh auth login")
+        || said.contains("no oauth token found")
+        || said.contains("not logged in")
+    {
+        return GithubCliRefusal::NotLoggedIn {
+            hostname: hostname.to_string(),
+            os_user: os_user.to_string(),
+        };
+    }
+    GithubCliRefusal::Failed(format!(
+        "gh {} exited with {code}: {}",
+        args.join(" "),
+        summarise(stderr)
+    ))
+}
+
 impl GithubCli {
     /// The `gh` on the `PATH` a spawned child runs with, looked up at each call.
     pub fn on_spawn_child_path() -> Self {
@@ -152,24 +178,7 @@ impl GithubCli {
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         match output.status.code() {
             Some(0) => Ok(stdout),
-            Some(code) => {
-                let said = stderr.to_ascii_lowercase();
-                if said.contains("gh auth login")
-                    || said.contains("no oauth token found")
-                    || said.contains("not logged in")
-                {
-                    Err(GithubCliRefusal::NotLoggedIn {
-                        hostname: hostname.to_string(),
-                        os_user: os_user.to_string(),
-                    })
-                } else {
-                    Err(GithubCliRefusal::Failed(format!(
-                        "gh {} exited with {code}: {}",
-                        args.join(" "),
-                        summarise(&stderr)
-                    )))
-                }
-            }
+            Some(code) => Err(refusal_for_exit(code, &stderr, os_user, hostname, args)),
             None => Err(GithubCliRefusal::Failed(format!(
                 "gh {} was killed by a signal",
                 args.join(" ")
