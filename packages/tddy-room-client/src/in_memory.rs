@@ -90,3 +90,60 @@ impl RoomConnector for InMemoryRoomConnector {
         }
     }
 }
+
+/// The far end of an in-memory duplex: what the client sent, and a way to answer it.
+pub struct DuplexPeer {
+    /// Every `service/method` the client opened a duplex to, in order.
+    pub opened: Arc<Mutex<Vec<(String, String)>>>,
+    /// Frames the client sent.
+    pub from_client: mpsc::Receiver<Vec<u8>>,
+    /// Frames delivered to the client.
+    pub to_client: mpsc::Sender<Result<Vec<u8>, tddy_rpc::Status>>,
+}
+
+/// A joined in-memory room serving one duplex, whose far end the test plays.
+struct InMemoryDuplexSession {
+    opened: Arc<Mutex<Vec<(String, String)>>>,
+    duplex: Mutex<Option<RoomDuplex>>,
+}
+
+/// A session that serves exactly one duplex, and the peer end the test drives it with.
+pub fn a_session_with_one_duplex() -> (Arc<dyn RoomSession>, DuplexPeer) {
+    let (outbound, from_client) = mpsc::channel(64);
+    let (to_client, inbound) = mpsc::channel(64);
+    let opened = Arc::new(Mutex::new(Vec::new()));
+    let session = InMemoryDuplexSession {
+        opened: Arc::clone(&opened),
+        duplex: Mutex::new(Some(RoomDuplex { outbound, inbound })),
+    };
+    let peer = DuplexPeer {
+        opened,
+        from_client,
+        to_client,
+    };
+    (Arc::new(session), peer)
+}
+
+impl RoomSession for InMemoryDuplexSession {
+    fn rpc(&self) -> Arc<dyn tddy_rpc::RpcClientTransport> {
+        panic!("this in-memory session serves one duplex and no calls")
+    }
+
+    fn open_duplex(&self, service: &str, method: &str) -> Result<RoomDuplex, tddy_rpc::Status> {
+        self.opened
+            .lock()
+            .unwrap()
+            .push((service.to_string(), method.to_string()));
+        self.duplex.lock().unwrap().take().ok_or_else(|| {
+            tddy_rpc::Status::failed_precondition("this in-memory session's duplex is already open")
+        })
+    }
+
+    fn subscribe(&self, _topic: &str) -> mpsc::UnboundedReceiver<Vec<u8>> {
+        mpsc::unbounded_channel().1
+    }
+
+    fn peer_present(&self) -> bool {
+        true
+    }
+}
