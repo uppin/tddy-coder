@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 9/11 — status-ui
+# Initial Discovery: #satellite 9/13 — status-ui
 
 **Changeset**: [2026-10-16-livekit-satellite-status-ui.md](./2026-10-16-livekit-satellite-status-ui.md)
 **Date**: 2026-10-16
@@ -11,7 +11,7 @@
 - Generated TS protos are committed and checked by `scripts/generated-code.sh check` (root `package.json:26`). #623's proto change had left `daemon_config_pb.ts` stale in **two** packages (`tddy-web`, `tddy-rust-typescript-tests`) and `session_room_pb.ts` missing — fixed on #623 (`c4147adfb`, `1ed8ea926`), which this node consumes.
 - No settings-related code issue in `tddy-web`.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

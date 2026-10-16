@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #631
 **Type**: Feature (web)
-**Stack**: #satellite 9/11. Base: `feature/satellite/coder-participant` (#630).
+**Stack**: #satellite 9/13. Base: `feature/satellite/coder-participant` (#630).
 
 ## Initial Discovery
 
@@ -28,6 +29,14 @@ driver's backend stub for the RPC, and the Cypress component spec.
 | #623 `satellite-1-extension-ports` | `GetIntegrationStatus` + `IntegrationStatus`/`IntegrationState` in `daemon_config.proto`, and the regenerated `packages/tddy-web/src/gen/daemon_config_pb.ts` (commit `c4147adfb`) | Calls the generated client and renders the response | Change the proto or regenerate it |
 | #624–#630 | Nothing consumed | — | — |
 
+**As published (wave 2):** `integrationStatusText` (throws), its 6 bun unit tests (all failing), the
+driver's `aDaemonReportingIntegrations` / `aDaemonWithoutIntegrationStatus` / `aLiveKitIntegration`
+and `expectLiveKitStatus` / `expectNoLiveKitStatus`, the `daemonSettingsLivekitStatus` test id, and
+`cypress/component/DaemonSettingsIntegrationStatus.cy.tsx`: 5 failing (no status line rendered), and
+`shows no status for a daemon without the status call` passing by design — it pins the
+`Unimplemented` behaviour green must keep. Verified with only this spec, after
+`./dev bun run local-registry-install` in the worktree.
+
 ## Draft PR contract
 
 ```ts
@@ -44,13 +53,13 @@ and the failing Cypress spec and unit test.
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes. Its only need is #623's published RPC and generated client, and
 it stubs the backend.
 **Concurrent with:** nodes 2–8
 **Blocks:** none
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -134,10 +143,10 @@ minutes, hours).
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
