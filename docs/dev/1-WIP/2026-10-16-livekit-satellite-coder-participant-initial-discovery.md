@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 8/11 — coder-participant
+# Initial Discovery: #satellite 8/13 — coder-participant
 
 **Changeset**: [2026-10-16-livekit-satellite-coder-participant.md](./2026-10-16-livekit-satellite-coder-participant.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - `tddy-coder` is lib + bin; scripts build it with `-p tddy-coder` (`release:60`, `test:23`). A bin-only LiveKit edge still counts in the manifest → binary crate split recommended (same open question as node 7).
 - `run.rs` code issue `oversized-file-run.md` is open and unclaimed.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

@@ -68,6 +68,20 @@ pub struct SessionParticipantHandle {
     _run: tokio::task::JoinHandle<()>,
 }
 
+/// [`spawn_session_participant`], served through `host` instead of naming a transport: joins
+/// `ws_url` as `identity` with `session_token`, once (no reconnect), publishing from `metadata_rx`.
+pub async fn spawn_session_participant_with(
+    ws_url: &str,
+    session_token: &str,
+    identity: &str,
+    opts: SessionParticipantOptions,
+    metadata_rx: watch::Receiver<String>,
+    host: &dyn crate::participant_host::SessionParticipantHost,
+) -> anyhow::Result<SessionParticipantHandle> {
+    let _ = (ws_url, session_token, identity, opts, metadata_rx, host);
+    todo!("spawn_session_participant_with")
+}
+
 /// Spawn the session's LiveKit participant, serving the session-scoped RPC coordinates and
 /// publishing `session` metadata from `metadata_rx`.
 ///
