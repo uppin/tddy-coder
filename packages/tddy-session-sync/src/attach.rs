@@ -32,6 +32,7 @@ use tddy_service::proto::session::{
     ConnectSessionRequest, ConnectSessionResponse, ListSessionsRequest, ListSessionsResponse,
     SessionEntry,
 };
+use tddy_service::proto::session_room::OpenSessionRoomResponse;
 use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 use tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC;
 use tokio::sync::mpsc;
@@ -328,6 +329,24 @@ fn join_nonce() -> String {
         .map(|since| since.as_millis())
         .unwrap_or_default();
     format!("{millis}-{}", std::process::id())
+}
+
+/// Ask the daemon at `daemon_url` to open `session_id`'s room with itself in it, before a mirror
+/// joins that room to look for it there.
+///
+/// `SessionRoomService.OpenSessionRoom` is the LiveKit integration's own call: `ConnectSession` is
+/// local work and no longer opens a room for a caller that did not arrive over LiveKit, and this is
+/// such a caller. It fails, naming the room, when the daemon's LiveKit cannot be reached — a mirror
+/// that asked for a room and has none must hear about it rather than wait for a daemon nobody put
+/// there.
+pub async fn open_session_room(
+    daemon_url: &str,
+    session_token: &str,
+    session_id: &str,
+    timeout: Duration,
+) -> Result<OpenSessionRoomResponse, DaemonHttpError> {
+    let _ = (daemon_url, session_token, session_id, timeout);
+    todo!("open_session_room")
 }
 
 /// Why a call to the daemon's Connect-HTTP surface did not produce an answer.

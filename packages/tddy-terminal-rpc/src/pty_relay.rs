@@ -530,6 +530,22 @@ async fn connect_session_over_http(
     Ok(())
 }
 
+/// Ask the daemon at `daemon_url` to open `session_id`'s room — with itself in it and the
+/// session's terminal exposed there — before this relay joins the room to look for it.
+///
+/// `SessionRoomService.OpenSessionRoom` is the LiveKit integration's own call; `ConnectSession` is
+/// local work and no longer opens a room for a caller that did not arrive over LiveKit. It fails,
+/// naming the room, when the daemon's LiveKit cannot be reached.
+#[cfg(feature = "livekit")]
+pub async fn open_session_room_over_http(
+    daemon_url: &str,
+    session_token: &str,
+    session_id: &str,
+) -> Result<tddy_service::proto::session_room::OpenSessionRoomResponse> {
+    let _ = (daemon_url, session_token, session_id);
+    todo!("open_session_room_over_http")
+}
+
 async fn connectrpc_post(
     client: &reqwest::Client,
     base: &str,

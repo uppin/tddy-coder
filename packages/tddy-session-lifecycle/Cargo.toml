@@ -87,6 +87,7 @@ tddy-telegram = { path = "../tddy-telegram" }
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 # Which GitHub account a project acts as: one `acting_identity` resolution at the session edge, whose
 # commit identity `tddy-daemon-livekit::session_git_environment` turns into the agent's `GIT_*`
 # variables. `tddy-credentials` names the vault records the resolution reads.
