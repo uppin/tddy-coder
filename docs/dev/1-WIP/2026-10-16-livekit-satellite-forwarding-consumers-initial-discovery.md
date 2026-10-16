@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 10/11 — forwarding-consumers
+# Initial Discovery: #satellite 10/13 — forwarding-consumers
 
 **Changeset**: [2026-10-16-livekit-satellite-forwarding-consumers.md](./2026-10-16-livekit-satellite-forwarding-consumers.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - session-files' `context_files.rs:49` is a doc comment; its real uses are in `svc_materialize_staged_attachment.rs`.
 - Real edges: n2 → n10 (CommonRoom over a port) and **n4 → n10** (daemon-auth strike needs #626's minting move) — the latter is new.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

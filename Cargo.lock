@@ -12347,6 +12347,7 @@ dependencies = [
  "livekit",
  "log",
  "pretty_assertions",
+ "prost 0.13.5",
  "rstest 0.24.0",
  "serde",
  "serde_json",
