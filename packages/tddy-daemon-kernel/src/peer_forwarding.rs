@@ -92,6 +92,12 @@ pub fn daemon_rpc_identity(instance_id: &str) -> String {
 /// forever — the operator sees an action that neither completes nor fails. Generous enough for a
 /// forward carrying a whole attachment's bytes over chunked data frames, short enough that a dead
 /// peer surfaces as an error rather than a hang.
+/// The room a session is reached in: `session-{session_id}`.
+pub fn session_room_name(session_id: &str) -> String {
+    let _ = session_id;
+    todo!("session_room_name")
+}
+
 pub const PEER_FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a forwarded server stream may go without a frame before it is terminated as an error.
@@ -319,6 +325,11 @@ fn peer_forward_deadline_status(
 #[cfg(test)]
 mod common_room_tests {
     use super::*;
+
+    #[test]
+    fn a_sessions_room_is_named_after_the_session() {
+        assert_eq!(session_room_name("1780828020298-abc"), "session-1780828020298-abc");
+    }
     use crate::config::DaemonConfig;
 
     #[test]

@@ -35,6 +35,7 @@
 //! [`AdvertisedSigningKey`]: the crate publishes them and reads peers' back
 //! ([`peer_signing_public_keys`]), and parses none of them.
 
+pub mod agent_room_ports;
 pub mod common_room_supervisor;
 pub mod first_admission_token;
 pub mod livekit_peer_discovery;

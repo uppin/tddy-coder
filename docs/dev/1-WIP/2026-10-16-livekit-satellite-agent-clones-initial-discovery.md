@@ -11,7 +11,7 @@
 - The hosted clone is a room *client* → reuses node 7's `RoomConnector` (new real edge n7 → n11).
 - `session_room_name` is a LiveKit-free string helper → kernel, beside `daemon_rpc_identity`.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16
