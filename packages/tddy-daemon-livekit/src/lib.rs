@@ -44,6 +44,7 @@ pub mod livekit_rooms_stream;
 pub mod livekit_service;
 pub mod os_user_resolution;
 pub mod peer_routing;
+pub mod room_tokens;
 pub mod placement;
 pub mod session_admission_service;
 pub mod session_git;
