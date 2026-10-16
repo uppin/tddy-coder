@@ -150,28 +150,31 @@ plugin owns.
 
 ## Implementation Plan (PR stack)
 
-Stack `#satellite`, 11 nodes, linear; branches `feature/satellite/<node>` (node 1:
-`satellite-1-extension-ports`). Each node strikes the crates it frees from the ratchet's
-`KNOWN_OFFENDERS`.
+Stack `#satellite`, 13 nodes, linear, registered with `gh stack` (#623–#635); branches
+`feature/satellite/<node>` (node 1: `satellite-1-extension-ports`). Each node strikes the crates it
+frees from the ratchet's `KNOWN_OFFENDERS`; node 13 deletes the list.
 
-| K | Node | Delivers | Strikes | Wave |
-|---|---|---|---|---|
-| 1 | extension-ports (#623) | Ports crate, `SessionReach`, local `ConnectSession`, `OpenSessionRoom`, `GetIntegrationStatus`, ratchet | — | 1 |
-| 2 | peer-forwarding | `PeerForwarder` port; the kernel's `peer_forwarding` LiveKit impl moves to the plugin | `tddy-daemon-kernel`, `tddy-host-service` | 2 |
-| 3 | session-rooms | `SessionRooms` port for room lookup/close | `tddy-session-activity`, `tddy-telegram-control` | 2 |
-| 4 | room-tokens | Room-token minting port | `tddy-screen-sharing` | 2 |
-| 5 | core-modules | LiveKit-free modules leave the plugin; dead `livekit` edges dropped | — | 2 |
-| 6 | terminal-bridge | Terminal exposure port; the CLI PTY bridge moves to the plugin | `tddy-cli-sessions` | 2 |
-| 7 | client-transports | Client room-transport port; LiveKit only in client binaries | `tddy-session-sync`, `tddy-remote-git-repo`, `tddy-terminal-rpc`, `tddy-session-tool-client` | 2 |
-| 8 | coder-participant | `tddy-coder` lib reaches its participant through a port | `tddy-coder` | 2 |
-| 9 | status-ui | Integration status on the web settings screen | — | 2 |
-| 10 | forwarding-consumers | daemon-rpc, session-files, daemon-auth route through `PeerForwarder` | `tddy-daemon-rpc`, `tddy-session-files`, `tddy-daemon-auth` | 3 |
-| 11 | agent-clones | Agent clones, split transport, lifecycle and launch behind ports; `KNOWN_OFFENDERS` deleted | `tddy-session-agents`, `tddy-session-split`, `tddy-session-lifecycle`, `tddy-agent-launch` | 4 |
+| K | PR | Node | Delivers | Strikes | Wave |
+|---|---|---|---|---|---|
+| 1 | #623 | extension-ports | Ports crate, `SessionReach`, local `ConnectSession`, `OpenSessionRoom`, `GetIntegrationStatus`, ratchet | — | 1 |
+| 2 | #624 | peer-forwarding | `PeerForwarder`; the kernel's `CommonRoom` over the port | `tddy-daemon-kernel`, `tddy-host-service` | 2 |
+| 3 | #625 | session-rooms | `SessionRooms` (close / hosts) | `tddy-session-activity`, `tddy-telegram-control` | 2 |
+| 4 | #626 | room-tokens | `RoomTokenMinter` | `tddy-screen-sharing` | 2 |
+| 5 | #627 | core-modules | LiveKit-free modules leave the plugin; dead `livekit` edges dropped | — | 2 |
+| 6 | #628 | terminal-bridge | `TerminalExposure` | `tddy-cli-sessions` | 2 |
+| 7 | #629 | client-transports | `tddy-room-client` (client join port) | `tddy-session-sync`, `tddy-remote-git-repo`, `tddy-terminal-rpc`, `tddy-session-tool-client` | 2 |
+| 8 | #630 | coder-participant | `SessionParticipantHost`; `tddy-coder-cli` binary crate | `tddy-coder` | 2 |
+| 9 | #631 | status-ui | Integration status on the web settings screen | — | 2 |
+| 10 | #632 | forwarding-consumers | Typed peer calls → kernel; `PeerRouting` → host-service; OAuth tunnel → plugin | `tddy-daemon-rpc`, `tddy-session-files`, `tddy-daemon-auth` | 3 |
+| 11 | #633 | agent-clones | `RoomBroadcast`, `RoomAdmission`, `RoomDirectory`; clone on `RoomConnector` | `tddy-session-agents` | 4 |
+| 12 | #634 | split-transport | `SplitRoomHosting`; split traits move to extensions | `tddy-session-split` | 4 |
+| 13 | #635 | lifecycle-launch | Host built from ports; `SessionReach::open_now`; offender list deleted | `tddy-session-lifecycle`, `tddy-agent-launch` | 5 |
 
-Real edges: `n1 → n2..n9`, `n2 → n10`, `n2, n3, n4, n10 → n11`. The line is the waves concatenated,
-blockers first: peer-forwarding (2 dependents) leads wave 2, then session-rooms and room-tokens (1
-each), then the nodes nothing waits on. Nodes 3–9 are sequential only because a registered stack is a
-line; they could be greened concurrently.
+Real edges: `n1 → n2..n9`, `n2, n4 → n10`, `n2, n3, n4, n7, n10 → n11`, `n4, n10 → n12`,
+`n11, n12 → n13`. The line is the waves concatenated with blockers leading: in wave 2, peer-forwarding
+leads (three transitive dependents), then room-tokens and session-rooms, then nodes nothing waits on.
+Nodes 3–9 are sequential only because a registered stack is a line. The original node 11 was split
+into 11–13 by capability, because one PR over four crates was too large to review.
 
 ## Success Criteria
 
