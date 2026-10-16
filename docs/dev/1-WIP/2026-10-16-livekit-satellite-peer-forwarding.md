@@ -169,14 +169,14 @@ only in how they build a `CommonRoom`. The ratchet asserts the dependency outcom
 |---|---|---|
 | `a_forwarded_call_returns_what_the_peer_answered` | `packages/tddy-daemon-kernel/tests/common_room_forwarding.rs` | `forward_to_peer` relays the forwarder's reply bytes |
 | `a_peer_that_does_not_answer_within_the_deadline_is_reported_as_timed_out` | same | `forward_to_peer_within` → `DeadlineExceeded` naming service, method, peer and seconds |
-| `forwarding_without_a_connected_common_room_is_a_failed_precondition` | same | `CommonRoom::new(Arc::new(NoPeerForwarding), ..)` refuses; `is_connected()` is false |
+| `forwarding_without_a_connected_transport_is_a_failed_precondition` | same | `CommonRoom::new(Arc::new(NoPeerForwarding), ..)` refuses; `is_connected()` is false |
 | `a_relayed_stream_delivers_each_frame_then_ends_when_the_peer_ends` | same | Frames decoded in order; end-of-stream closes the relay |
-| `a_stream_that_goes_quiet_ends_with_a_deadline_error` | same | Idle past `PEER_FORWARD_STREAM_IDLE_TIMEOUT` → one terminal `DeadlineExceeded` frame (uses `tokio::time::pause`) |
+| `a_stream_that_goes_quiet_ends_with_one_deadline_error` | same | Idle past `PEER_FORWARD_STREAM_IDLE_TIMEOUT` → one terminal `DeadlineExceeded` frame (uses `tokio::time::pause`) |
 | `a_common_room_carries_the_deadline_the_config_names` | `packages/tddy-daemon-kernel/src/peer_forwarding.rs` (existing, rebuilt on `new`) | `forward_timeout()` from config |
-| `the_kernel_and_host_service_name_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | `KNOWN_OFFENDERS` without the two crates; `every_known_offender_still_names_a_livekit_crate` and `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` pass |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | `KNOWN_OFFENDERS` without the two crates; `every_known_offender_still_names_a_livekit_crate` and `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` pass |
 
 Unit (`tddy-daemon-extensions/src/peer_forwarder.rs`):
-`with_nothing_wired_no_peer_is_connected`, `with_nothing_wired_a_forward_is_a_failed_precondition`.
+`with_nothing_wired_no_peer_is_connected`, `with_nothing_wired_a_forward_is_a_failed_precondition_naming_the_call`.
 
 ## Technical Debt & Production Readiness
 
