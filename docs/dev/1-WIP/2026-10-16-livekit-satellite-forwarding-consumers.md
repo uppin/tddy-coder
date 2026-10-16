@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #632
 **Type**: Refactor (architecture)
-**Stack**: #satellite 10/11. Base: `feature/satellite/status-ui` (#631).
+**Stack**: #satellite 10/13. Base: `feature/satellite/status-ui` (#631).
 
 ## Initial Discovery
 
@@ -41,6 +42,13 @@ session-files' switch to them; the OAuth loopback tunnel's move into the plugin.
 **New edge found while planning:** `n4 → n10`. #626's `## Green wave` lists only node 11 as blocked;
 its wave-2 commit updates that (a child does not edit its parent's docs).
 
+**As published (wave 2):** kernel `peer_calls` (13 helpers, `todo!()`), host-service
+`peer_routing::PeerRouting` (`new`, `classify_daemon_route`, `common_room_slot`; the rest of its
+surface moves in green), and failing tests. **Sequencing:** `tests/peer_calls.rs` builds a real
+`CommonRoom` over an in-memory forwarder — the integration is the point — so it currently stops at
+#624's `CommonRoom::new` (`todo!()` there) and cannot pass before #624 is green. The OAuth tunnel's move
+is a pure relocation and lands in green. The ratchet strikes wait on #623's `WorkspaceGraph`.
+
 ## Draft PR contract
 
 ```rust
@@ -74,14 +82,14 @@ the kernel (`Cargo.toml:24`), so the kernel cannot take it without a cycle.
 
 ## Green wave
 
-**Wave:** 3 of 4
+**Wave:** 3 of 5
 **Greenable independently:** not yet. The helpers' tests need #624's `CommonRoom` over a port
 (behaviour), and the daemon-auth strike needs #626's minting move. Greenable once #624 and #626 are
 green.
 **Concurrent with:** none
 **Blocks:** node 11 (its session-forwarding callers move onto the kernel helpers)
 
-    n1 → n2..n9      n2, n4 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -176,10 +184,10 @@ which move with it. The ratchet asserts the strikes.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
