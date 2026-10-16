@@ -152,9 +152,9 @@ which move with it. The ratchet asserts the strikes.
 |---|---|---|
 | `adding_a_project_on_a_peer_sends_the_request_to_that_peer_and_decodes_its_answer` | `packages/tddy-daemon-kernel/tests/peer_calls.rs` (new) | Service and method names, the encoded request, the decoded response |
 | `a_peer_answering_garbage_is_reported_as_an_internal_decode_error` | same | Decode failure produces `Internal` naming the response type |
-| `reading_a_host_document_from_a_peer_relays_every_frame` | same | Stream helper over the in-memory forwarder |
+| `reading_a_host_document_from_a_peer_relays_every_frame_decoded` | same | Stream helper over the in-memory forwarder |
 | `a_request_for_this_daemon_is_routed_locally_and_one_for_a_peer_is_forwarded` | `packages/tddy-host-service/tests/peer_routing.rs` (new) | `PeerRouting` with an eligible-source fake |
-| `the_daemon_rpc_session_files_and_auth_crates_name_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Three entries struck; both ratchet tests pass |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Three entries struck; both ratchet tests pass |
 
 ## Technical Debt & Production Readiness
 
