@@ -12347,6 +12347,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tddy-core",
+ "tddy-daemon-extensions",
  "tddy-discovery",
  "tddy-github",
  "tddy-livekit",

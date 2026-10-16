@@ -118,6 +118,20 @@ pub struct CommonRoom {
 }
 
 impl CommonRoom {
+    /// A common room whose forwards travel through `forwarder`, with the deadline `config` names.
+    pub fn new(
+        forwarder: Arc<dyn tddy_daemon_extensions::PeerForwarder>,
+        config: &crate::config::DaemonConfig,
+    ) -> Self {
+        let _ = (forwarder, config);
+        todo!("CommonRoom::new")
+    }
+
+    /// Whether a peer can be reached at all right now.
+    pub async fn is_connected(&self) -> bool {
+        todo!("CommonRoom::is_connected")
+    }
+
     /// A handle over `slot` whose forwards wait `config.peer_forward_timeout()`.
     pub fn from_config(
         slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,

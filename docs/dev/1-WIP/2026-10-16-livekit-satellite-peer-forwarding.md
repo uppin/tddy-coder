@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #624
 **Type**: Refactor (architecture)
-**Stack**: #satellite 2/11. Base: `satellite-1-extension-ports` (#623).
+**Stack**: #satellite 2/13. Base: `satellite-1-extension-ports` (#623).
 
 ## Initial Discovery
 
@@ -37,6 +38,10 @@ plugin. Strikes `tddy-daemon-kernel` and `tddy-host-service` from `KNOWN_OFFENDE
 | Parent node | What it delivers | How this PR consumes it | This PR does NOT |
 |---|---|---|---|
 | #623 `satellite-1-extension-ports` | The `tddy-daemon-extensions` crate (LiveKit-free, `tddy-rpc` + `async-trait` only) and the ratchet's `KNOWN_OFFENDERS` | Adds `peer_forwarder.rs` to that crate; strikes two entries from the list | Change `SessionReach`, the status board, or the ratchet's allowed sets |
+
+**Sequencing (found writing the tests):** the ratchet assertions in
+`livekit_is_a_satellite.rs` run on #623's `WorkspaceGraph`, still `todo!()` on #623 — they cannot
+pass here until #623 is green. Every other test in this node fails on this node's own surface.
 
 ## Draft PR contract
 
@@ -79,14 +84,14 @@ bodies are `todo!()` until green.
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes. Its tests drive `CommonRoom` over an in-memory forwarder and the
 plugin over the existing testkit suites; nothing waits on another wave-2 node.
 **Concurrent with:** nodes 3–9
 **Blocks:** node 10 (forwarding-consumers) and node 11 (agent-clones), which route through
 `PeerForwarder`
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -203,10 +208,10 @@ Unit (`tddy-daemon-extensions/src/peer_forwarder.rs`):
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

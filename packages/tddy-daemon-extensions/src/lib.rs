@@ -8,13 +8,16 @@
 //!
 //! - [`session_reach`] — a session was reached on this host; an integration may extend that reach
 //!   beyond it.
+//! - [`peer_forwarder`] — carry an RPC to a peer daemon; the kernel's `CommonRoom` keeps the policy.
 //! - [`integration_status`] — the one place an integration's live state is recorded, so "is it
 //!   configured, is it up" is answered once instead of re-derived per caller.
 
 pub mod integration_status;
+pub mod peer_forwarder;
 pub mod session_reach;
 
 pub use integration_status::{
     IntegrationReporter, IntegrationState, IntegrationStatus, IntegrationStatusBoard,
 };
+pub use peer_forwarder::{NoPeerForwarding, PeerForwarder};
 pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};
