@@ -14,6 +14,9 @@
 
 pub mod integration_status;
 pub mod peer_forwarder;
+pub mod room_admission;
+pub mod room_broadcast;
+pub mod room_directory;
 pub mod room_tokens;
 pub mod session_reach;
 pub mod session_rooms;
@@ -23,6 +26,9 @@ pub use integration_status::{
     IntegrationReporter, IntegrationState, IntegrationStatus, IntegrationStatusBoard,
 };
 pub use peer_forwarder::{NoPeerForwarding, PeerForwarder};
+pub use room_admission::{NoRoomAdmission, RoomAdmission};
+pub use room_broadcast::{NoRoomBroadcast, RoomBroadcast};
+pub use room_directory::{NoRoomDirectory, RoomDirectory};
 pub use room_tokens::{NoRoomTokens, RoomTokenMinter};
 pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};
 pub use session_rooms::{NoSessionRooms, SessionRooms};

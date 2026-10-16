@@ -2,6 +2,7 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #633
 **Type**: Refactor (architecture)
 **Stack**: #satellite 11/13. Base: `feature/satellite/forwarding-consumers` (#632).
 
@@ -38,6 +39,15 @@ to the kernel. Strikes `tddy-session-agents`.
 | #626 room-tokens | `RoomTokenMinter` | The clone's self-mint fallback (`session_agent_clone.rs:529`) | Change minting |
 | #629 client-transports | `tddy-room-client` (`RoomConnector`, `RoomSession`) | The clone joins the session room through it | Change the client port |
 | #632 forwarding-consumers | Kernel `peer_calls` (`forward_delete_session`, `forward_start_session_within`); `tddy_host_service::peer_routing::PeerRouting` | Provisioning forwards and routing | Re-add `*_via_livekit` names |
+
+**As published (wave 2):** `RoomBroadcast`, `RoomAdmission`, `RoomDirectory` with null objects;
+`tddy_daemon_kernel::peer_forwarding::session_room_name`; the plugin's impls (`SessionRoomRegistry` as
+`RoomBroadcast`, `SessionAdmissionRegistry` as `RoomAdmission`, `RosterDirectory` over `RoomRoster`) —
+all `todo!()` — with failing unit tests. **Shape correction:** `RoomAdmission` mirrors the registry it
+wraps (synchronous `admit`/`revoke`/`is_admitted` returning `bool`, plus `revoke_all_for_session`);
+the scoped join token stays with `first_admission_token`, not on the port. **Not yet published:** the
+session-agents acceptance tests (`roster_ports.rs`, `clone_room_join.rs`) — they drive `AgentRoster`
+paths whose fields change type in green. The ratchet strike waits on #623's `WorkspaceGraph`.
 
 ## Draft PR contract
 
@@ -165,10 +175,10 @@ Unit: null objects in `tddy-daemon-extensions` (`with_nothing_wired_*`).
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
