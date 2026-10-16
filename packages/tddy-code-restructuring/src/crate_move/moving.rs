@@ -11,6 +11,7 @@ use crate::{
 };
 
 use super::malformed;
+use super::new_crate::{self, NewCrate};
 
 use manifest_edits::Table;
 
@@ -38,19 +39,11 @@ pub(crate) struct Move {
     /// What to leave behind in the crate it left.
     pub(crate) reexport: Reexport,
     /// The crate the move creates at the destination, when its plan line names one with `name`.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-new-crate): implement — `travelling_alone` and the preconditions read it"
-    )]
-    pub(crate) creates: Option<super::NewCrate>,
+    pub(crate) creates: Option<NewCrate>,
 }
 
 /// The dependency lines a destination's manifest gains for what the moved code names: those for
 /// its plain table, and those for each `[target.'<cfg>'.…]` table, keyed by the header verbatim.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-new-crate): implement — `Move::dependency_lines` returns it"
-)]
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct CarriedLines {
     pub(crate) plain: Vec<String>,
@@ -71,10 +64,9 @@ impl Move {
 
         Ok(Move {
             origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
-            destination: destination::Destination::read(workspace.root, destination)?,
+            destination: new_crate::destination_of(workspace, op, destination)?,
             reexport: op.reexport.unwrap_or(Reexport::None),
-            // TODO(reshape-new-crate): implement — `NewCrate::named_by(op)`
-            creates: None,
+            creates: NewCrate::named_by(op),
             source,
             module,
             home,
@@ -100,7 +92,7 @@ impl Move {
             origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
             destination: destination.clone(),
             reexport,
-            // TODO(reshape-new-crate): implement — the cluster's `creates`
+            // A member is one module of a set; what the set creates is the cluster's to carry.
             creates: None,
             source: format!("{}/src/{}.rs", home.crate_dir, home.path.join("/")),
             module,
@@ -234,28 +226,41 @@ impl Move {
             self.dependency_lines(&text, &origin, Table::DevDependencies, dev_named)?;
 
         let mut edits =
-            manifest_edits::with_dependencies(&text, Table::Dependencies, &dependencies);
+            manifest_edits::with_dependencies(&text, Table::Dependencies, &dependencies.plain);
         edits.extend(manifest_edits::with_dependencies(
             &text,
             Table::DevDependencies,
-            &dev_dependencies,
+            &dev_dependencies.plain,
+        ));
+        edits.extend(target_table_edits(
+            &text,
+            dependencies
+                .by_target
+                .iter()
+                .chain(&dev_dependencies.by_target),
         ));
         Ok(FileEdit::Change { path, edits })
     }
 
-    /// The lines `table` of the destination's manifest has to gain for `named`.
+    /// The lines `table` of the destination's manifest has to gain for `named`, and the lines its
+    /// target-specific tables have to gain.
     ///
     /// A dev-dependency is already reachable from the destination's tests when either table declares
     /// it, so it is skipped then; a dependency is only reachable from its code through
     /// `[dependencies]`.
+    ///
+    /// A crate the origin declares in the plain table being filled is carried there. One it declares
+    /// only under `[target.'<cfg>'.…]` is carried to that same table of the destination, so the
+    /// `cfg` that kept it off other targets is not lost; a target dev dependency's table is the
+    /// `dev-dependencies` one, for code only tests name.
     fn dependency_lines(
         &self,
         destination: &str,
         origin: &str,
         table: Table,
         named: &BTreeSet<String>,
-    ) -> Result<Vec<String>> {
-        let mut lines = Vec::new();
+    ) -> Result<CarriedLines> {
+        let mut carried = CarriedLines::default();
         for extern_name in named {
             let declared_already = match table {
                 Table::Dependencies => {
@@ -269,7 +274,7 @@ impl Move {
                 continue;
             }
             if *extern_name == self.origin.extern_name {
-                lines.push(format!(
+                carried.plain.push(format!(
                     "{} = {{ path = \"{}\" }}",
                     self.origin.package,
                     manifest_edits::relative_from(&self.destination.dir, &self.origin.dir)
@@ -281,21 +286,75 @@ impl Move {
                 Table::DevDependencies => {
                     manifest_edits::dependency_line_from_either_table(origin, extern_name)
                 }
+            };
+            if let Some(declared) = declared {
+                carried.plain.push(manifest_edits::re_anchored(
+                    &declared,
+                    &self.origin.dir,
+                    &self.destination.dir,
+                ));
+                continue;
             }
-            .ok_or_else(|| {
-                malformed(format!(
+
+            let declared_for_targets = self.target_lines(destination, origin, table, extern_name);
+            if declared_for_targets.is_empty() {
+                return Err(malformed(format!(
                     "the moved module names `{extern_name}`, which {}/Cargo.toml does not declare \
                      — there is nothing to carry across",
                     self.origin.dir
-                ))
-            })?;
-            lines.push(manifest_edits::re_anchored(
-                &declared,
-                &self.origin.dir,
-                &self.destination.dir,
-            ));
+                )));
+            }
+            for (header, line) in declared_for_targets {
+                carried.by_target.entry(header).or_default().push(line);
+            }
         }
-        Ok(lines)
+        Ok(carried)
+    }
+
+    /// Each target table of the origin declaring `extern_name` that the destination does not
+    /// already declare it under, as the header it goes under there and the line, re-anchored.
+    fn target_lines(
+        &self,
+        destination: &str,
+        origin: &str,
+        table: Table,
+        extern_name: &str,
+    ) -> Vec<(String, String)> {
+        let dev = table == Table::DevDependencies;
+        let mut declarations = manifest_edits::target_declarations(origin, extern_name, dev);
+        let mut to_dev_table = false;
+        if declarations.is_empty() && dev {
+            declarations = manifest_edits::target_declarations(origin, extern_name, false);
+            to_dev_table = true;
+        }
+        // Reachable from the destination's tests through a table of its own, whichever one.
+        let reachable_for_tests =
+            dev && !manifest_edits::target_declarations(destination, extern_name, false).is_empty();
+        let held_under: Vec<String> =
+            manifest_edits::target_declarations(destination, extern_name, dev)
+                .into_iter()
+                .map(|held| held.header)
+                .collect();
+
+        declarations
+            .into_iter()
+            .map(|declared| {
+                let header = if to_dev_table {
+                    declared
+                        .header
+                        .replace(".dependencies]", ".dev-dependencies]")
+                } else {
+                    declared.header
+                };
+                let line = manifest_edits::re_anchored(
+                    &declared.line,
+                    &self.origin.dir,
+                    &self.destination.dir,
+                );
+                (header, line)
+            })
+            .filter(|(header, _)| !reachable_for_tests && !held_under.contains(header))
+            .collect()
     }
 
     /// Every manifest that has to gain a dependency on the destination.
@@ -366,6 +425,17 @@ impl Move {
             )],
         }])
     }
+}
+
+/// One `with_lines_under` edit per target table the destination's manifest `text` has to gain
+/// lines in, each keyed by its header as the origin wrote it.
+fn target_table_edits<'a>(
+    text: &str,
+    tables: impl Iterator<Item = (&'a String, &'a Vec<String>)>,
+) -> Vec<TextEdit> {
+    tables
+        .flat_map(|(header, lines)| manifest_edits::with_lines_under(text, header, lines))
+        .collect()
 }
 
 mod facade_writer;

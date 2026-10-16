@@ -9,11 +9,13 @@
 //! The skeleton is resolved into first, so every edit the move makes to the new manifest and root
 //! reads them as text that exists, and is then folded into one creation and one change per file.
 
-use crate::crate_move::destination::Destination;
-use crate::edit::FileEdit;
+use crate::crate_move::destination::{declared_package_name, Destination};
+use crate::crate_move::manifest_edits;
+use crate::edit::{FileEdit, TextEdit, WorkspaceEdit};
 use crate::overlay::Overlay;
 use crate::plan::RefactorOp;
 use crate::registry::Workspace;
+use crate::RestructureError;
 
 use super::Result;
 
@@ -28,21 +30,17 @@ pub struct NewCrate {
 
 impl NewCrate {
     /// The crate `op` creates, when it is a module crate move whose line carries `name`.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-new-crate): implement — `Move::read` and `cluster::named_by` read it"
-    )]
     pub(crate) fn named_by(op: &RefactorOp) -> Option<NewCrate> {
-        // TODO(reshape-new-crate): implement
-        let _ = op;
-        todo!("NewCrate::named_by")
+        if !op.op.moves_across_crates() {
+            return None;
+        }
+        Some(NewCrate {
+            dir: op.to.clone()?,
+            package: op.name.clone()?,
+        })
     }
 
     /// The destination this crate will be, without reading a manifest that does not exist yet.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-new-crate): implement — `Move::read` uses it when the op creates"
-    )]
     pub(crate) fn destination(&self) -> Destination {
         Destination {
             dir: self.dir.clone(),
@@ -54,42 +52,115 @@ impl NewCrate {
     /// Why this crate cannot be created in `workspace`, moving code out of `origin`, if it cannot:
     /// a crate already at `dir`, a directory that is not empty, an extern name the origin or a
     /// listed member already has, or a workspace with no `members` array.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-new-crate): implement — `move_preconditions` reports it"
-    )]
     pub(crate) fn refusal(
         &self,
         workspace: &Workspace<'_>,
         origin: &Destination,
     ) -> Result<Option<String>> {
-        // TODO(reshape-new-crate): implement
-        let _ = (workspace, origin);
-        todo!("NewCrate::refusal")
+        let dir = &self.dir;
+        if holds(workspace, &format!("{dir}/Cargo.toml"))? {
+            return Ok(Some(format!(
+                "`{dir}` is already a crate — drop `name` to move into it"
+            )));
+        }
+        if !is_empty_or_missing(workspace, dir)? {
+            return Ok(Some(format!("`{dir}` is not empty")));
+        }
+
+        let extern_name = self.destination().extern_name;
+        if extern_name == origin.extern_name {
+            return Ok(Some(already_the_extern_name_of(&extern_name, &origin.dir)));
+        }
+        let root = workspace.read("Cargo.toml")?;
+        let Some(members) = manifest_edits::members_list(&root) else {
+            return Ok(Some(format!(
+                "the workspace lists no `members`, so cargo would not build `{}`",
+                self.package
+            )));
+        };
+        // A glob entry names no one directory, and a listed directory with no manifest holds no
+        // crate that could clash: neither is this check's to read.
+        for member in root[members].split('"').skip(1).step_by(2) {
+            let manifest = format!("{member}/Cargo.toml");
+            if !member.contains('*') && holds(workspace, &manifest)? {
+                let text = workspace.read(&manifest)?;
+                let held = declared_package_name(&text).map(|package| package.replace('-', "_"));
+                if held.as_deref() == Some(extern_name.as_str()) {
+                    return Ok(Some(already_the_extern_name_of(&extern_name, member)));
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// The skeleton the move resolves into: `[package]` with this name and the origin's `version`
     /// and `edition` lines verbatim, and an empty `src/lib.rs`.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-new-crate): implement — `cluster::widened_cluster` seeds it"
-    )]
     pub(crate) fn skeleton(
         &self,
         workspace: &Workspace<'_>,
         origin: &Destination,
     ) -> Result<Skeleton> {
-        // TODO(reshape-new-crate): implement
-        let _ = (workspace, origin);
-        todo!("NewCrate::skeleton")
+        let origin_manifest = workspace.read(&format!("{}/Cargo.toml", origin.dir))?;
+        let mut manifest = format!("[package]\nname = \"{}\"\n", self.package);
+        for key in ["version", "edition"] {
+            if let Some(line) = manifest_edits::package_line(&origin_manifest, key) {
+                manifest.push_str(line);
+                manifest.push('\n');
+            }
+        }
+        Ok(Skeleton {
+            manifest,
+            root: String::new(),
+            created: [
+                format!("{}/Cargo.toml", self.dir),
+                format!("{}/src/lib.rs", self.dir),
+            ],
+        })
+    }
+}
+
+/// The destination an operation moves into: the crate it creates, which has no manifest to read
+/// yet, or the one `to` names, read through `workspace`'s overlay.
+///
+/// # Errors
+///
+/// Refuses as [`Destination::read_in`] does.
+pub(crate) fn destination_of(
+    workspace: &Workspace<'_>,
+    op: &RefactorOp,
+    to: &str,
+) -> Result<Destination> {
+    match NewCrate::named_by(op) {
+        Some(creation) => Ok(creation.destination()),
+        None => Destination::read_in(workspace, to),
+    }
+}
+
+fn already_the_extern_name_of(extern_name: &str, dir: &str) -> String {
+    format!("`{extern_name}` is already the extern name of `{dir}`")
+}
+
+/// Whether `path` is a file `workspace` reads: on disk, or in its overlay.
+fn holds(workspace: &Workspace<'_>, path: &str) -> Result<bool> {
+    match workspace.read(path) {
+        Ok(_) => Ok(true),
+        Err(RestructureError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Whether `dir` is absent or holds nothing, so creating a crate in it writes over no file.
+fn is_empty_or_missing(workspace: &Workspace<'_>, dir: &str) -> Result<bool> {
+    match std::fs::read_dir(workspace.root.join(dir)) {
+        Ok(mut entries) => Ok(entries.next().is_none()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(error.into()),
     }
 }
 
 /// The two files a new crate starts as, before the move fills them.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-new-crate): implement — built by `NewCrate::skeleton`, read by `folded`"
-)]
 pub(crate) struct Skeleton {
     /// `<dir>/Cargo.toml` as created.
     pub(crate) manifest: String,
@@ -99,30 +170,91 @@ pub(crate) struct Skeleton {
     pub(crate) created: [String; 2],
 }
 
+impl Skeleton {
+    /// Both files as the one edit that creates them: a creation and a change inserting their text.
+    pub(crate) fn creation(&self) -> WorkspaceEdit {
+        let texts = [&self.manifest, &self.root];
+        let mut changes: Vec<FileEdit> = self
+            .created
+            .iter()
+            .map(|path| FileEdit::Create { path: path.clone() })
+            .collect();
+        for (path, text) in self.created.iter().zip(texts) {
+            if !text.is_empty() {
+                changes.push(inserted(path, text));
+            }
+        }
+        WorkspaceEdit { changes }
+    }
+}
+
+/// The change that writes all of `text` into the empty file at `path`.
+fn inserted(path: &str, text: &str) -> FileEdit {
+    FileEdit::Change {
+        path: path.to_string(),
+        edits: vec![manifest_edits::replacement("", 0..0, text)],
+    }
+}
+
 /// The move's `changes` with every edit to a created file folded into its skeleton text: one
 /// `FileEdit::Create` and one `FileEdit::Change` per created file, so no path gets two changes.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-new-crate): implement — `cluster::widened_cluster` folds its edit"
-)]
 pub(crate) fn folded(skeleton: &Skeleton, changes: Vec<FileEdit>) -> Result<Vec<FileEdit>> {
-    // TODO(reshape-new-crate): implement
-    let _ = (skeleton, changes);
-    todo!("new_crate::folded")
+    let mut folded: Vec<FileEdit> = skeleton
+        .created
+        .iter()
+        .map(|path| FileEdit::Create { path: path.clone() })
+        .collect();
+    let mut into_created: [Vec<TextEdit>; 2] = Default::default();
+
+    for change in changes {
+        match change {
+            FileEdit::Change { path, edits } => {
+                match skeleton.created.iter().position(|created| *created == path) {
+                    Some(created) => into_created[created].extend(edits),
+                    None => folded.push(FileEdit::Change { path, edits }),
+                }
+            }
+            other => folded.push(other),
+        }
+    }
+
+    let texts = [&skeleton.manifest, &skeleton.root];
+    for ((path, text), edits) in skeleton.created.iter().zip(texts).zip(&into_created) {
+        let text = crate::apply::edited(text.clone(), edits)?;
+        if !text.is_empty() {
+            folded.push(inserted(path, &text));
+        }
+    }
+    Ok(folded)
 }
 
 /// An overlay over `workspace` holding the skeleton of every crate an operation before `index`
 /// creates, so a plain `check` reads operation `index` at its place in the plan.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-new-crate): implement — `preconditions::unrunnable` seeds it"
-)]
+///
+/// A creation that is itself refused is left out: it is reported on its own, and seeding a
+/// skeleton over a crate that exists would make every later read disagree with the tree.
 pub(crate) fn created_by_earlier_operations(
     workspace: &Workspace<'_>,
     ops: &[RefactorOp],
     index: usize,
 ) -> Result<Overlay> {
-    // TODO(reshape-new-crate): implement
-    let _ = (workspace, ops, index);
-    todo!("new_crate::created_by_earlier_operations")
+    let mut overlay = workspace.overlay.clone();
+    for creation in ops[..index]
+        .iter()
+        .filter_map(|op| NewCrate::named_by(op).map(|creation| (op, creation)))
+    {
+        let (op, creation) = creation;
+        let seeded = Workspace {
+            root: workspace.root,
+            overlay: &overlay,
+        };
+        let home = super::preconditions::home_of_anchor(&seeded, &op.anchor)?;
+        let origin = Destination::read_in(&seeded, &home.crate_dir)?;
+        if creation.refusal(&seeded, &origin)?.is_some() {
+            continue;
+        }
+        let skeleton = creation.skeleton(&seeded, &origin)?;
+        overlay.record(workspace.root, &skeleton.creation())?;
+    }
+    Ok(overlay)
 }

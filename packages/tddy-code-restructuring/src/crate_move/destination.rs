@@ -26,27 +26,12 @@ impl Destination {
     /// Read a destination from its `Cargo.toml`.
     ///
     /// Refuses a directory with no manifest rather than creating one: a plan that names a crate
-    /// which does not exist is a plan defect, and scaffolding a crate is authoring, not moving.
+    /// which does not exist is a plan defect, unless its line carries `name`, which is what
+    /// creates a crate (see [`NewCrate`](crate::NewCrate)).
     pub fn read(root: &Path, dir: &str) -> Result<Destination> {
         let manifest = root.join(dir).join("Cargo.toml");
-        let text = std::fs::read_to_string(&manifest).map_err(|error| {
-            RestructureError::MalformedPlan(format!(
-                "`{dir}` is not a crate: {} could not be read ({error})",
-                manifest.display()
-            ))
-        })?;
-        let package = declared_package_name(&text).ok_or_else(|| {
-            RestructureError::MalformedPlan(format!(
-                "{} declares no `[package] name`",
-                manifest.display()
-            ))
-        })?;
-
-        Ok(Destination {
-            dir: dir.to_string(),
-            package: package.to_string(),
-            extern_name: package.replace('-', "_"),
-        })
+        let text = std::fs::read_to_string(&manifest);
+        Destination::from_manifest(dir, &manifest.display().to_string(), text)
     }
 
     /// [`Destination::read`] through `workspace`'s overlay rather than from disk, so an operation
@@ -57,9 +42,32 @@ impl Destination {
     /// Refuses as [`Destination::read`] does; a missing manifest's refusal says that `name` creates
     /// the crate.
     pub fn read_in(workspace: &Workspace<'_>, dir: &str) -> Result<Destination> {
-        // TODO(reshape-new-crate): implement
-        let _ = (workspace, dir);
-        todo!("Destination::read_in")
+        let manifest = format!("{dir}/Cargo.toml");
+        let text = workspace.read(&manifest);
+        Destination::from_manifest(dir, &manifest, text)
+    }
+
+    /// The destination `dir`'s manifest declares, where reading it gave `text`.
+    fn from_manifest<E: std::fmt::Display>(
+        dir: &str,
+        manifest: &str,
+        text: std::result::Result<String, E>,
+    ) -> Result<Destination> {
+        let text = text.map_err(|error| {
+            RestructureError::MalformedPlan(format!(
+                "`{dir}` is not a crate: {manifest} could not be read ({error}) — add `name` to \
+                 create it"
+            ))
+        })?;
+        let package = declared_package_name(&text).ok_or_else(|| {
+            RestructureError::MalformedPlan(format!("{manifest} declares no `[package] name`"))
+        })?;
+
+        Ok(Destination {
+            dir: dir.to_string(),
+            package: package.to_string(),
+            extern_name: package.replace('-', "_"),
+        })
     }
 
     /// The crate this one reaches under `extern_name` by a **path** dependency, if it declares one.

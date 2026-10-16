@@ -88,7 +88,7 @@ pub(crate) fn survey_moved_file(
                 continue;
             }
             if !sighting.in_use
-                && !manifest_edits::declares_dependency_in_either_table(&manifest, head)
+                && !manifest_edits::declares_dependency_in_any_table(&manifest, head)
             {
                 continue;
             }
@@ -131,10 +131,12 @@ pub(crate) fn survey_moved_file(
 /// async_trait;`), where `manifest` declares the crate, does not shadow the crate: see
 /// [`bound_only_by_their_own_crate`].
 fn names_bound_by(text: &str, manifest: &str) -> BTreeSet<String> {
-    // TODO(reshape-new-crate): implement — drop the names `bound_only_by_their_own_crate` returns
-    // when `manifest` declares them in any table
-    let _ = manifest;
     let mut bound = names_bound_in(text);
+    for own in bound_only_by_their_own_crate(text) {
+        if manifest_edits::declares_dependency_in_any_table(manifest, &own) {
+            bound.remove(&own);
+        }
+    }
     let items = items_of_module(text);
     bound.extend(items.defined);
     bound.extend(items.children.into_iter().map(|child| child.name));
@@ -144,14 +146,46 @@ fn names_bound_by(text: &str, manifest: &str) -> BTreeSet<String> {
 /// The names `text` binds only through `use` leaves whose first segment is that same name, with at
 /// least two segments and no alias — `use x::x;`, `use x::{x, Y};` — and through nothing else: no
 /// `mod x`, no item `x`, no `use other::x`.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-new-crate): implement — `names_bound_by` reads it"
-)]
 fn bound_only_by_their_own_crate(text: &str) -> BTreeSet<String> {
-    // TODO(reshape-new-crate): implement
-    let _ = text;
-    todo!("survey::bound_only_by_their_own_crate")
+    let items = items_of_module(text);
+    let use_paths: Vec<Vec<String>> = sightings(text)
+        .into_iter()
+        .filter(|sighting| sighting.in_use)
+        .map(|sighting| sighting.segments)
+        .collect();
+    let is_own_import =
+        |segments: &[String]| segments.len() >= 2 && segments.first() == segments.last();
+
+    use_paths
+        .iter()
+        .filter(|segments| is_own_import(segments))
+        .filter_map(|segments| segments.first())
+        .filter(|name| {
+            let imported_otherwise = use_paths
+                .iter()
+                .any(|segments| segments.last() == Some(name) && !is_own_import(segments));
+            let aliased_to_it = items
+                .uses
+                .iter()
+                .any(|leaf| leaf.alias.is_some() && leaf.bound_name() == Some(name.as_str()));
+            let defined_here = items.defined.contains(name)
+                || items.children.iter().any(|child| child.name == **name)
+                || declares_module(text, name);
+            !(imported_otherwise || aliased_to_it || defined_here)
+        })
+        .cloned()
+        .collect()
+}
+
+/// Whether any line of `text`, at any depth, declares `mod <name>`.
+fn declares_module(text: &str, name: &str) -> bool {
+    text.lines().any(|line| {
+        manifest_edits::after_visibility(line.trim())
+            .strip_prefix("mod ")
+            .is_some_and(|rest| {
+                rest.trim_end_matches(|c: char| c == ';' || c == '{' || c.is_whitespace()) == name
+            })
+    })
 }
 
 /// `self::`, `super::` (any depth) and `crate::` resolved against `module_path` in `crate_name`,
