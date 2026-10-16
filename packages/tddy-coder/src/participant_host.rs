@@ -63,6 +63,19 @@ pub trait SessionParticipantHost: Send + Sync {
     ) -> Result<ServedParticipant, String>;
 }
 
+/// The join and reconnect policy the coder's LiveKit flags ask for: with API credentials it
+/// re-mints for `room` and reconnects; with a token it serves once, with that token.
+pub fn participant_join_from_cli(
+    url: &str,
+    room: &str,
+    identity: &str,
+    token: Option<&str>,
+    credentials: Option<(&str, &str)>,
+) -> (ParticipantJoin, bool) {
+    let _ = (url, room, identity, token, credentials);
+    todo!("participant_join_from_cli")
+}
+
 /// No transport wired: the coder serves nothing in any room.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NoParticipantHost;
