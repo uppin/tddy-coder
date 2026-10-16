@@ -46,6 +46,11 @@ pass. Not yet published: `run_main(args, host)`, the `run.rs` call-site tests, t
 `merge_participant_metadata_json` move, and `tddy-coder-cli` (all green). `WIRING` already names
 `tddy-coder-cli`; the ratchet assertions wait on #623's `WorkspaceGraph`.
 
+**Red pass (2026-10-17):** added `participant_host::participant_join_from_cli` (the join and
+reconnect policy both `run.rs` modes ask for) with its two tests, and
+`tddy_changeset::session_participant_metadata::merge_participant_metadata_json` with its test. Green
+routes `run.rs`'s four join sites through `participant_join_from_cli` + the host.
+
 ## Draft PR contract
 
 ```rust
@@ -149,9 +154,9 @@ real host.
 |---|---|---|
 | `a_coder_with_api_credentials_serves_its_surface_with_reconnect` | `packages/tddy-coder/tests/participant_host_port.rs` (new) | Join = room/identity/credentials, `reconnect: true`, metadata receiver present |
 | `a_coder_given_only_a_token_serves_once_with_that_token` | same | `ParticipantAuth::Token`, `reconnect: false` |
-| `a_session_participant_serves_under_its_session_identity` | same | `session_participant` join identity and surface |
-| `merging_participant_metadata_overwrites_top_level_keys` | `packages/tddy-core/src/session_participant_metadata.rs` (moved tests or new unit) | Helper behaviour unchanged after the move |
-| `the_coder_library_names_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | `tddy-coder` struck; `tddy-coder-cli` in `WIRING`; both ratchet tests pass |
+| `a_session_participant_serves_once_under_its_session_identity_with_its_token` | same | `session_participant` join identity and surface |
+| `merging_participant_metadata_overwrites_top_level_keys` | `packages/tddy-changeset/src/session_participant_metadata.rs` (`merge_tests`; `tddy_core` re-exports this module) | Helper behaviour unchanged after the move |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | `tddy-coder` struck; `tddy-coder-cli` in `WIRING`; both ratchet tests pass |
 
 ## Technical Debt & Production Readiness
 

@@ -96,3 +96,54 @@ async fn a_session_participant_serves_once_under_its_session_identity_with_its_t
         )]
     );
 }
+
+#[test]
+fn a_coder_with_api_credentials_serves_its_surface_with_reconnect() {
+    let (join, reconnect) = tddy_coder::participant_host::participant_join_from_cli(
+        "ws://10.0.0.5:7880",
+        "tddy-lobby",
+        "coder-1780828020298-abc",
+        None,
+        Some(("devkey", "a-secret")),
+    );
+
+    assert_eq!(
+        (join, reconnect),
+        (
+            ParticipantJoin {
+                url: "ws://10.0.0.5:7880".to_string(),
+                identity: "coder-1780828020298-abc".to_string(),
+                auth: ParticipantAuth::Credentials {
+                    api_key: "devkey".to_string(),
+                    api_secret: "a-secret".to_string(),
+                    room: "tddy-lobby".to_string(),
+                    ttl: std::time::Duration::from_secs(6 * 3600),
+                },
+            },
+            true
+        )
+    );
+}
+
+#[test]
+fn a_coder_given_only_a_token_serves_once_with_that_token() {
+    let (join, reconnect) = tddy_coder::participant_host::participant_join_from_cli(
+        "ws://10.0.0.5:7880",
+        "tddy-lobby",
+        "coder-1780828020298-abc",
+        Some("a-room-token"),
+        None,
+    );
+
+    assert_eq!(
+        (join, reconnect),
+        (
+            ParticipantJoin {
+                url: "ws://10.0.0.5:7880".to_string(),
+                identity: "coder-1780828020298-abc".to_string(),
+                auth: ParticipantAuth::Token("a-room-token".to_string()),
+            },
+            false
+        )
+    );
+}

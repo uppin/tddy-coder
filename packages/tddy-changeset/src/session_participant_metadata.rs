@@ -118,3 +118,36 @@ pub fn session_metadata_json(meta: &SessionParticipantMetadata) -> String {
         }
     }
 }
+
+/// Merge `update`'s top-level keys over `baseline`'s (nested values are replaced whole, not deep
+/// merged). Moved here from `tddy-livekit`: it is pure JSON over the block this module owns, and
+/// its consumer must not depend on the LiveKit crate to reach it.
+pub fn merge_participant_metadata_json(
+    baseline: &str,
+    update: &str,
+) -> Result<String, serde_json::Error> {
+    let _ = (baseline, update);
+    todo!("merge_participant_metadata_json")
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::merge_participant_metadata_json;
+
+    #[test]
+    fn merging_participant_metadata_overwrites_top_level_keys() {
+        let merged: serde_json::Value = serde_json::from_str(
+            &merge_participant_metadata_json(
+                r#"{"session":{"agent":"claude"},"codex_oauth":{"pending":true}}"#,
+                r#"{"session":{"agent":"cursor"}}"#,
+            )
+            .expect("both are JSON objects"),
+        )
+        .unwrap();
+
+        assert_eq!(
+            merged,
+            serde_json::json!({"session":{"agent":"cursor"},"codex_oauth":{"pending":true}})
+        );
+    }
+}
