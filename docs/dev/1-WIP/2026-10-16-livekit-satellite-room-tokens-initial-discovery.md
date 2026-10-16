@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 4/11 — room-tokens
+# Initial Discovery: #satellite 4/13 — room-tokens
 
 **Changeset**: [2026-10-16-livekit-satellite-room-tokens.md](./2026-10-16-livekit-satellite-room-tokens.md)
 **Date**: 2026-10-16
@@ -11,7 +11,7 @@
 - `tddy-screen-sharing` names `tddy-livekit` only for this mint → strikable here. `tddy-daemon-auth` keeps `livekit::Room` / `tddy_livekit::RpcClient` in `oauth_loopback_tunnel.rs` → not strikable until node 10.
 - TODO `2026-08-13-tokengenerator-generate-for-performs-no-authorization.md` applies to the port too (it authorizes nothing).
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

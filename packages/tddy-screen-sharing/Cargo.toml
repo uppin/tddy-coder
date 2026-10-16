@@ -31,6 +31,8 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-host-service = { path = "../tddy-host-service" }
 # The LiveKit access token a bridge process joins the room with.
 tddy-livekit = { path = "../tddy-livekit" }
+# `RoomTokenMinter`: a bridge's room token is minted through the daemon's one minter.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
 [target.'cfg(unix)'.dependencies]
 # `SIGTERM` to a bridge process — the daemon's own stop path.

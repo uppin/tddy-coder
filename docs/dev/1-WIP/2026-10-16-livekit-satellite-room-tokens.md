@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #626
 **Type**: Refactor (architecture)
-**Stack**: #satellite 4/11. Base: `feature/satellite/session-rooms` (#625).
+**Stack**: #satellite 4/13. Base: `feature/satellite/session-rooms` (#625).
 
 ## Initial Discovery
 
@@ -40,6 +41,13 @@ and daemon-auth's switch onto the port, and the daemon wiring that builds the mi
 | #623 `satellite-1-extension-ports` | `tddy-daemon-extensions`; ratchet list | Adds `room_tokens.rs`; strikes one entry | Touch `SessionReach` or the status board |
 | #624 peer-forwarding, #625 session-rooms | Nothing consumed (line predecessors) | — | Touch `PeerForwarder`, `SessionRooms` |
 
+**As published (wave 2):** the surface is additive so no existing test is broken by a stub: the
+port, `room_token_minter`, `MinterTokenProvider`, and screen sharing's `with_room_tokens` builder plus
+a minter parameter threaded through `prepare_bridge` / `build_bridge_spawn_config` (both private, so
+the bridge test lives in that module's `tests`, not `tests/bridge_room_token.rs`). Green switches
+`build_token_service_entry`, `LiveKitTokenServiceImpl` and the runtime onto the minter. The ratchet
+assertions additionally wait on #623's `WorkspaceGraph`.
+
 ## Draft PR contract
 
 ```rust
@@ -70,12 +78,12 @@ Bodies are `todo!()` until green; the failing tests below are published with the
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes; every test drives this node's own port and adapters.
 **Concurrent with:** nodes 2, 3 and 5–9
-**Blocks:** node 11 (agent-clones), whose split agent and clone mint through this port
+**Blocks:** node 10 (#632 — daemon-auth is struck only once its minting is off `TokenGenerator`), node 11 (#633 — the clone's self-mint) and node 12 (#634 — the split agent's join token)
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -143,7 +151,7 @@ recording fake minter: what they pass in, and that they hand on what comes back.
 | `a_minted_token_grants_the_requested_room_to_the_requested_identity` | `packages/tddy-daemon-livekit/tests/room_tokens.rs` (new) | Verified with the configured secret: `video.room`, `sub` identity, TTL |
 | `a_block_without_its_secret_mints_nothing_and_names_the_field` | same | `FailedPrecondition` naming `api_secret` |
 | `a_daemon_without_livekit_mints_nothing` | same | `room_token_minter(None)` refuses |
-| `the_bridge_is_handed_the_token_minted_for_its_room_and_identity` | `packages/tddy-screen-sharing/tests/bridge_room_token.rs` (new) | Recording minter sees (room, bridge identity, default TTL); the spawn config carries its token |
+| `the_bridge_is_handed_the_token_minted_for_its_room_and_identity` | `packages/tddy-screen-sharing/src/screen_sharing_service.rs` (`tests` module; the function under test is private) | Recording minter sees (room, bridge identity, default TTL); the spawn config carries its token |
 | `the_token_service_mints_through_the_injected_minter` | `packages/tddy-daemon-auth/tests/token_minting_port.rs` (new) | `GenerateToken` (authenticated) returns the minter's token; TTL from the minter adapter |
 | `the_screen_sharing_crate_names_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
 
@@ -179,10 +187,10 @@ Unit (`tddy-daemon-extensions/src/room_tokens.rs`): `with_nothing_wired_every_mi
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
