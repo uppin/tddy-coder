@@ -145,8 +145,8 @@ the dependency outcome.
 | Test | File | Validates |
 |---|---|---|
 | `a_registry_hosting_no_room_reports_none_hosted_and_closes_quietly` | `packages/tddy-daemon-livekit/tests/session_rooms_port.rs` (new) | The real `SessionRoomRegistry` as `&dyn SessionRooms`: `hosts` false, `close` and `close_for_worktree` no-ops |
-| `closing_a_deleted_sessions_room_asks_the_rooms_to_close_that_session` | `packages/tddy-session-activity/tests/session_room_closing.rs` (new) | `close_session_room` trims the id and calls `close` exactly once on a recording `SessionRooms` |
-| `the_session_activity_and_telegram_crates_name_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Two entries struck; both ratchet tests pass |
+| `closing_a_deleted_sessions_room_asks_the_rooms_to_close_that_session_once` | `packages/tddy-session-activity/tests/session_room_closing.rs` (new) | `close_session_room` trims the id and calls `close` exactly once on a recording `SessionRooms` |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Two entries struck; both ratchet tests pass |
 
 Unit (`tddy-daemon-extensions/src/session_rooms.rs`): `with_nothing_wired_no_session_room_is_hosted`,
 `with_nothing_wired_closing_is_a_no_op`.
