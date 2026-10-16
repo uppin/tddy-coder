@@ -493,6 +493,17 @@ impl LiveKitSession {
     }
 }
 
+/// The session for `key` from `cache`, joining through `connector` on first use: the room in the
+/// key's token, as the token's identity, waiting for `key.server_identity`.
+pub async fn room_session_via(
+    cache: &LiveKitRoomCache,
+    key: &LiveKitRoomKey,
+    connector: &dyn tddy_room_client::RoomConnector,
+) -> Result<Arc<LiveKitSession>, String> {
+    let _ = (cache, key, connector);
+    todo!("room_session_via")
+}
+
 impl LiveKitRoomCache {
     /// Return the session for `key`, running `connect` only if this destination has no live one.
     pub async fn client_via<F, Fut>(

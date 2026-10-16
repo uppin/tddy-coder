@@ -530,6 +530,19 @@ async fn connect_session_over_http(
     Ok(())
 }
 
+/// Join the room `config` names (default `tddy-lobby`) as `config.client_identity`, minting from its
+/// API credentials, and wait for `server_identity` to be there — through `connector`, so this crate
+/// names no transport.
+pub async fn join_terminal_room(
+    config: &PtyRelayConfig,
+    livekit_url: &str,
+    server_identity: &str,
+    connector: &dyn tddy_room_client::RoomConnector,
+) -> Result<Arc<dyn tddy_room_client::RoomSession>> {
+    let _ = (config, livekit_url, server_identity, connector);
+    todo!("join_terminal_room")
+}
+
 /// Ask the daemon at `daemon_url` to open `session_id`'s room — with itself in it and the
 /// session's terminal exposed there — before this relay joins the room to look for it.
 ///

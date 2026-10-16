@@ -49,6 +49,13 @@ connector entry points and tests for `tddy-terminal-rpc` (pty-relay) and `tddy-s
 (room cache), and remote-git's relay test — they land in green with the switch. The ratchet
 assertions wait on #623's `WorkspaceGraph`; the bin-crate decision (Decisions) is still open.
 
+**Red pass (2026-10-17):** added `join_terminal_room` + `tests/pty_relay_room_join.rs` (2 tests),
+`room_session_via` + `tests/room_transport_cache.rs`, and `in_memory::a_session_with_one_duplex`.
+⚠ **Open:** `the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` is not written yet —
+the git relay's room seam remains to be specified (green writes it with the switch). **For green:**
+with `RoomAuth::Token`, `RoomJoin.identity`/`room` carry nothing the token does not; align with #630's
+shape (room and identity inside the credentials variant) when the port is implemented.
+
 ## Draft PR contract
 
 ```rust
@@ -157,9 +164,9 @@ testkit-backed suites of each tool, which run through the binaries' wiring.
 | `a_mirror_joins_the_session_room_under_its_own_identity_and_waits_for_the_daemon` | `packages/tddy-session-sync/tests/attach_room_join.rs` (new) | `attach` asks the connector for `session-{id}`, identity `syncer-…`, peer `daemon-{instance}`, credentials auth |
 | `a_daemon_that_never_arrives_is_reported_absent` | same | `PeerAbsent` → `AttachError::DaemonAbsent { identity, room, waited }` |
 | `the_relay_pipes_stdio_through_a_duplex_to_the_remote_git_service` | `packages/tddy-remote-git-repo/tests/relay_over_room.rs` (new) | Bytes written to the relay's stdin arrive on the duplex's outbound side, and inbound frames reach stdout |
-| `pty_relay_joins_the_room_it_was_told_and_drives_the_terminal_service` | `packages/tddy-terminal-rpc/tests/pty_relay_room_join.rs` (new) | Join request (room, identity, server identity) and the `terminal.TerminalService` call through `rpc()` |
-| `the_tool_client_reuses_one_room_session_while_the_daemon_is_present` | `packages/tddy-session-tool-client/tests/room_transport_cache.rs` (new) | Two dispatches, one `connect`; a gone peer reconnects |
-| `the_four_client_libraries_name_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Four entries struck; both ratchet tests pass |
+| `pty_relay_joins_the_room_it_was_told_as_its_own_identity_and_waits_for_the_server` | `packages/tddy-terminal-rpc/tests/pty_relay_room_join.rs` (new) | Join request (room, identity, server identity) and the `terminal.TerminalService` call through `rpc()` |
+| `the_tool_client_joins_a_destination_once_and_reuses_the_session` | `packages/tddy-session-tool-client/tests/room_transport_cache.rs` (new) | Two dispatches, one `connect`; a gone peer reconnects |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Four entries struck; both ratchet tests pass |
 
 Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_naming_the_missing_transport`.
 

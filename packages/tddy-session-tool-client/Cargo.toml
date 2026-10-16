@@ -28,6 +28,9 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tddy-livekit = { path = "../tddy-livekit", optional = true }
 livekit = { version = "0.7", optional = true }
 
+# The client room transport port: the LiveKit arm joins through it.
+tddy-room-client = { path = "../tddy-room-client" }
+
 [features]
 # Off by default, unlike `tddy-tools`' own: this crate is dev-depended on by `tddy-sandbox-app` and
 # `tddy-sandbox-darwin`, whose suites only ever dispatch over the in-jail socket, and neither should
@@ -37,5 +40,7 @@ default = []
 livekit = ["dep:tddy-livekit", "dep:livekit"]
 
 [dev-dependencies]
+pretty_assertions = { workspace = true }
+tddy-room-client = { path = "../tddy-room-client", features = ["test-support"] }
 serial_test = "3"
 tokio = { version = "1", features = ["rt-multi-thread"] }
