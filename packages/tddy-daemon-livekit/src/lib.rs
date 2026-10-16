@@ -46,6 +46,7 @@ pub mod peer_routing;
 pub mod placement;
 pub mod session_admission_service;
 pub mod session_git;
+pub mod session_reach;
 pub mod session_room;
 
 pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};
@@ -55,6 +56,7 @@ pub use livekit_peer_discovery::{
 pub use livekit_peer_transport::LiveKitPeerTransport;
 pub use livekit_rooms_stream::{RoomRoster, RosterError};
 pub use livekit_service::{build_livekit_entry, build_livekit_service, LiveKitServiceImpl};
+pub use session_reach::{livekit_integration_state, LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 pub use session_room::{
     RemoteSnapshotSource, SessionRoomRegistry, SessionTerminalBridge, SessionTokenMinter,
     WorktreeSource,

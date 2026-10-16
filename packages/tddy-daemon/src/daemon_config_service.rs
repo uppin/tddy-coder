@@ -13,8 +13,9 @@ use tokio::sync::Mutex;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, GetClientConfigRequest,
-    GetClientConfigResponse, GetConfigRequest, GetConfigResponse, SandboxedCodebaseSupport,
-    UpdateConfigRequest, UpdateConfigResponse,
+    GetClientConfigResponse, GetConfigRequest, GetConfigResponse, GetIntegrationStatusRequest,
+    GetIntegrationStatusResponse, SandboxedCodebaseSupport, UpdateConfigRequest,
+    UpdateConfigResponse,
 };
 
 use crate::config::DaemonConfig;
@@ -39,6 +40,9 @@ pub struct DaemonConfigServiceImpl {
     config: Arc<Mutex<DaemonConfig>>,
     common_room: Arc<dyn CommonRoomSupervisor>,
     authenticate: SessionTokenAuthenticator,
+    /// The board the daemon's integrations report their live state on; `None` until the
+    /// composition root installs it with [`Self::with_integration_status`].
+    integration_status: Option<Arc<tddy_daemon_extensions::IntegrationStatusBoard>>,
 }
 
 impl DaemonConfigServiceImpl {
@@ -53,7 +57,18 @@ impl DaemonConfigServiceImpl {
             config,
             common_room,
             authenticate,
+            integration_status: None,
         }
+    }
+
+    /// Serve `GetIntegrationStatus` from `board` (builder).
+    #[must_use]
+    pub fn with_integration_status(
+        mut self,
+        board: Arc<tddy_daemon_extensions::IntegrationStatusBoard>,
+    ) -> Self {
+        self.integration_status = Some(board);
+        self
     }
 
     /// Admit the caller, or refuse the call. The daemon's configuration holds its LiveKit
@@ -238,5 +253,13 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
             auth_flow: tddy_daemon_auth::auth::github_auth_flow(&config)
                 .map(|flow| flow.as_str().to_string()),
         }))
+    }
+
+    async fn get_integration_status(
+        &self,
+        request: Request<GetIntegrationStatusRequest>,
+    ) -> Result<Response<GetIntegrationStatusResponse>, Status> {
+        let _ = request;
+        todo!("DaemonConfigServiceImpl::get_integration_status")
     }
 }
