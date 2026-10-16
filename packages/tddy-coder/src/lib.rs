@@ -9,6 +9,7 @@ pub mod plain;
 pub mod recipe;
 pub mod remote;
 pub mod run;
+pub mod participant_host;
 pub mod session_participant;
 pub mod tool_host_wiring;
 mod tty;

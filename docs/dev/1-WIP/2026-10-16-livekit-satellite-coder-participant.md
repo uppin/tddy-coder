@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #630
 **Type**: Refactor (architecture)
-**Stack**: #satellite 8/11. Base: `feature/satellite/client-transports` (#629).
+**Stack**: #satellite 8/13. Base: `feature/satellite/client-transports` (#629).
 
 ## Initial Discovery
 
@@ -36,6 +37,14 @@ to the ratchet's `WIRING`.
 | #623 `satellite-1-extension-ports` | The ratchet (`WIRING`, `KNOWN_OFFENDERS`) | Strikes `tddy-coder`, adds `tddy-coder-cli` to `WIRING` | Change the ratchet's logic |
 | #629 client-transports | `tddy-room-client` (client join port) | **Not consumed**: the coder *serves* a surface, it does not join as a client. No edge n7 → n8. | Reuse `RoomConnector` |
 | #624–#628 | Nothing consumed | — | — |
+
+**As published (wave 2):** `participant_host` (port, `NoParticipantHost`, join/options/served types)
+and `spawn_session_participant_with` (todo!()), with failing tests. **Shape correction:** the room
+lives in `ParticipantAuth::Credentials { room, .. }`, not on `ParticipantJoin` — a token-authenticated
+join's room is the one its token was minted for, and `spawn_session_participant` never had a room to
+pass. Not yet published: `run_main(args, host)`, the `run.rs` call-site tests, the
+`merge_participant_metadata_json` move, and `tddy-coder-cli` (all green). `WIRING` already names
+`tddy-coder-cli`; the ratchet assertions wait on #623's `WorkspaceGraph`.
 
 ## Draft PR contract
 
@@ -71,13 +80,13 @@ pub struct LiveKitParticipantHost;   // over tddy_livekit::LiveKitParticipant
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes — library tests use an in-memory host; the binary keeps the
 existing LiveKit suites.
 **Concurrent with:** nodes 2–7, 9
 **Blocks:** none
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -177,10 +186,10 @@ real host.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
