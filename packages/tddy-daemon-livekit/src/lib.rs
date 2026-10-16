@@ -49,6 +49,7 @@ pub mod session_admission_service;
 pub mod session_git;
 pub mod session_reach;
 pub mod session_room;
+pub mod session_rooms_port;
 
 pub use common_room_supervisor::{CommonRoomSupervisor, SupervisedCommonRoom};
 pub use livekit_peer_discovery::{

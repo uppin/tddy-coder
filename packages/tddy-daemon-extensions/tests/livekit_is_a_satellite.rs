@@ -57,14 +57,12 @@ const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-daemon-rpc",
     "tddy-remote-git-repo",
     "tddy-screen-sharing",
-    "tddy-session-activity",
     "tddy-session-agents",
     "tddy-session-files",
     "tddy-session-lifecycle",
     "tddy-session-split",
     "tddy-session-sync",
     "tddy-session-tool-client",
-    "tddy-telegram-control",
     "tddy-terminal-rpc",
 ];
 

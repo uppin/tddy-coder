@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 3/11 — session-rooms
+# Initial Discovery: #satellite 3/13 — session-rooms
 
 **Changeset**: [2026-10-16-livekit-satellite-session-rooms.md](./2026-10-16-livekit-satellite-session-rooms.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - `hosts` (`session_room.rs:1774`) and `contains` (`:1795`) have identical bodies.
 - No code issue in the touched crates is claimed or relevant (session-activity: `complexity-service-stream-acp-replay.md`; telegram-control: six handler complexity records — untouched functions).
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16
