@@ -72,55 +72,7 @@ pub fn session_type_is_facilitated_here(session_type: &str) -> bool {
     matches!(session_type.trim(), "claude-cli" | "cursor-cli")
 }
 
-/// Everything one poll of a checkout observed.
-///
-/// `changed_paths` is carried here and published in room metadata but never in an event: an event
-/// says *that* the checkout moved, and reading it is what the file-access RPCs in the same room are
-/// for.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct WorktreeSnapshot {
-    pub head_commit: String,
-    pub branch: String,
-    pub changed_paths: Vec<String>,
-    pub changed_files: u32,
-    pub lines_added: i64,
-    pub lines_removed: i64,
-    pub untracked_files: u32,
-    /// The tree object of the whole working tree as it stands, staged into a **temporary** index.
-    ///
-    /// This is what makes a delta possible: diffing two of these yields an ordinary git patch that
-    /// carries deletions, renames, modes and binary content, and — unlike `git diff HEAD` — it sees
-    /// a newly written *untracked* file, which is exactly what a `Write` produces.
-    ///
-    /// The index is temporary and that is not an optimisation: `git add -A` against the agent's own
-    /// index would rewrite its staging area mid-session.
-    ///
-    /// Empty when the tree could not be written; the tick then produces no delta rather than a
-    /// wrong one.
-    pub wip_tree: String,
-}
-
-impl WorktreeSnapshot {
-    /// True when the two snapshots disagree about the **tracked** diff — the paths and their line
-    /// counts, everything `git diff --numstat HEAD` measures.
-    ///
-    /// HEAD is deliberately excluded: it is the other half of the comparison and gets its own event.
-    ///
-    /// So is `untracked_files`, for two reasons. An event carries counts only, and a HEAD-relative
-    /// diff has no line counts for a path git does not track — so a newly written untracked file
-    /// could only be announced as `files=0 +0 -0`, which tells a receiver nothing it can act on.
-    /// And every write is untracked for the moment between the file appearing and `git add`
-    /// staging it, so treating that as activity would put an empty event in front of the commit
-    /// event that actually describes the work. The fact is not lost: it lives in the room's
-    /// metadata, which [`WorktreeSnapshot`] equality still covers, so a joiner reads the untracked
-    /// count from state rather than from a notification with nothing in it.
-    fn tracked_diff_differs(&self, other: &Self) -> bool {
-        self.changed_paths != other.changed_paths
-            || self.changed_files != other.changed_files
-            || self.lines_added != other.lines_added
-            || self.lines_removed != other.lines_removed
-    }
-}
+pub use tddy_daemon_extensions::split_rooms::WorktreeSnapshot;
 
 /// Measure `worktree_root` as it stands right now, within [`DEFAULT_SESSION_ROOM_GIT_TIMEOUT`].
 ///
@@ -2032,35 +1984,7 @@ pub struct RemoteCheckout {
     session_dir: PathBuf,
 }
 
-/// The credential one poll authenticates with.
-///
-/// A minter rather than a token, because a token is a thing that expires: a session token lives
-/// [`tddy_github::SESSION_TOKEN_TTL`] — five minutes — while a room outlives the agent it belongs
-/// to, so anything frozen at session start stops being accepted by the codebase daemon long before
-/// the room stops asking, and every poll after that reads as an unreachable peer. This daemon holds
-/// its own signing key, so it can issue one per poll and needs no long-lived bearer token in memory
-/// at all.
-///
-/// Infallible: a minter can only be built where a signing key and a verified identity are already
-/// proven to exist, so "nothing to sign with" is a precondition of constructing one and never a
-/// condition a poll has to handle.
-pub trait SessionTokenMinter: Send + Sync {
-    fn mint(&self) -> String;
-}
-
-/// One `GetWorktreeSnapshot` call, as the room's poll loop needs it.
-///
-/// A trait so the room does not depend on `DaemonSessionHost`: the daemon supplies the real
-/// implementation, and the dependency runs one way.
-#[async_trait::async_trait]
-pub trait RemoteSnapshotSource: Send + Sync {
-    async fn snapshot(
-        &self,
-        session_token: &str,
-        codebase_session_id: &str,
-        codebase_instance_id: &str,
-    ) -> Result<WorktreeSnapshot, Status>;
-}
+pub use tddy_daemon_extensions::split_rooms::{RemoteSnapshotSource, SessionTokenMinter};
 
 impl RemoteCheckout {
     pub fn new(

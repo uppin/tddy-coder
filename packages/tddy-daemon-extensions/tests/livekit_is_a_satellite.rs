@@ -58,7 +58,6 @@ const WIRING: &[&str] = &[
 const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-agent-launch",
     "tddy-session-lifecycle",
-    "tddy-session-split",
 ];
 
 fn set_of(names: &[&str]) -> BTreeSet<String> {
