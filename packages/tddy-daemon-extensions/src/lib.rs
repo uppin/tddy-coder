@@ -39,4 +39,6 @@ pub use split_rooms::{
     WorktreeSnapshot,
 };
 pub use session_rooms::{NoSessionRooms, SessionRooms};
-pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};
+pub use session_reach::{
+    NoSessionReach, OpenedRoom, ReachableSessions, ReachedSession, SessionReach,
+};

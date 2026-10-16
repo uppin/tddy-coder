@@ -11,7 +11,7 @@
 - LiveKit-free helpers still in the plugin: `session_type_is_facilitated_here`, `snapshot_worktree_within`; `StartSessionPeerRoute` is a type alias of the kernel's `PeerRoute` (`livekit_peer_discovery.rs:390`).
 - `serve_daemon_rpc_participant` in lifecycle's `src/test_util.rs:355` joins LiveKit and is used by five `tddy-daemon` acceptance suites → moves to `tddy-livekit-testkit`.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

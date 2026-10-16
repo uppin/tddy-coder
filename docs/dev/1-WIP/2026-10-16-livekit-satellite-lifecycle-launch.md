@@ -2,6 +2,7 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #635
 **Type**: Refactor (architecture)
 **Stack**: #satellite 13/13. Base: `feature/satellite/split-transport` (#634).
 
@@ -43,6 +44,16 @@ deleting `KNOWN_OFFENDERS`. Strikes `tddy-session-lifecycle` and `tddy-agent-lau
 | #632 forwarding-consumers | `PeerRouting` in host-service; kernel `peer_calls` | Host constructor takes `PeerRouting`; launch forwards | Move routing again |
 | #633 agent-clones | `RoomAdmission`, `RoomDirectory`, `RoomBroadcast` | Host builders; `AgentRoster` fields | Change the ports |
 | #634 split-transport | `SplitRoomHosting`; moved `WorktreeSnapshot`, `RemoteSnapshotSource` | Host builders; lifecycle's snapshot impl | Change the ports |
+
+**As published (wave 2):** `OpenedRoom` and `SessionReach::open_now` (both implementations `todo!()`)
+with a failing unit test, and the ratchet's final form — `KNOWN_OFFENDERS` and its
+`every_known_offender_…` test deleted, `only_plugins_and_wiring_name_a_livekit_crate` the closing
+assertion (fails until every node is green; also waits on #623's `WorkspaceGraph`). **For green:**
+`LiveKitSessionReach` still has #623's inherent `open_now(&ReachedSession, ..)` beside the new trait
+method — fold the inherent one into the trait's. **Not yet published:** the port-based
+`DaemonSessionHost::new` and its builders, `host_without_integrations.rs`, the delta-adapter and helper
+moves, and the test-helper move — each changes every fixture's construction at once, so they land
+together in green.
 
 ## Draft PR contract
 
@@ -186,10 +197,10 @@ changes widely.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
