@@ -152,8 +152,8 @@ which must stay green.
 | `a_recorded_terminal_is_exposed_once_however_many_reaches_arrive_together` | `packages/tddy-cli-sessions/tests/exposed_terminals.rs` (new) | Concurrent `ensure_exposed_terminal` → one `expose` call; both answer `true` |
 | `a_terminal_whose_exposure_ended_is_exposed_again` | same | A finished `ExposedTerminal` → a second `expose` |
 | `a_session_that_recorded_no_terminal_is_not_exposed` | same | No record → `false`, no `expose` call |
-| `the_exposed_service_carries_the_session_metadata_block` | same | `metadata_json` passed = `session_metadata_json(block)` |
-| `the_cli_sessions_crate_names_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
+| `the_exposure_advertises_the_session_metadata_block_at_the_given_address` | same | `metadata_json` passed = `session_metadata_json(block)` |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
 
 Unit (`tddy-daemon-extensions/src/terminal_exposure.rs`): `with_nothing_wired_exposing_is_a_failed_precondition`.
 
