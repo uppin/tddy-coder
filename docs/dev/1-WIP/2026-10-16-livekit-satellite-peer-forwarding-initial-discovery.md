@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 2/11 — peer-forwarding
+# Initial Discovery: #satellite 2/13 — peer-forwarding
 
 **Changeset**: [2026-10-16-livekit-satellite-peer-forwarding.md](./2026-10-16-livekit-satellite-peer-forwarding.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - `tddy-host-service` names `livekit` only for the `Room` type in `with_common_room`.
 - `tddy-vm`'s `CommonRoom` matches are its own `LiveKitCommonRoom` config struct — not affected.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16
