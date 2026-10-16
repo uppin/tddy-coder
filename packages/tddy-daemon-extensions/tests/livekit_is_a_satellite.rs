@@ -54,14 +54,10 @@ const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-coder",
     "tddy-daemon-auth",
     "tddy-daemon-rpc",
-    "tddy-remote-git-repo",
     "tddy-session-agents",
     "tddy-session-files",
     "tddy-session-lifecycle",
     "tddy-session-split",
-    "tddy-session-sync",
-    "tddy-session-tool-client",
-    "tddy-terminal-rpc",
 ];
 
 fn set_of(names: &[&str]) -> BTreeSet<String> {

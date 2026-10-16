@@ -33,6 +33,16 @@ const SERVER_SILENCE_DEADLINE: Duration = Duration::from_secs(600);
 
 /// Run one git operation to completion and return the **remote child's** exit code, which the
 /// caller uses as its own so git sees the true remote status.
+/// [`run`], joining the repository's room through `connector` instead of naming a transport.
+pub async fn run_with(
+    request: GitRequest,
+    credentials: Credentials,
+    connector: std::sync::Arc<dyn tddy_room_client::RoomConnector>,
+) -> Result<i32, RelayError> {
+    let _ = (request, credentials, connector);
+    todo!("relay::run_with")
+}
+
 pub async fn run(request: GitRequest, credentials: Credentials) -> Result<i32, RelayError> {
     let daemon = DaemonRpc::new(&credentials.daemon_url, credentials.connect_timeout)?;
 
