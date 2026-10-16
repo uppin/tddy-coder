@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #628
 **Type**: Refactor (architecture)
-**Stack**: #satellite 6/11. Base: `feature/satellite/core-modules` (#627).
+**Stack**: #satellite 6/13. Base: `feature/satellite/core-modules` (#627).
 
 ## Initial Discovery
 
@@ -29,6 +30,8 @@ Exposing a PTY to remote participants as a port. Owns `TerminalExposure`, `Termi
 |---|---|---|---|
 | #623 `satellite-1-extension-ports` | `tddy-daemon-extensions`; `ReachableSessions::expose_terminal` (implemented by the host over `SessionTerminalBridge`); ratchet | Adds `terminal_exposure.rs`; the host's bridge calls the new port; strikes one entry | Change `ReachableSessions` or `SessionReach` |
 | #624–#627 | Nothing consumed. The plugin mints the participant token itself, so there is **no** edge to #626's `RoomTokenMinter` (that edge would push this node into wave 3) | — | Use `RoomTokenMinter` |
+
+**As published (wave 2):** port + null object + `ExposedTerminal` (real: a JoinHandle wrapper), `ensure_exposed_terminal` and `pty_terminal_service` (todo!()), the plugin's `LiveKitTerminalExposure` (todo!()), and the failing tests. Lifecycle's bridge and telegram's immediate bridge switch in green; the ratchet assertions wait on #623's `WorkspaceGraph`.
 
 ## Draft PR contract
 
@@ -67,13 +70,13 @@ Bodies are `todo!()` until green; the failing tests below are published with the
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes. The manager is tested against an in-memory exposure, and the
 plugin against the existing testkit suites.
 **Concurrent with:** nodes 2–5 and 7–9
 **Blocks:** none
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -183,10 +186,10 @@ Unit (`tddy-daemon-extensions/src/terminal_exposure.rs`): `with_nothing_wired_ex
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
