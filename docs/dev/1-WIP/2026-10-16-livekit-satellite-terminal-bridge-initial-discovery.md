@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 6/11 — terminal-bridge
+# Initial Discovery: #satellite 6/13 — terminal-bridge
 
 **Changeset**: [2026-10-16-livekit-satellite-terminal-bridge.md](./2026-10-16-livekit-satellite-terminal-bridge.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - The plugin can mint the participant token itself, avoiding an n4 → n6 edge that would step the line back a wave.
 - No `tests/` dir and no `docs/code-issues/` in `tddy-cli-sessions`.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

@@ -96,4 +96,19 @@ impl CliSessionManager {
         }
         Ok(true)
     }
+
+    /// Expose `session_id`'s recorded terminal through `exposure` at `at`, unless an exposure is
+    /// still running or there is nothing to expose. Single-flight, like
+    /// [`Self::ensure_livekit_terminal`], which it replaces.
+    ///
+    /// `Ok(false)` is not a failure: the session recorded no terminal, or its PTY is gone.
+    pub async fn ensure_exposed_terminal(
+        &self,
+        session_id: &str,
+        at: &tddy_daemon_extensions::TerminalAddress,
+        exposure: &dyn tddy_daemon_extensions::TerminalExposure,
+    ) -> Result<bool, tddy_rpc::Status> {
+        let _ = (session_id, at, exposure);
+        todo!("CliSessionManager::ensure_exposed_terminal")
+    }
 }
