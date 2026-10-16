@@ -184,7 +184,7 @@ impl LaunchSessions {
         if let Some(jail) = self.workspace_sandboxes.remove(session_id).await {
             jail.stop();
         }
-        session_deletion::close_session_room(&self.session_rooms, session_id);
+        session_deletion::close_session_room(&*self.session_rooms, session_id);
         session_deletion::delete_session_directory(
             &sessions_base,
             session_id,

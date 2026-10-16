@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #625
 **Type**: Refactor (architecture)
-**Stack**: #satellite 3/11. Base: `feature/satellite/peer-forwarding` (#624).
+**Stack**: #satellite 3/13. Base: `feature/satellite/peer-forwarding` (#624).
 
 ## Initial Discovery
 
@@ -32,6 +33,12 @@ Strikes `tddy-session-activity` and `tddy-telegram-control`.
 |---|---|---|---|
 | #623 `satellite-1-extension-ports` | `tddy-daemon-extensions` crate; ratchet list | Adds `session_rooms.rs`; strikes two entries | Change `SessionReach` or the status board |
 | #624 `feature/satellite/peer-forwarding` | Nothing consumed; it is the line's predecessor only | — | Touch `PeerForwarder` or `CommonRoom` |
+
+**As published (wave 2):** the port, its null object, the plugin's impl, `close_session_room(&dyn
+SessionRooms, ..)` and telegram's field/builder are on the surface. The worktree service keeps its
+own `WorktreeRoomCloser` until green: re-aliasing it to the wider port in the contract would break
+the runtime's `SessionRoomWorktreeCloser` adapter, which green deletes together with the switch.
+The ratchet assertions additionally wait on #623's `WorkspaceGraph`.
 
 ## Draft PR contract
 
@@ -63,13 +70,13 @@ Bodies are `todo!()` until green. The failing tests below are published with the
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes. Its tests drive the port's null object, the real registry through
 the port, and the deletion helper; none needs another wave-2 node's behaviour.
 **Concurrent with:** nodes 2 and 4–9
 **Blocks:** node 11 (agent-clones), which moves the remaining registry holders onto ports
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -174,10 +181,10 @@ Unit (`tddy-daemon-extensions/src/session_rooms.rs`): `with_nothing_wired_no_ses
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
