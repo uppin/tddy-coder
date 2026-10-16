@@ -481,6 +481,19 @@ pub struct CloneMirrorSpec {
 /// Registers the clone and reports `READY` only once the **first restore has completed**: readiness
 /// is a claim that a prompt can be served, and a checkout that has joined a room but not yet caught
 /// up would answer a search from the state the worktree was cut in.
+/// The join a hosted clone makes into `session_id`'s room, and the participant it waits for: the
+/// room `session-{session_id}`, as `daemon-{owning}`, with `token`, waiting for `daemon-{facilitating}`.
+pub fn clone_room_join(
+    url: &str,
+    session_id: &str,
+    owning_instance_id: &str,
+    facilitating_instance_id: &str,
+    token: &str,
+) -> (tddy_room_client::RoomJoin, String) {
+    let _ = (url, session_id, owning_instance_id, facilitating_instance_id, token);
+    todo!("clone_room_join")
+}
+
 pub async fn run_clone_mirror(
     spec: CloneMirrorSpec,
     hosted: Arc<HostedAgentClones>,

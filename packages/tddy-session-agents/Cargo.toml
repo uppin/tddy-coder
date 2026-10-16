@@ -9,6 +9,10 @@ name = "tddy_session_agents"
 path = "src/lib.rs"
 
 [dependencies]
+# The client room-transport port the hosted clone joins its session room through.
+tddy-room-client = { path = "../tddy-room-client" }
+# The room ports the roster broadcasts and admits through.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 # `SessionAgentRecord` and `session_metadata`, which `session_agent_roster` persists a roster
 # through, and `session_activity::SessionActivityStatus`, which the status mapping reads.
 tddy-core = { path = "../tddy-core" }

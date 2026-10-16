@@ -49,6 +49,12 @@ the scoped join token stays with `first_admission_token`, not on the port. **Not
 session-agents acceptance tests (`roster_ports.rs`, `clone_room_join.rs`) — they drive `AgentRoster`
 paths whose fields change type in green. The ratchet strike waits on #623's `WorkspaceGraph`.
 
+**Red pass (2026-10-17):** added `roster_broadcast::broadcast_roster_through` and
+`session_agent_clone::clone_room_join` with two tests in `tests/roster_ports.rs`.
+⚠ **Open:** `an_owning_daemon_is_admitted_before_its_agent_is_attached` needs a seam into the
+attach flow (`AgentRoster` → `RoomAdmission`) that green introduces together with the field change;
+it is not written yet.
+
 ## Draft PR contract
 
 ```rust
@@ -141,10 +147,10 @@ in-memory `RoomConnector`. The existing testkit-backed roster and clone suites (
 
 | Test | File | Validates |
 |---|---|---|
-| `attaching_an_agent_broadcasts_the_new_roster_on_the_agents_topic` | `packages/tddy-session-agents/tests/roster_ports.rs` (new) | `RoomBroadcast::publish(session, SESSION_AGENTS_TOPIC, roster bytes)` |
+| `a_changed_roster_is_broadcast_on_the_agents_topic_of_its_session_room` | `packages/tddy-session-agents/tests/roster_ports.rs` (new) | `RoomBroadcast::publish(session, SESSION_AGENTS_TOPIC, roster bytes)` |
 | `an_owning_daemon_is_admitted_before_its_agent_is_attached` | same | `RoomAdmission::admit` precedes the forward to the owning peer |
-| `a_hosted_clone_joins_the_session_room_and_waits_for_the_facilitating_daemon` | `packages/tddy-session-agents/tests/clone_room_join.rs` (new) | `RoomConnector::connect` join and peer identity |
-| `the_session_agents_crate_names_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
+| `a_hosted_clone_joins_the_session_room_and_waits_for_the_facilitating_daemon` | `packages/tddy-session-agents/tests/roster_ports.rs` | `RoomConnector::connect` join and peer identity |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
 
 Unit: null objects in `tddy-daemon-extensions` (`with_nothing_wired_*`).
 
