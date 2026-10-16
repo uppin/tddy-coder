@@ -50,6 +50,11 @@ lib suite is 77 passing, its only 6 failures being #623's own red tests. New: `S
 `SplitRoomHosting` impl and session-split's acceptance tests (`split_room_hosting_port.rs`) — they drive
 `SplitSessions` paths that switch in green. The ratchet strike waits on #623's `WorkspaceGraph`.
 
+**Red pass (2026-10-17):** added `split_session::split_remote_tool_env_from_join` and
+`tests/split_room_hosting_port.rs` (`a_split_agent_is_spawned_with_the_join_the_port_issued`); the
+refusal row is the `NoSplitRooms` unit test. ⚠ **Open:** `a_split_start_hosts_the_room_over_the_remote_checkout`
+needs a seam into `spawn_split_agent` that green introduces with the `SplitSessions` field change.
+
 ## Draft PR contract
 
 ```rust
@@ -146,8 +151,8 @@ lifecycle's split tests) remain the testkit-backed integration proof.
 |---|---|---|
 | `a_split_start_hosts_the_room_over_the_remote_checkout` | `packages/tddy-session-split/tests/split_room_hosting_port.rs` (new) | `host_remote_worktree(session, dir, codebase session, codebase instance, ..)` with the verified-caller minter |
 | `a_split_agent_is_spawned_with_the_join_the_port_issued` | same | `agent_join(room, split identity, SPLIT_AGENT_TOKEN_TTL)` flows into the agent's env |
-| `a_daemon_without_split_rooms_refuses_split_placement_as_before` | same | `NoSplitRooms` produces `FailedPrecondition` "cannot place a session's codebase on another daemon: …" |
-| `the_session_split_crate_names_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
+| `with_nothing_wired_split_placement_is_refused_as_before` | `packages/tddy-daemon-extensions/src/split_rooms.rs` (unit) | `NoSplitRooms` produces `FailedPrecondition` "cannot place a session's codebase on another daemon: …" |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
 
 ## Technical Debt & Production Readiness
 

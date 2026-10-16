@@ -5,6 +5,8 @@ edition = "2021"
 description = "Split and sandboxed-codebase sessions: the paired agent/codebase start, resume and teardown"
 
 [dependencies]
+# `SplitRoomHosting` / `SplitAgentJoin`: split placement reaches its room through these.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 anyhow = "1"
 async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }

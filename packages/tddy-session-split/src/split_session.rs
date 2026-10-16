@@ -150,6 +150,19 @@ pub use agent_argv::*;
 
 pub use agent_credentials::*;
 
+/// The split agent's tool environment from the room join the split-room port issued: it reaches the
+/// codebase daemon's session through that room, as `host_identity`'s peer, carrying
+/// `agent_session_token`.
+pub fn split_remote_tool_env_from_join(
+    join: &tddy_daemon_extensions::SplitAgentJoin,
+    host_identity: &str,
+    agent_session_token: String,
+    target: &SplitSpawnTarget<'_>,
+) -> RemoteToolEnv {
+    let _ = (join, host_identity, agent_session_token, target);
+    todo!("split_remote_tool_env_from_join")
+}
+
 /// Mint the agent's scoped LiveKit join token and build the `TDDY_REMOTE_*` environment around it.
 ///
 /// `codebase_session_id` is the **workspace session on the codebase daemon**, not this session:
