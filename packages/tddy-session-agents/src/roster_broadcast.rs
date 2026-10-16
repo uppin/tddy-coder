@@ -19,3 +19,14 @@ pub async fn broadcast_roster(
         );
     }
 }
+
+/// Broadcast `roster` to everyone in `session_id`'s room through the room port: encoded, on the
+/// session-agents topic.
+pub fn broadcast_roster_through(
+    rooms: &dyn tddy_daemon_extensions::RoomBroadcast,
+    session_id: &str,
+    roster: &SessionAgentRoster,
+) {
+    let _ = (rooms, session_id, roster);
+    todo!("broadcast_roster_through")
+}
