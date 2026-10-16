@@ -152,8 +152,8 @@ recording fake minter: what they pass in, and that they hand on what comes back.
 | `a_block_without_its_secret_mints_nothing_and_names_the_field` | same | `FailedPrecondition` naming `api_secret` |
 | `a_daemon_without_livekit_mints_nothing` | same | `room_token_minter(None)` refuses |
 | `the_bridge_is_handed_the_token_minted_for_its_room_and_identity` | `packages/tddy-screen-sharing/src/screen_sharing_service.rs` (`tests` module; the function under test is private) | Recording minter sees (room, bridge identity, default TTL); the spawn config carries its token |
-| `the_token_service_mints_through_the_injected_minter` | `packages/tddy-daemon-auth/tests/token_minting_port.rs` (new) | `GenerateToken` (authenticated) returns the minter's token; TTL from the minter adapter |
-| `the_screen_sharing_crate_names_no_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
+| `the_token_service_mints_through_the_injected_minter_for_the_requested_room_and_identity` | `packages/tddy-daemon-auth/tests/token_minting_port.rs` (new) | `GenerateToken` (authenticated) returns the minter's token; TTL from the minter adapter |
+| `only_plugins_wiring_and_known_offenders_name_a_livekit_crate` + `every_known_offender_still_names_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | Entry struck; both ratchet tests pass |
 
 Unit (`tddy-daemon-extensions/src/room_tokens.rs`): `with_nothing_wired_every_mint_is_a_failed_precondition`.
 
