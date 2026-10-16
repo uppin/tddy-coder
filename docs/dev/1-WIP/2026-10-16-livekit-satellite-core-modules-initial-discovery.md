@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 5/11 — core-modules
+# Initial Discovery: #satellite 5/13 — core-modules
 
 **Changeset**: [2026-10-16-livekit-satellite-core-modules.md](./2026-10-16-livekit-satellite-core-modules.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - `livekit = "0.7"` in `tddy-daemon-rpc` and `tddy-session-lifecycle` is unused: no `livekit::` path in either crate's `src/`.
 - No claimed code issue in any touched package.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16
