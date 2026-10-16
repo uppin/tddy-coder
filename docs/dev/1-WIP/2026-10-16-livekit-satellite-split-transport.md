@@ -2,6 +2,7 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #634
 **Type**: Refactor (architecture)
 **Stack**: #satellite 12/13. Base: `feature/satellite/agent-clones` (#633).
 
@@ -39,6 +40,15 @@ and session-split's switch. Strikes `tddy-session-split`.
 | #626 room-tokens | `RoomTokenMinter` | The plugin's `SplitRoomHosting::agent_join` mints through it | Change minting |
 | #632 forwarding-consumers | Kernel `forward_start_session_within`, `forward_delete_session`; `tddy_host_service::peer_routing::PeerRouting` | Split start and teardown forwards; `split_ports.rs:18` | Re-add the plugin names |
 | #633 agent-clones | `session_room_name` in the kernel | Split room name (`split_claude_cli_start.rs:85`) | Change the helper |
+
+**As published (wave 2):** `WorktreeSnapshot`, `SessionTokenMinter` and `RemoteSnapshotSource` are
+**moved** into `tddy_daemon_extensions::split_rooms` (verbatim; `WorktreeSnapshot::tracked_diff_differs`
+moved with its type and became `pub`, since an inherent method cannot stay behind in the plugin) and
+re-exported from `tddy_daemon_livekit::session_room`, so every caller compiles unchanged — the plugin's
+lib suite is 77 passing, its only 6 failures being #623's own red tests. New: `SplitRoomHosting`,
+`SplitAgentJoin`, `NoSplitRooms` (`todo!()`) with a failing unit test. **Not yet published:** the plugin's
+`SplitRoomHosting` impl and session-split's acceptance tests (`split_room_hosting_port.rs`) — they drive
+`SplitSessions` paths that switch in green. The ratchet strike waits on #623's `WorkspaceGraph`.
 
 ## Draft PR contract
 
@@ -166,10 +176,10 @@ lifecycle's split tests) remain the testkit-backed integration proof.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

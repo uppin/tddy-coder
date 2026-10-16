@@ -68,7 +68,6 @@ const WIRING_WITH_A_LIBRARY: &[&str] = &["tddy-remote-git-repo", "tddy-session-s
 const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-agent-launch",
     "tddy-session-lifecycle",
-    "tddy-session-split",
 ];
 
 fn set_of(names: &[&str]) -> BTreeSet<String> {

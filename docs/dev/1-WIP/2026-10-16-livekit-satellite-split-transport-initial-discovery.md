@@ -11,7 +11,7 @@
 - `SessionTokenMinter` (`session_room.rs:2047`), `RemoteSnapshotSource` (`:2056`) and `WorktreeSnapshot` (`:81`) are LiveKit-free → move to `tddy-daemon-extensions` with plugin re-exports; lifecycle implements `RemoteSnapshotSource` at `svc_agent_roster_wiring.rs:12`.
 - Real edges: n2, n4, n10 → n12 (and n11 for `session_room_name` in the kernel, line predecessor).
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16
