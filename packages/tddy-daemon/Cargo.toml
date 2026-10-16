@@ -107,6 +107,7 @@ tddy-credentials = { path = "../tddy-credentials" }
 # three of its seven modules that something here still names.
 tddy-daemon-auth = { path = "../tddy-daemon-auth" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-session-lifecycle = { path = "../tddy-session-lifecycle" }
 # The RPC families served above the session host: `runtime.rs` builds `RpcHandlers` from the host and
 # installs them on it as its `DaemonRpcFamilies`.

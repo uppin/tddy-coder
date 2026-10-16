@@ -10,6 +10,7 @@
 
 pub mod assertions;
 pub mod builders;
+pub mod dependency_graph;
 pub mod fakes;
 pub mod fs;
 #[cfg(unix)]

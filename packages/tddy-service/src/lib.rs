@@ -340,6 +340,12 @@ pub mod proto {
     pub mod daemon_config {
         include!(concat!(env!("OUT_DIR"), "/daemon_config.rs"));
     }
+    /// `SessionRoomService` — the LiveKit integration's "open this session's room or fail" call,
+    /// registered only when that integration is wired. See `docs/ft/daemon/session-room.md`.
+    #[allow(unused_imports, unused_variables)]
+    pub mod session_room {
+        include!(concat!(env!("OUT_DIR"), "/session_room.rs"));
+    }
     pub mod reflection {
         include!(concat!(env!("OUT_DIR"), "/grpc.reflection.v1.rs"));
     }
