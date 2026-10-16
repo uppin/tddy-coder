@@ -3,7 +3,7 @@
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
 **Type**: Bug Fix + Architecture Change
-**Stack**: `#satellite` node 1 of 11 (planned; see PRD § Implementation Plan). Base: `master`.
+**Stack**: #satellite 1/11. Base: `master`. Branch: `satellite-1-extension-ports`, PR #623.
 
 ## Initial Discovery
 
@@ -48,6 +48,33 @@ No claimed code issue sits on this node's files (the only `**Claimed by:**` hit 
 - PRD: [PRD-2026-10-16-livekit-satellite-integration.md](../../ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-integration.md)
 - [session-room.md](../../ft/daemon/session-room.md), [session-worktree-sync.md](../../ft/daemon/session-worktree-sync.md),
   [terminal-sessions.md](../../ft/daemon/terminal-sessions.md), [daemon-settings.md](../../ft/daemon/daemon-settings.md)
+
+## Responsibility
+
+The extension-port crate and the first port through it: a local session attach never depends on
+LiveKit. Owns `tddy-daemon-extensions` (ports, null objects, status board), `SessionRoomService`,
+`GetIntegrationStatus`, `LiveKitSessionReach`, the two `OpenSessionRoom` clients, `WorkspaceGraph`
+and the ratchet test with its `KNOWN_OFFENDERS` list.
+
+## Boundaries
+
+- Moves no other LiveKit consumer behind a port; each later node owns its cluster (PRD § Implementation Plan).
+- `ensure_session_room` stays for the agent-roster paths (node 11).
+- No web change (node 9).
+- Strikes no crate from `KNOWN_OFFENDERS`; it only creates the list.
+
+## Dependencies
+
+None: root node, based on `master`.
+
+## Green wave
+
+**Wave:** 1 of 4
+**Greenable independently:** yes. Every test drives this node's own surface.
+**Concurrent with:** none
+**Blocks:** every other node (each consumes `tddy-daemon-extensions` or edits the ratchet list)
+
+    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
 
 ## Draft PR contract
 
