@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #629
 **Type**: Refactor (architecture)
-**Stack**: #satellite 7/11. Base: `feature/satellite/terminal-bridge` (#628).
+**Stack**: #satellite 7/13. Base: `feature/satellite/terminal-bridge` (#628).
 
 ## Initial Discovery
 
@@ -39,6 +40,15 @@ binaries' wiring. Strikes `tddy-session-sync`, `tddy-remote-git-repo`, `tddy-ter
 | #623 `satellite-1-extension-ports` | `open_session_room` (session-sync) and `open_session_room_over_http` (pty-relay), which a client calls before joining; the ratchet | Joins after those calls, through the new port; strikes four entries | Change those two functions |
 | #624–#628 | Nothing consumed | — | — |
 
+**As published (wave 2):** the `tddy-room-client` crate (port, `NoRoomTransport`, and the
+`test-support` `in_memory` connector — a real fake, it is test infrastructure), `LiveKitRoomConnector`
+in `tddy-livekit` (todo!()), `tddy_session_sync::join_session_room` and `tddy_remote_git_repo::relay::run_with`
+(todo!()), with failing tests for the port and for session-sync's join. Additive by design: the old
+entry points stay until green so no existing suite breaks on a stub. **Not yet published:** the
+connector entry points and tests for `tddy-terminal-rpc` (pty-relay) and `tddy-session-tool-client`
+(room cache), and remote-git's relay test — they land in green with the switch. The ratchet
+assertions wait on #623's `WorkspaceGraph`; the bin-crate decision (Decisions) is still open.
+
 ## Draft PR contract
 
 ```rust
@@ -73,13 +83,13 @@ surface. Bodies are `todo!()` until green.
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes; library tests use an in-memory connector, and binaries keep the
 existing testkit suites.
 **Concurrent with:** nodes 2–6, 8 and 9
 **Blocks:** none (node 8 may reuse the crate; if it does, record the edge n7 → n8 there)
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -187,10 +197,10 @@ Unit (`tddy-room-client/src/lib.rs`): `with_nothing_wired_connecting_fails_namin
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

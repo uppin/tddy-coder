@@ -14,6 +14,8 @@ path = "src/main.rs"
 
 [dependencies]
 tddy-livekit = { path = "../tddy-livekit" }
+# The client room transport port: the library joins through it, the binary wires LiveKit.
+tddy-room-client = { path = "../tddy-room-client" }
 # The RPC surface this binary dials, and `session_activity::NO_TICK` — the wire's "no poll tick has
 # covered this call yet". Read from the crate that owns `activity.proto` rather than spelled as a
 # literal here, so the daemon producing the ticks and this consumer cannot drift about which value
@@ -31,6 +33,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 
 [dev-dependencies]
+tddy-room-client = { path = "../tddy-room-client", features = ["test-support"] }
 # `stub_http_routed`: a daemon stand-in that records which RPC path a call reached.
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 tokio = { version = "1", features = ["macros", "rt"] }

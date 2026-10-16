@@ -328,6 +328,22 @@ fn join_nonce() -> String {
     format!("{millis}-{}", std::process::id())
 }
 
+/// Join `address`'s session room under `identity` through `connector`, and wait up to `wait` for
+/// the facilitating daemon to be there.
+///
+/// The room half of [`attach`], on the client-transport port: the mirror's library names no
+/// transport, and its binary hands it one.
+pub async fn join_session_room(
+    address: &SessionAddress,
+    livekit: &crate::credentials::LiveKitCredentials,
+    identity: &str,
+    wait: Duration,
+    connector: &dyn tddy_room_client::RoomConnector,
+) -> Result<std::sync::Arc<dyn tddy_room_client::RoomSession>, AttachError> {
+    let _ = (address, livekit, identity, wait, connector);
+    todo!("join_session_room")
+}
+
 /// Ask the daemon at `daemon_url` to open `session_id`'s room with itself in it, before a mirror
 /// joins that room to look for it there.
 ///

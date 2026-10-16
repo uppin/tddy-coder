@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 7/11 — client-transports
+# Initial Discovery: #satellite 7/13 — client-transports
 
 **Changeset**: [2026-10-16-livekit-satellite-client-transports.md](./2026-10-16-livekit-satellite-client-transports.md)
 **Date**: 2026-10-16
@@ -12,7 +12,7 @@
 - Open: a lib+bin crate whose *binary* needs LiveKit still names it in `[dependencies]`; the ratchet treats the crate as a unit. Needs a decision in wave 2 (bin-only crate split vs allowed-set entry + lib shape test).
 - Code issues touched: tool-client `oversized-file-lib.md`, session-sync `oversized-file-attach.md` (both shrink); unclaimed.
 
-## Exploration 1 — whole-work discovery (copied from #satellite 1/11, #623)
+## Exploration 1 — whole-work discovery (copied from #satellite 1/13, #623)
 
 **Changeset**: [2026-10-16-livekit-satellite-ports.md](./2026-10-16-livekit-satellite-ports.md)
 **Date**: 2026-10-16

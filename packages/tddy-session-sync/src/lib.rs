@@ -20,7 +20,7 @@ pub mod sync;
 
 pub use apply::{ApplyOutcome, Delta, ReconcileReason};
 pub use attach::{
-    attach, daemon_identity, open_session_room, resolve_session, session_room_name,
+    attach, daemon_identity, join_session_room, open_session_room, resolve_session, session_room_name,
     syncer_identity, AttachError, AttachedSession, DaemonHttpError, SessionAddress,
 };
 pub use credentials::{
