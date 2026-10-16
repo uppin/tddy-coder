@@ -1,4 +1,4 @@
-# Initial Discovery: #satellite 11/11 — agent-clones
+# Initial Discovery: #satellite 11/13 — agent-clones
 
 **Changeset**: [2026-10-16-livekit-satellite-agent-clones.md](./2026-10-16-livekit-satellite-agent-clones.md)
 **Date**: 2026-10-16
