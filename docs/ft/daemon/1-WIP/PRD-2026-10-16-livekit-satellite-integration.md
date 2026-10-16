@@ -150,33 +150,28 @@ plugin owns.
 
 ## Implementation Plan (PR stack)
 
-1. **Extension ports, local `ConnectSession`, `OpenSessionRoom`, integration status read,
-   dependency ratchet.** *(this PRD's first changeset)*
-2. **Integration status in the UI** — settings LiveKit block and host chrome show the board.
-3. **Peer forwarding behind a port** — the kernel's `peer_forwarding` moves to the plugin behind a
-   transport-neutral `PeerForwarder`; the SDK leaves `tddy-daemon-kernel` (closes
-   `packages/tddy-daemon-kernel/docs/code-issues/heavy-dependency-livekit-peer-forwarding.md`).
-4. **LiveKit-free modules leave the plugin** — `placement`, `os_user_resolution`, `session_git` and
-   the identity re-exports move to core; drop unused `livekit` edges (`tddy-daemon-rpc`,
-   `tddy-session-lifecycle`).
-5. **Session-room registry behind a port** — `tddy-session-activity`, `tddy-telegram-control`,
-   `tddy-agent-launch`, `tddy-session-lifecycle` see a `SessionRooms` port.
-6. **Token minting behind a port** — `tddy-daemon-auth`, `tddy-screen-sharing`,
-   `tddy-session-split`.
-7. **Peer-forwarding consumers** — `tddy-daemon-rpc`, `tddy-session-files`, `tddy-host-service`,
-   `tddy-agent-launch` route through `PeerForwarder`.
-8. **Agent clones and split transport** — `tddy-session-agents`, `tddy-session-split`; lifecycle's
-   plugin re-exports removed.
-9. **Terminal bridge as a plugin** — `tddy-cli-sessions`' LiveKit bridge implements a terminal
-   exposure port.
-10. **Client libraries** — `tddy-coder`, `tddy-session-sync`, `tddy-remote-git-repo`,
-    `tddy-terminal-rpc`, `tddy-session-tool-client`, `tddy-discovery`: LiveKit only in their
-    binaries' wiring.
-11. **Ratchet closes** — the known-offender list is empty and deleted; docs describe the plugin
-    boundary.
+Stack `#satellite`, 11 nodes, linear; branches `feature/satellite/<node>` (node 1:
+`satellite-1-extension-ports`). Each node strikes the crates it frees from the ratchet's
+`KNOWN_OFFENDERS`.
 
-Order 3→4 is chosen so the largest closure win lands early; nodes 5–10 are independent of each other
-apart from shared ports and may be re-ordered at stack planning.
+| K | Node | Delivers | Strikes | Wave |
+|---|---|---|---|---|
+| 1 | extension-ports (#623) | Ports crate, `SessionReach`, local `ConnectSession`, `OpenSessionRoom`, `GetIntegrationStatus`, ratchet | — | 1 |
+| 2 | peer-forwarding | `PeerForwarder` port; the kernel's `peer_forwarding` LiveKit impl moves to the plugin | `tddy-daemon-kernel`, `tddy-host-service` | 2 |
+| 3 | session-rooms | `SessionRooms` port for room lookup/close | `tddy-session-activity`, `tddy-telegram-control` | 2 |
+| 4 | room-tokens | Room-token minting port | `tddy-screen-sharing` | 2 |
+| 5 | core-modules | LiveKit-free modules leave the plugin; dead `livekit` edges dropped | — | 2 |
+| 6 | terminal-bridge | Terminal exposure port; the CLI PTY bridge moves to the plugin | `tddy-cli-sessions` | 2 |
+| 7 | client-transports | Client room-transport port; LiveKit only in client binaries | `tddy-session-sync`, `tddy-remote-git-repo`, `tddy-terminal-rpc`, `tddy-session-tool-client` | 2 |
+| 8 | coder-participant | `tddy-coder` lib reaches its participant through a port | `tddy-coder` | 2 |
+| 9 | status-ui | Integration status on the web settings screen | — | 2 |
+| 10 | forwarding-consumers | daemon-rpc, session-files, daemon-auth route through `PeerForwarder` | `tddy-daemon-rpc`, `tddy-session-files`, `tddy-daemon-auth` | 3 |
+| 11 | agent-clones | Agent clones, split transport, lifecycle and launch behind ports; `KNOWN_OFFENDERS` deleted | `tddy-session-agents`, `tddy-session-split`, `tddy-session-lifecycle`, `tddy-agent-launch` | 4 |
+
+Real edges: `n1 → n2..n9`, `n2 → n10`, `n2, n3, n4, n10 → n11`. The line is the waves concatenated,
+blockers first: peer-forwarding (2 dependents) leads wave 2, then session-rooms and room-tokens (1
+each), then the nodes nothing waits on. Nodes 3–9 are sequential only because a registered stack is a
+line; they could be greened concurrently.
 
 ## Success Criteria
 
