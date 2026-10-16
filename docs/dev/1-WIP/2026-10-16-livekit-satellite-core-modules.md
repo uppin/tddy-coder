@@ -2,8 +2,9 @@
 
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
+**PR**: #627
 **Type**: Refactor (mechanical move)
-**Stack**: #satellite 5/11. Base: `feature/satellite/room-tokens` (#626).
+**Stack**: #satellite 5/13. Base: `feature/satellite/room-tokens` (#626).
 
 ## Initial Discovery
 
@@ -38,6 +39,11 @@ instance-id imports at the kernel, and removing the two unused `livekit` edges.
 | #623 `satellite-1-extension-ports` | The ratchet and `WorkspaceGraph` | Extends the ratchet suite with this node's edge assertion | Change the allowed sets |
 | #624–#626 | Nothing consumed (line predecessors) | — | Touch their ports |
 
+**As published (wave 2):** the two shape tests. The `session_git` suite moves to
+`tddy-agent-launch/tests/` together with the module in green — relocating it first would leave
+`tddy-agent-launch`'s test target unable to compile. The SDK-edge assertion waits on #623's
+`WorkspaceGraph`.
+
 ## Draft PR contract
 
 Moves cannot be published as signatures ahead of the move, so the first push of this PR publishes
@@ -55,13 +61,13 @@ new surface.
 
 ## Green wave
 
-**Wave:** 2 of 4
+**Wave:** 2 of 5
 **Greenable independently:** yes; a pure move, and no test depends on another node's behaviour.
 **Concurrent with:** nodes 2–4 and 6–9
 **Blocks:** none. It shrinks the import surface nodes 10 and 11 would otherwise rewrite; no behaviour
 edge.
 
-    n1 → n2..n9      n2 → n10      n2, n3, n4, n10 → n11
+    n1 → n2..n9   n2, n4 → n10   n2, n3, n4, n7, n10 → n11   n4, n10 → n12   n11, n12 → n13
 
 ## Affected Packages
 
@@ -154,10 +160,10 @@ package.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
