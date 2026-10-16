@@ -2,17 +2,8 @@
 //!
 //! PRD `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-integration.md`. The core reaches
 //! LiveKit through the extension ports in this crate; LiveKit's crates implement them; a binary's
-//! wiring brings the two together. Every other crate that names a LiveKit crate today is listed in
-//! [`KNOWN_OFFENDERS`], and the list may only shrink:
-//!
-//! - a crate that starts naming a LiveKit crate and is not on a list fails
-//!   [`only_plugins_wiring_and_known_offenders_name_a_livekit_crate`];
-//! - a known offender that stops naming one and is not struck off fails
-//!   [`every_known_offender_still_names_a_livekit_crate`], so the list always says what the tree
-//!   does.
-//!
-//! The stack that decouples LiveKit strikes entries off as it moves each cluster behind a port;
-//! its last node deletes the list.
+//! wiring brings the two together. The `#satellite` stack shrank a list of known offenders node by
+//! node until it was empty; what is left is the rule itself.
 //!
 //! "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included — an
 //! optional dependency is one the crate can be built with. `[dev-dependencies]` are not counted: a
@@ -64,9 +55,6 @@ const WIRING: &[&str] = &[
 /// through `tddy-room-client`, and only `src/main.rs` names the plugin.
 const WIRING_WITH_A_LIBRARY: &[&str] = &["tddy-remote-git-repo", "tddy-session-sync", "tddy-tools"];
 
-/// Library crates that still name a LiveKit crate. Strike a crate off when it stops.
-const KNOWN_OFFENDERS: &[&str] = &["tddy-agent-launch", "tddy-session-lifecycle"];
-
 fn set_of(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|name| name.to_string()).collect()
 }
@@ -114,42 +102,23 @@ fn the_extension_ports_reach_no_livekit_crate() {
 }
 
 #[test]
-fn only_plugins_wiring_and_known_offenders_name_a_livekit_crate() {
+fn only_plugins_and_wiring_name_a_livekit_crate() {
     // Given the workspace as Cargo resolves it
     let graph = WorkspaceGraph::load();
     let allowed: BTreeSet<String> = set_of(PLUGINS)
         .into_iter()
         .chain(set_of(WIRING))
         .chain(set_of(WIRING_WITH_A_LIBRARY))
-        .chain(set_of(KNOWN_OFFENDERS))
         .collect();
 
     // When every crate naming a LiveKit crate is collected
     let naming = crates_naming_livekit(&graph);
 
-    // Then each one is on a list
+    // Then each one is LiveKit itself, or a binary's wiring
     assert_eq!(
         naming.difference(&allowed).collect::<Vec<_>>(),
         Vec::<&String>::new(),
         "these crates name a LiveKit crate: reach it through tddy-daemon-extensions instead"
-    );
-}
-
-#[test]
-fn every_known_offender_still_names_a_livekit_crate() {
-    // Given the workspace as Cargo resolves it
-    let graph = WorkspaceGraph::load();
-
-    // When the known offenders are checked against it
-    let naming = crates_naming_livekit(&graph);
-
-    // Then each still does — one that stopped must be struck off, so the list only shrinks
-    assert_eq!(
-        set_of(KNOWN_OFFENDERS)
-            .difference(&naming)
-            .collect::<Vec<_>>(),
-        Vec::<&String>::new(),
-        "these crates no longer name a LiveKit crate: strike them from KNOWN_OFFENDERS"
     );
 }
 

@@ -31,7 +31,9 @@ pub use room_admission::{NoRoomAdmission, RoomAdmission, ADMISSION_TOKEN_TTL};
 pub use room_broadcast::{NoRoomBroadcast, RoomBroadcast};
 pub use room_directory::{NoRoomDirectory, RoomDirectory};
 pub use room_tokens::{NoRoomTokens, RoomTokenMinter};
-pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};
+pub use session_reach::{
+    NoSessionReach, OpenedRoom, ReachableSessions, ReachedSession, SessionReach,
+};
 pub use session_rooms::{NoSessionRooms, OpenedSessionRoom, SessionRooms};
 pub use split_rooms::{
     NoSplitRooms, RemoteSnapshotSource, SessionTokenMinter, SplitAgentJoin, SplitRoomHosting,
