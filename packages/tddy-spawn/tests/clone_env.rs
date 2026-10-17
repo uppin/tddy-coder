@@ -5,7 +5,7 @@
 //! can be told to allow. Every assertion here is about a variable a real `git` and `ssh` act on;
 //! that they act on them as claimed is `clone_askpass_acceptance`'s to prove.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC7, AC13)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::collections::BTreeMap;
 use std::time::Duration;

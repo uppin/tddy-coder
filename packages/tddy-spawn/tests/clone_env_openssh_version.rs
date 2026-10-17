@@ -5,7 +5,7 @@
 //! prompt nobody can see, which is exactly the failure this feature exists to end. Better to say so
 //! up front than to find out by waiting.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC15)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use tddy_spawn::clone_env::OpenSshVersion;
 

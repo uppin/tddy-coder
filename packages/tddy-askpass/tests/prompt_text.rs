@@ -5,7 +5,7 @@
 //! anything else would put "type yes to trust this host" in front of an operator as though it were a
 //! password prompt. The wording below is ssh's own, as `clone_askpass_acceptance` observes it.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC1, AC6)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use tddy_askpass::prompt_text::{classify, AskpassPrompt};
 

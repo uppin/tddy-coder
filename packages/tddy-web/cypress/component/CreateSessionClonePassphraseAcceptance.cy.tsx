@@ -6,7 +6,7 @@
  * pinned in `HostAddKeyAcceptance.cy.tsx`; what is pinned here is that the *start* surfaces them:
  * only while a start is in flight, for the host that is cloning, with the same guarantees.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC12)
+ * Feature: docs/ft/daemon/clone-ssh-passphrase.md
  */
 
 import { anInMemoryRpcBackend, type InMemoryRpcBackend } from "tddy-connectrpc-testkit";

@@ -1,7 +1,7 @@
 # 2026-10-17 — Daemon git-over-SSH beyond the first clone cannot ask for a passphrase
 
 **Category:** Future enhancement
-**Source:** `2026-10-17-clone-passphrase-prompt` (clone passphrase prompt)
+**Source:** the clone passphrase prompt (2026-10-17)
 
 - The clone passphrase prompt covers **only** the auto-clone in `ensure_project_available_for_start`.
   Fetch, push, worktree sync and the project coordinate handlers' clone

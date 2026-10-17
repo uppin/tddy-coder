@@ -193,6 +193,14 @@ and this page describes a contract until then.
 - [x] The fingerprint the dialog displays and pins always belongs to the key that will encrypt the
       answer — including when a second prompt replaces the key while the dialog is open.
 
+## The same question while a session starts
+
+The create-session form asks the same question when a start's clone needs a key passphrase
+([cloning over SSH](../daemon/clone-ssh-passphrase.md)). It is the same dialog, with the same encryption,
+the same derived fingerprint and the same key-continuity check, and it is shown only while a start is in
+flight, for the host that is cloning: the codebase host on a split session, the session's own host
+otherwise. A form nobody is submitting opens no prompt stream.
+
 ## Out of scope
 
 Removing a key from an agent. Generating a key. Expanding `~` on the host — rejected, not deferred,
@@ -202,6 +210,8 @@ need touching at all.
 
 ## Related documentation
 
+- [clone-ssh-passphrase.md](../daemon/clone-ssh-passphrase.md) — the second trigger for this prompt, a
+  session start whose clone needs a passphrase
 - [hosts-screen-tooling.md](./hosts-screen-tooling.md) — the ssh-agent section this action sits in,
   and the read side of the same agent
 - [hosts-screen.md](./hosts-screen.md) — the screen and its rows

@@ -4,7 +4,7 @@
 //! one that outlived its clone, or could be guessed, would let a stranger put a passphrase prompt in
 //! front of somebody.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC9, AC10)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::collections::HashSet;
 

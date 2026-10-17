@@ -8,7 +8,7 @@
  * flight, against the host that is cloning — and renders nothing the rest of the time, so a form
  * nobody is submitting opens no stream.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC12)
+ * Feature: docs/ft/daemon/clone-ssh-passphrase.md
  */
 
 import React from "react";

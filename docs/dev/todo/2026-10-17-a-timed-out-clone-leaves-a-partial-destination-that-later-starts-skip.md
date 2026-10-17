@@ -1,7 +1,7 @@
 # 2026-10-17 — A timed-out clone leaves a partial destination that later starts skip
 
 **Category:** Future enhancement (defect)
-**Source:** `2026-10-17-clone-passphrase-prompt` (clone passphrase prompt)
+**Source:** the clone passphrase prompt (2026-10-17)
 
 - `clone_as_user_with_env` is `test -e "$1" || git clone …`. When the caller's
   `tokio::time::timeout` fires, the blocking task is abandoned and the `git clone` child keeps running;

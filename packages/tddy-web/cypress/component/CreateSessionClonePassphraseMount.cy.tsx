@@ -7,7 +7,7 @@
  * names the right host, and that the pane — which is handed its session token as a prop and is
  * mounted here without the auth context — still renders.
  *
- * PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC12)
+ * Feature: docs/ft/daemon/clone-ssh-passphrase.md
  */
 
 import React from "react";

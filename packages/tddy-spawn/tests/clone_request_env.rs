@@ -5,7 +5,7 @@
 //! between the daemon and a worker that may be a different build, so the field has to be optional on
 //! the wire.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC13)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::collections::BTreeMap;
 

@@ -55,3 +55,10 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed:** 1010 → 1023 lines by brace matching (nesting 6, unchanged), +13: `build` starts the daemon's one `AskpassEndpoint`
+on the `host_prompts` registry and the keypair `HostServiceImpl` publishes, and installs it on the session host. The endpoint is the
+daemon's to own, so the start belongs beside the host service's construction, which is where a split of this function would move it.
+Not claimed by any PR.

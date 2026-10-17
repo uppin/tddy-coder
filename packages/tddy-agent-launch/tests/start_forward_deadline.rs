@@ -7,7 +7,7 @@
 //! peer-forward deadline while a split start, which has the same peer-side work, already waited the
 //! peer's whole clone budget.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC11)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::time::Duration;
 

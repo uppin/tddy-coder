@@ -6,7 +6,7 @@
 //! clone, which fetches from another daemon and uses no SSH key here, takes none of the passphrase
 //! machinery with it.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC8, AC13)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

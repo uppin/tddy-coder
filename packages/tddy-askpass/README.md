@@ -30,4 +30,9 @@ Not a human: the daemon sets `SSH_ASKPASS` to this binary (resolved beside the d
 then on `PATH`) in the environment of the clone it runs. It ships with `./install`, `./release`
 and `./publish.sh` next to `tddy-remote-git-repo`.
 
-Design: `docs/dev/1-WIP/2026-10-17-clone-passphrase-prompt.md`.
+When ssh asks again for a key this clone already got an answer for (after a wrong passphrase), the helper
+also writes `the previous passphrase for key '…' was rejected (incorrect passphrase)` to stderr before it
+prints the new answer; ssh passes that into the clone's error.
+
+Behaviour: [cloning over SSH](../../docs/ft/daemon/clone-ssh-passphrase.md). The daemon's end:
+[`tddy-host-service/docs/clone-askpass.md`](../tddy-host-service/docs/clone-askpass.md).

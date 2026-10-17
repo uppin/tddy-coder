@@ -37,14 +37,32 @@ steps are in sibling modules:
 
 | Module | Holds |
 |---|---|
-| `start_request_checks.rs` | `forward_start_session` (a start owned by a peer), `provision_project_for_start`, `validate_stack_seed_against_project` |
+| `start_request_checks.rs` | `forward_start_session` (a start owned by a peer, waiting `start_forward_deadline(config)` — the split-start budget, not the 30 s forward deadline), `provision_project_for_start` (keeps a streamed start alive while it waits), `validate_stack_seed_against_project` |
 | `workspace_branch_start.rs` | `seed_and_start_workspace_session` |
 | `cli_branch_starts.rs` | the claude-cli and cursor-cli branches: `cli_start_prelude` (sessions base, new id, attachments and initial prompt, returned as a `CliStart`) |
 | `tool_session_spawn.rs` | `spawn_tool_session` and `spawn_tddy_coder`: the one `tddy-coder` spawn, for both a start and a resume |
 | `tool_spawn_plan.rs` | `ToolSpawnPlan` (what the child is spawned with) and `ToolSpawnPurpose` (`Start` / `Resume`) |
 | `svc_ensure_project_available_for_start.rs`, `svc_index_workspace_worktree.rs` | project provisioning for a start; the semantic index over a workspace worktree |
+| `clone_planner.rs`, `clone_backend.rs`, `clone_ssh_env.rs`, `start_keepalive.rs` | how a clone reaches its remote and runs; see [Cloning a project](#cloning-a-project-for-a-start) |
 | `svc_start_claude_cli_session.rs` | the non-sandboxed Claude CLI start; holds `SessionStdioEndpoint` (the reverse stdio endpoint to a spawned `tddy-coder`) |
 | `svc_resume_claude_cli_session.rs`, `svc_resume_sandboxed_claude_cli_session.rs` | the resume paths; the sandboxed one relaunches through `relaunch_sandboxed_runner` |
+
+## Cloning a project for a start
+
+`ensure_project_available_for_start` clones the project's checkout when the host has none. How the clone
+reaches its remote is decided per clone, on the blocking pool, where the URL being cloned is known:
+
+| Module | Holds |
+|---|---|
+| `clone_planner.rs` | `ClonePlanner` and `PlannedClone`: a facilitator clone runs with only its transport shim; an SSH remote runs with the askpass environment when the host's OpenSSH is 8.4 or later and an agent is reachable; otherwise it runs without prompting (`BatchMode=yes`) and a failure says why. The grant a clone holds lives until it ends. A refusal before the clone starts (an unresolvable session) is kept and returned as its own `Status`. |
+| `clone_ssh_env.rs` | `ClonePlan::{Facilitator, Ssh}`, `clone_ssh_env_for`, `agent_socket_for` and `CloneAgentError` (`NoAgentReachable` and `LookupFailed`, kept distinct), `is_ssh_url`, `resolve_askpass_path` (beside the daemon executable, then `PATH`) |
+| `clone_backend.rs` | `CloneBackend::clone_repo`: the supervised, forked-worker and in-process backends, each carrying the plan's environment |
+| `start_keepalive.rs` | `with_keepalive`: awaits provisioning and emits `StartKeepAlive` every `START_KEEPALIVE_INTERVAL` (5 s) until it ends |
+
+`LaunchSessions.askpass` is the daemon's one `AskpassEndpoint` (`None` on a host the daemon runtime did not
+build, whose SSH clones are given no helper). Behaviour:
+[cloning over SSH](../../../docs/ft/daemon/clone-ssh-passphrase.md); the endpoint:
+[clone askpass](../../tddy-host-service/docs/clone-askpass.md).
 
 ## The CLI spawns
 

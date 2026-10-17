@@ -6,7 +6,7 @@
 //! agrees with `install`; that passes just as well when *neither* names the helper, which is why
 //! the helper is pinned by name here.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC14)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::path::PathBuf;
 

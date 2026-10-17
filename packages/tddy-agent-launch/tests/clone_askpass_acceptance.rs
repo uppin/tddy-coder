@@ -9,7 +9,7 @@
 //!
 //! Needs `sshd`, `ssh-keygen`, `ssh-agent` and a built `tddy-askpass`; `./test` provides them.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC1–AC4, AC6–AC8)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 mod support;
 

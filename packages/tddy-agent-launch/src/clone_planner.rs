@@ -264,6 +264,10 @@ mod tests {
         Some("OpenSSH_9.9p1, OpenSSL 3.0.13")
     }
 
+    fn an_openssh_that_cannot_ask() -> Option<&'static str> {
+        Some("OpenSSH_8.3p1 Ubuntu-1ubuntu0.2, OpenSSL 1.1.1f  31 Mar 2020")
+    }
+
     fn the_operator_is_ada() -> SessionUserResolver {
         Arc::new(|_| Some("ada".to_string()))
     }
@@ -339,5 +343,25 @@ mod tests {
             "/run/user/1000/ssh-agent.socket"
         );
         assert_eq!(planned.env()["SSH_ASKPASS_REQUIRE"], "force");
+    }
+
+    #[tokio::test]
+    async fn an_openssh_older_than_8_4_clones_without_prompting_and_says_so() {
+        // Given a host whose OpenSSH cannot be told to ask without a display, though an agent exists
+        let (planner, _keys) = a_planner_over(AgentAt("/run/user/1000/ssh-agent.socket")).await;
+        let planner = planner.with_host_probes(
+            Arc::new(AgentAt("/run/user/1000/ssh-agent.socket")),
+            an_openssh_that_cannot_ask,
+        );
+
+        // When the clone is planned
+        let planned = planner.plan(SSH_REMOTE).expect("the clone is not refused");
+
+        // Then it runs fail-fast with no helper, and a failure names the version and the 8.4 floor
+        assert!(planned.env()["GIT_SSH_COMMAND"].contains("-o BatchMode=yes"));
+        assert!(!planned.env().contains_key("SSH_ASKPASS"));
+        let said = planned.explain_failure("Permission denied (publickey)".to_string());
+        assert!(said.contains("OpenSSH_8.3p1"), "{said}");
+        assert!(said.contains("needs >= 8.4"), "{said}");
     }
 }

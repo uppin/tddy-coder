@@ -72,6 +72,12 @@ repos_base_path: "repos"
 2. **If that path already exists** (checked as the target OS user): **no clone** — the existing directory is registered as `main_repo_path`.
 3. Otherwise: run `git clone` as the target OS user, then register the project.
 
+## Cloning at session start
+
+A session start on a host that does not hold the project's checkout clones it first, from the registered
+`git_url` or from a peer's, into `{home}/{repos_base}/{name}/`. A clone over SSH asks the operator for a key
+passphrase when the key is protected; see [cloning over SSH](clone-ssh-passphrase.md).
+
 ## API (ConnectionService)
 
 - `ListProjects` / `CreateProject` — manage projects.
@@ -88,6 +94,7 @@ The **`tddy-daemon`** binary is the multi-user orchestrator: serves the web bund
 
 ## Related
 
+- [Cloning over SSH](clone-ssh-passphrase.md) — the passphrase question a clone asks.
 - [Per-project GitHub identity](github-identity.md) — what a session does with the account its project assigns, or with the host's `gh` login for a Local gh project.
 - [Git integration base ref (worktrees)](../coder/git-integration-base-ref.md) — validation, default ref, project registry fields.
 - [gRPC remote control](../coder/grpc-remote-control.md) — daemon and transport roles.

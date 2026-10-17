@@ -6,7 +6,7 @@
 //! prompt it is, how long it waits, what it refuses, and — above all — that the decrypted answer
 //! reaches nothing but the helper.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC1, AC5, AC6, AC9, AC10)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;

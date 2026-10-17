@@ -4,7 +4,7 @@
 //! is the one the daemon speaks and the two cannot drift. What ssh itself does with the helper is
 //! covered where ssh really runs, in `tddy-agent-launch/tests/clone_askpass_acceptance.rs`.
 //!
-//! PRD: docs/ft/daemon/1-WIP/PRD-2026-10-17-clone-passphrase-prompt.md (AC1, AC5, AC6, AC10)
+//! Feature: docs/ft/daemon/clone-ssh-passphrase.md
 
 use std::process::{Command, Output};
 use std::sync::Arc;

@@ -49,3 +49,10 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Touched, unchanged:** 99 → 99 lines by brace matching (nesting 4, 5 parameters), at the merge-base and after. The change replaced the
+function's inline clone backend and facilitator plumbing with `ClonePlanner::for_launch` and moved the refusal mapping into the
+blocking closure, to keep this function where it was. The helper beside it, `spawn_project_clone`, fell from 86 lines at nesting 7 to 57
+at nesting 3 (the three-backend `match` moved to `clone_backend.rs`); it has no record of its own. Not claimed by any PR.

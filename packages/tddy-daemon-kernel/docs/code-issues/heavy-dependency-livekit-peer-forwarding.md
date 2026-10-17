@@ -130,3 +130,9 @@ six crates that inherit the SDK for nothing stands either way.
 module was split in `#unbundle` node 6 to avoid this edge, and that the split is documented in two
 places as a workaround rather than as a design. The two comments are the evidence that this is a real
 constraint rather than a tidy-up, and they are not in the graph.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Touched, still the one LiveKit consumer:** `peer_forwarding.rs` went from 321 to 313 lines, because the loop that carries a forwarded
+stream's frames moved to `stream_relay.rs` (111 lines, no LiveKit types), so the crate has one more module and the share of it that
+needs the SDK is slightly smaller. The record's counts were not re-run; the dependent-crate figures are unchanged. Not claimed by any PR.

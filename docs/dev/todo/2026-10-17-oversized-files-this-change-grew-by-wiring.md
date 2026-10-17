@@ -1,9 +1,9 @@
-# 2026-10-17 — Four oversized files this change grew by a few lines of wiring
+# 2026-10-17 — Oversized files this change grew by a few lines of wiring
 
 **Category:** Deferred refactor
-**Source:** `2026-10-17-clone-passphrase-prompt` — `/pr-wrap` step 3.5, file-length gate
+**Source:** the clone passphrase prompt (2026-10-17) — `/pr-wrap` step 3.5, file-length gate
 
-The clone passphrase prompt touched four files that were already over the 500-production-line budget and
+The clone passphrase prompt touched five files that were already over the 500-production-line budget and
 grew each by the minimum wiring it needed:
 
 | File | Production lines | Cause |
@@ -12,6 +12,7 @@ grew each by the minimum wiring it needed:
 | `packages/tddy-web/src/components/sessions/CreateSessionPane.tsx` | 785 → 795 | one import and one `<StartPassphrasePrompt>` mount |
 | `packages/tddy-service/build.rs` | 723 → 729 | a prost pass for `askpass.proto` |
 | `packages/tddy-daemon-rpc/src/project/coordinate_handlers.rs` | 658 → 660 | `env` on two `CloneRequest` constructions |
+| `packages/tddy-session-lifecycle/src/connection_service.rs` | +4 (by diff) | the `askpass` field and `mod svc_askpass_wiring;` |
 
 **Why deferred, with the developer's consent:** none of the growth is logic. The feature's own code is in new
 modules (`askpass/`, `clone_env.rs`, `clone_planner.rs`, `clone_backend.rs`, `clone_ssh_env.rs`,
