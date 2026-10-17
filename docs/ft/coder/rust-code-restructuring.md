@@ -334,8 +334,8 @@ How the crate delivers this: [item-anchors.md](../../../packages/tddy-code-restr
 | `reorder_call_args` | Reorder one call's arguments. `order` names every argument position once |
 | `repoint_call` | Rewrite the part of a call **in front of** its arguments. Single form: one call's callee. Bulk form: insert hops after the receiver of every call of a method. See [`repoint_call`](#repoint_call) |
 | `repoint_facade_imports` | Re-point every path of one file (or of every file of one module) that goes through a `pub use` of **another crate** to the path where the item is **defined**. A `symbol` anchor names one file; an `items`/`item` anchor on a `mod` declaration names the module. See [`repoint_facade_imports`](#repoint_facade_imports) |
-| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate, **with the directory of its children**: `git mv` the file and every file its `mod` declarations lead to (`x.rs` and `x/mod.rs` children, children of inline modules) to the same place relative to the module under the destination's `src/`, rewrite every path they name — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required. `reexport: "glob"` leaves one grouped `<visibility> use <dest_crate>::{a, b};` per destination and visibility in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff** — the facade has the visibility of the `mod` line it replaces (`pub(crate) mod x;` leaves `pub(crate) use dest::x;`, a private `mod x;` a private `use dest::x;`), so it never widens the origin's API; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;`, written with any visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(self)`, `pub(in …)` or none), is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was. A child the move cannot carry is a finding of plain `check` (see [Path survey](#path-survey)) |
-| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to` and `reexport` behave as above. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate`. Each member's declaration is removed, and its comments travel, as for a single module. A member that is a directory child of another member (`a::b` beside `a`) is **folded** into it: it is carried at its nested position (`a/b.rs` lands at `<dest>/src/a/b.rs`), gets no root declaration and no facade, and its parent's `mod b;` line stays as written. A member whose parent does not move lands at the destination's root under its last segment. No file arriving in the destination is given a `use` that names the destination crate |
+| `move_module_to_crate` | Move `<crate>/src/<module>.rs` into another crate, **with the directory of its children**: `git mv` the file and every file its `mod` declarations lead to (`x.rs` and `x/mod.rs` children, children of inline modules) to the same place relative to the module under the destination's `src/`, rewrite every path they name — in `use` items at any depth and in bodies — from its [path survey](#path-survey), re-point every caller found by `textDocument/references`, and edit both `Cargo.toml`s. `to` is the destination crate's directory and is required; it is a crate that exists, or one the move creates when the line carries `name` (see [Crate creation](#crate-creation)). `reexport: "glob"` leaves one grouped `<visibility> use <dest_crate>::{a, b};` per destination and visibility in the origin, naming the modules that moved there across the whole plan, which gives a **zero caller diff** — the facade has the visibility of the `mod` line it replaces (`pub(crate) mod x;` leaves `pub(crate) use dest::x;`, a private `mod x;` a private `use dest::x;`), so it never widens the origin's API; `"named"` is refused, because a named re-export puts items at the destination's crate root while a caller writes `crate::<module>::Item`. The origin's `mod <module>;`, written with any visibility (`pub`, `pub(crate)`, `pub(super)`, `pub(self)`, `pub(in …)` or none), is removed with the doc and plain comments directly above it, which are written above the `pub mod <module>;` the destination's root gains; a declaration carrying any attribute (`#[cfg]`, `#[path]`, `#[allow]`) is refused by `check` and `apply` before anything is written, naming the attribute. Removing it never joins two `use` runs: where it was the only line between them, one blank line stays (after the facade, when one takes its place) so `rustfmt` sorts each run as it was. A child the move cannot carry is a finding of plain `check` (see [Path survey](#path-survey)) |
+| `move_cluster_to_crate` | Move a **set** of modules into another crate as one unit. `anchor` is the first member and `also` names the rest; `to`, `name` and `reexport` behave as above; a cluster creates its crate once. The whole set moves or none of it does, in a single edit, so the tree is never half-moved. A path reaching a **co-moving** member stays `crate::` — the destination *is* `crate` once the file has arrived — while a path reaching a module staying behind is re-pointed at the origin. Every member's paths are read by the same survey as a single module's. This is what makes a mutually-referencing group movable; a set of one is refused, because that is `move_module_to_crate`. Each member's declaration is removed, and its comments travel, as for a single module. A member that is a directory child of another member (`a::b` beside `a`) is **folded** into it: it is carried at its nested position (`a/b.rs` lands at `<dest>/src/a/b.rs`), gets no root declaration and no facade, and its parent's `mod b;` line stays as written. A member whose parent does not move lands at the destination's root under its last segment. No file arriving in the destination is given a `use` that names the destination crate |
 | `move_test_binary_to_crate` | Move `<crate>/tests/<name>.rs` into the crate it exercises: `git mv` the file, re-point **every** path in it that opens with the origin's extern name, and extend the destination's `[dev-dependencies]`. `to` is required; `reexport` is **refused**, because nothing can reference a test binary. There is no origin edit at all — cargo auto-discovers `tests/*.rs`, so the crate the test left never named it. Each path is resolved to the crate that **defines** what it reaches, through however many re-export facades stand in the way |
 
 ### `extract_method`
@@ -946,6 +946,40 @@ the operation never produces a change `verify` would report.
 - [Feature prompt: agent skills](feature-prompt-agent-skills.md)
 - Package: [`packages/tddy-code-restructuring/README.md`](../../../packages/tddy-code-restructuring/README.md)
 
+## Crate creation
+
+`move_module_to_crate` and `move_cluster_to_crate` create their destination when the plan line carries
+`name`, the new crate's `[package] name`:
+
+```jsonl
+{"op":"move_cluster_to_crate","anchor":{ … },"also":[{ … }],"to":"packages/tddy-restructure-plan","name":"tddy-restructure-plan","reexport":"glob"}
+{"op":"move_module_to_crate","anchor":{ … },"to":"packages/tddy-restructure-plan","reexport":"glob"}
+```
+
+The first line creates `packages/tddy-restructure-plan`; the second moves into it and carries no `name`.
+
+- **What is created.** `<to>/Cargo.toml` — `[package]` with the name and the origin's `version` and
+  `edition` lines, copied as written (`version.workspace = true` stays that way; a line the origin lacks is
+  omitted, never invented) — an empty `<to>/src/lib.rs`, and the root `members` entry. Nothing else is
+  authored: no `description`, no `[lib]`, no `publish`, no dependency version or feature list. The files
+  and the move are one edit, so a crate is never created without its code or the reverse.
+- **What fills it.** The move resolves as it does into an existing crate: each `pub mod <module>;` is
+  declared in sorted order, and the manifest gains the crates the moved code names, from the origin's
+  tables, with the path back to the origin when a module stays behind.
+- **Plan order.** A later operation moves into the crate an earlier one created, and plain `check`,
+  `check --deep`, `apply --dry-run` and `apply` agree on a plan that creates a crate and fills it.
+- **Refused, naming the path, with nothing written** — by the plan reader: `name` on
+  `move_test_binary_to_crate` (a test binary moves into a crate that exists), a `name` that is not a Cargo
+  package name (a non-empty run of ASCII letters, digits, `-` and `_` that does not start with a digit or
+  `-`, and is not `test`), and two operations creating the same `to`; and by `check`: `<to>` already a crate
+  (drop `name` to move into it), `<to>` existing and not empty, an extern name (`-` read as `_`) that the
+  origin or a crate the root `members` array lists explicitly already has, and a root `Cargo.toml` with no
+  `members` array.
+- **Without `name`,** a `to` that is not a crate is refused, and the refusal says that `name`
+  creates it.
+
+How the crate delivers this: [crate-creation.md](../../../packages/tddy-code-restructuring/docs/crate-creation.md).
+
 ## Path survey
 
 A cross-crate move decides everything it writes about the moved file from one **path survey**, taken
@@ -955,8 +989,10 @@ left, and the destination's manifest. The three cannot disagree about what the f
 - **What is read.** Every path the file writes — in `use` items at any depth (groups expanded) and in
   bodies — whose first segment is `crate`, `self`, `super` or a crate. A `use` item's first segment is a
   crate unless the file binds the name itself (a module it declares, something it imports, an item it
-  defines — `use Kind::*;` inside a function over the file's own `enum Kind`). In code a path counts
-  only when the origin's manifest declares its first segment. A path written after `..` or `..=` — a
+  defines — `use Kind::*;` inside a function over the file's own `enum Kind`) — except that a crate imported
+  under its own name (`use async_trait::async_trait;`) is the crate, when the origin declares it and
+  nothing else binds the name. In code a path counts only when the origin's manifest declares its first
+  segment, in any dependency table, target-specific ones included. A path written after `..` or `..=` — a
   struct update `..crate::a::f()`, a range `0..crate::a::MAX` — is a path like any other; one after a
   single `.` is a field access and is not.
 - **Which files are read.** The module's own file **and every file its `mod` declarations lead to**,
@@ -1009,7 +1045,10 @@ left, and the destination's manifest. The three cannot disagree about what the f
   path (`crate::a::b::Item`), would be private to the destination after the move. `check --deep` and
   `apply` refuse, naming the child and each referring file; nothing is widened and nothing is written.
 - **The manifest.** Each crate the survey names is copied from the origin's manifest (a path dependency re-anchored) into the
-  destination's `[dependencies]`, or `[dev-dependencies]` when only `#[cfg(test)]` code names it. The
+  destination's `[dependencies]`, or `[dev-dependencies]` when only `#[cfg(test)]` code names it. A crate
+  the origin declares only under a target table (`[target.'cfg(unix)'.dependencies]`) lands under the same
+  header in the destination, not flattened into `[dependencies]`; a crate it declares in the plain table
+  goes to the plain table. A destination that already declares the crate gains nothing. The
   destination is never in its own manifest; the move asserts it, and a survey that reports one is
   refused as inconsistent rather than filtered. A crate declared nowhere it could be copied from refuses
   the move.
@@ -1145,6 +1184,12 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   separately, with "cut the dependency" as the remedy, since a root item is not a sibling that can come
   along; a path to a module keeps the cluster remedy. A `use` in a function body counts as a `use`, not as
   a body path.
+- **Crate creation does not expand glob `members` entries.** The extern-name clash check reads the
+  crates the root `members` array lists explicitly; a clash through a glob member surfaces at the compile
+  gate, where cargo refuses two packages of one name.
+- **Target tables are matched by header text, and `move_test_binary_to_crate` reads none.** A header
+  spelled differently from the origin's is a different header, and a test binary's own scan reads
+  `[dependencies]` and `[dev-dependencies]` only.
 - **A restricted child inside an inline module is read where it is declared; the inline module's own
   visibility is not read.** `pub(crate) mod i { pub mod d; }` is not found restricted.
 - **A module's sibling test modules do not move with it.** A `#[cfg(test)] mod x_tests;` beside the module,

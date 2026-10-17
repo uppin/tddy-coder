@@ -13,7 +13,7 @@ what the file names:
 |---|---|---|
 | `header::repointed_header_at` | every surveyed path | the edits that re-point each path, headers and bodies; the crates the file names; the edges back to the origin |
 | `refusals::refuse_a_dependency_cycle` | the edges | the cycle refusal, listing every path that forced it |
-| `moving::Move::destination_manifest` | the crates named, split by `#[cfg(test)]` | `[dependencies]` and `[dev-dependencies]` lines, copied from the origin's manifest |
+| `moving::Move::destination_manifest` | the crates named, split by `#[cfg(test)]` | `[dependencies]`, `[dev-dependencies]` and target-table lines, copied from the origin's manifest |
 | `item_move::canonical_paths` (through `crate_move::survey`, now `pub(crate)`) | each `crate::`-headed path whose `defined_at` differs from what is written | the rewritten moved text, and a note naming every path rewritten or left |
 | `repoint_facade::rewrite` (through `crate_move::survey`, `pub(crate)`) | each path whose `defined_at` differs from `resolved` **and** whose defining crate is not the file's own | the rewritten paths of one file (or of every file of one module), and a note naming every path rewritten |
 
@@ -64,8 +64,16 @@ A path is surveyed when its first segment is `crate`, `self` or `super`, or name
 item the first segment is a crate unless the file binds the name itself — a module it declares, a name
 its `use` items bring in, an item it defines (`names_bound_by`) — and unless it is a built-in root
 (`std`, `core`, `alloc`). In code the first segment must also be declared by the origin's manifest, in
-either dependency table: `PermissionMode::Plan` and `mpsc::channel` are paths too, and a dependency
-line for either would be an edit nobody asked for. A `use` group with nothing before it names no path.
+any dependency table — plain, dev or target-specific (`declares_dependency_in_any_table`):
+`PermissionMode::Plan` and `mpsc::channel` are paths too, and a dependency line for either would be an
+edit nobody asked for. A `use` group with nothing before it names no path.
+
+A crate imported under its own name is surveyed as that crate. `use async_trait::async_trait;` and
+`use anyhow::{anyhow, Result};` bind a name that is also the head of their own path, which would read as
+the file binding the head itself (`bound_only_by_their_own_crate`). A name is dropped from the bound set
+only when every `use` binding it is a leaf of at least two segments, with no alias, whose first segment is
+that name, nothing else binds it (no `mod x`, no item `x`, no `use other::x`), and the origin's manifest
+declares it in some table. A module, an item or another import of the same name still shadows the crate.
 
 ## Resolution
 
@@ -108,7 +116,17 @@ A cluster's callers are collected across its members (`SetTotals.callers`) and w
 `moving::caller_changes`, one edit per statement.
 
 Edges are collected outside `#[cfg(test)]` only. The manifest pass puts a crate in `[dev-dependencies]`
-when only `#[cfg(test)]` code names it (and drops it when the rest of the file names it too). The
+when only `#[cfg(test)]` code names it (and drops it when the rest of the file names it too).
+
+Target-specific tables are read the same way (`manifest_edits::target_declarations`, headers matched
+verbatim, quotes included: `[target.'cfg(unix)'.dependencies]`). `Move::dependency_lines` decides per named
+crate: a crate the origin declares in the plain table being filled goes to that table; otherwise each
+target table of the matching kind that declares it contributes its line, re-anchored, under the same
+header in the destination — so `libc` stays `cfg(unix)`. Code that only `#[cfg(test)]` names lands in the
+target `dev-dependencies` table, falling back to the target `dependencies` table the origin declares it in.
+A destination that already declares the crate under that header, or in its plain table, gains nothing, and
+a missing header is appended at the end of the manifest (`with_lines_under`). A crate in no table at all
+refuses the move. The
 destination appearing in either set is `MalformedPlan` from `destination_manifest` — an assertion, since
 the survey reads the destination's own items as `crate::`.
 
@@ -132,6 +150,9 @@ records.
 - **`#[cfg(test)]` is recognised as `#[cfg(test)]` and `#[cfg(all(test, …))]` only.** `any(test, …)`,
   `not(…)` and `cfg_attr` read as ordinary code, which errs the safe way: a crate lands in
   `[dependencies]` rather than missing from the build.
+- **A target header is matched as written.** `[target.'cfg(unix)'.dependencies]` and
+  `[target."cfg(unix)".dependencies]` are two headers, and only the one the origin spells is carried.
+  `move_test_binary_to_crate` reads no target table of its own (`test_binary.rs` has its own scanner).
 - **`#[path = "…"]` modules are not followed, and items a macro generates, or paths inside a macro's
   arguments, are not seen.** The compile gate catches what
   results.
