@@ -55,6 +55,14 @@ method — fold the inherent one into the trait's. **Not yet published:** the po
 moves, and the test-helper move — each changes every fixture's construction at once, so they land
 together in green.
 
+**Red pass (2026-10-17):** added `opened_session_room::require_opened_room` (the agent-roster
+check over the port's `OpenedRoom`) with two tests. ⚠ **Open:**
+`a_host_built_with_nothing_wired_serves_a_local_session` needs the port-based
+`DaemonSessionHost::new`, which changes every fixture at once (green).
+`the_activity_service_reads_deltas_through_the_plugins_store` is **blocked by a dependency cycle**:
+the adapter can only move into `tddy-daemon-livekit` once `tddy-session-activity` stops depending on
+the plugin, which is #625's green.
+
 ## Draft PR contract
 
 ```rust
@@ -164,8 +172,8 @@ changes widely.
 | Test | File | Validates |
 |---|---|---|
 | `a_host_built_with_nothing_wired_serves_a_local_session` | `packages/tddy-session-lifecycle/tests/host_without_integrations.rs` (new) | Every port at its null object: start, connect locally, resume and delete succeed |
-| `attaching_a_remote_agent_opens_the_room_first_through_the_reach` | `packages/tddy-session-lifecycle/tests/session_room_acceptance.rs` (extended) | Agent-roster path calls `open_now`; `Ok(None)` → today's precondition message |
-| `only_plugins_and_wiring_name_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` (rewritten) | No `KNOWN_OFFENDERS`; every crate naming a LiveKit crate is in `PLUGINS ∪ WIRING` |
+| `a_remote_agent_is_refused_as_before_when_no_integration_hosts_rooms` + `a_remote_agent_proceeds_once_the_room_is_open` | `packages/tddy-session-agents/tests/opened_room.rs` (the agent-roster check over `OpenedRoom`) | Agent-roster path calls `open_now`; `Ok(None)` → today's precondition message |
+| `only_plugins_and_wiring_name_a_livekit_crate` | `packages/tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` (rewritten; present) | No `KNOWN_OFFENDERS`; every crate naming a LiveKit crate is in `PLUGINS ∪ WIRING` |
 | `the_activity_service_reads_deltas_through_the_plugins_store` | `packages/tddy-daemon-livekit/tests/session_delta_stores.rs` (new) | The moved adapter maps the scope and lookup errors as before |
 
 ## Technical Debt & Production Readiness

@@ -22,3 +22,13 @@ pub fn require_opened_session_room(
         ))),
     }
 }
+
+/// [`require_opened_session_room`] over the reach port's [`tddy_daemon_extensions::OpenedRoom`]:
+/// a remote agent needs a room; no integration (`None`) refuses with the same message as before.
+pub fn require_opened_room(
+    session_id: &str,
+    opened: Option<tddy_daemon_extensions::OpenedRoom>,
+) -> Result<(), Status> {
+    let _ = (session_id, opened);
+    todo!("require_opened_room")
+}
