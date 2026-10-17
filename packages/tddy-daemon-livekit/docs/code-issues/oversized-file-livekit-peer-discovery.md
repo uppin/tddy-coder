@@ -6,7 +6,7 @@
 **Metrics:** **1,658 production lines** (2026-10-04; 1,565 at detection) · budget 500 · **3.3× over**
 **Thresholds breached:** length 1658 > 500
 **Restructure:** three `extract_module --to_file` seams, one per plan — designed, not applied
-**Status:** Open — **unclaimed** — regressed 2026-10-04 (+22, #512)
+**Status:** Open — regressed 2026-10-17 (+39 from #623, `#satellite` 1/13; deferred with the developer's consent); **unclaimed** — regressed 2026-10-04 (+22, #512)
 
 ## Measurement history
 
@@ -16,6 +16,7 @@
 | 2026-09-23 | 1,638 | master 1,565 → 1,638 after #508 (`#keyring` 1/9: the signing-key advertisement fields, `AdvertisedSigningKey`, `peer_signing_public_keys`, the shared identity rule) — grown by #508; split deferred to a follow-up after #keyring lands because dependents #509–#513 touch it |
 | 2026-10-04 | 1,636 | 1,638 on `master` (`6faef323`) → 1,636 after `#e2e-leg` 2/5 (#579): the forwarding call sites take a `CommonRoom` instead of the bare room slot (a type change at the seam, −2). Not grown; still over budget, the split still deferred |
 | 2026-10-04 | 1,658 | 1,636 → 1,658 in #512 (`#keyring` 5/9): `forward_set_project_accounts_via_livekit`, the sibling of `forward_set_project_default_branch_via_livekit` — it lands in seam A's range. Split still deferred: #513 (`#keyring` 6/9) also edits this file, so a split now would conflict it |
+| 2026-10-17 | 1,658 → 1,697 (+39) | `#satellite` 1/13 (#623): the discovery loop reports `Connecting` / `Connected` / `Unreachable` on the integration status board (`common_room_failure_state`, `common_room_lost_state`, a trailing `IntegrationReporter`). Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` — and because #624 (`#satellite` 2/13) also edits this file |
 
 ## What would close it — designed seams
 
