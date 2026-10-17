@@ -76,29 +76,105 @@ jobs:
       - name: cargo clippy
         run: ./dev cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  # Two legs of one job, so the setup below exists once. They split the suite by
-  # what a test needs to run, not by how long it takes (docs/dev/guides/ci.md):
+  # The Rust suite runs as two checks. They split it by what a test needs to run, not by how long
+  # it takes (docs/dev/guides/ci.md):
   #
-  #   Rust tests      everything that runs in this process or against files and
-  #                   sockets it makes itself.
-  #   Rust e2e tests  everything that needs real infrastructure: a LiveKit server in
-  #                   Docker, or a real tddy-supervisor / index-daemon / daemon /
-  #                   coder process. The set is .config/rust-e2e.filterset — the one
-  #                   place it is written; each leg takes it or its complement.
+  #   Rust tests      everything that runs in this process or against files and sockets it makes
+  #                   itself. Builds its own test targets, from the rust-cache.
+  #   Rust e2e tests  everything that needs real infrastructure: a LiveKit server in Docker, or a
+  #                   real tddy-supervisor / index-daemon / daemon / coder process. The set is
+  #                   .config/rust-e2e.filterset — the one place it is written; each leg takes it or
+  #                   its complement. It runs as shards (`rust-e2e-shard`) from an archive of just its
+  #                   test targets (`rust-test-build`), and `rust-e2e` is the one check that stands
+  #                   for all of them.
+  #
+  # An archive of every test target is tens of GB and does not fit a runner (ENOSPC while archiving
+  # 983 binaries), so only the e2e targets — about a tenth — are archived.
+  rust-test-build:
+    name: Rust e2e test archive
+    runs-on: ubuntu-latest
+    # Independent of `Rust build` and of `Rust tests`: it needs no fixture binary to compile, so all
+    # three compile side by side and the e2e shards wait for the slower of this and `Rust build`.
+    #
+    # Compiles the shared dependency graph and the e2e test targets only. The first run on a cold
+    # cache builds 57 crates including libwebrtc; later runs restore master's cache.
+    timeout-minutes: 150
+    outputs:
+      archive_seconds: ${{ steps.archive.outputs.seconds }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      # Reads the cache `Rust tests` writes: it restores the dependency graph the unit leg built on
+      # master. It never saves — `Rust tests` builds the full set of test targets, so it is the one
+      # writer, and two writers on one key would race.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: false
+
+      # `-p`/`--test` arguments derived from .config/rust-e2e.filterset. The script fails — and so does
+      # this step — on an empty selection, a filterset name that matches no test target, or a filterset
+      # that could select a unit-test binary; there is no fallback to archiving everything.
+      - name: Derive the e2e archive arguments
+        run: ./dev bun scripts/nextest-e2e-archive.ts .config/rust-e2e.filterset e2e-archive-args.txt
+
+      # Its own step, so the compile is timed and visible while it runs. `df` before, after the build
+      # and after archiving, so a disk problem names the step that caused it.
+      - name: Build the e2e nextest archive
+        id: archive
+        run: |
+          args="$(cat e2e-archive-args.txt)"
+          echo "::group::disk before the build"; df -h /; echo "::endgroup::"
+          start=$(date +%s)
+          # shellcheck disable=SC2086 # word-splitting the derived -p/--test list is the point
+          ./dev cargo nextest archive $args --locked --archive-file nextest-archive.tar.zst
+          seconds=$(( $(date +%s) - start ))
+          echo "::group::disk after the build and the archive"; df -h /; du -sh target; echo "::endgroup::"
+          echo "seconds=$seconds" >> "$GITHUB_OUTPUT"
+          {
+            echo "### e2e test archive"
+            echo
+            echo "- compile and archive: ${seconds} s"
+            echo "- archive size: $(du -h nextest-archive.tar.zst | cut -f1)"
+            echo "- target/ size: $(du -sh target | cut -f1)"
+            echo "- test targets: $(wc -w < e2e-archive-args.txt) arguments"
+            echo
+            echo '```'
+            df -h /
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # nextest already zstd-compresses the archive, so the artifact adds no compression of its own.
+      - name: Upload the e2e nextest archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: nextest-archive
+          path: nextest-archive.tar.zst
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
   rust-test:
-    name: ${{ matrix.check }}
+    name: Rust tests
     runs-on: ubuntu-latest
     needs: rust-build
-    strategy:
-      fail-fast: false # a red e2e leg must not hide the unit leg's result, or the reverse
-      matrix:
-        include:
-          - check: Rust tests
-            junit: junit-rust
-            e2e: false
-          - check: Rust e2e tests
-            junit: junit-rust-e2e
-            e2e: true
     # The first run on a cold cache builds 57 crates including libwebrtc. Later
     # runs restore master's cache and finish in a fraction of this.
     timeout-minutes: 150
@@ -124,11 +200,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          # One cache for both legs: they build the same `--workspace` test targets, so the e2e leg
-          # restores what the other leg saved. Only that leg saves it — two writers on one key would
-          # race, and the second would fail to reserve it.
+          # The writer of the `test` cache: it builds every `--workspace` test target, so what it
+          # saves is what the e2e archive job restores (read-only). Only this job saves it — two
+          # writers on one key would race, and the second would fail to reserve it.
           shared-key: test
-          save-if: ${{ github.ref == 'refs/heads/master' && !matrix.e2e }}
+          save-if: ${{ github.ref == 'refs/heads/master' }}
 
       # nextest builds the test targets itself. What it cannot produce is a
       # binary belonging to another workspace package, which suites like
@@ -148,55 +224,22 @@ jobs:
           find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
           find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
 
-      # The e2e leg's LiveKit tests share one pinned server (see docs/dev/guides/ci.md) instead of
-      # starting a container each. The script exports LIVEKIT_TESTKIT_WS_URL through $GITHUB_ENV.
-      - name: Start shared LiveKit server
-        if: ${{ matrix.e2e }}
-        timeout-minutes: 5
-        run: scripts/livekit-ci-server.sh start
-
-      - name: Drill — remove the shared LiveKit server mid-run
-        if: ${{ matrix.e2e && inputs.kill_livekit_after_seconds != '' }}
-        env:
-          KILL_AFTER: ${{ inputs.kill_livekit_after_seconds }}
-        run: scripts/livekit-ci-server.sh stop-after "$KILL_AFTER"
-
       - name: cargo nextest
         id: nextest
         # Keep going on failure so the JUnit report still publishes; the report
         # step below is what fails the job.
         continue-on-error: true
         # ANDed with the profile's default-filter, so the exclusions in
-        # .config/nextest.toml apply to both legs.
+        # .config/nextest.toml apply to every leg.
         run: |
           e2e="$(cat .config/rust-e2e.filterset)"
-          if [ "${{ matrix.e2e }}" = "true" ]; then
-            filter="$e2e"
-          else
-            filter="not ($e2e)"
-          fi
-          ./dev cargo nextest run --workspace --profile ci --locked -E "$filter"
-
-      - name: Stop shared LiveKit server
-        if: ${{ always() && matrix.e2e }}
-        timeout-minutes: 2
-        run: scripts/livekit-ci-server.sh stop
-
-      # Where the e2e leg's run time goes, per test binary, on the check's summary page — from the
-      # JUnit nextest just wrote, so it costs nothing. Skipped only when nextest wrote none (a build
-      # failure); a script error is not swallowed.
-      - name: Summarise e2e run time per binary
-        if: ${{ matrix.e2e && !cancelled() }}
-        run: |
-          if [ -f target/nextest/ci/junit.xml ]; then
-            ./dev bun scripts/ci-e2e-timing.ts junit target/nextest/ci/junit.xml >> "$GITHUB_STEP_SUMMARY"
-          fi
+          ./dev cargo nextest run --workspace --profile ci --locked -E "not ($e2e)"
 
       - name: Publish test report
         uses: mikepenz/action-junit-report@v6
         with:
           report_paths: target/nextest/ci/junit.xml
-          check_name: ${{ matrix.check }}
+          check_name: Rust tests
           detailed_summary: true
           fail_on_failure: true
           require_tests: true
@@ -205,10 +248,191 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.junit }}
+          name: junit-rust
           path: target/nextest/ci/junit.xml
           if-no-files-found: warn
           retention-days: 14
+
+  # One shard of the e2e set. nextest `--partition hash:i/N` assigns each *test* (not each binary) to
+  # a shard by a stable hash of its binary id and name, so the serial `rust-analyzer` group — 52
+  # binaries, 320 tests, the bulk of the run time — is spread evenly and adding a binary rebalances
+  # nothing by hand. Every shard is its own nextest process, so each has its own copy of the group.
+  #
+  # The check this job publishes (`Rust e2e shard i/N`) is not the one branch protection reads: that
+  # is `rust-e2e` below.
+  rust-e2e-shard:
+    name: Rust e2e shard ${{ matrix.shard }}/${{ strategy.job-total }}
+    runs-on: ubuntu-latest
+    needs: [rust-build, rust-test-build]
+    strategy:
+      fail-fast: false # a red shard must not hide the others' results
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
+          df -h /
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      - name: Fetch test fixture binaries
+        uses: actions/download-artifact@v7
+        with:
+          name: rust-fixture-bins
+          path: fixture-bins
+
+      - name: Install fixture binaries into target/debug
+        run: |
+          find fixture-bins -type f -exec chmod +x {} +
+          mkdir -p target/debug/examples
+          find fixture-bins -maxdepth 1 -type f -exec cp -p {} target/debug/ \;
+          find fixture-bins/examples -maxdepth 1 -type f -exec cp -p {} target/debug/examples/ \;
+
+      - name: Fetch the nextest archive
+        uses: actions/download-artifact@v7
+        with:
+          name: nextest-archive
+
+      - name: Disk after the archive download
+        run: |
+          ls -lh nextest-archive.tar.zst
+          df -h /
+
+      # The shard's LiveKit tests share one pinned server (see docs/dev/guides/ci.md) instead of
+      # starting a container each. The script exports LIVEKIT_TESTKIT_WS_URL through $GITHUB_ENV.
+      # One server per shard: each shard is its own runner.
+      - name: Start shared LiveKit server
+        timeout-minutes: 5
+        run: scripts/livekit-ci-server.sh start
+
+      - name: Drill — remove the shared LiveKit server mid-run
+        if: ${{ inputs.kill_livekit_after_seconds != '' }}
+        env:
+          KILL_AFTER: ${{ inputs.kill_livekit_after_seconds }}
+        run: scripts/livekit-ci-server.sh stop-after "$KILL_AFTER"
+
+      - name: cargo nextest
+        id: nextest
+        # Keep going on failure so the JUnit still uploads and the aggregator can report; the last
+        # step of this job is what fails it.
+        continue-on-error: true
+        run: |
+          ./dev cargo nextest run --archive-file nextest-archive.tar.zst \
+            --extract-to "$PWD" --extract-overwrite --workspace-remap "$PWD" \
+            --partition "hash:${{ matrix.shard }}/${{ strategy.job-total }}" \
+            --profile ci -E "$(cat .config/rust-e2e.filterset)"
+
+      - name: Stop shared LiveKit server
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: scripts/livekit-ci-server.sh stop
+
+      # This shard's run phase on its summary page, from the JUnit nextest just wrote, so it costs
+      # nothing. Skipped only when nextest wrote none; a script error is not swallowed.
+      - name: Summarise the shard's run phase
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f target/nextest/ci/junit.xml ]; then
+            ./dev bun scripts/ci-e2e-timing.ts junit target/nextest/ci/junit.xml .config/nextest.toml >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-rust-e2e-shard-${{ matrix.shard }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail the shard if nextest failed
+        if: ${{ steps.nextest.outcome == 'failure' }}
+        run: exit 1
+
+  # The check named `Rust e2e tests`: the name branch protection requires, which the shards must not
+  # change. It publishes the one JUnit report for every shard (so scripts/ci-status.sh finds the
+  # failing tests and the count under that name) and fails unless every job it depends on
+  # succeeded. `!cancelled()` and the explicit gate matter: without them a failed shard, or a failed
+  # archive build that skips the shards, would leave this check skipped, and a skipped check does
+  # not block a merge.
+  rust-e2e:
+    name: Rust e2e tests
+    runs-on: ubuntu-latest
+    needs: [rust-build, rust-test-build, rust-e2e-shard]
+    if: ${{ !cancelled() }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Fetch every shard's JUnit XML
+        if: ${{ needs.rust-e2e-shard.result != 'skipped' }}
+        uses: actions/download-artifact@v7
+        with:
+          pattern: junit-rust-e2e-shard-*
+          path: shards
+
+      - name: Publish test report
+        if: ${{ needs.rust-e2e-shard.result != 'skipped' }}
+        uses: mikepenz/action-junit-report@v6
+        with:
+          report_paths: shards/*/junit.xml
+          check_name: Rust e2e tests
+          detailed_summary: true
+          fail_on_failure: true
+          require_tests: true
+
+      - uses: cachix/install-nix-action@v31
+        if: ${{ !cancelled() && needs.rust-e2e-shard.result != 'skipped' }}
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: nix-community/cache-nix-action@v7
+        if: ${{ !cancelled() && needs.rust-e2e-shard.result != 'skipped' }}
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          save: false # rust-build is the sole writer; see the comment there
+
+      # The whole leg on one summary page: the archive build and the slowest shard as phases, a row
+      # per shard, per-binary run time and the slowest tests across shards.
+      - name: Summarise the e2e leg
+        if: ${{ !cancelled() && needs.rust-e2e-shard.result != 'skipped' }}
+        env:
+          ARCHIVE_SECONDS: ${{ needs.rust-test-build.outputs.archive_seconds }}
+        run: |
+          shopt -s nullglob
+          reports=(shards/*/junit.xml)
+          if [ ${#reports[@]} -gt 0 ]; then
+            ./dev bun scripts/ci-e2e-timing.ts merge "$ARCHIVE_SECONDS" .config/nextest.toml "${reports[@]}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Fail unless every job this check stands for succeeded
+        if: ${{ always() }}
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needed jobs: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::a job behind Rust e2e tests ended '$result', not 'success'"
+              exit 1
+            fi
+          done
 
   # Manual only. Compiles every test target cold with `--timings` (20+ minutes) to answer one
   # question: how much of a leg's compile would a per-target split skip? See
@@ -303,15 +527,19 @@ jobs:
       # directory is many GB. Each belongs to a package other than the one whose
       # tests run it, so cargo never builds them as a side effect of those
       # tests, and `CARGO_BIN_EXE_*` is unset for them. The list is everything
-      # matched by `grep -r 'target/debug/' packages/*/tests`; if you add a test
-      # that shells out to a workspace binary, add it here too.
+      # a test resolves beside its own executable: grep for `target/debug/` AND for
+      # `current_exe` in `packages/*/tests` (the second finds `tddy-remote-git-repo` and
+      # `tddy-index-daemon`, which no `target/debug/` literal names). The e2e archive builds only
+      # the packages that own e2e tests, so a binary of any other package exists only because it
+      # is staged here; if you add a test that shells out to a workspace binary, add it here too.
       #
       # Stripped because these are execution fixtures; nothing reads symbols.
       - name: Stage test fixture binaries
         run: |
           mkdir -p fixture-bins/examples
           for b in tddy-coder tddy-tools tddy-daemon tddy-demo tddy-demo-tui \
-                   tddy-acp-stub tddy-sandbox-runner; do
+                   tddy-acp-stub tddy-sandbox-runner tddy-remote-git-repo \
+                   tddy-index-daemon; do
             cp "target/debug/$b" fixture-bins/
           done
           cp target/debug/examples/echo_server fixture-bins/examples/

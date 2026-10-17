@@ -15,6 +15,8 @@ export interface FilterSubject {
   package: string;
   /** The test target's name. */
   binary: string;
+  /** A lib or bin unit-test binary rather than an integration-test target; `kind(test)` is false for it. */
+  unit?: true;
 }
 
 export type PredicateName = "binary" | "package" | "kind";
@@ -89,7 +91,8 @@ export function parseFilterset(filterset: string): Filter {
 /**
  * Whether `filter` selects `subject`.
  *
- * `kind(test)` is true for every subject: every caller evaluates test targets only.
+ * `kind(test)` is true for every subject except a `unit` one: a caller that evaluates integration-test
+ * targets only never marks one.
  */
 export function matches(filter: Filter, subject: FilterSubject): boolean {
   switch (filter.kind) {
@@ -102,7 +105,7 @@ export function matches(filter: Filter, subject: FilterSubject): boolean {
     case "predicate":
       if (filter.name === "binary") return subject.binary === filter.arg;
       if (filter.name === "package") return subject.package === filter.arg;
-      return true;
+      return subject.unit !== true;
   }
 }
 
