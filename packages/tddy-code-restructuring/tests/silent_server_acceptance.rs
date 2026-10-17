@@ -14,12 +14,13 @@
 //! Driven over `fake_lsp` — `--cold-hovers N --loads-crate-graph` (ready, never types),
 //! `--goes-busy-after-hovers 1` (busy and silent after a ready warm-up), `--never-quiescent` (busy
 //! and silent from the start, so in the warm-up) and
-//! `--narrates-while-loading` (busy and talking) — with the bounds and the heartbeat injected, so
+//! `--goes-busy-after-hovers 1 --narrates-while-loading` (busy after the warm-up, and talking every
+//! 250 ms) — with the bounds and the heartbeat injected, so
 //! no test waits production's minutes and none branches on being a test.
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tddy_code_restructuring::backends::rust::{ProgressSink, RustBackend, SilenceBounds};
 use tddy_code_restructuring::crate_move::{ItemReferences, ModuleReferences};
@@ -42,9 +43,21 @@ const A_SHORT_READY_BOUND: Duration = Duration::from_millis(300);
 /// A loading bound short enough that a test sees it pass many times over.
 const A_SHORT_LOADING_BOUND: Duration = Duration::from_millis(500);
 
-/// A loading bound above the two seconds between a wait's polls, so a server that narrates on
-/// every poll is never silent for that long.
+/// A loading bound above the two seconds between a wait's polls: the wait hears the server's new
+/// words when it next asks, so a server narrating every 250 ms is heard on every poll and is never
+/// silent for this long — and a wait that did not reset its clock on them would pass it twice over
+/// in [`MORE_THAN_TWO_LOADING_BOUNDS`].
 const A_LOADING_BOUND_ABOVE_THE_POLL: Duration = Duration::from_secs(3);
+
+/// How long the narrating server is left to talk: more than two of [`A_LOADING_BOUND_ABOVE_THE_POLL`].
+const MORE_THAN_TWO_LOADING_BOUNDS: Duration = Duration::from_secs(7);
+
+/// The stage a rename of `foo` waits in once the warm-up is over.
+const TYPE_INFERENCE_AT_FOO: &str = "type inference at src/lib.rs:1";
+
+/// How long a test waits for a beat it needs before it stops the run anyway, so a run that never
+/// beats there fails the assertion instead of hanging the suite.
+const LONG_ENOUGH_FOR_THE_BEAT_THE_TEST_NEEDS: Duration = Duration::from_secs(15);
 
 /// A bound no test reaches.
 const NEVER_REACHED: Duration = Duration::from_secs(3600);
@@ -221,6 +234,17 @@ async fn what_it_ended_with<T: std::fmt::Debug>(
         .expect_err("a run that was stopped is a refusal")
 }
 
+/// Wait, polling every 100 ms, until a beat names `stage` — or [`LONG_ENOUGH_FOR_THE_BEAT_THE_TEST_NEEDS`]
+/// has passed, for the assertion to report.
+async fn until_a_beat_names(heard: &HeardLines, stage: &str) {
+    let started = Instant::now();
+    while !heard.beats().iter().any(|beat| beat.contains(stage))
+        && started.elapsed() < LONG_ENOUGH_FOR_THE_BEAT_THE_TEST_NEEDS
+    {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// Whether the run was still going after `elapsed`.
 async fn still_going_after<T>(
     operation: &tokio::task::JoinHandle<Result<T, RestructureError>>,
@@ -276,15 +300,16 @@ async fn a_beat_for_a_ready_server_that_gives_no_answer_says_it_is_ready_and_giv
     .await;
     let operation = the_rename_of_foo(backend, workspace.path());
 
-    // When it has waited past the warm-up for a few beats
-    let _stopped = what_it_ended_with(&cancel, operation, Duration::from_secs(3)).await;
+    // When it has waited past the warm-up until a beat of the wait for type inference
+    until_a_beat_names(&heard, TYPE_INFERENCE_AT_FOO).await;
+    let _stopped = what_it_ended_with(&cancel, operation, Duration::ZERO).await;
 
     // Then every beat of the wait for type inference says the server is ready and gives no answer,
     // never that it has not said it is ready
     let inference_beats: Vec<String> = heard
         .beats()
         .into_iter()
-        .filter(|beat| beat.contains("type inference at src/lib.rs:1"))
+        .filter(|beat| beat.contains(TYPE_INFERENCE_AT_FOO))
         .collect();
     assert!(!inference_beats.is_empty(), "{:#?}", heard.all());
     assert!(
@@ -366,13 +391,13 @@ async fn a_server_that_never_finishes_loading_and_goes_silent_is_refused_as_stal
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_loading_server_that_keeps_narrating_is_never_refused_as_stalled() {
-    // Given a rename on a server that stays loading and reports a new build script on every poll,
-    // with a loading bound above the poll interval
+    // Given a rename whose server goes busy on build scripts after the warm-up and reports a new
+    // one every 250 ms, with a 3 s loading bound
     let workspace = a_workspace_holding_foo();
     let (heard, cancel) = (HeardLines::default(), CancellationToken::new());
     let backend = a_backend_over_a_fake_started_with(
         workspace.path(),
-        &["--narrates-while-loading"],
+        &["--goes-busy-after-hovers", "1", "--narrates-while-loading"],
         bounds(NEVER_REACHED, A_LOADING_BOUND_ABOVE_THE_POLL),
         &heard,
         &cancel,
@@ -381,14 +406,20 @@ async fn a_loading_server_that_keeps_narrating_is_never_refused_as_stalled() {
     let operation = the_rename_of_foo(backend, workspace.path());
 
     // When it has waited for more than two loading bounds
-    let going = still_going_after(&operation, Duration::from_secs(7)).await;
+    let going = still_going_after(&operation, MORE_THAN_TWO_LOADING_BOUNDS).await;
 
-    // Then it is still waiting, and only its caller ends it
-    assert!(going, "a server that kept talking was refused as stalled");
+    // Then it is still waiting for type inference at the anchor, and only its caller ends it
     let refusal = what_it_ended_with(&cancel, operation, Duration::ZERO).await;
     assert!(
-        matches!(refusal, RestructureError::IndexingIncomplete { .. }),
-        "{refusal:?}"
+        going,
+        "a server that kept talking was refused: {refusal:?}\n{:#?}",
+        heard.all()
+    );
+    assert!(
+        matches!(&refusal, RestructureError::IndexingIncomplete { stage, .. }
+            if stage == TYPE_INFERENCE_AT_FOO),
+        "{refusal:?}\n{:#?}",
+        heard.all()
     );
 }
 
