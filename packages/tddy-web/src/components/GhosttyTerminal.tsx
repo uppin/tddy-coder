@@ -6,7 +6,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Ghostty, Terminal, FitAddon } from "ghostty-web";
+import { Terminal, FitAddon } from "ghostty-web";
+import { newGhosttyInstance } from "../lib/ghosttyInstance";
 import {
   canPitchIn,
   canPitchOut,
@@ -280,11 +281,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       async function setup() {
         logLife("init cols=%d rows=%d fontSize=%d", cols, rows, fontSize);
-        // Each terminal gets its own WASM instance rather than ghostty-web's process-wide one
-        // (`init()`): on a shared instance, a terminal created after another was freed is handed
-        // the freed one's memory unzeroed, so a new session's pane opens on the previous session's
-        // screen. An instance costs ~1.2 MB and a few ms, and is released with its terminal.
-        const ghostty = await Ghostty.load();
+        // Each terminal gets its own WASM instance rather than ghostty-web's process-wide one —
+        // see `newGhosttyInstance` for why.
+        const ghostty = await newGhosttyInstance();
         if (!isMounted || !containerRef.current) return;
         logLife("creating Terminal");
 
@@ -1332,6 +1331,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         data-testid={testId}
         data-terminal-font-size={String(displayFontSize)}
         data-session-active={sessionActive ? "true" : "false"}
+        // Set once the emulator is open in this element: it takes focus and input from then on.
+        data-terminal-ready={ready ? "true" : "false"}
         aria-disabled={sessionActive ? undefined : true}
         ref={containerRef}
         style={{

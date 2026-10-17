@@ -136,7 +136,11 @@ export function aTerminalWithHistoryPaging() {
   };
 
   const waitForTerminal = () =>
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+      "have.attr",
+      "data-terminal-ready",
+      "true",
+    );
 
   const waitForListener = () =>
     cy.wrap(null, { timeout: 10000 }).should(() => {

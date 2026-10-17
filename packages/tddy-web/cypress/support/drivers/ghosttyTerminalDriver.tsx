@@ -102,9 +102,12 @@ export function aGhosttyTerminal(options: GhosttyTerminalDriverOptions = {}) {
       return this;
     },
 
-    /** Wait for the terminal element to exist. */
+    /**
+     * Wait for the terminal to exist and its emulator to be open in it — before then it takes no
+     * focus and installs no input handlers, so an interaction would race its setup.
+     */
     expectExists() {
-      terminal().should("exist");
+      terminal().should("have.attr", "data-terminal-ready", "true");
       return this;
     },
 
