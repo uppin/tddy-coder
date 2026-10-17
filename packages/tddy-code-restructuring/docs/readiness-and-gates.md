@@ -11,7 +11,8 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | A wait ended by the server's own diagnostics | `readiness.rs` (`wait_until_answerable`) | `SeamRefused` for an operation at inactive code or in a file no module tree reaches |
 | Documents closed after each entry point | `backends/rust/documents.rs` (`closing_what_it_opens`) | (refuses nothing; stops a shared server answering from a finished run's text) |
 | Health gate | `readiness.rs` (`refuse_degraded_index`), `ServerChatter::degraded` | `ServerDefect` |
-| Bounded type probe | `readiness.rs` (`wait_until_resolved_within_bound`, `READY_HOVER_BOUND`) | `ServerDefect` |
+| Silence bounds | `readiness.rs` (`silence_verdict`, `refuse_silence`, `keep_waiting_unless_stalled`; `SilenceBounds`, `READY_HOVER_BOUND`, `LOADING_SILENCE_BOUND`) | `ServerDefect` for a ready index that will not type a position; `ServerStalled` for a loading server gone silent |
+| Untracked-move preflight | `apply.rs` (`untracked_move_sources`), `runner.rs` (`preflight_moves`), `runner/rehearsal.rs` (`resolve_and_preflight`, `untracked_move_anchors`) | `UntrackedMoveSource`, before the operation writes or journals anything |
 | Early-return refusal | `backends/rust/early_return.rs` (`refuse_early_returns`), through `backends/rust/extracted_fn.rs` (`refuse_unliftable_returns`) | `SeamRefused` |
 | Partial-cluster finding | `crate_move/cluster.rs` (`stranded_siblings`) | a static `check` finding: the cycle `apply` refuses (`refusals::refuse_a_dependency_cycle`) |
 | Body-path finding | `crate_move/preconditions.rs` (`stays_behind_through_a_body`) | a static `check` finding: a body path to a module staying behind, which `apply` refuses as a dependency cycle |
@@ -19,7 +20,7 @@ explicit failure, with its class and the reason, instead of a run that reports s
 | Uncarriable-child findings | `crate_move/carried.rs` (`uncarriable`), run by `preconditions.rs` (`unrunnable`) | a static `check` finding per child a move cannot carry (see below) |
 | Restricted child reached from outside | `crate_move/carried.rs` (`restricted_children_reached`), called by `cluster/gathering.rs` (`member_changes`) | `MalformedPlan`, at resolve time: `check --deep` and `apply` |
 | Inferred-placeholder post-condition | `backends/rust.rs` (`refuse_inferred_placeholder`) | `ServerDefect` |
-| Compile gate | `runner/compile_gate.rs` | `BaselineDoesNotCompile`, `AppliedTreeDoesNotCompile` |
+| Compile gate | `runner/compile_gate.rs` (`baseline_packages` for the baseline's set) | `BaselineDoesNotCompile`, `AppliedTreeDoesNotCompile` |
 | Group gate | `runner/group_gate.rs` | `GroupDoesNotCompile` (the group is rolled back) |
 
 There is **no opt-out flag** for any of them.
@@ -55,7 +56,10 @@ is a collaborator a host or a test injects (`with_wait_heartbeat`, `Options.wait
 on the shared client is narrated too — `LspClientBridge` polls it in heartbeat-sized slices and beats
 between them — so the one wait the poll loops cannot reach is not the silent one. A wait ended by
 cancellation names its stage in `IndexingIncomplete.stage`, and the heartbeat reads the chatter and
-the clock and writes neither readiness flag.
+the clock and writes neither readiness flag. A beat has three wordings for the server's state:
+`is still loading`, `is ready and gives no answer here` (it said it was quiescent, read through
+`ServerChatter::quiescent`, and the position is still untyped), and `has not said it is ready`, kept
+for a server that never reported a status.
 
 **A `null` hover that will never change is read from the server's diagnostics, not waited out.**
 Two kinds of position never resolve, however long the index has been ready, and rust-analyzer says
@@ -75,19 +79,52 @@ still `null`, `wait_until_answerable` fetches that report, once per poll:
 Before the index is loaded, a missing diagnostic proves nothing, so the wait goes on. No timeout is
 involved: the server's own answer ends the wait.
 
-### The probe is bounded
+### Silence is bounded, total time is not
 
-The type probe of an extraction that needs inference (`extract_method`, `extract_variable`) waits
-through `wait_until_resolved_within_bound`. A hover that stays
-`null` after the index is loaded and healthy, and that neither diagnostic above explains, will never
-change, so once the hover has been silent for `READY_HOVER_BOUND` (30 s) the operation ends as
-`rust-analyzer's answer was unusable:`, naming the position. Time spent before the index is ready
-does not count: the bound starts when readiness is declared, and `silent_past` is the decision, kept
-a pure function so it is tested without a server. The probe asks at a position that can carry a hover
-(see [assist-output-repairs.md](assist-output-repairs.md#where-an-extraction-asks-and-what-extract_variable-binds)):
-a range opening on a `{` or a comment is probed at the first code inside it, so the bound is the
-backstop and not the expected path. Waits that carry no bound (`wait_until_answerable`
-for a caller survey) end by the server's own diagnostics.
+Every wait for type inference goes through `wait_until_answerable` (`wait_until_resolved` is its
+refusing form for an operation acting at the position): renames, symbol anchors, the post-assist
+rename, `extract_module` with `to_file`, the reference survey (`references_at`), the signature
+rewrites and the extraction probes. The crate-index warm-up is `ensure_indexed`. Both poll through
+`keep_waiting_unless_stalled`, and every silence they meet is judged by one pure decision,
+`silence_verdict(loading, ready_silent_for, words_unchanged_for, &bounds)`, refused in one place,
+`refuse_silence`. The bounds are `SilenceBounds { ready, loading }`, defaulting to
+`READY_HOVER_BOUND` (30 s) and `LOADING_SILENCE_BOUND` (10 min), and injected like the heartbeat
+(`RustBackend::with_silence_bounds`); they are not configurable from the daemon's YAML or the CLI.
+
+- **Ready and untypable** (`Silence::ReadyUntypable`). A hover that stays `null` after the index is
+  loaded and healthy, and that neither diagnostic above explains (`excused_silence`), will never
+  change. Once the hover has been silent without a break for `bounds.ready` (`ready_silence` keeps
+  that clock; any look that is not ready-and-silent stops it), the operation ends as
+  `rust-analyzer's answer was unusable: the index is ready and rust-analyzer still gives no hover at
+  <file>:<line> after …, so it cannot type this position`. Time before the index is ready does not
+  count. The extraction probe asks at a position that can carry a hover (see
+  [assist-output-repairs.md](assist-output-repairs.md#where-an-extraction-asks-and-what-extract_variable-binds)):
+  a range opening on a `{` or a comment is probed at the first code inside it, so for extractions the
+  bound is the backstop and not the expected path.
+- **Loading and silent** (`Silence::Stalled`). While `ServerChatter::loading()` holds, the decision
+  reads how long the server's last words have stood unchanged (`ServerChatter::quiet_for`, the
+  heartbeat's `unchanged for`). Past `bounds.loading` the wait is refused as `ServerStalled { stage,
+  server, last, quiet_seconds, furthest }` — `stage` is `warming the crate index` or `type inference
+  at <file>:<line>`, `last` is the server's last words (`nothing reported` when it said none, the
+  `NOTHING_REPORTED` constant the heartbeat shares). Any new word restarts the clock, so a load that
+  keeps narrating is never refused here. It is judged in every 100 ms slice a poll sleeps in, not
+  once per poll: a busy report can be folded away by the next poll's request before a once-per-poll
+  look sees it.
+
+Neither bound limits total time; cancellation is still the only bound on how long a wait lasts, and
+`wait_heartbeat_acceptance::a_wait_has_no_deadline_however_many_beats_pass` pins that. The waits
+outside these two (`settled_outline`, `locate_symbol`, `offered_assist`) end by cancellation or by
+the server's answer only. `tddy-index-daemon`'s `status_of` maps `ServerStalled` to
+`DeadlineExceeded`.
+
+**Why there is a loading bound at all.** `#carve` 17 stage B2 had a one-op `rename_symbol` sit at
+`waiting for type inference at the anchor` for over ten minutes at 0% CPU after `check --deep` of
+the same plan answered, and every later request to the daemon queued behind it. Ten minutes is past
+any single build script this workspace runs. A reproduction on the real workspace (three attempts,
+2026-10-17) did not reproduce that hang: the type-inference wait answered at once each time, so the
+two refusals are proved against `fake_lsp` (`silent_server_acceptance`), not a live server. It did
+show rust-analyzer's own build-script `cargo check` holding `target/debug/.cargo-lock` while the
+compile gate waited for it (see Known limitations).
 
 ## Documents are closed when an operation ends
 
@@ -282,8 +319,15 @@ legally carry `_` (`collect::<Vec<_>>()`), which is why `extract_variable`'s bin
 Every **writing** `apply`, on both apply paths (`runner::apply` for the CLI, and the index daemon's
 `apply_plan`), is bracketed by `cargo check --all-targets --message-format short -p …`:
 
-- **Baseline, before anything is written.** `refuse_a_broken_baseline` checks the packages owning
-  every file the plan names (snapshot and anchors). A failure is `BaselineDoesNotCompile`, and nothing
+- **Baseline, before anything is written.** `refuse_a_broken_baseline` checks the packages
+  `baseline_packages` returns: those owning every file the plan names (snapshot and anchors), and the
+  destination package of every cross-crate move (`move_module_to_crate`, `move_cluster_to_crate`,
+  `move_test_binary_to_crate`), read as the `[package] name` of `<to>/Cargo.toml` through
+  `Destination::read`. A `to` with no manifest adds nothing (a move that creates its crate is judged
+  by the operation); a manifest that is there but cannot be read, or declares no `[package] name`, is
+  refused. Other kinds' `to` is not read. So a destination that was already broken is reported as
+  `cargo check --all-targets -p destination -p origin` failing before the plan runs, not blamed on the
+  plan by the result check. A failure is `BaselineDoesNotCompile`, and nothing
   is written, so a pre-broken tree is never blamed on the plan. It runs as the `before_writing` gate of
   `open_run_after`: after the cheap read-only refusals (git worktree, repo-scoped journal,
   `JournalExists`, snapshot), after item anchors are resolved (`open_run_resolving_anchors`, the one
@@ -326,7 +370,9 @@ reported in full rather than masked.
 
 **Recorded.** Every `cargo check` this runs — the baseline, the result check and the tidy's own —
 goes through the run's `SpawnRecorder` under the purpose `compile-gate`, so the record holds what
-was executed and how each ended. A check killed on cancel is recorded with the signal that killed
+was executed and how each ended. The baseline, the result check and the tidy's are run-level and carry no
+operation; a group's end-of-group check is started through `spawns.for_group(name)` and carries
+`group`. A check killed on cancel is recorded with the signal that killed
 it; a tree that fails the baseline is recorded with the exit status the compiler returned (101 for a
 type error). See [What a run executes](../README.md#what-a-run-executes).
 
@@ -334,6 +380,40 @@ type error). See [What a run executes](../README.md#what-a-run-executes).
 is its own `RestructureError` variant. `tddy-index-daemon`'s `status_of` maps the baseline to
 `FailedPrecondition` (the same request fails until the tree is repaired) and the applied tree to
 `Internal` (the executor produced it).
+
+## The untracked-move preflight
+
+A move goes through `git mv` so history survives, and `git mv` refuses a file git does not track.
+Inside one edit the order is creates, then text changes, then renames, so a move of an untracked file
+used to fail after its text edits were on disk, with the operation already journalled in flight —
+and the next run refused the journal as indeterminate. The preflight refuses it first.
+
+- **When.** `runner::preflight_moves(index, id, resolved, root, overlay, spawns)` runs on each
+  resolved edit **before** `GroupRun::enter` and before the journal's `in_flight` record, in both
+  apply loops (`store_run.rs` for the CLI, `tddy-index-daemon/src/apply.rs` for the daemon), right
+  after resolution and before the dry-run branch. A refusal leaves the operation's files and the
+  journal as the previous operation left them, so after `git add` the same plan applies with no
+  `--resume` and no clean-up. Operations of the run that already committed stay committed; a group is
+  rolled back whole, as for any member failure.
+- **What is tracked.** `apply::untracked_move_sources` runs one `git ls-files --error-unmatch -z --
+  <paths…>` per edit that renames, then one per path when that fails, to name each untracked one
+  (`LS_FILES_UNMATCHED`, exit status 1, means "not tracked"; any other failure is `MalformedPlan`, as a
+  failed `git mv` is). A path is tracked when git knows it (an intent-to-add or a staged rename
+  counts), when it is a `Create` path of the same edit, or when the run's `Overlay` introduced it
+  (`Overlay::introduced`: dry run and rehearsal, where nothing reached disk). Its `git` is recorded
+  for its operation (`spawns.for_operation(index, id)`).
+- **Parity.** `apply --dry-run` (the same call, overlay populated) and `check --deep`
+  (`Rehearsal::resolve_and_preflight`, which turns the refusal into a finding) refuse the same
+  operation the same way. Static `check` reports an untracked anchor file of the three cross-crate
+  move kinds (`untracked_move_anchors`, chained into `check_plan`'s static move findings through
+  `static_move_findings`), including a cluster's `also`. A file not on disk is not judged statically,
+  since an earlier operation may create it; `reparent_module` anchors the old parent's `mod` line, not
+  the moved file, so its untracked source is reported by `check --deep` and `apply` only.
+- **The refusal.** `UntrackedMoveSource { op, paths }` reads: operation *N* moves *paths*, which git
+  does not track — a move goes through `git mv` so history survives. `git add` it and apply again.
+  Nothing of operation *N* was written. `status_of` maps it to `FailedPrecondition`.
+- **Not done.** No automatic `git add` of the author's file and no fall back to `fs::rename`: either
+  would be a fallback the author did not ask for.
 
 
 ## Transactional groups
@@ -462,7 +542,9 @@ was never repaired a second time, so the run failed after a correct split.
   tree compiles; only `apply`'s gate says that.
 - **Each writing apply pays two checks.** On a warm target directory they are incremental; on a cold
   one they are the price of a check, and they contend for the checkout's `target/` lock with the
-  developer's own builds. The baseline runs before the per-operation static checks, so a plan that
+  developer's own builds — and with rust-analyzer's own build-script `cargo check`, which shares
+  `target/` with the gate: measured at roughly 47 s and 60 s of lock wait on this workspace
+  (2026-10-17), not permanent. rust-analyzer has no separate `cargo.targetDir`. The baseline runs before the per-operation static checks, so a plan that
   one of those would refuse still pays a `cargo check` first.
 - **The degraded-index refusal names this repository's `./run-index-daemon` script**, which is host
   knowledge inside a library. It is kept because the advice is actionable where it is read.

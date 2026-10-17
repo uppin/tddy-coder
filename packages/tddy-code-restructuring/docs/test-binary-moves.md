@@ -127,6 +127,8 @@ closing quote follows one character or one escape.
 | the anchor is not `<crate>/tests/<name>.rs` | a module path, or `tests/common/mod.rs` |
 | a path opening with the origin and continuing into a group or a glob | ambiguous defining crate; split the declaration |
 | a named crate the origin's manifest declares in neither table | the plan read a manifest the test does not compile against |
+| `operation N moves <crate>/tests/<name>.rs, which git does not track …` (`UntrackedMoveSource`) | the test binary is not in git's index; `git add` it and apply the same plan again. Refused before anything is written, by `apply`, `apply --dry-run`, `check --deep` and static `check` alike (see [readiness-and-gates.md](readiness-and-gates.md#the-untracked-move-preflight)) |
+| `the tree does not compile before the plan runs: \`cargo check --all-targets -p <destination> -p <origin>\` fails` | the destination (or the origin) did not compile before the plan; nothing is written. The baseline covers the destination's package because the moved binary becomes one of its targets (see [readiness-and-gates.md](readiness-and-gates.md#the-compile-gate)) |
 
 ## Limits
 
@@ -134,8 +136,9 @@ closing quote follows one character or one escape.
   `concat!(env!("CARGO_MANIFEST_DIR"), "/../<crate>/src/<file>.rs")` still resolves from its new
   crate only by coincidence; string literals are deliberately untouched, so such a path is a hand
   edit after the move.
-- **`check` has no static preflight for a test-binary move.** The plan's vocabulary refusals are
-  reported, but the path shape and the facade walk are resolved at apply time.
+- **`check`'s static preflight for a test-binary move is the untracked anchor file only.** The plan's
+  vocabulary refusals and a test binary git does not track are reported, but the path shape and the
+  facade walk are resolved at apply time.
 - **The scanners read lines, not parsed items**, for `use` and `mod` declarations, so an unindented
   `use`/`mod` line inside a raw-string fixture is read as a binding. The failure mode is a
   dev-dependency line not written, which is a compile error at CI, never a silent wrong edit.

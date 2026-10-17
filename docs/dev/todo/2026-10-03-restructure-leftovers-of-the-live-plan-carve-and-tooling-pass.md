@@ -34,14 +34,6 @@ Not a regression of the stack, so not carved here. The analysis found three cont
 `facade_walk` — taking the parent to ~417. Its record is
 `packages/tddy-code-restructuring/docs/code-issues/oversized-file-test-binary.md`.
 
-## 4. A stale plan after a failed apply says only "item changed"
-
-`apply` rewrites the plan file as it runs, so a plan whose run failed and was rolled back is stale, and
-re-running it is refused with `the item … changed since the plan was written — re-anchor it`, which
-sends the author looking for an edit they did not make. The refusal should say that the plan file was
-last written by a run (the journal under `.restructure/` knows) and that the remedy is to regenerate it.
-The skill now documents the behaviour (`code-restructuring` § Testing cadence); the message does not.
-
 ## 5. Untested shapes in the fixes
 
 - **Field and method visibility.** A moved struct's `pub(super)` field is rebased (block-form bodies
