@@ -1,10 +1,12 @@
+use crate::clone_backend::CloneBackend;
+use crate::clone_planner::ClonePlanner;
 use crate::launch_ports::LaunchSessions;
 use std::path::Path;
 use std::path::PathBuf;
 use tddy_daemon_kernel::user_paths::repos_base_for_user;
 use tddy_projects::project_storage;
 use tddy_rpc::Status;
-use tddy_spawn::{spawn_worker, spawner};
+use tddy_spawn::spawn_worker;
 
 /// What provisioning a project's working copy on the blocking pool needs: the clone backend, and
 /// where the project comes from.
@@ -17,7 +19,7 @@ pub(super) struct ProjectClone {
     peer_entries: Vec<tddy_service::proto::project::ProjectEntry>,
     spawn_backend: tddy_spawn::supervisor_client::SpawnBackendChoice,
     runtime: tokio::runtime::Handle,
-    ssh_command: Option<String>,
+    planner: ClonePlanner,
     facilitating_remote_url: Option<String>,
 }
 
@@ -33,55 +35,24 @@ pub(super) fn spawn_project_clone(
         peer_entries,
         spawn_backend,
         runtime,
-        ssh_command,
+        planner,
         facilitating_remote_url,
     } = launch;
     let handle = tokio::task::spawn_blocking(move || {
-        let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
-            match &spawn_backend {
-                tddy_spawn::supervisor_client::SpawnBackendChoice::Supervisor { socket_path } => {
-                    let mut env = std::collections::BTreeMap::new();
-                    if let Some(ref ssh) = ssh_command {
-                        env.insert("GIT_SSH_COMMAND".to_string(), ssh.clone());
-                    }
-                    runtime
-                        .block_on(
-                            tddy_spawn::supervisor_spawn::clone_repo_via_supervisor_with_env(
-                                socket_path,
-                                &os_user_owned,
-                                git_url,
-                                dest,
-                                env,
-                            ),
-                        )
-                        .map_err(|e| format!("{e:#}"))
-                }
-                tddy_spawn::supervisor_client::SpawnBackendChoice::ForkedWorker => {
-                    if let Some(ref client) = spawn_client {
-                        if ssh_command.is_none() {
-                            // No transport env var to carry: the forked worker's `clone_repo` is
-                            // the original path (it has no env-var channel).
-                            return client
-                                .clone_repo(spawn_worker::CloneRequest {
-                                    os_user: os_user_owned.clone(),
-                                    git_url: git_url.to_string(),
-                                    destination: dest.display().to_string(),
-                                })
-                                .map_err(|e| e.to_string());
-                        }
-                    }
-                    // Facilitator clone (carries `GIT_SSH_COMMAND`) or no forked worker at all:
-                    // the in-process `clone_as_user_with_env` carries the transport env var directly.
-                    let extra: Vec<(&str, &str)> = ssh_command
-                        .as_ref()
-                        .map(|ssh| vec![("GIT_SSH_COMMAND", ssh.as_str())])
-                        .unwrap_or_default();
-                    spawner::clone_as_user_with_env(&os_user_owned, git_url, dest, &extra)
-                        .map_err(|e| e.to_string())
-                }
-            }
+        let backend = CloneBackend {
+            choice: spawn_backend,
+            spawn_client,
+            os_user: os_user_owned,
+            runtime,
         };
-        if let Some(remote_url) = facilitating_remote_url {
+        let cloner = |git_url: &str, dest: &Path| -> Result<(), String> {
+            // The plan (and the grant it holds) lives until this clone has ended.
+            let planned = planner.plan(git_url)?;
+            backend
+                .clone_repo(git_url, dest, planned.env())
+                .map_err(|e| planned.explain_failure(e))
+        };
+        let provisioned = if let Some(remote_url) = facilitating_remote_url {
             tddy_projects::project_provision::ensure_project_available_from_facilitator(
                 &projects_dir_owned,
                 &project_id_owned,
@@ -103,7 +74,9 @@ pub(super) fn spawn_project_clone(
                 cloner,
                 peer_lookup,
             )
-        }
+        };
+        // A clone refused before it started says why, with the status that fits.
+        provisioned.map_err(|status| planner.take_failure().unwrap_or(status))
     });
     handle
 }
@@ -200,6 +173,7 @@ impl LaunchSessions {
             .map(|(instance_id, _)| format!("{instance_id}:{project_id_owned}"));
 
         let handle = spawn_project_clone(ProjectClone {
+            planner: ClonePlanner::for_launch(self, ssh_command, &os_user_owned, session_token),
             repos_base_dir,
             spawn_client,
             os_user_owned,
@@ -208,7 +182,6 @@ impl LaunchSessions {
             peer_entries,
             spawn_backend,
             runtime,
-            ssh_command,
             facilitating_remote_url,
         });
 

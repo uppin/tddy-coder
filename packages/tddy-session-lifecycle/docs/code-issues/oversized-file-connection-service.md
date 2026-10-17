@@ -37,3 +37,10 @@ their own files.
 
 Related: [`2026-09-24-lifecycle-files-over-the-400-line-target`](../../../../docs/dev/todo/2026-09-24-lifecycle-files-over-the-400-line-target.md)
 (the 2026-10-07 status section).
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed by four lines**, by `git diff --numstat` (the counter this record uses was not re-run): the `askpass` field on
+`DaemonSessionHost` with its doc comment, and `mod svc_askpass_wiring;`. The builder that sets it lives in the new
+`connection_service/svc_askpass_wiring.rs`. Not claimed by any PR; deferred with the other oversized files this change touched in
+`docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.

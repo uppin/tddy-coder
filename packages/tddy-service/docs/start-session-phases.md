@@ -24,13 +24,22 @@ terminates with the failure, so the last BEGIN a consumer saw names the step tha
 
 Every phase event reaches the client before the terminal event: the result never overtakes an END.
 
+## `StartKeepAlive`
+
+`StartSessionEvent` carries a fourth variant, `StartKeepAlive { string activity; }` (`keep_alive`, field 4).
+It says the start is alive and waiting on `activity` (`"provisioning"` while a project's checkout is cloned,
+which can stop to ask the operator for an SSH key passphrase), so a relay that ends a forwarded stream after
+30 seconds of silence does not end this one. The host emits one every 5 seconds from the start of that wait
+until it ends, and none after. A consumer ignores it: it is neither a phase nor the result. The unary start
+emits none.
+
 ## Which starts report
 
 claude-cli, cursor-cli and workspace starts report. The sandboxed claude-cli and cursor-cli starts, the
 tool start and the split start report no phases. Children spawned by a PR-stack orchestrator or a
 grill-me conversation discard their start's progress and report none either.
 
-The host-side seam is `AttachmentProgressSink::begin_phase` / `end_phase`
+The host-side seam is `AttachmentProgressSink::begin_phase` / `end_phase` (and `keep_alive`)
 ([tddy-session-files](../../tddy-session-files/docs/host-documents-and-attachments.md#materialisation-progress));
 the start code is described in
 [tddy-session-lifecycle's session-service.md](../../tddy-session-lifecycle/docs/session-service.md#start-phases).

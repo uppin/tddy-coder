@@ -78,3 +78,9 @@ Three or four cuts of ~200 lines each take the file under 500 **and** the functi
 
 ⚠ Line numbers must be re-derived with `restructure anchors` — the seams above were located
 against the 1,479-line tree, before this merge.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed, split deferred with consent:** 1781 → 1794 production lines. +13: `build` starts the daemon's one `AskpassEndpoint` on the registry and keypair the host service already owns, and installs it on the session host (`with_askpass_endpoint`). The change's own
+modules are all small and new; only this unavoidable wiring landed in the file. Not claimed by any PR.
+Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.

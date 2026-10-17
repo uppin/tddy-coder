@@ -52,3 +52,24 @@ pub fn test_service(tddy_data_dir: &Path) -> HostServiceImpl {
 pub fn test_service_owned(tddy_data_dir: PathBuf) -> HostServiceImpl {
     test_service(&tddy_data_dir)
 }
+
+/// Encrypt `plaintext` the way the browser does — RSA-OAEP(SHA-256) under a host's published SPKI
+/// DER — so a test can answer a host prompt without a browser.
+///
+/// A separate implementation from `HostKeypair::decrypt`, on purpose: a round trip whose two halves
+/// share code proves only that the code agrees with itself. This one goes through the `rsa` crate's
+/// public API alone, the same independence `host_keypair`'s own round-trip test relies on.
+pub fn encrypt_for_host(spki_der: &[u8], plaintext: &[u8]) -> Vec<u8> {
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::{Oaep, RsaPublicKey};
+
+    let public_key =
+        RsaPublicKey::from_public_key_der(spki_der).expect("a published SPKI DER public key");
+    public_key
+        .encrypt(
+            &mut rand::thread_rng(),
+            Oaep::new::<sha2::Sha256>(),
+            plaintext,
+        )
+        .expect("a passphrase fits comfortably in an OAEP payload")
+}

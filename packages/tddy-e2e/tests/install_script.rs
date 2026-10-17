@@ -152,6 +152,8 @@ fn write_fake_release_binaries(root: &Path) {
         "tddy-coder",
         "tddy-tools",
         "tddy-remote-git-repo",
+        // ssh's SSH_ASKPASS helper for a daemon-run clone; `install` requires it beside the daemon.
+        "tddy-askpass",
         "tddy-session-sync",
         // Runs inside every jail the daemon spawns, so `install` requires it exactly as it
         // requires the daemon. A fixture missing it fails the preflight before any assertion runs.
@@ -260,6 +262,7 @@ fn install_copies_binaries_to_custom_dir() {
         "tddy-coder",
         "tddy-tools",
         "tddy-remote-git-repo",
+        "tddy-askpass",
         "tddy-session-sync",
     ] {
         let p = bin_dir.join(name);
@@ -895,6 +898,7 @@ fn install_desktop_puts_the_application_and_the_tools_it_spawns_on_path() {
         "tddy-sandbox-runner",
         "tddy-index-daemon",
         "tddy-remote-git-repo",
+        "tddy-askpass",
         "tddy-session-sync",
     ] {
         assert!(

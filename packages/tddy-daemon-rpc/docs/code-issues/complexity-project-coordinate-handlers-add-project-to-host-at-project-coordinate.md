@@ -45,3 +45,8 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed by one line:** 176 → 177 lines by brace matching (nesting 5, unchanged). A `CloneRequest` construction gained
+`env: Default::default()`, the field the forked worker now carries. Not claimed by any PR.

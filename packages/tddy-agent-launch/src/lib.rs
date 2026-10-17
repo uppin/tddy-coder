@@ -4,6 +4,9 @@ pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod cli_branch_starts;
+mod clone_backend;
+mod clone_planner;
+pub mod clone_ssh_env;
 pub mod conversation_spawn;
 pub mod conversation_spawn_handler;
 pub mod conversation_worktree_op;
@@ -28,6 +31,7 @@ pub mod session_worktree_observer;
 pub mod stack_child_spawn;
 pub mod stack_parent;
 pub mod stack_seed_validation;
+pub mod start_keepalive;
 pub mod start_request_checks;
 pub mod svc_ensure_project_available_for_start;
 pub mod svc_index_workspace_worktree;
@@ -54,3 +58,5 @@ mod host_session_socket_tests;
 mod session_acting_identity_tests;
 #[cfg(test)]
 mod start_request_checks_unit_tests;
+
+pub use start_request_checks::start_forward_deadline;

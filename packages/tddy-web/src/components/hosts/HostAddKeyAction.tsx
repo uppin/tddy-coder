@@ -16,17 +16,8 @@
  * worth retyping, an absent agent is not, and an expired prompt means answering faster — three
  * different next actions, which is the entire reason the response carries an enum.
  *
- * The key that arrives with a prompt is fingerprinted here before any dialog is shown, and it is
- * that derived value — never the fingerprint string the prompt advertises beside it — that is
- * displayed and pinned. The two fields ride the same unauthenticated channel and only one of them
- * encrypts anything; see `hostKeyPinning`.
- *
- * A checked key is held **together with the prompt it came from**, and only a pair whose prompt is
- * the one in hand is shown. The fingerprint on screen is therefore always the digest of the key that
- * would do the encrypting: a second frame replacing the key retires the previous verdict in the same
- * render, and the dialog says nothing and sends nothing until the new key's check lands. Left as two
- * pieces of state, the frame in between shows the old key's fingerprint and its reassuring verdict
- * beside bytes that would encrypt for somebody else.
+ * The prompt question itself — its feed, the key-continuity check and the answer — is
+ * `useHostPromptAnswer`, shared with the create-session form's start.
  *
  * The key is named by an **absolute path**, in the picker and in the field alike. `~` is expanded
  * nowhere — not here, which does not know the host's home, and not in the daemon, whose confinement
@@ -34,10 +25,8 @@
  * sent one would be told only that their key must be inside a home it already was inside. This side
  * holds the context that makes that legible, so this side refuses it.
  *
- * The prompt feed is read only while an add is in flight. The daemon replays whatever is still
- * outstanding to a subscriber that arrives late (`host_prompt_stream.rs`), so there is no window in
- * which this component can miss the question its own call raised — and a screenful of hosts nobody
- * is adding a key to opens no streams at all.
+ * The prompt feed is read only while an add is in flight, so a screenful of hosts nobody is adding a
+ * key to opens no streams at all.
  *
  * Feature: `docs/ft/web/hosts-screen-add-key.md`
  */
@@ -52,33 +41,14 @@ import {
   type HostSshAgent,
 } from "../../gen/host_pb";
 import { useHostClient } from "../../rpc/connections/registry";
-import { useHostPrompts, type HostPromptEventLike } from "../../rpc/useHostPrompts";
 import { useAuthContext } from "../../hooks/authProvider";
-import {
-  acceptChangedHostKey,
-  verifyHostKey,
-  type HostKeyCheck,
-} from "../../lib/hostKeyPinning";
 import { HostPassphraseDialog } from "./HostPassphraseDialog";
+import { useHostPromptAnswer } from "./useHostPromptAnswer";
 
 export interface HostAddKeyActionProps {
   instanceId: string;
   /** This host's ssh-agent probe result — the same block `HostRowSshAgent` summarises. */
   sshAgent: HostSshAgent | undefined;
-}
-
-/**
- * A verified host key, kept with the prompt it arrived on.
- *
- * The pair is the point. `verifyHostKey` derives a fingerprint from one particular set of key bytes,
- * and everything the dialog says about a key — the fingerprint it shows, the continuity verdict it
- * blocks on, the key it encrypts under — has to be about *those* bytes. Held as one value, the two
- * cannot drift apart; held as two pieces of state, they do so on the first frame that replaces one.
- */
-interface CheckedPromptKey {
-  /** The very prompt whose key was checked — identity, not its id, is what binds the two. */
-  prompt: HostPromptEventLike;
-  check: HostKeyCheck;
 }
 
 /** What the add came to, as an operator reads it. */
@@ -148,53 +118,10 @@ export function HostAddKeyAction({
   const addInFlight = useRef<AbortController | null>(null);
   const [report, setReport] = useState<AddReport | null>(null);
   const [addedFingerprint, setAddedFingerprint] = useState<string | null>(null);
-  const [handledPromptId, setHandledPromptId] = useState<string | null>(null);
 
-  // Only while a call of ours is blocked on an answer: `null` subscribes to nothing, so a row
-  // nobody is adding a key to costs no stream.
-  const prompt = useHostPrompts(adding ? instanceId : null);
-  const outstandingPrompt = prompt && prompt.promptId !== handledPromptId ? prompt : null;
-
-  const [checkedKey, setCheckedKey] = useState<CheckedPromptKey | null>(null);
-
-  // The checked key of the question being asked *now*, or nothing — the one value the dialog is
-  // rendered from.
-  //
-  // Compared here rather than cleared by an effect, and compared by the prompt's own identity rather
-  // than by its id: an effect runs after the commit, so a frame that replaced the key would be
-  // painted once with the previous key's fingerprint and its reassuring verdict beside bytes that
-  // would encrypt for somebody else — the substitution the pin exists to catch, wearing the pin's
-  // approval. Two frames can carry one `prompt_id`; only one of them is this object.
-  const answering: CheckedPromptKey | null =
-    checkedKey !== null && checkedKey.prompt === outstandingPrompt ? checkedKey : null;
-
-  // Checked once per question, after the commit rather than during render: the check *records* the
-  // pin, and a render React discards would otherwise spend this host's one first-use trust slot on
-  // a dialog nobody was ever shown.
-  //
-  // The key itself is checked, not the fingerprint string beside it. Both fields ride the same
-  // unauthenticated channel, and only the key encrypts anything — so `verifyHostKey` derives a
-  // fingerprint from the published key, pins that, and refuses a prompt whose two halves disagree.
-  useEffect(() => {
-    if (outstandingPrompt === null) {
-      setCheckedKey(null);
-      return;
-    }
-    // Deriving a digest is asynchronous, so a prompt replaced while one is in flight would
-    // otherwise land its verdict on the question that succeeded it.
-    let current = true;
-    const asked = outstandingPrompt;
-    void verifyHostKey(instanceId, asked.hostPublicKey, asked.hostPublicKeyFingerprint).then(
-      (check) => {
-        // Stored with the prompt it is about, so a verdict and the key it was derived from can only
-        // ever be read as the pair they were produced as.
-        if (current) setCheckedKey({ prompt: asked, check });
-      },
-    );
-    return () => {
-      current = false;
-    };
-  }, [instanceId, outstandingPrompt]);
+  // Only while a call of ours is blocked on an answer: an inactive row costs no stream.
+  const { prompt: outstandingPrompt, answering, acceptChangedKey, answer, cancel } =
+    useHostPromptAnswer(instanceId, adding, sessionToken ?? "");
 
   const [candidates, setCandidates] = useState<HostKeyCandidate[]>([]);
   const thereIsAnAgent = anAgentAnswered(sshAgent);
@@ -248,7 +175,6 @@ export function HostAddKeyAction({
     setAdding(true);
     setReport(null);
     setAddedFingerprint(null);
-    setHandledPromptId(null);
     try {
       const response = await client.addHostKey(
         {
@@ -281,7 +207,7 @@ export function HostAddKeyAction({
    * is aborted and the control comes back, rather than staying disabled for the prompt's full TTL.
    */
   const cancelAdd = () => {
-    if (outstandingPrompt !== null) setHandledPromptId(outstandingPrompt.promptId);
+    cancel();
     addInFlight.current?.abort();
     addInFlight.current = null;
     // Not left to the aborted call's `finally`: the row must come back now, whether or not the
@@ -290,49 +216,10 @@ export function HostAddKeyAction({
     setReport({ text: "The add was cancelled. Nothing was sent." });
   };
 
-  /**
-   * Pin the key the host is presenting now, after the operator said the change is the host's own.
-   *
-   * The verdict is settled here rather than re-derived: the check that produced it already hashed
-   * this key, and asking storage again would only be able to agree with what was just written.
-   */
-  const acceptChangedKey = () => {
-    if (answering === null || answering.check.fingerprint === null) return;
-    acceptChangedHostKey(instanceId, answering.check.fingerprint);
-    // Settled on the pair, so the accepted verdict stays bound to the key it was given for.
-    setCheckedKey({
-      prompt: answering.prompt,
-      check: { ...answering.check, verdict: { kind: "unchanged" } },
-    });
-  };
-
   /** Send the ciphertext the dialog produced. The passphrase itself never reaches this component. */
   const answerPrompt = async (encryptedAnswer: Uint8Array) => {
-    if (outstandingPrompt === null || !client) return;
-    // One prompt accepts exactly one answer, so the question is closed here rather than when the
-    // send comes back.
-    setHandledPromptId(outstandingPrompt.promptId);
-    try {
-      const response = await client.answerHostPrompt({
-        sessionToken: sessionToken ?? "",
-        daemonInstanceId: instanceId,
-        promptId: outstandingPrompt.promptId,
-        encryptedAnswer,
-      });
-      if (!response.accepted) {
-        // The dialog is gone by now, so this is the only place the refusal can be read. The
-        // daemon's own words stand in: it distinguishes an unknown prompt from an expired one from
-        // one already answered, and each sends the operator somewhere different.
-        setReport({
-          text:
-            response.rejectionReason === ""
-              ? "The host refused that answer."
-              : `The host refused that answer: ${response.rejectionReason}`,
-        });
-      }
-    } catch (error) {
-      setReport({ text: `The answer could not be sent: ${messageOf(error)}` });
-    }
+    const refusal = await answer(encryptedAnswer);
+    if (refusal !== null) setReport({ text: refusal });
   };
 
   return (

@@ -51,3 +51,8 @@ the seam with `restructure check --deep` against a warm index (`./run-index-daem
 ⚠ **Re-measure before acting.** This record was generated in a batch of 100 from one sweep. Confirm
 the numbers still hold and that the finding is real before spending a PR on it — an unverified
 finding is a lead, not an issue.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed by one line:** 388 → 389 lines by brace matching (nesting 6, unchanged). The call to `provision_project_for_start` gained its
+`progress` argument and wraps to a second line; the keep-alive it enables lives in `start_keepalive.rs`. Not claimed by any PR.

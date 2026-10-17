@@ -11860,6 +11860,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tddy-askpass"
+version = "0.1.0"
+dependencies = [
+ "prost 0.13.5",
+ "reqwest 0.12.28",
+ "tddy-host-service",
+ "tddy-service",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tddy-bsp"
 version = "0.1.0"
 dependencies = [
@@ -12676,6 +12688,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum 0.8.9",
  "base64 0.22.1",
  "futures-util",
  "libc",
@@ -12692,6 +12705,7 @@ dependencies = [
  "ssh-agent-lib",
  "ssh-key",
  "sysinfo",
+ "tddy-askpass",
  "tddy-core",
  "tddy-daemon-extensions",
  "tddy-daemon-kernel",

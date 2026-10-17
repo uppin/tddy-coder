@@ -31,8 +31,21 @@ export type { HostPromptEventLike };
  * @returns the outstanding prompt, or `null` when the host is not asking anything.
  */
 export function useHostPrompts(hostId: string | null): HostPromptEventLike | null {
-  const client = useHostClient(HostService, hostId);
   const { sessionToken } = useAuthContext();
+  return useHostPromptsFor(hostId, sessionToken ?? "");
+}
+
+/**
+ * [`useHostPrompts`] for a caller that holds the operator's session token itself.
+ *
+ * The create-session pane is handed its token as a prop and is mounted without the auth context, so
+ * a hook that reads the context would throw there. Everything else about the feed is identical.
+ */
+export function useHostPromptsFor(
+  hostId: string | null,
+  sessionToken: string,
+): HostPromptEventLike | null {
+  const client = useHostClient(HostService, hostId);
   const [prompt, setPrompt] = useState<HostPromptEventLike | null>(null);
 
   useEffect(() => {
@@ -50,7 +63,7 @@ export function useHostPrompts(hostId: string | null): HostPromptEventLike | nul
     const subscription = subscribeHostPrompts(
       (signal) =>
         client.streamHostPrompts(
-          { sessionToken: sessionToken ?? "", daemonInstanceId: hostId },
+          { sessionToken, daemonInstanceId: hostId },
           { signal },
         ),
       (event) => setPrompt(event),

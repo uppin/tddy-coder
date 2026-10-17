@@ -15,6 +15,7 @@
 //! moved here has to preserve it, so the worker's constructor stays synchronous and takes no
 //! runtime handle.
 
+pub mod clone_env;
 pub mod spawn_worker;
 pub mod spawner;
 pub mod supervisor_client;

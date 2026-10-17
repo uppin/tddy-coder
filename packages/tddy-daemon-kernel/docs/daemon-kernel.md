@@ -218,13 +218,19 @@ every forward is a `FailedPrecondition` naming the call and the peer.
   forwarded stream is the fixed `PEER_FORWARD_STREAM_IDLE_TIMEOUT` (30 s), not a setting: it is held
   above the roster's service threshold by a test and below `ROSTER_KEEPALIVE_INTERVAL * 2` by a
   compile-time assertion.
+- The loop that carries a forwarded stream's frames is `stream_relay::Relay { idle_timeout, decode_frame,
+  idle_status }` with `run(frames, tx)`, separate from `CommonRoom` so the idle policy runs without a LiveKit
+  room. The timeout is **per frame**: every frame restarts it, so a peer emitting keep-alives while it waits
+  on a clone is never cut off, and one that goes silent ends the relayed stream with an error, never a short
+  success.
 - A timeout is `DeadlineExceeded` naming the seconds waited. A peer that has left the common room is
   still refused up front (`refuse_departed_daemon`), never waited out.
 - A relayed stream ends at the first terminal frame: a peer's error frame is relayed once, and a frame
   that cannot be decoded ends the relay with that error. A consumer that drops its receiver releases the
   transport's stream no later than the idle timeout.
-- The remote managed worktree's split-start forward uses
-  `spawn_worker_request_timeout + peer_forward_timeout`, so a longer setting lengthens it too.
+- The remote managed worktree's split-start forward, and the plain `StartSession` forward, use
+  `spawn_worker_request_timeout + peer_forward_timeout` (`split_forward_deadline`, 330 s by default) so a
+  peer that clones first, and may stop to ask for a passphrase, is waited for; a longer setting lengthens it too.
 
 ## `keyring.group_secret` — which peers may hold this daemon's credentials
 

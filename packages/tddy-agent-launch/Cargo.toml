@@ -45,6 +45,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# `start_keepalive`'s tests pause the clock to cross the keep-alive interval instantly.
+tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
 # `gh_cli::a_gh_cli`: the `gh` stub a Local gh identity is resolved against. Workspace-internal.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

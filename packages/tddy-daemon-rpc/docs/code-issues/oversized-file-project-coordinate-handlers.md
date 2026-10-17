@@ -33,3 +33,9 @@ From this first reading, Seam A alone brings the file to about 355 lines. Prove 
 ## Measurement update 2026-10-15 — #622 (local gh)
 
 **Regressed, split deferred with consent:** 650 → 658 production lines. `SetProjectAccounts` carries `local_gh` and maps the storage refusal to `InvalidArgument`. See [2026-10-15-local-gh-oversized-files-deferred.md](../../../../docs/dev/todo/2026-10-15-local-gh-oversized-files-deferred.md).
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed, split deferred with consent:** 658 → 660 production lines. +2: the two `CloneRequest` constructions gained the `env` field the forked worker now carries (`env: Default::default()`). The change's own
+modules are all small and new; only this unavoidable wiring landed in the file. Not claimed by any PR.
+Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.

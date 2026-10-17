@@ -199,6 +199,9 @@ fn what_it_says(event: StartSessionEvent) -> Option<Said> {
         // This suite asks for no attachments; their progress is pinned in
         // `session_attach_staging_scope_acceptance.rs`.
         StartEvent::AttachmentProgress(_) => None,
+        // Keep-alives say nothing about a phase; they are pinned by tddy-agent-launch's
+        // `start_keepalive.rs`.
+        StartEvent::KeepAlive(_) => None,
     }
 }
 

@@ -2,7 +2,7 @@
 # Build optimized production binaries. Uses nix dev shell for consistent toolchain.
 # Output: target/release/tddy-coder, target/release/tddy-tools, target/release/tddy-daemon,
 #         target/release/tddy-supervisor, target/release/tddy-remote-git-repo,
-#         target/release/tddy-session-sync, target/release/tddy-sandbox-runner,
+#         target/release/tddy-askpass, target/release/tddy-session-sync, target/release/tddy-sandbox-runner,
 #         target/release/tddy-index-daemon
 #
 # Usage: ./release [--desktop] [--installers]
@@ -65,6 +65,7 @@ in_shell cargo build --release \
   -p tddy-daemon \
   -p tddy-supervisor \
   -p tddy-remote-git-repo \
+  -p tddy-askpass \
   -p tddy-session-sync \
   -p tddy-index-daemon
 

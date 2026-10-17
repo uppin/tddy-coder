@@ -1,0 +1,26 @@
+[package]
+name = "tddy-askpass"
+version = "0.1.0"
+edition = "2021"
+description = "ssh's SSH_ASKPASS helper for a daemon-run clone — relays a key passphrase request to the daemon, which asks the operator"
+
+[lib]
+name = "tddy_askpass"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tddy-askpass"
+path = "src/main.rs"
+
+[dependencies]
+prost = "0.13"
+# Blocking client: the helper makes one request and exits, so it needs no runtime of its own.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+tddy-service = { path = "../tddy-service" }
+
+[dev-dependencies]
+# The helper is tested against the daemon's real endpoint, so the wire it speaks is whatever the
+# daemon speaks and the test cannot drift from it. Dev-only: the helper itself never links the host.
+tddy-host-service = { path = "../tddy-host-service" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync"] }
+tempfile = "3"

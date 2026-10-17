@@ -119,6 +119,7 @@ impl DaemonSessionHost {
             rpc_families: None,
             worktree_observer: None,
             session_reach: Arc::new(tddy_daemon_extensions::NoSessionReach),
+            askpass: None,
         }
     }
 

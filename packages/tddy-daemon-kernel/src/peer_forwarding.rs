@@ -200,7 +200,7 @@ impl CommonRoom {
         D: Fn(Vec<u8>) -> Result<T, tddy_rpc::Status> + Send + 'static,
     {
         let open_deadline = self.forward_timeout;
-        let mut frames = tokio::time::timeout(
+        let frames = tokio::time::timeout(
             open_deadline,
             self.forwarder
                 .call_server_stream(peer_id, service, method, body),
@@ -223,28 +223,20 @@ impl CommonRoom {
         let service = service.to_string();
         let method = method.to_string();
         tokio::spawn(async move {
-            loop {
-                let item =
-                    match tokio::time::timeout(PEER_FORWARD_STREAM_IDLE_TIMEOUT, frames.recv())
-                        .await
-                    {
-                        Ok(Some(Ok(bytes))) => decode_frame(bytes),
-                        // A mid-stream failure arrives as a single terminal error frame.
-                        Ok(Some(Err(status))) => Err(status),
-                        // The peer sent end-of-stream: the relayed stream ends the same way.
-                        Ok(None) => break,
-                        Err(_) => Err(peer_forward_deadline_status(
-                            &service,
-                            &method,
-                            &peer_id,
-                            PEER_FORWARD_STREAM_IDLE_TIMEOUT,
-                        )),
-                    };
-                let terminal = item.is_err();
-                if tx.send(item).is_err() || terminal {
-                    break;
-                }
+            crate::stream_relay::Relay {
+                idle_timeout: PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+                decode_frame,
+                idle_status: || {
+                    peer_forward_deadline_status(
+                        &service,
+                        &method,
+                        &peer_id,
+                        PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+                    )
+                },
             }
+            .run(frames, tx)
+            .await;
         });
         Ok(rx)
     }

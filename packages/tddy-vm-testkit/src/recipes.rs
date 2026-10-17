@@ -109,10 +109,11 @@ pub fn install_bundle_paths() -> Vec<(&'static str, &'static str)> {
 /// Exactly `./install`'s own `INSTALLED_BINARIES` under `--systemd` (`install:561`), because
 /// the script refuses to run with any of them missing — `install: missing release binary:
 /// …/tddy-remote-git-repo` is how a short list announces itself, after a bake and a boot.
-/// `tddy-remote-git-repo` and `tddy-session-sync` are clients rather than services,
+/// `tddy-remote-git-repo`, `tddy-askpass` and `tddy-session-sync` are clients rather than services
+/// (the second is the `SSH_ASKPASS` helper of a daemon-run clone, resolved beside the daemon),
 /// `tddy-sandbox-runner` is the payload inside every jail the daemon spawns, and
 /// `tddy-index-daemon` is the warm rust-analyzer index the daemon spawns as a sibling of its own
-/// executable; the script installs all four regardless, so a deployment has to carry them.
+/// executable; the script installs all five regardless, so a deployment has to carry them.
 ///
 /// `./release` builds every one of them.
 pub fn deployed_binaries() -> Vec<&'static str> {
@@ -122,6 +123,7 @@ pub fn deployed_binaries() -> Vec<&'static str> {
         "tddy-coder",
         "tddy-tools",
         "tddy-remote-git-repo",
+        "tddy-askpass",
         "tddy-session-sync",
         "tddy-sandbox-runner",
         "tddy-index-daemon",

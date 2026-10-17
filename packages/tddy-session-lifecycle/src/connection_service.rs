@@ -206,6 +206,9 @@ pub struct DaemonSessionHost {
     /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
     /// the composition root installs an integration with [`Self::with_session_reach`].
     session_reach: Arc<dyn tddy_daemon_extensions::SessionReach>,
+    /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host the
+    /// daemon runtime did not build.
+    askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,
 }
 
 pub use session_worktree_observer::SessionWorktreeObserver;
@@ -525,6 +528,7 @@ mod jail_relaunch_unit_tests;
 #[cfg(test)]
 mod stack_child_spawn_tests;
 mod svc_agent_roster_wiring;
+mod svc_askpass_wiring;
 mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
 mod svc_reachable_sessions;

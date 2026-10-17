@@ -22,7 +22,7 @@
 #
 # Layout in the .deb:
 #   /usr/bin/{tddy-daemon,tddy-coder,tddy-tools,tddy-index-daemon,tddy-remote-git-repo,
-#            tddy-session-sync,tddy-sandbox-runner,codex-acp}
+#            tddy-askpass, tddy-session-sync,tddy-sandbox-runner,codex-acp}
 #   /usr/share/tddy/web/...
 #   /etc/tddy/daemon.yaml          (conffile, from daemon.yaml.production)
 #   /lib/systemd/system/tddy-daemon.service
@@ -61,7 +61,7 @@ if "$WANT_BUILD"; then
 fi
 
 # Verify build artifacts
-for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-index-daemon target/release/tddy-remote-git-repo target/release/tddy-session-sync target/release/tddy-sandbox-runner; do
+for f in target/release/tddy-daemon target/release/tddy-coder target/release/tddy-tools target/release/tddy-index-daemon target/release/tddy-remote-git-repo target/release/tddy-askpass target/release/tddy-session-sync target/release/tddy-sandbox-runner; do
   [[ -f "$f" ]] || { echo "publish: missing $f (run ./release or pass --build)" >&2; exit 1; }
 done
 [[ -f packages/tddy-web/dist/index.html ]] || {
@@ -107,6 +107,9 @@ mkdir -p \
 # them on PATH without a checkout and a Rust toolchain. See docs/ft/daemon/remote-git-repo.md
 # § Shipping.
 #
+# tddy-askpass is ssh's SSH_ASKPASS helper for a daemon-run clone; the daemon looks for it beside its
+# own executable, like tddy-sandbox-runner below.
+#
 # tddy-sandbox-runner runs inside every jail the daemon spawns, and the daemon looks for it beside
 # its own executable — so it belongs in the same /usr/bin, not in a libexec dir.
 #
@@ -119,6 +122,7 @@ install -m 0755 target/release/tddy-coder           "${STAGE}/usr/bin/tddy-coder
 install -m 0755 target/release/tddy-tools           "${STAGE}/usr/bin/tddy-tools"
 install -m 0755 target/release/tddy-index-daemon    "${STAGE}/usr/bin/tddy-index-daemon"
 install -m 0755 target/release/tddy-remote-git-repo "${STAGE}/usr/bin/tddy-remote-git-repo"
+install -m 0755 target/release/tddy-askpass        "${STAGE}/usr/bin/tddy-askpass"
 install -m 0755 target/release/tddy-session-sync   "${STAGE}/usr/bin/tddy-session-sync"
 install -m 0755 target/release/tddy-sandbox-runner  "${STAGE}/usr/bin/tddy-sandbox-runner"
 install -m 0755 "$CODEX_ACP_NATIVE"                 "${STAGE}/usr/bin/codex-acp"
@@ -165,7 +169,7 @@ Maintainer: ${MAINTAINER}
 Depends: ${DEPENDS}
 Installed-Size: ${INSTALLED_SIZE}
 Description: tddy — TDD-driven coder daemon, CLI, tools, and web dashboard
- Bundles tddy-daemon, tddy-coder, tddy-tools, tddy-index-daemon, tddy-remote-git-repo, tddy-session-sync,
+ Bundles tddy-daemon, tddy-coder, tddy-tools, tddy-index-daemon, tddy-remote-git-repo, tddy-askpass, tddy-session-sync,
  tddy-sandbox-runner and codex-acp,
  the tddy-web static dashboard at /usr/share/tddy/web,
  a default systemd unit, and /etc/tddy/daemon.yaml.

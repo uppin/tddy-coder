@@ -29,6 +29,12 @@ text. `null` also covers a start that is not being streamed.
 The wire contract is [`StartPhase`](../../tddy-service/docs/start-session-phases.md). Starts that report
 no phases (sandboxed, tool and split starts) show no line.
 
+## Keep-alive events
+
+The stream can also carry `keepAlive` events while the host provisions the project. The loop in
+`startSessionStreamed` is an `if` / `else if` chain over `attachmentProgress`, `result` and `phase` with no
+`else`, so a `keepAlive` is ignored: it is not mistaken for the result and sets no phase.
+
 ## Indexing indicator
 
 `SessionIndexingIndicator` (`src/components/session/`) follows

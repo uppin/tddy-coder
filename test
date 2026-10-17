@@ -20,6 +20,8 @@ nix develop --profile ./.nix-profile -c bash -c '
   # sets no CARGO_BIN_EXE_ for them and never rebuilds it on their behalf — without this line a
   # change to the runner is tested against whatever build happened to be on disk, and the suite
   # goes green against the old jail. The fixtures check the binary exists; nothing checks its age.
-  cargo build -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-runner -p tddy-build -p tddy-livekit -p tddy-livekit-screen-capture -p tddy-acp-stub -p tddy-demo-tui --examples --bins
+  # tddy-askpass is here for the same reason: the clone acceptance suite (tddy-agent-launch) runs the
+  # helper from target/debug in a package that does not own it.
+  cargo build -p tddy-coder -p tddy-tools -p tddy-sandbox-darwin -p tddy-sandbox-runner -p tddy-askpass -p tddy-build -p tddy-livekit -p tddy-livekit-screen-capture -p tddy-acp-stub -p tddy-demo-tui --examples --bins
   cargo test --no-fail-fast "$@" -- --test-threads=1 2>&1 | tee .verify-result.txt
 ' -- "$@"

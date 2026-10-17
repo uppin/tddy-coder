@@ -51,6 +51,7 @@ import {
   selectableAgentValue,
 } from "./selectableAgentOptions";
 import { BranchConflictDialog } from "./BranchConflictDialog";
+import { StartPassphrasePrompt } from "./StartPassphrasePrompt";
 
 /** Pseudo-agent key used to fetch the claude-cli session type's model catalog. */
 const CLAUDE_CLI_AGENT = "claude-cli";
@@ -756,6 +757,15 @@ export function CreateSessionPane({
 
       {/* The step of the start the host is in, while it is streaming one. */}
       <CreateSessionStartPhase step={startPhase} />
+
+      {/* A start that must clone can block on the host's ssh key passphrase, and the host doing the
+          cloning is the one that asks: the codebase host on a split session (the workspace start is
+          forwarded there), the session's own host otherwise. */}
+      <StartPassphrasePrompt
+        instanceId={isSplitCodebase ? codebaseDaemonInstanceId : agentHostInstanceId}
+        active={submitting}
+        sessionToken={sessionToken}
+      />
 
       <CreateSessionActions
         error={error}

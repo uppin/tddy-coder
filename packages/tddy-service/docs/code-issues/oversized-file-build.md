@@ -43,3 +43,9 @@ function under 60.
 group. Prove the split with
 `./dev scripts/generated-code.sh check` and a clean `cargo build -p tddy-service` before and after:
 a build script has no tests of its own, and the generated code is the behaviour.
+
+## Measurement update 2026-10-17 — clone passphrase prompt
+
+**Regressed, split deferred with consent:** 723 → 729 production lines. +6: one messages-only prost pass for `askpass.proto` (a service-less proto the endpoint serves by hand). The change's own
+modules are all small and new; only this unavoidable wiring landed in the file. Not claimed by any PR.
+Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.
