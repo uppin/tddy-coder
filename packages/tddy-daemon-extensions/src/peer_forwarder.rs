@@ -41,28 +41,34 @@ pub struct NoPeerForwarding;
 #[async_trait::async_trait]
 impl PeerForwarder for NoPeerForwarding {
     async fn is_connected(&self) -> bool {
-        todo!("NoPeerForwarding::is_connected")
+        false
     }
 
     async fn call_unary(
         &self,
-        _peer_id: &str,
-        _service: &str,
-        _method: &str,
+        peer_id: &str,
+        service: &str,
+        method: &str,
         _body: Vec<u8>,
     ) -> Result<Vec<u8>, Status> {
-        todo!("NoPeerForwarding::call_unary")
+        Err(not_wired(peer_id, service, method))
     }
 
     async fn call_server_stream(
         &self,
-        _peer_id: &str,
-        _service: &str,
-        _method: &str,
+        peer_id: &str,
+        service: &str,
+        method: &str,
         _body: Vec<u8>,
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
-        todo!("NoPeerForwarding::call_server_stream")
+        Err(not_wired(peer_id, service, method))
     }
+}
+
+fn not_wired(peer_id: &str, service: &str, method: &str) -> Status {
+    Status::failed_precondition(format!(
+        "no peer transport is wired on this daemon; cannot forward {service}/{method} to daemon {peer_id}"
+    ))
 }
 
 #[cfg(test)]
@@ -78,7 +84,12 @@ mod tests {
     async fn with_nothing_wired_a_forward_is_a_failed_precondition_naming_the_call() {
         // When a call is forwarded with no transport
         let refused = NoPeerForwarding
-            .call_unary("peer-1", "project.ProjectService", "AddProjectToHost", Vec::new())
+            .call_unary(
+                "peer-1",
+                "project.ProjectService",
+                "AddProjectToHost",
+                Vec::new(),
+            )
             .await
             .expect_err("nothing can carry the call");
 
