@@ -100,8 +100,8 @@ async fn refuses_to_apply_to_a_tree_that_did_not_compile_before_the_plan() {
     assert!(
         refusal.starts_with(
             "the tree does not compile before the plan runs: `cargo check --all-targets -p \
-             origin` fails, so a failure after it could not be told from one the plan caused. \
-             Nothing was written."
+             destination -p origin` fails, so a failure after it could not be told from one the \
+             plan caused. Nothing was written."
         ),
         "the refusal does not say the tree was already broken:\n{refusal}"
     );
