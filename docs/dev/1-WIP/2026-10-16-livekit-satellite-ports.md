@@ -444,6 +444,30 @@ See Testing Plan tables (each row = one test, file path given).
 ## Validation Results
 
 ### /validate-changes
+
+Run 2026-10-17 on the tree rebased onto `master` (d2a2b16a2); 12 commits, all this PR's own, no
+deletions, no `todo!()` left in an owned surface. Scoped `cargo check --all-targets` clean over the
+nine touched packages; the ratchet (3/3), `WorkspaceGraph` (4/4) and the extension unit tests pass.
+
+Changeset sync: every Scope item is implemented (the discovery loop now reports to the status
+board, so the former "node 1 adds the board" gap is closed).
+
+- ⚠ **`OpenSessionRoom` skips `session_type_is_facilitated_here`.** `ConnectSession` opens a room only
+  for `claude-cli` / `cursor-cli` sessions that record a checkout, because a room for any other
+  session "would put it on a daemon that serves nobody". `SessionRoomServer::open_session_room`
+  resolves any session with a `repo_path` and opens a room for it; no test pins either answer.
+- ⚠ **One status entry, two connections.** `LiveKitSessionReach::open_now` and the discovery loop
+  write the same `livekit` entry, last writer wins: a session room that opens reports `Connected`
+  while the common room is down, and a failure to expose one session's terminal reports
+  `Unreachable` while the common room is up.
+- ℹ `Unreachable { error }` carries `format!("{error:#}")` of the connect failure to any
+  session-token holder via `GetIntegrationStatus`; confirm the SDK's error text never embeds the
+  access-token URL.
+- ℹ `open_now` maps `Ok(None)` to `livekit_integration_state(config)`, which reads `Connecting` for a
+  complete block; `ensure_open` returns `None` only without credentials, so it is unreachable today.
+- ℹ The boundary suites no longer see `[dev-dependencies]` (`WorkspaceGraph` excludes them by
+  contract); the daemon-auth/livekit "does not declare the daemon" tests are weaker by that edge.
+- ℹ `ensure_session_room` is still called by `tddy-session-agents` on the attach path: nodes 3-11.
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
