@@ -272,7 +272,7 @@ export function mergedSummary(archiveSeconds: number, shards: ShardRun[], config
   const lines = [
     "### e2e phases",
     "",
-    `- test archive build (compile, once for every leg): ${seconds1(archiveSeconds)} s`,
+    `- e2e test archive build (compile and archive of the e2e targets only): ${seconds1(archiveSeconds)} s`,
     `- run phase: ${seconds1(slowest)} s — the slowest of ${shards.length} shards`,
     "",
     "| Shard | Tests | Run wall s | Serial group tests | Serial group sum s | Group sum / wall |",

@@ -206,7 +206,7 @@ describe("the merged e2e summary", () => {
   test("the_run_phase_is_the_slowest_shard_and_the_archive_build_is_its_own_phase", () => {
     const summary = mergedSummary(930, shards, config);
 
-    expect(summary).toContain("test archive build (compile, once for every leg): 930.0 s");
+    expect(summary).toContain("e2e test archive build (compile and archive of the e2e targets only): 930.0 s");
     expect(summary).toContain("run phase: 8.0 s — the slowest of 2 shards");
   });
 

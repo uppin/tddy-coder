@@ -11,8 +11,8 @@ tests that failed.
 |-------|--------------|-----------------|
 | `Rust lint` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets -- -D warnings` | ~8 min |
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
-| `Rust tests` | `cargo nextest run --archive-file … --profile ci`, minus the e2e set | |
-| `Rust e2e tests` | the same command, restricted to the e2e set and run as 6 shards — tests that need real infrastructure | |
+| `Rust tests` | `cargo nextest run --workspace --profile ci`, minus the e2e set | |
+| `Rust e2e tests` | `cargo nextest run --archive-file … --profile ci`, restricted to the e2e set, run as 6 shards from an archive of just the e2e test targets — tests that need real infrastructure | |
 | `Generated code` | `bun install --frozen-lockfile`, then `scripts/generated-code.sh check` | ~3 min |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
 
@@ -37,10 +37,9 @@ If you add a test that shells out to a workspace binary, add that binary to the
 artifact — otherwise it will pass locally and fail in CI with "not built".
 
 Worth being explicit about the limit of this: because the runners are separate,
-`Rust build` shares the *binaries*, not the compilation. The test targets are compiled
-once, by a job of their own, and shared as an archive (see
-[Rust tests and Rust e2e tests](#rust-tests-and-rust-e2e-tests)). The two compile side by side,
-so the test checks wait for the slower of them, not for the sum.
+`Rust build` shares the *binaries*, not the compilation. `Rust tests` compiles its own test
+targets from the cache. The e2e targets are compiled by a job of their own and shared with the
+e2e shards as an archive (see [Rust tests and Rust e2e tests](#rust-tests-and-rust-e2e-tests)).
 
 All three run in the **nix dev shell** via `./dev`, against the pinned
 `flake.lock`. CI therefore uses the same rustc, clippy, bun and system libraries
@@ -56,17 +55,36 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 | `Rust tests` | every test not in the e2e set | nothing outside the process, the files and the sockets it makes itself |
 | `Rust e2e tests` | the e2e set | real infrastructure: a **LiveKit server in Docker**, a **live rust-analyzer**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
 
-**The test targets are compiled once.** The `Rust test archive` job runs
-`cargo nextest archive --workspace --locked` as a step of its own — so the compile is timed and
-visible while it runs — and uploads the result as the `nextest-archive` artifact (a zstd tarball of
-every test binary and the metadata nextest needs, kept one day). It is the only job that compiles test
-targets, so it is the only writer of the `test` cargo cache (master only). `Rust tests` and every e2e
-shard download it and run `cargo nextest run --archive-file … --extract-to "$PWD" --workspace-remap
-"$PWD"`; they compile nothing. `--locked` belongs to the archive step: `run --archive-file` rejects
-it. The archive is extracted into the workspace, so `target/debug` holds the fixture binaries and the
-archive's own binaries side by side, as after a local build, and the JUnit lands at
-`target/nextest/ci/junit.xml`. Every job runs on the same runner image at the same checkout path, which
-is what lets paths baked in at compile time (`env!("CARGO_MANIFEST_DIR")`) stay valid.
+**`Rust tests` compiles its own test targets.** It restores the `test` cargo cache, builds every
+`--workspace` test target and runs the complement of the e2e set. It is the only job that saves that
+cache (master only): it builds the full set, and two writers on one key would race.
+
+**The e2e targets are archived, and only they are.** The `Rust e2e test archive` job runs
+`cargo nextest archive -p <package>... --test <name>... --locked` as a step of its own — so the compile
+is timed and visible while it runs — and uploads the result as `nextest-archive` (a zstd tarball of the
+test binaries and the metadata nextest needs, kept one day, uploaded with `compression-level: 0` since
+zstd output does not compress further). An archive of the whole workspace — 983 binaries — filled the
+runner's disk while archiving (`No space left on device`, after the compile finished), and seven jobs
+would each have downloaded and extracted it; the e2e targets are about a tenth of the binaries. The job
+restores the `test` cache read-only and runs in parallel with `Rust build` and `Rust tests`. It prints
+`df -h /` before the build and after the archive, and the archive's size, in its step summary.
+
+The `-p`/`--test` arguments are **derived from `.config/rust-e2e.filterset`**, so the set is still written
+once: `scripts/nextest-e2e-archive.ts` evaluates the filterset over the workspace's integration-test
+targets and writes the arguments. It fails — and with it the job, with no fallback to archiving
+everything — when the selection is empty; when a `binary()` or `package()` the filterset names matches no
+test target (a stale entry cannot silently shrink the leg); or when the filterset could select a lib or
+bin unit-test binary, which `--test` never builds. Packages are named with `-p` so a test target name
+shared by two packages is built only where the filterset selects it. `scripts/nextest-e2e-archive.test.ts`
+pins each of these, and runs the real filterset against the real workspace. A test in a unit-test
+binary therefore cannot be e2e: give it its own file under `tests/`.
+
+Each shard downloads the archive and runs `cargo nextest run --archive-file … --extract-to "$PWD"
+--workspace-remap "$PWD"`; it compiles nothing. `--locked` belongs to the archive step: `run
+--archive-file` rejects it. The archive is extracted into the workspace, so `target/debug` holds the
+fixture binaries and the archive's own binaries side by side, as after a local build, and the JUnit lands
+at `target/nextest/ci/junit.xml`. Every job runs on the same runner image at the same checkout path,
+which is what lets paths baked in at compile time (`env!("CARGO_MANIFEST_DIR")`) stay valid.
 
 **The e2e leg runs as shards.** Six `Rust e2e shard i/6` jobs each run `--partition hash:i/6` over
 the e2e set. nextest hashes each *test* (binary id and test name), not each binary, so the serial
@@ -81,7 +99,7 @@ group protects). Each shard starts its own shared LiveKit server. Shard count is
 rename or remove `Rust e2e tests`. Shard jobs are named `Rust e2e shard i/6`; a job named
 `Rust e2e tests` (`rust-e2e`) `needs` them, downloads every shard's JUnit, publishes **one** report named
 `Rust e2e tests` (which is what `scripts/ci-status.sh` reads for counts and failing test names) and fails
-unless every job it needs — `Rust build`, the archive, every shard — ended `success`. It runs with
+unless every job it needs — `Rust build`, the e2e archive, every shard — ended `success`. It runs with
 `!cancelled()` rather than the default, because a skipped job does not block a merge: without it, a failed
 archive build would skip the shards and the check with them. Each shard fails its own job when nextest
 failed, after uploading its JUnit as `junit-rust-e2e-shard-i`. `Rust tests` is a single job, uploads
@@ -129,10 +147,11 @@ made required, a red `Rust e2e tests` does not block a merge.
 
 ### Where the e2e leg's time goes
 
-- **Phases**, on every run: the archive build is its own step in `Rust test archive` (its duration is in
-  the Actions step list while it runs, and in that job's summary afterwards); each shard's own run
-  is its `cargo nextest` step. The `Rust e2e tests` check's summary puts them together — the archive
-  build, the slowest shard as the run phase, and a row per shard.
+- **Phases**, on every run: the e2e archive build is its own step in `Rust e2e test archive` (its
+  duration is in the Actions step list while it runs, and in that job's summary afterwards, with the
+  archive's size and the disk); each shard's own run is its `cargo nextest` step. The `Rust e2e tests`
+  check's summary puts them together — the archive build, the slowest shard as the run phase, and a
+  row per shard.
 - **Per shard**, on each shard's step summary: the run's wall time, each test binary with its time and
   test count, the 20 slowest tests, and the `rust-analyzer` group's serial sum against the run's wall
   time. A shard whose wall time is much above its group's serial sum is waiting on something other than
