@@ -44,9 +44,9 @@ use super::{Options, StatePaths};
 /// names (its snapshot and its anchors), and the destination crate of each cross-crate move.
 ///
 /// A destination counts because a move writes into it, so a failure already there would otherwise
-/// surface after the apply and be blamed on the plan. A `to` with no readable manifest adds nothing
-/// and raises nothing here — that is a crate the move creates, and there is nothing to check before
-/// it exists; the move's own preconditions judge a `to` that is not a crate.
+/// surface after the apply and be blamed on the plan. A `to` with no manifest adds nothing and
+/// raises nothing here — that is a crate the move creates, and there is nothing to check before it
+/// exists. A manifest that is there but cannot be read, or declares no package, is refused.
 pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>> {
     let named = plan
         .snapshot
@@ -60,11 +60,20 @@ pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<Str
         .filter(|op| op.op.moves_across_crates() || op.op == RefactorKind::MoveTestBinaryToCrate)
         .filter_map(|op| op.to.as_deref());
     for to in destinations {
-        if let Ok(destination) = Destination::read(root, to) {
-            packages.insert(destination.package);
-        }
+        packages.extend(destination_package(root, to)?);
     }
     Ok(packages)
+}
+
+/// The package `to`'s manifest declares, `None` when `to` has no manifest yet.
+///
+/// Only a missing manifest is passed over: one that cannot be read or declares no `[package] name`
+/// is [`Destination::read`]'s refusal, not a destination to leave out of the baseline.
+fn destination_package(root: &Path, to: &str) -> Result<Option<String>> {
+    match std::fs::metadata(root.join(to).join("Cargo.toml")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        _ => Destination::read(root, to).map(|destination| Some(destination.package)),
+    }
 }
 
 /// Refuse a fresh, writing run whose tree does not compile before the plan touches it.
@@ -503,6 +512,37 @@ mod tests {
 
         // Then only the origin is checked
         assert_eq!(packages, BTreeSet::from(["origin".to_string()]));
+    }
+
+    /// A destination that exists but whose manifest names no package is not a crate the move
+    /// creates, so the baseline does not quietly leave it out.
+    #[test]
+    fn a_destination_whose_manifest_declares_no_package_is_refused() {
+        // Given a test-binary move to a directory whose manifest declares no `[package] name`
+        let workspace = a_workspace_with_only_the_origin_crate();
+        std::fs::create_dir_all(workspace.path().join("crates/destination")).expect("the dir");
+        std::fs::write(
+            workspace.path().join("crates/destination/Cargo.toml"),
+            "[workspace]\nmembers = []\n",
+        )
+        .expect("the manifest");
+        let plan = Plan::parse(
+            "{\"v\":1,\"snapshot\":{}}\n\
+             {\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+             \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+             \"to\":\"crates/destination\"}\n",
+        )
+        .expect("the plan parses");
+
+        // When the baseline's packages are read
+        let refusal = baseline_packages(workspace.path(), &plan)
+            .expect_err("a manifest naming no package is refused");
+
+        // Then the refusal says the manifest declares no package
+        assert!(
+            refusal.to_string().contains("declares no `[package] name`"),
+            "{refusal}"
+        );
     }
 
     #[test]

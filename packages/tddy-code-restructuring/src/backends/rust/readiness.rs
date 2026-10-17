@@ -58,8 +58,9 @@ impl Default for SilenceBounds {
 pub(super) enum Silence {
     /// Keep waiting: nothing has been silent past its bound.
     Waiting,
-    /// The index is ready and has left the hover `null` past [`SilenceBounds::ready`].
-    ReadyUntypable,
+    /// The index is ready and has left the hover `null` past [`SilenceBounds::ready`], for this
+    /// long.
+    ReadyUntypable(Duration),
     /// The server says it is loading and its words have not changed past
     /// [`SilenceBounds::loading`].
     Stalled,
@@ -77,22 +78,24 @@ pub(super) fn silence_verdict(
     bounds: &SilenceBounds,
 ) -> Silence {
     if loading {
-        if silent_past(words_unchanged_for, Some(bounds.loading)) {
+        if silent_past(words_unchanged_for, bounds.loading) {
             Silence::Stalled
         } else {
             Silence::Waiting
         }
-    } else if ready_silent_for.is_some_and(|silent_for| silent_past(silent_for, Some(bounds.ready)))
-    {
-        Silence::ReadyUntypable
     } else {
-        Silence::Waiting
+        match ready_silent_for {
+            Some(silent_for) if silent_past(silent_for, bounds.ready) => {
+                Silence::ReadyUntypable(silent_for)
+            }
+            _ => Silence::Waiting,
+        }
     }
 }
 
-/// Whether a hover silent for `silent_for` has outlasted `bound`; no bound never does.
-fn silent_past(silent_for: Duration, bound: Option<Duration>) -> bool {
-    bound.is_some_and(|bound| silent_for >= bound)
+/// Whether a silence of `silent_for` has outlasted `bound`.
+fn silent_past(silent_for: Duration, bound: Duration) -> bool {
+    silent_for >= bound
 }
 
 /// Where a wait for one position ended.
@@ -276,11 +279,11 @@ impl RustBackend {
         match silence_verdict(loading, silent_for, unchanged, &self.silence_bounds) {
             Silence::Waiting => Ok(()),
             Silence::Stalled => Err(self.stalled(waiting.stage(), unchanged)),
-            Silence::ReadyUntypable => Err(server_defect(format!(
-                "the index is ready and rust-analyzer still gives no hover at {} after {:?}, so \
-                 it cannot type this position. Start the range on an expression it can type.",
+            Silence::ReadyUntypable(silent_for) => Err(server_defect(format!(
+                "the index is ready and rust-analyzer still gives no hover at {} after \
+                 {silent_for:?}, so it cannot type this position. Start the range on an expression \
+                 it can type.",
                 located(uri, position)?,
-                silent_for.unwrap_or_default()
             ))),
         }
     }
@@ -602,7 +605,7 @@ mod tests {
         let silent_for = READY_HOVER_BOUND;
 
         // When
-        let outlasted = silent_past(silent_for, Some(READY_HOVER_BOUND));
+        let outlasted = silent_past(silent_for, READY_HOVER_BOUND);
 
         // Then
         assert!(outlasted);
@@ -614,19 +617,7 @@ mod tests {
         let silent_for = READY_HOVER_BOUND - Duration::from_millis(1);
 
         // When
-        let outlasted = silent_past(silent_for, Some(READY_HOVER_BOUND));
-
-        // Then
-        assert!(!outlasted);
-    }
-
-    #[test]
-    fn a_wait_without_a_bound_never_outlasts_it() {
-        // Given a hover silent for far longer than the bound
-        let silent_for = READY_HOVER_BOUND * 1000;
-
-        // When
-        let outlasted = silent_past(silent_for, None);
+        let outlasted = silent_past(silent_for, READY_HOVER_BOUND);
 
         // Then
         assert!(!outlasted);

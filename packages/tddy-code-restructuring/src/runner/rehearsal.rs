@@ -5,7 +5,7 @@
 
 use crate::crate_move::{self, Survey};
 use crate::plan::RefactorKind;
-use crate::registry::{BackendRegistry, Workspace};
+use crate::registry::{BackendRegistry, LanguageBackend, Workspace};
 use crate::spawn_record::SpawnRecorder;
 use crate::{Overlay, PositionLedger, Result, VisibilityChange};
 use std::path::Path;
@@ -55,29 +55,8 @@ impl Rehearsal {
             }
         };
 
-        let resolved = registry
-            .backend_for(Path::new(at.anchor.file()), at.op)?
-            .resolve(
-                &at,
-                &Workspace {
-                    root,
-                    overlay: &self.overlay,
-                },
-            );
-
-        // The refusal `apply` gives an untracked move before it writes, given here the same way.
-        let resolved = resolved.and_then(|resolved| {
-            super::preflight_moves(
-                index,
-                op.id.as_ref(),
-                &resolved,
-                root,
-                &self.overlay,
-                spawns,
-            )?;
-            Ok(resolved)
-        });
-        match resolved {
+        let backend = registry.backend_for(Path::new(at.anchor.file()), at.op)?;
+        match self.resolve_and_preflight(backend, root, index, &at, spawns) {
             Ok(resolved) => {
                 self.ledger.record(&resolved.edit);
                 self.overlay.record(root, &resolved.edit)?;
@@ -95,6 +74,35 @@ impl Rehearsal {
                 widenings: Vec::new(),
             }),
         }
+    }
+
+    /// Resolve `at`, operation `index`, on `backend` over the rehearsal's overlay — refusing an
+    /// untracked move the way `apply` does before it writes ([`super::preflight_moves`]).
+    ///
+    /// The id is the operation's own: a deep check reads no journal, so there is no earlier epoch's
+    /// id-less record for it to continue, which is what the apply loops' `legacy` filter is for.
+    fn resolve_and_preflight(
+        &self,
+        backend: &mut dyn LanguageBackend,
+        root: &Path,
+        index: usize,
+        at: &crate::plan::RefactorOp,
+        spawns: &SpawnRecorder,
+    ) -> Result<crate::Resolution> {
+        let workspace = Workspace {
+            root,
+            overlay: &self.overlay,
+        };
+        let resolved = backend.resolve(at, &workspace)?;
+        super::preflight_moves(
+            index,
+            at.id.as_ref(),
+            &resolved,
+            root,
+            &self.overlay,
+            spawns,
+        )?;
+        Ok(resolved)
     }
 
     /// The blast radius of a cross-crate move, asked of the backend's own reference engine.

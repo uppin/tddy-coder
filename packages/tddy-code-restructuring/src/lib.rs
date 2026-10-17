@@ -324,7 +324,7 @@ impl std::fmt::Display for WrittenByRun {
             formatter.write_str("; its edits have since been undone")?;
         }
         formatter.write_str(
-            ". Regenerate the plan with `restructure anchors` rather than re-anchoring by hand",
+            ". Regenerate the plan with `restructure anchors` rather than re-anchoring by hand.",
         )
     }
 }

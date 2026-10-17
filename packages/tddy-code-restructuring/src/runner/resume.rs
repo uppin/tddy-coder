@@ -23,9 +23,10 @@ use super::Options;
 ///
 /// Some when the journal holds a completed operation with a `PlanSynced` record after it — the
 /// run committed operations and rewrote the plan's anchors for the tree it left. `undone` is true
-/// when every file a completed record touched hashes, under `root`, to what it held before the run
-/// first touched it — the `pre` of the earliest completed record naming it: the run's edits have
-/// been rolled back since, so the plan describes a tree that no longer exists.
+/// when the completed records name at least one file and every one of them hashes, under `root`, to
+/// what it held before the run first touched it — the `pre` of the earliest completed record naming
+/// it: the run's edits have been rolled back since, so the plan describes a tree that no longer
+/// exists. With no file to compare there is nothing to call undone.
 pub(super) fn written_by_run(
     journal: &Journal,
     root: &Path,
@@ -45,7 +46,7 @@ pub(super) fn written_by_run(
                 .or_insert(digest.as_str());
         }
     }
-    let mut undone = true;
+    let mut undone = !before_the_run.is_empty();
     for (path, digest) in before_the_run {
         undone &= hash_file(&root.join(path))? == digest;
     }
@@ -182,6 +183,16 @@ mod written_by_run_tests {
         };
         let pre = BTreeMap::from([("src/a.rs".to_string(), digest_of(before))]);
         let post = BTreeMap::from([("src/a.rs".to_string(), digest_of(after))]);
+        a_journal_of_a_run_whose_operation_0_had(root, pre, post)
+    }
+
+    /// A journal whose run of the plan completed operation 0, recording `pre` and `post` for it,
+    /// and then wrote the plan back.
+    fn a_journal_of_a_run_whose_operation_0_had(
+        root: &Path,
+        pre: BTreeMap<String, String>,
+        post: BTreeMap<String, String>,
+    ) -> Journal {
         let edit = WorkspaceEdit {
             changes: vec![FileEdit::Change {
                 path: "src/a.rs".to_string(),
@@ -232,6 +243,27 @@ mod written_by_run_tests {
                 left.as_ref().map(|run| (run.last_applied, run.undone))
             ),
             (Some((0, true)), Some((0, false)))
+        );
+    }
+
+    /// "Undone" says the run's edits were rolled back, which a run that recorded no file cannot
+    /// show either way.
+    #[test]
+    fn written_by_run_does_not_call_a_run_that_recorded_no_file_undone() {
+        // Given a run that completed operation 0 and wrote the plan back, recording no file
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        let journal =
+            a_journal_of_a_run_whose_operation_0_had(root, BTreeMap::new(), BTreeMap::new());
+        let paths = StatePaths::for_plan(root, Path::new("plan.jsonl")).unwrap();
+
+        // When the journal is asked who wrote the plan
+        let run = written_by_run(&journal, root, &paths).unwrap();
+
+        // Then it names operation 0, and does not say its edits were undone
+        assert_eq!(
+            run.map(|run| (run.last_applied, run.undone)),
+            Some((0, false))
         );
     }
 }
