@@ -12418,6 +12418,7 @@ dependencies = [
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-auth",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
