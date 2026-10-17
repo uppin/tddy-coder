@@ -85,6 +85,21 @@ fn crates_naming_livekit(graph: &WorkspaceGraph) -> BTreeSet<String> {
 }
 
 #[test]
+fn the_extension_ports_reach_the_crates_they_are_built_on() {
+    // Given the workspace as Cargo resolves it
+    let graph = WorkspaceGraph::load();
+
+    // When everything this crate can be built with is followed
+    let reached = graph.reaches("tddy-daemon-extensions");
+
+    // Then the walk saw something: "reaches no LiveKit crate" below is not vacuous
+    assert!(
+        reached.contains("tddy-rpc"),
+        "tddy-daemon-extensions reaches {reached:?}, which should include tddy-rpc"
+    );
+}
+
+#[test]
 fn the_extension_ports_reach_no_livekit_crate() {
     // Given the workspace as Cargo resolves it
     let graph = WorkspaceGraph::load();
@@ -94,7 +109,9 @@ fn the_extension_ports_reach_no_livekit_crate() {
 
     // Then none of it is LiveKit: a core crate that depends on the ports gains no LiveKit
     assert_eq!(
-        reached.intersection(&set_of(LIVEKIT_FAMILY)).collect::<Vec<_>>(),
+        reached
+            .intersection(&set_of(LIVEKIT_FAMILY))
+            .collect::<Vec<_>>(),
         Vec::<&String>::new()
     );
 }

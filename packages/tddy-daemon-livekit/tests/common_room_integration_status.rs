@@ -41,6 +41,18 @@ livekit:
     serde_yaml::from_str(&yaml).expect("daemon yaml")
 }
 
+/// A LiveKit address nothing listens on: bound, then released, so a dial is refused at once.
+async fn a_livekit_address_nothing_listens_on() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("binding a loopback port must succeed");
+    let addr = listener
+        .local_addr()
+        .expect("a bound listener must know its address");
+    drop(listener);
+    format!("ws://{addr}")
+}
+
 /// The discovery loop running for `config`, reporting on the returned board.
 fn the_discovery_loop_for(
     config: DaemonConfig,
@@ -105,7 +117,10 @@ async fn joining_the_common_room_reports_livekit_connected() {
 #[tokio::test]
 async fn a_server_that_does_not_answer_reports_livekit_unreachable() {
     // Given a daemon configured to join a room on a server nothing listens on
-    let config = a_daemon_config_joining("ws://127.0.0.1:1", "status-board-unreachable");
+    let config = a_daemon_config_joining(
+        &a_livekit_address_nothing_listens_on().await,
+        "status-board-unreachable",
+    );
 
     // When the discovery loop runs
     let (board, discovery) = the_discovery_loop_for(config);

@@ -11,7 +11,7 @@ use tddy_daemon_extensions::ReachedSession;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 use tddy_daemon_livekit::os_user_resolution::resolve_os_user;
-use tddy_rpc::{Request, Response, Status};
+use tddy_rpc::{Request, RequestTransport, Response, Status};
 use tddy_service::proto::exec_tools::ExecuteToolRequest;
 use tddy_service::proto::session::start_session_event::Event as StartSessionEventKind;
 use tddy_service::proto::session::ResumeSessionResponse as ConnResumeSessionResponse;
@@ -31,6 +31,31 @@ use tddy_worktree_service::stream::MpscResultStream;
 
 /// The coordinate a forwarded call from the legacy connection service is addressed at on the peer.
 const SESSION_SERVICE: &str = "session.SessionService";
+
+/// What a session's metadata says about this daemon opening a room for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FacilitatedCheckout {
+    /// The session's agent runs elsewhere, so its room is over there; opening one here would put
+    /// it on a daemon that serves nobody.
+    NotFacilitated,
+    /// Facilitated here, yet recording no checkout on this daemon.
+    NoCheckout,
+    /// Facilitated here over this checkout: the only sessions this daemon opens a room for.
+    Checkout(PathBuf),
+}
+
+/// The one rule for "a session this daemon facilitates over a checkout it holds", shared by
+/// `ConnectSession` and an extension's own RPC.
+pub fn facilitated_checkout(metadata: &tddy_core::SessionMetadata) -> FacilitatedCheckout {
+    let session_type = metadata.session_type.as_deref().unwrap_or_default();
+    if !tddy_daemon_livekit::session_room::session_type_is_facilitated_here(session_type) {
+        return FacilitatedCheckout::NotFacilitated;
+    }
+    match metadata.repo_path.as_deref() {
+        Some(worktree_root) => FacilitatedCheckout::Checkout(PathBuf::from(worktree_root)),
+        None => FacilitatedCheckout::NoCheckout,
+    }
+}
 
 pub fn bridge_conn_resume_response(
     resp: Result<Response<ConnResumeSessionResponse>, Status>,
@@ -130,6 +155,42 @@ impl LaunchSessions {
         Ok((session_dir, metadata))
     }
 
+    /// Connecting to a session is a reach: whatever extends sessions beyond this host is told,
+    /// with the transport the request came in on, and decides what that costs the caller. LiveKit
+    /// opens the session's room in the caller's time for a caller that arrived over LiveKit and
+    /// in the background for everyone else, so a local client never waits on a server it does
+    /// not use.
+    async fn tell_the_reach(
+        &self,
+        session_id: &str,
+        metadata: &tddy_core::SessionMetadata,
+        session_dir: PathBuf,
+        arrived_over: RequestTransport,
+    ) -> Result<(), Status> {
+        let worktree_root = match facilitated_checkout(metadata) {
+            FacilitatedCheckout::NotFacilitated => return Ok(()),
+            FacilitatedCheckout::NoCheckout => {
+                log::debug!(
+                    "ConnectSession: session {session_id} records no checkout on this daemon, so \
+                     its room is not this daemon's to open"
+                );
+                return Ok(());
+            }
+            FacilitatedCheckout::Checkout(worktree_root) => worktree_root,
+        };
+        self.session_reach
+            .session_reached(
+                ReachedSession {
+                    session_id: session_id.to_string(),
+                    session_dir,
+                    worktree_root,
+                    arrived_over,
+                },
+                Arc::clone(&self.reachable_sessions),
+            )
+            .await
+    }
+
     pub async fn connect_session_at_session_coordinate(
         &self,
         request: Request<ConnectSessionRequest>,
@@ -141,37 +202,8 @@ impl LaunchSessions {
 
         let session_type = metadata.session_type.as_deref().unwrap_or_default();
 
-        // Connecting to a session is a reach: whatever extends sessions beyond this host is told,
-        // with the transport the request came in on, and decides what that costs the caller. LiveKit
-        // opens the session's room in the caller's time for a caller that arrived over LiveKit and
-        // in the background for everyone else, so a local client never waits on a server it does
-        // not use.
-        //
-        // Only for a session this daemon facilitates over a checkout it holds. A session whose
-        // agent runs elsewhere has its room over there, and opening one here would put it on a
-        // daemon that serves nobody.
-        if tddy_daemon_livekit::session_room::session_type_is_facilitated_here(session_type) {
-            match metadata.repo_path.as_deref() {
-                Some(worktree_root) => {
-                    self.session_reach
-                        .session_reached(
-                            ReachedSession {
-                                session_id: req.session_id.clone(),
-                                session_dir,
-                                worktree_root: PathBuf::from(worktree_root),
-                                arrived_over,
-                            },
-                            Arc::clone(&self.reachable_sessions),
-                        )
-                        .await?;
-                }
-                None => log::debug!(
-                    "ConnectSession: session {} records no checkout on this daemon, so its room is \
-                     not this daemon's to open",
-                    req.session_id
-                ),
-            }
-        }
+        self.tell_the_reach(&req.session_id, &metadata, session_dir, arrived_over)
+            .await?;
 
         // The *terminal* room, which is a different room with different participants. A claude-cli,
         // cursor-cli or workspace session has none: its PTY is served over gRPC and bridged into

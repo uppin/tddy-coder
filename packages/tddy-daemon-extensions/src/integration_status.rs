@@ -14,11 +14,15 @@ pub enum IntegrationState {
     /// Switched off, or not configured at all.
     Disabled,
     /// Configured with required fields missing, named in configuration order.
-    Misconfigured { missing: Vec<String> },
+    Misconfigured {
+        missing: Vec<String>,
+    },
     Connecting,
     Connected,
     /// Configured and not answering; `error` is the last failure.
-    Unreachable { error: String },
+    Unreachable {
+        error: String,
+    },
 }
 
 /// One integration's entry on the board.
@@ -27,7 +31,8 @@ pub struct IntegrationStatus {
     pub id: String,
     pub label: String,
     pub state: IntegrationState,
-    /// When the integration entered `state`. A report of the state it is already in leaves it.
+    /// When the integration entered `state`. A report of the same kind of state, whatever its
+    /// detail, leaves it.
     pub since: SystemTime,
 }
 
@@ -43,17 +48,17 @@ impl IntegrationStatusBoard {
     }
 
     /// Register integration `id` (displayed as `label`) as [`IntegrationState::Disabled`] and hand
-    /// back the reporter it updates its entry with.
+    /// back the reporter it updates its entry with. An `id` already registered keeps its entry, so
+    /// a second reporter for it never resets what the first has reported.
     pub fn reporter(self: &Arc<Self>, id: &str, label: &str) -> IntegrationReporter {
-        self.lock().insert(
-            id.to_string(),
-            IntegrationStatus {
+        self.lock()
+            .entry(id.to_string())
+            .or_insert_with(|| IntegrationStatus {
                 id: id.to_string(),
                 label: label.to_string(),
                 state: IntegrationState::Disabled,
                 since: SystemTime::now(),
-            },
-        );
+            });
         IntegrationReporter {
             board: Arc::clone(self),
             id: id.to_string(),
@@ -82,16 +87,17 @@ pub struct IntegrationReporter {
 
 impl IntegrationReporter {
     /// Record `state` as the integration's current one. Reporting the state it is already in keeps
-    /// the moment it entered it.
+    /// the moment it entered it, and so does a report of the same kind of state with new detail:
+    /// an `Unreachable` whose error text varies between retries is still the one outage.
     pub fn report(&self, state: IntegrationState) {
         let mut entries = self.board.lock();
         let entry = entries
             .get_mut(&self.id)
             .expect("a reporter's entry is registered when the reporter is made");
-        if entry.state != state {
-            entry.state = state;
+        if std::mem::discriminant(&entry.state) != std::mem::discriminant(&state) {
             entry.since = SystemTime::now();
         }
+        entry.state = state;
     }
 }
 
@@ -178,38 +184,77 @@ mod tests {
     }
 
     #[test]
-    fn a_change_of_state_moves_when_it_began() {
+    fn a_change_of_state_is_dated_from_when_it_was_entered() {
         // Given an integration that became connected
         let board = IntegrationStatusBoard::new();
         let livekit = board.reporter("livekit", "LiveKit");
         livekit.report(IntegrationState::Connected);
         let connected_since = since_of(&board, "livekit");
 
-        // When it loses its server — a clock tick later, since a state entered within the same
-        // tick as the last would be dated identically on a coarse clock
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        // When it loses its server
         livekit.report(IntegrationState::Unreachable {
             error: "connection reset".to_string(),
         });
 
-        // Then the unreachable state is dated from that report. `>`: the clock's value is the
-        // runtime's, and only its order relative to the earlier report is known.
+        // Then the unreachable state is dated no earlier than the connected one. `>=`, not `>`: a
+        // coarse clock may date both reports alike, so only the order is known, never a gap.
         assert!(
-            since_of(&board, "livekit") > connected_since,
-            "a new state must be dated from when it was entered"
+            since_of(&board, "livekit") >= connected_since,
+            "a new state must be dated from when it was entered, never before the state it replaced"
         );
+    }
+
+    #[test]
+    fn a_retry_that_fails_differently_keeps_when_the_outage_began() {
+        // Given an integration unreachable with one error
+        let board = IntegrationStatusBoard::new();
+        let livekit = board.reporter("livekit", "LiveKit");
+        livekit.report(IntegrationState::Unreachable {
+            error: "a".to_string(),
+        });
+        let unreachable_since = since_of(&board, "livekit");
+
+        // When a retry fails with other error text
+        livekit.report(IntegrationState::Unreachable {
+            error: "b".to_string(),
+        });
+
+        // Then the newest error is shown, and the outage still dates from its first report
+        assert_eq!(
+            (state_of(&board, "livekit"), since_of(&board, "livekit")),
+            (
+                IntegrationState::Unreachable {
+                    error: "b".to_string()
+                },
+                unreachable_since
+            )
+        );
+    }
+
+    #[test]
+    fn a_reporter_made_twice_for_one_integration_keeps_what_was_reported() {
+        // Given an integration that has reported connected
+        let board = IntegrationStatusBoard::new();
+        board
+            .reporter("livekit", "LiveKit")
+            .report(IntegrationState::Connected);
+
+        // When a second reporter is made for it
+        board.reporter("livekit", "LiveKit");
+
+        // Then it is still connected
+        assert_eq!(state_of(&board, "livekit"), IntegrationState::Connected);
     }
 
     #[test]
     fn integrations_are_listed_by_id_and_report_independently() {
         // Given two integrations registered out of order
         let board = IntegrationStatusBoard::new();
-        let telegram = board.reporter("telegram", "Telegram");
+        let _telegram = board.reporter("telegram", "Telegram");
         let livekit = board.reporter("livekit", "LiveKit");
 
         // When only one of them reports
         livekit.report(IntegrationState::Connected);
-        drop(telegram);
 
         // Then both are listed, ordered by id, each in its own state
         assert_eq!(

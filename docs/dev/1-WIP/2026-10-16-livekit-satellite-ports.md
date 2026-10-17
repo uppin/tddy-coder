@@ -476,8 +476,47 @@ board, so the former "node 1 adds the board" gap is closed).
   contract); the daemon-auth/livekit "does not declare the daemon" tests are weaker by that edge.
 - ℹ `ensure_session_room` is still called by `tddy-session-agents` on the attach path: nodes 3-11.
 ### /validate-tests
+
+Review 2026-10-17; fixed in the refactor commit unless marked deferred.
+
+- ✅ Two "leaves the livekit entry alone" tests could pass on an unrelated failure: both now also
+  assert the refusal is the host stand-in's own message.
+- ✅ `WorkspaceGraph` reachability test asserted two behaviours and duplicated the `names_directly`
+  test: split into one test per behaviour over a fixture isolating each (second hop, registry crate
+  reached not followed, back-edge never reaches itself, dev-dependency not followed).
+  `names_directly` on a non-member now panics, so a misspelled crate cannot satisfy an absence check.
+- ✅ Ratchet `the_extension_ports_reach_no_livekit_crate` had no non-vacuity guard: a sibling test
+  asserts the reach includes `tddy-rpc`.
+- ✅ `GetIntegrationStatus` tests derived `since_unix_ms` from the same board: now a wall-clock
+  window; `Connecting`, `Connected` and the no-board `failed_precondition` are covered.
+- ✅ Common-room "unreachable" test dialled a hard-coded `ws://127.0.0.1:1`: now a bound-then-released port.
+- ✅ `a_change_of_state_moves_when_it_began` slept 2ms for a strict `>`: now `>=` with the reason
+  stated (no injectable clock exists, so "moves" is only ordered, not proven by a gap). Dated-from
+  behaviour of a repeat report is pinned by its own equality test.
+- ✅ The board assertion that ends `a_session_connected_locally_becomes_drivable_over_livekit_without_another_call`
+  raced the bridge (the board reads `Connected` only after `bridge` returns): now an `eventually_awaiting`.
+- ⏸ Deferred: `livekit_on` / `state_of` helper copies across test files.
+
 ### /validate-prod-ready
+
+- ✅ `IntegrationStatusBoard::reporter` reset an existing entry to `Disabled` when an id was
+  registered twice: now entry-or-insert.
+- ✅ `since` contradicted its documentation: an `Unreachable` retry with different error text reset
+  it. The board now keeps `since` across reports of the same kind of state, updating the detail.
+- ✅ `session_reach.rs` tied `3` to the field array length: compares against the named array's length.
+- ⏸ Deferred (files #624 edits, or recorded elsewhere): orphan embedder board in
+  `spawn_common_room_discovery_task`; pre-epoch `since_unix_ms` `map_or(0)`; unnamed retry delays;
+  pub-only-for-tests `open_session_room` surface.
+
 ### /analyze-clean-code
+
+- ✅ The "facilitated here + records a checkout" rule lived twice (`connect_session_at_session_coordinate`,
+  `ReachableSessions::resolve`): one `facilitated_checkout` / `FacilitatedCheckout` in
+  `tddy-agent-launch::session_coordinate_handlers` now serves both. The reach block moved out of
+  `connect_session_at_session_coordinate` into `tell_the_reach`.
+- ⏸ Deferred: discovery-loop 5-parameter grouping and `common_room_discovery_cycle` length
+  (`livekit_peer_discovery.rs`, edited by #624); `connectrpc_post` duplicated across
+  `tddy-session-sync` / `tddy-terminal-rpc`; `PLUGINS` subset of `LIVEKIT_FAMILY` duplication.
 
 ## TODO
 

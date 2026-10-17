@@ -1752,8 +1752,18 @@ async fn a_session_connected_locally_becomes_drivable_over_livekit_without_anoth
         seen.contains(A_KEYSTROKE_SEQUENCE),
         "the terminal must be drivable over LiveKit after a local connect, got: {seen:?}"
     );
-    // The board says so too
-    assert_eq!(daemon.livekit_integration(), IntegrationState::Connected);
+    // The board says so too — once the bridge returned, which is after the lobby shows it
+    eventually_awaiting(
+        "the board to report LiveKit connected",
+        ACTIVITY_TIMEOUT,
+        || async {
+            let state = daemon.livekit_integration();
+            (state == IntegrationState::Connected)
+                .then_some(())
+                .ok_or_else(|| format!("the board held {state:?}"))
+        },
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------

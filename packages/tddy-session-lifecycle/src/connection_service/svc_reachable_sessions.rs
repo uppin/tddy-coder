@@ -4,11 +4,11 @@
 //! [`SessionReach`]; an integration's own RPC resolves sessions and reaches the host's room services
 //! through [`ReachableSessions`], implemented here once.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use tddy_agent_launch::session_coordinate_handlers::{facilitated_checkout, FacilitatedCheckout};
 use tddy_daemon_extensions::{ReachableSessions, ReachedSession, SessionReach};
-use tddy_daemon_livekit::session_room::{session_type_is_facilitated_here, SessionTerminalBridge};
+use tddy_daemon_livekit::session_room::SessionTerminalBridge;
 use tddy_rpc::{RequestTransport, Status};
 
 use crate::connection_service::DaemonSessionHost;
@@ -34,19 +34,23 @@ impl ReachableSessions for DaemonSessionHost {
         let (session_dir, metadata) = self
             .launch_sessions()
             .resolve_session_for_token(session_token, session_id)?;
-        // The rule `ConnectSession` applies before it reaches a session: a room for one whose agent
-        // runs elsewhere would sit on a daemon that serves nobody.
-        let session_type = metadata.session_type.as_deref().unwrap_or_default();
-        if !session_type_is_facilitated_here(session_type) {
-            return Err(Status::failed_precondition(format!(
-                "session {session_id} is a {session_type:?} session, which this daemon does not facilitate, so it hosts no room for it"
-            )));
-        }
-        let worktree_root = metadata.repo_path.map(PathBuf::from).ok_or_else(|| {
-            Status::failed_precondition(format!(
-                "session {session_id} records no checkout on this daemon"
-            ))
-        })?;
+        // The rule `ConnectSession` applies before it reaches a session.
+        let worktree_root = match facilitated_checkout(&metadata) {
+            // A room for a session whose agent runs elsewhere would sit on a daemon that serves
+            // nobody.
+            FacilitatedCheckout::NotFacilitated => {
+                let session_type = metadata.session_type.as_deref().unwrap_or_default();
+                return Err(Status::failed_precondition(format!(
+                    "session {session_id} is a {session_type:?} session, which this daemon does not facilitate, so it hosts no room for it"
+                )));
+            }
+            FacilitatedCheckout::NoCheckout => {
+                return Err(Status::failed_precondition(format!(
+                    "session {session_id} records no checkout on this daemon"
+                )));
+            }
+            FacilitatedCheckout::Checkout(worktree_root) => worktree_root,
+        };
         Ok(ReachedSession {
             session_id: session_id.to_string(),
             session_dir,

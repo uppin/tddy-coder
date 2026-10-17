@@ -36,9 +36,20 @@ impl WorkspaceGraph {
         self.names.keys().cloned().collect()
     }
 
-    /// The crates `krate` names directly, workspace members and registry crates alike.
+    /// The crates workspace member `krate` names directly, workspace members and registry crates
+    /// alike.
+    ///
+    /// # Panics
+    ///
+    /// When `krate` is not a member of the workspace: a misspelled name must not read as a crate
+    /// that names nothing, or every "does not name X" check on it would pass vacuously.
     pub fn names_directly(&self, krate: &str) -> BTreeSet<String> {
-        self.names.get(krate).cloned().unwrap_or_default()
+        self.names.get(krate).cloned().unwrap_or_else(|| {
+            panic!(
+                "`{krate}` is not a member of the workspace (members: {:?})",
+                self.names.keys().collect::<Vec<_>>()
+            )
+        })
     }
 
     /// Every crate reachable from `krate` by following what each crate names, `krate` excluded.
@@ -47,7 +58,9 @@ impl WorkspaceGraph {
         let mut reached = BTreeSet::new();
         let mut pending = vec![krate.to_string()];
         while let Some(current) = pending.pop() {
-            for named in self.names_directly(&current) {
+            // A registry crate is not a member, so it names nothing here: reached, not followed.
+            let named_by_current = self.names.get(&current).cloned().unwrap_or_default();
+            for named in named_by_current {
                 if named != krate && reached.insert(named.clone()) {
                     pending.push(named);
                 }
@@ -190,18 +203,111 @@ mod tests {
         assert_eq!(graph.names_directly("store"), names(&["core"]));
     }
 
+    /// A workspace of `members`, each a crate name with the body of its manifest after the
+    /// `[package]` table (its `[dependencies]`, `[dev-dependencies]`, ...).
+    fn a_workspace_of(members: &[(&str, &str)]) -> tempfile::TempDir {
+        let root = tempfile::tempdir().expect("tempdir");
+        let listed: Vec<String> = members
+            .iter()
+            .map(|(name, _)| format!("\"{name}\""))
+            .collect();
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            format!(
+                "[workspace]\nmembers = [{}]\nresolver = \"2\"\n",
+                listed.join(", ")
+            ),
+        )
+        .expect("write the workspace manifest");
+        for (name, body) in members {
+            let source = root.path().join(name).join("src");
+            std::fs::create_dir_all(&source).expect("create the crate directory");
+            std::fs::write(source.join("lib.rs"), "").expect("write lib.rs");
+            std::fs::write(
+                root.path().join(name).join("Cargo.toml"),
+                format!(
+                    "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n{body}"
+                ),
+            )
+            .expect("write the crate manifest");
+        }
+        root
+    }
+
     #[test]
-    fn reaches_every_hop_but_not_the_crate_itself_nor_its_dev_dependencies() {
-        // Given a crate whose dependency has a dependency of its own
-        let root = a_workspace_spelling_dependencies_every_way();
+    fn reaches_a_crate_only_another_crate_names() {
+        // Given `app` naming `middle`, which alone names `leaf`
+        let root = a_workspace_of(&[
+            ("app", "[dependencies]\nmiddle = { path = \"../middle\" }\n"),
+            ("middle", "[dependencies]\nleaf = { path = \"../leaf\" }\n"),
+            ("leaf", ""),
+        ]);
 
-        // When everything it can be built with is followed
-        let graph = WorkspaceGraph::of_workspace(root.path());
+        // When what `app` reaches is read
+        let reached = WorkspaceGraph::of_workspace(root.path()).reaches("app");
 
-        // Then the second hop is reached, a registry crate is reached, and a dev-dependency is not
-        assert_eq!(
-            graph.reaches("app"),
-            names(&["codegen", "core", "serde", "store"])
-        );
+        // Then the second hop is reached
+        assert_eq!(reached, names(&["leaf", "middle"]));
+    }
+
+    #[test]
+    fn reaches_a_registry_crate_without_following_it() {
+        // Given `app` naming a registry crate
+        let root = a_workspace_of(&[("app", "[dependencies]\nserde = \"1\"\n")]);
+
+        // When what `app` reaches is read
+        let reached = WorkspaceGraph::of_workspace(root.path()).reaches("app");
+
+        // Then the registry crate is reached
+        assert_eq!(reached, names(&["serde"]));
+    }
+
+    #[test]
+    fn never_reaches_the_crate_it_started_from_even_when_a_dependency_names_it_back() {
+        // Given `leaf` naming `app` back, as a build dependency
+        let root = a_workspace_of(&[
+            ("app", "[dependencies]\nleaf = { path = \"../leaf\" }\n"),
+            (
+                "leaf",
+                "[build-dependencies]\napp = { path = \"../app\" }\n",
+            ),
+        ]);
+
+        // When what `app` reaches is read
+        let reached = WorkspaceGraph::of_workspace(root.path()).reaches("app");
+
+        // Then `app` is not among it
+        assert_eq!(reached, names(&["leaf"]));
+    }
+
+    #[test]
+    fn does_not_follow_a_dev_dependency_to_what_only_it_names() {
+        // Given `app` naming `probe` only under `[dev-dependencies]`, and `probe` naming `deep`
+        let root = a_workspace_of(&[
+            (
+                "app",
+                "[dev-dependencies]\nprobe = { path = \"../probe\" }\n",
+            ),
+            ("probe", "[dependencies]\ndeep = { path = \"../deep\" }\n"),
+            ("deep", ""),
+        ]);
+
+        // When what `app` reaches is read
+        let reached = WorkspaceGraph::of_workspace(root.path()).reaches("app");
+
+        // Then neither is reached
+        assert_eq!(reached, names(&[]));
+    }
+
+    #[test]
+    #[should_panic(expected = "`tddy-no-such-crate` is not a member of the workspace")]
+    fn a_crate_that_is_not_a_member_cannot_be_asked_what_it_names() {
+        // Given a workspace without the crate asked about
+        let root = a_workspace_of(&[("app", "")]);
+
+        // When what a misspelled crate names is read
+        WorkspaceGraph::of_workspace(root.path()).names_directly("tddy-no-such-crate");
+
+        // Then it panics rather than answering "nothing"
     }
 }

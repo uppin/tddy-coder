@@ -38,20 +38,23 @@ pub fn livekit_integration_state(livekit: Option<&LiveKitConfig>) -> Integration
     let Some(livekit) = livekit else {
         return IntegrationState::Disabled;
     };
-    let missing: Vec<String> = [
+    let fields = [
         ("url", &livekit.url),
         ("api_key", &livekit.api_key),
         ("api_secret", &livekit.api_secret),
-    ]
-    .into_iter()
-    .filter(|(_, value)| value.as_deref().is_none_or(|v| v.trim().is_empty()))
-    .map(|(field, _)| field.to_string())
-    .collect();
-    match missing.len() {
-        0 => IntegrationState::Connecting,
-        // Switched off and never filled in: nothing was misconfigured, it is simply not in use.
-        3 if !livekit.enabled => IntegrationState::Disabled,
-        _ => IntegrationState::Misconfigured { missing },
+    ];
+    let missing: Vec<String> = fields
+        .into_iter()
+        .filter(|(_, value)| value.as_deref().is_none_or(|v| v.trim().is_empty()))
+        .map(|(field, _)| field.to_string())
+        .collect();
+    if missing.is_empty() {
+        IntegrationState::Connecting
+    // Switched off and never filled in: nothing was misconfigured, it is simply not in use.
+    } else if missing.len() == fields.len() && !livekit.enabled {
+        IntegrationState::Disabled
+    } else {
+        IntegrationState::Misconfigured { missing }
     }
 }
 

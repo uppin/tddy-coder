@@ -272,13 +272,20 @@ async fn a_terminal_that_cannot_be_exposed_fails_the_open_and_leaves_the_livekit
     let before = livekit_on(&board);
 
     // When it opens the session's room
-    reach
+    let refused = reach
         .open_now(&host.session, host.clone())
         .await
         .expect_err("a terminal that cannot be exposed must still fail the request");
 
-    // Then the failure was the session's, not the server's: the entry says what it said before
-    assert_eq!(livekit_on(&board), before);
+    // Then the host's refusal is what failed it, and since that was the session's failure and not
+    // the server's, the entry says what it said before
+    assert_eq!(
+        (refused.message().to_string(), livekit_on(&board)),
+        (
+            "the host cannot expose this session's terminal".to_string(),
+            before
+        )
+    );
 }
 
 #[tokio::test]
@@ -294,11 +301,18 @@ async fn a_host_that_cannot_build_the_room_services_fails_the_open_and_leaves_th
     let before = livekit_on(&board);
 
     // When it opens the session's room
-    reach
+    let refused = reach
         .open_now(&host.session, host.clone())
         .await
         .expect_err("a room whose services cannot be built must not open");
 
-    // Then no server was reached or failed to be: the entry says what it said before
-    assert_eq!(livekit_on(&board), before);
+    // Then the host's refusal is what failed it, and no server was reached or failed to be: the
+    // entry says what it said before
+    assert_eq!(
+        (refused.message().to_string(), livekit_on(&board)),
+        (
+            "the host cannot build this session's room services".to_string(),
+            before
+        )
+    );
 }
