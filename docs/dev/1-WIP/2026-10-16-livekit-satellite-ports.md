@@ -3,7 +3,7 @@
 **Date**: 2026-10-16
 **Status**: 🚧 In Progress
 **Type**: Bug Fix + Architecture Change
-**Stack**: #satellite 1/11. Base: `master`. Branch: `satellite-1-extension-ports`, PR #623.
+**Stack**: #satellite 1/13. Base: `master`. Branch: `satellite-1-extension-ports`, PR #623.
 
 ## Initial Discovery
 
@@ -112,13 +112,13 @@ port 7880 times out; two `claude-cli` sessions started (agents alive), neither t
 
 ## Scope
 
-- [ ] `tddy-daemon-extensions` crate: ports, null object, status board
-- [ ] Protos: `SessionRoomService.OpenSessionRoom`, `DaemonConfigService.GetIntegrationStatus`
-- [ ] `ConnectSession` via `SessionReach`; never awaits LiveKit for a non-LiveKit caller
-- [ ] `LiveKitSessionReach`: sync for `RequestTransport::LiveKit`, background otherwise; `OpenSessionRoom`; status reporting
-- [ ] `tddy-session-sync` and `pty-relay` call `OpenSessionRoom`
-- [ ] Daemon wiring (board, plugin, RPC entry, `GetIntegrationStatus`)
-- [ ] `WorkspaceGraph` helper; boundary suites migrated; ratchet test
+- [x] `tddy-daemon-extensions` crate: ports, null object, status board
+- [x] Protos: `SessionRoomService.OpenSessionRoom`, `DaemonConfigService.GetIntegrationStatus`
+- [x] `ConnectSession` via `SessionReach`; never awaits LiveKit for a non-LiveKit caller
+- [x] `LiveKitSessionReach`: sync for `RequestTransport::LiveKit`, background otherwise; `OpenSessionRoom`; status reporting
+- [x] `tddy-session-sync` and `pty-relay` call `OpenSessionRoom`
+- [x] Daemon wiring (board, plugin, RPC entry, `GetIntegrationStatus`)
+- [x] `WorkspaceGraph` helper; boundary suites migrated; ratchet test
 
 ## Technical Changes
 
