@@ -187,13 +187,17 @@ fn apply_held_plan(
                         overlay: &overlay,
                     },
                 )?;
+            // Refused before anything of the operation is written or journalled — before a group
+            // is entered and before the in-flight record — so the same plan applies cleanly once
+            // the file is added. A dry run's overlay holds what its earlier operations moved.
+            let id = op.id.as_ref().filter(|_| !legacy);
+            runner::preflight_moves(index, id, &resolved, root, &overlay, &options.spawns)?;
 
             if options.dry_run {
                 ledger.record(&resolved.edit);
                 overlay.record(root, &resolved.edit)?;
                 unreported.push((index, resolved));
             } else {
-                let id = op.id.as_ref().filter(|_| !legacy);
                 GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
                 runner::commit_operation(
                     index,
