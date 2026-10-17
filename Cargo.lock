@@ -12315,6 +12315,7 @@ dependencies = [
  "tddy-livekit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-testing-commons",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

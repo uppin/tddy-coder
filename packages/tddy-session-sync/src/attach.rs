@@ -28,11 +28,8 @@ use tddy_livekit::broadcast::BroadcastMessage;
 use tddy_livekit::client_connect::{connect_client, ConnectError, ConnectedClient};
 use tddy_livekit::{BroadcastChannel, TokenGenerator, DEFAULT_LIVEKIT_JWT_TTL_SECS};
 use tddy_service::proto::auth::{RefreshSessionRequest, RefreshSessionResponse};
-use tddy_service::proto::session::{
-    ConnectSessionRequest, ConnectSessionResponse, ListSessionsRequest, ListSessionsResponse,
-    SessionEntry,
-};
-use tddy_service::proto::session_room::OpenSessionRoomResponse;
+use tddy_service::proto::session::{ListSessionsRequest, ListSessionsResponse, SessionEntry};
+use tddy_service::proto::session_room::{OpenSessionRoomRequest, OpenSessionRoomResponse};
 use tddy_service::session_activity::SESSION_ACTIVITY_TOPIC;
 use tddy_service::worktree_activity::WORKTREE_ACTIVITY_TOPIC;
 use tokio::sync::mpsc;
@@ -256,12 +253,12 @@ pub async fn attach(credentials: &Credentials) -> Result<AttachedSession, Attach
     let listed = http.list_sessions(&session_token).await?;
     let address = resolve_session(&listed, &credentials.session_id)?;
 
-    // Ask the daemon to open the session's room before joining it. The room is opened by the first
-    // connection to the session rather than by its creation, so a mirror that joined without asking
-    // would be joining a room LiveKit auto-creates on its behalf — one with no `daemon-{id}` in it,
-    // which is exactly the `DaemonAbsent` wait below. `ConnectSession` is the daemon's answer to
-    // "something is connecting to this session", and a mirror is such a thing.
-    http.connect_session(&session_token, &address.session_id)
+    // Ask the daemon to open the session's room before joining it. The room is opened when
+    // something asks for it rather than by the session's creation, so a mirror that joined without
+    // asking would be joining a room LiveKit auto-creates on its behalf — one with no `daemon-{id}`
+    // in it, which is exactly the `DaemonAbsent` wait below. `ConnectSession` is local work and
+    // does not do it for a caller that did not arrive over LiveKit, so this asks for it by name.
+    http.open_session_room(&session_token, &address.session_id)
         .await?;
 
     let room_name = session_room_name(&address.session_id);
@@ -345,8 +342,9 @@ pub async fn open_session_room(
     session_id: &str,
     timeout: Duration,
 ) -> Result<OpenSessionRoomResponse, DaemonHttpError> {
-    let _ = (daemon_url, session_token, session_id, timeout);
-    todo!("open_session_room")
+    DaemonHttp::new(daemon_url, timeout)?
+        .open_session_room(session_token, session_id)
+        .await
 }
 
 /// Why a call to the daemon's Connect-HTTP surface did not produce an answer.
@@ -454,27 +452,26 @@ impl DaemonHttp {
         Ok(response.sessions)
     }
 
-    /// Tell the daemon a client is connecting to this session, which is what opens its room.
+    /// Ask the daemon to open this session's room with itself in it and the session's terminal
+    /// exposed there.
     ///
-    /// The response's LiveKit fields name the session's *terminal* room and are deliberately
-    /// unused: a mirror joins `session-{id}`, which it derives itself. What is wanted is the call's
-    /// effect — the facilitating daemon in the room before anything looks for it there.
-    async fn connect_session(
+    /// The response's coordinates are returned for a caller that wants them; a mirror joins
+    /// `session-{id}`, which it derives itself, and wants the call's effect — the facilitating daemon
+    /// in the room before anything looks for it there.
+    async fn open_session_room(
         &self,
         session_token: &str,
         session_id: &str,
-    ) -> Result<(), DaemonHttpError> {
-        let _: ConnectSessionResponse = self
-            .unary(
-                "session.SessionService",
-                "ConnectSession",
-                ConnectSessionRequest {
-                    session_token: session_token.to_string(),
-                    session_id: session_id.to_string(),
-                },
-            )
-            .await?;
-        Ok(())
+    ) -> Result<OpenSessionRoomResponse, DaemonHttpError> {
+        self.unary(
+            "session_room.SessionRoomService",
+            "OpenSessionRoom",
+            OpenSessionRoomRequest {
+                session_token: session_token.to_string(),
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
     }
 
     async fn unary<Req: prost::Message, Res: prost::Message + Default>(
