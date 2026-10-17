@@ -44,6 +44,8 @@ import { useHostPrompts } from "../../src/rpc/useHostPrompts";
 import { hostDesktopPage, hostPassphraseDialogPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
+/** The directory lists the host its row is about — a row exists only for a listed host. */
+const HOST_LISTED = [{ instanceId: HOST, label: HOST }];
 const VNC = 1;
 
 function aReachableVnc() {
@@ -62,7 +64,7 @@ function mountWithMedia(
   backend: InMemoryRpcBackend = anInMemoryRpcBackend(),
 ) {
   mountWithRpc(
-    withSelectedDaemon(<HostRowRemoteDesktop instanceId={HOST} readings={readings} />),
+    withSelectedDaemon(<HostRowRemoteDesktop instanceId={HOST} readings={readings} />, HOST_LISTED),
     backend,
   );
 }
@@ -663,6 +665,7 @@ function connectWithABystanderOn(feed: HostPromptFeed, backend: InMemoryRpcBacke
         <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />
         <AQuestionArrivedProbe hostId={HOST} />
       </>,
+      HOST_LISTED,
     ),
     backend,
   );
@@ -774,6 +777,7 @@ describe("Host desktop overlay placement", () => {
           githubCli={undefined}
           remoteDesktop={[aReachableVnc()]}
         />,
+        HOST_LISTED,
       ),
       anInMemoryRpcBackend(),
     );

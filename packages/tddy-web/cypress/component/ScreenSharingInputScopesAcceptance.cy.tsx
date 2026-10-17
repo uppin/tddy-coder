@@ -32,6 +32,8 @@ import { sessionsDrawerPage } from "../support/pages/sessionsDrawerPage";
 // ---------------------------------------------------------------------------
 
 const HOST = "workstation-1";
+/** The directory lists the host its row is about — a row exists only for a listed host. */
+const HOST_LISTED = [{ instanceId: HOST, label: HOST }];
 const VNC = 1;
 const A_HOST_TARGET = "target-host-desktop-1";
 /** The participant `StartHostStream` names — where this host's input has to go, and nowhere else. */
@@ -75,7 +77,10 @@ describe("Input on a host's desktop", () => {
     const bridge = aBridgeRecordingInput();
     const backend = bridge.servedBy(aHostWhoseDesktopOpens());
     const recorded = mountWithRecordingLiveKitRpc(
-      withSelectedDaemon(<HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />),
+      withSelectedDaemon(
+        <HostRowRemoteDesktop instanceId={HOST} readings={[aReachableVnc()]} />,
+        HOST_LISTED,
+      ),
       backend,
     );
     hostDesktopPage.connect(HOST).click();

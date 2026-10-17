@@ -121,6 +121,29 @@ export class ConnectionProviderRegistry {
 
 const ConnectionProviderContext = createContext<ConnectionProviderRegistry | null>(null);
 
+/**
+ * Whether a host has been announced yet — `null` when nothing in scope restricts it.
+ *
+ * Reaching a host is a different question from being *ready* to be asked: a host the page was
+ * pointed at (a reload onto `?host=laptop-b`) can be resolved by a wire long before the directory
+ * has listed it, and a request sent to it in that window has nobody to answer it. The directory is
+ * what knows, so whoever owns it provides the answer here and the hooks below withhold every
+ * connection to a host that is not ready. Without a provider nothing is withheld, which keeps a
+ * subtree that has no directory (the playground, a bare registry in a unit test) working.
+ */
+const HostReadinessContext = createContext<((hostId: string) => boolean) | null>(null);
+
+/** Provide the readiness predicate for hosts resolved below. Identity changes when readiness does. */
+export function HostReadiness({
+  isReady,
+  children,
+}: {
+  isReady: (hostId: string) => boolean;
+  children: ReactNode;
+}) {
+  return <HostReadinessContext.Provider value={isReady}>{children}</HostReadinessContext.Provider>;
+}
+
 export interface ConnectionProvidersProps {
   /**
    * Override the registry for this subtree. Tests pass one holding an in-memory provider; the app
@@ -175,20 +198,23 @@ export function useConnectionProviders(): ConnectionProviderRegistry {
  */
 export function useHostConnector(): (hostId: string | null) => HostConnection | null {
   const registry = useConnectionProviders();
+  const isReady = useContext(HostReadinessContext);
   const subscribe = useCallback((listener: () => void) => registry.subscribe(listener), [registry]);
   const revision = useSyncExternalStore(subscribe, () => registry.revision());
   // `revision` is a dependency, not an input — the resolver reads the registry's providers at the
   // moment it is called. Re-deriving on it is what changes this function's identity when a wire
   // registers, and so what re-runs the effects and callbacks that hold it.
   return useMemo(
-    () => (hostId: string | null) => (hostId ? registry.connectHost(hostId) : null),
-    [registry, revision],
+    () => (hostId: string | null) =>
+      hostId && (isReady?.(hostId) ?? true) ? registry.connectHost(hostId) : null,
+    [registry, revision, isReady],
   );
 }
 
 /**
  * The connection to `hostId`, or `null` when no registered provider can reach it — including when
- * `hostId` is `null` because no host is selected yet.
+ * `hostId` is `null` because no host is selected yet, and when the host is not ready yet (see
+ * {@link HostReadiness}): a waiting host is asked nothing.
  *
  * Memoised on `hostId` and the registry, so a connection's identity is as stable as its routing.
  */
