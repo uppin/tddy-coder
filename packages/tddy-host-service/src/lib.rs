@@ -18,6 +18,7 @@ pub mod host_session_service;
 pub mod host_stats;
 pub mod host_tooling;
 pub mod multi_host;
+pub mod peer_routing;
 pub mod remote_desktop_probe;
 pub mod ssh_agent;
 pub mod ssh_agent_add;
