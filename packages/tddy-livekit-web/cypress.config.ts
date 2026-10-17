@@ -4,7 +4,10 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { AccessToken } from "livekit-server-sdk";
+import createDebug from "debug";
 import { LivekitDockerTestkit } from "./cypress/support/livekitDockerTestkit.js";
+
+const log = createDebug("tddy:livekit-web:echo-server");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -44,7 +47,9 @@ export default defineConfig({
       const startEchoServerImpl = async (
         withReflection: boolean
       ): Promise<{ url: string; roomName: string; clientToken: string }> => {
+        log(`startEchoServer(withReflection=${withReflection}): starting the LiveKit testkit`);
         const wsUrl = await testkit.start();
+        log(`testkit ready at ${wsUrl}`);
 
         const serverToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
           identity: SERVER_IDENTITY,
@@ -71,6 +76,7 @@ export default defineConfig({
 
         return new Promise<{ url: string; roomName: string; clientToken: string }>(
           (resolve, reject) => {
+            log(`spawning ${binaryPath}`);
             echoServerProcess = spawn(binaryPath, spawnArgs, {
               stdio: ["ignore", "pipe", "pipe"],
               env: { ...process.env, RUST_LOG: "info" },
@@ -81,6 +87,7 @@ export default defineConfig({
             echoServerProcess.stdout?.on("data", (data) => {
               stdout += data.toString();
               if (stdout.includes("READY") && !resolved) {
+                log("echo server printed READY");
                 resolved = true;
                 clearTimeout(timeout);
                 const clientToken = new AccessToken(DEV_API_KEY, DEV_API_SECRET, {
