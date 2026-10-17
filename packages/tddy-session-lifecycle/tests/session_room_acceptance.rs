@@ -1465,7 +1465,9 @@ const A_LOCAL_CONNECT: Duration = Duration::from_secs(2);
 
 impl FacilitatingDaemon {
     /// A daemon configured with a LiveKit that never answers, and no LiveKit plugin wired.
-    async fn with_livekit_that_never_answers_and_no_plugin(livekit: &ALiveKitNobodyAnswers) -> Self {
+    async fn with_livekit_that_never_answers_and_no_plugin(
+        livekit: &ALiveKitNobodyAnswers,
+    ) -> Self {
         Self::build_with(
             Some(livekit.ws_url()),
             None,
@@ -1640,7 +1642,10 @@ async fn a_host_without_the_livekit_plugin_never_contacts_livekit_on_connect() {
 
     // Then neither connect dialled anything: LiveKit is reached through the plugin or not at all,
     // whatever the configuration names
-    assert_eq!(remote.expect("the connect must succeed"), no_terminal_room());
+    assert_eq!(
+        remote.expect("the connect must succeed"),
+        no_terminal_room()
+    );
     assert_eq!(
         livekit.connections_accepted(),
         0,
@@ -1675,6 +1680,36 @@ async fn opening_a_session_room_names_the_room_and_the_daemon_waiting_in_it() {
     // ...and that participant is already there when it arrives
     let probe = AgentProbe::join(&daemon, &room, "probe-opened-room").await;
     assert_eq!(probe.remote_identities(), vec![rpc_identity(INSTANCE_ID)]);
+}
+
+#[tokio::test]
+#[serial]
+async fn opening_the_room_of_a_session_this_daemon_does_not_facilitate_is_refused() {
+    // Given a daemon that hosts session rooms, and a workspace session: a checkout whose agent, if
+    // it has one, runs elsewhere
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_workspace_session().await;
+
+    // When a client asks the LiveKit plugin to open that session's room
+    let refused = daemon
+        .open_session_room(&started.session_id)
+        .await
+        .expect_err("a room for a session this daemon does not facilitate must be refused");
+
+    // Then the refusal names the session and says why, and no room was created for it
+    assert_eq!(refused.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        refused.message.contains(&started.session_id),
+        "the refusal must name the session, got: {}",
+        refused.message
+    );
+    assert_eq!(
+        daemon
+            .room_on_the_server(&session_room_name(&started.session_id))
+            .await,
+        None,
+        "a refused session must have no room on the server"
+    );
 }
 
 #[tokio::test]

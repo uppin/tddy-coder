@@ -70,7 +70,16 @@ async fn a_livekit_address_nothing_listens_on() -> String {
 /// The session host, reduced to one session whose checkout is a real git repository here.
 struct OneCheckoutOnThisHost {
     session: ReachedSession,
+    /// What this host cannot do for the session, if anything.
+    cannot: Option<HostCannot>,
     _home: tempfile::TempDir,
+}
+
+/// The part of serving a session the host stand-in refuses.
+#[derive(Clone, Copy)]
+enum HostCannot {
+    BuildTheRoomServices,
+    ExposeTheTerminal,
 }
 
 #[async_trait::async_trait]
@@ -84,17 +93,35 @@ impl ReachableSessions for OneCheckoutOnThisHost {
     }
 
     fn session_services(&self) -> Result<MultiRpcService, Status> {
-        Ok(MultiRpcService::new(Vec::new()))
+        match self.cannot {
+            Some(HostCannot::BuildTheRoomServices) => Err(Status::internal(
+                "the host cannot build this session's room services",
+            )),
+            _ => Ok(MultiRpcService::new(Vec::new())),
+        }
     }
 
     async fn expose_terminal(&self, _session_id: &str) -> Result<(), Status> {
-        Ok(())
+        match self.cannot {
+            Some(HostCannot::ExposeTheTerminal) => Err(Status::internal(
+                "the host cannot expose this session's terminal",
+            )),
+            _ => Ok(()),
+        }
     }
 }
 
 /// A session whose checkout — one committed file — lives in a temp directory, reached from this
 /// host.
 fn a_session_with_a_checkout(suffix: &str) -> Arc<OneCheckoutOnThisHost> {
+    a_session_the_host_cannot(suffix, None)
+}
+
+/// [`a_session_with_a_checkout`], on a host that refuses `cannot`.
+fn a_session_the_host_cannot(
+    suffix: &str,
+    cannot: Option<HostCannot>,
+) -> Arc<OneCheckoutOnThisHost> {
     let home = tempfile::tempdir().expect("tempdir");
     let session_id = format!("1780828020298-{suffix}");
     let worktree = home.path().join("checkout");
@@ -108,6 +135,7 @@ fn a_session_with_a_checkout(suffix: &str) -> Arc<OneCheckoutOnThisHost> {
             worktree_root: worktree,
             arrived_over: RequestTransport::InProcess,
         },
+        cannot,
         _home: home,
     })
 }
@@ -137,7 +165,9 @@ fn git_ok(cwd: &Path, args: &[&str]) {
 }
 
 /// The plugin as the daemon wires it, reporting on a board of its own.
-fn the_livekit_plugin(config: DaemonConfig) -> (Arc<LiveKitSessionReach>, Arc<IntegrationStatusBoard>) {
+fn the_livekit_plugin(
+    config: DaemonConfig,
+) -> (Arc<LiveKitSessionReach>, Arc<IntegrationStatusBoard>) {
     let board = IntegrationStatusBoard::new();
     let reach = LiveKitSessionReach::new(
         config,
@@ -164,8 +194,9 @@ fn livekit_on(board: &IntegrationStatusBoard) -> IntegrationState {
 #[tokio::test]
 async fn a_room_that_cannot_be_opened_reports_livekit_unreachable_with_the_failure() {
     // Given the plugin configured with a LiveKit nothing listens on, and a session to open a room for
-    let (_dir, config) =
-        a_daemon_config(&a_livekit_block_at(&a_livekit_address_nothing_listens_on().await));
+    let (_dir, config) = a_daemon_config(&a_livekit_block_at(
+        &a_livekit_address_nothing_listens_on().await,
+    ));
     let (reach, board) = the_livekit_plugin(config);
     let host = a_session_with_a_checkout("unreachable");
 
@@ -223,4 +254,51 @@ async fn a_room_opened_on_a_reachable_server_reports_livekit_connected() {
     // Then the room is the session's, and LiveKit is reported connected
     assert_eq!(opened.room, session_room_name(&host.session.session_id));
     assert_eq!(livekit_on(&board), IntegrationState::Connected);
+}
+
+#[tokio::test]
+#[serial(livekit_docker)]
+async fn a_terminal_that_cannot_be_exposed_fails_the_open_and_leaves_the_livekit_entry_alone() {
+    // Given the plugin on a LiveKit that answers, for a session whose terminal the host cannot expose
+    let testkit = LiveKitTestkit::start()
+        .await
+        .expect("LiveKit testkit (Docker, or LIVEKIT_TESTKIT_WS_URL)");
+    let (_dir, config) = a_daemon_config(&a_livekit_block_at(&testkit.get_ws_url()));
+    let (reach, board) = the_livekit_plugin(config);
+    let host = a_session_the_host_cannot(
+        &uuid::Uuid::new_v4().simple().to_string(),
+        Some(HostCannot::ExposeTheTerminal),
+    );
+    let before = livekit_on(&board);
+
+    // When it opens the session's room
+    reach
+        .open_now(&host.session, host.clone())
+        .await
+        .expect_err("a terminal that cannot be exposed must still fail the request");
+
+    // Then the failure was the session's, not the server's: the entry says what it said before
+    assert_eq!(livekit_on(&board), before);
+}
+
+#[tokio::test]
+async fn a_host_that_cannot_build_the_room_services_fails_the_open_and_leaves_the_livekit_entry_alone(
+) {
+    // Given the plugin configured with a LiveKit nothing listens on, for a session whose room
+    // services the host cannot build, which is asked for before anything is dialled
+    let (_dir, config) = a_daemon_config(&a_livekit_block_at(
+        &a_livekit_address_nothing_listens_on().await,
+    ));
+    let (reach, board) = the_livekit_plugin(config);
+    let host = a_session_the_host_cannot("no-services", Some(HostCannot::BuildTheRoomServices));
+    let before = livekit_on(&board);
+
+    // When it opens the session's room
+    reach
+        .open_now(&host.session, host.clone())
+        .await
+        .expect_err("a room whose services cannot be built must not open");
+
+    // Then no server was reached or failed to be: the entry says what it said before
+    assert_eq!(livekit_on(&board), before);
 }

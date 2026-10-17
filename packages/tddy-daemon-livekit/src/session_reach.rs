@@ -22,7 +22,7 @@ use tddy_service::proto::session_room::{
 };
 
 use crate::session_room::{
-    session_room_name, DaemonRoomHosting, OpenedSessionRoom, SessionRoomRegistry,
+    session_room_name, DaemonRoomHosting, OpenedSessionRoom, RoomOpenFailure, SessionRoomRegistry,
     SessionTerminalBridge,
 };
 
@@ -86,22 +86,34 @@ impl LiveKitSessionReach {
         session: &ReachedSession,
         host: Arc<dyn ReachableSessions>,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
-        let outcome = self.open_room(session, host).await;
-        self.status.report(match &outcome {
-            Ok(Some(_)) => IntegrationState::Connected,
-            Ok(None) => livekit_integration_state(self.config.livekit.as_ref()),
-            Err(failure) => IntegrationState::Unreachable {
-                error: failure.message.clone(),
-            },
-        });
-        outcome
+        match self.open_room(session, host).await {
+            Ok(Some(opened)) => {
+                self.status.report(IntegrationState::Connected);
+                Ok(Some(opened))
+            }
+            // `ensure_open` answers `None` only without credentials, so this is the state the
+            // block alone describes.
+            Ok(None) => {
+                self.status
+                    .report(livekit_integration_state(self.config.livekit.as_ref()));
+                Ok(None)
+            }
+            Err(RoomOpenFailure::Server(failure)) => {
+                self.status.report(IntegrationState::Unreachable {
+                    error: failure.message.clone(),
+                });
+                Err(failure)
+            }
+            // The server was not the problem, so the board says nothing new about it.
+            Err(RoomOpenFailure::Elsewhere(failure)) => Err(failure),
+        }
     }
 
     async fn open_room(
         &self,
         session: &ReachedSession,
         host: Arc<dyn ReachableSessions>,
-    ) -> Result<Option<OpenedSessionRoom>, Status> {
+    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
         let instance_id = local_instance_id_for_config(&self.config);
         let hosting = DaemonRoomHosting {
             config: &self.config,
@@ -114,7 +126,7 @@ impl LiveKitSessionReach {
             &session.session_dir,
         );
         self.rooms
-            .ensure_open(
+            .ensure_open_staged(
                 &hosting,
                 || host.session_services(),
                 &TerminalExposedBy(Arc::clone(&host)),

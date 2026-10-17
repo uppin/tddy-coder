@@ -452,19 +452,26 @@ nine touched packages; the ratchet (3/3), `WorkspaceGraph` (4/4) and the extensi
 Changeset sync: every Scope item is implemented (the discovery loop now reports to the status
 board, so the former "node 1 adds the board" gap is closed).
 
-- ⚠ **`OpenSessionRoom` skips `session_type_is_facilitated_here`.** `ConnectSession` opens a room only
-  for `claude-cli` / `cursor-cli` sessions that record a checkout, because a room for any other
-  session "would put it on a daemon that serves nobody". `SessionRoomServer::open_session_room`
-  resolves any session with a `repo_path` and opens a room for it; no test pins either answer.
-- ⚠ **One status entry, two connections.** `LiveKitSessionReach::open_now` and the discovery loop
-  write the same `livekit` entry, last writer wins: a session room that opens reports `Connected`
-  while the common room is down, and a failure to expose one session's terminal reports
-  `Unreachable` while the common room is up.
+- ✅ **`OpenSessionRoom` skipped `session_type_is_facilitated_here`** — resolved. `ReachableSessions::resolve`
+  (`svc_reachable_sessions.rs`) now applies the same `session_type_is_facilitated_here` rule as
+  `ConnectSession`, so a session type this daemon does not facilitate is refused with
+  `failed_precondition` naming the session. Pinned by
+  `opening_the_room_of_a_session_this_daemon_does_not_facilitate_is_refused` (refusal, and no room
+  on the server).
+- ✅ **One status entry, two connections** — the failure half resolved. `ensure_open_staged` returns a
+  `RoomOpenFailure`: `Server` for creating or joining the room on LiveKit, `Elsewhere` for the
+  session's services, checkout, terminal bridge and deletion mid-open. `open_now` reports
+  `Unreachable` for `Server` only; an `Elsewhere` failure still fails the request but leaves the
+  entry alone. Pinned by `a_terminal_that_cannot_be_exposed_fails_the_open_and_leaves_the_livekit_entry_alone`
+  and `a_host_that_cannot_build_the_room_services_fails_the_open_and_leaves_the_livekit_entry_alone`.
+  Still last-writer-wins between a session-room open and the discovery loop on success: a session room
+  that opens reports `Connected` while the common room is down.
 - ℹ `Unreachable { error }` carries `format!("{error:#}")` of the connect failure to any
   session-token holder via `GetIntegrationStatus`; confirm the SDK's error text never embeds the
   access-token URL.
 - ℹ `open_now` maps `Ok(None)` to `livekit_integration_state(config)`, which reads `Connecting` for a
-  complete block; `ensure_open` returns `None` only without credentials, so it is unreachable today.
+  complete block; `ensure_open` returns `None` only without credentials, so it is unreachable today
+  (the arm now says so).
 - ℹ The boundary suites no longer see `[dev-dependencies]` (`WorkspaceGraph` excludes them by
   contract); the daemon-auth/livekit "does not declare the daemon" tests are weaker by that edge.
 - ℹ `ensure_session_room` is still called by `tddy-session-agents` on the attach path: nodes 3-11.
