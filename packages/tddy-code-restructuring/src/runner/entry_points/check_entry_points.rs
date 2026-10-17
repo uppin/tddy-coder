@@ -10,7 +10,7 @@ use crate::{crate_move, item_anchor, Anchor, Overlay, Plan};
 
 use crate::registry::Workspace;
 
-use super::super::rehearsal::Rehearsal;
+use super::super::rehearsal::{untracked_move_anchors, Rehearsal};
 
 use crate::item_anchor::{has_item_anchors, plan_file_has_item_anchors};
 
@@ -251,7 +251,10 @@ pub fn check_plan(
     // Every member of a cluster operation, not only the module its anchor names — otherwise
     // `check` passes a set one of whose members `apply` then refuses, which is the parity this
     // whole static pass exists to hold.
-    for (operation, detail) in crate_move::unrunnable(&static_workspace, &plan.ops)? {
+    for (operation, detail) in crate_move::unrunnable(&static_workspace, &plan.ops)?
+        .into_iter()
+        .chain(untracked_move_anchors(root, &plan.ops, &options.spawns)?)
+    {
         findings.push(Finding { operation, detail });
     }
 
@@ -292,7 +295,7 @@ pub fn check_plan(
             op.op,
             op.anchor.file()
         ));
-        let rehearsed = rehearsal.rehearse(root, &mut registry, op)?;
+        let rehearsed = rehearsal.rehearse(root, &mut registry, index, op, &options.spawns)?;
         for line in rehearsed_lines(index, &rehearsed) {
             (options.account)(&line);
         }

@@ -123,7 +123,7 @@ None depend on this node. The line successor is `feature/reshape/move-item-paths
 ## Scope
 
 - [ ] M1: reproduce the B2 hang and record its shape
-- [ ] M2: untracked-source preflight (commit, dry run, rehearsal, static)
+- [x] M2: untracked-source preflight (commit, dry run, rehearsal, static)
 - [ ] M3: destination packages in the baseline
 - [ ] M4: silence bounds, `ServerStalled`, heartbeat wording, fake mode, daemon status
 - [ ] M5: operation context on spawn records, op id in the resolving line
@@ -165,7 +165,7 @@ As in Responsibility rules P1–P10.
 ## Implementation milestones
 
 - [ ] **M1 — reproduce B2 (manual, real workspace).** Warm `./run-index-daemon` on this checkout, hand-edit 7 files of one crate, and apply a one-op item-anchored `rename_symbol` whose header lists only the anchored file. Collect the heartbeat lines (stage / loading / unchanged-for), `<runtime>/tddy-index-<tag>.spawns.jsonl`, `ps -o pid,ppid,stat,etime,command` under the rust-analyzer pid, and `lsof target/debug/.cargo-lock`. Make at most three attempts. Record in **Validation Results**: ready-and-silent (P5 closes it), loading-and-silent (P6 bounds it; if `target/` contention shows, raise F5), or not reproduced. M2–M6 do not wait on M1's outcome.
-- [ ] **M2** — `untracked_move_sources`, `Overlay::introduced`, `preflight_moves`, `rehearse_dry_run`, rehearsal and static parity, the variant. Tests 1–8.
+- [x] **M2** — `untracked_move_sources`, `Overlay::introduced`, `preflight_moves`, `rehearse_dry_run`, rehearsal and static parity, the variant. Tests 1–8.
 - [ ] **M3** — `baseline_packages`. Tests 9–11.
 - [ ] **M4** — `SilenceBounds`, `silence_verdict`, call sites, heartbeat wording, fake mode, `ServerStalled`, daemon `status_of`. Tests 12–20.
 - [ ] **M5** — `OperationContext`, recorder scoping, JSONL keys, the resolving line. Tests 21–25.
@@ -309,6 +309,7 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 - **Red, each because the implementation is missing:** 1–7 (the apply fails at `git mv` as `plan is malformed`, the journal keeps an in-flight record so the re-run is `JournalExists`, the dry run and both checks report nothing, the resolving line has no id); 8, 11, 17, 18, 28 (`todo!()` in the stub); 9–10 (the baseline checks `-p origin` only, the post gate blames the plan); 12, 16 (cancelled as `IndexingIncomplete` at `type inference at src/lib.rs:N`: no ready bound on those waits); 13 (the type-inference beat says `has not said it is ready`); 14 (no `ServerStalled`: the wait runs on until the fake's next poll and the rename ends `no edits`); 21, 23 (`ProcessStart.operation` is never set); 24 (the JSONL line has no op keys); 26 (the refusal has no run context).
 - **Green pins** (specify what already holds and must keep holding): 15 (a narrating load is not refused), 19–20 (status classes, implemented with the variants), 22 and 25 (run-level processes carry no operation), 27 (no journal, unchanged text).
 - **Implementation constraint found while writing 14:** `fake_lsp`'s busy report is followed, at the next 2 s poll, by the shared client folding the earlier `quiescent: true`. So the loading verdict has to be evaluated in the wait's sleep slices (where the heartbeat beats, every 100 ms), not only once per poll.
+- **M2 green, 2026-10-17.** Tests 1–8 pass (test 7, P9's resolving line, landed with M2 because it is one in-place `format!` in the loop M2 edits). Scoped: `cargo test -p tddy-code-restructuring --test apply_preflight_acceptance` 7 passed; `--lib counts_a_file_the_engine_created…` passed; regressions `check_precondition_parity` 23, `every_spawn_is_recorded` 1, `library_returns_its_results` 6, `one_renderer_for_every_front_end` 12, `plan_store_acceptance` 5, `plan_store_resume_acceptance` 5, `test_binary_move` 18, `transactional_groups_acceptance` 10 — all passed; `--lib` 1056 passed, the 6 failures being tests 11, 17, 18, 24, 26, 28 of later milestones. `cargo clippy -p tddy-code-restructuring --all-targets -D warnings` and `cargo fmt --check` clean. Notes: `untracked_move_anchors` (static) covers the three cross-crate move kinds, whose anchors name the files they move; `reparent_module` anchors the old parent's `mod` line rather than the moved file, so its untracked source is reported by the deep check and the apply only. A file not on disk is not judged statically (an earlier operation may create it). The index daemon's apply loop does not call `preflight_moves` (its edit was consented for `status.rs` only); it still fails at `git mv` for an untracked source.
 - Seen and not ours: `apply_compile_gate_acceptance::a_failed_apply_says_the_tidy_did_not_run_and_how_many_unused_imports_it_left` (node 3's contract) and `apply_tidy_acceptance::{removes_an_unused_mut_from_a_file_the_run_wrote, says_which_file_it_removed_an_unused_mut_from}` (node 4's contract) are red on this branch's base.
 
 ## TODO
@@ -320,7 +321,7 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 - [ ] Add the PRD reference to `docs/ft/coder/1-OVERVIEW.md` **at wrap** (a shared append-point: not edited while planning)
 - [x] Create failing acceptance tests (commit 2: owned surface + tests 1–28)
 - [x] Run acceptance tests (verify they fail) — see Validation Results: 22 red, 6 green pins
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests (wave-1 tests approved 2026-10-09)
 - [ ] M1 — reproduce the B2 hang and record its shape
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code

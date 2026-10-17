@@ -8,7 +8,7 @@ use crate::edit::{FileEdit, Range, TextEdit, WorkspaceEdit};
 use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Apply one operation's complete edit set to disk.
@@ -57,10 +57,73 @@ pub fn untracked_move_sources(
     overlay: &crate::Overlay,
     spawns: &SpawnRecorder,
 ) -> Result<Vec<String>> {
-    let _ = (root, edit, overlay, spawns);
-    todo!(
-        "TODO(reshape-apply-robust): implement — `git ls-files --error-unmatch` per rename source"
-    )
+    let created: BTreeSet<&str> = edit
+        .changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Create { path } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+    let sources: Vec<&str> = edit
+        .changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Rename { from, .. } => Some(from.as_str()),
+            _ => None,
+        })
+        .filter(|from| !created.contains(from) && !overlay.introduced(from))
+        .collect();
+    untracked_paths(root, &sources, spawns)
+}
+
+/// The paths of `paths` git does not track, in the order given, each named once.
+///
+/// One `git ls-files --error-unmatch` answers for all of them in the common case, where every one
+/// is tracked; only when that fails is each asked alone, to name the ones it failed for.
+pub(crate) fn untracked_paths(
+    root: &Path,
+    paths: &[&str],
+    spawns: &SpawnRecorder,
+) -> Result<Vec<String>> {
+    let mut unique: Vec<&str> = Vec::new();
+    for path in paths {
+        if !unique.contains(path) {
+            unique.push(path);
+        }
+    }
+    if unique.is_empty() || git_tracks(root, &unique, spawns)? {
+        return Ok(Vec::new());
+    }
+    let mut untracked = Vec::new();
+    for path in unique {
+        if !git_tracks(root, &[path], spawns)? {
+            untracked.push(path.to_string());
+        }
+    }
+    Ok(untracked)
+}
+
+/// Whether git's index holds every one of `paths` — an intent-to-add or a staged rename included.
+///
+/// `--literal-pathspecs`, because a path is a path here and not a pattern: a file named `a[1].rs`
+/// must not be answered for by `a1.rs`.
+fn git_tracks(root: &Path, paths: &[&str], spawns: &SpawnRecorder) -> Result<bool> {
+    let mut command = spawns.command("git");
+    command
+        .args(["--literal-pathspecs", "ls-files", "--error-unmatch", "--"])
+        .args(paths)
+        .current_dir(root);
+    let output = spawns.output(purpose::GIT, &mut command)?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        // `--error-unmatch`'s own answer: a path matched nothing in the index.
+        Some(1) => Ok(false),
+        _ => Err(RestructureError::MalformedPlan(format!(
+            "git ls-files --error-unmatch failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))),
+    }
 }
 
 /// Confirm `root` is inside a git worktree. `git mv` is mandatory, so this is checked up front.
