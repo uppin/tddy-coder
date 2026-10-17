@@ -539,7 +539,7 @@ jobs:
           mkdir -p fixture-bins/examples
           for b in tddy-coder tddy-tools tddy-daemon tddy-demo tddy-demo-tui \
                    tddy-acp-stub tddy-sandbox-runner tddy-remote-git-repo \
-                   tddy-index-daemon; do
+                   tddy-askpass tddy-index-daemon; do
             cp "target/debug/$b" fixture-bins/
           done
           cp target/debug/examples/echo_server fixture-bins/examples/
@@ -574,7 +574,7 @@ jobs:
           # INSTALLED_BINARIES by a unit test — the script refuses to run with any of
           # them missing, and a short list only announces itself after a bake and a boot.
           for b in tddy-supervisor tddy-daemon tddy-coder tddy-tools \
-                   tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner \
+                   tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner \
                    tddy-index-daemon; do
             cp "target/debug/$b" dist/
           done
