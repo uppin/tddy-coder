@@ -437,6 +437,55 @@ mod tests {
         assert_eq!(untracked, vec!["src/stray.ts".to_string()]);
     }
 
+    /// The two other ways a source is the run's own, though git has never seen it: the same edit
+    /// creates it, or an earlier operation of a run that has written nothing yet introduced it.
+    #[test]
+    fn counts_a_source_the_same_edit_creates_or_an_earlier_operation_introduced_as_tracked() {
+        // Given a worktree where git has never seen `src/fresh.ts` or `src/earlier.ts`
+        let workspace = git_workspace();
+        let root = workspace.path();
+        // And an unwritten run whose earlier operation created `src/earlier.ts`
+        let mut overlay = crate::Overlay::new();
+        overlay
+            .record(
+                root,
+                &WorkspaceEdit {
+                    changes: vec![FileEdit::Create {
+                        path: "src/earlier.ts".to_string(),
+                    }],
+                },
+            )
+            .unwrap();
+        // And an edit that creates `src/fresh.ts` and moves it, and moves `src/earlier.ts`
+        let creating_and_moving = WorkspaceEdit {
+            changes: vec![
+                FileEdit::Create {
+                    path: "src/fresh.ts".to_string(),
+                },
+                FileEdit::Rename {
+                    from: "src/fresh.ts".to_string(),
+                    to: "src/moved/fresh.ts".to_string(),
+                },
+                FileEdit::Rename {
+                    from: "src/earlier.ts".to_string(),
+                    to: "src/moved/earlier.ts".to_string(),
+                },
+            ],
+        };
+
+        // When the edit's untracked rename sources are asked for
+        let untracked = untracked_move_sources(
+            root,
+            &creating_and_moving,
+            &overlay,
+            &SpawnRecorder::discard(),
+        )
+        .unwrap();
+
+        // Then neither is named
+        assert_eq!(untracked, Vec::<String>::new());
+    }
+
     #[test]
     fn accepts_a_directory_inside_a_git_worktree() {
         let workspace = git_workspace();

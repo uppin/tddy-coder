@@ -100,8 +100,7 @@ fn main() {
         || args.iter().any(|a| a == "--never-quiescent");
     // `--never-quiescent` wins: a server that never finishes loading must not narrate a finished one.
     let loads_crate_graph = !never_quiescent
-        && (args.iter().any(|a| a == "--loads-crate-graph")
-            || goes_busy_after_hovers);
+        && (args.iter().any(|a| a == "--loads-crate-graph") || goes_busy_after_hovers);
     NEVER_QUIESCENT.store(never_quiescent, std::sync::atomic::Ordering::SeqCst);
     HOVER_NEVER_ANSWERS.store(
         args.iter().any(|a| a == "--hover-never-answers"),
