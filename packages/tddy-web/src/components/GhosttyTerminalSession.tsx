@@ -45,6 +45,7 @@ import type { ByteDelta } from "./sessions/sessionRuntimeRegistry";
 const dTerm = tddyDebug("tddy:term:session");
 const dResize = tddyDebug("tddy:term:resize");
 const dHistory = tddyDebug("tddy:term:history");
+const dMouse = tddyDebug("tddy:term:mouse");
 
 /** Hex preview of the first `n` bytes for diagnosing garbled / misaligned output. */
 function hexPreview(data: Uint8Array, n = 24): string {
@@ -557,11 +558,21 @@ export function GhosttyTerminalSession({
   // 2. Mouse tracking OFF → no-op here; ghostty-web emits Up/Down for pagers on the alternate screen.
   // The wheel never swaps panes: switching to and from history is a manual toggle (the affordances
   // below), so scrolling inside a TUI can't drop the user out of the live view by accident.
+  // Installed whether or not the connection serves history: routing the wheel to a mouse-tracking
+  // TUI has nothing to do with scrollback, and without the gate ghostty-web emulates arrow keys.
   useEffect(() => {
     const el = liveContainerRef.current;
-    if (!el || !canScrollBack) return;
+    if (!el) return;
     const handler = (e: WheelEvent) => {
-      if (!(termRef.current?.hasMouseTracking?.() ?? false)) return;
+      const tracking = termRef.current?.hasMouseTracking?.() ?? false;
+      dMouse(
+        "wheel gate tracking=%o altScreen=%o ctrl=%o deltaY=%d",
+        tracking,
+        termRef.current?.isAlternateScreen?.() ?? false,
+        e.ctrlKey,
+        e.deltaY,
+      );
+      if (!tracking) return;
       if (!e.ctrlKey) {
         termRef.current?.sendWheelSgr?.(e);
       }
@@ -570,7 +581,7 @@ export function GhosttyTerminalSession({
     };
     el.addEventListener("wheel", handler, { capture: true });
     return () => el.removeEventListener("wheel", handler, { capture: true } as AddEventListenerOptions);
-  }, [canScrollBack]);
+  }, []);
 
   // The "Load earlier output" affordance is shown on the live pane before the first fill (older
   // history can be served and is not yet loaded). After the first fill, the live pane shows a

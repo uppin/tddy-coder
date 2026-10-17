@@ -1214,7 +1214,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         },
         sendWheelSgr(e: WheelEvent) {
           if (e.ctrlKey) return;
-          sendWheelSgrAt(e.clientX, e.clientY, e.deltaY < 0);
+          const sent = sendWheelSgrAt(e.clientX, e.clientY, e.deltaY < 0);
+          logMouse(
+            "wheel gate reported to TUI sent=%o deltaY=%d deltaMode=%d client=(%d,%d)",
+            sent,
+            e.deltaY,
+            e.deltaMode,
+            e.clientX,
+            e.clientY,
+          );
         },
         sendKeystroke(data: string) {
           const t = termRef.current as unknown as {
