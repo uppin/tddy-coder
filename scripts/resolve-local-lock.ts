@@ -9,11 +9,16 @@
  * then highest version <= locked version, then latest available), and
  * writes the result to `local.bun.lock`.
  *
+ * A locked version already in the bun, npm or yarn cache — fetched from the
+ * same registry host — is an exact match the registry is known to serve, so
+ * it is kept without a registry request (see `local-package-cache.ts`).
+ *
  * Zero external dependencies — semver logic is inlined.
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join, dirname } from "path";
+import { loadLocalPackageCache, type CachedPackage } from "./local-package-cache";
 
 const REGISTRY_URL =
   process.env.LOCAL_REGISTRY_URL ?? "https://npm.dev.wixpress.com";
@@ -203,6 +208,31 @@ async function fetchRegistryInfo(
   }
 }
 
+/**
+ * Whether the registry serves exactly `name@version`, asked of the per-version
+ * endpoint — a few KB, where the package document lists every version ever
+ * published. `null` when the registry did not answer; the caller then resolves
+ * from the package document as before.
+ */
+async function registryHasVersion(
+  name: string,
+  version: string
+): Promise<boolean | null> {
+  try {
+    const response = await fetchWithTimeout(
+      `${REGISTRY_URL}/${name}/${version}`,
+      { Accept: "application/json" },
+      120_000
+    );
+    if (response.status === 404) return false;
+    if (!response.ok) return null;
+    const info = (await response.json()) as RegistryVersionInfo;
+    return info.version === version;
+  } catch {
+    return null;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Version resolution
 // ---------------------------------------------------------------------------
@@ -268,11 +298,13 @@ interface ResolvedPackage {
   key: string;
   entry: LockfilePackageEntry;
   changed: boolean;
+  cachedFrom?: CachedPackage["source"];
 }
 
 async function resolvePackage(
   key: string,
-  entry: LockfilePackageEntry
+  entry: LockfilePackageEntry,
+  localCache: Map<string, CachedPackage>
 ): Promise<ResolvedPackage> {
   const packageId = entry[0];
 
@@ -285,6 +317,20 @@ async function resolvePackage(
   }
 
   const { name, version: lockedVersion } = parsePackageId(packageId);
+
+  const cached = localCache.get(packageId);
+  if (cached) {
+    if (cached.integrity && entry[3] && cached.integrity !== entry[3]) {
+      console.warn(
+        `  [WARN] ${packageId}: ${cached.source} cache integrity differs from bun.lock`
+      );
+    }
+    return { key, entry, changed: false, cachedFrom: cached.source };
+  }
+
+  if (await registryHasVersion(name, lockedVersion)) {
+    return { key, entry, changed: false };
+  }
 
   const registryInfo = await fetchRegistryInfo(name);
   if (!registryInfo) {
@@ -365,12 +411,15 @@ async function main() {
   const packageEntries = Object.entries(lockfile.packages);
 
   console.log(`Found ${packageEntries.length} packages to resolve`);
+  const localCache = loadLocalPackageCache(REGISTRY_URL);
+  console.log(`Local caches hold ${localCache.size} packages from this registry`);
   console.log();
 
   let changedCount = 0;
   let unchangedCount = 0;
   let errorCount = 0;
   let processedCount = 0;
+  const cacheHits: Record<CachedPackage["source"], number> = { bun: 0, npm: 0, yarn: 0 };
   const total = packageEntries.length;
 
   const results = await processInBatches(
@@ -378,7 +427,11 @@ async function main() {
     CONCURRENCY,
     async ([key, entry]) => {
       try {
-        const result = await resolvePackage(key, entry as LockfilePackageEntry);
+        const result = await resolvePackage(
+          key,
+          entry as LockfilePackageEntry,
+          localCache
+        );
         processedCount++;
         process.stderr.write(`\r  Progress: ${processedCount}/${total}`);
         return result;
@@ -403,6 +456,7 @@ async function main() {
     newPackages[result.key] = result.entry;
     const { name, version } = parsePackageId(result.entry[0]);
     resolvedVersions.set(name, version);
+    if (result.cachedFrom) cacheHits[result.cachedFrom]++;
     if (result.changed) {
       const origEntry = lockfile.packages[result.key] as LockfilePackageEntry;
       const { name: origName, version: origVersion } = parsePackageId(origEntry[0]);
@@ -480,6 +534,10 @@ async function main() {
   console.log(`  Changed:   ${changedCount}`);
   console.log(`  Unchanged: ${unchangedCount}`);
   console.log(`  Errors:    ${errorCount}`);
+  console.log(
+    `  From local cache: ${cacheHits.bun + cacheHits.npm + cacheHits.yarn} ` +
+      `(bun ${cacheHits.bun}, npm ${cacheHits.npm}, yarn ${cacheHits.yarn})`
+  );
   console.log(`  Patched package.json files: ${patchedPkgJsons.length}`);
   console.log(`  Output:    ${OUTPUT_PATH}`);
   if (patchedPkgJsons.length > 0) {
