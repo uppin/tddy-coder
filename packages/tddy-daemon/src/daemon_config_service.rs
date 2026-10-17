@@ -14,7 +14,8 @@ use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, GetClientConfigRequest,
     GetClientConfigResponse, GetConfigRequest, GetConfigResponse, GetIntegrationStatusRequest,
-    GetIntegrationStatusResponse, SandboxedCodebaseSupport, UpdateConfigRequest,
+    GetIntegrationStatusResponse, IntegrationState as WireIntegrationState,
+    IntegrationStatus as WireIntegrationStatus, SandboxedCodebaseSupport, UpdateConfigRequest,
     UpdateConfigResponse,
 };
 
@@ -92,6 +93,37 @@ impl DaemonConfigServiceImpl {
                 "this daemon was started without a config file, so there is nowhere to persist an update",
             )
         })
+    }
+}
+
+/// One board entry as the wire carries it: the failure only for `UNREACHABLE`, the missing fields
+/// only for `MISCONFIGURED`.
+fn wire_status(status: tddy_daemon_extensions::IntegrationStatus) -> WireIntegrationStatus {
+    use tddy_daemon_extensions::IntegrationState;
+
+    let (state, error, missing_fields) = match status.state {
+        IntegrationState::Disabled => (WireIntegrationState::Disabled, String::new(), Vec::new()),
+        IntegrationState::Misconfigured { missing } => {
+            (WireIntegrationState::Misconfigured, String::new(), missing)
+        }
+        IntegrationState::Connecting => {
+            (WireIntegrationState::Connecting, String::new(), Vec::new())
+        }
+        IntegrationState::Connected => (WireIntegrationState::Connected, String::new(), Vec::new()),
+        IntegrationState::Unreachable { error } => {
+            (WireIntegrationState::Unreachable, error, Vec::new())
+        }
+    };
+    WireIntegrationStatus {
+        id: status.id,
+        label: status.label,
+        state: state as i32,
+        error,
+        missing_fields,
+        since_unix_ms: status
+            .since
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |since| since.as_millis() as i64),
     }
 }
 
@@ -259,7 +291,14 @@ impl DaemonConfigServiceTrait for DaemonConfigServiceImpl {
         &self,
         request: Request<GetIntegrationStatusRequest>,
     ) -> Result<Response<GetIntegrationStatusResponse>, Status> {
-        let _ = request;
-        todo!("DaemonConfigServiceImpl::get_integration_status")
+        self.admit(&request.into_inner().session_token)?;
+        let board = self.integration_status.as_ref().ok_or_else(|| {
+            Status::failed_precondition(
+                "this daemon was started without an integration status board",
+            )
+        })?;
+        Ok(Response::new(GetIntegrationStatusResponse {
+            integrations: board.snapshot().into_iter().map(wire_status).collect(),
+        }))
     }
 }

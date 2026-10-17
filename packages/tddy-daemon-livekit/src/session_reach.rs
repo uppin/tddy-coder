@@ -69,6 +69,9 @@ impl LiveKitSessionReach {
         rooms: Arc<SessionRoomRegistry>,
         status: IntegrationReporter,
     ) -> Arc<Self> {
+        // What the configuration alone says, from the start: a daemon with LiveKit configured is
+        // not "disabled" merely because nothing has dialled it yet.
+        status.report(livekit_integration_state(config.livekit.as_ref()));
         Arc::new(Self {
             config,
             rooms,
