@@ -164,6 +164,9 @@ export interface SessionServiceScenario
   connectSession?:
     | Partial<ConnectSessionResponse>
     | ((sessionId: string) => Partial<ConnectSessionResponse>);
+  /** The first n `ConnectSession` calls fail with `Code.Unavailable` instead of replying; later ones
+   *  reply as `connectSession` says. Models an attach that fails transiently. Default: none fail. */
+  failedConnectSessions?: number;
   /** ResumeSession response. A function derives it per-request; a plain object is static. */
   resumeSession?:
     | Partial<ResumeSessionResponse>
@@ -340,6 +343,9 @@ export function aSessionServiceBackend(
       }),
       connectSession: async (req) => {
         connectedSessionIds.push(req.sessionId);
+        if (connectedSessionIds.length <= (scenario.failedConnectSessions ?? 0)) {
+          throw new ConnectError("daemon could not attach the session", Code.Unavailable);
+        }
         const overrides =
           typeof scenario.connectSession === "function"
             ? scenario.connectSession(req.sessionId)

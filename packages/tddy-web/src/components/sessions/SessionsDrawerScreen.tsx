@@ -187,6 +187,25 @@ export function SessionsDrawerScreen({
   // changing, and each revival owes a fresh attach — a claim that only reset on selection change
   // would strand every resume after the first on an empty pane.
   const attachClaimRef = useRef<AttachClaim | null>(null);
+  // The session whose last attach failed and was already given its one automatic retry.
+  const retriedAttachSessionRef = useRef<string | null>(null);
+  /**
+   * What a finished `ConnectSession` owes the attach claim.
+   *
+   * A failed attach took nothing, so its claim is given back and the liveness effect re-attaches on
+   * the next list snapshot — a live session offers no Resume to recover by. That is allowed once per
+   * session: a second consecutive failure keeps the claim, so a persistent failure stays on the
+   * `error` status and inspector instead of spinning a `ConnectSession` per poll.
+   */
+  const settleAttach = (sessionId: string, attached: boolean) => {
+    if (attached) {
+      retriedAttachSessionRef.current = null;
+      return;
+    }
+    if (retriedAttachSessionRef.current === sessionId) return;
+    retriedAttachSessionRef.current = sessionId;
+    if (attachClaimRef.current?.sessionId === sessionId) attachClaimRef.current = null;
+  };
   // Bumped once per session-list snapshot, so an attach claim can record which snapshot it was taken
   // under. Without it a resume could not be told apart from a stale dormant reading: `ResumeSession`
   // returns before the daemon's next `ListSessions`, so the list keeps reporting the session dormant
@@ -590,9 +609,11 @@ export function SessionsDrawerScreen({
     if (session.isActive) {
       const owningHost = connectHost(owningHostForSession(session, selectedInstanceId ?? ""));
       if (owningHost) {
-        connectSession(selectedSessionId, sessionToken, owningHost).catch((err) => {
-          console.debug("[SessionsDrawerScreen] connectSession error", err);
-        });
+        connectSession(selectedSessionId, sessionToken, owningHost)
+          .then((attached) => settleAttach(selectedSessionId, attached))
+          .catch((err) => {
+            console.debug("[SessionsDrawerScreen] connectSession error", err);
+          });
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -636,9 +657,12 @@ export function SessionsDrawerScreen({
     );
     if (!owningHost) return;
     attachClaimRef.current = { sessionId: selectedSession.sessionId, listGeneration };
-    connectSession(selectedSession.sessionId, sessionToken, owningHost).catch((err) => {
-      console.debug("[SessionsDrawerScreen] connectSession error", err);
-    });
+    const attachedId = selectedSession.sessionId;
+    connectSession(attachedId, sessionToken, owningHost)
+      .then((attached) => settleAttach(attachedId, attached))
+      .catch((err) => {
+        console.debug("[SessionsDrawerScreen] connectSession error", err);
+      });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSession, selectedInstanceId, connectHost, listGeneration]);
 
@@ -681,12 +705,15 @@ export function SessionsDrawerScreen({
     // terminal through a reconnect and another `ClaimTerminalControl`. The claim is stamped with the
     // snapshot the operator acted on, so the dormant readings still in flight cannot revoke it.
     attachClaimRef.current = { sessionId, listGeneration };
-    resumeSession(sessionId, sessionToken, activeHost).catch((err) => {
-      // The resume never landed, so no attach was taken after all — release the claim so the liveness
-      // effect can still attach if the session turns out to be alive.
-      attachClaimRef.current = null;
-      console.debug("[SessionsDrawerScreen] resumeSession error", err);
-    });
+    resumeSession(sessionId, sessionToken, activeHost)
+      .then((attached) => {
+        // The resume never landed, so no attach was taken after all — release the claim so the
+        // liveness effect can still attach if the session turns out to be alive.
+        if (!attached) attachClaimRef.current = null;
+      })
+      .catch((err) => {
+        console.debug("[SessionsDrawerScreen] resumeSession error", err);
+      });
   };
 
   const handleDelete = (sessionId: string) => {
@@ -802,9 +829,11 @@ export function SessionsDrawerScreen({
     navigate(sessionsDrawerPathForSession(sessionId));
     const creatingHost = connectHost(selectedInstanceId);
     if (!creatingHost) return;
-    connectSession(sessionId, sessionToken, creatingHost).catch((err) => {
-      console.debug("[SessionsDrawerScreen] connectSession after create error", err);
-    });
+    connectSession(sessionId, sessionToken, creatingHost)
+      .then((attached) => settleAttach(sessionId, attached))
+      .catch((err) => {
+        console.debug("[SessionsDrawerScreen] connectSession after create error", err);
+      });
     // Refresh the sessions list so the newly-created session appears in the drawer
     // and selectedSession resolves to a non-null value.
     requestSessionsRefresh();
