@@ -26,6 +26,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -48,7 +49,7 @@ import {
   useAppLocation,
 } from "../routing/useAppLocation";
 import { LiveKitConnections } from "./connections/liveKit";
-import { useHostClient } from "./connections/registry";
+import { HostReadiness, useHostClient } from "./connections/registry";
 import type { ConnectionStatus } from "./connections/types";
 import { daemonHostOf } from "./hostDirectory/daemonHost";
 import { useLiveKitHostDirectorySource } from "./hostDirectory/liveKitSource";
@@ -335,6 +336,25 @@ function SelectedDaemonScope({
   const { selectedInstanceId, selectDaemon } = useSelectedDaemonState(daemons, servingInstanceId);
   const selectedLabel = useSelectedDaemonLabel(daemons, selectedInstanceId);
 
+  // A host is ready once the directory has listed it, and stays ready: a common room that drops and
+  // rejoins empties the list for a moment, and withdrawing every client over that would tear down
+  // each stream keyed on one — the flash `useSelectedDaemonState` exists to avoid. Only a host that
+  // has never been listed in this tab is waiting.
+  //
+  // The predicate changes identity only when a host is *newly* listed, never when the list is merely
+  // rebuilt with the same daemons (`useRoomParticipants` yields a fresh array per participant event):
+  // its identity is what re-runs every read keyed on a connection. Recording during render is
+  // idempotent, so a discarded render leaves nothing wrong behind.
+  const listedRef = useRef<Set<string>>(new Set());
+  for (const daemon of daemons) listedRef.current.add(daemon.instanceId);
+  const listedCount = listedRef.current.size;
+  const isReady = useMemo(() => {
+    const listed = new Set(listedRef.current);
+    return (hostId: string) => listed.has(hostId);
+    // `listedCount` is the proxy for "the listed set grew".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listedCount]);
+
   const value: SelectedDaemonContextValue = useMemo(
     () => ({
       daemons,
@@ -367,7 +387,9 @@ function SelectedDaemonScope({
   // re-register the wire that reaches them.
   return (
     <SelectedDaemonContext.Provider value={value}>
-      <Fragment key={selectedInstanceId ?? "__no-daemon__"}>{children}</Fragment>
+      <HostReadiness isReady={isReady}>
+        <Fragment key={selectedInstanceId ?? "__no-daemon__"}>{children}</Fragment>
+      </HostReadiness>
     </SelectedDaemonContext.Provider>
   );
 }
