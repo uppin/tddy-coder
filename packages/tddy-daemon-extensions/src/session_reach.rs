@@ -29,8 +29,11 @@ pub trait ReachableSessions: Send + Sync {
     /// Authenticate `session_token` and resolve `session_id` to a session this host runs — for an
     /// extension serving an RPC of its own. `arrived_over` of the result is
     /// [`RequestTransport::Direct`]: the extension's RPC, not the core, received the request.
-    async fn resolve(&self, session_token: &str, session_id: &str)
-        -> Result<ReachedSession, Status>;
+    async fn resolve(
+        &self,
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<ReachedSession, Status>;
 
     /// The RPC surface a participant outside this host reaches the session through.
     fn session_services(&self) -> Result<tddy_rpc::MultiRpcService, Status>;

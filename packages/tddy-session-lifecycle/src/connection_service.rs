@@ -527,6 +527,6 @@ mod stack_child_spawn_tests;
 mod svc_agent_roster_wiring;
 mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
-mod svc_session_identity_wiring;
 mod svc_reachable_sessions;
+mod svc_session_identity_wiring;
 mod svc_worktree_observer_wiring;

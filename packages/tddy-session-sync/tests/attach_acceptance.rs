@@ -238,12 +238,11 @@ const A_LOOPBACK_CALL: std::time::Duration = std::time::Duration::from_secs(5);
 #[tokio::test]
 async fn asks_the_daemon_to_open_the_session_room_through_the_room_service() {
     // Given a daemon that serves the room service (and nothing else: any other path is a 404)
-    let daemon =
-        tddy_testing_commons::stub_http_routed::a_stub_http_endpoint_routing(&[(
-            OPEN_SESSION_ROOM,
-            "",
-        )])
-        .await;
+    let daemon = tddy_testing_commons::stub_http_routed::a_stub_http_endpoint_routing(&[(
+        OPEN_SESSION_ROOM,
+        "",
+    )])
+    .await;
 
     // When a mirror asks for the session's room
     tddy_session_sync::open_session_room(
