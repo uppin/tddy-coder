@@ -1,4 +1,4 @@
-use crate::crate_move::destination;
+use crate::crate_move::new_crate;
 use crate::crate_move::source_scan::items_of_module;
 use std::path::Path;
 
@@ -248,6 +248,11 @@ fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<
         .filter(|(_, op)| op.op.moves_across_crates())
         .flat_map(|(index, op)| op.anchors().map(move |anchor| (index, op, anchor)))
         .filter_map(|(index, op, anchor)| {
+            let overlay = new_crate::created_by_earlier_operations(workspace, ops, index).ok()?;
+            let workspace = &Workspace {
+                root: workspace.root,
+                overlay: &overlay,
+            };
             let earlier = super::super::moved_by_earlier_operations(workspace, ops, index, anchor);
             super::super::move_preconditions(
                 workspace,
@@ -258,8 +263,7 @@ fn modules_the_plan_moves(workspace: &Workspace<'_>, ops: &[RefactorOp]) -> Vec<
             let source = anchor.file();
             let module = module_home::module_name(source).ok()?;
             let home = module_home::module_home(workspace, source, &module).ok()?;
-            let destination =
-                destination::Destination::read(workspace.root, op.to.as_deref()?).ok()?;
+            let destination = new_crate::destination_of(workspace, op, op.to.as_deref()?).ok()?;
             let reexport = op.reexport.unwrap_or(Reexport::None);
             let moving = moving::Move::of(workspace, &home, &destination, reexport).ok()?;
             // A tree that cannot be carried is left out: `unrunnable` reports it, and `check` runs

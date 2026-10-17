@@ -1,16 +1,12 @@
-use super::PlannedRewrite;
-
 use std::{collections::BTreeSet, ffi::OsStr, path::Path};
 
 use crate::{
-    crate_move::{
-        destination, manifest_edits, module_files, module_home,
-        use_group::{self, Leaf},
-    },
-    edit::{FileEdit, TextEdit},
+    crate_move::{destination, manifest_edits, module_files, module_home},
+    edit::FileEdit,
 };
 
 use super::malformed;
+use super::new_crate::{self, NewCrate};
 
 use manifest_edits::Table;
 
@@ -37,6 +33,8 @@ pub(crate) struct Move {
     pub(crate) destination: destination::Destination,
     /// What to leave behind in the crate it left.
     pub(crate) reexport: Reexport,
+    /// The crate the move creates at the destination, when its plan line names one with `name`.
+    pub(crate) creates: Option<NewCrate>,
 }
 
 impl Move {
@@ -53,8 +51,9 @@ impl Move {
 
         Ok(Move {
             origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
-            destination: destination::Destination::read(workspace.root, destination)?,
+            destination: new_crate::destination_of(workspace, op, destination)?,
             reexport: op.reexport.unwrap_or(Reexport::None),
+            creates: NewCrate::named_by(op),
             source,
             module,
             home,
@@ -80,6 +79,8 @@ impl Move {
             origin: destination::Destination::read(workspace.root, &home.crate_dir)?,
             destination: destination.clone(),
             reexport,
+            // A member is one module of a set; what the set creates is the cluster's to carry.
+            creates: None,
             source: format!("{}/src/{}.rs", home.crate_dir, home.path.join("/")),
             module,
             home: home.clone(),
@@ -212,28 +213,41 @@ impl Move {
             self.dependency_lines(&text, &origin, Table::DevDependencies, dev_named)?;
 
         let mut edits =
-            manifest_edits::with_dependencies(&text, Table::Dependencies, &dependencies);
+            manifest_edits::with_dependencies(&text, Table::Dependencies, &dependencies.plain);
         edits.extend(manifest_edits::with_dependencies(
             &text,
             Table::DevDependencies,
-            &dev_dependencies,
+            &dev_dependencies.plain,
+        ));
+        edits.extend(target_table_edits(
+            &text,
+            dependencies
+                .by_target
+                .iter()
+                .chain(&dev_dependencies.by_target),
         ));
         Ok(FileEdit::Change { path, edits })
     }
 
-    /// The lines `table` of the destination's manifest has to gain for `named`.
+    /// The lines `table` of the destination's manifest has to gain for `named`, and the lines its
+    /// target-specific tables have to gain.
     ///
     /// A dev-dependency is already reachable from the destination's tests when either table declares
     /// it, so it is skipped then; a dependency is only reachable from its code through
     /// `[dependencies]`.
+    ///
+    /// A crate the origin declares in the plain table being filled is carried there. One it declares
+    /// only under `[target.'<cfg>'.…]` is carried to that same table of the destination, so the
+    /// `cfg` that kept it off other targets is not lost; a target dev dependency's table is the
+    /// `dev-dependencies` one, for code only tests name.
     fn dependency_lines(
         &self,
         destination: &str,
         origin: &str,
         table: Table,
         named: &BTreeSet<String>,
-    ) -> Result<Vec<String>> {
-        let mut lines = Vec::new();
+    ) -> Result<CarriedLines> {
+        let mut carried = CarriedLines::default();
         for extern_name in named {
             let declared_already = match table {
                 Table::Dependencies => {
@@ -247,7 +261,7 @@ impl Move {
                 continue;
             }
             if *extern_name == self.origin.extern_name {
-                lines.push(format!(
+                carried.plain.push(format!(
                     "{} = {{ path = \"{}\" }}",
                     self.origin.package,
                     manifest_edits::relative_from(&self.destination.dir, &self.origin.dir)
@@ -259,21 +273,75 @@ impl Move {
                 Table::DevDependencies => {
                     manifest_edits::dependency_line_from_either_table(origin, extern_name)
                 }
+            };
+            if let Some(declared) = declared {
+                carried.plain.push(manifest_edits::re_anchored(
+                    &declared,
+                    &self.origin.dir,
+                    &self.destination.dir,
+                ));
+                continue;
             }
-            .ok_or_else(|| {
-                malformed(format!(
+
+            let declared_for_targets = self.target_lines(destination, origin, table, extern_name);
+            if declared_for_targets.is_empty() {
+                return Err(malformed(format!(
                     "the moved module names `{extern_name}`, which {}/Cargo.toml does not declare \
                      — there is nothing to carry across",
                     self.origin.dir
-                ))
-            })?;
-            lines.push(manifest_edits::re_anchored(
-                &declared,
-                &self.origin.dir,
-                &self.destination.dir,
-            ));
+                )));
+            }
+            for (header, line) in declared_for_targets {
+                carried.by_target.entry(header).or_default().push(line);
+            }
         }
-        Ok(lines)
+        Ok(carried)
+    }
+
+    /// Each target table of the origin declaring `extern_name` that the destination does not
+    /// already declare it under, as the header it goes under there and the line, re-anchored.
+    fn target_lines(
+        &self,
+        destination: &str,
+        origin: &str,
+        table: Table,
+        extern_name: &str,
+    ) -> Vec<(String, String)> {
+        let dev = table == Table::DevDependencies;
+        let mut declarations = target_tables::target_declarations(origin, extern_name, dev);
+        let mut to_dev_table = false;
+        if declarations.is_empty() && dev {
+            declarations = target_tables::target_declarations(origin, extern_name, false);
+            to_dev_table = true;
+        }
+        // Reachable from the destination's tests through a table of its own, whichever one.
+        let reachable_for_tests =
+            dev && !target_tables::target_declarations(destination, extern_name, false).is_empty();
+        let held_under: Vec<String> =
+            target_tables::target_declarations(destination, extern_name, dev)
+                .into_iter()
+                .map(|held| held.header)
+                .collect();
+
+        declarations
+            .into_iter()
+            .map(|declared| {
+                let header = if to_dev_table {
+                    declared
+                        .header
+                        .replace(".dependencies]", ".dev-dependencies]")
+                } else {
+                    declared.header
+                };
+                let line = manifest_edits::re_anchored(
+                    &declared.line,
+                    &self.origin.dir,
+                    &self.destination.dir,
+                );
+                (header, line)
+            })
+            .filter(|(header, _)| !reachable_for_tests && !held_under.contains(header))
+            .collect()
     }
 
     /// Every manifest that has to gain a dependency on the destination.
@@ -346,82 +414,13 @@ impl Move {
     }
 }
 
+pub(super) mod callers;
 mod facade_writer;
+mod table_edits;
+use crate::crate_move::manifest_edits::target_tables;
+use crate::crate_move::moving::table_edits::target_table_edits;
+use crate::crate_move::moving::table_edits::CarriedLines;
 pub(crate) use facade_writer::{declared_in_destination, left_behind};
-
-/// One `FileEdit::Change` per caller, carrying every path in that file at once.
-///
-/// `rewrites` are every path the whole move re-points, so a `use` group naming two moved modules is
-/// written once — see [`caller_edits`].
-///
-/// # Errors
-///
-/// Refuses for every reason [`caller_edits`] does.
-pub(crate) fn caller_changes(
-    workspace: &Workspace<'_>,
-    rewrites: Vec<PlannedRewrite>,
-) -> Result<Vec<FileEdit>> {
-    let paths: BTreeSet<String> = rewrites
-        .iter()
-        .map(|rewrite| rewrite.path.clone())
-        .collect();
-
-    let mut changes = Vec::new();
-    for path in paths {
-        let text = workspace.read(&path)?;
-        let in_the_file: Vec<&PlannedRewrite> = rewrites
-            .iter()
-            .filter(|rewrite| rewrite.path == path)
-            .collect();
-        let edits = caller_edits(&path, &text, &in_the_file)?;
-        changes.push(FileEdit::Change { path, edits });
-    }
-    Ok(changes)
-}
-
-/// The edits one caller file needs. A path in a plain `use` or in a body is replaced where it
-/// stands; paths inside one grouped `use` are one [`use_group`] edit of the whole statement, so the
-/// group keeps what stays and the re-pointed members leave it, rather than a new crate name being
-/// spliced into someone else's group.
-///
-/// # Errors
-///
-/// Refuses a group that must split while an attribute or doc comment sits above it, and one the
-/// group rule cannot read.
-fn caller_edits(file: &str, text: &str, rewrites: &[&PlannedRewrite]) -> Result<Vec<TextEdit>> {
-    let mut edits = Vec::new();
-    let mut groups: Vec<(std::ops::Range<usize>, Vec<Leaf>)> = Vec::new();
-
-    for rewrite in rewrites {
-        let group = use_group::statement_containing(text, rewrite.span.start)
-            .filter(|span| use_group::is_a_group(&text[span.clone()]));
-        let Some(span) = group else {
-            edits.push(manifest_edits::replacement(
-                text,
-                rewrite.span.clone(),
-                &rewrite.to,
-            ));
-            continue;
-        };
-        let leaf = Leaf {
-            written: use_group::leaf_path(
-                &text[span.clone()],
-                rewrite.span.start - span.start,
-                &text[rewrite.span.clone()],
-            ),
-            rewritten: rewrite.to.clone(),
-        };
-        match groups.iter_mut().find(|(known, _)| *known == span) {
-            Some((_, leaves)) => leaves.push(leaf),
-            None => groups.push((span, vec![leaf])),
-        }
-    }
-
-    for (span, leaves) in groups {
-        edits.push(use_group::statement_edit(file, text, span, &leaves)?);
-    }
-    Ok(edits)
-}
 
 #[cfg(test)]
 mod tests {

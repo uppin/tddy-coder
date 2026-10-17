@@ -1,5 +1,8 @@
+pub(super) mod target_tables;
+
 use crate::{edit::Position, Range};
 
+use crate::crate_move::manifest_edits::target_tables::with_lines_under;
 use crate::edit::TextEdit;
 
 /// The span of the `[<visibility>] mod <module>;` line in a crate root, newline included.
@@ -315,25 +318,11 @@ fn dependencies_of(manifest: &str, table: Table) -> Vec<&str> {
 
 /// The manifest with `lines` added to one of its dependency tables.
 pub(crate) fn with_dependencies(manifest: &str, table: Table, lines: &[String]) -> Vec<TextEdit> {
-    if lines.is_empty() {
-        return Vec::new();
-    }
-
-    let added = lines.join("\n") + "\n";
-    match end_of_dependencies(manifest, table) {
-        Some(at) => vec![replacement(manifest, at..at, &added)],
-        // A manifest without the table gains it, at the end where a table cannot land inside
-        // another one.
-        None => vec![replacement(
-            manifest,
-            manifest.len()..manifest.len(),
-            &format!("\n{}\n{added}", table.header()),
-        )],
-    }
+    with_lines_under(manifest, table.header(), lines)
 }
 
-/// Where one of a manifest's dependency tables ends, or `None` when it declares none.
-fn end_of_dependencies(manifest: &str, table: Table) -> Option<usize> {
+/// Where the table with this header ends, or `None` when the manifest has no such table.
+fn end_of_table(manifest: &str, header: &str) -> Option<usize> {
     let mut offset = 0usize;
     let mut found = None;
     let mut inside = false;
@@ -342,7 +331,7 @@ fn end_of_dependencies(manifest: &str, table: Table) -> Option<usize> {
         offset += line.len();
 
         let trimmed = line.trim();
-        if trimmed == table.header() {
+        if trimmed == header {
             inside = true;
             found = Some(offset);
             continue;
@@ -466,6 +455,26 @@ pub(crate) fn position_of(text: &str, offset: usize) -> Position {
             .map_or(0, |line| line.chars().count()) as u32
             + 1,
     }
+}
+
+/// The line of a manifest's `[package]` table whose key is `key`, verbatim — `edition = "2021"`,
+/// `version.workspace = true`.
+pub(crate) fn package_line<'a>(manifest: &'a str, key: &str) -> Option<&'a str> {
+    manifest
+        .lines()
+        .map(str::trim)
+        .skip_while(|line| *line != "[package]")
+        .skip(1)
+        .take_while(|line| !line.starts_with('['))
+        .find(|line| {
+            line.split_once('=').is_some_and(|(name, _)| {
+                let name = name.trim();
+                name == key
+                    || name
+                        .strip_prefix(key)
+                        .is_some_and(|rest| rest.starts_with('.'))
+            })
+        })
 }
 
 #[cfg(test)]
@@ -756,5 +765,103 @@ mod declared_module_tests {
             crate::apply::edited(root.to_string(), &[edit]).expect("the edit applies"),
             "pub(crate) mod alpha;\npub mod beta;\npub(super) mod zeta;\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod target_table_tests {
+    use super::*;
+    use crate::apply::edited;
+    use crate::crate_move::manifest_edits::target_tables::declares_dependency_in_any_table;
+    use crate::crate_move::manifest_edits::target_tables::target_declarations;
+    use crate::crate_move::manifest_edits::target_tables::with_lines_under;
+    use crate::crate_move::manifest_edits::target_tables::DeclaredIn;
+
+    const UNIX_DEPENDENCIES: &str = "[target.'cfg(unix)'.dependencies]";
+    const A_MANIFEST_WITH_A_UNIX_TABLE: &str =
+        "[package]\nname = \"origin\"\nversion = \"0.1.0\"\n\
+         edition = \"2021\"\n\n[dependencies]\nlog = \"0.4\"\n\n\
+         [target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n";
+
+    #[test]
+    fn a_crate_declared_under_a_target_table_is_read_with_its_header_and_line() {
+        // When the unix table is asked for `libc`
+        let declared = target_declarations(A_MANIFEST_WITH_A_UNIX_TABLE, "libc", false);
+
+        // Then it answers with the header and the line verbatim
+        assert_eq!(
+            declared,
+            [DeclaredIn {
+                header: UNIX_DEPENDENCIES.to_string(),
+                line: "libc = \"0.2\"".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_crate_counts_as_declared_in_a_plain_or_a_target_table_and_not_otherwise() {
+        assert!(declares_dependency_in_any_table(
+            A_MANIFEST_WITH_A_UNIX_TABLE,
+            "log"
+        ));
+        assert!(declares_dependency_in_any_table(
+            A_MANIFEST_WITH_A_UNIX_TABLE,
+            "libc"
+        ));
+        assert!(!declares_dependency_in_any_table(
+            A_MANIFEST_WITH_A_UNIX_TABLE,
+            "serde"
+        ));
+    }
+
+    #[test]
+    fn lines_are_appended_to_a_target_table_or_the_table_is_appended() {
+        // Given one manifest with the unix table and one without
+        let without = "[package]\nname = \"destination\"\n";
+
+        // When a line is added under the unix header to each
+        let extended = edited(
+            A_MANIFEST_WITH_A_UNIX_TABLE.to_string(),
+            &with_lines_under(
+                A_MANIFEST_WITH_A_UNIX_TABLE,
+                UNIX_DEPENDENCIES,
+                &["nix = \"0.29\"".to_string()],
+            ),
+        )
+        .expect("the edits apply");
+        let created = edited(
+            without.to_string(),
+            &with_lines_under(without, UNIX_DEPENDENCIES, &["libc = \"0.2\"".to_string()]),
+        )
+        .expect("the edits apply");
+
+        // Then the existing table grows, and the missing one is written at the end
+        assert!(
+            extended.ends_with("libc = \"0.2\"\nnix = \"0.29\"\n"),
+            "{extended}"
+        );
+        assert_eq!(
+            created,
+            "[package]\nname = \"destination\"\n\n[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n"
+        );
+    }
+
+    #[test]
+    fn a_package_line_is_read_verbatim_from_the_package_table_only() {
+        // Given a manifest inheriting its version, with a dependency carrying its own `version`
+        let manifest =
+            "[package]\nname = \"origin\"\nversion.workspace = true\nedition = \"2024\"\n\n\
+                        [dependencies]\nserde = { version = \"1\" }\n";
+
+        // When / Then
+        assert_eq!(
+            package_line(manifest, "version"),
+            Some("version.workspace = true")
+        );
+        assert_eq!(
+            package_line(manifest, "edition"),
+            Some("edition = \"2024\"")
+        );
+        assert_eq!(package_line(manifest, "description"), None);
     }
 }

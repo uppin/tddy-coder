@@ -123,8 +123,8 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 | `rename_symbol` | symbol, range or item | `name` | ✅ | ✅ |
 | `extract_module` | range over a selection of items | `name`, `reexport` = `glob` \| `named` \| `none`, `to_file` | — | ✅ |
 | `extract_module_to_file` | range at the `mod` keyword | — | — | ✅ |
-| `move_module_to_crate` | symbol | `to`, `reexport` = `glob` \| `none` | — | ✅ |
-| `move_cluster_to_crate` | symbol (first member) | `also` (the other members' anchors), `to`, `reexport` | — | ✅ |
+| `move_module_to_crate` | symbol | `to`, `name` (creates the crate at `to`), `reexport` = `glob` \| `none` | — | ✅ |
+| `move_cluster_to_crate` | symbol (first member) | `also` (the other members' anchors), `to`, `name` (creates the crate at `to`), `reexport` | — | ✅ |
 | `move_test_binary_to_crate` | the test binary's path | `to` | — | ✅ |
 | `move_item` | `items` anchor (or one `item` anchor) over whole module-level items of one file | `to` (the destination module; with `name`, its parent), `name` (creates the destination), `reexport` = `glob` \| `named` \| `none` \| `outside` | — | ✅ |
 | `reparent_module` | `items` anchor on the module's `mod` declaration | `to` (the new parent), `reexport` = `glob` \| `none` \| `outside` | — | ✅ |
@@ -150,6 +150,15 @@ Do not write these by hand: `restructure anchors <file> --at L:C-L:C` and `--ite
 Every operation but two groups is backed by a real assist in the engine that claims it: `extract_class` (below) and the signature and call-site operations (see **Signature and call-site operations**). Where a cell is
 empty the engine has no equivalent, and the executor refuses the operation rather than approximating
 it. The ⚠️ marks `extract_class` — see **`extract_class` is hand-written** below.
+
+`name` on `move_module_to_crate` and `move_cluster_to_crate` is the `[package] name` of a crate the move
+creates at `to`; a later operation of the plan moves into it without `name`. The skeleton is `[package]` with
+the name and the origin's `version` and `edition` lines verbatim, an empty `src/lib.rs`, and a root `members`
+entry. Refused, naming the path and writing nothing: `name` on `move_test_binary_to_crate`; a name that is not
+a Cargo package name (letters, digits, `-`, `_`; no leading digit or `-`; not `test`); two operations
+creating the same `to`; `to` already a crate, or a directory that is not empty; an extern name the origin or
+a listed `members` entry already has; a root `Cargo.toml` with no `members` array. A move without `name`
+into a missing crate is refused, and says `name` creates it.
 
 `variant` selects between actions the engine offers for the same operation. Omitting it keeps the
 behaviour an operation had before the field existed (`inner`, `alias`), and a name the operation does

@@ -240,6 +240,7 @@ fn header_version(line: &str) -> Option<u32> {
 fn parse_ops<'a>(lines: impl Iterator<Item = &'a str>) -> Result<Vec<RefactorOp>> {
     let ops = lines.map(parse_op).collect::<Result<Vec<_>>>()?;
     refuse_split_groups(&ops)?;
+    crate_move_fields::refuse_crate_creations_it_cannot_honour(&ops)?;
     Ok(ops)
 }
 
@@ -452,6 +453,7 @@ fn parse_op(line: &str) -> Result<RefactorOp> {
 }
 
 mod canonical_paths;
+mod crate_move_fields;
 mod facade_imports_fields;
 mod file_hint;
 mod groups;

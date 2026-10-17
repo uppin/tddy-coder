@@ -15,6 +15,8 @@ use crate::plan::Reexport;
 
 use super::module_home;
 
+use super::new_crate::{self, NewCrate};
+
 use super::malformed;
 use crate::crate_move::{carried, moving};
 use crate::edit::{FileEdit, TextEdit};
@@ -37,6 +39,8 @@ pub struct MovingCluster {
     pub destination: destination::Destination,
     /// What each leaves behind in the crate it left.
     pub reexport: Reexport,
+    /// The crate the move creates at the destination, when its plan line names one with `name`.
+    pub creates: Option<NewCrate>,
 }
 
 impl MovingCluster {
@@ -63,6 +67,7 @@ pub(crate) fn travelling_alone(moving: &moving::Move) -> MovingCluster {
         members: vec![moving.home.clone()],
         destination: moving.destination.clone(),
         reexport: moving.reexport,
+        creates: moving.creates.clone(),
     }
 }
 
@@ -85,8 +90,9 @@ pub(crate) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Mov
 
     Ok(MovingCluster {
         members,
-        destination: destination::Destination::read(workspace.root, to)?,
+        destination: new_crate::destination_of(workspace, op, to)?,
         reexport: op.reexport.unwrap_or(Reexport::None),
+        creates: NewCrate::named_by(op),
     })
 }
 
@@ -109,6 +115,56 @@ pub(crate) fn named_by(workspace: &Workspace<'_>, op: &RefactorOp) -> Result<Mov
 /// whose members do not all leave the same crate — `crate::<module>` is written relative to one
 /// crate root, so a set spanning two of them has no single co-moving vocabulary to be read in.
 pub fn resolve_cluster(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
+) -> Result<WorkspaceEdit> {
+    match &cluster.creates {
+        None => cluster_edits(engine, workspace, cluster),
+        Some(creation) => creating(engine, workspace, cluster, creation),
+    }
+}
+
+/// [`resolve_cluster`] for a set that moves into a crate it creates: the creation is refused where
+/// the tree forbids it, the set is resolved against a workspace that already holds the new crate's
+/// skeleton — so every edit to its manifest and root reads text that exists — and the edits to the
+/// created files are folded into the skeleton, one creation and one change per file.
+fn creating(
+    engine: &mut dyn ModuleReferences,
+    workspace: &Workspace<'_>,
+    cluster: &MovingCluster,
+    creation: &NewCrate,
+) -> Result<WorkspaceEdit> {
+    let first = cluster
+        .members
+        .first()
+        .ok_or_else(|| malformed("a moving cluster names no modules — there is nothing to move"))?;
+    let origin = destination::Destination::read_in(workspace, &first.crate_dir)?;
+    if let Some(refusal) = creation.refusal(workspace, &origin)? {
+        return Err(malformed(refusal));
+    }
+
+    let skeleton = creation.skeleton(workspace, &origin)?;
+    let mut overlay = workspace.overlay.clone();
+    overlay.record(workspace.root, &skeleton.creation())?;
+    let seeded = Workspace {
+        root: workspace.root,
+        overlay: &overlay,
+    };
+    // The new root declares nothing yet, so every member lands in the same gap and would keep the
+    // order the plan named them in; by name is the order a sorted root has.
+    let mut by_name = cluster.clone();
+    by_name
+        .members
+        .sort_by(|left, right| left.path.cmp(&right.path));
+    let edit = cluster_edits(engine, &seeded, &by_name)?;
+    Ok(WorkspaceEdit {
+        changes: new_crate::folded(&skeleton, edit.changes)?,
+    })
+}
+
+/// The edits of a set moving into a crate that exists in `workspace`.
+fn cluster_edits(
     engine: &mut dyn ModuleReferences,
     workspace: &Workspace<'_>,
     cluster: &MovingCluster,
@@ -140,7 +196,7 @@ pub fn resolve_cluster(
     // Every member's callers are written together: two members named in one `use` group of a
     // caller are one edit of that statement, not two over spans of the same group.
     if cluster.reexport == Reexport::None {
-        merged.absorb_all(moving::caller_changes(workspace, callers)?);
+        merged.absorb_all(callers::caller_changes(workspace, callers)?);
     }
     merged.absorb_all(moving::left_behind(workspace, &members, &surveys)?);
     merged.absorb_all(moving::declared_in_destination(workspace, &members)?);
@@ -249,6 +305,7 @@ impl MergedChanges {
 
 mod gathering;
 mod stranded;
+use crate::crate_move::moving::callers;
 pub use stranded::siblings_left_behind;
 pub(crate) use stranded::stranded_siblings;
 
@@ -405,6 +462,7 @@ mod tests {
                 extern_name: "destination".to_string(),
             },
             reexport,
+            creates: None,
         }
     }
 

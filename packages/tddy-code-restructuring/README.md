@@ -169,6 +169,11 @@ over separate moves, at its first operation — see
 moved module's body path to a module that stays behind, and a destination that already has the module —
 see [the body-path and merge findings](docs/readiness-and-gates.md#the-body-path-and-merge-findings).
 
+`move_module_to_crate` and `move_cluster_to_crate` **create** their destination when the plan line carries
+`name`: the new crate's manifest (the origin's `version` and `edition` lines, verbatim), `src/lib.rs` and
+root `members` entry are part of the move's single edit, and a later operation of the plan moves into
+the crate an earlier one created. See [docs/crate-creation.md](docs/crate-creation.md).
+
 `move_test_binary_to_crate` moves `<crate>/tests/<name>.rs` to the crate it exercises. A test binary
 is a different shape from a module — cargo auto-discovers it, so there is no `mod` line to remove;
 nothing can reference it, so `reexport` is refused; and the destination gains
@@ -202,7 +207,7 @@ leaves no record on this path. The daemon's own record is always open and has no
 | Runner | `runner/entry_points.rs` with `anchor_entry_points.rs`, `check_entry_points.rs`, `store_run.rs` (and `store_run/applied_op_record.rs`); `runner/group_gate.rs`; `runner/tidy.rs` with `tidy/{diagnostics,gating,format}.rs`; `runner/{budget,comparison,compile_gate,options,outcome,rehearsal,resume}.rs` |
 | Verify | `verify.rs`, `verify/statements.rs`, `verify/tokens.rs`, `verify/retarget.rs` (`Declared`, R1, R2 and R3), `verify/rebind.rs` (`Rebind`, R-rebind), `verify/repoint.rs` (`Repoint`, R-call) |
 | Rust backend | `backends/rust.rs`, and beside it `item_move/` (with `canonical_paths.rs`, `doc_links.rs`), `retarget_impl/` (with `outline.rs`, `rewrite.rs`, `fields.rs`, `imports.rs`, `preflight.rs`, `delegator.rs`), `read_fields_through/` (with `range.rs`, `method.rs`, `typing.rs`, `edits.rs`), `repoint_call/` (with `single.rs`, `sites.rs`, `receivers.rs`), `repoint_facade/` (with `scope.rs`, `rewrite.rs`, `group.rs`, `refusals.rs`), `module_reparent/`, `signature_rewrites`, `return_type`, `line_diff`, `placeholder_checks`, `lsp_edits`, `import_text`, `module_text`, `visibility`, `seam_survey`, `facade`, `server_process`, `prelude_shadow`, `relative_visibility`, `inline_paths`, `imports`, `early_return`, `chatter` |
-| Cross-crate moves | `crate_move/{moving,cluster,source_scan,carried,module_files}.rs` with `moving/facade_writer.rs`, `cluster/{stranded,gathering}.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/test_binary.rs`. `crate_move::survey` and `crate_move::reexports` are `pub(crate)`, read by `item_move`'s canonical-path pass |
+| Cross-crate moves | `crate_move/{moving,cluster,source_scan,carried,module_files}.rs` with `moving/facade_writer.rs`, `cluster/{stranded,gathering}.rs`, `source_scan/{module_items,sighting_walk}.rs`; `crate_move/new_crate.rs` (see [docs/crate-creation.md](docs/crate-creation.md)); `crate_move/test_binary.rs`. `crate_move::survey` and `crate_move::reexports` are `pub(crate)`, read by `item_move`'s canonical-path pass |
 
 Rust-analyzer's progress is throttled per token to one line every two seconds in the printed stream
 (`ServerChatter`'s default); a host that serves structured events builds `ServerChatter::unthrottled()`

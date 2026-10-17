@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use super::malformed;
+use super::new_crate;
 
 use crate::crate_move::{carried, cluster, header, manifest_edits, module_home, moving, survey};
 
@@ -55,6 +56,12 @@ pub(crate) fn unrunnable(
         if !op.op.moves_across_crates() {
             continue;
         }
+        // Read at its place in the plan: a crate an earlier operation creates is there for it.
+        let overlay = new_crate::created_by_earlier_operations(workspace, ops, index)?;
+        let workspace = &Workspace {
+            root: workspace.root,
+            overlay: &overlay,
+        };
         for anchor in op.anchors() {
             let earlier = moved_by_earlier_operations(workspace, ops, index, anchor);
             let member = member_op(op, anchor);
@@ -240,8 +247,17 @@ pub(crate) fn move_preconditions(
     if manifest_edits::removed_declaration(&text, declared_in, &moving.module)?.is_none() {
         return Err(moving.declared_nowhere());
     }
-    if let Some(finding) = destination_already_has_the_module(workspace, op)? {
-        return Err(malformed(finding));
+    match &moving.creates {
+        Some(creation) => {
+            if let Some(finding) = creation.refusal(workspace, &moving.origin)? {
+                return Err(malformed(finding));
+            }
+        }
+        None => {
+            if let Some(finding) = destination_already_has_the_module(workspace, op)? {
+                return Err(malformed(finding));
+            }
+        }
     }
     if let Some(finding) = stays_behind_through_a_body(workspace, op, earlier)? {
         return Err(malformed(finding));
