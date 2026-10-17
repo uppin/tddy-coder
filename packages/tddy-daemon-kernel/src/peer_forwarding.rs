@@ -1,4 +1,4 @@
-//! Serving one daemon's RPC on another daemon, over the LiveKit common room.
+//! Serving one daemon's RPC on another daemon, through a [`PeerForwarder`] over the common room.
 //!
 //! Every multi-host RPC in this system is addressed by a `daemon_instance_id`, and the daemon that
 //! takes the call is very often not the one that can answer it: a host's tooling probe, the prompts
@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::Room;
+use tddy_daemon_extensions::PeerForwarder;
 
 /// Whether an RPC should run locally or be forwarded to a discovered peer.
 ///
@@ -107,31 +107,28 @@ pub const PEER_FORWARD_TIMEOUT: Duration = Duration::from_secs(30);
 /// `tests/session_agent_roster_acceptance.rs`.
 pub const PEER_FORWARD_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The common room as every forwarding call sees it: the room slot **and** how long a forward to a
-/// peer may wait. The deadline rides with the slot because the slot is the one thing every
-/// forwarding call site already holds, so the setting reaches all of them without a global (the
-/// e2e tests run several daemons in one process) and without a new argument on each.
+/// The common room as every forwarding call sees it: the transport that carries a call to a peer
+/// **and** how long a forward may wait. The deadline rides with the transport because it is the one
+/// thing every forwarding call site already holds, so the setting reaches all of them without a
+/// global (the e2e tests run several daemons in one process) and without a new argument on each.
 #[derive(Clone)]
 pub struct CommonRoom {
-    slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
+    forwarder: Arc<dyn PeerForwarder>,
     forward_timeout: Duration,
 }
 
 impl CommonRoom {
-    /// A handle over `slot` whose forwards wait `config.peer_forward_timeout()`.
-    pub fn from_config(
-        slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
-        config: &crate::config::DaemonConfig,
-    ) -> Self {
+    /// A common room whose forwards travel through `forwarder`, with the deadline `config` names.
+    pub fn new(forwarder: Arc<dyn PeerForwarder>, config: &crate::config::DaemonConfig) -> Self {
         Self {
-            slot,
+            forwarder,
             forward_timeout: config.peer_forward_timeout(),
         }
     }
 
-    /// The room slot, for the code that joins, replaces or inspects the connection itself.
-    pub fn slot(&self) -> &Arc<tokio::sync::RwLock<Option<Arc<Room>>>> {
-        &self.slot
+    /// Whether a peer can be reached at all right now.
+    pub async fn is_connected(&self) -> bool {
+        self.forwarder.is_connected().await
     }
 
     /// How long a forward to a peer waits for its answer.
@@ -139,44 +136,11 @@ impl CommonRoom {
         self.forward_timeout
     }
 
-    /// An RPC client addressed at a peer daemon's [`daemon_rpc_identity`], drawn from the common
-    /// room's shared client factory.
-    ///
-    /// The factory keeps **one** request-id registry and **one** response loop per room connection,
-    /// regardless of how many peers are forwarded to or how often. Building a client per call (as
-    /// `forward_to_peer` once did) leaked a `subscribe()` loop each time.
-    async fn peer_client(
-        &self,
-        peer_id: &str,
-        service: &str,
-        method: &str,
-        what: &str,
-    ) -> Result<tddy_livekit::RpcClient, tddy_rpc::Status> {
-        let room_arc = {
-            let g = self.slot.read().await;
-            g.clone()
-        }
-        .ok_or_else(|| {
-            tddy_rpc::Status::failed_precondition(format!(
-                "LiveKit common room is not connected on this daemon; cannot forward {what} to a peer"
-            ))
-        })?;
-        let target = daemon_rpc_identity(peer_id);
-        log::debug!(
-            "peer_client: peer_id={} target_identity={} service={} method={} ({what})",
-            peer_id,
-            target,
-            service,
-            method
-        );
-        Ok(tddy_livekit::LiveKitRpcClientFactory::for_room(room_arc).client(target))
-    }
-
-    /// Forward a generic RPC to a peer daemon in the common room via LiveKit data-channel RPC.
+    /// Forward a generic RPC to a peer daemon in the common room, through the [`PeerForwarder`].
     ///
     /// This is the generic building block for all peer-forwarding. It:
-    /// 1. Draws a client for the peer's [`daemon_rpc_identity`] (`failed_precondition` if no room
-    ///    is connected).
+    /// 1. Hands the call to the [`PeerForwarder`], which addresses the peer's
+    ///    [`daemon_rpc_identity`] (`failed_precondition` if no transport is connected).
     /// 2. Calls `{service}/{method}` with the given `body` bytes, bounded by
     ///    [`CommonRoom::forward_timeout`].
     pub async fn forward_to_peer(
@@ -205,18 +169,19 @@ impl CommonRoom {
         body: Vec<u8>,
         deadline: Duration,
     ) -> Result<Vec<u8>, tddy_rpc::Status> {
-        let client = self.peer_client(peer_id, service, method, "an RPC").await?;
-        tokio::time::timeout(deadline, client.call_unary(service, method, body))
-            .await
-            .map_err(|_| peer_forward_deadline_status(service, method, peer_id, deadline))?
+        tokio::time::timeout(
+            deadline,
+            self.forwarder.call_unary(peer_id, service, method, body),
+        )
+        .await
+        .map_err(|_| peer_forward_deadline_status(service, method, peer_id, deadline))?
     }
 
     /// Forward a **server-streaming** RPC to a peer daemon, relaying each frame decoded by
     /// `decode_frame` into the returned receiver.
     ///
-    /// The transport already does the streaming ([`tddy_livekit::RpcClient::call_server_stream`]);
-    /// what a daemon needs on top is the peer's [`daemon_rpc_identity`], a deadline, and the
-    /// guarantee that a stream which stops without its end-of-stream marker terminates **as an
+    /// The transport already does the streaming ([`PeerForwarder::call_server_stream`]); what a
+    /// daemon needs on top is a deadline, and the guarantee that a stream which stops without its end-of-stream marker terminates **as an
     /// error** rather than as a short but successful stream. That distinction is the whole point: a
     /// caller writing frames to disk cannot tell a truncated document from a complete one.
     ///
@@ -235,22 +200,20 @@ impl CommonRoom {
         D: Fn(Vec<u8>) -> Result<T, tddy_rpc::Status> + Send + 'static,
     {
         let open_deadline = self.forward_timeout;
-        let client = self
-            .peer_client(peer_id, service, method, "a stream")
-            .await?;
         let mut frames = tokio::time::timeout(
             open_deadline,
-            client.call_server_stream(service, method, body),
+            self.forwarder
+                .call_server_stream(peer_id, service, method, body),
         )
         .await
         .map_err(|_| peer_forward_deadline_status(service, method, peer_id, open_deadline))??;
 
-        // Deliberately unbounded, even though the transport channel underneath it is bounded (32
-        // frames): that channel is filled by the room's **shared** response loop with
-        // `send().await` (`ClientEngine::on_response`), so a relay that stopped draining it would
-        // block response dispatch for every other in-flight call on this daemon's common-room
-        // connection — head-of-line blocking across unrelated RPCs, which is worse than buffering one
-        // stream. What bounds the buffer instead is the payload: both callers cap what they accept
+        // Deliberately unbounded: the transport sits behind the port and may be filled by a
+        // **shared** response loop, so a relay that stopped draining the receiver it hands back
+        // could block response dispatch for every other in-flight call on the same connection —
+        // head-of-line blocking across unrelated RPCs, which is worse than buffering one stream.
+        // This relay therefore always drains the forwarder's receiver and buffers here. What bounds
+        // the buffer instead is the payload: both callers cap what they accept
         // (`max_attachment_bytes` re-checked while accumulating in
         // `fetch_peer_staged_attachment`, the same cap checked before the first frame in
         // `stream_read_host_document`), and both relayed streams are short-lived. Bounding this
@@ -260,9 +223,6 @@ impl CommonRoom {
         let service = service.to_string();
         let method = method.to_string();
         tokio::spawn(async move {
-            // The client carries this call's registration in the room's shared engine; hold it for the
-            // stream's whole life so the response loop keeps delivering frames to it.
-            let _client = client;
             loop {
                 let item =
                     match tokio::time::timeout(PEER_FORWARD_STREAM_IDLE_TIMEOUT, frames.recv())
@@ -314,7 +274,7 @@ mod common_room_tests {
             ..Default::default()
         };
 
-        let room = CommonRoom::from_config(Arc::new(tokio::sync::RwLock::new(None)), &config);
+        let room = CommonRoom::new(Arc::new(tddy_daemon_extensions::NoPeerForwarding), &config);
 
         assert_eq!(room.forward_timeout(), Duration::from_secs(7));
     }

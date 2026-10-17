@@ -15,6 +15,7 @@
 |---|---|---|
 | 2026-09-24 | 939 | first detection. The size predates #509 (939 at merge-base `4e7157d2`). #509 changed 6 lines (3+/3−), all of them the `os_user_for_github` binding (`let os_user = self…` → `&self…`). It did not grow the file |
 | 2026-10-04 | 934 | 939 on `master` (`6faef323`) → 934 after `#e2e-leg` 2/5 (#579): the host's forwards go through a `CommonRoom` (`HostServiceImpl::with_common_room` builds it from the host's own `DaemonConfig`). Not grown; unchanged class |
+| 2026-10-17 | 937 → 936 (−1) | `#satellite` 2/13 (#624): `with_common_room` takes a `CommonRoom` instead of the bare room slot, dropping the SDK import. The PR touched this file and shrank it by one line; still 1.9× over budget, the split remains deferred. Not claimed by any PR |
 
 ## What would close it — candidate seams (not proven)
 

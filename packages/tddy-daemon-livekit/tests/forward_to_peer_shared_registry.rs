@@ -17,6 +17,7 @@ use tokio::sync::RwLock;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::CommonRoom;
+use tddy_daemon_livekit::LiveKitPeerForwarder;
 use tddy_livekit::{LiveKitParticipant, LiveKitRpcClientFactory};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_service::proto::test::{EchoRequest, EchoResponse};
@@ -88,8 +89,8 @@ async fn forward_to_peer_draws_from_one_shared_registry_per_room() -> Result<()>
     .map_err(|e| anyhow::anyhow!("local connect: {}", e))?;
     wait_for_participant(&room, &mut events, &rpc_identity(PEER_INSTANCE_ID)).await?;
     let room = Arc::new(room);
-    let common_room = CommonRoom::from_config(
-        Arc::new(RwLock::new(Some(room.clone()))),
+    let common_room = CommonRoom::new(
+        LiveKitPeerForwarder::new(Arc::new(RwLock::new(Some(room.clone())))),
         &DaemonConfig::default(),
     );
 

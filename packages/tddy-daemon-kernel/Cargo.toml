@@ -22,11 +22,10 @@ tddy-discovery = { path = "../tddy-discovery" }
 # `DaemonConfig::sandbox_cgroup_config` returns `tddy_sandbox::CgroupConfig` — the config type is
 # the sandbox crate's, and the daemon's YAML block is a serde mirror of it.
 tddy-sandbox = { path = "../tddy-sandbox" }
-# `peer_forwarding`: one daemon serving another's RPC over the LiveKit common room.
-tddy-livekit = { path = "../tddy-livekit" }
 tddy-rpc = { path = "../tddy-rpc" }
+# `PeerForwarder`: the transport `CommonRoom` forwards through.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-service = { path = "../tddy-service" }
-livekit = "0.7"
 tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "net", "time", "process", "io-util"] }
 tddy-task = { path = "../tddy-task" }
 tddy-github = { path = "../tddy-github" }
@@ -36,6 +35,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `test-util`: `tokio::time::pause` drives the stream idle timeout without waiting it out.
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "time", "test-util"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"
