@@ -1775,7 +1775,7 @@ fn build_telegram(
             Some(active_elicitation),
             Some(telegram_tracked),
         )
-        .with_session_rooms(Arc::clone(session_rooms)),
+        .with_session_rooms(session_rooms.clone()),
     ));
 
     TelegramWiring {
