@@ -46,3 +46,6 @@ base64 = "0.22"
 # server would rather than by re-reading the fields the daemon just wrote.
 livekit-api = "0.5"
 tempfile = "3"
+# `dependency_graph::WorkspaceGraph`, which `tests/dependency_boundary_unit.rs` walks the workspace
+# with. Workspace-internal.
+tddy-testing-commons = { path = "../tddy-testing-commons" }

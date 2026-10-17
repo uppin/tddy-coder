@@ -272,11 +272,12 @@ async fn run_livekit_session(config: PtyRelayConfig) -> Result<()> {
     if !resp.livekit_server_identity.is_empty() {
         if let Some(livekit_url) = config.livekit_url.as_deref() {
             // Ask the daemon to make the session reachable over LiveKit before joining the room to
-            // look for it. Starting a session is local work and touches LiveKit nowhere, so the
-            // participant this is about to wait for is put there by `ConnectSession` — which is the
-            // daemon's answer to "something is connecting to this session over LiveKit", and this is
-            // such a thing. Without it the wait below would expire against a room nobody joined.
-            connect_session_over_http(&config.daemon_url, &session_token, &resp.session_id).await?;
+            // look for it. Starting a session is local work and touches LiveKit nowhere, and
+            // `ConnectSession` does not open a room for a caller that did not arrive over LiveKit,
+            // so the participant this is about to wait for is put there by `OpenSessionRoom`.
+            // Without it the wait below would expire against a room nobody joined.
+            open_session_room_over_http(&config.daemon_url, &session_token, &resp.session_id)
+                .await?;
             log::info!(target: "tddy_terminal_rpc::pty_relay", "connecting via LiveKit");
             return run_livekit_terminal(
                 &config,
@@ -499,37 +500,6 @@ async fn exchange_stub_session_token(daemon_url: &str) -> anyhow::Result<String>
     Ok(exchange_resp.session_token)
 }
 
-/// Tell the daemon a client is connecting to `session_id`, which is what makes the session
-/// reachable over LiveKit: its room, and the participant serving its terminal.
-///
-/// The reply's own LiveKit fields are deliberately unread — a claude-cli session answers with empty
-/// coordinates, because the room it names is the *terminal* room and this session has none. What is
-/// wanted is the call's effect.
-#[cfg(feature = "livekit")]
-async fn connect_session_over_http(
-    daemon_url: &str,
-    session_token: &str,
-    session_id: &str,
-) -> Result<()> {
-    use prost::Message as _;
-    use tddy_service::proto::session::ConnectSessionRequest;
-
-    connectrpc_post(
-        &reqwest::Client::new(),
-        daemon_url,
-        "session.SessionService",
-        "ConnectSession",
-        ConnectSessionRequest {
-            session_token: session_token.to_string(),
-            session_id: session_id.to_string(),
-        }
-        .encode_to_vec(),
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("ConnectSession for {session_id}: {e}"))?;
-    Ok(())
-}
-
 /// Ask the daemon at `daemon_url` to open `session_id`'s room — with itself in it and the
 /// session's terminal exposed there — before this relay joins the room to look for it.
 ///
@@ -542,8 +512,24 @@ pub async fn open_session_room_over_http(
     session_token: &str,
     session_id: &str,
 ) -> Result<tddy_service::proto::session_room::OpenSessionRoomResponse> {
-    let _ = (daemon_url, session_token, session_id);
-    todo!("open_session_room_over_http")
+    use prost::Message as _;
+    use tddy_service::proto::session_room::{OpenSessionRoomRequest, OpenSessionRoomResponse};
+
+    let reply = connectrpc_post(
+        &reqwest::Client::new(),
+        daemon_url,
+        "session_room.SessionRoomService",
+        "OpenSessionRoom",
+        OpenSessionRoomRequest {
+            session_token: session_token.to_string(),
+            session_id: session_id.to_string(),
+        }
+        .encode_to_vec(),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("OpenSessionRoom for {session_id}: {e}"))?;
+    OpenSessionRoomResponse::decode(reply.as_slice())
+        .map_err(|e| anyhow::anyhow!("decode OpenSessionRoomResponse: {e}"))
 }
 
 async fn connectrpc_post(

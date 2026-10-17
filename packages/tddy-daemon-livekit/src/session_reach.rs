@@ -44,7 +44,7 @@ pub fn livekit_integration_state(livekit: Option<&LiveKitConfig>) -> Integration
         ("api_secret", &livekit.api_secret),
     ]
     .into_iter()
-    .filter(|(_, value)| value.as_deref().map_or(true, |v| v.trim().is_empty()))
+    .filter(|(_, value)| value.as_deref().is_none_or(|v| v.trim().is_empty()))
     .map(|(field, _)| field.to_string())
     .collect();
     match missing.len() {
