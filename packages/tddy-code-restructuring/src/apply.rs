@@ -8,7 +8,7 @@ use crate::edit::{FileEdit, Range, TextEdit, WorkspaceEdit};
 use crate::spawn_record::{purpose, SpawnRecorder};
 use crate::{RestructureError, Result};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 /// Apply one operation's complete edit set to disk.
@@ -42,6 +42,91 @@ pub fn apply_workspace_edit(
             _ => None,
         }),
     )
+}
+
+/// The sources of `edit`'s renames that git does not track, which `git mv` would refuse.
+///
+/// Asked before an operation writes anything, so a move of a file nobody has `git add`ed is
+/// refused with the tree and the journal as the previous operation left them — rather than
+/// failing at `git mv` after the operation's text edits are already on disk. A source counts as
+/// tracked when git knows it (an intent-to-add or a staged rename included), when the same edit
+/// creates it, or when `overlay` says an earlier operation of an unwritten run introduced it.
+pub fn untracked_move_sources(
+    root: &Path,
+    edit: &WorkspaceEdit,
+    overlay: &crate::Overlay,
+    spawns: &SpawnRecorder,
+) -> Result<Vec<String>> {
+    let created: BTreeSet<&str> = edit
+        .changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Create { path } => Some(path.as_str()),
+            _ => None,
+        })
+        .collect();
+    let sources: Vec<&str> = edit
+        .changes
+        .iter()
+        .filter_map(|change| match change {
+            FileEdit::Rename { from, .. } => Some(from.as_str()),
+            _ => None,
+        })
+        .filter(|from| !created.contains(from) && !overlay.introduced(from))
+        .collect();
+    untracked_paths(root, &sources, spawns)
+}
+
+/// The paths of `paths` git does not track, in the order given, each named once.
+///
+/// One `git ls-files --error-unmatch` answers for all of them in the common case, where every one
+/// is tracked; only when that fails is each asked alone, to name the ones it failed for.
+pub(crate) fn untracked_paths(
+    root: &Path,
+    paths: &[&str],
+    spawns: &SpawnRecorder,
+) -> Result<Vec<String>> {
+    let mut unique: Vec<&str> = Vec::new();
+    for path in paths {
+        if !unique.contains(path) {
+            unique.push(path);
+        }
+    }
+    if unique.is_empty() || git_tracks(root, &unique, spawns)? {
+        return Ok(Vec::new());
+    }
+    let mut untracked = Vec::new();
+    for path in unique {
+        if !git_tracks(root, &[path], spawns)? {
+            untracked.push(path.to_string());
+        }
+    }
+    Ok(untracked)
+}
+
+/// `git ls-files --error-unmatch`'s own exit status for a path that matched nothing in the index —
+/// an answer, not a failure of git.
+const LS_FILES_UNMATCHED: i32 = 1;
+
+/// Whether git's index holds every one of `paths` — an intent-to-add or a staged rename included.
+///
+/// `--literal-pathspecs`, because a path is a path here and not a pattern: a file named `a[1].rs`
+/// must not be answered for by `a1.rs`.
+fn git_tracks(root: &Path, paths: &[&str], spawns: &SpawnRecorder) -> Result<bool> {
+    let mut command = spawns.command("git");
+    command
+        .args(["--literal-pathspecs", "ls-files", "--error-unmatch", "--"])
+        .args(paths)
+        .current_dir(root);
+    let output = spawns.output(purpose::GIT, &mut command)?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(LS_FILES_UNMATCHED) => Ok(false),
+        _ => Err(RestructureError::MalformedPlan(format!(
+            "git ls-files --error-unmatch failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))),
+    }
 }
 
 /// Confirm `root` is inside a git worktree. `git mv` is mandatory, so this is checked up front.
@@ -319,6 +404,89 @@ mod tests {
             .output()
             .unwrap();
         String::from_utf8(output.stdout).unwrap()
+    }
+
+    /// `#reshape` 9/19: what `git mv` would refuse is a file git has never seen — not one the
+    /// engine `git add -N`'d earlier in the run, and not one the index already holds.
+    #[test]
+    fn counts_a_file_the_engine_created_in_the_same_run_as_tracked_and_names_one_git_has_never_seen(
+    ) {
+        // Given a committed file, a file added with intent-to-add, and one never added
+        let workspace = git_workspace();
+        let root = workspace.path();
+        std::fs::write(root.join("src/created.ts"), "export const b = 1;\n").unwrap();
+        git(root, &["add", "-N", "src/created.ts"]);
+        std::fs::write(root.join("src/stray.ts"), "export const c = 1;\n").unwrap();
+        let moving_all_three = WorkspaceEdit {
+            changes: ["shapes", "created", "stray"]
+                .into_iter()
+                .map(|name| FileEdit::Rename {
+                    from: format!("src/{name}.ts"),
+                    to: format!("src/moved/{name}.ts"),
+                })
+                .collect(),
+        };
+
+        // When the edit's untracked rename sources are asked for
+        let untracked = untracked_move_sources(
+            root,
+            &moving_all_three,
+            &crate::Overlay::new(),
+            &SpawnRecorder::discard(),
+        )
+        .unwrap();
+
+        // Then only the file git has never seen is named
+        assert_eq!(untracked, vec!["src/stray.ts".to_string()]);
+    }
+
+    /// The two other ways a source is the run's own, though git has never seen it: the same edit
+    /// creates it, or an earlier operation of a run that has written nothing yet introduced it.
+    #[test]
+    fn counts_a_source_the_same_edit_creates_or_an_earlier_operation_introduced_as_tracked() {
+        // Given a worktree where git has never seen `src/fresh.ts` or `src/earlier.ts`
+        let workspace = git_workspace();
+        let root = workspace.path();
+        // And an unwritten run whose earlier operation created `src/earlier.ts`
+        let mut overlay = crate::Overlay::new();
+        overlay
+            .record(
+                root,
+                &WorkspaceEdit {
+                    changes: vec![FileEdit::Create {
+                        path: "src/earlier.ts".to_string(),
+                    }],
+                },
+            )
+            .unwrap();
+        // And an edit that creates `src/fresh.ts` and moves it, and moves `src/earlier.ts`
+        let creating_and_moving = WorkspaceEdit {
+            changes: vec![
+                FileEdit::Create {
+                    path: "src/fresh.ts".to_string(),
+                },
+                FileEdit::Rename {
+                    from: "src/fresh.ts".to_string(),
+                    to: "src/moved/fresh.ts".to_string(),
+                },
+                FileEdit::Rename {
+                    from: "src/earlier.ts".to_string(),
+                    to: "src/moved/earlier.ts".to_string(),
+                },
+            ],
+        };
+
+        // When the edit's untracked rename sources are asked for
+        let untracked = untracked_move_sources(
+            root,
+            &creating_and_moving,
+            &overlay,
+            &SpawnRecorder::discard(),
+        )
+        .unwrap();
+
+        // Then neither is named
+        assert_eq!(untracked, Vec::<String>::new());
     }
 
     #[test]

@@ -11,13 +11,15 @@
 
 use crate::edit::{FileEdit, WorkspaceEdit};
 use crate::Result;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Resolved-but-unwritten file contents, keyed by path relative to the workspace root.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Overlay {
     files: BTreeMap<PathBuf, String>,
+    /// Every path a folded edit created or moved a file to, and no later edit moved away from.
+    introduced: BTreeSet<PathBuf>,
 }
 
 impl Overlay {
@@ -27,7 +29,16 @@ impl Overlay {
 
     /// Whether anything has been recorded. An empty overlay is a real run.
     pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
+        self.files.is_empty() && self.introduced.is_empty()
+    }
+
+    /// Whether an edit this overlay folded in created `path` or moved a file to it.
+    ///
+    /// What a dry run and a rehearsal ask before refusing a move whose source git does not track:
+    /// nothing reached disk, so a file an earlier operation created or moved is in no index, and
+    /// is still the run's own.
+    pub fn introduced(&self, path: &str) -> bool {
+        self.introduced.contains(Path::new(path))
     }
 
     /// The contents of `relative` as this run last resolved it, or as it stands on disk.
@@ -47,6 +58,7 @@ impl Overlay {
         for change in &edit.changes {
             if let FileEdit::Create { path } = change {
                 self.files.insert(PathBuf::from(path), String::new());
+                self.introduced.insert(PathBuf::from(path));
             }
         }
         for change in &edit.changes {
@@ -62,6 +74,8 @@ impl Overlay {
                 if let Some(contents) = self.files.remove(Path::new(from)) {
                     self.files.insert(PathBuf::from(to), contents);
                 }
+                self.introduced.remove(Path::new(from));
+                self.introduced.insert(PathBuf::from(to));
             }
         }
         Ok(())

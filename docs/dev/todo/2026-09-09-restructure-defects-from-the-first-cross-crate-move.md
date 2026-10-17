@@ -33,9 +33,12 @@ failure that destroys information.
    `move_items_to_crate { from, items }` and no item-list anchor, so a subsystem whose centre cannot
    leave has nothing to hand the operation. `move_cluster_to_crate` moves *whole modules together*
    and does not address this. See § *No vocabulary for a seam split*.
-2. **`git mv` means an uncommitted file cannot move at all**, and the failure leaves the tree
+2. ~~**`git mv` means an uncommitted file cannot move at all**, and the failure leaves the tree
    inconsistent because `pub mod` was already appended. One `git ls-files` in the preflight would
-   catch it; the preflight has none (`ls-files` appears only in `runner/comparison.rs`).
+   catch it; the preflight has none (`ls-files` appears only in `runner/comparison.rs`).~~ Fixed by
+   `#reshape` 9/19 (PR #607): a move of a file git does not track is refused as `UntrackedMoveSource`
+   before the operation writes or journals anything, in `apply`, `--dry-run`, `check --deep` and
+   static `check`; `git add` it and the same plan applies.
 3. **The `pub(crate)` widening a cross-crate move forces is not reported.** `extract_module` reports
    its widenings; a cross-crate move, where the question actually bites, does not — it surfaced as
    four `E0603`s at the next build.
@@ -174,7 +177,8 @@ layered by hand.
   What would fix it: evaluate the refusal against the plan's *end state* — a module the same plan
   moves to the same destination is not an origin dependency.
 
-- **`git mv` means an uncommitted file cannot move at all.** Op 1 of layer 2 died on a file
+- **`git mv` means an uncommitted file cannot move at all.** (Fixed by `#reshape` 9/19, PR #607 —
+  see open item 2 above; kept as the original report.) Op 1 of layer 2 died on a file
   authored earlier in the same PR:
 
       Error: plan is malformed: git mv packages/tddy-daemon/src/livekit_service.rs

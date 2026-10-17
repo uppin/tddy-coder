@@ -5,10 +5,12 @@
 //! checks that make "if" something a run can know, and the lowering that lets item anchors be read
 //! from a tree that already holds the journal's edits.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::apply::hash_file;
 use crate::item_anchor::{self, has_item_anchors};
-use crate::journal::Journal;
+use crate::journal::{Journal, OpStatus};
 use crate::plan::Plan;
 use crate::plan_store::pending_digest;
 use crate::registry::BackendRegistry;
@@ -16,6 +18,72 @@ use crate::{RestructureError, Result};
 
 use super::options::usage;
 use super::Options;
+
+/// What `journal` says about the run of its plan that last wrote the plan file back, if any did.
+///
+/// Some when the journal holds a completed operation with a `PlanSynced` record after it — the
+/// run committed operations and rewrote the plan's anchors for the tree it left. `undone` is true
+/// when the completed records name at least one file and every one of them hashes, under `root`, to
+/// what it held before the run first touched it — the `pre` of the earliest completed record naming
+/// it: the run's edits have been rolled back since, so the plan describes a tree that no longer
+/// exists. With no file to compare there is nothing to call undone.
+pub(super) fn written_by_run(
+    journal: &Journal,
+    root: &Path,
+    paths: &super::StatePaths,
+) -> Result<Option<crate::WrittenByRun>> {
+    if !wrote_the_plan_back(journal) {
+        return Ok(None);
+    }
+    let Some(last) = journal.last_completed() else {
+        return Ok(None);
+    };
+    let undone = every_file_is_back(root, &digests_before_the_run(journal))?;
+    Ok(Some(crate::WrittenByRun {
+        last_applied: last.op,
+        last_applied_id: last.op_id.as_ref().map(ToString::to_string),
+        journal: paths
+            .journal
+            .parent()
+            .expect("state paths live in a directory")
+            .display()
+            .to_string(),
+        undone,
+    }))
+}
+
+/// Every file `journal`'s completed records name, with the digest it had before the run first
+/// touched it — the `pre` of the earliest completed record naming it.
+fn digests_before_the_run(journal: &Journal) -> BTreeMap<&str, &str> {
+    let mut before_the_run = BTreeMap::new();
+    for record in journal.completed() {
+        for (path, digest) in &record.pre {
+            before_the_run
+                .entry(path.as_str())
+                .or_insert(digest.as_str());
+        }
+    }
+    before_the_run
+}
+
+/// Whether `before_the_run` names at least one file and every one hashes, under `root`, to the
+/// digest it names. Every file is hashed, so one that can no longer be read is refused.
+fn every_file_is_back(root: &Path, before_the_run: &BTreeMap<&str, &str>) -> Result<bool> {
+    let mut back = !before_the_run.is_empty();
+    for (path, digest) in before_the_run {
+        back &= hash_file(&root.join(path))? == *digest;
+    }
+    Ok(back)
+}
+
+/// Whether `journal` records a completed operation followed by the plan being written back.
+fn wrote_the_plan_back(journal: &Journal) -> bool {
+    let mut completed = false;
+    journal.records_in_force().any(|record| {
+        completed |= record.status == OpStatus::Completed;
+        completed && record.status == OpStatus::PlanSynced
+    })
+}
 
 /// The index of the first operation a run executes: `--from` as an index, `--from` as an id, or
 /// where the journal left off.
@@ -105,4 +173,110 @@ pub(super) fn lower_pending(
         ops,
         ..plan.clone()
     })
+}
+
+#[cfg(test)]
+mod written_by_run_tests {
+    use super::*;
+    use crate::apply::hash_file;
+    use crate::edit::{FileEdit, WorkspaceEdit};
+    use crate::journal::JournalRecord;
+    use crate::runner::StatePaths;
+    use std::collections::BTreeMap;
+
+    /// A journal whose run of the plan completed operation 0 — `src/a.rs` from `before` to
+    /// `after` — and then wrote the plan back.
+    fn a_journal_of_a_run_that_rewrote_src_a(root: &Path, before: &str, after: &str) -> Journal {
+        let digest_of = |text: &str| {
+            let file = root.join("digest.tmp");
+            std::fs::write(&file, text).unwrap();
+            let digest = hash_file(&file).unwrap();
+            std::fs::remove_file(&file).unwrap();
+            digest
+        };
+        let pre = BTreeMap::from([("src/a.rs".to_string(), digest_of(before))]);
+        let post = BTreeMap::from([("src/a.rs".to_string(), digest_of(after))]);
+        a_journal_of_a_run_whose_operation_0_had(root, pre, post)
+    }
+
+    /// A journal whose run of the plan completed operation 0, recording `pre` and `post` for it,
+    /// and then wrote the plan back.
+    fn a_journal_of_a_run_whose_operation_0_had(
+        root: &Path,
+        pre: BTreeMap<String, String>,
+        post: BTreeMap<String, String>,
+    ) -> Journal {
+        let edit = WorkspaceEdit {
+            changes: vec![FileEdit::Change {
+                path: "src/a.rs".to_string(),
+                edits: Vec::new(),
+            }],
+        };
+        let mut journal = Journal::default();
+        let file = the_journal_file_of_plan_jsonl(root);
+        for record in [
+            JournalRecord::in_flight(0, None, pre.clone()),
+            JournalRecord::completed(0, None, edit, pre, post, Vec::new(), Vec::new()),
+            JournalRecord::plan_synced(0, None, "digest".to_string()),
+        ] {
+            journal.append(&file, record).unwrap();
+        }
+        journal
+    }
+
+    /// Where a run of `plan.jsonl` under `root` journals, its directory created.
+    fn the_journal_file_of_plan_jsonl(root: &Path) -> std::path::PathBuf {
+        let directory =
+            crate::runner::state_directory_for_plan(root, Path::new("plan.jsonl")).unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
+        directory.join("journal.jsonl")
+    }
+
+    /// `#reshape` 9/19: "undone" is a claim about every file the run touched, so it holds only
+    /// when each one is back at its pre-run content.
+    #[test]
+    fn written_by_run_reports_undone_only_when_every_touched_file_is_back_at_its_pre_hash() {
+        // Given a run that rewrote `src/a.rs` from "one" to "two", and the file restored to "one"
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        let journal = a_journal_of_a_run_that_rewrote_src_a(root, "one\n", "two\n");
+        std::fs::write(root.join("src/a.rs"), "one\n").unwrap();
+        let paths = StatePaths::for_plan(root, Path::new("plan.jsonl")).unwrap();
+
+        // When the journal is asked who wrote the plan, with the file restored and then not
+        let restored = written_by_run(&journal, root, &paths).unwrap();
+        std::fs::write(root.join("src/a.rs"), "two\n").unwrap();
+        let left = written_by_run(&journal, root, &paths).unwrap();
+
+        // Then both name operation 0, and only the restored tree is undone
+        assert_eq!(
+            (
+                restored.as_ref().map(|run| (run.last_applied, run.undone)),
+                left.as_ref().map(|run| (run.last_applied, run.undone))
+            ),
+            (Some((0, true)), Some((0, false)))
+        );
+    }
+
+    /// "Undone" says the run's edits were rolled back, which a run that recorded no file cannot
+    /// show either way.
+    #[test]
+    fn written_by_run_does_not_call_a_run_that_recorded_no_file_undone() {
+        // Given a run that completed operation 0 and wrote the plan back, recording no file
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        let journal =
+            a_journal_of_a_run_whose_operation_0_had(root, BTreeMap::new(), BTreeMap::new());
+        let paths = StatePaths::for_plan(root, Path::new("plan.jsonl")).unwrap();
+
+        // When the journal is asked who wrote the plan
+        let run = written_by_run(&journal, root, &paths).unwrap();
+
+        // Then it names operation 0, and does not say its edits were undone
+        assert_eq!(
+            run.map(|run| (run.last_applied, run.undone)),
+            Some((0, false))
+        );
+    }
 }

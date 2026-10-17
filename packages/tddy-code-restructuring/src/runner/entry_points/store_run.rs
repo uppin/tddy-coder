@@ -2,7 +2,7 @@ use super::super::refuse_a_broken_result;
 use crate::backends::rust::ProgressSink;
 use crate::Result;
 
-use super::super::commit_operation;
+use super::super::{commit_operation, preflight_moves};
 
 use super::progress_line;
 
@@ -234,6 +234,20 @@ fn report_settled(
     }
 }
 
+/// The progress line announcing that operation `index` of `total` is being resolved, naming its id
+/// beside its index when it has one, so the line joins the journal record of the operation.
+fn resolving_line(index: usize, total: usize, op: &crate::plan::RefactorOp, file: &str) -> String {
+    let id = op
+        .id
+        .as_ref()
+        .map(|id| format!(" ({id})"))
+        .unwrap_or_default();
+    format!(
+        "op {index}{id} of {total}: resolving {:?} in `{file}`",
+        op.op
+    )
+}
+
 fn apply_held_plan(
     root: &Path,
     store: &mut PlanStore,
@@ -297,11 +311,7 @@ fn apply_held_plan(
             }
 
             let at = ledger.translate_op(op)?;
-            (options.progress)(&format!(
-                "op {index} of {total}: resolving {:?} in `{}`",
-                op.op,
-                at.anchor.file()
-            ));
+            (options.progress)(&resolving_line(index, total, op, at.anchor.file()));
             let resolved = registry
                 .backend_for(Path::new(at.anchor.file()), op.op)?
                 .resolve(
@@ -311,6 +321,10 @@ fn apply_held_plan(
                         overlay: &overlay,
                     },
                 )?;
+            // Refused before anything of the operation is written or journalled; a dry run's
+            // overlay holds what its earlier operations created and moved.
+            let id = op.id.as_ref().filter(|_| !legacy);
+            preflight_moves(index, id, &resolved, root, &overlay, &options.spawns)?;
 
             // A group member's account waits for its group to be kept: see below.
             if op.group.is_none() || options.dry_run {
@@ -337,7 +351,6 @@ fn apply_held_plan(
             (options.progress)(&format!(
                 "op {index} of {total}: applying {files} file(s) to disk"
             ));
-            let id = op.id.as_ref().filter(|_| !legacy);
             GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
             commit_operation(
                 index,
@@ -445,6 +458,7 @@ pub fn refuse_a_stale_pending_op(
                 plan: key.to_string(),
                 op: id.to_string(),
                 reason: found.reason.to_string(),
+                written_by: resume::written_by_run(&journal, store.root(), &paths)?.map(Box::new),
             });
         }
     }
@@ -577,6 +591,86 @@ mod tests {
         options: &Options,
     ) -> std::result::Result<(), String> {
         refuse_a_stale_pending_op(store, key, options).map_err(|error| error.to_string())
+    }
+
+    /// Journal, for `second.jsonl`, a run that completed `c1` over `src/a.rs` — whose content
+    /// before the run was `before` — and then wrote the plan back.
+    fn a_run_of_second_that_applied_c1(store: &PlanStore, second: &PlanKey, before: &str) {
+        let directory =
+            crate::runner::state_directory_for_plan(store.root(), &store.path_of(second)).unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
+        let scratch = directory.join("before.tmp");
+        std::fs::write(&scratch, before).unwrap();
+        let pre = std::collections::BTreeMap::from([(
+            "src/a.rs".to_string(),
+            crate::apply::hash_file(&scratch).unwrap(),
+        )]);
+        std::fs::remove_file(&scratch).unwrap();
+        let c1 = Some(OpId("c1".to_string()));
+        let mut journal = Journal::default();
+        for record in [
+            JournalRecord::in_flight(0, c1.clone(), pre.clone()),
+            JournalRecord::completed(
+                0,
+                c1.clone(),
+                lines_replaced(10, 11, "    moved();\n"),
+                pre,
+                std::collections::BTreeMap::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            JournalRecord::plan_synced(0, c1, "digest".to_string()),
+        ] {
+            journal
+                .append(&directory.join("journal.jsonl"), record)
+                .unwrap();
+        }
+    }
+
+    /// `#reshape` 9/19: the commonest stale plan is one its own failed run rewrote and the author
+    /// then rolled back — the refusal says so, instead of sending them after an edit they never
+    /// made.
+    #[test]
+    fn a_stale_plan_a_run_wrote_back_and_whose_edits_were_undone_says_so_and_to_regenerate_it() {
+        // Given c2 stale, and a journal whose run applied c1 to `src/a.rs` — now back as it was
+        let (_root, store, second) = second_with_stale(1);
+        a_run_of_second_that_applied_c1(&store, &second, "fn untouched() {}\n");
+
+        // When the run is checked for stale operations
+        let refusal = refused(&store, &second, &Options::default()).unwrap_err();
+
+        // Then it says a run of the plan wrote it, that the run was undone, and to regenerate
+        assert!(
+            refusal.contains(
+                "this plan file was last written by a run of it, which applied operation 0 (c1)"
+            ),
+            "{refusal}"
+        );
+        assert!(
+            refusal.contains("its edits have since been undone"),
+            "{refusal}"
+        );
+        assert!(refusal.contains("Regenerate the plan"), "{refusal}");
+    }
+
+    /// Without a journal there is nothing to say about a run, and the refusal is as it always was.
+    #[test]
+    fn a_stale_plan_with_no_journal_keeps_todays_refusal() {
+        // Given c2 stale, and no run of the plan on record
+        let (_root, store, second) = second_with_stale(1);
+
+        // When the run is checked for stale operations
+        let refusal = refused(&store, &second, &Options::default());
+
+        // Then the refusal names the operation and why, and nothing about a run
+        assert_eq!(
+            refusal,
+            Err(
+                "operation `c2` of second.jsonl is stale (edited by first.jsonl#a1) — re-anchor \
+                 it before applying"
+                    .to_string()
+            )
+        );
     }
 
     #[test]

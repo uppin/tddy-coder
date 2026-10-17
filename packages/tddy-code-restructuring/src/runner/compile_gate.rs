@@ -31,18 +31,56 @@ use tokio_util::sync::CancellationToken;
 
 use crate::apply::touched_paths;
 use crate::backends::rust::{human_delta, ProgressSink};
-use crate::crate_move::declared_package_name;
+use crate::crate_move::{declared_package_name, Destination};
 use crate::journal::Journal;
+use crate::plan::RefactorKind;
 use crate::spawn_record::{purpose, RecordedChild, SpawnRecorder};
 use crate::{Plan, RestructureError, Result};
 
 use super::tidy::{tidy, Tidied, Tidying};
 use super::{Options, StatePaths};
 
+/// The packages a fresh apply's baseline `cargo check` covers: those owning every file the plan
+/// names (its snapshot and its anchors), and the destination crate of each cross-crate move.
+///
+/// A destination counts because a move writes into it, so a failure already there would otherwise
+/// surface after the apply and be blamed on the plan. A `to` with no manifest adds nothing and
+/// raises nothing here — that is a crate the move creates, and there is nothing to check before it
+/// exists. A manifest that is there but cannot be read, or declares no package, is refused.
+pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>> {
+    let named = plan
+        .snapshot
+        .keys()
+        .cloned()
+        .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
+    let mut packages = owning_packages(root, named)?;
+    let destinations = plan
+        .ops
+        .iter()
+        .filter(|op| op.op.moves_across_crates() || op.op == RefactorKind::MoveTestBinaryToCrate)
+        .filter_map(|op| op.to.as_deref());
+    for to in destinations {
+        packages.extend(destination_package(root, to)?);
+    }
+    Ok(packages)
+}
+
+/// The package `to`'s manifest declares, `None` when `to` has no manifest yet.
+///
+/// Only a missing manifest is passed over: one that cannot be read or declares no `[package] name`
+/// is [`Destination::read`]'s refusal, not a destination to leave out of the baseline.
+fn destination_package(root: &Path, to: &str) -> Result<Option<String>> {
+    match std::fs::metadata(root.join(to).join("Cargo.toml")) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        _ => Destination::read(root, to).map(|destination| Some(destination.package)),
+    }
+}
+
 /// Refuse a fresh, writing run whose tree does not compile before the plan touches it.
 ///
-/// Checked over the packages owning every file the plan names — its snapshot and its anchors — which
-/// are the packages whose failure afterwards would otherwise be blamed on it.
+/// Checked over [`baseline_packages`]: the packages owning every file the plan names, and every
+/// cross-crate move's destination — the packages whose failure afterwards would otherwise be
+/// blamed on it.
 ///
 /// Skipped for a dry run, which writes nothing, and for a run continuing a journal (`--resume`,
 /// `--from`): that tree already holds the earlier run's edits, so a baseline would judge the plan's
@@ -57,12 +95,7 @@ pub fn refuse_a_broken_baseline(
     if options.dry_run || options.continues_a_journal() {
         return Ok(());
     }
-    let named = plan
-        .snapshot
-        .keys()
-        .cloned()
-        .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
-    let packages = owning_packages(root, named)?;
+    let packages = baseline_packages(root, plan)?;
 
     match failing_check(
         root,
@@ -441,6 +474,76 @@ pub(super) fn compiler_errors(said: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A workspace holding only the `origin` crate, with a test binary a plan can name.
+    fn a_workspace_with_only_the_origin_crate() -> tempfile::TempDir {
+        let workspace = tempfile::tempdir().expect("a temporary workspace");
+        let root = workspace.path();
+        std::fs::create_dir_all(root.join("crates/origin/tests")).expect("tests");
+        std::fs::write(
+            root.join("crates/origin/Cargo.toml"),
+            "[package]\nname = \"origin\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("the manifest");
+        std::fs::write(
+            root.join("crates/origin/tests/golden.rs"),
+            "#[test]\nfn t() {}\n",
+        )
+        .expect("the test binary");
+        workspace
+    }
+
+    /// `#reshape` 9/19: a destination a move will create has no manifest yet, and so nothing to
+    /// check before the move — it adds no package and raises nothing.
+    #[test]
+    fn a_destination_without_a_manifest_adds_no_package_to_the_baseline() {
+        // Given a test-binary move to a crate directory that does not exist yet
+        let workspace = a_workspace_with_only_the_origin_crate();
+        let plan = Plan::parse(
+            "{\"v\":1,\"snapshot\":{}}\n\
+             {\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+             \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+             \"to\":\"crates/not-yet\"}\n",
+        )
+        .expect("the plan parses");
+
+        // When the baseline's packages are read
+        let packages = baseline_packages(workspace.path(), &plan).expect("the packages are read");
+
+        // Then only the origin is checked
+        assert_eq!(packages, BTreeSet::from(["origin".to_string()]));
+    }
+
+    /// A destination that exists but whose manifest names no package is not a crate the move
+    /// creates, so the baseline does not quietly leave it out.
+    #[test]
+    fn a_destination_whose_manifest_declares_no_package_is_refused() {
+        // Given a test-binary move to a directory whose manifest declares no `[package] name`
+        let workspace = a_workspace_with_only_the_origin_crate();
+        std::fs::create_dir_all(workspace.path().join("crates/destination")).expect("the dir");
+        std::fs::write(
+            workspace.path().join("crates/destination/Cargo.toml"),
+            "[workspace]\nmembers = []\n",
+        )
+        .expect("the manifest");
+        let plan = Plan::parse(
+            "{\"v\":1,\"snapshot\":{}}\n\
+             {\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+             \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+             \"to\":\"crates/destination\"}\n",
+        )
+        .expect("the plan parses");
+
+        // When the baseline's packages are read
+        let refusal = baseline_packages(workspace.path(), &plan)
+            .expect_err("a manifest naming no package is refused");
+
+        // Then the refusal says the manifest declares no package
+        assert!(
+            refusal.to_string().contains("declares no `[package] name`"),
+            "{refusal}"
+        );
+    }
 
     #[test]
     fn keeps_the_error_lines_of_a_failed_check_and_drops_the_ones_merely_mentioning_the_word() {

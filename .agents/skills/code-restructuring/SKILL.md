@@ -100,10 +100,13 @@ record's.
 9. **Apply** — `--dry-run` first, then apply; `verify --against HEAD` after. An apply ends with
    `cargo check --all-targets` over every package it touched, and **a tree that does not compile is a
    failed run**, never "applied N of N": the edits are left on disk for inspection and the message says
-   how to roll them back. A fresh apply first checks the packages the plan names, and refuses to write
-   anything into a tree that already does not compile. An apply also **consumes its plan file**: it
+   how to roll them back. A fresh apply first checks the packages the plan names and the destination
+   crate of every cross-crate move, and refuses to write anything into a tree that already does not
+   compile. A move of a file git does not track is refused before that operation writes anything:
+   `git add` the file and apply the same plan again. An apply also **consumes its plan file**: it
    writes each operation's anchors back for the tree it left, so a plan that has been applied (or that
-   failed part-way and was rolled back) is stale — regenerate it from `anchors` rather than re-running it.
+   failed part-way and was rolled back) is stale — regenerate it from `anchors` rather than re-running
+   it. The refusal of such a plan says a run of it wrote it, and whether that run's edits were undone.
 
 ## Gathering a topic module
 
@@ -153,7 +156,8 @@ rust-analyzer, tens of seconds each) and tells you nothing the loop did not.
 
 Between plans, and after each one, the evidence is only what the tool produces:
 
-- `restructure apply` — its own `cargo check --all-targets` before and after (the compile gate), the
+- `restructure apply` — its own `cargo check --all-targets` before (over the plan's packages and every
+  cross-crate move's destination) and after (the compile gate), the
   tidy of imports the compiler reports unused, and `rustfmt` over every file it wrote. That gate is part
   of the apply: do not skip it, and do not add a build, `cargo clippy`, `cargo fmt` or `./test` of your
   own beside it.
@@ -197,11 +201,15 @@ seconds; against a cold one an apply costs six to ten minutes before it can refu
   compile before the plan runs:` means repair the tree first; nothing was written. `… were applied, and
   the tree no longer compiles:` means the edits are on disk and the compiler rejects them. Every
   refusal already ends with its own remedy.
-- **Waiting** — a run waits until the server is ready or until you stop it; there is no
-  `--indexing-budget` any more (it derived a per-operation ceiling of a twentieth of itself, which
-  refused large files at 45s). While it waits it says so every 30 seconds — the stage, how long it
-  has waited, which server, and how long that server has said nothing new — so a silent build script
-  is told from a slow index. `^C` cancels, and the refusal names the stage and how far the index got.
+- **Waiting** — a run waits until the server is ready or until you stop it, with no total deadline;
+  there is no `--indexing-budget` any more (it derived a per-operation ceiling of a twentieth of
+  itself, which refused large files at 45s). While it waits it says so every 30 seconds — the stage,
+  how long it has waited, which server, and how long that server has said nothing new — so a silent
+  build script is told from a slow index. Silence is bounded: a ready index that leaves a position
+  untyped for 30 s is refused as `rust-analyzer's answer was unusable: … cannot type this position`,
+  and a server that says it is loading and then says nothing new for 10 minutes is refused as stalled
+  (`ServerStalled`, naming the stage and its last words). A load that keeps narrating is waited on.
+  `^C` cancels, and the refusal names the stage and how far the index got.
 - **A warm index** — a cold start is minutes per run, so for an iterative carve start the daemon once
   and point the CLI at it:
 

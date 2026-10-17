@@ -168,7 +168,12 @@ current, not only the one being applied.
 - **`apply` refuses a stale operation** at or after the run's start, before any write, with
   `FailedPrecondition`, naming the operation and why. Only the operations the run would reach count:
   with `--stop-after N` a stale operation beyond the stop is not refused, and a `--dry-run`, which
-  writes nothing, is not refused at all.
+  writes nothing, is not refused at all. When the plan's journal shows that a run of this plan
+  applied operations and wrote the plan back, the refusal says so: `this plan file was last written
+  by a run of it, which applied operation N (<id>) (journal: <dir>)`, adds `its edits have since
+  been undone` when every file that run touched is back at its pre-run content, and says to
+  regenerate the plan with `restructure anchors` rather than re-anchor by hand. With no journal the
+  refusal names the operation and its reason only.
 - **`restructure snapshot` of an item-anchored plan** does the same re-resolution once for a plan
   that is not loaded, so a plan written before a rebase runs again without hand re-anchoring; a v1
   range plan is told to convert with `anchors --at`.
@@ -649,7 +654,8 @@ Two parts of that handshake are load-bearing:
 
 ### Waiting
 
-**A wait ends when the server is ready or when its caller stops waiting. Nothing else bounds it.**
+**A wait ends when the server is ready, when its caller stops waiting, or when the server has gone
+silent past a bound. Nothing bounds how long a wait lasts in total.**
 
 There were budgets, and how they were wrong is worth recording. `--indexing-budget SECONDS` set a
 one-time warm-up bound and derived the per-operation bound from it as a twentieth, floored at 30s. So
@@ -660,7 +666,7 @@ thing left to wait out is seconds — is false for a large file in a large works
 own comment said before the flag was removed.
 
 A server should not invent a deadline its caller never stated, so the caller's own bound is the only
-one: a gRPC caller's `grpc-timeout`, a streaming caller dropping its receiver, `^C` on the command
+bound on total time: a gRPC caller's `grpc-timeout`, a streaming caller dropping its receiver, `^C` on the command
 line, or the host cancelling on shutdown. Cancellation is checked **inside** the poll loops rather
 than awaited, because the engine is synchronous and runs under `spawn_blocking`, where dropping the
 calling future stops nothing.
@@ -682,8 +688,9 @@ Now every polling wait says, every 30 seconds (`WAIT_HEARTBEAT`), which **stage*
 it has **waited**, **which server** it is waiting on (a pid the backend started, or "behind a shared
 client"), the server's **last words** and how long they have been **unchanged**, and the furthest
 phase it reported. The `unchanged for` figure is the one that separates a slow server from a stuck
-one. The heartbeat **diagnoses, it does not cure**: it adds no deadline, and a run still waits until
-the server is ready or its caller stops it. A request already in flight on the shared client is
+one. The heartbeat **diagnoses, it does not cure**: nothing ends at a beat. A beat for a server that
+is ready and still leaves the position untyped says it `is ready and gives no answer here`; `has not
+said it is ready` is kept for a server that never reported a status. A request already in flight on the shared client is
 narrated too. A wait ended by cancellation names its stage, so the refusal reads `… after 240s while
 warming the crate index (last progress: …)`. rust-analyzer's own children (a build script) are
 invisible to every site here; the quoted progress text is evidence, not identification.
@@ -698,6 +705,28 @@ index in that state answers without the code it could not build, so nothing it s
 The latest status is kept on the shared client, so the gate holds against a warm daemon whose status
 transition another request already read.
 
+**A silent wait ends in a named refusal.** Two silences are bounded, and both measure **silence,
+not elapsed time**:
+
+- **Ready and untypable — 30 s (`READY_HOVER_BOUND`).** Every wait for type inference — renames,
+  symbol anchors, the post-assist rename, `extract_module` with `to_file`, the reference survey, the
+  signature rewrites and the extraction probes — refuses once the index is ready and healthy and the
+  hover has stayed `null` for the bound, with no `inactive-code` or `unlinked-file` diagnostic to
+  explain it. The refusal is `rust-analyzer's answer was unusable: … cannot type this position`,
+  naming `file:line`. Time before the index is ready does not count.
+- **Loading and silent — 10 min (`LOADING_SILENCE_BOUND`).** While the server says it is loading, a
+  wait whose server's last words have not changed for the bound is refused as `ServerStalled`, naming
+  the stage, the server, its last words, how long they have been unchanged and the furthest phase.
+  This holds in the crate-index warm-up (`warming the crate index`) and in the wait for type
+  inference (`type inference at <file>:<line>`). Any new word from the server restarts the clock, so a
+  load that keeps narrating — twenty minutes of indexing on a large workspace — is waited on for as
+  long as it narrates.
+
+The bounds are a collaborator a host or a test injects (`RustBackend::with_silence_bounds`,
+`SilenceBounds`), like the heartbeat; they are not configurable from the daemon's YAML or the command
+line. A total deadline stays rejected for the reason above. Other waits (an empty outline, a server
+that never sends `experimental/serverStatus`) end by cancellation only.
+
 ### Refusal classes
 
 Every refusal is fatal — the executor never falls back — and its **class** is what says who has to do
@@ -710,8 +739,10 @@ something about it. Read the class before the text.
 | `rust-analyzer's answer was unusable: …` | The server answered and the answer cannot be used — an extraction produced before inference, a mangled rewrite, a response with no edits, comments it dropped that cannot be put back, a request handler that panicked (`-32603`) | Retry against a warm server, or look at the server | `Internal` |
 | `rust-analyzer reports its index as degraded …` | The server said its own index is incomplete — usually build scripts or proc macros that failed to link in the environment it was started in | Restart the server (or `./run-index-daemon --stop && ./run-index-daemon`) from the dev shell's whole environment | `Internal` |
 | `rust-analyzer would not settle …` | The wait ended before the index did | Wait, or look at the server | `DeadlineExceeded` |
+| `rust-analyzer said it was loading and then said nothing new for Ns while <stage> …` (`ServerStalled`) | The server says it is loading and its last words have not changed for the loading-silence bound: stalled, not slow | Look at the server (its build scripts, a lock on `target/`), or restart it | `DeadlineExceeded` |
+| `operation N moves <paths>, which git does not track …` (`UntrackedMoveSource`) | A move's source file is not in git's index, and a move goes through `git mv`. Refused before the operation writes anything or journals it | `git add` the file and apply the same plan again — no `--resume`, no clean-up | `FailedPrecondition` |
 | snapshot / journal / anchor mismatches, `the item … changed since the plan was written` | The tree is not in the state the plan was written against, or an anchored item's text is no longer the text its fingerprint names | Repair the tree, re-snapshot, or re-anchor the item with `restructure anchors` | `FailedPrecondition` |
-| `the tree does not compile before the plan runs …` | `apply`'s baseline `cargo check` failed; nothing was written | Make the tree compile, then apply again | `FailedPrecondition` |
+| `the tree does not compile before the plan runs …` | `apply`'s baseline `cargo check` — over the packages owning the plan's files and the destination package of every cross-crate move — failed; nothing was written | Make the tree compile, then apply again | `FailedPrecondition` |
 | `N of M operation(s) were applied, and the tree no longer compiles …` | Every operation was accepted and the compiler rejects the result. The edits are left on disk and in the journal | Fix the compiler-named errors by hand, or roll back as the message says (restore the touched paths from git, remove the journal) | `Internal` |
 | ``group `<name>` does not compile at its end, so it was rolled back: …`` | A transactional group's members were accepted and the compiler rejects the tree they leave together. The group was undone exactly; earlier operations stay applied | Fix the plan so the group compiles at its end, or the code it depends on | `FailedPrecondition` |
 
@@ -863,6 +894,14 @@ that never came back.
   under a watcher shell rather than `exec`-ing it. And a cold CLI run killed before `.restructure/`
   exists leaves no record, because the record must not be the thing that makes a refusal's "nothing
   was written" false.
+- **Which operation started it.** A process started while an operation is committed (its `git`
+  calls, the preflight's `git ls-files` included) carries `op` (the plan index) and, when the plan
+  has ids, `op_id` on its `start` line; a group's end-of-group `cargo check` carries `group`. The
+  keys are written only when present. Run-level processes — the baseline and result `cargo check`,
+  the tidy, the worktree probe, the language server — carry none. Both apply loops get this through
+  the shared commit path. The command line's progress line names the id too (`op 3 (split-io) of 7:
+  resolving …`), so a progress line, a spawn line and a journal record join on a key that survives
+  reordering the plan.
 - **Never fatal.** A record that cannot be written is logged and dropped; it never fails the run.
 
 The structural test `every_spawn_is_recorded` keeps it complete: a `Command::new` or `.spawn()` in
@@ -1098,8 +1137,9 @@ How the crate delivers this: [path-survey.md](../../../packages/tddy-code-restru
   `ListPlans`; `apply` ignores it, since it refuses only operations at or after its start. The
   applied plan's own v2 `files` hints are not rewritten by its own apply.
 - **An apply consumes its plan file.** A run rewrites the plan as it goes, so a plan whose apply
-  failed and was rolled back is stale; re-running it is refused as an item that changed. Regenerate
-  the plan.
+  failed and was rolled back is stale. Re-running it is refused, and the refusal says a run of the
+  plan wrote it; regenerate the plan. `check`'s stale finding and the `ItemChanged` refusal raised
+  while lowering anchors do not say so, and no copy of the plan as it was before the run is kept.
 - **`--from <id>` does not reach the daemon.** `ApplyRequest` carries no field for it, so the daemon path
   refuses it, naming the workaround. Journal records and `OperationApplied` events carry `op_id`.
 - **`check` without `--deep` cannot examine item anchors.** A static check has no server to resolve

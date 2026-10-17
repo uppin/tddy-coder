@@ -618,6 +618,87 @@ async fn fails_an_apply_that_leaves_a_tree_the_compiler_rejects() {
     );
 }
 
+/// [`a_workspace_whose_test_binary_reads_a_file_beside_it`], with a test binary that calls into
+/// its own crate — so moving it gives the destination a dev-dependency on `origin`, a text edit
+/// written before any `git mv` — on disk but never added to git, which `git mv` will not move.
+fn a_workspace_whose_test_binary_is_untracked() -> tempfile::TempDir {
+    let workspace = a_workspace_whose_test_binary_reads_a_file_beside_it();
+    std::fs::write(
+        workspace.path().join("crates/origin/tests/golden.rs"),
+        "#[test]\nfn reads_the_level() {\n    assert_eq!(origin::level(), 2);\n}\n",
+    )
+    .expect("a test binary naming its crate");
+    git(&workspace, &["add", "crates/origin/tests/golden.rs"]);
+    git(
+        &workspace,
+        &["rm", "--cached", "--quiet", "crates/origin/tests/golden.rs"],
+    );
+    workspace
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_move_of_a_file_git_does_not_track_before_writing_anything() {
+    // Given a plan moving a test binary git does not track, and what the files it touches hold
+    let workspace = a_workspace_whose_test_binary_is_untracked();
+    let plan = a_plan_in(
+        &workspace,
+        &[
+            "{\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+           \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+           \"to\":\"crates/destination\"}",
+        ],
+    );
+    let read = |path: &str| std::fs::read_to_string(workspace.path().join(path)).ok();
+    let before = (
+        read("crates/origin/tests/golden.rs"),
+        read("crates/destination/Cargo.toml"),
+    );
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is applied through the daemon
+    let refusal = stream_at::<_, RestructureEvent>(
+        &entry,
+        "Apply",
+        ApplyRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plan: plan.to_string_lossy().to_string(),
+            dry_run: false,
+            resume: false,
+            from: None,
+            stop_after: None,
+        },
+    )
+    .await
+    .expect_err("a move of an untracked file is refused");
+
+    // Then the run is refused as a failed precondition, naming the file git does not track
+    assert_eq!(
+        refusal.code(),
+        tddy_rpc::Code::FailedPrecondition,
+        "{}",
+        refusal.message()
+    );
+    assert!(
+        refusal.message().contains("which git does not track"),
+        "{}",
+        refusal.message()
+    );
+    assert!(
+        refusal.message().contains("crates/origin/tests/golden.rs"),
+        "{}",
+        refusal.message()
+    );
+    // And the files, the destination's manifest the move would have edited among them, are as
+    // they were
+    assert_eq!(
+        (
+            read("crates/origin/tests/golden.rs"),
+            read("crates/destination/Cargo.toml")
+        ),
+        before
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_apply_whose_plan_names_a_file_no_backend_handles() {
     // Given a plan anchored in a file no language backend claims
