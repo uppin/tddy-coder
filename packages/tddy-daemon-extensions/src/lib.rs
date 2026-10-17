@@ -20,6 +20,7 @@ pub mod room_directory;
 pub mod room_tokens;
 pub mod session_reach;
 pub mod session_rooms;
+pub mod split_rooms;
 pub mod terminal_exposure;
 
 pub use integration_status::{
@@ -32,6 +33,10 @@ pub use room_directory::{NoRoomDirectory, RoomDirectory};
 pub use room_tokens::{NoRoomTokens, RoomTokenMinter};
 pub use terminal_exposure::{
     ExposedTerminal, NoTerminalExposure, TerminalAddress, TerminalExposure,
+};
+pub use split_rooms::{
+    NoSplitRooms, RemoteSnapshotSource, SessionTokenMinter, SplitAgentJoin, SplitRoomHosting,
+    WorktreeSnapshot,
 };
 pub use session_rooms::{NoSessionRooms, SessionRooms};
 pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};

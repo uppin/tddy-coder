@@ -13542,6 +13542,7 @@ dependencies = [
  "tddy-cli-sessions",
  "tddy-core",
  "tddy-daemon-auth",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
