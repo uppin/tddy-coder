@@ -22,11 +22,15 @@ const METHOD: &str = "AddProjectToHost";
 // An in-memory transport
 // ---------------------------------------------------------------------------
 
-/// What a peer answers: bytes now, or never.
+/// What a peer answers: bytes now, a failure, or never; a stream that opens, or fails to.
 enum Answer {
     Bytes(Vec<u8>),
+    /// A unary call the peer fails.
+    Failure(Status),
     Never,
     Frames(mpsc::Receiver<Result<Vec<u8>, Status>>),
+    /// A stream the transport cannot open.
+    OpenFailure(Status),
 }
 
 /// One call the transport carried: peer, service, method, request body.
@@ -82,8 +86,11 @@ impl PeerForwarder for AScriptedPeer {
         ));
         match self.take(service, method) {
             Answer::Bytes(bytes) => Ok(bytes),
+            Answer::Failure(status) => Err(status),
             Answer::Never => std::future::pending().await,
-            Answer::Frames(_) => panic!("a unary call was scripted with a stream"),
+            Answer::Frames(_) | Answer::OpenFailure(_) => {
+                panic!("a unary call was scripted with a stream")
+            }
         }
     }
 
@@ -96,7 +103,11 @@ impl PeerForwarder for AScriptedPeer {
     ) -> Result<mpsc::Receiver<Result<Vec<u8>, Status>>, Status> {
         match self.take(service, method) {
             Answer::Frames(frames) => Ok(frames),
-            _ => panic!("a stream was scripted with a unary answer"),
+            Answer::OpenFailure(status) => Err(status),
+            Answer::Never => std::future::pending().await,
+            Answer::Bytes(_) | Answer::Failure(_) => {
+                panic!("a stream was scripted with a unary answer")
+            }
         }
     }
 }
@@ -110,6 +121,29 @@ fn a_config_with_forward_timeout(secs: u64) -> DaemonConfig {
 
 fn a_room_over(peer: Arc<dyn PeerForwarder>) -> CommonRoom {
     CommonRoom::new(peer, &a_config_with_forward_timeout(30))
+}
+
+/// A room over a peer that serves `frames` as the stream for [`SERVICE`]/[`METHOD`].
+fn a_room_streaming(frames: mpsc::Receiver<Result<Vec<u8>, Status>>) -> CommonRoom {
+    a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::Frames(frames),
+    )))
+}
+
+/// Relay the stream, decoding each frame as UTF-8 text; bytes that are not text fail to decode.
+async fn relayed_as_text(room: &CommonRoom) -> mpsc::UnboundedReceiver<Result<String, Status>> {
+    room.forward_server_stream_to_peer(PEER, SERVICE, METHOD, Vec::new(), |bytes| {
+        String::from_utf8(bytes).map_err(|_| Status::invalid_argument("frame is not text"))
+    })
+    .await
+    .expect("the stream opened")
+}
+
+/// A frame's code and message, which is what a caller can tell apart.
+fn code_and_message(status: Status) -> (Code, String) {
+    (status.code, status.message)
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +203,19 @@ async fn a_peer_that_does_not_answer_within_the_deadline_is_reported_as_timed_ou
 }
 
 #[tokio::test]
-async fn forwarding_without_a_connected_transport_is_a_failed_precondition() {
+async fn a_common_room_with_no_transport_wired_is_not_connected() {
+    // Given a common room with no transport wired
+    let room = a_room_over(Arc::new(NoPeerForwarding));
+
+    // When asked whether a peer can be reached
+    let connected = room.is_connected().await;
+
+    // Then it cannot
+    assert!(!connected);
+}
+
+#[tokio::test]
+async fn forwarding_without_a_connected_transport_is_a_failed_precondition_naming_the_call() {
     // Given a common room with no transport wired
     let room = a_room_over(Arc::new(NoPeerForwarding));
 
@@ -179,9 +225,36 @@ async fn forwarding_without_a_connected_transport_is_a_failed_precondition() {
         .await
         .expect_err("nothing can carry the call");
 
-    // Then the room is reported unreachable, and refused as a precondition
-    assert!(!room.is_connected().await);
-    assert_eq!(refused.code, Code::FailedPrecondition);
+    // Then it is refused as a precondition, naming what could not be forwarded
+    assert_eq!(
+        code_and_message(refused),
+        (
+            Code::FailedPrecondition,
+            "no peer transport is wired on this daemon; cannot forward project.ProjectService/AddProjectToHost to daemon peer-daemon-1".to_string()
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_failure_the_peer_returns_reaches_the_caller_unchanged() {
+    // Given a peer that fails the call
+    let room = a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::Failure(Status::not_found("no such project on this host")),
+    )));
+
+    // When a request is forwarded to it
+    let refused = room
+        .forward_to_peer(PEER, SERVICE, METHOD, Vec::new())
+        .await
+        .expect_err("the peer failed the call");
+
+    // Then the caller sees the peer's code and message, not a rewrapped one
+    assert_eq!(
+        code_and_message(refused),
+        (Code::NotFound, "no such project on this host".to_string())
+    );
 }
 
 #[tokio::test]
@@ -240,4 +313,117 @@ async fn a_stream_that_goes_quiet_ends_with_one_deadline_error() {
         )
     );
     assert!(after.is_none(), "nothing follows the terminal error");
+}
+
+#[tokio::test]
+async fn a_stream_the_transport_cannot_open_is_reported_as_that_failure() {
+    // Given a transport that cannot open the stream
+    let room = a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::OpenFailure(Status::unavailable("the peer left the room")),
+    )));
+
+    // When the stream is relayed
+    let refused = room
+        .forward_server_stream_to_peer(PEER, SERVICE, METHOD, Vec::new(), Ok)
+        .await
+        .expect_err("the stream never opened");
+
+    // Then the caller gets the transport's failure
+    assert_eq!(
+        code_and_message(refused),
+        (Code::Unavailable, "the peer left the room".to_string())
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_stream_that_is_never_opened_is_reported_as_timed_out() {
+    // Given a transport that never answers the request to open the stream
+    let room = a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::Never,
+    )));
+
+    // When the stream is relayed (time is paused, so the 30s deadline does not wait)
+    let refused = room
+        .forward_server_stream_to_peer(PEER, SERVICE, METHOD, Vec::new(), Ok)
+        .await
+        .expect_err("a stream nobody opens must time out");
+
+    // Then it says which call, to which daemon, after how long
+    assert_eq!(
+        code_and_message(refused),
+        (
+            Code::DeadlineExceeded,
+            "forwarding project.ProjectService/AddProjectToHost to daemon peer-daemon-1 timed out after 30s: the peer is in the common room but its RPC participant did not answer".to_string()
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_terminal_error_frame_from_the_peer_is_relayed_once_and_ends_the_relay() {
+    // Given a peer that streams one frame, fails, and (wrongly) would send another
+    let (tx, rx) = mpsc::channel(4);
+    tx.send(Ok(b"one".to_vec())).await.unwrap();
+    tx.send(Err(Status::internal("the peer's export broke")))
+        .await
+        .unwrap();
+    tx.send(Ok(b"after the failure".to_vec())).await.unwrap();
+    let room = a_room_streaming(rx);
+
+    // When the stream is relayed to its end
+    let mut relayed = relayed_as_text(&room).await;
+    let first = relayed.recv().await.expect("a first frame");
+    let terminal = relayed.recv().await.expect("a terminal frame");
+    let after = relayed.recv().await;
+
+    // Then the good frame arrives, the failure arrives once unchanged, and nothing follows
+    assert_eq!(first.expect("a good frame"), "one");
+    assert_eq!(
+        code_and_message(terminal.expect_err("the peer's failure")),
+        (Code::Internal, "the peer's export broke".to_string())
+    );
+    assert!(after.is_none(), "nothing follows the terminal error");
+}
+
+#[tokio::test]
+async fn a_frame_that_fails_to_decode_ends_the_relay_with_that_error() {
+    // Given a peer whose second frame is not text, followed by a frame that would decode
+    let (tx, rx) = mpsc::channel(4);
+    tx.send(Ok(b"one".to_vec())).await.unwrap();
+    tx.send(Ok(vec![0xff, 0xfe])).await.unwrap();
+    tx.send(Ok(b"after the bad frame".to_vec())).await.unwrap();
+    let room = a_room_streaming(rx);
+
+    // When the stream is relayed to its end
+    let mut relayed = relayed_as_text(&room).await;
+    let first = relayed.recv().await.expect("a first frame");
+    let terminal = relayed.recv().await.expect("a terminal frame");
+    let after = relayed.recv().await;
+
+    // Then the decode failure is the terminal error, and nothing follows it
+    assert_eq!(first.expect("a good frame"), "one");
+    assert_eq!(
+        code_and_message(terminal.expect_err("the decode failure")),
+        (Code::InvalidArgument, "frame is not text".to_string())
+    );
+    assert!(after.is_none(), "nothing follows the terminal error");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_consumer_that_drops_the_relay_releases_the_forwarders_stream() {
+    // Given a relayed stream whose peer has sent one frame and then goes quiet
+    let (peer_side, rx) = mpsc::channel(4);
+    peer_side.send(Ok(b"one".to_vec())).await.unwrap();
+    let room = a_room_streaming(rx);
+    let mut relayed = relayed_as_text(&room).await;
+    relayed.recv().await.expect("a first frame").expect("good");
+
+    // When the consumer drops its end (the relay notices at the next idle timeout; time is paused)
+    drop(relayed);
+
+    // Then the relay ends and lets go of the forwarder's stream, which the peer side observes
+    peer_side.closed().await;
 }
