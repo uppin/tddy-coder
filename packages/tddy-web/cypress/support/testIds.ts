@@ -788,6 +788,8 @@ export const TEST_IDS = {
 
   // Daemon selector (top-right strip on daemon-mode screens)
   daemonSelectorTrigger: "daemon-selector-trigger",
+  /** The pulsing dot shown while the selected daemon is not listed — "Waiting for daemon". */
+  daemonSelectorWaiting: "daemon-selector-waiting",
 
   // Host-connection probes (HostConnectionAcceptance.cy.tsx) — small components that render what
   // `useHostClient` / `useHostConnection` resolved, so the connection model can be driven without a

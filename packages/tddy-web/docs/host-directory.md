@@ -126,6 +126,7 @@ and:
 
 | Field | Meaning |
 |---|---|
+| `selectedLabel` | the selected daemon's label — listed, or remembered for this tab while it waits unlisted (`useSelectedDaemonLabel`); `null` when nothing is selected or it was never listed here |
 | `directoryStatus` | whether this page can name hosts at all — the merged, optimistic status |
 | `directoryError` | why, when `directoryStatus` is `error`; `null` otherwise |
 

@@ -1,37 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { presenceIdentityForUser } from "../lib/presenceIdentity";
-
-/** Provides an isolated in-memory sessionStorage for the duration of fn. */
-function withMockedSessionStorage(fn: () => void): void {
-  const store = new Map<string, string>();
-  const mock: Storage = {
-    get length() {
-      return store.size;
-    },
-    clear() {
-      store.clear();
-    },
-    getItem(k: string) {
-      return store.get(k) ?? null;
-    },
-    key(i: number) {
-      return [...store.keys()][i] ?? null;
-    },
-    removeItem(k: string) {
-      store.delete(k);
-    },
-    setItem(k: string, v: string) {
-      store.set(k, v);
-    },
-  };
-  const prev = globalThis.sessionStorage;
-  globalThis.sessionStorage = mock;
-  try {
-    fn();
-  } finally {
-    globalThis.sessionStorage = prev;
-  }
-}
+import { withMockedSessionStorage } from "../test-utils/sessionStorage";
 
 describe("presence identity for LiveKit common room", () => {
   it("repeated calls in the same tab reuse the same identity via sessionStorage", () => {

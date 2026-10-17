@@ -56,18 +56,7 @@ import { HostPresenceRoom } from "./hostDirectory/presenceRoom";
 import { useServingHostDirectorySource } from "./hostDirectory/servingSource";
 import { HostDirectorySources, useHostDirectory } from "./hostDirectory/useHostDirectory";
 import type { HostDirectorySource } from "./hostDirectory/types";
-
-// ---------------------------------------------------------------------------
-// Persistence + resolution
-// ---------------------------------------------------------------------------
-
-// The rules themselves are pure and live in `routing/selectedHost` so they are unit-testable
-// without React's JSX runtime; re-exported here for this module's existing importers.
-export {
-  readStoredSelectedDaemon,
-  writeStoredSelectedDaemon,
-  resolveSelectedDaemonInstanceId,
-} from "../routing/selectedHost";
+import { useSelectedDaemonLabel } from "./useSelectedDaemonLabel";
 
 // ---------------------------------------------------------------------------
 // Context
@@ -76,6 +65,16 @@ export {
 interface SelectedDaemonContextValue {
   readonly daemons: DaemonHost[];
   readonly selectedInstanceId: string | null;
+  /**
+   * The label the selected daemon is known by: its listed label while it is listed, otherwise the
+   * one this tab last saw it listed under (`useSelectedDaemonLabel`). `null` when
+   * nothing is selected, or the selected daemon has never been listed in this tab — a shared link
+   * opened before the common room lists its host.
+   *
+   * A selection is kept while its daemon is not listed (see `resolveSelectedDaemonInstanceId`), and
+   * the selector shows it as waiting under this label rather than a bare instance id.
+   */
+  readonly selectedLabel: string | null;
   readonly servingInstanceId?: string;
   readonly selectDaemon: (instanceId: string) => void;
   /**
@@ -204,16 +203,18 @@ function useDirectorySources({
 
 /**
  * Own the currently selected daemon's state: initialized from {@link resolveSelectedDaemonInstanceId},
- * recomputed whenever `daemons` changes (so a selection whose daemon left the common room falls
- * back to the serving daemon / first available daemon instead of pointing at a dead peer), and
- * persisted to `sessionStorage` on explicit selection.
+ * recomputed whenever `daemons` changes (so a tab that chose nothing gets a default once a daemon is
+ * listed), and persisted to `sessionStorage` on explicit selection. A chosen daemon that is not
+ * listed stays selected — the common room may not have listed it *yet*, after a reload, or it may
+ * be about to come back — and the selector shows it as waiting.
  *
- * An empty `daemons` list is treated as "no information yet" rather than "no daemons exist" and
- * never clears an existing selection: the common room's connection is not always up (the initial
- * connect, or a transient disconnect/reconnect — see `useCommonRoom`) and `daemons` is briefly
- * empty in both cases. Resetting the selection during that gap would flash the UI to "nothing
- * selected" and null out every `useDaemonClient` consumer's RPC client, even though the daemon is
- * still there and about to reappear.
+ * An empty `daemons` list still never clears an existing selection, because resolution keeps any
+ * choice whether or not it is listed. That matters: the common room's connection is not always up
+ * (the initial connect, or a transient disconnect/reconnect — see `useCommonRoom`) and `daemons` is
+ * briefly empty in both cases. Resetting the selection during that gap would flash the UI to
+ * "nothing selected" and null out every `useDaemonClient` consumer's RPC client, even though the
+ * daemon is still there and about to reappear. Resolution still re-runs while the list is empty, so
+ * a Back or an edited `?host=` takes effect without waiting for the directory.
  */
 function useSelectedDaemonState(
   daemons: DaemonHost[],
@@ -232,7 +233,6 @@ function useSelectedDaemonState(
   );
 
   useEffect(() => {
-    if (daemons.length === 0) return;
     setSelectedInstanceId((current) =>
       resolveSelectedDaemonInstanceId({
         daemons,
@@ -246,8 +246,12 @@ function useSelectedDaemonState(
   // Record the resolved host so the very first reload — or a copy of the address bar into another
   // tab, which carries no `sessionStorage` — already names it. `replace`: nobody chose this, it is
   // the default made explicit.
+  //
+  // Only an address with no host is written. A `?host=` already there is a choice — a link, a
+  // reload, a Back — and changes only by navigation: the URL wins resolution unconditionally, so
+  // rewriting it here could only ever replace the operator's host with a default.
   useEffect(() => {
-    if (!selectedInstanceId || urlInstanceId === selectedInstanceId) return;
+    if (!selectedInstanceId || urlInstanceId) return;
     setAppLocationParams({ [PARAM_HOST]: selectedInstanceId }, { replace: true });
   }, [selectedInstanceId, urlInstanceId]);
 
@@ -329,11 +333,13 @@ function SelectedDaemonScope({
   // The screens speak `DaemonHost`; the directory speaks `HostDescriptor`. See `hostDirectory/daemonHost`.
   const daemons = useMemo(() => directory.hosts.map(daemonHostOf), [directory.hosts]);
   const { selectedInstanceId, selectDaemon } = useSelectedDaemonState(daemons, servingInstanceId);
+  const selectedLabel = useSelectedDaemonLabel(daemons, selectedInstanceId);
 
   const value: SelectedDaemonContextValue = useMemo(
     () => ({
       daemons,
       selectedInstanceId,
+      selectedLabel,
       servingInstanceId,
       selectDaemon,
       directoryStatus: directory.status,
@@ -342,6 +348,7 @@ function SelectedDaemonScope({
     [
       daemons,
       selectedInstanceId,
+      selectedLabel,
       servingInstanceId,
       selectDaemon,
       directory.status,
@@ -372,6 +379,7 @@ function SelectedDaemonScope({
 const NO_PROVIDER_DEFAULTS: SelectedDaemonContextValue = {
   daemons: [],
   selectedInstanceId: null,
+  selectedLabel: null,
   servingInstanceId: undefined,
   selectDaemon: () => {},
   directoryStatus: "idle",

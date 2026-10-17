@@ -144,7 +144,13 @@ now exposes as `daemon_instance_id`.
   instance id.
 - Selecting an entry re-targets all daemon-level RPC clients used by the current screen at
   `daemon-{selectedInstanceId}`. The selection persists for the browser tab (`sessionStorage`) and
-  defaults to the serving daemon.
+  in the URL (`?host=`), and defaults to the serving daemon only when nothing was chosen.
+- A selected daemon that is not listed — the common room still joining after a reload, or the daemon
+  gone from it — stays selected and is shown **waiting**: its last-seen label (or its instance id, if
+  this tab never listed it) beside a pulsing amber dot whose tooltip is "Waiting for daemon". It is
+  listed as an option that cannot be chosen; the other listed daemons stay selectable. The waiting
+  state ends by itself when the daemon is listed again, with no remount and no URL change. See
+  [URL state routing § Host in the URL](url-state-routing.md#host-in-the-url).
 - The **Projects** screen host picker ("Add to host") is migrated to source its daemon list from
   the same shared common-room context as the selector, instead of opening its own separate common-
   room connection (today `ProjectsAppPage` calls `useCommonRoom` independently). Add-to-host also
