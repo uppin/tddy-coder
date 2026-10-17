@@ -95,6 +95,8 @@ use tddy_service::proto::session_files::{
     UploadStagedAttachmentChunkResponse,
 };
 
+use crate::session_reach::livekit_integration_state;
+use tddy_daemon_extensions::{IntegrationReporter, IntegrationState};
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
 use tddy_host_service::host_registry::{now_unix_ms, HostRegistry, HostSighting};
 use tddy_host_service::multi_host::{DaemonInstanceId, EligibleDaemonInfo, EligibleDaemonSource};
@@ -837,13 +839,20 @@ where
 ///
 /// Returned as a handle because it never ends on its own: the only way to stop discovering peers in
 /// a room is for its owner to abort it, which is what a reconfigured common room does.
+///
+/// Reports on `status`: what the configuration says while the first attempt is made (`Connecting`
+/// for a complete `livekit:` block, otherwise `Disabled` / `Misconfigured`), `Connected` once the
+/// room is joined, and `Unreachable` with the reason whenever a connect fails or the room is lost.
+/// Retries do not report `Connecting` again, so `Unreachable` keeps the moment it began.
 pub fn spawn_common_room_discovery_loop(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
     signing_key: AdvertisedSigningKey,
+    status: IntegrationReporter,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        status.report(livekit_integration_state(config.livekit.as_ref()));
         loop {
             let local_id = local_instance_id_for_config(&config);
             let outcome = common_room_discovery_cycle(
@@ -851,8 +860,13 @@ pub fn spawn_common_room_discovery_loop(
                 registry.clone(),
                 room_slot.clone(),
                 signing_key.clone(),
+                &status,
             )
             .await;
+            status.report(match &outcome {
+                Ok(reason) => common_room_lost_state(*reason),
+                Err(e) => common_room_failure_state(config.livekit.as_ref(), e),
+            });
             let retry_secs: u64 = match &outcome {
                 Ok(Some(DisconnectReason::DuplicateIdentity)) => 6,
                 _ => 2,
@@ -1295,11 +1309,35 @@ async fn run_common_room_registry_loop(
     }
 }
 
+/// What a failed discovery cycle means for the status board: the operator's configuration when that
+/// is what the cycle could not use (`Disabled`, `Misconfigured`), otherwise a room that did not
+/// answer, with the failure.
+fn common_room_failure_state(
+    livekit: Option<&LiveKitConfig>,
+    error: &anyhow::Error,
+) -> IntegrationState {
+    match livekit_integration_state(livekit) {
+        IntegrationState::Connecting => IntegrationState::Unreachable {
+            error: format!("{error:#}"),
+        },
+        configuration => configuration,
+    }
+}
+
+/// What a joined room that ended means for the status board.
+fn common_room_lost_state(reason: Option<DisconnectReason>) -> IntegrationState {
+    let reason = reason.map_or_else(|| "no reason given".to_string(), |r| format!("{r:?}"));
+    IntegrationState::Unreachable {
+        error: format!("left the common room: {reason}"),
+    }
+}
+
 async fn common_room_discovery_cycle(
     config: Arc<DaemonConfig>,
     registry: Arc<CommonRoomPeerRegistry>,
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
     signing_key: AdvertisedSigningKey,
+    status: &IntegrationReporter,
 ) -> anyhow::Result<Option<DisconnectReason>> {
     let (room_name, url, api_key, api_secret) = livekit_common_room_connect_strings(&config)?;
     let set_metadata_budget = config.common_room_set_metadata_attempt_budget();
@@ -1338,6 +1376,7 @@ async fn common_room_discovery_cycle(
         let mut g = room_slot.write().await;
         *g = Some(room.clone());
     }
+    status.report(IntegrationState::Connected);
     log::info!(
         "common_room_discovery: common-room LiveKit session ready for instance_id={} (metadata publish is best-effort)",
         local_id
@@ -1661,6 +1700,98 @@ mod tests {
     use super::*;
     use std::time::Duration;
     use tddy_host_service::multi_host::DaemonInstanceId;
+
+    // -----------------------------------------------------------------------
+    // What the discovery loop tells the integration status board.
+    // -----------------------------------------------------------------------
+
+    /// A `livekit:` block as an operator writes it.
+    fn a_livekit_block(yaml: &str) -> LiveKitConfig {
+        serde_yaml::from_str(yaml).expect("the livekit block must parse")
+    }
+
+    fn a_complete_livekit_block() -> LiveKitConfig {
+        a_livekit_block(
+            "enabled: true\nurl: ws://10.0.0.5:7880\napi_key: devkey\napi_secret: secret\n",
+        )
+    }
+
+    #[test]
+    fn a_failed_connect_to_a_configured_room_is_unreachable_with_the_failure() {
+        // Given a complete livekit block and a connect that failed
+        let livekit = a_complete_livekit_block();
+        let failure = anyhow::anyhow!("timeout waiting for RoomEvent::Connected (30s)");
+
+        // When the failure is classified for the status board
+        let state = common_room_failure_state(Some(&livekit), &failure);
+
+        // Then the daemon is unreachable and the board carries the failure
+        assert_eq!(
+            state,
+            IntegrationState::Unreachable {
+                error: "timeout waiting for RoomEvent::Connected (30s)".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_failure_that_comes_from_missing_credentials_is_misconfigured_not_unreachable() {
+        // Given a livekit block with no secret, whose connect strings could not be built
+        let livekit = a_livekit_block("enabled: true\nurl: ws://10.0.0.5:7880\napi_key: devkey\n");
+        let failure = anyhow::anyhow!("livekit.api_secret not set");
+
+        // When the failure is classified for the status board
+        let state = common_room_failure_state(Some(&livekit), &failure);
+
+        // Then it reads as the operator's configuration problem
+        assert_eq!(
+            state,
+            IntegrationState::Misconfigured {
+                missing: vec!["api_secret".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn a_common_room_the_operator_switched_off_is_disabled_not_unreachable() {
+        // Given LiveKit switched off, so the connect strings were refused
+        let livekit = a_livekit_block("enabled: false\n");
+        let failure = anyhow::anyhow!("the common room is disabled (livekit.enabled is false)");
+
+        // When the failure is classified for the status board
+        let state = common_room_failure_state(Some(&livekit), &failure);
+
+        // Then it is disabled
+        assert_eq!(state, IntegrationState::Disabled);
+    }
+
+    #[test]
+    fn a_room_the_server_dropped_us_from_is_unreachable_naming_the_reason() {
+        // When the room reports why it disconnected us
+        let state = common_room_lost_state(Some(DisconnectReason::DuplicateIdentity));
+
+        // Then the board names the reason
+        assert_eq!(
+            state,
+            IntegrationState::Unreachable {
+                error: "left the common room: DuplicateIdentity".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn a_room_that_ended_without_a_reason_is_unreachable_all_the_same() {
+        // When the session ends and the room gave no reason
+        let state = common_room_lost_state(None);
+
+        // Then the board still says the room is gone
+        assert_eq!(
+            state,
+            IntegrationState::Unreachable {
+                error: "left the common room: no reason given".to_string()
+            }
+        );
+    }
 
     // -----------------------------------------------------------------------
     // Recording the room into the durable host registry.

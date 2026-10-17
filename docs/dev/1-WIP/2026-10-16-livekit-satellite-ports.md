@@ -293,7 +293,7 @@ impl WorkspaceGraph {
 - [x] M2 Protos generated; stubs registered
 - [x] M3 `ConnectSession` through `SessionReach`; local-connect acceptance green
 - [x] M4 `LiveKitSessionReach` + `OpenSessionRoom`; session-room acceptance (testkit) green
-- [x] M5 Status reporting + `GetIntegrationStatus` (the common-room discovery loop's reporter hook is open — see Technical Debt)
+- [x] M5 Status reporting + `GetIntegrationStatus` (the common-room discovery loop reports on the same reporter)
 - [x] M6 Clients switched; their tests green
 - [x] M7 `WorkspaceGraph`; boundary suites migrated; ratchet green
 
@@ -392,10 +392,14 @@ See Testing Plan tables (each row = one test, file path given).
   through feature unification and failed when built alone (first time a crate depended on
   `tddy-rpc` with no other tokio user). Fixed in its manifest.
 
-- **TODO: the common-room discovery loop does not yet report on the board.** `LiveKitSessionReach`
-  reports `Connecting` (from the `livekit:` block, at construction), `Connected` and `Unreachable`
-  (from every room open); `spawn_common_room_discovery_loop` has no reporter, because taking one
-  changes a signature four test suites call. Needs its own decision on how the hook is passed.
+- **The common-room discovery loop reports on the board** through a trailing `IntegrationReporter`
+  argument of `spawn_common_room_discovery_loop`, carried to the runtime in
+  `PeerDiscoveryHandles.status` (the same reporter, cloned, that `LiveKitSessionReach` holds).
+  `livekit_integration_state` of the config while the first attempt runs, `Connected` once the room
+  is joined, `Unreachable { error }` for a failed connect or a lost room (a failure that is really the
+  config — `Disabled` / `Misconfigured` — is reported as that). Retries do not report `Connecting`
+  again, so `Unreachable` keeps its `since`. `runtime::spawn_common_room_discovery_task` (the
+  embedder entry, ten test callers) keeps its signature and reports on a private board nobody reads.
 - `ensure_session_room` and the agent-roster paths are untouched (node 11 per Boundaries).
 - The two boundary suites no longer read `[dev-dependencies]` of their own crate: `WorkspaceGraph`
   names normal, build and optional dependencies only (its contract). The test that asserted

@@ -244,6 +244,9 @@ pub struct PeerDiscoveryHandles {
     /// What this daemon advertises as its signing identity, so peers can verify the session tokens
     /// it mints. Built by whoever owns the keypair and handed in, never derived here.
     pub signing_key: crate::livekit_peer_discovery::AdvertisedSigningKey,
+    /// LiveKit's entry on the integration status board, which the discovery loop reports on — the
+    /// same entry the session-room plugin reports on, so the board has one LiveKit answer.
+    pub status: tddy_daemon_extensions::IntegrationReporter,
 }
 
 /// The real thing: joins the common room as this daemon, serving its RPC roster and running peer
@@ -300,6 +303,7 @@ impl CommonRoomConnector for DaemonCommonRoomConnector {
                     handles.registry.clone(),
                     handles.room_slot.clone(),
                     handles.signing_key.clone(),
+                    handles.status.clone(),
                 ),
             ),
             None => {

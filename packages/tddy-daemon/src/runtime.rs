@@ -287,6 +287,9 @@ pub fn spawn_common_room_discovery_task(
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
     signing_key: tddy_daemon_livekit::AdvertisedSigningKey,
 ) {
+    // An embedder keeps no status board, so the loop reports on one nobody reads.
+    let status = tddy_daemon_extensions::IntegrationStatusBoard::new()
+        .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit");
     tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
         &config,
         room_slot.clone(),
@@ -296,6 +299,7 @@ pub fn spawn_common_room_discovery_task(
         registry,
         room_slot,
         signing_key,
+        status,
     );
 }
 
@@ -788,10 +792,13 @@ pub async fn build(
     // LiveKit plugin behind the session host's `SessionReach` port. The plugin shares the host's
     // room registry so the rooms it opens are the ones deletion closes.
     let integration_board = tddy_daemon_extensions::IntegrationStatusBoard::new();
+    // One reporter, cloned to the discovery loop below: both report into the same board entry.
+    let livekit_status =
+        integration_board.reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit");
     let livekit_reach = tddy_daemon_livekit::LiveKitSessionReach::new(
         config.clone(),
         Arc::clone(&shared_session_rooms),
-        integration_board.reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit"),
+        livekit_status.clone(),
     );
 
     let telegram = build_telegram(
@@ -893,6 +900,7 @@ pub async fn build(
                     // Announced on every connection to the common room, so a peer holding one of
                     // this daemon's tokens can find the key that verifies it.
                     signing_key: advertised_signing_key,
+                    status: livekit_status.clone(),
                 });
                 tasks.oauth_loopback_tunnel = Some(OauthLoopbackTunnel {
                     config: config_arc.clone(),
