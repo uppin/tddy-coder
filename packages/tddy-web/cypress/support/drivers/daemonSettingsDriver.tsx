@@ -4,7 +4,7 @@
  */
 
 import React from "react";
-import { createClient, type Code } from "@connectrpc/connect";
+import { Code, createClient } from "@connectrpc/connect";
 import { anInMemoryRpcBackend } from "tddy-connectrpc-testkit";
 import { DaemonSettingsScreen } from "../../../src/components/settings/DaemonSettingsScreen";
 import { DaemonConfigService } from "../../../src/gen/daemon_config_pb";
@@ -76,6 +76,44 @@ export function aDaemonRefusingUpdates(code: Code, message: string) {
   return aDaemonServing().failWith(DaemonConfigService.method.updateConfig, code, message);
 }
 
+/** What `GetIntegrationStatus` answers with: LiveKit in `state`, entered `secondsAgo`. */
+export function aLiveKitIntegration(fields: {
+  state: number;
+  secondsAgo: number;
+  error?: string;
+  missingFields?: string[];
+}) {
+  return {
+    id: "livekit",
+    label: "LiveKit",
+    state: fields.state,
+    error: fields.error ?? "",
+    missingFields: fields.missingFields ?? [],
+    sinceUnixMs: BigInt(Date.now() - fields.secondsAgo * 1000),
+  };
+}
+
+/** A daemon that also reports its integrations, answering each status read with the next entry. */
+export function aDaemonReportingIntegrations(
+  ...answers: ReturnType<typeof aLiveKitIntegration>[]
+) {
+  let read = 0;
+  return aDaemonConfigBackend().onUnary(DaemonConfigService.method.getIntegrationStatus, () => {
+    const answer = answers[Math.min(read, answers.length - 1)];
+    read += 1;
+    return { integrations: [answer] };
+  });
+}
+
+/** A daemon too old to answer `GetIntegrationStatus`. */
+export function aDaemonWithoutIntegrationStatus() {
+  return aDaemonConfigBackend().failWith(
+    DaemonConfigService.method.getIntegrationStatus,
+    Code.Unimplemented,
+    "unknown method GetIntegrationStatus",
+  );
+}
+
 type Backend = ReturnType<typeof aDaemonConfigBackend>;
 
 export function aDaemonSettingsScreen(backend: Backend) {
@@ -129,6 +167,14 @@ export function aDaemonSettingsScreen(backend: Backend) {
     },
     expectRestartRequired(field: string) {
       byTestId(TEST_IDS.daemonSettingsRestartRequired).should("contain.text", field);
+      return driver;
+    },
+    expectLiveKitStatus(text: string) {
+      byTestId(TEST_IDS.daemonSettingsLivekitStatus).should("have.text", text);
+      return driver;
+    },
+    expectNoLiveKitStatus() {
+      byTestId(TEST_IDS.daemonSettingsLivekitStatus).should("not.exist");
       return driver;
     },
     expectError(fragment: string) {
