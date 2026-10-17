@@ -57,7 +57,6 @@ const WIRING: &[&str] = &[
 /// Library crates that still name a LiveKit crate. Strike a crate off when it stops.
 const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-agent-launch",
-    "tddy-session-agents",
     "tddy-session-lifecycle",
     "tddy-session-split",
 ];
