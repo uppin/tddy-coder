@@ -61,4 +61,39 @@ export const daemonSelectorPage = {
   expectUnreachable() {
     daemonSelectorPage.trigger().should("contain.text", "Common room unreachable");
   },
+
+  /**
+   * Asserts the selector is holding on to a selected daemon that is not listed right now: the
+   * trigger names it — exactly, so a bare instance id beside the label would fail — and the
+   * pulsing dot says "Waiting for daemon".
+   */
+  expectWaitingFor(label: string) {
+    daemonSelectorPage.trigger().should("have.text", label);
+    daemonSelectorPage
+      .trigger()
+      .find(`[data-testid="${TEST_IDS.daemonSelectorWaiting}"]`)
+      .should("have.attr", "title", "Waiting for daemon");
+  },
+
+  /** Asserts the selected daemon is listed — no waiting dot on the trigger. */
+  expectNotWaiting() {
+    daemonSelectorPage.trigger().find(`[data-testid="${TEST_IDS.daemonSelectorWaiting}"]`).should("not.exist");
+  },
+
+  /**
+   * Clicks the option for `instanceId` even if it is disabled — the way a test proves a disabled
+   * option really does nothing, rather than only looking disabled. Opens the dropdown first.
+   */
+  forceChoose(instanceId: string) {
+    daemonSelectorPage.open();
+    byTestId(daemonSelectorOption(instanceId)).click({ force: true });
+  },
+
+  /**
+   * Asserts the open dropdown lists `instanceId` as an option that cannot be chosen. Does not open
+   * it: a disabled option is reached through {@link forceChoose}, which leaves the dropdown open.
+   */
+  expectOptionUnavailable(instanceId: string) {
+    byTestId(daemonSelectorOption(instanceId)).should("have.attr", "aria-disabled", "true");
+  },
 };
