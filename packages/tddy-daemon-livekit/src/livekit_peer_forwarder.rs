@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, RwLock};
 pub type CommonRoomSlot = Arc<RwLock<Option<Arc<Room>>>>;
 
 /// Frames the relay of one forwarded stream buffers; matches the transport channel it reads.
+/// Independent of the transport's own depth: it adds one buffering hop, it does not replace it.
 const STREAM_RELAY_DEPTH: usize = 32;
 
 /// Forwards over the common room in `slot`.
@@ -95,8 +96,10 @@ impl PeerForwarder for LiveKitPeerForwarder {
 
         // The client carries this call's registration in the room's shared engine; hold it for the
         // stream's whole life so the response loop keeps delivering frames to it. Frames pass
-        // through a channel of the transport's own depth, so a reader that stops draining stalls
-        // this relay, never the room's shared response loop.
+        // through a channel of their own, so this relay adds one buffering hop. It does not isolate
+        // the room: the transport's channel (32 frames) is filled by the shared response loop with
+        // `send().await`, so a reader that stops draining eventually blocks that loop for every
+        // in-flight call (head-of-line). Callers must drain promptly or drop the receiver.
         let (tx, rx) = mpsc::channel(STREAM_RELAY_DEPTH);
         tokio::spawn(async move {
             let _client = client;

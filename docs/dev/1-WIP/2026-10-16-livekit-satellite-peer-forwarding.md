@@ -179,6 +179,19 @@ Unit (`tddy-daemon-extensions/src/peer_forwarder.rs`):
 `with_nothing_wired_no_peer_is_connected`, `with_nothing_wired_a_forward_is_a_failed_precondition_naming_the_call`.
 
 ## Technical Debt & Production Readiness
+- **Deferred: `CommonRoom::over_slot` helper.** `LiveKitPeerForwarder::new(slot)` followed by
+  `CommonRoom::new` is repeated at two sites in `runtime.rs`, in `peer_routing.rs` and in
+  `livekit_peer_discovery.rs`. Those files are edited by later stack nodes, so the helper lands
+  with them rather than creating a conflict here.
+- **Deferred: no direct unit test of `LiveKitPeerForwarder::call_server_stream`** ("the relay
+  releases when the reader drops"). It needs a LiveKit server, so only the testkit suites cover it;
+  they could not be run on the loaded dev machine and are left to CI.
+- **Behaviour notes, not defects.** The kernel's unary and stream-open deadlines now also cover the
+  slot read and client build (benign: both are quick). `NoPeerForwarding`'s message ("no peer
+  transport is wired on this daemon; ...") differs from the LiveKit forwarder's "LiveKit common
+  room is not connected ..." by design; the plugin keeps its text byte-for-byte.
+- **Deferred: `with_common_room(room)` couples the room's config to the service's** by doc comment
+  only; nothing checks that the room was built from the service's own `DaemonConfig`.
 
 ## Decisions & Trade-offs
 - **Port the transport, keep the policy.** Deadlines and the idle rule are behaviour every
@@ -198,9 +211,32 @@ Unit (`tddy-daemon-extensions/src/peer_forwarder.rs`):
 
 ## Validation Results
 ### /validate-changes
+- Found: the `LiveKitPeerForwarder` stream relay comment claimed a stalled reader never reaches the
+  room's shared response loop; it does (the transport channel is filled with `send().await`), so a
+  stalled relay eventually blocks that loop for every in-flight call. Fixed: comment corrected, the
+  drain-or-drop requirement now stated on `PeerForwarder::call_server_stream`, and
+  `STREAM_RELAY_DEPTH` noted as independent of the transport's depth. Doc/comment only.
+- Found: kernel docs in `peer_forwarding.rs` still named LiveKit and `ClientEngine::on_response`.
+  Fixed: reworded to the transport-neutral port; the reason the kernel relay is unbounded is kept.
+- Checked: no test outside `LiveKitPeerForwarder` depends on the old kernel "LiveKit common room is
+  not connected" text. The `tddy-session-lifecycle` and `tddy-daemon-rpc` acceptance tests that
+  assert it go through `PeerRouting`, which wraps the LiveKit forwarder; the host-service unit
+  tests over `NoPeerForwarding` assert the code only.
 ### /validate-tests
+- Found: the kernel's forwarding policy had no failure-path tests. Added over the in-memory
+  forwarder: a peer's unary failure reaches the caller unchanged; a stream that cannot be opened is
+  that failure; the stream-open deadline names service, method and peer; a terminal error frame is
+  relayed once and ends the relay; a frame that fails to decode ends it; a consumer that drops the
+  relay releases the forwarder's stream.
+- Found: one test asserted both `is_connected()` and the refusal, and only the refusal's code.
+  Split in two; the refusal's message is now asserted.
+- Not run: the `tddy-daemon-livekit` testkit suites (they fail on the loaded dev machine with
+  `wait_pc_connection timed out`, also on the parent's tip); CI runs them.
 ### /validate-prod-ready
+- No mock code, fallbacks or debug output introduced; the fixes are tests and comments.
 ### /analyze-clean-code
+- Stale LiveKit wording in kernel docs and a mis-wrapped doc sentence fixed. The repeated
+  slot-to-room construction is deferred (see Technical Debt).
 
 ## TODO
 

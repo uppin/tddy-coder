@@ -25,6 +25,9 @@ pub trait PeerForwarder: Send + Sync {
 
     /// A server stream from `daemon-{peer_id}`. The receiver stays fed until the peer ends the
     /// stream or fails it; the implementation keeps whatever the stream needs alive until then.
+    ///
+    /// The caller MUST drain the receiver promptly, or drop it: a reader that stalls backs the
+    /// transport up, and a shared transport stalls every other in-flight call with it.
     async fn call_server_stream(
         &self,
         peer_id: &str,

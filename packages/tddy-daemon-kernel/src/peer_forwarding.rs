@@ -1,4 +1,4 @@
-//! Serving one daemon's RPC on another daemon, over the LiveKit common room.
+//! Serving one daemon's RPC on another daemon, through a [`PeerForwarder`] over the common room.
 //!
 //! Every multi-host RPC in this system is addressed by a `daemon_instance_id`, and the daemon that
 //! takes the call is very often not the one that can answer it: a host's tooling probe, the prompts
@@ -136,7 +136,7 @@ impl CommonRoom {
         self.forward_timeout
     }
 
-    /// Forward a generic RPC to a peer daemon in the common room via LiveKit data-channel RPC.
+    /// Forward a generic RPC to a peer daemon in the common room, through the [`PeerForwarder`].
     ///
     /// This is the generic building block for all peer-forwarding. It:
     /// 1. Hands the call to the [`PeerForwarder`], which addresses the peer's
@@ -181,8 +181,7 @@ impl CommonRoom {
     /// `decode_frame` into the returned receiver.
     ///
     /// The transport already does the streaming ([`PeerForwarder::call_server_stream`]); what a
-    /// daemon needs on top is a deadline, and the
-    /// guarantee that a stream which stops without its end-of-stream marker terminates **as an
+    /// daemon needs on top is a deadline, and the guarantee that a stream which stops without its end-of-stream marker terminates **as an
     /// error** rather than as a short but successful stream. That distinction is the whole point: a
     /// caller writing frames to disk cannot tell a truncated document from a complete one.
     ///
@@ -209,12 +208,12 @@ impl CommonRoom {
         .await
         .map_err(|_| peer_forward_deadline_status(service, method, peer_id, open_deadline))??;
 
-        // Deliberately unbounded, even though the transport channel underneath it is bounded (32
-        // frames): that channel is filled by the room's **shared** response loop with
-        // `send().await` (`ClientEngine::on_response`), so a relay that stopped draining it would
-        // block response dispatch for every other in-flight call on this daemon's common-room
-        // connection — head-of-line blocking across unrelated RPCs, which is worse than buffering one
-        // stream. What bounds the buffer instead is the payload: both callers cap what they accept
+        // Deliberately unbounded: the transport sits behind the port and may be filled by a
+        // **shared** response loop, so a relay that stopped draining the receiver it hands back
+        // could block response dispatch for every other in-flight call on the same connection —
+        // head-of-line blocking across unrelated RPCs, which is worse than buffering one stream.
+        // This relay therefore always drains the forwarder's receiver and buffers here. What bounds
+        // the buffer instead is the payload: both callers cap what they accept
         // (`max_attachment_bytes` re-checked while accumulating in
         // `fetch_peer_staged_attachment`, the same cap checked before the first frame in
         // `stream_read_host_document`), and both relayed streams are short-lived. Bounding this
