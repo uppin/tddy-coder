@@ -118,9 +118,9 @@ The **Code pane** ends in a status strip that follows the same load in more deta
   definition or hover, which may answer nothing until it has. This includes a session whose warm the
   host no longer remembers, e.g. after the host restarted.
 
-`<phase>` is the phase the index is in **now**, and `<n>` the furthest that phase has got: an early
-phase that finished at 100% (rust-analyzer's *Roots Scanned*) no longer stands in for the minutes of
-building and indexing that follow it.
+`<phase>` is the phase the index is in **now**, and `<n>` the furthest that phase has got, so the
+minutes of building and indexing are reported as themselves rather than behind an early phase that
+finished at 100% (rust-analyzer's *Roots Scanned*).
 
 Progress comes from the session's **owning host**, over the same client as code navigation, and only the
 session's owner may watch it. "Ready" means the index has loaded the worktree's graph, not merely that

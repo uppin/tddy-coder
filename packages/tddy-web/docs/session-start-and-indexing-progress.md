@@ -37,8 +37,13 @@ The stream can also carry `keepAlive` events while the host provisions the proje
 
 ## Indexing indicator
 
-`SessionIndexingIndicator` (`src/components/session/`) follows
-`code_navigation.CodeNavigationService.WatchCodeIndex(session)` on the **host that owns the session**:
+`useCodeIndexProgress(client, sessionToken, sessionId)` (`src/components/session/`) follows
+`code_navigation.CodeNavigationService.WatchCodeIndex(session)` and yields one of five states:
+`waiting` (nothing heard yet), `progress` (the latest message), `ready`, `failed` (a message carrying
+`error`, or the call failing) and `untracked` (the stream ended without a message — nothing on the host
+warms this session, including a warm the host no longer remembers). Two components read it.
+
+`SessionIndexingIndicator` follows it on the **host that owns the session**:
 `SessionsDrawerScreen` resolves the `CodeNavigationService` client for the selected session's owning host
 and passes it through `SessionMainPane` as `codeNavigationClient`, the same client the code pane's
 navigation uses. `SessionMainPane` renders the indicator at the start of the session header row when that
@@ -58,11 +63,25 @@ The indicator never blocks the session. It consumes the stream with a `cancelled
 it; unmounting, or a change of client, token or session, ends the previous follow. Without a navigation
 client the header shows no indicator.
 
+`CodeIndexStatusStrip` is the bottom strip of the [Code pane](code-navigation.md)
+(`data-testid="worktree-code-index-status"`, with the state in `data-state`). `WorktreeCodePane`
+renders it when it has both a navigation client and a `sessionId`, which `SessionMainPane` passes from
+the selected session. Unlike the header it stays visible in every state:
+
+| State | Summary (`worktree-code-index-status-summary`) | Detail (`worktree-code-index-status-detail`) |
+|---|---|---|
+| `waiting` | `Code index: checking…` | — |
+| `progress` | `Indexing — <phase> <percentage>%` | the message's `line`, truncated with the full text as its title |
+| `ready` | `Code index ready` | — |
+| `failed` | `Indexing failed — <reason>`, in the error colour | — |
+| `untracked` | `Code index not warmed for this session` | that the index loads on the first definition or hover |
+
 ## Testing
 
 | Spec | Pins |
 |---|---|
 | `cypress/component/SessionStartAndIndexingProgress.cy.tsx` (2) | the create pane shows the current start phase; the header shows indexing until ready |
+| `cypress/component/CodeIndexStatusStrip.cy.tsx` (3) | the Code pane's strip: phase, percentage and the server's line, then ready; not warmed when the stream ends empty; the failure's reason |
 | `cypress/component/CreateSessionAttachmentProgress.cy.tsx` | per-attachment progress, and a start with nothing attached going through the stream |
 | `cypress/component/CreateSessionPane.cy.tsx` (29) | the form, started through the streamed start |
 | `cypress/component/ServerStreamFallback.cy.tsx` (7) | the testkit fallback below |

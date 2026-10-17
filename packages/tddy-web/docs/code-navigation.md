@@ -15,14 +15,16 @@ All under `src/components/session/`:
 | `useCodeNavigation.ts` | `useCodeNavigation(api, navigation)`: the selected file, the hover card, the location list and the notice, with the handlers (`navigate`, `showHover`, `showReferences`, `openLocation`, `openFile`) that act on them |
 | `CodeNavigationOverlays.tsx` | `HoverCard`, `LocationListCard` and `NavigationNotice` |
 | `codeNavigationApi.ts` | `createCodeNavigationApi`: binds session token, project id and worktree path once, so the pane speaks only worktree-relative paths and positions |
-| `WorktreeCodePane.tsx` | Composes the file tree, the preview, the overlays and, for a plan file, the "Open as plan" entry and the plan dialog |
+| `WorktreeCodePane.tsx` | Composes the file tree, the preview, the overlays, for a plan file the "Open as plan" entry and the plan dialog, and — given a `sessionId` — the code-index status strip along the bottom |
+| `CodeIndexStatusStrip.tsx`, `useCodeIndexProgress.ts` | The strip showing where the session's code index stands, and the `WatchCodeIndex` follow it shares with the header's indicator ([indexing indicator](session-start-and-indexing-progress.md#indexing-indicator)) |
 | `restructurePlanApi.ts` | `createRestructurePlanApi` (the three plan calls with the session token, project id and worktree path bound once) and `isRestructurePlanFile` |
 | `RestructurePlanDialog.tsx` | The plan dialog: operation table, stale notice, Run |
 
 `SessionsDrawerScreen` resolves a `CodeNavigationService` client for the host that owns the selected
 session (`useDaemonClientFor`) and passes it through `SessionMainPane` as `codeNavigationClient`. Absent,
 the pane is the read-only preview and offers no navigation. The same client feeds the header's
-[indexing indicator](session-start-and-indexing-progress.md#indexing-indicator).
+[indexing indicator](session-start-and-indexing-progress.md#indexing-indicator) and the pane's status
+strip, which `SessionMainPane` enables by passing the selected session's id as `sessionId`.
 
 ## Positions
 

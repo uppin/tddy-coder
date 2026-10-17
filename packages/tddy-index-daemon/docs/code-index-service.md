@@ -107,6 +107,15 @@ edits made in that window are caught at apply by the resolver's fingerprint refu
 `ServerChatter` is `unthrottled()`: a client that wanted the 50% it was never sent cannot ask again. The
 printed progress of the single-shot console is throttled to one line per token every two seconds.
 
+**`phase` and `percentage` are the current phase's.** Each `IndexProgress` names the phase the server
+reported on most recently — from its `begin`, at 0% until it reports a number — and the highest
+percentage *that* phase has reached (`ServerChatter::current()`), so a sub-step carrying no number
+never moves it backwards. The cross-phase figure travels separately in `furthest`
+(`ServerChatter::furthest()`): rust-analyzer finishes *Roots Scanned* at 100% within seconds and then
+spends minutes building and indexing, which a single cross-phase maximum would hide behind that first
+100%. A phase that never reports a percentage (running build scripts) is still named, and `line`
+carries what it is doing.
+
 ## Navigation
 
 `Definition`, `References` and `Hover` take `{workspace_root, file, position}` and answer from the

@@ -5,13 +5,14 @@
 **Detected:** 2026-10-04 by the `/pr-wrap` step 3.5 file-length gate on PR #571 (`#live-plan` 12/15)
 **Metrics:** **674 lines** (whole file, TS) · budget 500 · **1.35× over** — `wc -l packages/tddy-web/src/components/sessions/SessionMainPane.tsx`
 **Thresholds breached:** length 674 > 500
-**Status:** Open — unclaimed
+**Status:** Open — unclaimed, regressed 2026-10-18 (+1 line, #652)
 
 ## Measurement history
 
 | Run | Lines | Note |
 |---|---|---|
 | 2026-10-04 | 674 | first detection — already over before #571 (666 at base `c3567fde`); +8 in #571. Deferred because dependent #572 touches this file (the stack rule: no split lands mid-stack) |
+| 2026-10-18 | 675 | +1 in #652 — the `sessionId` prop passed to `WorktreeCodePane` for its index status strip. Split still not attempted |
 
 ## What would close it
 
