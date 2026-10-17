@@ -248,12 +248,12 @@ None depend on this node. The second stack (the crate split) consumes `name`; it
 
 ## Scope
 
-- [ ] **Plan surface**: `crate_move_fields.rs`, C1 refusals, `NewCrate` re-export
-- [ ] **Creation**: `new_crate.rs` (C2–C6), `Move.creates`, `MovingCluster.creates`, the `resolve_cluster` wrapper
-- [ ] **Plan order**: `Destination::read_in` at the destination sites; seeded static check
-- [ ] **Survey**: rule S1
-- [ ] **Manifest**: rule T1 in `manifest_edits` and `Move::dependency_lines`
-- [ ] **Live test** in `move_module_to_crate_acceptance.rs`
+- [x] **Plan surface**: `crate_move_fields.rs`, C1 refusals, `NewCrate` re-export
+- [x] **Creation**: `new_crate.rs` (C2–C6), `Move.creates`, `MovingCluster.creates`, the `resolve_cluster` wrapper
+- [x] **Plan order**: `Destination::read_in` at the destination sites; seeded static check
+- [x] **Survey**: rule S1
+- [x] **Manifest**: rule T1 in `manifest_edits` and `Move::dependency_lines`
+- [x] **Live test** in `move_module_to_crate_acceptance.rs`
 - [ ] **Package documentation** at wrap (list under Affected Packages); narrow the 10-04 and 10-08 also-members entries, delete the
   10-08 async-trait entry
 - [ ] **Testing**: acceptance tests pass; `./test -p tddy-code-restructuring`, scoped; CI for the rest
@@ -314,13 +314,13 @@ origin declares them in.
 
 ## Implementation milestones
 
-- [ ] **M1** plan surface (C1); tests 1–3
-- [ ] **M2** `Destination::read_in` and the refusal remedy; test 9
-- [ ] **M3** skeleton, folding, the cluster wrapper (C3–C6); tests 10–15
-- [ ] **M4** tree refusals and the seeded static check (C2, P1); tests 4–8
-- [ ] **M5** rule S1; tests 16–17, 19–20
-- [ ] **M6** rule T1; tests 18, 21–25
-- [ ] **M7** live test; test 26
+- [x] **M1** plan surface (C1); tests 1–3
+- [x] **M2** `Destination::read_in` and the refusal remedy; test 9
+- [x] **M3** skeleton, folding, the cluster wrapper (C3–C6); tests 10–15
+- [x] **M4** tree refusals and the seeded static check (C2, P1); tests 4–8
+- [x] **M5** rule S1; tests 16–17, 19–20
+- [x] **M6** rule T1; tests 18, 21–25
+- [x] **M7** live test; test 26
 - [ ] **M8** docs staged, scoped gate, length gates
 
 ## Testing plan
@@ -519,6 +519,32 @@ planned contract:
 - 1 in `crate_move/survey.rs` (`a_name_bound_only_by_its_own_crates_import_is_listed_and_one_bound_otherwise_is_not`),
   covering `bound_only_by_their_own_crate`.
 
+### Green and /validate-changes (2026-10-17)
+
+Scoped gate on `tddy-code-restructuring` (the only package touched): `./test -p tddy-code-restructuring` — 82 `test result: ok`, no
+failure; `cargo clippy -p tddy-code-restructuring --all-targets -- -D warnings` and `cargo fmt` clean. Rest of the workspace: CI.
+
+Stack gate: branch rebased onto `origin/master` (7/19 and earlier already squash-merged); `origin/master..HEAD` is this PR only.
+Boundaries held: `test_binary.rs` and `backends/rust.rs` untouched; `resolve_cluster` is a wrapper, the old body is
+`cluster_edits`; no parent symbol implemented (no parent).
+
+Implementation decisions beyond the plan:
+- Cluster members are sorted by module path in `cluster::creating` only (test 13); moves into existing crates keep plan order.
+- A crate only test code names, declared under a target `dependencies` table, is written to the destination's matching
+  `[target.<cfg>.dev-dependencies]` table (the plan's "same header" would promote it to a normal dependency). Covered by `a_crate_only_test_code_names_lands_in_the_target_dev_dependencies_table`.
+- A package name starting with `-` is refused as well (cargo rejects it).
+- `stranded.rs` reads each operation against the crates earlier operations create (not in the plan; needed for P1 parity).
+
+**File length — resolved in this PR (engine-driven `move_item`, no hand-moved code).** Production lines:
+
+| File | Before the PR | After green | After split |
+|---|---|---|---|
+| `crate_move/manifest_edits.rs` | 470 | 549 | 479 (+ `manifest_edits/target_tables.rs`, 77) |
+| `crate_move/moving.rs` | 425 | 517 | 424 (+ `moving/callers.rs`, 85; `moving/table_edits.rs`, 20) |
+
+`/validate-tests` and `/validate-prod-ready`: new tests are Given/When/Then with real assertions, no `#[ignore]`, no sleeps;
+no `TODO`/`FIXME`, stdout writes, `todo!()` or `dead_code` allows added to production code.
+
 ## TODO
 
 - [x] Record initial discovery (`2026-10-09-reshape-new-crate-initial-discovery.md`)
@@ -530,11 +556,11 @@ planned contract:
 - [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
-- [ ] Update documentation with progress
+- [x] TDD Green — implement with quality code
+- [x] Update documentation with progress
 - [ ] Repeat Red→Green→Update cycle until feature complete
-- [ ] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
-- [ ] Validate changes (/validate-changes)
+- [x] Run the scoped tests (`./test -p tddy-code-restructuring`) — verify 100% pass; CI answers for the rest of the workspace
+- [x] Validate changes (/validate-changes)
 - [ ] Refactor issues from change validation
 - [ ] USER REVIEW — development complete
 - [ ] Validate tests (/validate-tests)

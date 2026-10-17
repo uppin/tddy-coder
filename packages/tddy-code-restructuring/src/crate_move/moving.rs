@@ -1,13 +1,8 @@
-use super::PlannedRewrite;
-
 use std::{collections::BTreeSet, ffi::OsStr, path::Path};
 
 use crate::{
-    crate_move::{
-        destination, manifest_edits, module_files, module_home,
-        use_group::{self, Leaf},
-    },
-    edit::{FileEdit, TextEdit},
+    crate_move::{destination, manifest_edits, module_files, module_home},
+    edit::FileEdit,
 };
 
 use super::malformed;
@@ -40,14 +35,6 @@ pub(crate) struct Move {
     pub(crate) reexport: Reexport,
     /// The crate the move creates at the destination, when its plan line names one with `name`.
     pub(crate) creates: Option<NewCrate>,
-}
-
-/// The dependency lines a destination's manifest gains for what the moved code names: those for
-/// its plain table, and those for each `[target.'<cfg>'.…]` table, keyed by the header verbatim.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct CarriedLines {
-    pub(crate) plain: Vec<String>,
-    pub(crate) by_target: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 impl Move {
@@ -321,17 +308,17 @@ impl Move {
         extern_name: &str,
     ) -> Vec<(String, String)> {
         let dev = table == Table::DevDependencies;
-        let mut declarations = manifest_edits::target_declarations(origin, extern_name, dev);
+        let mut declarations = target_tables::target_declarations(origin, extern_name, dev);
         let mut to_dev_table = false;
         if declarations.is_empty() && dev {
-            declarations = manifest_edits::target_declarations(origin, extern_name, false);
+            declarations = target_tables::target_declarations(origin, extern_name, false);
             to_dev_table = true;
         }
         // Reachable from the destination's tests through a table of its own, whichever one.
         let reachable_for_tests =
-            dev && !manifest_edits::target_declarations(destination, extern_name, false).is_empty();
+            dev && !target_tables::target_declarations(destination, extern_name, false).is_empty();
         let held_under: Vec<String> =
-            manifest_edits::target_declarations(destination, extern_name, dev)
+            target_tables::target_declarations(destination, extern_name, dev)
                 .into_iter()
                 .map(|held| held.header)
                 .collect();
@@ -427,93 +414,13 @@ impl Move {
     }
 }
 
-/// One `with_lines_under` edit per target table the destination's manifest `text` has to gain
-/// lines in, each keyed by its header as the origin wrote it.
-fn target_table_edits<'a>(
-    text: &str,
-    tables: impl Iterator<Item = (&'a String, &'a Vec<String>)>,
-) -> Vec<TextEdit> {
-    tables
-        .flat_map(|(header, lines)| manifest_edits::with_lines_under(text, header, lines))
-        .collect()
-}
-
+pub(super) mod callers;
 mod facade_writer;
+mod table_edits;
+use crate::crate_move::manifest_edits::target_tables;
+use crate::crate_move::moving::table_edits::target_table_edits;
+use crate::crate_move::moving::table_edits::CarriedLines;
 pub(crate) use facade_writer::{declared_in_destination, left_behind};
-
-/// One `FileEdit::Change` per caller, carrying every path in that file at once.
-///
-/// `rewrites` are every path the whole move re-points, so a `use` group naming two moved modules is
-/// written once — see [`caller_edits`].
-///
-/// # Errors
-///
-/// Refuses for every reason [`caller_edits`] does.
-pub(crate) fn caller_changes(
-    workspace: &Workspace<'_>,
-    rewrites: Vec<PlannedRewrite>,
-) -> Result<Vec<FileEdit>> {
-    let paths: BTreeSet<String> = rewrites
-        .iter()
-        .map(|rewrite| rewrite.path.clone())
-        .collect();
-
-    let mut changes = Vec::new();
-    for path in paths {
-        let text = workspace.read(&path)?;
-        let in_the_file: Vec<&PlannedRewrite> = rewrites
-            .iter()
-            .filter(|rewrite| rewrite.path == path)
-            .collect();
-        let edits = caller_edits(&path, &text, &in_the_file)?;
-        changes.push(FileEdit::Change { path, edits });
-    }
-    Ok(changes)
-}
-
-/// The edits one caller file needs. A path in a plain `use` or in a body is replaced where it
-/// stands; paths inside one grouped `use` are one [`use_group`] edit of the whole statement, so the
-/// group keeps what stays and the re-pointed members leave it, rather than a new crate name being
-/// spliced into someone else's group.
-///
-/// # Errors
-///
-/// Refuses a group that must split while an attribute or doc comment sits above it, and one the
-/// group rule cannot read.
-fn caller_edits(file: &str, text: &str, rewrites: &[&PlannedRewrite]) -> Result<Vec<TextEdit>> {
-    let mut edits = Vec::new();
-    let mut groups: Vec<(std::ops::Range<usize>, Vec<Leaf>)> = Vec::new();
-
-    for rewrite in rewrites {
-        let group = use_group::statement_containing(text, rewrite.span.start)
-            .filter(|span| use_group::is_a_group(&text[span.clone()]));
-        let Some(span) = group else {
-            edits.push(manifest_edits::replacement(
-                text,
-                rewrite.span.clone(),
-                &rewrite.to,
-            ));
-            continue;
-        };
-        let leaf = Leaf {
-            written: use_group::leaf_path(
-                &text[span.clone()],
-                rewrite.span.start - span.start,
-                &text[rewrite.span.clone()],
-            ),
-            rewritten: rewrite.to.clone(),
-        };
-        match groups.iter_mut().find(|(known, _)| *known == span) {
-            Some((_, leaves)) => leaves.push(leaf),
-            None => groups.push((span, vec![leaf])),
-        }
-    }
-
-    for (span, leaves) in groups {
-        edits.push(use_group::statement_edit(file, text, span, &leaves)?);
-    }
-    Ok(edits)
-}
 
 #[cfg(test)]
 mod tests {

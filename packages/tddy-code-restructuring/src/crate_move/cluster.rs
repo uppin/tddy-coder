@@ -196,7 +196,7 @@ fn cluster_edits(
     // Every member's callers are written together: two members named in one `use` group of a
     // caller are one edit of that statement, not two over spans of the same group.
     if cluster.reexport == Reexport::None {
-        merged.absorb_all(moving::caller_changes(workspace, callers)?);
+        merged.absorb_all(callers::caller_changes(workspace, callers)?);
     }
     merged.absorb_all(moving::left_behind(workspace, &members, &surveys)?);
     merged.absorb_all(moving::declared_in_destination(workspace, &members)?);
@@ -305,6 +305,7 @@ impl MergedChanges {
 
 mod gathering;
 mod stranded;
+use crate::crate_move::moving::callers;
 pub use stranded::siblings_left_behind;
 pub(crate) use stranded::stranded_siblings;
 

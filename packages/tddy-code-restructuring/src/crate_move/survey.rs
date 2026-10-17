@@ -19,6 +19,7 @@ use super::manifest_edits;
 use super::source_scan::{items_of_module, sightings};
 use super::test_binary::{is_a_built_in_root, names_bound_in};
 use super::{malformed, reexports, Result};
+use crate::crate_move::manifest_edits::target_tables;
 use crate::edit::Position;
 use crate::registry::Workspace;
 
@@ -87,8 +88,7 @@ pub(crate) fn survey_moved_file(
             if is_a_built_in_root(head) || bound.contains(head) {
                 continue;
             }
-            if !sighting.in_use
-                && !manifest_edits::declares_dependency_in_any_table(&manifest, head)
+            if !sighting.in_use && !target_tables::declares_dependency_in_any_table(&manifest, head)
             {
                 continue;
             }
@@ -133,7 +133,7 @@ pub(crate) fn survey_moved_file(
 fn names_bound_by(text: &str, manifest: &str) -> BTreeSet<String> {
     let mut bound = names_bound_in(text);
     for own in bound_only_by_their_own_crate(text) {
-        if manifest_edits::declares_dependency_in_any_table(manifest, &own) {
+        if target_tables::declares_dependency_in_any_table(manifest, &own) {
             bound.remove(&own);
         }
     }
