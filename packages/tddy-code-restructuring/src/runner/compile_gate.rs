@@ -31,38 +31,52 @@ use tokio_util::sync::CancellationToken;
 
 use crate::apply::touched_paths;
 use crate::backends::rust::{human_delta, ProgressSink};
-use crate::crate_move::declared_package_name;
+use crate::crate_move::{declared_package_name, Destination};
 use crate::journal::Journal;
+use crate::plan::RefactorKind;
 use crate::spawn_record::{purpose, RecordedChild, SpawnRecorder};
 use crate::{Plan, RestructureError, Result};
 
 use super::tidy::{tidy, Tidied, Tidying};
 use super::{Options, StatePaths};
 
+/// The packages a fresh apply's baseline `cargo check` covers: those owning every file the plan
+/// names (its snapshot and its anchors), and the destination crate of each cross-crate move.
+///
+/// A destination counts because a move writes into it, so a failure already there would otherwise
+/// surface after the apply and be blamed on the plan. A `to` with no readable manifest adds nothing
+/// and raises nothing here — that is a crate the move creates, and there is nothing to check before
+/// it exists; the move's own preconditions judge a `to` that is not a crate.
+pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>> {
+    let named = plan
+        .snapshot
+        .keys()
+        .cloned()
+        .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
+    let mut packages = owning_packages(root, named)?;
+    let destinations = plan
+        .ops
+        .iter()
+        .filter(|op| op.op.moves_across_crates() || op.op == RefactorKind::MoveTestBinaryToCrate)
+        .filter_map(|op| op.to.as_deref());
+    for to in destinations {
+        if let Ok(destination) = Destination::read(root, to) {
+            packages.insert(destination.package);
+        }
+    }
+    Ok(packages)
+}
+
 /// Refuse a fresh, writing run whose tree does not compile before the plan touches it.
 ///
-/// Checked over the packages owning every file the plan names — its snapshot and its anchors — which
-/// are the packages whose failure afterwards would otherwise be blamed on it.
+/// Checked over [`baseline_packages`]: the packages owning every file the plan names, and every
+/// cross-crate move's destination — the packages whose failure afterwards would otherwise be
+/// blamed on it.
 ///
 /// Skipped for a dry run, which writes nothing, and for a run continuing a journal (`--resume`,
 /// `--from`): that tree already holds the earlier run's edits, so a baseline would judge the plan's
 /// own partial work, and [`refuse_a_broken_result`] checks everything the journal records anyway —
 /// the same line [`super::open_run`] draws for the snapshot.
-/// The packages a fresh apply's baseline `cargo check` covers: those owning every file the plan
-/// names (its snapshot and its anchors), and the destination crate of each cross-crate move.
-///
-/// A destination counts because a move writes into it, so a failure already there would otherwise
-/// surface after the apply and be blamed on the plan. A `to` with no manifest yet adds nothing —
-/// that is a crate the move creates, and there is nothing to check before it exists.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-apply-robust): implement — called by refuse_a_broken_baseline at green"
-)]
-pub(super) fn baseline_packages(root: &Path, plan: &Plan) -> Result<BTreeSet<String>> {
-    let _ = (root, plan);
-    todo!("TODO(reshape-apply-robust): implement")
-}
-
 pub fn refuse_a_broken_baseline(
     root: &Path,
     plan: &Plan,
@@ -72,12 +86,7 @@ pub fn refuse_a_broken_baseline(
     if options.dry_run || options.continues_a_journal() {
         return Ok(());
     }
-    let named = plan
-        .snapshot
-        .keys()
-        .cloned()
-        .chain(plan.ops.iter().map(|op| op.anchor.file().to_string()));
-    let packages = owning_packages(root, named)?;
+    let packages = baseline_packages(root, plan)?;
 
     match failing_check(
         root,
