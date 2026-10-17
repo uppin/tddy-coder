@@ -16,7 +16,7 @@
 //!   RPC surface is reachable through it.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -89,19 +89,54 @@ pub const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Signed in
 <body style=\"font:16px system-ui;padding:3rem;text-align:center\">\
 <p>Signed in. You can close this tab and return to Tddy Desktop.</p>";
 
-/// Serve `/auth/callback` on `addr` until a request carries a usable `code` and `state`.
+/// A loopback socket waiting for a sign-in to come back.
 ///
-/// Returns as soon as one does, so the socket is open for the length of a sign-in rather than the
-/// life of the process. Anything else — a favicon probe, a stray request, a callback missing a
-/// parameter — is answered `404` and the listener keeps waiting, because closing on the first
-/// wrong request would end the sign-in the operator is in the middle of.
-pub async fn await_callback(addr: SocketAddr) -> std::io::Result<CallbackParams> {
-    let listener = TcpListener::bind(addr).await?;
-    log::info!("[tddy-desktop] waiting for the sign-in callback on http://{addr}/auth/callback");
-    loop {
-        let (stream, _) = listener.accept().await?;
-        if let Some(params) = serve_one(stream).await? {
-            return Ok(params);
+/// Bound **before** the daemon is assembled, because the provider has to be told where to redirect
+/// and the port is not known until the OS has handed one out. It asks for none: a fixed port is one
+/// a second instance of the application — the installed one beside a development run — or a served
+/// daemon on the same machine may already hold, and then the browser's redirect reaches something
+/// else while this window waits for a code that never comes.
+pub struct CallbackListener {
+    listener: TcpListener,
+    addr: SocketAddr,
+}
+
+impl CallbackListener {
+    /// Bind loopback on a port the OS assigns (port 0).
+    pub async fn bind_os_assigned() -> std::io::Result<Self> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+        let addr = listener.local_addr()?;
+        log::info!(
+            "[tddy-desktop] waiting for the sign-in callback on {}",
+            callback_url(addr.port())
+        );
+        Ok(Self { listener, addr })
+    }
+
+    /// The address actually bound — the one the OS chose. Production hands out `callback_url()`;
+    /// the specs need the socket address to connect to.
+    #[cfg(test)]
+    pub fn local_addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    /// The loopback callback URL, as the daemon should hand it to the provider.
+    pub fn callback_url(&self) -> String {
+        callback_url(self.addr.port())
+    }
+
+    /// Serve `/auth/callback` until a request carries a usable `code` and `state`.
+    ///
+    /// Returns as soon as one does, so the socket is open for the length of a sign-in rather than
+    /// the life of the process. Anything else — a favicon probe, a stray request, a callback missing
+    /// a parameter — is answered `404` and the listener keeps waiting, because closing on the first
+    /// wrong request would end the sign-in the operator is in the middle of.
+    pub async fn wait(self) -> std::io::Result<CallbackParams> {
+        loop {
+            let (stream, _) = self.listener.accept().await?;
+            if let Some(params) = serve_one(stream).await? {
+                return Ok(params);
+            }
         }
     }
 }
@@ -200,14 +235,6 @@ mod serving {
     use std::net::{Ipv4Addr, SocketAddr};
     use tokio::io::AsyncReadExt;
 
-    /// A loopback address on a port the OS picked, so a test never collides with a real daemon.
-    fn a_free_loopback_address() -> SocketAddr {
-        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("a free port");
-        let addr = listener.local_addr().expect("the bound address");
-        drop(listener);
-        addr
-    }
-
     /// Make the request a browser would, and read what came back.
     async fn request(addr: SocketAddr, target: &str) -> String {
         let mut stream = TcpStream::connect(addr).await.expect("connect");
@@ -220,12 +247,18 @@ mod serving {
         response
     }
 
+    async fn an_os_assigned_listener() -> CallbackListener {
+        CallbackListener::bind_os_assigned()
+            .await
+            .expect("a loopback listener")
+    }
+
     #[tokio::test]
     async fn takes_the_code_from_the_callback_a_browser_is_redirected_to() {
         // Given the host application waiting for a sign-in to come back
-        let addr = a_free_loopback_address();
-        let waiting = tokio::spawn(await_callback(addr));
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let listener = an_os_assigned_listener().await;
+        let addr = listener.local_addr();
+        let waiting = tokio::spawn(listener.wait());
 
         // When the browser lands on the callback
         let response = request(addr, "/auth/callback?code=test-code&state=abc").await;
@@ -241,9 +274,9 @@ mod serving {
     #[tokio::test]
     async fn keeps_waiting_through_a_request_that_is_not_the_callback() {
         // Given the host application waiting for a sign-in
-        let addr = a_free_loopback_address();
-        let waiting = tokio::spawn(await_callback(addr));
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let listener = an_os_assigned_listener().await;
+        let addr = listener.local_addr();
+        let waiting = tokio::spawn(listener.wait());
 
         // When something else asks for something else — a browser probing for a favicon, say
         let refused = request(addr, "/favicon.ico").await;
@@ -257,5 +290,51 @@ mod serving {
             waiting.await.expect("join").expect("the callback").code,
             "late"
         );
+    }
+
+    #[tokio::test]
+    async fn listens_on_loopback_on_a_port_the_os_assigned() {
+        // Given a listener asked for no particular port
+
+        // When it is bound
+        let listener = an_os_assigned_listener().await;
+
+        // Then it reports the port it actually got, on loopback only — never the wildcard address,
+        // because the callback carries an authorization code
+        assert_eq!(listener.local_addr().ip(), Ipv4Addr::LOCALHOST);
+        assert_ne!(listener.local_addr().port(), 0);
+    }
+
+    #[tokio::test]
+    async fn names_the_port_it_got_in_the_callback_url_it_hands_out() {
+        // Given a bound listener
+        let listener = an_os_assigned_listener().await;
+
+        // When the URL to give the provider is asked for
+        let url = listener.callback_url();
+
+        // Then it is the loopback callback on the listener's own port, so the provider's redirect
+        // reaches this listener and not whatever else owns a well-known port
+        assert_eq!(
+            url,
+            format!(
+                "http://127.0.0.1:{}/auth/callback",
+                listener.local_addr().port()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn two_listeners_never_contend_for_a_port() {
+        // Given one host application already waiting for its sign-in — the installed app, say
+        let first = an_os_assigned_listener().await;
+
+        // When a second one starts, as a development run beside it does
+        let second = CallbackListener::bind_os_assigned().await;
+
+        // Then it binds too, on a different port: sign-in no longer depends on a port nobody else
+        // is using
+        let second = second.expect("a second listener beside the first");
+        assert_ne!(first.local_addr().port(), second.local_addr().port());
     }
 }
