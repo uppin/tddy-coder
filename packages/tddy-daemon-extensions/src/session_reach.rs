@@ -63,7 +63,7 @@ impl SessionReach for NoSessionReach {
         _session: ReachedSession,
         _host: Arc<dyn ReachableSessions>,
     ) -> Result<(), Status> {
-        todo!("NoSessionReach::session_reached")
+        Ok(())
     }
 }
 

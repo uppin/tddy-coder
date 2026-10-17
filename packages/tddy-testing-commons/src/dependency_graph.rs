@@ -9,41 +9,94 @@
 //! optional dependency is still one the crate can be built with. `[dev-dependencies]` are not
 //! followed — a test may reach anything.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::process::Command;
 
 /// The crates of one Cargo workspace and the dependencies each one names.
 #[derive(Debug, Clone)]
-pub struct WorkspaceGraph {}
+pub struct WorkspaceGraph {
+    /// Each workspace member and the crates it names in `[dependencies]` / `[build-dependencies]`.
+    names: BTreeMap<String, BTreeSet<String>>,
+}
 
 impl WorkspaceGraph {
     /// The workspace this checkout's crates belong to.
     pub fn load() -> Self {
-        todo!("WorkspaceGraph::load")
+        Self::read(Path::new(env!("CARGO_MANIFEST_DIR")))
     }
 
     /// The workspace whose root manifest is `workspace_root/Cargo.toml`.
     pub fn of_workspace(workspace_root: &Path) -> Self {
-        let _ = workspace_root;
-        todo!("WorkspaceGraph::of_workspace")
+        Self::read(workspace_root)
     }
 
     /// Every crate that is a member of the workspace.
     pub fn workspace_crates(&self) -> BTreeSet<String> {
-        todo!("WorkspaceGraph::workspace_crates")
+        self.names.keys().cloned().collect()
     }
 
     /// The crates `krate` names directly, workspace members and registry crates alike.
     pub fn names_directly(&self, krate: &str) -> BTreeSet<String> {
-        let _ = krate;
-        todo!("WorkspaceGraph::names_directly")
+        self.names.get(krate).cloned().unwrap_or_default()
     }
 
     /// Every crate reachable from `krate` by following what each crate names, `krate` excluded.
     /// Registry crates are reached but not followed further.
     pub fn reaches(&self, krate: &str) -> BTreeSet<String> {
-        let _ = krate;
-        todo!("WorkspaceGraph::reaches")
+        let mut reached = BTreeSet::new();
+        let mut pending = vec![krate.to_string()];
+        while let Some(current) = pending.pop() {
+            for named in self.names_directly(&current) {
+                if named != krate && reached.insert(named.clone()) {
+                    pending.push(named);
+                }
+            }
+        }
+        reached
+    }
+
+    /// Run `cargo metadata` in `directory` — the one place the graph is read from.
+    fn read(directory: &Path) -> Self {
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let output = Command::new(cargo)
+            .args(["metadata", "--no-deps", "--format-version", "1"])
+            .current_dir(directory)
+            .output()
+            .expect("run `cargo metadata`");
+        assert!(
+            output.status.success(),
+            "`cargo metadata` failed in {}: {}",
+            directory.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let metadata: serde_json::Value =
+            serde_json::from_slice(&output.stdout).expect("`cargo metadata` prints JSON");
+
+        let packages = metadata["packages"]
+            .as_array()
+            .expect("metadata lists packages");
+        let names = packages
+            .iter()
+            .map(|package| {
+                let name = package["name"].as_str().expect("a package has a name");
+                let dependencies = package["dependencies"]
+                    .as_array()
+                    .expect("a package lists its dependencies")
+                    .iter()
+                    // `kind` is null for `[dependencies]`, "build" or "dev" otherwise.
+                    .filter(|dependency| dependency["kind"].as_str() != Some("dev"))
+                    .map(|dependency| {
+                        dependency["name"]
+                            .as_str()
+                            .expect("a dependency has a name")
+                            .to_string()
+                    })
+                    .collect();
+                (name.to_string(), dependencies)
+            })
+            .collect();
+        Self { names }
     }
 }
 
