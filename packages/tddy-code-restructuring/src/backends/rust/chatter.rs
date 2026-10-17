@@ -10,6 +10,9 @@ use serde_json::Value;
 /// What a progress line calls a phase the server never gave a title.
 const UNTITLED_PHASE: &str = "working";
 
+/// What a message says of a server that has reported nothing, in place of its words or its phase.
+pub(super) const NOTHING_REPORTED: &str = "nothing reported";
+
 /// The least time between two lines shown for one progress token.
 ///
 /// A cold load reports hundreds of notifications per phase — a percent at a time, or one message
@@ -224,7 +227,7 @@ impl ServerChatter {
         let last = self
             .last
             .clone()
-            .unwrap_or_else(|| "nothing reported".to_string());
+            .unwrap_or_else(|| NOTHING_REPORTED.to_string());
         match &self.furthest {
             Some((percentage, phase)) => format!("{last}; furthest {phase} {percentage}%"),
             None => last,

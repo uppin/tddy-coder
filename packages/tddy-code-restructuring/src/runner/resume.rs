@@ -38,18 +38,7 @@ pub(super) fn written_by_run(
     let Some(last) = journal.last_completed() else {
         return Ok(None);
     };
-    let mut before_the_run: BTreeMap<&str, &str> = BTreeMap::new();
-    for record in journal.completed() {
-        for (path, digest) in &record.pre {
-            before_the_run
-                .entry(path.as_str())
-                .or_insert(digest.as_str());
-        }
-    }
-    let mut undone = !before_the_run.is_empty();
-    for (path, digest) in before_the_run {
-        undone &= hash_file(&root.join(path))? == digest;
-    }
+    let undone = every_file_is_back(root, &digests_before_the_run(journal))?;
     Ok(Some(crate::WrittenByRun {
         last_applied: last.op,
         last_applied_id: last.op_id.as_ref().map(ToString::to_string),
@@ -61,6 +50,30 @@ pub(super) fn written_by_run(
             .to_string(),
         undone,
     }))
+}
+
+/// Every file `journal`'s completed records name, with the digest it had before the run first
+/// touched it — the `pre` of the earliest completed record naming it.
+fn digests_before_the_run(journal: &Journal) -> BTreeMap<&str, &str> {
+    let mut before_the_run = BTreeMap::new();
+    for record in journal.completed() {
+        for (path, digest) in &record.pre {
+            before_the_run
+                .entry(path.as_str())
+                .or_insert(digest.as_str());
+        }
+    }
+    before_the_run
+}
+
+/// Whether `before_the_run` names at least one file and every one hashes, under `root`, to the
+/// digest it names. Every file is hashed, so one that can no longer be read is refused.
+fn every_file_is_back(root: &Path, before_the_run: &BTreeMap<&str, &str>) -> Result<bool> {
+    let mut back = !before_the_run.is_empty();
+    for (path, digest) in before_the_run {
+        back &= hash_file(&root.join(path))? == *digest;
+    }
+    Ok(back)
 }
 
 /// Whether `journal` records a completed operation followed by the plan being written back.

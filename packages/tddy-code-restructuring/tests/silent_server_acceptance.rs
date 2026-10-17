@@ -68,6 +68,12 @@ const LONG_ENOUGH_FOR_A_SHORT_BOUND: Duration = Duration::from_secs(8);
 /// How long a cancelled wait may take to unwind before the test calls it stuck.
 const CANCELLATION_UNWIND: Duration = Duration::from_secs(5);
 
+/// How often a backend under test beats, so a test hears its wait narrated within a second.
+const A_FAST_HEARTBEAT: Duration = Duration::from_millis(300);
+
+/// How often [`until_a_beat_names`] looks at what was heard.
+const BETWEEN_LOOKS_FOR_A_BEAT: Duration = Duration::from_millis(100);
+
 /// The lines a run sent to its progress sink, in order.
 #[derive(Clone, Default)]
 struct HeardLines(Arc<Mutex<Vec<String>>>);
@@ -138,7 +144,7 @@ async fn a_client_on_a_fake_started_with(root: &Path, args: &[&str]) -> Arc<LspC
 }
 
 /// A backend over a fake started with `args`, ending silent waits at `bounds` and beating every
-/// 300 ms into `heard`.
+/// [`A_FAST_HEARTBEAT`] into `heard`.
 async fn a_backend_over_a_fake_started_with(
     root: &Path,
     args: &[&str],
@@ -149,7 +155,7 @@ async fn a_backend_over_a_fake_started_with(
     let client = a_client_on_a_fake_started_with(root, args).await;
     RustBackend::from_lsp_client(client, None, heard.sink())
         .with_cancellation(cancel.clone())
-        .with_wait_heartbeat(Duration::from_millis(300))
+        .with_wait_heartbeat(A_FAST_HEARTBEAT)
         .with_silence_bounds(bounds)
 }
 
@@ -234,14 +240,14 @@ async fn what_it_ended_with<T: std::fmt::Debug>(
         .expect_err("a run that was stopped is a refusal")
 }
 
-/// Wait, polling every 100 ms, until a beat names `stage` — or [`LONG_ENOUGH_FOR_THE_BEAT_THE_TEST_NEEDS`]
-/// has passed, for the assertion to report.
+/// Wait, polling every [`BETWEEN_LOOKS_FOR_A_BEAT`], until a beat names `stage` — or
+/// [`LONG_ENOUGH_FOR_THE_BEAT_THE_TEST_NEEDS`] has passed, for the assertion to report.
 async fn until_a_beat_names(heard: &HeardLines, stage: &str) {
     let started = Instant::now();
     while !heard.beats().iter().any(|beat| beat.contains(stage))
         && started.elapsed() < LONG_ENOUGH_FOR_THE_BEAT_THE_TEST_NEEDS
     {
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(BETWEEN_LOOKS_FOR_A_BEAT).await;
     }
 }
 

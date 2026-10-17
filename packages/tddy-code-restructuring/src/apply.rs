@@ -104,6 +104,10 @@ pub(crate) fn untracked_paths(
     Ok(untracked)
 }
 
+/// `git ls-files --error-unmatch`'s own exit status for a path that matched nothing in the index —
+/// an answer, not a failure of git.
+const LS_FILES_UNMATCHED: i32 = 1;
+
 /// Whether git's index holds every one of `paths` — an intent-to-add or a staged rename included.
 ///
 /// `--literal-pathspecs`, because a path is a path here and not a pattern: a file named `a[1].rs`
@@ -117,8 +121,7 @@ fn git_tracks(root: &Path, paths: &[&str], spawns: &SpawnRecorder) -> Result<boo
     let output = spawns.output(purpose::GIT, &mut command)?;
     match output.status.code() {
         Some(0) => Ok(true),
-        // `--error-unmatch`'s own answer: a path matched nothing in the index.
-        Some(1) => Ok(false),
+        Some(LS_FILES_UNMATCHED) => Ok(false),
         _ => Err(RestructureError::MalformedPlan(format!(
             "git ls-files --error-unmatch failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()

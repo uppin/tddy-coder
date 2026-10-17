@@ -395,9 +395,12 @@ static CRATE_GRAPH_LOAD_PENDING: std::sync::atomic::AtomicBool =
 /// load's own quiescence a moment later — a server that went busy and then, for no reason, ready.
 fn after_the_crate_graph_load() {
     while CRATE_GRAPH_LOAD_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(BETWEEN_LOOKS_AT_THE_LOAD);
     }
 }
+
+/// How often [`after_the_crate_graph_load`] looks whether the load has finished narrating.
+const BETWEEN_LOOKS_AT_THE_LOAD: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// Report the server busy on a build script, and never say it is done.
 ///

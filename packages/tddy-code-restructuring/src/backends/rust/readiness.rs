@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::chatter::NOTHING_REPORTED;
 use super::wait::server_name;
 use super::{
     first_symbol_position, path_of, relative_to, seam_refusal, server_defect, LspPoint,
@@ -91,6 +92,17 @@ pub(super) fn silence_verdict(
             _ => Silence::Waiting,
         }
     }
+}
+
+/// How long a ready index has left the hover `null`, on the clock `since` — started at the first
+/// such look and stopped by any look that is not one, so only an unbroken silence is measured.
+/// `None` while the index is not ready and silent.
+fn ready_silence(since: &mut Option<Instant>, ready_and_silent: bool) -> Option<Duration> {
+    if !ready_and_silent {
+        *since = None;
+        return None;
+    }
+    Some(since.get_or_insert_with(Instant::now).elapsed())
 }
 
 /// Whether a silence of `silent_for` has outlasted `bound`.
@@ -232,14 +244,8 @@ impl RustBackend {
                 if let Some(excused) = self.excused_silence(uri, position)? {
                     return Ok(excused);
                 }
-            } else {
-                ready_and_silent_since = None;
             }
-            let silent_for = ready_and_silent.then(|| {
-                ready_and_silent_since
-                    .get_or_insert_with(Instant::now)
-                    .elapsed()
-            });
+            let silent_for = ready_silence(&mut ready_and_silent_since, ready_and_silent);
             self.refuse_silence(&waiting, silent_for, uri, position)?;
             if !self.keep_waiting_unless_stalled(&mut waiting, uri, position)? {
                 return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
@@ -318,7 +324,7 @@ impl RustBackend {
 
     /// The refusal of a wait in `stage` on a loading server that has said nothing new for `quiet`.
     fn stalled(&self, stage: &WaitStage, quiet: Duration) -> RestructureError {
-        let nothing = || "nothing reported".to_string();
+        let nothing = || NOTHING_REPORTED.to_string();
         RestructureError::ServerStalled {
             stage: stage.text().to_string(),
             server: server_name(self.waited_on()),
