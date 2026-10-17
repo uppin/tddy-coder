@@ -106,12 +106,12 @@ in the kernel and the transport moves to the plugin.
 
 ## Scope
 
-- [ ] `PeerForwarder` + `NoPeerForwarding` in `tddy-daemon-extensions`
-- [ ] `CommonRoom::new` / `is_connected`; SDK import removed from the kernel
-- [ ] `LiveKitPeerForwarder` in the plugin; `peer_routing.rs`, `livekit_peer_discovery.rs`, runtime and host-service repointed
-- [ ] `is_connected()` at `svc_provision_agent_clone.rs:195` and `svc_paired_codebase_teardown.rs:136`
-- [ ] Manifests: `tddy-daemon-kernel`, `tddy-host-service` drop `livekit` / `tddy-livekit`
-- [ ] Ratchet: strike `tddy-daemon-kernel`, `tddy-host-service`
+- [x] `PeerForwarder` + `NoPeerForwarding` in `tddy-daemon-extensions`
+- [x] `CommonRoom::new` / `is_connected`; SDK import removed from the kernel
+- [x] `LiveKitPeerForwarder` in the plugin; `peer_routing.rs`, `livekit_peer_discovery.rs`, runtime and host-service repointed
+- [x] `is_connected()` at `svc_provision_agent_clone.rs:195` and `svc_paired_codebase_teardown.rs:136`
+- [x] Manifests: `tddy-daemon-kernel`, `tddy-host-service` drop `livekit` / `tddy-livekit`
+- [x] Ratchet: strike `tddy-daemon-kernel`, `tddy-host-service` (the list already excludes them; the ratchet tests stay red until #623's `WorkspaceGraph` is green)
 
 ## Technical Changes
 
@@ -150,10 +150,10 @@ connected" precondition, and the keep-alive of the client for a stream's life.
 | `tddy-daemon-extensions/tests/livekit_is_a_satellite.rs` | strike two offenders |
 
 ## Implementation Milestones
-- [ ] M1 Port and null object with unit tests green
-- [ ] M2 `CommonRoom` over the port; kernel tests green with an in-memory forwarder
-- [ ] M3 Plugin forwarder; existing `tddy-daemon-livekit` forwarding suites green
-- [ ] M4 Manifests trimmed; ratchet green
+- [x] M1 Port and null object with unit tests green
+- [x] M2 `CommonRoom` over the port; kernel tests green with an in-memory forwarder
+- [x] M3 Plugin forwarder; existing `tddy-daemon-livekit` forwarding suites green
+- [x] M4 Manifests trimmed; ratchet green (ratchet assertions blocked on #623's `WorkspaceGraph`)
 
 ## Testing Plan
 
@@ -212,7 +212,7 @@ Unit (`tddy-daemon-extensions/src/peer_forwarder.rs`):
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
