@@ -41,6 +41,9 @@ use crate::cli::{IndexDaemonArgs, Lifetime};
 /// down without touching what the service says about a request.
 pub(crate) const MAIN: &str = "tddy_index_daemon::main";
 
+/// The language server run when `--rust-analyzer` names none: looked up on this process's `PATH`.
+const RUST_ANALYZER_ON_PATH: &str = "rust-analyzer";
+
 /// How long a language server may sit unused before its host is entitled to reap it.
 ///
 /// Nothing in *this* process reaps: the PRD puts the index's lifecycle in `tddy-daemon`, which
@@ -62,6 +65,11 @@ async fn main() -> ExitCode {
     let serving_over_stdio = args.stdio;
     let log_file = args.log_file.clone();
     let spawn_record = args.spawn_record.clone();
+    let rust_analyzer = args
+        .rust_analyzer
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| RUST_ANALYZER_ON_PATH.to_string());
 
     // Before `init_tddy_logger`, because `log::set_logger` succeeds only once: under `--stdio` fd 1
     // carries RPC frames, and a logger configured to write there would corrupt every frame after
@@ -110,7 +118,7 @@ async fn main() -> ExitCode {
         Lifetime::SingleShot(requested) => {
             // The task registry is the serving path's; a single-shot run holds the servers only
             // long enough to shut them down again.
-            let (_tasks, servers, service) = wired(spawn_observer);
+            let (_tasks, servers, service) = wired(&rust_analyzer, spawn_observer);
             let verdict = single_shot::run_once(service.as_ref(), requested).await;
             // A plan this run loaded or changed is written back before the process goes, as a
             // serving one does on shutdown: the run is over and nothing else will.
@@ -127,7 +135,7 @@ async fn main() -> ExitCode {
             }
         }
         Lifetime::Serve(transports) => {
-            let (tasks, servers, service) = wired(spawn_observer);
+            let (tasks, servers, service) = wired(&rust_analyzer, spawn_observer);
             match serve::serve(transports, service, servers, tasks).await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(failure) => {
@@ -146,11 +154,12 @@ async fn main() -> ExitCode {
 /// run, because the serving path needs the same handle in more than one place and a second
 /// construction shape would be a second thing to keep in step.
 fn wired(
+    rust_analyzer: &str,
     spawn_observer: Option<Arc<dyn SpawnObserver>>,
 ) -> (TaskRegistry, LspRegistry, Arc<CodeIndexServiceImpl>) {
     let tasks = TaskRegistry::new();
     let registry = LspRegistry::new(
-        rust_analyzer_as_this_crate_needs_it(),
+        rust_analyzer_as_this_crate_needs_it(rust_analyzer),
         tasks.clone(),
         A_SERVER_MAY_SIT_UNUSED_FOR,
     );
@@ -197,11 +206,11 @@ fn send_stderr_to(path: &std::path::Path) -> anyhow::Result<()> {
 /// code actions at all — which reads as a range that supports no refactoring — and positions
 /// counted in utf-16 code units while this client counts bytes. Both are settled by the handshake,
 /// which is why this process cannot share `tddy-daemon`'s registry: the handshake is fixed at spawn.
-fn rust_analyzer_as_this_crate_needs_it() -> LspAllowList {
+fn rust_analyzer_as_this_crate_needs_it(program: &str) -> LspAllowList {
     let mut allow = LspAllowList::new();
     allow.allow(
         Language::Rust,
-        LaunchSpec::new("rust-analyzer")
+        LaunchSpec::new(program)
             .with_capabilities(tddy_code_restructuring::client_capabilities())
             .with_initialization_options(tddy_code_restructuring::server_settings()),
     );

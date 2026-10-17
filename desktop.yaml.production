@@ -130,3 +130,14 @@ allowed_tools:
     label: "tddy-coder"
   - path: "__INSTALL_BIN_DIR__/tddy-tools"
     label: "tddy-tools"
+
+# The warm rust-analyzer index (`tddy-index-daemon`, inside the .app beside the application binary).
+# Neither rust-analyzer nor a Rust toolchain ships with the app, and an app launched from the Dock
+# does not inherit a developer shell's PATH. So name them here, or code navigation (hover,
+# definitions) and restructuring answer "language server not found":
+#
+# index_daemon:
+#   rust_analyzer_path: /Users/you/.nix-profile/bin/rust-analyzer
+#   env:                                  # set on the index daemon; rust-analyzer inherits it
+#     PATH: /Users/you/.nix-profile/bin:/usr/bin:/bin   # where it finds cargo and rustc
+#     # CARGO, RUSTC, RUST_SRC_PATH, RUSTUP_TOOLCHAIN — any variable rust-analyzer reads

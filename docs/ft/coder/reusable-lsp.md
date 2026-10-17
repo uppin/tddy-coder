@@ -239,6 +239,15 @@ the server blocked mid-write and stopped answering every request thereafter. Thi
 reading the code and then demonstrated: a fake server flooding stderr wedges, and the client's next
 request times out. Now drained in bounded chunks to the log.
 
+### A server that cannot be started is not a server that exited
+
+`LspServerBody::client_tx` carries `Result<Arc<LspClient>, LspError>`. A spawn that fails sends its
+refusal before the body ends: `LspError::ServerNotFound("<program>: <io error>")` when the program is
+not there, `LspError::Io` for any other spawn failure. `LspError::ServerExited` means only a server that
+started and then went away — the registry still reads a channel dropped unsent that way. The difference
+is what a host reports: a host that is not set up for a language is `FailedPrecondition`, a server that
+died is `Unavailable`.
+
 ## Future Considerations (Not In Scope)
 
 - Additional languages (TypeScript / Python / Go) beyond the Rust allow-list entry.

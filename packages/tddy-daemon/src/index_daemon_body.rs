@@ -12,6 +12,7 @@
 //! 3. cancellation asks the child to stop and gives it a bounded grace period before killing it,
 //!    because the index daemon has language servers of its own to take with it.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
@@ -39,6 +40,10 @@ const LAST_WORDS: Duration = Duration::from_millis(500);
 pub struct IndexDaemonBody {
     /// The program to run.
     pub program: PathBuf,
+    /// The rust-analyzer the child is told to run; `None` leaves it to the child's own `PATH`.
+    pub rust_analyzer: Option<PathBuf>,
+    /// Environment variables set on the child, on top of this daemon's own.
+    pub env: BTreeMap<String, String>,
     /// The AF_UNIX socket it is told to bind, which is also how the daemon reaches it.
     pub socket_path: PathBuf,
     /// Reports whether the process started at all, so "could not be executed" reaches the caller
@@ -54,6 +59,8 @@ impl TaskBody for IndexDaemonBody {
     async fn run(self: Box<Self>, ctx: TaskContext) -> TaskStatus {
         let IndexDaemonBody {
             program,
+            rust_analyzer,
+            env,
             socket_path,
             started_tx,
         } = *self;
@@ -62,12 +69,16 @@ impl TaskBody for IndexDaemonBody {
         command
             .arg("--grpc-uds")
             .arg(&socket_path)
+            .envs(&env)
             // The index daemon serves on the socket above, so its own stdin and stdout carry
             // nothing — and leaving stdout inherited would let a library that forgets itself print
             // into whatever this daemon's stdout is.
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
+        if let Some(rust_analyzer) = &rust_analyzer {
+            command.arg("--rust-analyzer").arg(rust_analyzer);
+        }
 
         let mut child = match command.spawn() {
             Ok(child) => {

@@ -71,6 +71,11 @@ pub(crate) struct IndexDaemonArgs {
     /// Not recorded: what rust-analyzer itself starts (build scripts, the proc-macro server).
     #[arg(long, value_name = "PATH")]
     pub(crate) spawn_record: Option<PathBuf>,
+
+    /// The rust-analyzer to run. When absent, `rust-analyzer` is looked up on this process's
+    /// `PATH`.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) rust_analyzer: Option<PathBuf>,
 }
 
 /// The operations a single-shot run can ask for, grouped as the command line that already exists

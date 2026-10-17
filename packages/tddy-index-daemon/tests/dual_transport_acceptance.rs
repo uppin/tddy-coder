@@ -815,3 +815,36 @@ async fn sigterm_flushes_every_dirty_plan_before_exit() {
         "the dirty plan was lost with the process"
     );
 }
+
+#[test]
+fn runs_the_language_server_named_by_rust_analyzer_and_refuses_one_that_is_not_there() {
+    // Given a workspace and a `--rust-analyzer` naming a program that is not on disk
+    let workspace = a_workspace_holding("pub fn foo() -> u32 {\n    1\n}\n");
+    let missing = "/nonexistent/tddy-test/rust-analyzer";
+
+    // When an anchor is asked for, which needs the language server
+    let run = Command::new(the_index_daemon())
+        .args(["--rust-analyzer", missing])
+        .args([
+            "restructure",
+            "anchors",
+            "--workspace-root",
+            &workspace.path().to_string_lossy(),
+            "src/lib.rs",
+            "--items",
+            "foo",
+        ])
+        .output()
+        .expect("the binary runs");
+
+    // Then the refusal names that program as not found — a host that is not set up for it — rather
+    // than reporting a server that exited
+    let said = rendered(&run.stderr);
+    assert!(
+        said.iter().any(|line| line
+            .starts_with("FAILED_PRECONDITION: language server not found: ")
+            && line.contains(missing)),
+        "expected a not-found refusal naming {missing}, got {said:?}"
+    );
+    assert!(!run.status.success(), "a refused anchor must not exit zero");
+}

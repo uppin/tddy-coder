@@ -1,6 +1,7 @@
 //! What to start, and what a started one is: the spawn plan an `index_daemon:` configuration
 //! section asks for, the record of a bound process, and where the program is found.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,6 +19,11 @@ pub struct IndexDaemonSpawn {
     /// How long the process may sit unused before [`crate::index_daemon::IndexDaemonRegistry::reap_idle`]
     /// stops it.
     pub idle_timeout: Duration,
+    /// The rust-analyzer the child is told to run (`--rust-analyzer`); `None` leaves it to the
+    /// child's own `PATH`.
+    pub rust_analyzer: Option<PathBuf>,
+    /// Environment variables set on the child, on top of this daemon's own.
+    pub env: BTreeMap<String, String>,
 }
 
 impl IndexDaemonSpawn {
@@ -31,6 +37,8 @@ impl IndexDaemonSpawn {
             socket_path: config.resolved_socket_path(),
             ready_timeout: Duration::from_secs(config.ready_timeout_secs),
             idle_timeout: Duration::from_secs(config.idle_timeout_secs),
+            rust_analyzer: config.rust_analyzer_path.clone(),
+            env: config.env.clone(),
         }
     }
 }

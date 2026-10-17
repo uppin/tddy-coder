@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::allowlist::LaunchSpec;
 use crate::client::LspClient;
+use crate::error::LspError;
 use crate::spawn_observer::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
 
 /// The purpose a language server started by this crate is recorded under.
@@ -44,8 +45,9 @@ pub struct LspServerBody {
     pub spec: LaunchSpec,
     /// Workspace root the server operates on (its cwd / `rootUri`).
     pub root_dir: PathBuf,
-    /// One-shot used to publish the initialized client back to the registry.
-    pub client_tx: oneshot::Sender<Arc<LspClient>>,
+    /// One-shot used to publish the initialized client back to the registry — or, when the
+    /// program could not be started at all, why. Dropped unsent when the server goes away later.
+    pub client_tx: oneshot::Sender<Result<Arc<LspClient>, LspError>>,
 }
 
 /// The body a registry with a [`SpawnObserver`] spawns: the same server, reporting through the
@@ -114,12 +116,19 @@ impl LspServerBody {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
-                return TaskStatus::Failed {
-                    message: format!(
-                        "failed to spawn language server '{}': {}",
-                        spec.program, err
-                    ),
+                let message = format!(
+                    "failed to spawn language server '{}': {}",
+                    spec.program, err
+                );
+                // A program that is not there is the host's setup, not a server that died: the
+                // caller is told so, rather than left to read the dropped channel as an exit.
+                let refusal = if err.kind() == std::io::ErrorKind::NotFound {
+                    LspError::ServerNotFound(format!("{}: {err}", spec.program))
+                } else {
+                    LspError::Io(message.clone())
                 };
+                let _ = client_tx.send(Err(refusal));
+                return TaskStatus::Failed { message };
             }
         };
 
@@ -232,7 +241,7 @@ impl LspServerBody {
                 };
             }
         };
-        let _ = client_tx.send(Arc::clone(&client));
+        let _ = client_tx.send(Ok(Arc::clone(&client)));
 
         // Run until cancelled or the child exits on its own.
         let cancel = ctx.cancel_token();
