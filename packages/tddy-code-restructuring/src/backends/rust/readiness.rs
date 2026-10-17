@@ -6,9 +6,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::wait::server_name;
 use super::{
     first_symbol_position, path_of, relative_to, seam_refusal, server_defect, LspPoint,
-    RustBackend, WaitStage, Waiting, INDEXING_POLL,
+    RustBackend, WaitStage, Waiting, CANCEL_CHECK, INDEXING_POLL,
 };
 use crate::{RestructureError, Result};
 
@@ -53,10 +54,6 @@ impl Default for SilenceBounds {
 }
 
 /// What one look at a silent wait decides.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-apply-robust): implement — constructed by silence_verdict at green"
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Silence {
     /// Keep waiting: nothing has been silent past its bound.
@@ -71,19 +68,26 @@ pub(super) enum Silence {
 /// What a wait that has seen no answer decides, from the server's state and its two silences.
 ///
 /// `ready_silent_for` is how long a ready index has left the hover `null` (`None` while it is
-/// loading); `words_unchanged_for` is how long the server's last words have stood.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-apply-robust): implement — called by await_answer at green"
-)]
+/// loading); `words_unchanged_for` is how long the server's last words have stood. Neither is how
+/// long the wait has lasted: a server that keeps saying something new is never refused here.
 pub(super) fn silence_verdict(
     loading: bool,
     ready_silent_for: Option<Duration>,
     words_unchanged_for: Duration,
     bounds: &SilenceBounds,
 ) -> Silence {
-    let _ = (loading, ready_silent_for, words_unchanged_for, bounds);
-    todo!("TODO(reshape-apply-robust): implement")
+    if loading {
+        if silent_past(words_unchanged_for, Some(bounds.loading)) {
+            Silence::Stalled
+        } else {
+            Silence::Waiting
+        }
+    } else if ready_silent_for.is_some_and(|silent_for| silent_past(silent_for, Some(bounds.ready)))
+    {
+        Silence::ReadyUntypable
+    } else {
+        Silence::Waiting
+    }
 }
 
 /// Whether a hover silent for `silent_for` has outlasted `bound`; no bound never does.
@@ -163,6 +167,8 @@ impl RustBackend {
     ///
     /// Code rust-analyzer treats as inactive is refused rather than waited on: nothing resolves
     /// there, so an operation acting at it has nothing to act on.
+    ///
+    /// Bounded on silence, as every wait for type inference is: see [`Self::wait_until_answerable`].
     pub(super) fn wait_until_resolved(&mut self, uri: &str, position: &Value) -> Result<()> {
         match self.wait_until_answerable(uri, position)? {
             Answerable::Ready => Ok(()),
@@ -184,32 +190,14 @@ impl RustBackend {
     /// answer is asked for only once the index is loaded. Before that, a missing diagnostic proves
     /// nothing. A file the server reports `unlinked-file` is refused, since nothing resolves there
     /// however long the wait; code it reports inactive ends the wait for the caller to decide.
+    ///
+    /// Two silences end it too ([`SilenceBounds`]): a ready index leaving the hover `null` with
+    /// nothing excusing it is a position it will never type, and a loading server saying nothing new
+    /// is stalled ([`RestructureError::ServerStalled`]). Neither is a limit on total time.
     pub(super) fn wait_until_answerable(
         &mut self,
         uri: &str,
         position: &Value,
-    ) -> Result<Answerable> {
-        self.await_answer(uri, position, None)
-    }
-
-    /// [`Self::wait_until_resolved`], ended as unusable once a ready index has left the hover `null`
-    /// for [`READY_HOVER_BOUND`] — a position nothing excuses and nothing will ever type.
-    pub(super) fn wait_until_resolved_within_bound(
-        &mut self,
-        uri: &str,
-        position: &Value,
-    ) -> Result<()> {
-        match self.await_answer(uri, position, Some(READY_HOVER_BOUND))? {
-            Answerable::Ready => Ok(()),
-            Answerable::Inactive(said) => Err(inactive_code_refusal(uri, position, &said)?),
-        }
-    }
-
-    fn await_answer(
-        &mut self,
-        uri: &str,
-        position: &Value,
-        bound: Option<Duration>,
     ) -> Result<Answerable> {
         (self.progress)("waiting for type inference at the anchor");
         let started = Instant::now();
@@ -232,37 +220,104 @@ impl RustBackend {
                 self.refuse_degraded_index()?;
                 return Ok(Answerable::Ready);
             }
-            if hover.is_null() && self.indexed && !self.chatter.loading() {
-                let report = self.pull_diagnostics(uri)?;
-                if let Some(said) = unlinked_file_in(&report) {
-                    self.refuse_degraded_index()?;
-                    return Err(unlinked_file_refusal(uri, &said)?);
-                }
-                if let Some(said) =
-                    inactive_code_covering(&report, &LspPoint::read(Some(position))?)
-                {
-                    self.refuse_degraded_index()?;
-                    return Ok(Answerable::Inactive(said));
-                }
-            }
-            if hover.is_null() && self.indexed && !self.chatter.loading() {
-                let silent_for = ready_and_silent_since
-                    .get_or_insert_with(Instant::now)
-                    .elapsed();
-                if silent_past(silent_for, bound) {
-                    return Err(server_defect(format!(
-                        "the index is ready and rust-analyzer still gives no hover at {} after \
-                         {silent_for:?}, so it cannot type this position. Start the range on an \
-                         expression it can type.",
-                        located(uri, position)?
-                    )));
+            let ready_and_silent = hover.is_null() && self.indexed && !self.chatter.loading();
+            if ready_and_silent {
+                if let Some(excused) = self.excused_silence(uri, position)? {
+                    return Ok(excused);
                 }
             } else {
                 ready_and_silent_since = None;
             }
-            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
+            let silent_for = ready_and_silent.then(|| {
+                ready_and_silent_since
+                    .get_or_insert_with(Instant::now)
+                    .elapsed()
+            });
+            self.refuse_silence(&waiting, silent_for, uri, position)?;
+            if !self.keep_waiting_for_inference(&mut waiting, uri, position)? {
                 return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
+        }
+    }
+
+    /// What a ready index's `null` hover at `position` means, when its diagnostics say: refused for
+    /// a file no crate's module tree reaches, [`Answerable::Inactive`] for code a `#[cfg]` switched
+    /// off, and `None` when nothing excuses it.
+    fn excused_silence(&mut self, uri: &str, position: &Value) -> Result<Option<Answerable>> {
+        let report = self.pull_diagnostics(uri)?;
+        if let Some(said) = unlinked_file_in(&report) {
+            self.refuse_degraded_index()?;
+            return Err(unlinked_file_refusal(uri, &said)?);
+        }
+        if let Some(said) = inactive_code_covering(&report, &LspPoint::read(Some(position))?) {
+            self.refuse_degraded_index()?;
+            return Ok(Some(Answerable::Inactive(said)));
+        }
+        Ok(None)
+    }
+
+    /// Refuse a wait whose server has gone silent past its bound ([`silence_verdict`]): a ready
+    /// index that has left the hover at `position` `null` for `silent_for`, with nothing excusing
+    /// it, is a position it will never type; a loading server whose words have not changed is
+    /// stalled.
+    fn refuse_silence(
+        &self,
+        waiting: &Waiting,
+        silent_for: Option<Duration>,
+        uri: &str,
+        position: &Value,
+    ) -> Result<()> {
+        let unchanged = self.chatter.quiet_for(Instant::now());
+        let loading = self.chatter.loading();
+        match silence_verdict(loading, silent_for, unchanged, &self.silence_bounds) {
+            Silence::Waiting => Ok(()),
+            Silence::Stalled => Err(self.stalled(waiting.stage(), unchanged)),
+            Silence::ReadyUntypable => Err(server_defect(format!(
+                "the index is ready and rust-analyzer still gives no hover at {} after {:?}, so \
+                 it cannot type this position. Start the range on an expression it can type.",
+                located(uri, position)?,
+                silent_for.unwrap_or_default()
+            ))),
+        }
+    }
+
+    /// Wait out one poll of a wait for type inference, as [`Self::keep_waiting`] does — `false`
+    /// once the caller has stopped waiting — refusing a server gone silent ([`Self::refuse_silence`]).
+    ///
+    /// Judged in every slice the poll sleeps in rather than once per poll: a server's busy report
+    /// can be folded away by the next poll's request before a once-per-poll look sees it.
+    fn keep_waiting_for_inference(
+        &self,
+        waiting: &mut Waiting,
+        uri: &str,
+        position: &Value,
+    ) -> Result<bool> {
+        let until = Instant::now() + INDEXING_POLL;
+        loop {
+            self.refuse_silence(waiting, None, uri, position)?;
+            let remaining = until.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Ok(true);
+            }
+            if !self.keep_waiting(Some(waiting), remaining.min(CANCEL_CHECK)) {
+                return Ok(false);
+            }
+        }
+    }
+
+    /// The refusal of a wait in `stage` on a loading server that has said nothing new for `quiet`.
+    fn stalled(&self, stage: &WaitStage, quiet: Duration) -> RestructureError {
+        let nothing = || "nothing reported".to_string();
+        RestructureError::ServerStalled {
+            stage: stage.text().to_string(),
+            server: server_name(self.waited_on()),
+            last: self.chatter.last.clone().unwrap_or_else(nothing),
+            quiet_seconds: quiet.as_secs(),
+            furthest: self
+                .chatter
+                .furthest()
+                .map(|(percentage, phase)| format!("{phase} {percentage}%"))
+                .unwrap_or_else(nothing),
         }
     }
 
