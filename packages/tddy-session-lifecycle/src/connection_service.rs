@@ -202,6 +202,9 @@ pub struct DaemonSessionHost {
     /// Told of each started session's worktree — see [`SessionWorktreeObserver`]. `None` on a host
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
+    /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host the
+    /// daemon runtime did not build.
+    askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,
 }
 
 pub use session_worktree_observer::SessionWorktreeObserver;
@@ -521,6 +524,7 @@ mod jail_relaunch_unit_tests;
 #[cfg(test)]
 mod stack_child_spawn_tests;
 mod svc_agent_roster_wiring;
+mod svc_askpass_wiring;
 mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
 mod svc_session_identity_wiring;

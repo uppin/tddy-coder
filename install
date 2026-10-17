@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install tddy-supervisor (and tddy-daemon, tddy-coder, tddy-tools, tddy-remote-git-repo,
-# tddy-session-sync, tddy-sandbox-runner) as a
+# tddy-askpass, tddy-session-sync, tddy-sandbox-runner) as a
 # systemd service.
 #
 # tddy-supervisor is the only systemd unit and the only root process: it starts tddy-daemon as an
@@ -381,7 +381,7 @@ DESKTOP_LINUX_BINARY_SRC="${ROOT_DIR}/target/release/tddy-desktop"
 # tddy-sandbox-runner and tddy-index-daemon are resolved as SIBLINGS OF THE RUNNING EXECUTABLE, which
 # for a macOS install is inside the .app, not BIN_DIR — so they are copied into both. On Linux the
 # executable IS in BIN_DIR and one copy serves both roles.
-DESKTOP_BINARIES=(tddy-coder tddy-tools tddy-sandbox-runner tddy-index-daemon tddy-remote-git-repo tddy-session-sync)
+DESKTOP_BINARIES=(tddy-coder tddy-tools tddy-sandbox-runner tddy-index-daemon tddy-remote-git-repo tddy-askpass tddy-session-sync)
 
 # --- generated files --------------------------------------------------------------------------
 #
@@ -923,13 +923,18 @@ fi
 # a per-user install spawns jails too, and the daemon that cannot find it fails the first sandboxed
 # start rather than at install time.
 #
+# tddy-askpass is ssh's SSH_ASKPASS helper for a clone the daemon runs: ssh execs it to ask the daemon
+# (and through it the operator) for a key passphrase. The daemon resolves it as a sibling of its own
+# executable, then as a bare name on PATH, with no existence check — so it lands in BIN_DIR beside
+# tddy-daemon, and a missing one is a clone that cannot ask rather than an install error.
+#
 # tddy-index-daemon holds a warm rust-analyzer index per workspace root and serves the restructure
 # and analyze operations over gRPC. Like tddy-sandbox-runner it is a process the daemon SPAWNS
 # rather than a service with a unit of its own, and it lands in BIN_DIR next to tddy-daemon for the
 # same reason: the daemon resolves it as a sibling of its own executable, with a bare name on PATH
 # as the only remaining fallback. Required in both modes, --user included, or the first restructure
 # a session asks for fails at spawn rather than at install time.
-INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-session-sync tddy-sandbox-runner tddy-index-daemon)
+INSTALLED_BINARIES=(tddy-daemon tddy-coder tddy-tools tddy-remote-git-repo tddy-askpass tddy-session-sync tddy-sandbox-runner tddy-index-daemon)
 if "$want_supervisor"; then
   INSTALLED_BINARIES=(tddy-supervisor "${INSTALLED_BINARIES[@]}")
 fi

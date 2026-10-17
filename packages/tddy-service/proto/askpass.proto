@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package askpass;
+
+// The loopback wire between a clone's `SSH_ASKPASS` helper and the daemon that started the clone.
+//
+// ssh hands its helper one argument, the question. The helper relays it here together with the
+// token the daemon gave the clone, and the daemon asks the operator who started the clone. This is
+// served on 127.0.0.1 only, by hand (`tddy-host-service::askpass`), at
+// `POST /rpc/askpass.AskpassService/Prompt` — the Connect unary shape the other loopback callers
+// use — so no generated server accompanies it.
+
+service AskpassService {
+  // Ask the clone's operator for what ssh is asking for. Blocks until answered or expired.
+  rpc Prompt(AskpassRequest) returns (AskpassResponse);
+}
+
+message AskpassRequest {
+  // The token the daemon issued for this clone. Names the operator the prompt is raised for.
+  string token = 1;
+  // ssh's question, verbatim.
+  string prompt = 2;
+}
+
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  // `answer` holds the plaintext the helper prints for ssh.
+  OUTCOME_ANSWER = 1;
+  // The request was not one the daemon relays, or its token is not (or no longer) valid.
+  OUTCOME_REFUSED = 2;
+  // Nobody answered in time.
+  OUTCOME_EXPIRED = 3;
+}
+
+message AskpassResponse {
+  Outcome outcome = 1;
+  // Set only for OUTCOME_ANSWER.
+  bytes answer = 3;
+  // Set only for OUTCOME_REFUSED. Never carries a secret.
+  string reason = 2;
+  // Set only for OUTCOME_ANSWER: this clone already got an answer for the same key, so ssh asking
+  // again means that answer was rejected. Carries the fact, never the passphrase.
+  bool previous_answer_rejected = 4;
+}

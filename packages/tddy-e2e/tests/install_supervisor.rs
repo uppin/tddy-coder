@@ -44,6 +44,8 @@ fn an_install_tree() -> InstallTree {
         "tddy-tools",
         "tddy-supervisor",
         "tddy-remote-git-repo",
+        // ssh's SSH_ASKPASS helper for a daemon-run clone; `install` requires it beside the daemon.
+        "tddy-askpass",
         "tddy-session-sync",
         // Runs inside every jail the daemon spawns, so `install` requires it exactly as it
         // requires the daemon. A fixture missing it fails the preflight before any assertion runs.

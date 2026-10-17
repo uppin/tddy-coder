@@ -19,13 +19,18 @@ prost = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sysinfo = { workspace = true }
-tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process", "io-util"] }
+tokio = { version = "1", features = ["rt", "macros", "fs", "sync", "time", "process", "io-util", "net"] }
 tddy-core = { path = "../tddy-core" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-task = { path = "../tddy-task" }
 tokio-stream = "0.1"
 tddy-service = { path = "../tddy-service" }
+# The shared classification of ssh's askpass questions. `tddy-askpass` dev-depends back on this
+# crate to test the helper against the real endpoint; a cycle through a dev-dependency is allowed.
+tddy-askpass = { path = "../tddy-askpass" }
+# The askpass endpoint's loopback HTTP server.
+axum = "0.8"
 livekit = "0.7"
 # `default = ["agent"]` is the *server* side. The blocking client and the protocol types are ungated.
 ssh-agent-lib = { version = "0.6.0", default-features = false }

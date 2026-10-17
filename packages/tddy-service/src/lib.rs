@@ -106,6 +106,13 @@ pub mod proto {
     pub mod auth {
         include!(concat!(env!("OUT_DIR"), "/auth.rs"));
     }
+    /// The loopback wire between a clone's `SSH_ASKPASS` helper and the daemon. Messages only.
+    pub mod askpass {
+        include!(concat!(env!("OUT_DIR"), "/askpass.rs"));
+
+        /// The route the helper POSTs to and the daemon serves: Connect's `/rpc/{service}/{method}`.
+        pub const PROMPT_PATH: &str = "/rpc/askpass.AskpassService/Prompt";
+    }
     /// `AccountsService`: what a person can see and curate in the credential store. Served from
     /// `tddy-accounts` over the vault `tddy-credentials` seals. Carries no secret in any message —
     /// see `accounts.proto`.

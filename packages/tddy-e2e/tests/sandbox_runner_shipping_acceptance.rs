@@ -66,6 +66,8 @@ const RELEASE_BINARIES: &[&str] = &[
     "tddy-coder",
     "tddy-tools",
     "tddy-remote-git-repo",
+    // `install` requires it beside the daemon, like the other helpers it execs.
+    "tddy-askpass",
     "tddy-session-sync",
     RUNNER,
     // Spawned by the daemon as a sibling of its own executable, exactly like the runner, so

@@ -54,6 +54,9 @@ auth_storage: "__AUTH_STORAGE_DIR__/auth"
 # listed as well. (A project that resolves to no account adds none of them.) Never a token: the
 # account's token is asked of the daemon per call and is in no spawn environment.
 #
+# A clone over SSH is spawned with the passphrase-prompt environment (SSH_ASKPASS and friends, see
+# supervisor.yaml's spawn_policy.allowed_env_keys), which the supervisor refuses unless listed there.
+#
 # STILL SPAWNED BY THE DAEMON ITSELF, and therefore still running as the daemon user on a supervised
 # host: sandbox sessions (tddy-sandbox-cgroups builds those jails in-process) and the claude-cli /
 # cursor-cli / PTY session types (pty_runtime.rs drops privilege by shelling out to `setpriv`, which

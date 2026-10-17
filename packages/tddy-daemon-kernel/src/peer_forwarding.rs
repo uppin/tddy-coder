@@ -238,7 +238,7 @@ impl CommonRoom {
         let client = self
             .peer_client(peer_id, service, method, "a stream")
             .await?;
-        let mut frames = tokio::time::timeout(
+        let frames = tokio::time::timeout(
             open_deadline,
             client.call_server_stream(service, method, body),
         )
@@ -263,28 +263,20 @@ impl CommonRoom {
             // The client carries this call's registration in the room's shared engine; hold it for the
             // stream's whole life so the response loop keeps delivering frames to it.
             let _client = client;
-            loop {
-                let item =
-                    match tokio::time::timeout(PEER_FORWARD_STREAM_IDLE_TIMEOUT, frames.recv())
-                        .await
-                    {
-                        Ok(Some(Ok(bytes))) => decode_frame(bytes),
-                        // A mid-stream failure arrives as a single terminal error frame.
-                        Ok(Some(Err(status))) => Err(status),
-                        // The peer sent end-of-stream: the relayed stream ends the same way.
-                        Ok(None) => break,
-                        Err(_) => Err(peer_forward_deadline_status(
-                            &service,
-                            &method,
-                            &peer_id,
-                            PEER_FORWARD_STREAM_IDLE_TIMEOUT,
-                        )),
-                    };
-                let terminal = item.is_err();
-                if tx.send(item).is_err() || terminal {
-                    break;
-                }
+            crate::stream_relay::Relay {
+                idle_timeout: PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+                decode_frame,
+                idle_status: || {
+                    peer_forward_deadline_status(
+                        &service,
+                        &method,
+                        &peer_id,
+                        PEER_FORWARD_STREAM_IDLE_TIMEOUT,
+                    )
+                },
             }
+            .run(frames, tx)
+            .await;
         });
         Ok(rx)
     }

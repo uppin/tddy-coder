@@ -140,6 +140,7 @@ impl ProjectRpcHandler {
                             os_user: os_user_owned,
                             git_url: git_url_owned,
                             destination: dest_path.display().to_string(),
+                            env: Default::default(),
                         })
                     } else {
                         spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)
@@ -317,6 +318,7 @@ impl ProjectRpcHandler {
                             os_user: os_user_owned,
                             git_url: git_url_owned,
                             destination: dest_path.display().to_string(),
+                            env: Default::default(),
                         })
                     } else {
                         spawner::clone_as_user(&os_user_owned, &git_url_owned, &dest_path)

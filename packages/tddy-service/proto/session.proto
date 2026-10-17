@@ -391,14 +391,23 @@ message StagedAttachmentRef {
 }
 
 // One event of a StreamStartSession response: progress while attachments materialize and the start's
-// phases begin and end, then exactly one terminal result. The result is always the last event; a
+// phases begin and end, keep-alives while it waits on slow provisioning, then exactly one terminal result. The result is always the last event; a
 // failure terminates the stream with a status instead, never with a result.
 message StartSessionEvent {
   oneof event {
     AttachmentMaterializationProgress attachment_progress = 1;
     StartSessionResponse result = 2;
     StartPhase phase = 3;
+    StartKeepAlive keep_alive = 4;
   }
+}
+
+// Sent every few seconds while a start waits on something slow it cannot report progress on — a
+// clone blocked on the operator's SSH passphrase — so a forwarded stream, which a relay ends after
+// 30 s without a frame, stays open. Carries no result and ends nothing: consumers ignore it.
+message StartKeepAlive {
+  // What the host is waiting on, e.g. "provisioning". Informational; never a terminal condition.
+  string activity = 1;
 }
 
 // Where a session takes its GitHub identity from.

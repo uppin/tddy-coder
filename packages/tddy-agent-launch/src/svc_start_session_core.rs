@@ -180,7 +180,8 @@ impl LaunchSessions {
         // peer), clone it into the host's base location so the session can start on a host that
         // doesn't have the project yet. A truly unknown project surfaces as NotFound.
         {
-            self.provision_project_for_start(&req, os_user).await?;
+            self.provision_project_for_start(&req, os_user, progress)
+                .await?;
         }
 
         // A base session that cannot seed a stack is refused here, before the session-type dispatch

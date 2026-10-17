@@ -14,7 +14,9 @@ use tddy_service::proto::session::StartSessionResponse;
 use tddy_service::proto::session::{GithubSource, StartSessionRequest};
 
 use crate::launch_ports::LaunchSessions;
+use crate::start_keepalive::{with_keepalive, START_KEEPALIVE_INTERVAL};
 use tddy_projects::project_storage::ProjectData;
+use tddy_session_files::attachment_progress::AttachmentProgressSink;
 
 /// The request a start is forwarded to a peer with: a request that names no GitHub source names
 /// this host's own project setting (`local_row`), so the peer acts the same way even if its copy of
@@ -55,6 +57,19 @@ pub(crate) fn record_requested_github_source(
 
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
+/// How long a forwarded `StartSession` waits for the peer's answer.
+///
+/// The peer may clone the project first, and a clone over SSH can stop to ask its operator for a key
+/// passphrase (up to the prompt's lifetime), so the ordinary peer-forward deadline is too short. A
+/// split start already waits the peer's whole clone budget for the same peer-side work; this is that
+/// one budget.
+#[must_use]
+pub fn start_forward_deadline(
+    config: &tddy_daemon_kernel::config::DaemonConfig,
+) -> std::time::Duration {
+    tddy_session_agents::agent_roster::split_forward_deadline(config)
+}
+
 impl LaunchSessions {
     pub(super) fn eligible_daemon_ids(&self) -> (String, Vec<String>) {
         let local_id = local_instance_id_for_config(&self.config);
@@ -83,12 +98,14 @@ impl LaunchSessions {
                     "cannot forward StartSession: this process has no LiveKit common-room connection (configure livekit.common_room with url, api_key, api_secret)",
                 )
             })?;
-        let inner = tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit(
-            slot,
-            &peer_instance_id,
-            req,
-        )
-        .await?;
+        let inner =
+            tddy_daemon_livekit::livekit_peer_discovery::forward_start_session_via_livekit_within(
+                slot,
+                &peer_instance_id,
+                req,
+                start_forward_deadline(&self.config),
+            )
+            .await?;
         log::info!(
             "StartSession: forward succeeded session_id={} livekit_server_identity={}",
             inner.session_id,
@@ -121,17 +138,24 @@ impl LaunchSessions {
         &self,
         req: &StartSessionRequest,
         os_user: &str,
+        progress: &AttachmentProgressSink,
     ) -> Result<(), Status> {
         let project_id = req.project_id.trim();
         if !project_id.is_empty() {
             let projects_dir = projects_path_for_user(os_user, Some(&self.tddy_data_dir))
                 .ok_or_else(|| Status::internal("could not resolve projects path"))?;
-            self.ensure_project_available_for_start(
-                os_user,
-                &projects_dir,
-                project_id,
-                &req.session_token,
-                req.agent_clone.as_ref(),
+            // A clone can wait on the operator's passphrase far longer than a forwarded stream
+            // tolerates silence, so the stream is kept alive for as long as this waits.
+            with_keepalive(
+                progress,
+                START_KEEPALIVE_INTERVAL,
+                self.ensure_project_available_for_start(
+                    os_user,
+                    &projects_dir,
+                    project_id,
+                    &req.session_token,
+                    req.agent_clone.as_ref(),
+                ),
             )
             .await?;
         }

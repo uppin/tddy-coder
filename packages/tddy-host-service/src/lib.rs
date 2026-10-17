@@ -6,6 +6,7 @@
 //! with auth because `AddHostKey` and `ListHostKeyCandidates` are host-service methods, and moving
 //! it here cuts the `host_tooling ⇄ ssh_agent` cycle as a side effect.
 
+pub mod askpass;
 pub mod github_cli;
 pub mod host_desktop_targets;
 pub mod host_keypair;

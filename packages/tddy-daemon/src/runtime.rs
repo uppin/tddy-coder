@@ -1122,6 +1122,18 @@ pub async fn build(
         let session_index_progress =
             tddy_daemon_rpc::code_index_warmup::SessionIndexProgress::new();
 
+        // The loopback endpoint a clone's `SSH_ASKPASS` helper asks for a key passphrase. It raises
+        // its prompts on the registry the host service streams from and decrypts with the keypair
+        // it publishes — the very instances above — so a clone's prompt reaches `StreamHostPrompts`.
+        let askpass_endpoint = Arc::new(
+            tddy_host_service::askpass::AskpassEndpoint::start(
+                Arc::clone(&host_prompts),
+                host_service_impl.host_keypair(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("bind the askpass endpoint on loopback: {e}"))?,
+        );
+
         let mut connection_impl =
             tddy_session_lifecycle::connection_service::DaemonSessionHost::new(
                 config.clone(),
@@ -1139,6 +1151,7 @@ pub async fn build(
             .with_model_registry(Arc::clone(&model_registry))
             .with_session_notification_bus(session_notification_bus)
             .with_session_tokens(session_tokens.clone())
+            .with_askpass_endpoint(askpass_endpoint)
             // Read here, before the local socket server is spawned: adopting its own listener
             // clears the `LISTEN_*` variables the host sockets are announced in.
             .with_inherited_host_session_sockets(

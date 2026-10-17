@@ -170,6 +170,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/accounts.proto"], &["proto"])?;
 
+    // Askpass wire: messages only. The loopback endpoint in `tddy-host-service::askpass` is a
+    // hand-written axum route at the Connect path, so no service code is generated.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .compile_protos(&["proto/askpass.proto"], &["proto"])?;
+
     // Host and worktree services — `#unbundle` node 1 split families E/F (hosts, telemetry, prompts,
     // keys) and G/H (worktrees, their disk usage, their files) out of `the pre-unbundle monolithic RPC coordinate`.
     //

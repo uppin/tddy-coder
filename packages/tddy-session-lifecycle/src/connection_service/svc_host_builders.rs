@@ -118,6 +118,7 @@ impl DaemonSessionHost {
             // from this host (`with_rpc_families`).
             rpc_families: None,
             worktree_observer: None,
+            askpass: None,
         }
     }
 

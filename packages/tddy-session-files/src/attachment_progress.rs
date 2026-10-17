@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tddy_service::proto::session::start_phase::{
     Boundary as StartPhaseBoundary, Step as StartStep,
 };
-use tddy_service::proto::session::{AttachmentMaterializationProgress, StartPhase};
+use tddy_service::proto::session::{AttachmentMaterializationProgress, StartKeepAlive, StartPhase};
 
 use tddy_rpc::Status;
 
@@ -78,6 +78,19 @@ impl AttachmentProgressSink {
     /// terminates with the failure instead.
     pub fn end_phase(&self, step: StartStep) {
         self.report_phase(step, StartPhaseBoundary::End);
+    }
+
+    /// Reports that the start is still alive and waiting on `activity`, so a relay that ends a
+    /// stream after a quiet spell does not end this one. A closed receiver is ignored.
+    pub fn keep_alive(&self, activity: &str) {
+        let Some(tx) = self.tx.as_ref() else {
+            return;
+        };
+        let _ = tx.send(Ok(StartSessionEvent {
+            event: Some(StartSessionEventKind::KeepAlive(StartKeepAlive {
+                activity: activity.to_string(),
+            })),
+        }));
     }
 
     /// A closed receiver is ignored, as for [`Self::report`].

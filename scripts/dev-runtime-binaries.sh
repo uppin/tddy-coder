@@ -25,6 +25,7 @@ DEV_RUNTIME_PACKAGES=(
   tddy-sandbox-runner  # runs inside every jail the daemon spawns
   tddy-index-daemon    # the warm rust-analyzer index, spawned per workspace root
   tddy-remote-git-repo # git's GIT_SSH_COMMAND shim
+  tddy-askpass         # ssh's SSH_ASKPASS helper for a daemon-run clone
   tddy-session-sync    # mirrors a session's worktree
 )
 

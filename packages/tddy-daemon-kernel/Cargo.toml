@@ -36,6 +36,8 @@ tonic = { version = "0.12", default-features = false, features = ["transport"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `stream_relay`'s tests pause the clock to cross the 30 s idle timeout instantly.
+tokio = { version = "1", features = ["test-util"] }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"

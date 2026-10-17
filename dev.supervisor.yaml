@@ -71,6 +71,9 @@ shutdown_grace_secs: 5
 #   # GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME and GIT_COMMITTER_EMAIL (its commit identity; never a
 #   # token) — list them too, or those spawns are refused. So does a Local gh project's tool session,
 #   # which is also spawned with TDDY_GITHUB_SOURCE (which GitHub host's `gh` it asks; not a secret).
+#   # A clone over SSH is also spawned with GIT_SSH_COMMAND, GIT_TERMINAL_PROMPT, SSH_ASKPASS,
+#   # SSH_ASKPASS_REQUIRE, SSH_AUTH_SOCK, TDDY_ASKPASS_TOKEN and TDDY_ASKPASS_URL — add them to the list
+#   # below to clone over SSH through this supervisor.
 #   allowed_env_keys: [RUST_LOG, GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL, GIT_COMMITTER_NAME, GIT_COMMITTER_EMAIL, TDDY_GITHUB_SOURCE]
 
 # ACTIVE, not commented out, and it has to be for a dev run to start at all. At startup the supervisor

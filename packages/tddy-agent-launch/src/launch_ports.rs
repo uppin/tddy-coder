@@ -104,6 +104,9 @@ pub struct LaunchSessions {
     pub presenter_observer_deps: PresenterObserverDeps,
     pub user_resolver: SessionUserResolver,
     pub spawn_client: Option<Arc<SpawnClient>>,
+    /// Where a clone's `SSH_ASKPASS` helper asks for a key passphrase. `None` on a host without a
+    /// daemon runtime, whose SSH clones are then given no helper.
+    pub askpass: Option<Arc<tddy_host_service::askpass::AskpassEndpoint>>,
     pub workspace_sandboxes:
         Arc<tddy_daemon_sandbox::workspace_tool_sandbox::WorkspaceSandboxRegistry>,
     /// The relay's idle tracker, bumped on every RPC this topic serves.

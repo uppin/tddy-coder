@@ -107,10 +107,12 @@ pub fn clone_request(
 /// shim env vars the clone needs (PRD AC37).
 ///
 /// `env` holds `GIT_SSH_COMMAND`, `TDDY_DAEMON_URL`, `TDDY_SESSION_TOKEN` for a facilitator-
-/// provisioned clone that drives `tddy-remote-git-repo` as its `GIT_SSH_COMMAND`. The supervisor's
-/// `SpawnPolicy::allowed_env_keys` **denies** any key not on its list, so an operator must add those
-/// three keys to `spawn_policy.allowed_env_keys` in `supervisor.yaml` for facilitator clones to
-/// work under a supervisor — the daemon cannot widen the policy itself, by design.
+/// provisioned clone that drives `tddy-remote-git-repo` as its `GIT_SSH_COMMAND`, or the variables
+/// of an SSH clone that can ask for a passphrase (`crate::clone_env::CloneSshEnv`). The
+/// supervisor's `SpawnPolicy::allowed_env_keys` **denies** any key not on its list, so an operator
+/// must add those three keys — and, for passphrase prompts,
+/// `crate::clone_env::CloneSshEnv::ALLOWED_ENV_KEYS` — to `spawn_policy.allowed_env_keys` in
+/// `supervisor.yaml`; the daemon cannot widen the policy itself, by design.
 pub fn clone_request_with_env(
     os_user: &str,
     git_program: &Path,
