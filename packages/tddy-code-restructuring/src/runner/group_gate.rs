@@ -244,7 +244,8 @@ impl GroupRun {
             return Ok(Settled::Pending);
         }
         on_check(open.name());
-        open.finish(gate.root, gate.paths, journal, gate.cancel, spawns)
+        let spawns = spawns.for_group(open.name());
+        open.finish(gate.root, gate.paths, journal, gate.cancel, &spawns)
             .map(Settled::Ready)
     }
 }

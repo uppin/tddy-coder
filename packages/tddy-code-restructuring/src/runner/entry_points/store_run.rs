@@ -234,35 +234,18 @@ fn report_settled(
     }
 }
 
-/// Rehearse operation `index` of a dry run: refuse it as the apply would, say it would apply, and
-/// carry its edit forward through `ledger` and `overlay` for the operations after it, writing
-/// nothing.
-///
-/// `done` counts the operations rehearsed before this one.
-// The loop's own state, threaded as it threads it into `commit_operation`: the operation's place in
-// the plan and the run, the tree, and the two projections a dry run folds instead of writing.
-#[allow(clippy::too_many_arguments)]
-fn rehearse_dry_run(
-    plan: &Plan,
-    index: usize,
-    done: usize,
-    resolved: &Resolution,
-    root: &Path,
-    options: &Options,
-    ledger: &mut PositionLedger,
-    overlay: &mut Overlay,
-) -> Result<()> {
-    preflight_moves(index, resolved, root, overlay, &options.spawns)?;
-    (options.account)(&progress_line(
-        index,
-        done,
-        plan.ops.len(),
-        plan.ops[index].op,
-        resolved.edit.changes.len(),
-        false,
-    ));
-    ledger.record(&resolved.edit);
-    overlay.record(root, &resolved.edit)
+/// The progress line announcing that operation `index` of `total` is being resolved, naming its id
+/// beside its index when it has one, so the line joins the journal record of the operation.
+fn resolving_line(index: usize, total: usize, op: &crate::plan::RefactorOp, file: &str) -> String {
+    let id = op
+        .id
+        .as_ref()
+        .map(|id| format!(" ({id})"))
+        .unwrap_or_default();
+    format!(
+        "op {index}{id} of {total}: resolving {:?} in `{file}`",
+        op.op
+    )
 }
 
 fn apply_held_plan(
@@ -328,15 +311,7 @@ fn apply_held_plan(
             }
 
             let at = ledger.translate_op(op)?;
-            (options.progress)(&format!(
-                "op {index}{} of {total}: resolving {:?} in `{}`",
-                op.id
-                    .as_ref()
-                    .map(|id| format!(" ({id})"))
-                    .unwrap_or_default(),
-                op.op,
-                at.anchor.file()
-            ));
+            (options.progress)(&resolving_line(index, total, op, at.anchor.file()));
             let resolved = registry
                 .backend_for(Path::new(at.anchor.file()), op.op)?
                 .resolve(
@@ -346,6 +321,10 @@ fn apply_held_plan(
                         overlay: &overlay,
                     },
                 )?;
+            // Refused before anything of the operation is written or journalled; a dry run's
+            // overlay holds what its earlier operations created and moved.
+            let id = op.id.as_ref().filter(|_| !legacy);
+            preflight_moves(index, id, &resolved, root, &overlay, &options.spawns)?;
 
             // A group member's account waits for its group to be kept: see below.
             if op.group.is_none() || options.dry_run {
@@ -355,16 +334,16 @@ fn apply_held_plan(
             let files = resolved.edit.changes.len();
             (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
             if options.dry_run {
-                rehearse_dry_run(
-                    &plan,
+                (options.account)(&progress_line(
                     index,
                     done,
-                    &resolved,
-                    root,
-                    options,
-                    &mut ledger,
-                    &mut overlay,
-                )?;
+                    plan.ops.len(),
+                    op.op,
+                    files,
+                    false,
+                ));
+                ledger.record(&resolved.edit);
+                overlay.record(root, &resolved.edit)?;
                 done += 1;
                 continue;
             }
@@ -372,8 +351,6 @@ fn apply_held_plan(
             (options.progress)(&format!(
                 "op {index} of {total}: applying {files} file(s) to disk"
             ));
-            let id = op.id.as_ref().filter(|_| !legacy);
-            preflight_moves(index, &resolved, root, &overlay, &options.spawns)?;
             GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
             commit_operation(
                 index,

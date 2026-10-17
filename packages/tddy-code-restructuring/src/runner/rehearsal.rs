@@ -67,7 +67,14 @@ impl Rehearsal {
 
         // The refusal `apply` gives an untracked move before it writes, given here the same way.
         let resolved = resolved.and_then(|resolved| {
-            super::preflight_moves(index, &resolved, root, &self.overlay, spawns)?;
+            super::preflight_moves(
+                index,
+                op.id.as_ref(),
+                &resolved,
+                root,
+                &self.overlay,
+                spawns,
+            )?;
             Ok(resolved)
         });
         match resolved {

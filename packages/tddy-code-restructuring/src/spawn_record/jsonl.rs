@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Map, Value};
-use tddy_lsp::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
+use tddy_lsp::{OperationContext, ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
 
 use super::purpose;
 use super::redact::redacted;
@@ -125,7 +125,7 @@ impl RecordBook {
             );
         }
 
-        let line = json!({
+        let mut line = json!({
             "v": 1,
             "event": "start",
             "id": id,
@@ -138,6 +138,9 @@ impl RecordBook {
             "pid": process.pid,
             "env_names": process.env_names,
         });
+        if let (Some(operation), Some(record)) = (&process.operation, line.as_object_mut()) {
+            label_with_operation(record, operation);
+        }
         // One line, newline included: a sink writes exactly this, so two writers never run together.
         (ProcessToken(token), format!("{line}\n"))
     }
@@ -163,6 +166,21 @@ impl RecordBook {
         }
         record.insert("outcome".to_string(), outcome_json(outcome));
         Some(format!("{}\n", Value::Object(record)))
+    }
+}
+
+/// Add the keys naming the operation a process was started for — `op`, `op_id` and `group`, each
+/// only when known — so a start line joins the journal record of that operation. A run-level
+/// process's line has none of them, which keeps its shape what it always was.
+fn label_with_operation(record: &mut Map<String, Value>, operation: &OperationContext) {
+    if let Some(op) = operation.op {
+        record.insert("op".to_string(), json!(op));
+    }
+    if let Some(op_id) = &operation.op_id {
+        record.insert("op_id".to_string(), json!(op_id));
+    }
+    if let Some(group) = &operation.group {
+        record.insert("group".to_string(), json!(group));
     }
 }
 
