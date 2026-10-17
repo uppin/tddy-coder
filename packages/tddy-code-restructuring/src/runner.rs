@@ -82,7 +82,7 @@ pub fn commit_operation(
         JournalRecord::in_flight(index, id.cloned(), pre.clone()),
     )?;
 
-    apply_workspace_edit(root, &resolved.edit, spawns)?;
+    apply_workspace_edit(root, &resolved.edit, &spawns.for_operation(index, id))?;
 
     let post = hash_touched_files(root, &resolved.edit)?;
     journal.append(
@@ -113,18 +113,21 @@ pub fn commit_operation(
 /// operation's text edits were on disk. Refused here, the tree and the journal stay exactly as the
 /// previous operation left them, so the same plan applies cleanly once the file is added. A dry run
 /// passes its `overlay`, so a file an earlier operation of the run created or moved is its own.
+/// The `git` it asks is recorded as started for the operation (`index`, `id`).
 ///
 /// # Errors
 ///
 /// [`RestructureError::UntrackedMoveSource`] naming every such source.
 pub fn preflight_moves(
     index: usize,
+    id: Option<&OpId>,
     resolved: &crate::Resolution,
     root: &Path,
     overlay: &crate::Overlay,
     spawns: &SpawnRecorder,
 ) -> Result<()> {
-    let paths = untracked_move_sources(root, &resolved.edit, overlay, spawns)?;
+    let spawns = spawns.for_operation(index, id);
+    let paths = untracked_move_sources(root, &resolved.edit, overlay, &spawns)?;
     if paths.is_empty() {
         return Ok(());
     }

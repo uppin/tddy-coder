@@ -21,7 +21,7 @@ use std::process::{
 };
 use std::sync::Arc;
 
-use tddy_lsp::{ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
+use tddy_lsp::{OperationContext, ProcessOutcome, ProcessStart, ProcessToken, SpawnObserver};
 
 pub use deferred::ColdRunSpawnRecord;
 pub use jsonl::JsonlSpawnRecord;
@@ -50,18 +50,25 @@ pub mod purpose {
 #[derive(Clone)]
 pub struct SpawnRecorder {
     observer: Option<Arc<dyn SpawnObserver>>,
+    /// The plan operation or group every process this recorder starts was started for. `None` for
+    /// a run-level recorder.
+    operation: Option<OperationContext>,
 }
 
 impl SpawnRecorder {
     /// A recorder nobody listens to: processes start exactly as they would without one.
     pub fn discard() -> Self {
-        Self { observer: None }
+        Self {
+            observer: None,
+            operation: None,
+        }
     }
 
     /// A recorder that reports to `observer`.
     pub fn new(observer: Arc<dyn SpawnObserver>) -> Self {
         Self {
             observer: Some(observer),
+            operation: None,
         }
     }
 
@@ -70,15 +77,28 @@ impl SpawnRecorder {
     ///
     /// What `commit_operation` starts its `git` processes through.
     pub fn for_operation(&self, op: usize, op_id: Option<&crate::OpId>) -> SpawnRecorder {
-        let _ = (op, op_id);
-        todo!("TODO(reshape-apply-robust): implement — carry an OperationContext with op and op_id")
+        self.labelled(|operation| {
+            operation.op = Some(op);
+            operation.op_id = op_id.map(ToString::to_string);
+        })
     }
 
     /// A recorder that labels every process it starts as started for the transactional group
     /// `group` — what a group's end-of-group compile gate runs through.
     pub fn for_group(&self, group: &str) -> SpawnRecorder {
-        let _ = group;
-        todo!("TODO(reshape-apply-robust): implement — carry an OperationContext with the group")
+        self.labelled(|operation| operation.group = Some(group.to_string()))
+    }
+
+    /// This recorder, with `label` applied to the operation context it carries — so a recorder
+    /// already scoped to a group keeps its group when it is scoped to an operation, and the
+    /// reverse.
+    fn labelled(&self, label: impl FnOnce(&mut OperationContext)) -> SpawnRecorder {
+        let mut operation = self.operation.clone().unwrap_or_default();
+        label(&mut operation);
+        SpawnRecorder {
+            observer: self.observer.clone(),
+            operation: Some(operation),
+        }
     }
 
     /// Whether anyone is told about the processes this recorder starts.
@@ -122,7 +142,7 @@ impl SpawnRecorder {
     pub fn spawn(&self, purpose: &'static str, command: &mut Command) -> io::Result<RecordedChild> {
         match command.spawn() {
             Ok(child) => {
-                let start = process_start(purpose, command, Some(child.id()));
+                let start = process_start(purpose, command, Some(child.id()), &self.operation);
                 let token = self
                     .observer
                     .as_ref()
@@ -136,7 +156,7 @@ impl SpawnRecorder {
             }
             Err(error) => {
                 if let Some(observer) = &self.observer {
-                    let start = process_start(purpose, command, None);
+                    let start = process_start(purpose, command, None, &self.operation);
                     let token = observer.started(&start);
                     observer.ended(
                         token,
@@ -151,8 +171,14 @@ impl SpawnRecorder {
     }
 }
 
-/// What a `Command` says about itself, so an observer can be told without running anything.
-fn process_start(purpose: &'static str, command: &Command, pid: Option<u32>) -> ProcessStart {
+/// What a `Command` says about itself, so an observer can be told without running anything, with
+/// the operation it was started for.
+fn process_start(
+    purpose: &'static str,
+    command: &Command,
+    pid: Option<u32>,
+    operation: &Option<OperationContext>,
+) -> ProcessStart {
     ProcessStart {
         purpose,
         program: command.get_program().to_string_lossy().into_owned(),
@@ -166,7 +192,7 @@ fn process_start(purpose: &'static str, command: &Command, pid: Option<u32>) -> 
             .map(|(name, _)| name.to_string_lossy().into_owned())
             .collect(),
         pid,
-        operation: None,
+        operation: operation.clone(),
     }
 }
 
