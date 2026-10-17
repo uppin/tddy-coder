@@ -29,6 +29,12 @@ from the same `IndexChannel`, with `register_restructure_executor`; without the 
 registered and a session's `restructure_*` tools are not advertised. The jail gate is derived from that
 registration (`restructure_tools_env` in `tddy-session-lifecycle`), so the two cannot disagree.
 
+`IndexDaemonSpawn::from_config` turns the section into the spawn plan: the program
+(`binary_path`, else resolved beside the daemon's executable or on `PATH`), the socket, the two budgets,
+`rust_analyzer_path` — handed to the child as `--rust-analyzer <path>` after `--grpc-uds <socket>` — and
+`env`, set on the child on top of the daemon's own environment, which is how rust-analyzer and the
+`cargo`/`rustc` it runs get a toolchain on a host that has none on its `PATH`.
+
 When `index_daemon:` is configured, `runtime::build` constructs the `IndexDaemonRegistry` **before** the
 session host, because the host's `SessionWorktreeObserver` (`tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver`)
 holds the registry, as an `IndexChannelSource`, to warm each started session's code index. The same

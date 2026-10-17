@@ -238,6 +238,23 @@ exits, stopped when every root has gone idle, and cancelled rather than orphaned
 off unless the daemon's configuration carries an `index_daemon:` section, so an existing deployment
 is unaffected, and it also requires a user resolver, like every other service the daemon assembles.
 
+**Which rust-analyzer it runs, and with what toolchain, is configuration.** A host that is not a
+developer shell — Tddy Desktop launched from the Dock, a systemd unit — has no `rust-analyzer`,
+`cargo` or `rustc` on its `PATH`, and neither ships with tddy. The `index_daemon:` section names them:
+
+```yaml
+index_daemon:
+  rust_analyzer_path: /path/to/rust-analyzer   # passed to tddy-index-daemon as --rust-analyzer
+  env:                                         # set on the index daemon; rust-analyzer inherits it
+    PATH: /toolchain/bin:/usr/bin:/bin         # where cargo and rustc are found
+    # CARGO, RUSTC, RUST_SRC_PATH, RUSTUP_TOOLCHAIN — any variable rust-analyzer reads
+```
+
+Without `rust_analyzer_path` the index daemon runs `rust-analyzer` from its own `PATH`. `env` is added to
+the daemon's own environment, overriding a variable of the same name, and is one environment for every
+workspace root the index daemon serves. A rust-analyzer that cannot be found is refused as
+`FailedPrecondition` (`language server not found: <path>: …`), never reported as a server that exited.
+
 Its first consumer is the web's [session code pane](../web/session-code-pane.md): tddy-daemon
 forwards the pane's go-to-definition, references and hover requests to it, starting it on the first
 one. The daemon authorises each request and answers `FailedPrecondition` when no `index_daemon:`

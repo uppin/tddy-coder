@@ -195,6 +195,19 @@ at once rather than leaving it for a resume, and a cancel during the group's own
 (`CallerStopped`) for the next resume to roll back. A resume (`--resume`) rolls an open group back before
 it runs anything. `stop_after` is judged only where a group would begin.
 
+## The language server
+
+`main.rs` builds the one `LspAllowList` entry this process serves — Rust — from
+`--rust-analyzer <PATH>`, or the bare `rust-analyzer` resolved on the process's own `PATH` when the
+flag is absent. The handshake (`client_capabilities`, `server_settings`) is fixed at spawn, which is
+why this process owns its registry rather than sharing `tddy-daemon`'s. The toolchain rust-analyzer
+loads a workspace with (`cargo`, `rustc`, `RUST_SRC_PATH`) is whatever this process's environment
+says; `tddy-daemon` sets it from `index_daemon.env`.
+
+A program that cannot be started reaches the caller as `LspError::ServerNotFound` (`NotFound`) or
+`LspError::Io` (any other spawn failure) — `FailedPrecondition` and `Internal` in [Refusals](#refusals) —
+not as `ServerExited`.
+
 ## The spawn record
 
 `--spawn-record <PATH>` names an append-only JSONL file the daemon writes, one object per line, of
