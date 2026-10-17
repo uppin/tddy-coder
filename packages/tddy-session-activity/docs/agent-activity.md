@@ -18,7 +18,7 @@ writes the same format; see
 | Session type | Who appends | Where |
 |---|---|---|
 | sandbox | the host-side executor `DaemonToolHandler::execute` — a `running` row then a terminal `completed`/`error` row around `tool_engine::execute_tool_with_env`, publishing each to the hub | `tddy-daemon` |
-| claude-cli | the `PreToolUse`/`PostToolUse` hooks (`tddy-tools session-hook`) POST `ReportAgentActivity`; the daemon pairs Pre→Post per session | hook → this crate |
+| claude-cli | the `PreToolUse`/`PostToolUse` hooks (`tddy-tools session-hook`) report `ReportAgentActivity` — over HTTP, or over the agent-tool socket on Tddy Desktop ([transport](../../../docs/ft/daemon/claude-cli-session.md#which-transport-a-hook-reports-over)); the daemon pairs Pre→Post per session | hook → this crate |
 | tool / cursor-cli | the **coder participant** over LiveKit while the session is live — its presenter appends rows and broadcasts `PresenterEvent::AgentActivity`; the daemon serves the file snapshot over `/rpc` as fallback | `tddy-coder` |
 
 ## `AgentActivityHub`

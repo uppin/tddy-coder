@@ -8,6 +8,9 @@
 //!    payload (name, input, response) so claude-cli sessions populate `agent-activity.jsonl`;
 //!    skipped for every other event.
 //!
+//! Both go to `--daemon` over HTTP, or — when the hook was given `--daemon-socket` — over the
+//! agent-tool socket of a daemon embedded in an application, which serves no HTTP RPC at all.
+//!
 //! **Fail-quiet contract**: any error (parse, network, daemon rejection) is printed to stderr and
 //! swallowed — the process always exits 0. Claude Code must never be blocked by a failing hook,
 //! and a failure in one report must not prevent the other.
@@ -39,6 +42,12 @@ pub struct SessionHookArgs {
     /// Daemon HTTP base URL (e.g. http://127.0.0.1:8899).
     #[arg(long, default_value = "http://127.0.0.1:8899")]
     pub daemon: String,
+
+    /// The daemon's agent-facing Unix socket. Set for a daemon embedded in an application (Tddy
+    /// Desktop), which serves no HTTP RPC; when given, both reports go over it instead of
+    /// `--daemon`.
+    #[arg(long)]
+    pub daemon_socket: Option<std::path::PathBuf>,
 
     /// OS user owning the session directory.
     #[arg(long)]
@@ -92,7 +101,7 @@ async fn try_run_session_hook(args: SessionHookArgs) -> anyhow::Result<()> {
     report_session_status(&args, hook_event_name, notification_type.as_deref()).await
 }
 
-/// POST a `ReportSessionStatus` RPC for the mapped activity status.
+/// Send a `ReportSessionStatus` RPC for the mapped activity status.
 ///
 /// Returns `Ok(())` without contacting the daemon when the event maps to no status (no-op event).
 async fn report_session_status(
@@ -112,10 +121,10 @@ async fn report_session_status(
         status: status.as_wire().to_string(),
     };
 
-    post_proto(&args.daemon, "ReportSessionStatus", req.encode_to_vec()).await
+    deliver(args, "ReportSessionStatus", req.encode_to_vec()).await
 }
 
-/// POST a `ReportAgentActivity` RPC carrying the tool payload of a tool-use hook.
+/// Send a `ReportAgentActivity` RPC carrying the tool payload of a tool-use hook.
 ///
 /// Returns `Ok(())` without contacting the daemon for non-tool events (the mapping yields `None`).
 async fn report_agent_activity(
@@ -133,7 +142,44 @@ async fn report_agent_activity(
         return Ok(());
     };
 
-    post_proto(&args.daemon, "ReportAgentActivity", req.encode_to_vec()).await
+    deliver(args, "ReportAgentActivity", req.encode_to_vec()).await
+}
+
+/// How long one report may take, over either transport: a hook that hangs blocks Claude Code.
+const REPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Send an encoded protobuf request to a daemon [`ACTIVITY_SERVICE`] method — over the daemon's
+/// agent-facing socket when the hook was given one, over HTTP otherwise.
+async fn deliver(args: &SessionHookArgs, method: &str, body: Vec<u8>) -> anyhow::Result<()> {
+    match &args.daemon_socket {
+        Some(socket) => call_over_socket(socket, method, body).await,
+        None => post_proto(&args.daemon, method, body).await,
+    }
+}
+
+/// Call a daemon [`ACTIVITY_SERVICE`] method over an embedded daemon's agent-tool socket: the
+/// `tddy-rpc` length-prefixed framing that socket serves (`tddy_daemon::agent_tool_socket`), one
+/// connection per call. No envelope is needed — both reports authenticate by the `hook_token` they
+/// carry, exactly as they do over HTTP.
+async fn call_over_socket(
+    socket: &std::path::Path,
+    method: &str,
+    body: Vec<u8>,
+) -> anyhow::Result<()> {
+    let context = format!("{ACTIVITY_SERVICE}/{method} over {}", socket.display());
+    let call = async {
+        let client = tddy_session_tool_client::connect_sandbox_ipc(socket)
+            .await
+            .map_err(|e| anyhow::anyhow!("{context}: {e}"))?;
+        client
+            .call_unary(ACTIVITY_SERVICE, method, body)
+            .await
+            .map_err(|e| anyhow::anyhow!("{context}: {e}"))
+    };
+    tokio::time::timeout(REPORT_TIMEOUT, call)
+        .await
+        .map_err(|_| anyhow::anyhow!("{context}: timed out"))??;
+    Ok(())
 }
 
 /// POST an encoded protobuf request to a daemon [`ACTIVITY_SERVICE`] method via the Connect
@@ -144,7 +190,7 @@ async fn post_proto(daemon: &str, method: &str, body: Vec<u8>) -> anyhow::Result
         daemon.trim_end_matches('/')
     );
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
+        .timeout(REPORT_TIMEOUT)
         .build()
         .map_err(|e| anyhow::anyhow!("build http client: {e}"))?;
 

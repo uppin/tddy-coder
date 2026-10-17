@@ -7,6 +7,13 @@ use tddy_rpc::Status;
 use crate::split_ports::SplitSessions;
 
 impl SplitSessions {
+    /// The agent-facing tool socket, when this daemon is embedded in an application and therefore
+    /// serves no HTTP listener for a co-located agent to POST to. See
+    /// [`tddy_daemon_kernel::embedded_host_agent_tool_socket`].
+    pub(crate) fn agent_tool_socket_for_embedded_host(&self) -> Option<String> {
+        tddy_daemon_kernel::embedded_host_agent_tool_socket(&self.tddy_data_dir)
+    }
+
     /// Resolve the `tddy-tools` binary from this deployment's **toolchain** — the directory its
     /// tddy binaries are installed in ([`tddy_daemon_kernel::toolchain`]).
     ///
@@ -20,19 +27,6 @@ impl SplitSessions {
     ///
     /// A path that does not exist is **refused here**, naming it, rather than written into a
     /// config for something downstream to fail on silently.
-    /// The agent-facing tool socket, when this daemon is embedded in an application and therefore
-    /// serves no HTTP listener for a co-located agent to POST to.
-    ///
-    /// Decided by whether the socket is *there* rather than by a host-kind flag threaded through
-    /// the session layer: an embedded daemon binds it at startup (`tddy_daemon::runtime`), a binary
-    /// one never does, and the path is derived from the same data dir on both sides — so the
-    /// question "does this host serve that socket" is answered by the host itself, and a stale
-    /// flag cannot disagree with reality.
-    pub(crate) fn agent_tool_socket_for_embedded_host(&self) -> Option<String> {
-        let path = tddy_daemon_kernel::agent_tool_socket_path(&self.tddy_data_dir);
-        path.exists().then(|| path.to_string_lossy().into_owned())
-    }
-
     pub(crate) fn resolve_tddy_tools_path(&self) -> Result<PathBuf, Status> {
         resolve_tddy_tools_path(&self.config)
     }
