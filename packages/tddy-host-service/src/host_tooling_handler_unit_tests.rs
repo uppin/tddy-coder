@@ -10,6 +10,8 @@ use crate::service::HostServiceImpl;
 use std::sync::Mutex as StdMutex;
 use tddy_service::proto::host::HostService;
 
+use tddy_daemon_extensions::NoPeerForwarding;
+use tddy_daemon_kernel::peer_forwarding::CommonRoom;
 use tddy_daemon_kernel::SessionUserResolver;
 
 /// The daemon serving the RPC — the one a browser happens to be talking to.
@@ -156,17 +158,15 @@ impl DaemonBuilder {
         let user_resolver: SessionUserResolver = Arc::new(|token| {
             (token == VERIFIABLE_TOKEN).then(|| SIGNED_IN_GITHUB_USER.to_string())
         });
-        HostServiceImpl::new(
-            a_config_named(RELAY_HOST, &self.mapped_github_user, &self.mapped_os_user),
-            temp.path(),
-            user_resolver,
-        )
-        .with_eligible_daemon_source(Arc::new(FakeEligibleDaemons(self.peers)))
-        // The room slot is present but unconnected: this daemon is *configured* for a common
-        // room, so a forward is attempted and fails on the transport rather than being refused
-        // for a missing configuration.
-        .with_common_room(Arc::new(tokio::sync::RwLock::new(None)))
-        .with_host_tooling(self.probe)
+        let config = a_config_named(RELAY_HOST, &self.mapped_github_user, &self.mapped_os_user);
+        let common_room = CommonRoom::new(Arc::new(NoPeerForwarding), &config);
+        HostServiceImpl::new(config, temp.path(), user_resolver)
+            .with_eligible_daemon_source(Arc::new(FakeEligibleDaemons(self.peers)))
+            // The common room is present but unconnected: this daemon is *configured* for a common
+            // room, so a forward is attempted and fails on the transport rather than being refused
+            // for a missing configuration.
+            .with_common_room(common_room)
+            .with_host_tooling(self.probe)
     }
 }
 

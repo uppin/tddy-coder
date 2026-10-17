@@ -19,6 +19,7 @@ use tokio::sync::RwLock;
 
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_livekit::livekit_peer_discovery::{daemon_rpc_identity, CommonRoom};
+use tddy_daemon_livekit::LiveKitPeerForwarder;
 use tddy_livekit::LiveKitParticipant;
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_rpc::{RpcMessage, RpcResult, RpcService};
@@ -115,8 +116,8 @@ impl Fleet {
         .expect("the forwarder joins the common room");
         sees_participant(&room, &mut events, &peer_identity).await;
         Self {
-            forwarders_room: CommonRoom::from_config(
-                Arc::new(RwLock::new(Some(Arc::new(room)))),
+            forwarders_room: CommonRoom::new(
+                LiveKitPeerForwarder::new(Arc::new(RwLock::new(Some(Arc::new(room))))),
                 &DaemonConfig::default(),
             ),
             _peer: peer,
