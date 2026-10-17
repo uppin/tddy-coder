@@ -22,6 +22,8 @@ import { withSelectedDaemon } from "../support/rpc/withSelectedDaemon";
 import { hostSshConfigPage } from "../support/pages/hostsScreenPage";
 
 const HOST = "workstation-1";
+/** The directory lists the host its row is about — a row exists only for a listed host. */
+const HOST_LISTED = [{ instanceId: HOST, label: HOST }];
 
 function aListingOf(aliases: string[]) {
   return create(ListSshConfigHostsResponseSchema, {
@@ -31,7 +33,7 @@ function aListingOf(aliases: string[]) {
 }
 
 function mountConfig(backend = anInMemoryRpcBackend()) {
-  mountWithRpc(withSelectedDaemon(<HostRowSshConfig instanceId={HOST} />), backend);
+  mountWithRpc(withSelectedDaemon(<HostRowSshConfig instanceId={HOST} />, HOST_LISTED), backend);
 }
 
 describe("Hosts screen SSH config", () => {
