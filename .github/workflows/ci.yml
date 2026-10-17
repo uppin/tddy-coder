@@ -779,7 +779,7 @@ jobs:
           # task timeout (seen on master at b73c97e0 and on other branches, same image digest). This
           # prints each phase of the testkit start so a failing run names the stalled one. Remove once
           # the hang is understood and fixed.
-          LIVEKIT_TESTKIT_DEBUG: "1"
+          DEBUG: "tddy:livekit-web:*"
         run: |
           mkdir -p reports/junit
           # Run both suites even if the first fails, so one broken package does

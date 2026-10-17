@@ -35,7 +35,8 @@ The `Web tests` job goes red with two failures and a lower test count:
 
 ## What would close it
 
-A failing sample with the testkit's phases in its log. `LIVEKIT_TESTKIT_DEBUG=1` prints them (a timestamped line per
+A failing sample with the testkit's phases in its log. `DEBUG=tddy:livekit-web:*` prints them (the repo's `debug` convention; `tddy:livekit-web:testkit` for the container,
+`tddy:livekit-web:echo-server` for the task around it) (a timestamped line per
 phase, each readiness probe at its start and at its answer, docker's own output); a `docker run` line with no
 `returned` line is a hung docker, a `ready probe N … started` line with no answer is a hung `fetch`. It is enabled on
 the `Web tests` component step by #651 and marked `FIXME(livekit-web-echo-server-hang)`. Until that lands on `master`
