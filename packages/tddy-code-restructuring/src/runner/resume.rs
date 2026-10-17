@@ -5,10 +5,12 @@
 //! checks that make "if" something a run can know, and the lowering that lets item anchors be read
 //! from a tree that already holds the journal's edits.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
+use crate::apply::hash_file;
 use crate::item_anchor::{self, has_item_anchors};
-use crate::journal::Journal;
+use crate::journal::{Journal, OpStatus};
 use crate::plan::Plan;
 use crate::plan_store::pending_digest;
 use crate::registry::BackendRegistry;
@@ -21,19 +23,52 @@ use super::Options;
 ///
 /// Some when the journal holds a completed operation with a `PlanSynced` record after it — the
 /// run committed operations and rewrote the plan's anchors for the tree it left. `undone` is true
-/// when every file a completed record touched hashes to that record's `pre` under `root`: the
-/// run's edits have been rolled back since, so the plan describes a tree that no longer exists.
-#[allow(
-    dead_code,
-    reason = "TODO(reshape-apply-robust): implement — called by refuse_a_stale_pending_op at green"
-)]
+/// when every file a completed record touched hashes, under `root`, to what it held before the run
+/// first touched it — the `pre` of the earliest completed record naming it: the run's edits have
+/// been rolled back since, so the plan describes a tree that no longer exists.
 pub(super) fn written_by_run(
     journal: &Journal,
     root: &Path,
     paths: &super::StatePaths,
 ) -> Result<Option<crate::WrittenByRun>> {
-    let _ = (journal, root, paths);
-    todo!("TODO(reshape-apply-robust): implement")
+    if !wrote_the_plan_back(journal) {
+        return Ok(None);
+    }
+    let Some(last) = journal.last_completed() else {
+        return Ok(None);
+    };
+    let mut before_the_run: BTreeMap<&str, &str> = BTreeMap::new();
+    for record in journal.completed() {
+        for (path, digest) in &record.pre {
+            before_the_run
+                .entry(path.as_str())
+                .or_insert(digest.as_str());
+        }
+    }
+    let mut undone = true;
+    for (path, digest) in before_the_run {
+        undone &= hash_file(&root.join(path))? == digest;
+    }
+    Ok(Some(crate::WrittenByRun {
+        last_applied: last.op,
+        last_applied_id: last.op_id.as_ref().map(ToString::to_string),
+        journal: paths
+            .journal
+            .parent()
+            .expect("state paths live in a directory")
+            .display()
+            .to_string(),
+        undone,
+    }))
+}
+
+/// Whether `journal` records a completed operation followed by the plan being written back.
+fn wrote_the_plan_back(journal: &Journal) -> bool {
+    let mut completed = false;
+    journal.records_in_force().any(|record| {
+        completed |= record.status == OpStatus::Completed;
+        completed && record.status == OpStatus::PlanSynced
+    })
 }
 
 /// The index of the first operation a run executes: `--from` as an index, `--from` as an id, or

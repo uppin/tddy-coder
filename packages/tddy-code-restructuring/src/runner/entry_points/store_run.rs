@@ -458,8 +458,7 @@ pub fn refuse_a_stale_pending_op(
                 plan: key.to_string(),
                 op: id.to_string(),
                 reason: found.reason.to_string(),
-                // TODO(reshape-apply-robust): implement — fill from `resume::written_by_run`.
-                written_by: None,
+                written_by: resume::written_by_run(&journal, store.root(), &paths)?.map(Box::new),
             });
         }
     }
