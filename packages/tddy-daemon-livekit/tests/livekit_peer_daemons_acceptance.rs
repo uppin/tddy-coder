@@ -85,6 +85,10 @@ fn host_service_with_livekit_discovery(
         tddy_daemon_extensions::IntegrationStatusBoard::new()
             .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit"),
     );
+    let common_room = tddy_daemon_kernel::peer_forwarding::CommonRoom::new(
+        tddy_daemon_livekit::LiveKitPeerForwarder::new(room_slot.clone()),
+        &config_arc,
+    );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(
             config_arc,
@@ -94,7 +98,7 @@ fn host_service_with_livekit_discovery(
     );
     let service = HostServiceImpl::new(config, sessions_tmp.path(), user_resolver)
         .with_eligible_daemon_source(eligible)
-        .with_common_room(room_slot);
+        .with_common_room(common_room);
     (service, sessions_tmp)
 }
 

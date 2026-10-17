@@ -133,7 +133,7 @@ impl SplitSessions {
         // session". Without this check the two are indistinguishable, and a momentary disconnect
         // would be read as "already torn down", completing the local delete and stranding the
         // worktree on the codebase host — the exact leak the paired teardown exists to prevent.
-        if slot.slot().read().await.is_none() {
+        if !slot.is_connected().await {
             return Err(Status::failed_precondition(format!(
                     "cannot reach the common room to delete the paired workspace session \
                  {codebase_session} on daemon {codebase_daemon}, so its worktree's fate is unknown; \

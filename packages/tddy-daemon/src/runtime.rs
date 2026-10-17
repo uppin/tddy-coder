@@ -1089,7 +1089,12 @@ pub async fn build(
             if let Some(ref handles) = livekit_discovery {
                 host_service = host_service
                     .with_eligible_daemon_source(Arc::clone(&handles.eligible_daemon_source))
-                    .with_common_room(Arc::clone(&handles.common_room_livekit_room));
+                    .with_common_room(tddy_daemon_kernel::peer_forwarding::CommonRoom::new(
+                        tddy_daemon_livekit::LiveKitPeerForwarder::new(Arc::clone(
+                            &handles.common_room_livekit_room,
+                        )),
+                        &config,
+                    ));
             }
             if let Some(ref tracker) = idle_tracker {
                 host_service = host_service.with_idle_tracker(tracker.clone());
@@ -1595,8 +1600,8 @@ pub async fn build(
             if let Some((registry, room_slot)) = credential_sync_room {
                 let local_instance_id =
                     tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config);
-                let common_room = tddy_daemon_kernel::peer_forwarding::CommonRoom::from_config(
-                    room_slot.clone(),
+                let common_room = tddy_daemon_kernel::peer_forwarding::CommonRoom::new(
+                    tddy_daemon_livekit::LiveKitPeerForwarder::new(room_slot.clone()),
                     &config,
                 );
                 let daemon_signing_key = Arc::new(signing_key.take().expect(

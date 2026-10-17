@@ -192,7 +192,7 @@ impl AgentRoster {
         // indistinguishable from their status codes alone: a forward attempted with no room fails
         // locally with `failed_precondition`, exactly as a peer that does not have the session does.
         // Without this check a momentary disconnect would read as "already torn down".
-        if slot.slot().read().await.is_none() {
+        if !slot.is_connected().await {
             return Err(Status::failed_precondition(format!(
                 "cannot reach the common room to delete session {session_id}'s clone \
                  {codebase_session_id} on daemon {daemon_instance_id}, so its checkout is still \

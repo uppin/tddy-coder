@@ -679,7 +679,10 @@ impl LiveKitEligibleDaemonSource {
         registry: Arc<CommonRoomPeerRegistry>,
         room_slot: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>,
     ) -> Self {
-        let common_room = CommonRoom::from_config(room_slot, &config);
+        let common_room = CommonRoom::new(
+            crate::livekit_peer_forwarder::LiveKitPeerForwarder::new(room_slot),
+            &config,
+        );
         Self {
             config,
             registry,
