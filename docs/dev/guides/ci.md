@@ -26,15 +26,19 @@ tests — they belong to a different package:
 | `target/debug/tddy-sandbox-runner` | `tddy-daemon-sandbox` `sandbox_runner_stdio_acceptance` |
 | `target/debug/tddy-acp-stub` | `tddy-integration-tests` `acp_*`, `codex_acp_*` |
 | `target/debug/examples/echo_server` | `tddy-livekit-web` Cypress specs |
+| `target/debug/tddy-remote-git-repo` | `tddy-worktree-service` `remote_git_livekit_acceptance`, `tddy-session-lifecycle` `session_sync_livekit_acceptance` |
+| `target/debug/tddy-index-daemon` | `tddy-tools` `index_daemon_client_acceptance` |
 
-Jobs get separate runners, so the build publishes those three as the
-`rust-fixture-bins` artifact and each test job downloads them into
+Jobs get separate runners, so the build publishes these, and the rest of the staging list in
+`ci.yml`, as the `rust-fixture-bins` artifact and each test job downloads them into
 `target/debug`. They are stripped first (execution fixtures, nobody reads their
 symbols) and the executable bit is re-applied on download, since artifacts are
 zipped without permissions.
 
 If you add a test that shells out to a workspace binary, add that binary to the
-artifact — otherwise it will pass locally and fail in CI with "not built".
+artifact — otherwise it will pass locally and fail in CI with "not built". The e2e archive builds only the packages that own e2e tests, so a binary of any other package
+exists in the e2e shards only because it is staged. Tests find these beside their own executable
+(`std::env::current_exe()`), so search for `current_exe` as well as `target/debug/` when listing them.
 
 Worth being explicit about the limit of this: because the runners are separate,
 `Rust build` shares the *binaries*, not the compilation. `Rust tests` compiles its own test

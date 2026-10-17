@@ -527,15 +527,19 @@ jobs:
       # directory is many GB. Each belongs to a package other than the one whose
       # tests run it, so cargo never builds them as a side effect of those
       # tests, and `CARGO_BIN_EXE_*` is unset for them. The list is everything
-      # matched by `grep -r 'target/debug/' packages/*/tests`; if you add a test
-      # that shells out to a workspace binary, add it here too.
+      # a test resolves beside its own executable: grep for `target/debug/` AND for
+      # `current_exe` in `packages/*/tests` (the second finds `tddy-remote-git-repo` and
+      # `tddy-index-daemon`, which no `target/debug/` literal names). The e2e archive builds only
+      # the packages that own e2e tests, so a binary of any other package exists only because it
+      # is staged here; if you add a test that shells out to a workspace binary, add it here too.
       #
       # Stripped because these are execution fixtures; nothing reads symbols.
       - name: Stage test fixture binaries
         run: |
           mkdir -p fixture-bins/examples
           for b in tddy-coder tddy-tools tddy-daemon tddy-demo tddy-demo-tui \
-                   tddy-acp-stub tddy-sandbox-runner; do
+                   tddy-acp-stub tddy-sandbox-runner tddy-remote-git-repo \
+                   tddy-index-daemon; do
             cp "target/debug/$b" fixture-bins/
           done
           cp target/debug/examples/echo_server fixture-bins/examples/
