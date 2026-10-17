@@ -279,9 +279,8 @@ pub struct SandboxCgroupConfig {
 
 /// The warm code-intelligence index this daemon manages (`index_daemon:` YAML section).
 ///
-/// Presence of the section is the switch, the way it is for `supervisor:`: without it this daemon
-/// starts no index daemon at all, so an existing deployment behaves exactly as it did. With it,
-/// a `tddy-index-daemon` that cannot be started is an error on the request that needed it — not a
+/// The section is optional and only overrides the defaults: every daemon manages an index daemon
+/// lazily, started by the first request that needs it. A `tddy-index-daemon` that cannot be started is an error on the request that needed it — not a
 /// quiet fall back to a cold rust-analyzer, which would turn a misconfiguration into six minutes
 /// of unexplained latency per request.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -336,9 +335,18 @@ impl IndexDaemonConfig {
         if let Some(path) = &self.socket_path {
             return path.clone();
         }
+        // `/run` exists only on Linux hosts; elsewhere (Tddy Desktop on macOS) the temp dir is the
+        // one place an unprivileged process can bind.
         let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/run"));
+            .unwrap_or_else(|| {
+                let run = PathBuf::from("/run");
+                if run.is_dir() {
+                    run
+                } else {
+                    std::env::temp_dir()
+                }
+            });
         runtime_dir.join("tddy-index-daemon.sock")
     }
 }
@@ -475,8 +483,7 @@ pub struct DaemonConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supervisor: Option<SupervisorClientConfig>,
     /// The warm code-intelligence index daemon this daemon starts, supervises and stops (see
-    /// [`IndexDaemonConfig`]). Absent = this daemon manages none, which is every deployment that
-    /// has not asked for one.
+    /// [`IndexDaemonConfig`]). Absent = [`IndexDaemonConfig::default`]; the section only overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_daemon: Option<IndexDaemonConfig>,
 

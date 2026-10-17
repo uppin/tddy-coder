@@ -1126,7 +1126,9 @@ pub async fn build(
         // advertises no client capabilities, so the two cannot share one registry entry (see the
         // PRD, § "A separate process, whose lifecycle the daemon manages"). Nothing is started
         // here: the first request that needs it starts it.
-        if let Some(configured) = config_arc.index_daemon.as_ref() {
+        {
+            // The section is an override, not a switch: without it the defaults apply.
+            let configured = &config_arc.index_daemon.clone().unwrap_or_default();
             let index_daemon = crate::index_daemon::IndexDaemonRegistry::new(
                 crate::index_daemon::IndexDaemonSpawn::from_config(configured),
                 shared_claude_cli_manager.task_registry(),
