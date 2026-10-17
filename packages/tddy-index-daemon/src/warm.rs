@@ -274,9 +274,7 @@ mod tests {
     fn names_the_phase_running_now_rather_than_the_one_that_reached_the_highest_percentage() {
         // Given a server that scanned its roots to 100% and then began indexing
         let mut chatter = ServerChatter::unthrottled();
-        let progress = |token: &str, value: serde_json::Value| {
-            json!({ "method": "$/progress", "params": { "token": token, "value": value } })
-        };
+        let progress = |token: &str, value: serde_json::Value| json!({ "method": "$/progress", "params": { "token": token, "value": value } });
         chatter.absorb(&progress(
             "roots",
             json!({ "kind": "begin", "title": "Roots Scanned", "percentage": 0 }),
