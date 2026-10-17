@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { init, Terminal, FitAddon } from "ghostty-web";
+import { Ghostty, Terminal, FitAddon } from "ghostty-web";
 import {
   canPitchIn,
   canPitchOut,
@@ -280,11 +280,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       async function setup() {
         logLife("init cols=%d rows=%d fontSize=%d", cols, rows, fontSize);
-        await init();
+        // Each terminal gets its own WASM instance rather than ghostty-web's process-wide one
+        // (`init()`): on a shared instance, a terminal created after another was freed is handed
+        // the freed one's memory unzeroed, so a new session's pane opens on the previous session's
+        // screen. An instance costs ~1.2 MB and a few ms, and is released with its terminal.
+        const ghostty = await Ghostty.load();
         if (!isMounted || !containerRef.current) return;
         logLife("creating Terminal");
 
         const term = new Terminal({
+          ghostty,
           cols,
           rows,
           fontSize,

@@ -288,14 +288,12 @@ export function aTerminalWithHistoryPaging() {
     /**
      * Toggle mouse tracking (DEC 1006) on the live terminal. When tracking is on, the wheel is
      * reported to the TUI (SGR button 64/65) and does NOT scroll the viewport.
+     *
+     * Sent as PTY output, the way a TUI enables it, so it is held with the other bytes until the
+     * terminal is ready — a direct write before then would be dropped.
      */
     enableLiveMouseTracking(on = true) {
-      cy.window().then((win) => {
-        const hook = (win as unknown as { __tddyLiveMouseTracking?: (on: boolean) => void })
-          .__tddyLiveMouseTracking;
-        expect(hook, "test-only live mouse-tracking hook registered").to.exist;
-        hook!(on);
-      });
+      this.pushOutput(enc(on ? "\x1b[?1006h\x1b[?1002h" : "\x1b[?1002l\x1b[?1006l"));
       return this;
     },
 
