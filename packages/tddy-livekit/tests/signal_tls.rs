@@ -8,6 +8,10 @@
 //! The server here accepts the TCP connection and closes it, so the connect still fails. What this
 //! pins is *how*: a handshake that was attempted, never one that was refused for want of TLS.
 //!
+//! The test runs with `ring` as rustls' provider, which is the only one the shipped binaries
+//! compile in. A workspace-wide test build links `aws-lc-rs` too, and rustls panics rather than pick
+//! between two, so the provider is installed explicitly instead of left to crate features.
+//!
 //! Run: `cargo test -p tddy-livekit --test signal_tls` (no LiveKit server needed).
 
 use anyhow::Result;
@@ -20,6 +24,12 @@ const CONNECT_DEADLINE: Duration = Duration::from_secs(60);
 
 /// What the websocket layer reports when the URL is `wss://` but no TLS backend was compiled in.
 const TLS_NOT_COMPILED_IN: [&str; 2] = ["TLS support not compiled in", "TlsFeatureNotEnabled"];
+
+/// Select `ring`, as the shipped binaries' feature set selects it implicitly.
+fn with_the_shipped_crypto_provider() {
+    // `Err` only means a provider is already installed for this process, which is the goal.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
 
 /// A server that completes the TCP handshake and hangs up straight away.
 struct HangingUpServer {
@@ -43,6 +53,7 @@ async fn a_server_that_hangs_up() -> Result<HangingUpServer> {
 
 #[tokio::test]
 async fn a_wss_connect_attempts_the_tls_handshake() -> Result<()> {
+    with_the_shipped_crypto_provider();
     let server = a_server_that_hangs_up().await?;
 
     let outcome = tokio::time::timeout(

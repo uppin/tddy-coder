@@ -47,3 +47,7 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
+# `signal_tls` installs the shipped binaries' crypto provider. A workspace-wide test build also links
+# `aws-lc-rs` (through `ironrdp` and `tddy-integration-tests`), and rustls refuses to choose between
+# two compiled-in providers. Already in Cargo.lock; `ring` only, so this adds no second provider.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

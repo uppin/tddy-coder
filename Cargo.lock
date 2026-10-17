@@ -12772,6 +12772,7 @@ dependencies = [
  "pretty_assertions",
  "prost 0.13.5",
  "rstest 0.24.0",
+ "rustls",
  "serde",
  "serde_json",
  "serde_yaml",
