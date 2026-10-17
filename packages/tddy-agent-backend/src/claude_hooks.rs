@@ -39,6 +39,19 @@ pub struct HookCommandParams<'a> {
     /// Per-session random opaque token persisted in `.session.yaml` (`hook_token`). The daemon
     /// validates this on every `ReportSessionStatus` call to prevent cross-session spoofing.
     pub hook_token: &'a str,
+    /// The daemon's agent-facing Unix socket, set when the daemon is embedded in an application
+    /// (Tddy Desktop) and so serves no HTTP RPC: there `daemon_url` is only where a GitHub sign-in
+    /// returns, and every report POSTed to it is answered with a 404 the hook swallows. When set,
+    /// the hook reports over this socket instead of `daemon_url`.
+    pub daemon_socket: Option<&'a str>,
+}
+
+/// The `--daemon-socket` argument of a hook command, with its leading space — or nothing when the
+/// daemon is reached over HTTP. Quoted like the tools path: the command is a shell string.
+pub(crate) fn daemon_socket_arg(p: &HookCommandParams<'_>) -> String {
+    p.daemon_socket
+        .map(|socket| format!(" --daemon-socket {}", shell_quote(socket)))
+        .unwrap_or_default()
 }
 
 /// Build the `.claude/settings.local.json` value for a claude-cli worktree.
@@ -66,10 +79,11 @@ pub fn build_claude_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
     let mut hooks_obj = serde_json::Map::new();
     for event in &events {
         let cmd = format!(
-            "{} session-hook --session {} --daemon {} --os-user {} --hook-token {} --event {}",
+            "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {} --event {}",
             shell_quote(p.tddy_tools_path),
             p.session_id,
             p.daemon_url,
+            daemon_socket_arg(p),
             p.os_user,
             p.hook_token,
             event,
@@ -99,6 +113,7 @@ mod tests {
             session_id: "sess-abc123",
             os_user: "alice",
             hook_token: "tok-xyz",
+            daemon_socket: None,
         }
     }
 
@@ -299,6 +314,30 @@ mod tests {
             "session-hook",
             "the stub must receive 'session-hook' as its first argument"
         );
+    }
+
+    /// An embedded daemon (Tddy Desktop) serves no HTTP RPC, so a hook given its agent-tool socket
+    /// must name it — shell-quoted, since the command is a shell string like the tools path.
+    #[test]
+    fn hook_command_names_the_daemon_socket_when_one_is_given() {
+        // Given
+        let params = HookCommandParams {
+            daemon_socket: Some("/var/folders/x y/tddy-agent-tools-0123.sock"),
+            ..test_params()
+        };
+
+        // When
+        let value = build_claude_hooks_settings(&params);
+
+        // Then
+        let hooks = value["hooks"].as_object().unwrap();
+        for (event_name, entries) in hooks {
+            let cmd = entries[0]["hooks"][0]["command"].as_str().unwrap();
+            assert!(
+                cmd.contains(" --daemon-socket '/var/folders/x y/tddy-agent-tools-0123.sock' "),
+                "{event_name}: the hook must report over the quoted daemon socket; got: {cmd}"
+            );
+        }
     }
 
     /// A single quote in the path must not end the quoting early.

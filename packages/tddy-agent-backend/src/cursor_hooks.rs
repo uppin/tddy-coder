@@ -5,7 +5,7 @@
 //! is wired to `tddy-tools session-hook` with session id, daemon URL, os_user, and hook_token
 //! baked in. Event names are read from stdin JSON (`hook_event_name`) by the hook binary.
 
-use crate::claude_hooks::{shell_quote, HookCommandParams};
+use crate::claude_hooks::{daemon_socket_arg, shell_quote, HookCommandParams};
 
 /// Cursor lifecycle hooks wired for activity status reporting.
 const CURSOR_HOOK_EVENTS: &[&str] = &[
@@ -24,10 +24,11 @@ pub fn build_cursor_hooks_settings(p: &HookCommandParams<'_>) -> serde_json::Val
     let mut hooks_obj = serde_json::Map::new();
     for event in CURSOR_HOOK_EVENTS {
         let cmd = format!(
-            "{} session-hook --session {} --daemon {} --os-user {} --hook-token {}",
+            "{} session-hook --session {} --daemon {}{} --os-user {} --hook-token {}",
             shell_quote(p.tddy_tools_path),
             p.session_id,
             p.daemon_url,
+            daemon_socket_arg(p),
             p.os_user,
             p.hook_token,
         );
@@ -55,6 +56,7 @@ mod tests {
             session_id: "sess-abc123",
             os_user: "alice",
             hook_token: "tok-xyz",
+            daemon_socket: None,
         }
     }
 

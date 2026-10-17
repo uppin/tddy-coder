@@ -27,6 +27,33 @@ pub fn agent_tool_socket_path(key: &Path) -> PathBuf {
     tmp.join(format!("tddy-agent-tools-{digest:016x}.sock"))
 }
 
+/// The agent-facing socket of the daemon keeping its state in `data_dir`, when that daemon is
+/// embedded in an application and therefore serves no HTTP listener for a co-located process to
+/// POST to.
+///
+/// Decided by whether something is *listening* on the socket rather than by a host-kind flag
+/// threaded through the session layer: an embedded daemon binds it at startup
+/// (`tddy_daemon::runtime`), a binary one never does, and the path is derived from the same data
+/// dir on both sides — so the question "does this host serve that socket" is answered by the host
+/// itself, and a stale flag cannot disagree with reality. `data_dir` must be the one the daemon
+/// *resolved* (`TDDY_DATA_DIR` included), not a second reading of the configuration: the path is a
+/// digest of it.
+///
+/// A connect probe, not `exists()`: the embedded daemon does not unlink its socket on exit, so
+/// once Tddy Desktop has run, the file outlives it. A binary daemon later started on the same data
+/// dir would otherwise find that file and point every hook at a socket nobody serves — and the
+/// hooks' fail-quiet contract would swallow every report. The probe connection is closed at once;
+/// the daemon's endpoint sees EOF before any frame and ends it without a word.
+pub fn embedded_host_agent_tool_socket(data_dir: &Path) -> Option<String> {
+    let path = agent_tool_socket_path(data_dir);
+    is_listening(&path).then(|| path.to_string_lossy().into_owned())
+}
+
+/// Whether a process is accepting connections on the Unix socket at `path`.
+fn is_listening(path: &Path) -> bool {
+    std::os::unix::net::UnixStream::connect(path).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +91,90 @@ mod tests {
         let key = Path::new("/some/data/dir/.tddy");
 
         assert_eq!(agent_tool_socket_path(key), agent_tool_socket_path(key));
+    }
+
+    /// A daemon's data dir, unique per test so the `$TMPDIR` socket paths digested from it never
+    /// collide. Whatever socket file a test leaves at that path is removed on drop.
+    struct ADataDir {
+        dir: tempfile::TempDir,
+    }
+
+    impl ADataDir {
+        fn new() -> Self {
+            Self {
+                dir: tempfile::tempdir().expect("a temporary data dir"),
+            }
+        }
+
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+
+        fn socket_path(&self) -> PathBuf {
+            agent_tool_socket_path(self.path())
+        }
+
+        /// Bind its agent-tool socket, as an embedded daemon does at startup.
+        fn with_its_socket_listening(&self) -> std::os::unix::net::UnixListener {
+            std::os::unix::net::UnixListener::bind(self.socket_path())
+                .expect("the agent-tool socket binds")
+        }
+
+        /// Leave its socket file behind with nobody listening — what an embedded daemon that
+        /// exited leaves: binding creates the file, and dropping the listener does not unlink it.
+        fn with_a_stale_socket_file(&self) {
+            drop(self.with_its_socket_listening());
+            assert!(
+                self.socket_path().exists(),
+                "the socket file outlives its listener"
+            );
+        }
+    }
+
+    impl Drop for ADataDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(self.socket_path());
+        }
+    }
+
+    #[test]
+    fn a_host_listening_on_its_agent_tool_socket_is_reached_over_it() {
+        // Given an embedded daemon listening on its agent-tool socket
+        let data_dir = ADataDir::new();
+        let _listener = data_dir.with_its_socket_listening();
+
+        // When a session asks where its hooks should report
+        let socket = embedded_host_agent_tool_socket(data_dir.path());
+
+        // Then they report over that socket
+        assert_eq!(
+            socket,
+            Some(data_dir.socket_path().to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn a_host_without_an_agent_tool_socket_is_not_reached_over_one() {
+        // Given a binary daemon, which never binds the socket
+        let data_dir = ADataDir::new();
+
+        // When a session asks where its hooks should report
+        let socket = embedded_host_agent_tool_socket(data_dir.path());
+
+        // Then there is no socket to report over
+        assert_eq!(socket, None);
+    }
+
+    #[test]
+    fn a_socket_file_nobody_listens_on_is_not_reached_over() {
+        // Given the socket file an exited embedded daemon left behind for the same data dir
+        let data_dir = ADataDir::new();
+        data_dir.with_a_stale_socket_file();
+
+        // When a session asks where its hooks should report
+        let socket = embedded_host_agent_tool_socket(data_dir.path());
+
+        // Then the dead socket is not chosen: every report sent to it would be lost
+        assert_eq!(socket, None);
     }
 }
