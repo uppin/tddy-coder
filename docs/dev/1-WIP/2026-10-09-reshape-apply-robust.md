@@ -20,7 +20,7 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 
 | Item | Verdict | What this change does about it |
 |---|---|---|
-| [2026-10-05-restructure-apply-did-not-return-after-a-clean-deep-check.md](../todo/2026-10-05-restructure-apply-did-not-return-after-a-clean-deep-check.md) | ✅ **RESOLVED HERE** | Reproduces and records the shape (M1). Every type-inference wait gets the ready-silence bound. A loading server silent for the stall bound is refused as `ServerStalled`. Deleted at wrap, with the reproduction result recorded in the change history |
+| [2026-10-05-restructure-apply-did-not-return-after-a-clean-deep-check.md](../todo/2026-10-05-restructure-apply-did-not-return-after-a-clean-deep-check.md) | ✅ **RESOLVED HERE** | Records the reproduction attempt (M1: not reproduced; developer chose to delete the entry 2026-10-17, its capability ask — fail with the stage rather than wait for ever — being delivered). Every type-inference wait gets the ready-silence bound. A loading server silent for the stall bound is refused as `ServerStalled`. Deleted at wrap, with the reproduction result recorded in the change history |
 | [2026-09-25-restructure-test-binary-move-cannot-see-through-a-glob-facade.md](../todo/2026-09-25-restructure-test-binary-move-cannot-see-through-a-glob-facade.md) (its only open item: the pre-apply gate omits the destination) | ✅ **RESOLVED HERE** | The baseline covers each cross-crate move's `to` package (M3). Deleted at wrap |
 | [2026-10-05-restructure-no-record-of-what-an-apply-executes.md](../todo/2026-10-05-restructure-no-record-of-what-an-apply-executes.md) (items 1–2 delivered by #590; item 3 open) | ✅ **RESOLVED HERE** | Spawn start lines carry `op` / `op_id` / `group`, and the resolving progress line names the op id (M5). Deleted at wrap |
 | [2026-09-09-restructure-defects-from-the-first-cross-crate-move.md](../todo/2026-09-09-restructure-defects-from-the-first-cross-crate-move.md) — claimed by node 7 (`move-widen`) | ⚠ partial (item 2) | The untracked-source preflight (M2). Node 7 wraps first and narrows the entry to items 1–2; this node's wrap removes item 2 and leaves item 1 (`move_items_to_crate`, deferred) |
@@ -122,7 +122,7 @@ None depend on this node. The line successor is `feature/reshape/move-item-paths
 
 ## Scope
 
-- [ ] M1: reproduce the B2 hang and record its shape
+- [x] M1: reproduce the B2 hang and record its shape (not reproduced; F5 contention found and deferred)
 - [x] M2: untracked-source preflight (commit, dry run, rehearsal, static)
 - [x] M3: destination packages in the baseline
 - [x] M4: silence bounds, `ServerStalled`, heartbeat wording, fake mode, daemon status
@@ -164,7 +164,7 @@ As in Responsibility rules P1–P10.
 
 ## Implementation milestones
 
-- [ ] **M1 — reproduce B2 (manual, real workspace).** Warm `./run-index-daemon` on this checkout, hand-edit 7 files of one crate, and apply a one-op item-anchored `rename_symbol` whose header lists only the anchored file. Collect the heartbeat lines (stage / loading / unchanged-for), `<runtime>/tddy-index-<tag>.spawns.jsonl`, `ps -o pid,ppid,stat,etime,command` under the rust-analyzer pid, and `lsof target/debug/.cargo-lock`. Make at most three attempts. Record in **Validation Results**: ready-and-silent (P5 closes it), loading-and-silent (P6 bounds it; if `target/` contention shows, raise F5), or not reproduced. M2–M6 do not wait on M1's outcome.
+- [x] **M1 — reproduce B2 (manual, real workspace).** Done 2026-10-17: not reproduced; see Validation Results. Warm `./run-index-daemon` on this checkout, hand-edit 7 files of one crate, and apply a one-op item-anchored `rename_symbol` whose header lists only the anchored file. Collect the heartbeat lines (stage / loading / unchanged-for), `<runtime>/tddy-index-<tag>.spawns.jsonl`, `ps -o pid,ppid,stat,etime,command` under the rust-analyzer pid, and `lsof target/debug/.cargo-lock`. Make at most three attempts. Record in **Validation Results**: ready-and-silent (P5 closes it), loading-and-silent (P6 bounds it; if `target/` contention shows, raise F5), or not reproduced. M2–M6 do not wait on M1's outcome.
 - [x] **M2** — `untracked_move_sources`, `Overlay::introduced`, `preflight_moves`, rehearsal and static parity, the variant. Tests 1–8.
 - [x] **M3** — `baseline_packages`. Tests 9–11.
 - [x] **M4** — `SilenceBounds`, `silence_verdict`, call sites, heartbeat wording, fake mode, `ServerStalled`, daemon `status_of`. Tests 12–20.
@@ -283,7 +283,7 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 - **F2 — untracked source: refuse.** An automatic `git add` would stage the author's file without consent, which is a fallback.
 - **F3 — no live rust-analyzer test.** `fake_lsp` reproduces every shape the bounds act on. The real-workspace reproduction is M1, recorded rather than automated.
 - **F4 — operation context as a `ProcessStart` field** (`tddy-lsp` edit consented), rather than a second observer event: two places construct it and the trait is unchanged.
-- **F5 — separate `cargo.targetDir` for rust-analyzer: not decided here.** It goes to the developer only if M1 shows `target/` lock contention.
+- **F5 — separate `cargo.targetDir` for rust-analyzer: deferred (developer, 2026-10-17).** M1 showed `target/` lock contention (gate waits of ~47 s and ~60 s, not permanent). Recorded as [2026-10-17-restructure-rust-analyzer-shares-target-with-the-compile-gate.md](../todo/2026-10-17-restructure-rust-analyzer-shares-target-with-the-compile-gate.md).
 - **F6 — stale context on `StaleOperation` only.** `stale_findings` is public and called by the daemon's `check`, outside the consented daemon edit, and a re-run meets `StaleOperation` first. Deferred to `2026-10-09-restructure-check-does-not-say-a-run-wrote-a-stale-plan.md`.
 - **F7 — test 15 reworked so it can fail (developer, 2026-10-17).** Same name, same claim. `--narrates-while-loading` implied never-quiescent, so the run never left the warm-up, where no loading bound applied, and the test could not fail. The fake now passes the warm-up and then goes busy and narrates on its own 250 ms timer (`--goes-busy-after-hovers 1 --narrates-while-loading`). The test runs a 3 s loading bound for 7 s and asserts the cancelled run was still waiting in `type inference at src/lib.rs:1`. Sanity-checked: with the chatter's new-words reset disabled it goes red as `ServerStalled`.
 - **F8 — test 13 waits on a condition (developer, 2026-10-17).** The fixed 3 s window is replaced with polling `heard.beats()` every 100 ms, up to 15 s, until a `type inference at src/lib.rs:1` beat appears; then the run is cancelled. Assertions unchanged.
@@ -308,7 +308,7 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 
 ## Validation Results
 
-- M1 reproduction: _pending_ (green).
+- **M1 reproduction (2026-10-17): not reproduced; `target/` lock contention observed (F5 raised, deferred).** Three attempts on a throwaway detached worktree at `4bf3d8853` against a warm `tddy-index-daemon` (cold warm ~21 min). Each attempt hand-edited 7 files of `tddy-code-restructuring` and applied a one-op item-anchored `rename_symbol` (`PositionLedger::renames` → `path_renames`) whose v2 header listed only `ledger.rs`, after `check --deep`. Attempt 1 (7 `.rs` comment lines) returned in 81 s; attempt 2 (6 `.rs` + a `Cargo.toml` comment) 84 s; attempt 3 (`Cargo.toml` edit between check and apply) 4 min 23 s. In every attempt the type-inference wait answered at once — neither P5's nor P6's shape occurred, so the new refusals rest on the `fake_lsp` tests. In attempts 2–3 rust-analyzer's build-script run (`cargo check --workspace --message-format=json`, child of the RA pid) held `target/debug/.cargo-lock` while the engine's compile gate (spawns `62291-7`, `62291-13`) sat at 0.0% CPU: ~47 s and ~60 s of lock wait (gates 50 s / 100 s vs 11–13 s uncontended). Not permanent. This is H1's shared-`target/` contention; F5 deferred by the developer to [2026-10-17-restructure-rust-analyzer-shares-target-with-the-compile-gate.md](../todo/2026-10-17-restructure-rust-analyzer-shares-target-with-the-compile-gate.md).
 - **Commit 2 (draft-PR contract), 2026-10-09.** Scoped: `cargo check` / `cargo clippy --all-targets -D warnings` for `tddy-code-restructuring`, `tddy-lsp`, `tddy-index-daemon` clean; `cargo fmt --all --check` clean; `tddy-lsp` 66 passed; `wait_heartbeat_acceptance` 7 passed (the no-deadline guard unchanged).
 - **Red, each because the implementation is missing:** 1–7 (the apply fails at `git mv` as `plan is malformed`, the journal keeps an in-flight record so the re-run is `JournalExists`, the dry run and both checks report nothing, the resolving line has no id); 8, 11, 17, 18, 28 (`todo!()` in the stub); 9–10 (the baseline checks `-p origin` only, the post gate blames the plan); 12, 16 (cancelled as `IndexingIncomplete` at `type inference at src/lib.rs:N`: no ready bound on those waits); 13 (the type-inference beat says `has not said it is ready`); 14 (no `ServerStalled`: the wait runs on until the fake's next poll and the rename ends `no edits`); 21, 23 (`ProcessStart.operation` is never set); 24 (the JSONL line has no op keys); 26 (the refusal has no run context).
 - **Green pins** (specify what already holds and must keep holding): 15 (a narrating load is not refused), 19–20 (status classes, implemented with the variants), 22 and 25 (run-level processes carry no operation), 27 (no journal, unchanged text).
@@ -334,7 +334,7 @@ All approved by the developer on 2026-10-09 (each was the recommendation).
 - [x] Create failing acceptance tests (commit 2: owned surface + tests 1–28)
 - [x] Run acceptance tests (verify they fail) — see Validation Results: 22 red, 6 green pins
 - [x] USER REVIEW — acceptance tests (wave-1 tests approved 2026-10-09)
-- [ ] M1 — reproduce the B2 hang and record its shape
+- [x] M1 — reproduce the B2 hang and record its shape
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
