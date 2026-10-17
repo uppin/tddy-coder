@@ -14,7 +14,7 @@ deletion are `tddy-session-activity`'s modules, reached here through facades.
 | `ListSessions` | unary | Sessions for the caller's OS user, enriched with agent status, activity and branch views |
 | `StartSession` | unary | Start an agent session (non-interactive callers) |
 | `StreamStartSession` | server stream | Same start path, reporting attachment materialization and the start's phases (worktree, semantic index, agent) before the one terminal result |
-| `ConnectSession` | unary | Dial-in metadata for an existing session |
+| `ConnectSession` | unary | Dial-in metadata for an existing session; reports the reach through the [`SessionReach` port](../../tddy-daemon-extensions/docs/extension-ports.md) and never awaits LiveKit for a caller that did not arrive over it |
 | `ResumeSession` | unary | Resume a stopped session |
 | `SignalSession` | unary | Deliver a signal to a running session |
 | `DeleteSession` | unary | Tear down a session |
@@ -117,6 +117,19 @@ defines (`rpc_families.rs`, re-exported as `tddy_session_lifecycle::DaemonRpcFam
   `open_measured_by` take the roster as a builder and call it after the LiveKit-credentials check,
   so a daemon with no LiveKit credentials opens no room and never asks for its families —
   `ConnectSession` on such a host answers with an empty LiveKit block rather than refusing.
+
+### Extending a session's reach
+
+`DaemonSessionHost::with_session_reach(Arc<dyn SessionReach>)` (a `#[must_use]` builder, called before
+`with_rpc_families`) installs what extends a session beyond this host; without it the host holds
+`NoSessionReach`. `ConnectSession` hands the integration the host itself as an
+`Arc<dyn ReachableSessions>`, implemented in `svc_reachable_sessions.rs`:
+
+| Method | Implementation |
+|---|---|
+| `resolve(token, session_id)` | The connect handler's token → user → session-directory path, then the `facilitated_checkout` rule: `failed_precondition` for a session type this daemon does not facilitate or one that records no checkout. The result's `arrived_over` is `Direct`. |
+| `session_services()` | The session-room roster, the RPC surface a room serves. |
+| `expose_terminal(session_id)` | `SessionTerminalBridge::bridge`, putting the participant that serves the session's terminal into the lobby. |
 
 `test_util::RpcFamiliesNotUnderTest` is the fixture for a suite that opens a session room without
 exercising any of the four families: its room serves none of them, and its `pr_stack_handler`

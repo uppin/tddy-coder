@@ -18,7 +18,7 @@ outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 (`config`, `tddy_data_dir`, `staging_base_dir`, `peer_routing`, `claude_cli_manager`, `sandbox_manager`,
 `task_registry`, `session_stdio`, `agent_activity_hub`, `user_resolver`, `spawn_client`,
 `workspace_sandboxes`, `rpc_activity`, `session_agent_inference`, `session_rooms`, `hosted_agent_clones`,
-`session_admissions`, `worktree_observer`, `host_session_sockets`, and the agent topic's `AgentRoster` and
+`session_admissions`, `worktree_observer`, `session_reach`, `reachable_sessions`, `host_session_sockets`, and the agent topic's `AgentRoster` and
 the split topic's `SplitSessions` handles), and `trait LaunchHost`, the four callbacks the host implements:
 `sandbox_rpc_handler` (the dispatch a jail relays family B to, bound to a session), `pr_stack` (the PR-stack
 handler, or `FAILED_PRECONDITION` when the host has no RPC families), `session_account_access` (what a
@@ -108,6 +108,24 @@ writes the source a start named into the new session's directory (`github-source
 as `impl LaunchSessions`. The list builds each entry with the free function `session_entry_from_listing`.
 Its siblings `svc_resume_session.rs` (`resume_session_at_session_coordinate`) and `svc_signal_delete_session.rs`
 are also `impl LaunchSessions`.
+
+### `ConnectSession` and the session-reach port
+
+`ConnectSession` resolves the session, then reports a **reach**: for a session whose type this daemon
+facilitates and which records a checkout, `tell_the_reach` calls
+[`SessionReach::session_reached`](../../tddy-daemon-extensions/docs/extension-ports.md) with the
+session and the transport the request arrived on (`request.metadata().transport()`, stamped by the
+receiving host). The port decides what that costs the caller, and its error fails the request, so
+`ConnectSession` itself opens no room and awaits LiveKit for no caller: a host with nothing wired
+holds `NoSessionReach`, and with the LiveKit plugin wired only a caller that arrived over LiveKit
+waits. The reply is dial-in metadata: empty LiveKit coordinates for `claude-cli`, `cursor-cli` and
+`workspace` sessions (the room those coordinates would name is the session's *terminal* room, which
+those types do not have), the session's terminal room otherwise.
+
+"Facilitated here, over a checkout this daemon holds" is one rule, `facilitated_checkout(metadata)`,
+answering `NotFacilitated`, `NoCheckout` or `Checkout(path)`. `ConnectSession` and an integration's
+own RPC (through `ReachableSessions::resolve`) both apply it, so the two cannot disagree about which
+sessions get a room.
 
 ## Stacked, child and conversation spawns
 

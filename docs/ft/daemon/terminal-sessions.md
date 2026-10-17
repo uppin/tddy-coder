@@ -301,6 +301,13 @@ selected by which fields are set. `tddy-tools pty-relay` keeps only the clap sur
 config. Both relays share one termios guard and terminal-size probe (`local_terminal`) rather than
 declaring one each.
 
+Attaching to a daemon session over **HTTP** never touches LiveKit, so a LiveKit server that is down
+or misconfigured does not affect it. Over **LiveKit** (`--livekit-url`) the relay first asks the
+daemon to open the session's room with `OpenSessionRoom`, then joins it and waits for the daemon's
+participant; a daemon whose LiveKit cannot be reached fails that call, naming the room, and the
+relay exits with it rather than waiting for a participant nobody put there. See
+[Session rooms](session-room.md#when-the-room-is-created).
+
 ---
 
 ## Non-goals (out of scope)

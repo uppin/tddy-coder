@@ -56,10 +56,11 @@ itself, which lives on the daemon's common room and is reached through the exist
 `tddy-remote-git-repo` shim.
 
 Getting into that room takes two calls to the daemon over HTTP first: `ListSessions` to resolve which
-host serves the session, and `ConnectSession` to open its room. A session's room is created by the
-first thing that connects to it over LiveKit rather than by the session's start
-([session-room.md](session-room.md)), and the syncer then waits for the facilitating daemon's
-`daemon-{instance_id}` participant to be there — so it asks rather than joining a room nobody hosts.
+host serves the session, and `OpenSessionRoom` to open its room. A session's room is opened when
+something asks for it rather than by the session's start ([session-room.md](session-room.md)), and
+the syncer then waits for the facilitating daemon's `daemon-{instance_id}` participant to be there —
+so it asks rather than joining a room nobody hosts. `OpenSessionRoom` is loud: a daemon whose LiveKit
+cannot be reached fails the call naming the room, and the syncer exits with that instead of waiting.
 
 ### Deltas come from the poll loop, not from tool inputs
 

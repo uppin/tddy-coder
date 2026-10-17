@@ -3,6 +3,12 @@
 **Date**: 2026-10-16
 **PRD Type**: Bug Fix + Technical Improvement (architecture)
 
+**Stack status**: this PRD covers the whole `#satellite` stack. Node 1 ([#623](https://github.com/uppin/tddy-coder/pull/623))
+has delivered the extension ports, a `ConnectSession` that never waits on LiveKit for a local caller,
+`OpenSessionRoom`, the integration status board with `GetIntegrationStatus`, and the dependency
+ratchet; its behaviour is documented in the permanent docs. The states described below that nodes 2–13
+have not yet delivered remain this PRD's, and the stack's last node wraps it.
+
 ## Affected Features
 
 - **Primary Feature**: [Session room](../session-room.md) — `ConnectSession` stops opening the

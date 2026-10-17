@@ -19,4 +19,4 @@ distinct copies of the same type.
 **What would close it.** Move `temp_session_dir`, and whatever else these suites use, into a helper
 that does not depend on `tddy-core`. That could be a small module in `tddy-testing-commons` split
 from its `tddy-core`-dependent part, or a `test_support` module in the crate. Then drop the
-dev-dependency. Related: `2026-09-10-the-dependency-boundary-harness-is-duplicated-per-crate.md`.
+dev-dependency. Related: the dependency-boundary harness now lives in `tddy-testing-commons` as `dependency_graph::WorkspaceGraph`.
