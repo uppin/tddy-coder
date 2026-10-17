@@ -132,3 +132,18 @@ fn every_known_offender_still_names_a_livekit_crate() {
         "these crates no longer name a LiveKit crate: strike them from KNOWN_OFFENDERS"
     );
 }
+
+#[test]
+fn the_daemon_rpc_and_session_lifecycle_crates_do_not_name_the_livekit_sdk() {
+    // Given the workspace as Cargo resolves it
+    let graph = WorkspaceGraph::load();
+
+    // When the two crates whose `livekit` edge no source uses are read
+    let naming_the_sdk: Vec<&str> = ["tddy-daemon-rpc", "tddy-session-lifecycle"]
+        .into_iter()
+        .filter(|krate| graph.names_directly(krate).contains("livekit"))
+        .collect();
+
+    // Then neither names the SDK itself
+    assert_eq!(naming_the_sdk, Vec::<&str>::new());
+}
