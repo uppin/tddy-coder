@@ -19,6 +19,18 @@ these are the design costs it *exposed*, not defects it introduced.
   re-derivations. ~6 call sites to move, one config field, migratable incrementally.
   **Do this before the next "turn X off" switch**; the shape recurs and the modes can silently
   disagree at rest.
+
+  **Partly resolved by `#satellite` 1/13 ([#623](https://github.com/uppin/tddy-coder/pull/623)).**
+  The runtime answer now exists: the integration status board
+  (`tddy-daemon-extensions::IntegrationStatusBoard`), read through
+  `DaemonConfigService.GetIntegrationStatus`, which the LiveKit plugin reports into from every
+  session-room open and from the common-room discovery loop; `livekit_integration_state` is the one
+  classification of the `livekit:` block (`Disabled` / `Misconfigured` / `Connecting`). `ConnectSession`
+  no longer waits on LiveKit for a local caller, so the wait behind #451 is gone from that path.
+  **Still open — the re-derivations have not moved onto the board:** `daemon_settings.rs`,
+  `common_room_supervisor.rs`, `config.rs`, `session_room.rs` (its own credentials check) and the two
+  web readers (`clientConfig`, `liveKitIsConfigured`) each still decide "configured" themselves.
+  Moving them is owned by nodes 2–5 of the `#satellite` stack.
 - **`packages/tddy-web/src/components/GhosttyTerminalSession.tsx` lands at 960 lines.** The terminal
   convergence removed a duplicate path (`GhosttyTerminalLiveKit` 736 + `GhosttyTerminalGrpc` 631) but
   produced one file above any comfortable review size. The cheapest extraction is the history/offset

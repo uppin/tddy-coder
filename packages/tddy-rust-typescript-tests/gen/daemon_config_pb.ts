@@ -2,15 +2,15 @@
 // @generated from file daemon_config.proto (package daemon_config, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file daemon_config.proto.
  */
 export const file_daemon_config: GenFile = /*@__PURE__*/
-  fileDesc("ChNkYWVtb25fY29uZmlnLnByb3RvEg1kYWVtb25fY29uZmlnIikKEEdldENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChFHZXRDb25maWdSZXNwb25zZRIvCghzZXR0aW5ncxgBIAEoCzIdLmRhZW1vbl9jb25maWcuRGFlbW9uU2V0dGluZ3MSEwoLY29uZmlnX3BhdGgYAiABKAkiXQoTVXBkYXRlQ29uZmlnUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEi8KCHNldHRpbmdzGAIgASgLMh0uZGFlbW9uX2NvbmZpZy5EYWVtb25TZXR0aW5ncyIwChRVcGRhdGVDb25maWdSZXNwb25zZRIYChByZXN0YXJ0X3JlcXVpcmVkGAEgAygJIi8KFkdldENsaWVudENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSKNBAoXR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2USGAoLbGl2ZWtpdF91cmwYASABKAlIAIgBARIZCgxsaXZla2l0X3Jvb20YAiABKAlIAYgBARIYCgtjb21tb25fcm9vbRgDIAEoCUgCiAEBEhgKC2RhZW1vbl9tb2RlGAQgASgISAOIAQESOQoOYWxsb3dlZF9hZ2VudHMYBSADKAsyIS5kYWVtb25fY29uZmlnLkNsaWVudEFsbG93ZWRBZ2VudBISCgVkZWJ1ZxgGIAEoCUgEiAEBEh8KEmRhZW1vbl9pbnN0YW5jZV9pZBgHIAEoCUgFiAEBEhwKD2xpdmVraXRfZW5hYmxlZBgIIAEoCEgGiAEBEkgKEnNhbmRib3hlZF9jb2RlYmFzZRgJIAEoCzInLmRhZW1vbl9jb25maWcuU2FuZGJveGVkQ29kZWJhc2VTdXBwb3J0SAeIAQESFgoJYXV0aF9mbG93GAogASgJSAiIAQFCDgoMX2xpdmVraXRfdXJsQg8KDV9saXZla2l0X3Jvb21CDgoMX2NvbW1vbl9yb29tQg4KDF9kYWVtb25fbW9kZUIICgZfZGVidWdCFQoTX2RhZW1vbl9pbnN0YW5jZV9pZEISChBfbGl2ZWtpdF9lbmFibGVkQhUKE19zYW5kYm94ZWRfY29kZWJhc2VCDAoKX2F1dGhfZmxvdyI3ChhTYW5kYm94ZWRDb2RlYmFzZVN1cHBvcnQSGwoTY29uZmluZXNfZmlsZXN5c3RlbRgBIAEoCCIvChJDbGllbnRBbGxvd2VkQWdlbnQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkicAoORGFlbW9uU2V0dGluZ3MSLwoHbGl2ZWtpdBgBIAEoCzIeLmRhZW1vbl9jb25maWcuTGl2ZUtpdFNldHRpbmdzEi0KBmxpc3RlbhgCIAEoCzIdLmRhZW1vbl9jb25maWcuTGlzdGVuU2V0dGluZ3Mi8AEKD0xpdmVLaXRTZXR0aW5ncxIQCgN1cmwYASABKAlIAIgBARIXCgpwdWJsaWNfdXJsGAIgASgJSAGIAQESFAoHYXBpX2tleRgDIAEoCUgCiAEBEhcKCmFwaV9zZWNyZXQYBCABKAlIA4gBARIYCgtjb21tb25fcm9vbRgFIAEoCUgEiAEBEhYKDmFwaV9zZWNyZXRfc2V0GAYgASgIEg8KB2VuYWJsZWQYByABKAhCBgoEX3VybEINCgtfcHVibGljX3VybEIKCghfYXBpX2tleUINCgtfYXBpX3NlY3JldEIOCgxfY29tbW9uX3Jvb20iWAoOTGlzdGVuU2V0dGluZ3MSFQoId2ViX3BvcnQYASABKA1IAIgBARIVCgh3ZWJfaG9zdBgCIAEoCUgBiAEBQgsKCV93ZWJfcG9ydEILCglfd2ViX2hvc3QyoAIKE0RhZW1vbkNvbmZpZ1NlcnZpY2USTgoJR2V0Q29uZmlnEh8uZGFlbW9uX2NvbmZpZy5HZXRDb25maWdSZXF1ZXN0GiAuZGFlbW9uX2NvbmZpZy5HZXRDb25maWdSZXNwb25zZRJXCgxVcGRhdGVDb25maWcSIi5kYWVtb25fY29uZmlnLlVwZGF0ZUNvbmZpZ1JlcXVlc3QaIy5kYWVtb25fY29uZmlnLlVwZGF0ZUNvbmZpZ1Jlc3BvbnNlEmAKD0dldENsaWVudENvbmZpZxIlLmRhZW1vbl9jb25maWcuR2V0Q2xpZW50Q29uZmlnUmVxdWVzdBomLmRhZW1vbl9jb25maWcuR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2ViBnByb3RvMw");
+  fileDesc("ChNkYWVtb25fY29uZmlnLnByb3RvEg1kYWVtb25fY29uZmlnIikKEEdldENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSJZChFHZXRDb25maWdSZXNwb25zZRIvCghzZXR0aW5ncxgBIAEoCzIdLmRhZW1vbl9jb25maWcuRGFlbW9uU2V0dGluZ3MSEwoLY29uZmlnX3BhdGgYAiABKAkiXQoTVXBkYXRlQ29uZmlnUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEi8KCHNldHRpbmdzGAIgASgLMh0uZGFlbW9uX2NvbmZpZy5EYWVtb25TZXR0aW5ncyIwChRVcGRhdGVDb25maWdSZXNwb25zZRIYChByZXN0YXJ0X3JlcXVpcmVkGAEgAygJIi8KFkdldENsaWVudENvbmZpZ1JlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSKNBAoXR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2USGAoLbGl2ZWtpdF91cmwYASABKAlIAIgBARIZCgxsaXZla2l0X3Jvb20YAiABKAlIAYgBARIYCgtjb21tb25fcm9vbRgDIAEoCUgCiAEBEhgKC2RhZW1vbl9tb2RlGAQgASgISAOIAQESOQoOYWxsb3dlZF9hZ2VudHMYBSADKAsyIS5kYWVtb25fY29uZmlnLkNsaWVudEFsbG93ZWRBZ2VudBISCgVkZWJ1ZxgGIAEoCUgEiAEBEh8KEmRhZW1vbl9pbnN0YW5jZV9pZBgHIAEoCUgFiAEBEhwKD2xpdmVraXRfZW5hYmxlZBgIIAEoCEgGiAEBEkgKEnNhbmRib3hlZF9jb2RlYmFzZRgJIAEoCzInLmRhZW1vbl9jb25maWcuU2FuZGJveGVkQ29kZWJhc2VTdXBwb3J0SAeIAQESFgoJYXV0aF9mbG93GAogASgJSAiIAQFCDgoMX2xpdmVraXRfdXJsQg8KDV9saXZla2l0X3Jvb21CDgoMX2NvbW1vbl9yb29tQg4KDF9kYWVtb25fbW9kZUIICgZfZGVidWdCFQoTX2RhZW1vbl9pbnN0YW5jZV9pZEISChBfbGl2ZWtpdF9lbmFibGVkQhUKE19zYW5kYm94ZWRfY29kZWJhc2VCDAoKX2F1dGhfZmxvdyI3ChhTYW5kYm94ZWRDb2RlYmFzZVN1cHBvcnQSGwoTY29uZmluZXNfZmlsZXN5c3RlbRgBIAEoCCIvChJDbGllbnRBbGxvd2VkQWdlbnQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkicAoORGFlbW9uU2V0dGluZ3MSLwoHbGl2ZWtpdBgBIAEoCzIeLmRhZW1vbl9jb25maWcuTGl2ZUtpdFNldHRpbmdzEi0KBmxpc3RlbhgCIAEoCzIdLmRhZW1vbl9jb25maWcuTGlzdGVuU2V0dGluZ3Mi8AEKD0xpdmVLaXRTZXR0aW5ncxIQCgN1cmwYASABKAlIAIgBARIXCgpwdWJsaWNfdXJsGAIgASgJSAGIAQESFAoHYXBpX2tleRgDIAEoCUgCiAEBEhcKCmFwaV9zZWNyZXQYBCABKAlIA4gBARIYCgtjb21tb25fcm9vbRgFIAEoCUgEiAEBEhYKDmFwaV9zZWNyZXRfc2V0GAYgASgIEg8KB2VuYWJsZWQYByABKAhCBgoEX3VybEINCgtfcHVibGljX3VybEIKCghfYXBpX2tleUINCgtfYXBpX3NlY3JldEIOCgxfY29tbW9uX3Jvb20iWAoOTGlzdGVuU2V0dGluZ3MSFQoId2ViX3BvcnQYASABKA1IAIgBARIVCgh3ZWJfaG9zdBgCIAEoCUgBiAEBQgsKCV93ZWJfcG9ydEILCglfd2ViX2hvc3QiNAobR2V0SW50ZWdyYXRpb25TdGF0dXNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkiVgocR2V0SW50ZWdyYXRpb25TdGF0dXNSZXNwb25zZRI2CgxpbnRlZ3JhdGlvbnMYASADKAsyIC5kYWVtb25fY29uZmlnLkludGVncmF0aW9uU3RhdHVzIpwBChFJbnRlZ3JhdGlvblN0YXR1cxIKCgJpZBgBIAEoCRINCgVsYWJlbBgCIAEoCRIuCgVzdGF0ZRgDIAEoDjIfLmRhZW1vbl9jb25maWcuSW50ZWdyYXRpb25TdGF0ZRINCgVlcnJvchgEIAEoCRIWCg5taXNzaW5nX2ZpZWxkcxgFIAMoCRIVCg1zaW5jZV91bml4X21zGAYgASgDKuABChBJbnRlZ3JhdGlvblN0YXRlEiEKHUlOVEVHUkFUSU9OX1NUQVRFX1VOU1BFQ0lGSUVEEAASHgoaSU5URUdSQVRJT05fU1RBVEVfRElTQUJMRUQQARIjCh9JTlRFR1JBVElPTl9TVEFURV9NSVNDT05GSUdVUkVEEAISIAocSU5URUdSQVRJT05fU1RBVEVfQ09OTkVDVElORxADEh8KG0lOVEVHUkFUSU9OX1NUQVRFX0NPTk5FQ1RFRBAEEiEKHUlOVEVHUkFUSU9OX1NUQVRFX1VOUkVBQ0hBQkxFEAUykQMKE0RhZW1vbkNvbmZpZ1NlcnZpY2USTgoJR2V0Q29uZmlnEh8uZGFlbW9uX2NvbmZpZy5HZXRDb25maWdSZXF1ZXN0GiAuZGFlbW9uX2NvbmZpZy5HZXRDb25maWdSZXNwb25zZRJXCgxVcGRhdGVDb25maWcSIi5kYWVtb25fY29uZmlnLlVwZGF0ZUNvbmZpZ1JlcXVlc3QaIy5kYWVtb25fY29uZmlnLlVwZGF0ZUNvbmZpZ1Jlc3BvbnNlEmAKD0dldENsaWVudENvbmZpZxIlLmRhZW1vbl9jb25maWcuR2V0Q2xpZW50Q29uZmlnUmVxdWVzdBomLmRhZW1vbl9jb25maWcuR2V0Q2xpZW50Q29uZmlnUmVzcG9uc2USbwoUR2V0SW50ZWdyYXRpb25TdGF0dXMSKi5kYWVtb25fY29uZmlnLkdldEludGVncmF0aW9uU3RhdHVzUmVxdWVzdBorLmRhZW1vbl9jb25maWcuR2V0SW50ZWdyYXRpb25TdGF0dXNSZXNwb25zZWIGcHJvdG8z");
 
 /**
  * @generated from message daemon_config.GetConfigRequest
@@ -358,6 +358,143 @@ export const ListenSettingsSchema: GenMessage<ListenSettings> = /*@__PURE__*/
   messageDesc(file_daemon_config, 10);
 
 /**
+ * @generated from message daemon_config.GetIntegrationStatusRequest
+ */
+export type GetIntegrationStatusRequest = Message<"daemon_config.GetIntegrationStatusRequest"> & {
+  /**
+   * Daemon access token, gated exactly like `GetConfig`.
+   *
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+};
+
+/**
+ * Describes the message daemon_config.GetIntegrationStatusRequest.
+ * Use `create(GetIntegrationStatusRequestSchema)` to create a new message.
+ */
+export const GetIntegrationStatusRequestSchema: GenMessage<GetIntegrationStatusRequest> = /*@__PURE__*/
+  messageDesc(file_daemon_config, 11);
+
+/**
+ * @generated from message daemon_config.GetIntegrationStatusResponse
+ */
+export type GetIntegrationStatusResponse = Message<"daemon_config.GetIntegrationStatusResponse"> & {
+  /**
+   * One entry per wired integration, ordered by `id`. Empty when none is wired.
+   *
+   * @generated from field: repeated daemon_config.IntegrationStatus integrations = 1;
+   */
+  integrations: IntegrationStatus[];
+};
+
+/**
+ * Describes the message daemon_config.GetIntegrationStatusResponse.
+ * Use `create(GetIntegrationStatusResponseSchema)` to create a new message.
+ */
+export const GetIntegrationStatusResponseSchema: GenMessage<GetIntegrationStatusResponse> = /*@__PURE__*/
+  messageDesc(file_daemon_config, 12);
+
+/**
+ * @generated from message daemon_config.IntegrationStatus
+ */
+export type IntegrationStatus = Message<"daemon_config.IntegrationStatus"> & {
+  /**
+   * Stable identifier, e.g. `livekit`.
+   *
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * Human-readable name, e.g. `LiveKit`.
+   *
+   * @generated from field: string label = 2;
+   */
+  label: string;
+
+  /**
+   * @generated from field: daemon_config.IntegrationState state = 3;
+   */
+  state: IntegrationState;
+
+  /**
+   * The last failure; set only for `INTEGRATION_STATE_UNREACHABLE`.
+   *
+   * @generated from field: string error = 4;
+   */
+  error: string;
+
+  /**
+   * The configuration fields that are missing; set only for `INTEGRATION_STATE_MISCONFIGURED`.
+   *
+   * @generated from field: repeated string missing_fields = 5;
+   */
+  missingFields: string[];
+
+  /**
+   * When the integration entered `state`, in Unix milliseconds.
+   *
+   * @generated from field: int64 since_unix_ms = 6;
+   */
+  sinceUnixMs: bigint;
+};
+
+/**
+ * Describes the message daemon_config.IntegrationStatus.
+ * Use `create(IntegrationStatusSchema)` to create a new message.
+ */
+export const IntegrationStatusSchema: GenMessage<IntegrationStatus> = /*@__PURE__*/
+  messageDesc(file_daemon_config, 13);
+
+/**
+ * @generated from enum daemon_config.IntegrationState
+ */
+export enum IntegrationState {
+  /**
+   * @generated from enum value: INTEGRATION_STATE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Switched off, or not configured at all.
+   *
+   * @generated from enum value: INTEGRATION_STATE_DISABLED = 1;
+   */
+  DISABLED = 1,
+
+  /**
+   * Configured with a required field missing; `missing_fields` names them.
+   *
+   * @generated from enum value: INTEGRATION_STATE_MISCONFIGURED = 2;
+   */
+  MISCONFIGURED = 2,
+
+  /**
+   * @generated from enum value: INTEGRATION_STATE_CONNECTING = 3;
+   */
+  CONNECTING = 3,
+
+  /**
+   * @generated from enum value: INTEGRATION_STATE_CONNECTED = 4;
+   */
+  CONNECTED = 4,
+
+  /**
+   * Configured and not answering; `error` is the last failure.
+   *
+   * @generated from enum value: INTEGRATION_STATE_UNREACHABLE = 5;
+   */
+  UNREACHABLE = 5,
+}
+
+/**
+ * Describes the enum daemon_config.IntegrationState.
+ */
+export const IntegrationStateSchema: GenEnum<IntegrationState> = /*@__PURE__*/
+  enumDesc(file_daemon_config, 0);
+
+/**
  * The daemon's own configuration, read and written by its UI.
  *
  * The YAML file the daemon was started with stays the source of truth: `UpdateConfig` validates,
@@ -394,6 +531,18 @@ export const DaemonConfigService: GenService<{
     methodKind: "unary";
     input: typeof GetClientConfigRequestSchema;
     output: typeof GetClientConfigResponseSchema;
+  },
+  /**
+   * The live state of each optional integration this daemon has wired (first: LiveKit). Served here
+   * rather than by the integration itself so it stays readable when the integration is the thing
+   * that is down.
+   *
+   * @generated from rpc daemon_config.DaemonConfigService.GetIntegrationStatus
+   */
+  getIntegrationStatus: {
+    methodKind: "unary";
+    input: typeof GetIntegrationStatusRequestSchema;
+    output: typeof GetIntegrationStatusResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_daemon_config, 0);

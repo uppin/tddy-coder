@@ -14,6 +14,10 @@ service DaemonConfigService {
   // desktop webview reaching the daemon over the host application's IPC bridge has no HTTP origin
   // to fetch it from.
   rpc GetClientConfig(GetClientConfigRequest) returns (GetClientConfigResponse);
+  // The live state of each optional integration this daemon has wired (first: LiveKit). Served here
+  // rather than by the integration itself so it stays readable when the integration is the thing
+  // that is down.
+  rpc GetIntegrationStatus(GetIntegrationStatusRequest) returns (GetIntegrationStatusResponse);
 }
 
 message GetConfigRequest {
@@ -119,4 +123,40 @@ message LiveKitSettings {
 message ListenSettings {
   optional uint32 web_port = 1;
   optional string web_host = 2;
+}
+
+message GetIntegrationStatusRequest {
+  // Daemon access token, gated exactly like `GetConfig`.
+  string session_token = 1;
+}
+
+message GetIntegrationStatusResponse {
+  // One entry per wired integration, ordered by `id`. Empty when none is wired.
+  repeated IntegrationStatus integrations = 1;
+}
+
+enum IntegrationState {
+  INTEGRATION_STATE_UNSPECIFIED = 0;
+  // Switched off, or not configured at all.
+  INTEGRATION_STATE_DISABLED = 1;
+  // Configured with a required field missing; `missing_fields` names them.
+  INTEGRATION_STATE_MISCONFIGURED = 2;
+  INTEGRATION_STATE_CONNECTING = 3;
+  INTEGRATION_STATE_CONNECTED = 4;
+  // Configured and not answering; `error` is the last failure.
+  INTEGRATION_STATE_UNREACHABLE = 5;
+}
+
+message IntegrationStatus {
+  // Stable identifier, e.g. `livekit`.
+  string id = 1;
+  // Human-readable name, e.g. `LiveKit`.
+  string label = 2;
+  IntegrationState state = 3;
+  // The last failure; set only for `INTEGRATION_STATE_UNREACHABLE`.
+  string error = 4;
+  // The configuration fields that are missing; set only for `INTEGRATION_STATE_MISCONFIGURED`.
+  repeated string missing_fields = 5;
+  // When the integration entered `state`, in Unix milliseconds.
+  int64 since_unix_ms = 6;
 }

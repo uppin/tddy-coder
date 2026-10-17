@@ -23,12 +23,16 @@ a room, or a clock. Only `sync::run` and the `Mirror` methods touch the world.
 
 ## Opening the room is asked for, not assumed
 
-A session's room is created by the first thing that connects to it over LiveKit, not by the session's
-own start ([session-room.md](../../../docs/ft/daemon/session-room.md)), and a mirror is such a thing.
-So `attach` calls **`ConnectSession`** before joining. Its reply is deliberately unread — those
-fields name the session's *terminal* room, while a mirror joins `session-{id}`, which it derives
+A session's room is opened when something asks for it, not by the session's own start
+([session-room.md](../../../docs/ft/daemon/session-room.md)), and a mirror is such a thing. So
+`attach` calls **`session_room.SessionRoomService.OpenSessionRoom`** before joining
+(`open_session_room`, a public function over the daemon's Connect-HTTP surface). The reply carries
+the room's coordinates, which `attach` does not use — a mirror joins `session-{id}`, which it derives
 itself — and what is wanted is the call's effect: `daemon-{instance_id}` in the room before anything
-looks for it there. Joining without asking would join a room LiveKit auto-creates on the mirror's
+looks for it there. `ConnectSession` is not the call: it is local work and opens no room for a
+caller that did not arrive over LiveKit. A daemon whose LiveKit cannot be reached fails the call,
+naming the room, and `attach` fails with it rather than waiting for a daemon nobody put there; a
+daemon without the room service answers 404, reported as `Refused { method: "OpenSessionRoom" }`. Joining without asking would join a room LiveKit auto-creates on the mirror's
 behalf, with no daemon in it, which is indistinguishable from the `DaemonAbsent` wait timing out.
 
 ## What the room supplies
@@ -117,7 +121,7 @@ The full flag/environment table is in the [README](../README.md#credentials).
 |---|---|
 | `tests/credentials_acceptance.rs` | Flag/environment/`.env` layering, precedence, and each refusal naming the variable it wanted. |
 | `tests/mirror_acceptance.rs` | Ownership refusals, sequence de-duplication, apply outcomes, and every reconcile reason naming its expected and actual values. |
-| `tests/attach_acceptance.rs` | Session resolution and the room/identity rules. Joining a real room is not covered here. |
+| `tests/attach_acceptance.rs` | Session resolution and the room/identity rules, and that `open_session_room` posts `OpenSessionRoomRequest` to the room service's path and nothing else, with a 404 reported as a refusal. Joining a real room is not covered here. |
 | `tests/sync_acceptance.rs` | Every decision and every git command the loop issues, as data rather than execution. |
 | `tests/cli_acceptance.rs` | The binary's surface, including that it never prints the value of a token it found in the environment. |
 

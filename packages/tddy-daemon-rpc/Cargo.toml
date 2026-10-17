@@ -65,6 +65,8 @@ tddy-session-tool-client = { path = "../tddy-session-tool-client", features = ["
 libc = "0.2"
 serial_test = "3"
 serde_yaml = "0.9"
+# The session-room suite wires the LiveKit plugin as the daemon does (status board for its reporter).
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
 tddy-session-files = { path = "../tddy-session-files" }

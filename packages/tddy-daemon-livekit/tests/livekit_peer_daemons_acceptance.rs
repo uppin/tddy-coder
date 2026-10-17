@@ -82,6 +82,8 @@ fn host_service_with_livekit_discovery(
         registry.clone(),
         room_slot.clone(),
         Default::default(),
+        tddy_daemon_extensions::IntegrationStatusBoard::new()
+            .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit"),
     );
     let eligible: Arc<dyn tddy_host_service::multi_host::EligibleDaemonSource> = Arc::new(
         tddy_daemon_livekit::livekit_peer_discovery::LiveKitEligibleDaemonSource::new(

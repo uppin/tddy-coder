@@ -287,6 +287,9 @@ pub fn spawn_common_room_discovery_task(
     room_slot: Arc<tokio::sync::RwLock<Option<Arc<livekit::Room>>>>,
     signing_key: tddy_daemon_livekit::AdvertisedSigningKey,
 ) {
+    // An embedder keeps no status board, so the loop reports on one nobody reads.
+    let status = tddy_daemon_extensions::IntegrationStatusBoard::new()
+        .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit");
     tddy_session_lifecycle::oauth_loopback_tunnel::spawn_oauth_loopback_tunnel(
         &config,
         room_slot.clone(),
@@ -296,6 +299,7 @@ pub fn spawn_common_room_discovery_task(
         registry,
         room_slot,
         signing_key,
+        status,
     );
 }
 
@@ -784,6 +788,19 @@ pub async fn build(
     let shared_session_rooms =
         Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new());
 
+    // What each optional integration reports about itself, read by `GetIntegrationStatus`; and the
+    // LiveKit plugin behind the session host's `SessionReach` port. The plugin shares the host's
+    // room registry so the rooms it opens are the ones deletion closes.
+    let integration_board = tddy_daemon_extensions::IntegrationStatusBoard::new();
+    // One reporter, cloned to the discovery loop below: both report into the same board entry.
+    let livekit_status =
+        integration_board.reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit");
+    let livekit_reach = tddy_daemon_livekit::LiveKitSessionReach::new(
+        config.clone(),
+        Arc::clone(&shared_session_rooms),
+        livekit_status.clone(),
+    );
+
     let telegram = build_telegram(
         &config,
         &tddy_data_dir,
@@ -883,6 +900,7 @@ pub async fn build(
                     // Announced on every connection to the common room, so a peer holding one of
                     // this daemon's tokens can find the key that verifies it.
                     signing_key: advertised_signing_key,
+                    status: livekit_status.clone(),
                 });
                 tasks.oauth_loopback_tunnel = Some(OauthLoopbackTunnel {
                     config: config_arc.clone(),
@@ -1136,6 +1154,9 @@ pub async fn build(
                 Arc::clone(&shared_claude_cli_manager),
             )
             .with_session_rooms(Arc::clone(&shared_session_rooms))
+            .with_session_reach(
+                Arc::clone(&livekit_reach) as Arc<dyn tddy_daemon_extensions::SessionReach>
+            )
             .with_model_registry(Arc::clone(&model_registry))
             .with_session_notification_bus(session_notification_bus)
             .with_session_tokens(session_tokens.clone())
@@ -1338,6 +1359,12 @@ pub async fn build(
         // PrStackService (stack planning and branch resolution, `tddy-pr-stack`) — through the same
         // handlers the host's session rooms serve.
         rpc_entries.extend(rpc_handlers.entries());
+
+        // SessionRoomService — LiveKit's own RPC: open a session's room, or fail naming it. The
+        // plugin owns it; it resolves sessions through the host it extends.
+        rpc_entries.push(livekit_reach.session_room_entry(
+            Arc::clone(&connection_arc) as Arc<dyn tddy_daemon_extensions::ReachableSessions>
+        ));
 
         // DemoVmService — family O (`tddy-vm` coordinate, host logic on the session host).
         rpc_entries.push(connection_arc.demo_vm_entry());
@@ -1610,12 +1637,15 @@ pub async fn build(
     // The daemon's own settings, read and written by its UI. Registered for every host — a desktop
     // application embedding the daemon is the one that most needs to configure it — and gated on the
     // same session token as every other daemon RPC.
-    let config_service = DaemonConfigServiceServer::new(DaemonConfigServiceImpl::new(
-        options.config_path.clone(),
-        Arc::new(Mutex::new(config.clone())),
-        Arc::clone(&common_room) as Arc<dyn CommonRoomSupervisor>,
-        config_service_authenticator,
-    ));
+    let config_service = DaemonConfigServiceServer::new(
+        DaemonConfigServiceImpl::new(
+            options.config_path.clone(),
+            Arc::new(Mutex::new(config.clone())),
+            Arc::clone(&common_room) as Arc<dyn CommonRoomSupervisor>,
+            config_service_authenticator,
+        )
+        .with_integration_status(integration_board),
+    );
     rpc_entries.push(tddy_rpc::ServiceEntry {
         name: DaemonConfigServiceServer::<DaemonConfigServiceImpl>::NAME,
         service: Arc::new(config_service) as Arc<dyn tddy_rpc::RpcService>,

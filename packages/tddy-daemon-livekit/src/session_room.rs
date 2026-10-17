@@ -1331,6 +1331,29 @@ pub trait SessionTerminalBridge: Send + Sync {
     async fn bridge(&self, session_id: &str) -> Result<(), Status>;
 }
 
+/// Which stage of opening a session's room failed.
+///
+/// The LiveKit server's reachability is a fact about the integration; the rest — the session's
+/// services, its checkout, its terminal — is a fact about the session. A caller that reports on
+/// the integration needs the first kind alone, so the two are told apart where they happen rather
+/// than recovered from a message.
+#[derive(Debug)]
+pub enum RoomOpenFailure {
+    /// Creating the room on the LiveKit server, or joining it, failed.
+    Server(Status),
+    /// Everything else: the services the room serves, the checkout it describes, the terminal
+    /// bridged into it, the session going away while it opened.
+    Elsewhere(Status),
+}
+
+impl RoomOpenFailure {
+    pub fn into_status(self) -> Status {
+        match self {
+            Self::Server(status) | Self::Elsewhere(status) => status,
+        }
+    }
+}
+
 /// The live rooms this daemon hosts, keyed by the session that owns each checkout.
 ///
 /// Owns the joined participant: a `LiveKitParticipant` that is dropped leaves the room, so a room
@@ -1485,6 +1508,19 @@ impl SessionRoomRegistry {
         service: impl FnOnce() -> Result<S, Status>,
         source: Arc<dyn WorktreeSource>,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
+        self.open_staged(hosting, service, source)
+            .await
+            .map_err(RoomOpenFailure::into_status)
+    }
+
+    /// [`Self::open_measured_by`], saying which stage failed.
+    async fn open_staged<S: RpcService>(
+        &self,
+        hosting: &SessionRoomHosting<'_>,
+        service: impl FnOnce() -> Result<S, Status>,
+        source: Arc<dyn WorktreeSource>,
+    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
+        use RoomOpenFailure::{Elsewhere, Server};
         let Some(credentials) = LiveKitCredentials::from_config(hosting.config) else {
             log::debug!(
                 "session_room: no LiveKit credentials configured; session {} keeps its worktree and hosts no room",
@@ -1492,7 +1528,7 @@ impl SessionRoomRegistry {
             );
             return Ok(None);
         };
-        let service = service()?;
+        let service = service().map_err(Elsewhere)?;
         let room_name = session_room_name(hosting.codebase_session_id);
         let identity = daemon_rpc_identity(hosting.instance_id);
 
@@ -1501,23 +1537,28 @@ impl SessionRoomRegistry {
         let measured = match source.measure().await {
             Measurement::Taken(measured) => measured,
             Measurement::Unavailable => {
-                return Err(Status::internal(format!(
+                return Err(Elsewhere(Status::internal(format!(
                     "worktree {:?} could not be measured; its room cannot be opened with a summary of it",
                     hosting.worktree_root,
-                )))
+                ))))
             }
             Measurement::Gone => {
-                return Err(Status::internal(format!(
+                return Err(Elsewhere(Status::internal(format!(
                     "worktree {:?} does not exist, so there is no checkout for {room_name} to be about",
                     hosting.worktree_root,
-                )))
+                ))))
             }
         };
 
-        let metadata = create_room(&credentials, &room_name, &measured).await?;
-        let joined = join_room(&credentials, &room_name, &identity, service).await?;
+        let metadata = create_room(&credentials, &room_name, &measured)
+            .await
+            .map_err(Server)?;
+        let joined = join_room(&credentials, &room_name, &identity, service)
+            .await
+            .map_err(Server)?;
         self.register(hosting, &room_name, joined, metadata, measured, source);
-        self.abandon_if_session_is_gone(hosting, &room_name)?;
+        self.abandon_if_session_is_gone(hosting, &room_name)
+            .map_err(Elsewhere)?;
 
         log::info!(
             "session_room: hosting {room_name} as {identity} for worktree {:?}",
@@ -1554,6 +1595,19 @@ impl SessionRoomRegistry {
         service: impl FnOnce() -> Result<S, Status>,
         terminal: &dyn SessionTerminalBridge,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
+        self.ensure_open_staged(hosting, service, terminal)
+            .await
+            .map_err(RoomOpenFailure::into_status)
+    }
+
+    /// [`Self::ensure_open`], saying which stage failed — for a caller that reports on the
+    /// LiveKit server and must tell a failure to reach it from a failure that is the session's.
+    pub async fn ensure_open_staged<S: RpcService>(
+        &self,
+        hosting: &SessionRoomHosting<'_>,
+        service: impl FnOnce() -> Result<S, Status>,
+        terminal: &dyn SessionTerminalBridge,
+    ) -> Result<Option<OpenedSessionRoom>, RoomOpenFailure> {
         let opening = self.opening_lock(hosting.codebase_session_id);
         let _opening_this_session = opening.lock().await;
         let room = match self.already_open(hosting) {
@@ -1565,8 +1619,12 @@ impl SessionRoomRegistry {
                 Some(already)
             }
             None => {
-                self.open_measured_by(hosting, service, Self::local_checkout(hosting)?)
-                    .await?
+                self.open_staged(
+                    hosting,
+                    service,
+                    Self::local_checkout(hosting).map_err(RoomOpenFailure::Elsewhere)?,
+                )
+                .await?
             }
         };
         // The room says where the session is; the bridge is what makes its terminal usable once
@@ -1579,7 +1637,10 @@ impl SessionRoomRegistry {
         // function is — the work happens when it is wanted — and not a retry: nothing here loops,
         // waits or comes back on its own.
         if room.is_some() {
-            terminal.bridge(hosting.codebase_session_id).await?;
+            terminal
+                .bridge(hosting.codebase_session_id)
+                .await
+                .map_err(RoomOpenFailure::Elsewhere)?;
         }
         Ok(room)
     }

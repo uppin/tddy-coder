@@ -202,6 +202,10 @@ pub struct DaemonSessionHost {
     /// Told of each started session's worktree — see [`SessionWorktreeObserver`]. `None` on a host
     /// whose embedder acts on nothing of the kind.
     worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
+    /// What extends a session's reach beyond this host when it is connected to — see
+    /// [`tddy_daemon_extensions::SessionReach`]. [`tddy_daemon_extensions::NoSessionReach`] until
+    /// the composition root installs an integration with [`Self::with_session_reach`].
+    session_reach: Arc<dyn tddy_daemon_extensions::SessionReach>,
 }
 
 pub use session_worktree_observer::SessionWorktreeObserver;
@@ -523,5 +527,6 @@ mod stack_child_spawn_tests;
 mod svc_agent_roster_wiring;
 mod svc_conversation_worktree_wiring;
 mod svc_host_builders;
+mod svc_reachable_sessions;
 mod svc_session_identity_wiring;
 mod svc_worktree_observer_wiring;

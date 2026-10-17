@@ -15,6 +15,13 @@
 //! created: creating a session is local work over a git checkout, and making it wait on a LiveKit
 //! server made it cost whatever reaching that server cost.
 //!
+//! LiveKit is a satellite integration (`docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-integration.md`):
+//! the host reports a connect through the `SessionReach` extension port, and the LiveKit plugin opens
+//! the room in the caller's time only for a caller that arrived **over LiveKit**. A local caller —
+//! the desktop's own window, the daemon's HTTP route — is answered at once and the room follows in
+//! the background. A client about to join the room asks the plugin's own `OpenSessionRoom`, which
+//! is loud. The fixture wires the plugin exactly as the daemon does.
+//!
 //! Most of these need the LiveKit testkit container (Docker or `LIVEKIT_TESTKIT_WS_URL`) and are
 //! `#[serial]` so they own it alone. The ones under § Session creation is a local operation need no
 //! container at all — their whole subject is that nothing is dialled.
@@ -29,11 +36,15 @@ use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_auth::{DaemonSigningKey, SessionTokens, StandaloneKeyDirectory, SIGNING_KEY_FILE};
+use tddy_daemon_extensions::{IntegrationState, IntegrationStatusBoard};
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_livekit::session_room::{session_room_name, WORKTREE_ACTIVITY_TOPIC};
+use tddy_daemon_livekit::session_room::{
+    session_room_name, SessionRoomRegistry, WORKTREE_ACTIVITY_TOPIC,
+};
+use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_rpc::Request;
+use tddy_rpc::{Request, RequestMetadata, RequestTransport, RpcMessage, RpcResult};
 use tddy_service::proto::livekit::LiveKitRoomInfo;
 use tddy_service::proto::session::{
     session_attachment::Source as AttachmentSource, ConnectSessionRequest, SessionAttachment,
@@ -41,6 +52,7 @@ use tddy_service::proto::session::{
     StartSessionResponse,
 };
 use tddy_service::proto::session_files::{ReadHostDocumentRequest, ReadHostDocumentResponse};
+use tddy_service::proto::session_room::{OpenSessionRoomRequest, OpenSessionRoomResponse};
 use tddy_service::proto::terminal::{TerminalInput, TerminalOutput};
 use tddy_service::proto::types::HostDocumentScope;
 use tddy_service::proto::worktree_activity::{WorktreeActivityEvent, WorktreeActivityKind};
@@ -296,9 +308,22 @@ impl AnAgent {
     }
 }
 
+/// Whether the daemon under test has the LiveKit plugin wired into its extension ports.
+#[derive(Clone, Copy)]
+enum ThePlugin {
+    Wired,
+    /// The host alone: no `SessionReach`, no `SessionRoomService` — whatever its config says.
+    NotWired,
+}
+
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
     service: DaemonSessionHost,
+    /// The LiveKit plugin's own `SessionRoomService`, registered beside the host's services as the
+    /// daemon registers it. Absent from a host built without the plugin.
+    room_service: Option<tddy_rpc::ServiceEntry>,
+    /// The board the plugin reports LiveKit's live state on.
+    integrations: Arc<IntegrationStatusBoard>,
     /// The PTY manager the service was built with, so a test can ask whether a session still has a
     /// terminal at all.
     agents: Arc<tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager>,
@@ -342,6 +367,15 @@ impl FacilitatingDaemon {
         livekit: Option<LiveKitTestkit>,
         agent: AnAgent,
     ) -> Self {
+        Self::build_with(ws_url, livekit, agent, ThePlugin::Wired).await
+    }
+
+    async fn build_with(
+        ws_url: Option<String>,
+        livekit: Option<LiveKitTestkit>,
+        agent: AnAgent,
+        plugin: ThePlugin,
+    ) -> Self {
         let os_user = std::env::var("USER").expect("USER required");
         let repo_dir = tempfile::tempdir().unwrap();
         create_test_repo_with_origin(repo_dir.path());
@@ -370,7 +404,18 @@ impl FacilitatingDaemon {
         let key = DaemonSigningKey::load_or_generate(&identity.path().join(SIGNING_KEY_FILE))
             .expect("the daemon generates its keypair");
         let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
-        let service = DaemonSessionHost::new(
+
+        // Wired as the daemon wires it: one room registry shared by the host and the plugin, the
+        // plugin installed as the host's reach before the RPC families, and its own service built
+        // over the finished host.
+        let rooms = Arc::new(SessionRoomRegistry::new());
+        let integrations = IntegrationStatusBoard::new();
+        let reach = LiveKitSessionReach::new(
+            config.clone(),
+            Arc::clone(&rooms),
+            integrations.reporter(LIVEKIT_INTEGRATION_ID, "LiveKit"),
+        );
+        let host = DaemonSessionHost::new(
             config.clone(),
             resolver,
             sessions.path().to_path_buf(),
@@ -381,14 +426,26 @@ impl FacilitatingDaemon {
             Arc::clone(&agents),
         )
         .with_staging_base_dir(staging.path().to_path_buf())
+        .with_session_rooms(rooms);
+        let host = match plugin {
+            ThePlugin::Wired => host.with_session_reach(reach.clone()),
+            ThePlugin::NotWired => host,
+        };
         // The rooms under test serve none of the families above the lifecycle crate: nothing here
         // calls one through a room. The exec tool read through a room is `tddy-daemon-rpc`'s
         // `session_room_exec_tool_acceptance.rs`.
-        .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest))
-        .with_session_tokens(tokens.clone());
+        let service = host
+            .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest))
+            .with_session_tokens(tokens.clone());
+        let room_service = match plugin {
+            ThePlugin::Wired => Some(reach.session_room_entry(Arc::new(service.clone()))),
+            ThePlugin::NotWired => None,
+        };
 
         Self {
             service,
+            room_service,
+            integrations,
             agents,
             config,
             common_room,
@@ -1230,18 +1287,81 @@ impl FacilitatingDaemon {
         started
     }
 
-    /// Connect to a session, as a client reaching it over LiveKit does.
+    /// Connect to a session, as a client reaching it over LiveKit does — the request stamped as
+    /// having arrived over a LiveKit room, which is what a remote client's request is.
     async fn connect_to(
         &self,
         session_id: &str,
     ) -> Result<tddy_service::proto::session::ConnectSessionResponse, tddy_rpc::Status> {
+        self.connect_over(session_id, RequestTransport::LiveKit)
+            .await
+    }
+
+    /// Connect to a session from this host, as the desktop's own window does.
+    async fn connect_locally_to(
+        &self,
+        session_id: &str,
+    ) -> Result<tddy_service::proto::session::ConnectSessionResponse, tddy_rpc::Status> {
+        self.connect_over(session_id, RequestTransport::InProcess)
+            .await
+    }
+
+    async fn connect_over(
+        &self,
+        session_id: &str,
+        transport: RequestTransport,
+    ) -> Result<tddy_service::proto::session::ConnectSessionResponse, tddy_rpc::Status> {
         self.service
-            .connect_session(Request::direct(ConnectSessionRequest {
-                session_token: TEST_TOKEN.to_string(),
-                session_id: session_id.to_string(),
-            }))
+            .connect_session(Request::with_metadata(
+                ConnectSessionRequest {
+                    session_token: TEST_TOKEN.to_string(),
+                    session_id: session_id.to_string(),
+                },
+                RequestMetadata::over(transport),
+            ))
             .await
             .map(|response| response.into_inner())
+    }
+
+    /// Ask the LiveKit plugin's `SessionRoomService` to open a session's room, over the daemon's
+    /// HTTP route as `tddy-session-sync` and `pty-relay` do.
+    async fn open_session_room(
+        &self,
+        session_id: &str,
+    ) -> Result<OpenSessionRoomResponse, tddy_rpc::Status> {
+        let entry = self
+            .room_service
+            .as_ref()
+            .expect("this daemon was built without the LiveKit plugin");
+        let request = OpenSessionRoomRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: session_id.to_string(),
+        };
+        let message = RpcMessage::new(
+            request.encode_to_vec(),
+            RequestMetadata::over(RequestTransport::Http),
+        );
+        let RpcResult::Unary(reply) = entry
+            .service
+            .handle_rpc(entry.name, "OpenSessionRoom", &message)
+            .await
+        else {
+            panic!("OpenSessionRoom is a unary call");
+        };
+        reply.map(|bytes| {
+            OpenSessionRoomResponse::decode(bytes.as_slice())
+                .expect("OpenSessionRoom must answer an OpenSessionRoomResponse")
+        })
+    }
+
+    /// LiveKit's entry on the integration status board.
+    fn livekit_integration(&self) -> IntegrationState {
+        self.integrations
+            .snapshot()
+            .into_iter()
+            .find(|integration| integration.id == LIVEKIT_INTEGRATION_ID)
+            .expect("the LiveKit plugin registers itself on the board")
+            .state
     }
 
     /// What the LiveKit **server** says about a room, or `None` when it has never heard of it.
@@ -1336,8 +1456,89 @@ async fn connecting_again_goes_on_using_the_room_the_first_connect_opened() {
     );
 }
 
+/// How long a connect from this host may take with LiveKit configured and unreachable.
+///
+/// Above the 1 s integration budget on purpose: a connect resolves the session's metadata from disk
+/// and, on a loaded machine, that is not instant. What it guards is the defect's scale — the room
+/// creation it must not wait on is capped at 30 s, and a join under it is not capped at all.
+const A_LOCAL_CONNECT: Duration = Duration::from_secs(2);
+
+impl FacilitatingDaemon {
+    /// A daemon configured with a LiveKit that never answers, and no LiveKit plugin wired.
+    async fn with_livekit_that_never_answers_and_no_plugin(
+        livekit: &ALiveKitNobodyAnswers,
+    ) -> Self {
+        Self::build_with(
+            Some(livekit.ws_url()),
+            None,
+            AnAgent::HoldingItsPtyOpen,
+            ThePlugin::NotWired,
+        )
+        .await
+    }
+
+    /// Connect from this host, failing rather than hanging if the connect waits on the network.
+    async fn connects_locally_within(
+        &self,
+        session_id: &str,
+        patience: Duration,
+    ) -> tddy_service::proto::session::ConnectSessionResponse {
+        tokio::time::timeout(patience, self.connect_locally_to(session_id))
+            .await
+            .expect("a connect from this host must not wait on LiveKit")
+            .expect("a connect from this host must succeed whatever LiveKit's state")
+    }
+}
+
+/// The reply a `claude-cli` session's connect carries: its terminal is served over gRPC and bridged
+/// into the lobby, so it names no terminal room.
+fn no_terminal_room() -> tddy_service::proto::session::ConnectSessionResponse {
+    tddy_service::proto::session::ConnectSessionResponse {
+        livekit_room: String::new(),
+        livekit_url: String::new(),
+        livekit_server_identity: String::new(),
+    }
+}
+
 #[tokio::test]
-async fn connecting_to_a_session_fails_when_livekit_cannot_be_reached() {
+async fn connecting_locally_answers_without_waiting_on_a_livekit_that_never_answers() {
+    // Given a daemon whose LiveKit is configured and accepts connections it never answers — the
+    // operator's failure exactly — and a session it started regardless
+    let livekit = a_livekit_nobody_answers().await;
+    let daemon = FacilitatingDaemon::with_livekit_that_never_answers(&livekit).await;
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // When the desktop's own window connects to it
+    let connected = daemon
+        .connects_locally_within(&started.session_id, A_LOCAL_CONNECT)
+        .await;
+
+    // Then it is answered at once, with the coordinates a claude-cli session always gets: nothing
+    // on this host's own path to its own session waits on a LiveKit server.
+    assert_eq!(connected, no_terminal_room());
+}
+
+#[tokio::test]
+async fn connecting_locally_succeeds_when_nothing_listens_where_livekit_is_configured() {
+    // Given a daemon whose LiveKit is configured at an address that refuses every connection
+    let daemon = FacilitatingDaemon::with_livekit_nothing_listens_on().await;
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // When the desktop's own window connects to it
+    let connected = daemon
+        .connects_locally_within(&started.session_id, A_LOCAL_CONNECT)
+        .await;
+
+    // Then the session is attached: a refused LiveKit is not this caller's failure
+    assert_eq!(connected, no_terminal_room());
+}
+
+#[tokio::test]
+async fn connecting_over_livekit_fails_when_livekit_cannot_be_reached() {
     // Given a daemon whose LiveKit is configured at an address nothing answers on, and a session it
     // started there regardless
     let daemon = FacilitatingDaemon::with_livekit_nothing_listens_on().await;
@@ -1345,15 +1546,16 @@ async fn connecting_to_a_session_fails_when_livekit_cannot_be_reached() {
         .starts_an_agent_session_within(Duration::from_secs(10))
         .await;
 
-    // When a client connects to it
+    // When a remote client — one whose request arrived over LiveKit — connects to it
     let refused = daemon
         .connect_to(&started.session_id)
         .await
-        .expect_err("connecting must fail when the room it needs cannot be created");
+        .expect_err("a remote client's connect must fail when the room it needs cannot be created");
 
-    // Then it is told so, naming the room it could not get. Creating a session stopped depending on
-    // LiveKit; *reaching* one over LiveKit did not, and a client that asked for a room and has none
-    // must hear about it rather than be handed coordinates nothing is serving.
+    // Then it is told so, naming the room it could not get. A client that reached the session over
+    // LiveKit needs the room and its terminal before it is answered, and must hear about it rather
+    // than be handed coordinates nothing is serving. `contains`: the message also carries the
+    // transport's own error, which names a port chosen at runtime.
     assert!(
         refused
             .message
@@ -1361,6 +1563,207 @@ async fn connecting_to_a_session_fails_when_livekit_cannot_be_reached() {
         "the failure must name the room that could not be created, got: {}",
         refused.message
     );
+}
+
+#[tokio::test]
+async fn opening_a_session_room_fails_when_livekit_cannot_be_reached() {
+    // Given a daemon whose LiveKit is configured at an address nothing answers on, and a session
+    let daemon = FacilitatingDaemon::with_livekit_nothing_listens_on().await;
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // When a client about to join the session's room asks the LiveKit plugin to open it
+    let refused = daemon
+        .open_session_room(&started.session_id)
+        .await
+        .expect_err("opening a room LiveKit cannot create must fail");
+
+    // Then the failure names the room — `contains` for the same reason as above
+    assert!(
+        refused
+            .message
+            .contains(&session_room_name(&started.session_id)),
+        "the failure must name the room that could not be created, got: {}",
+        refused.message
+    );
+}
+
+#[tokio::test]
+async fn a_room_that_could_not_be_opened_after_a_local_connect_is_reported_unreachable() {
+    // Given a daemon whose LiveKit refuses every connection, and a session connected to locally —
+    // which answers at once and leaves the room to the background
+    let daemon = FacilitatingDaemon::with_livekit_nothing_listens_on().await;
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+    daemon
+        .connects_locally_within(&started.session_id, A_LOCAL_CONNECT)
+        .await;
+
+    // When the background open has run its course
+    let error = eventually_awaiting(
+        "LiveKit to be reported unreachable",
+        Duration::from_secs(10),
+        || async {
+            match daemon.livekit_integration() {
+                IntegrationState::Unreachable { error } => Ok(error),
+                other => Err(format!("LiveKit was reported as {other:?}")),
+            }
+        },
+    )
+    .await;
+
+    // Then the operator can read why the session is not reachable from elsewhere: the failure is
+    // reported, naming the room, rather than returned to a caller that did not need it
+    assert!(
+        error.contains(&session_room_name(&started.session_id)),
+        "the reported failure must name the room, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn a_host_without_the_livekit_plugin_never_contacts_livekit_on_connect() {
+    // Given a host configured with a LiveKit that accepts connections, but with no LiveKit plugin
+    // wired into its extension ports
+    let livekit = a_livekit_nobody_answers().await;
+    let daemon = FacilitatingDaemon::with_livekit_that_never_answers_and_no_plugin(&livekit).await;
+    let started = daemon
+        .starts_an_agent_session_within(Duration::from_secs(10))
+        .await;
+
+    // When the session is connected to, from this host and over LiveKit both
+    daemon
+        .connects_locally_within(&started.session_id, A_LOCAL_CONNECT)
+        .await;
+    let remote = tokio::time::timeout(A_LOCAL_CONNECT, daemon.connect_to(&started.session_id))
+        .await
+        .expect("a host with nothing to extend its reach must not wait on LiveKit");
+
+    // Then neither connect dialled anything: LiveKit is reached through the plugin or not at all,
+    // whatever the configuration names
+    assert_eq!(
+        remote.expect("the connect must succeed"),
+        no_terminal_room()
+    );
+    assert_eq!(
+        livekit.connections_accepted(),
+        0,
+        "a host without the LiveKit plugin must not contact LiveKit"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn opening_a_session_room_names_the_room_and_the_daemon_waiting_in_it() {
+    // Given a daemon that hosts session rooms, and a session it started
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+    let room = session_room_name(&started.session_id);
+
+    // When a client about to join asks the LiveKit plugin to open the session's room
+    let opened = daemon
+        .open_session_room(&started.session_id)
+        .await
+        .expect("opening the room of a started session must succeed");
+
+    // Then it is told where to join and whom to look for...
+    assert_eq!(
+        opened,
+        OpenSessionRoomResponse {
+            livekit_room: room.clone(),
+            livekit_url: daemon.ws_url.clone(),
+            livekit_server_identity: rpc_identity(INSTANCE_ID),
+        }
+    );
+
+    // ...and that participant is already there when it arrives
+    let probe = AgentProbe::join(&daemon, &room, "probe-opened-room").await;
+    assert_eq!(probe.remote_identities(), vec![rpc_identity(INSTANCE_ID)]);
+}
+
+#[tokio::test]
+#[serial]
+async fn opening_the_room_of_a_session_this_daemon_does_not_facilitate_is_refused() {
+    // Given a daemon that hosts session rooms, and a workspace session: a checkout whose agent, if
+    // it has one, runs elsewhere
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_workspace_session().await;
+
+    // When a client asks the LiveKit plugin to open that session's room
+    let refused = daemon
+        .open_session_room(&started.session_id)
+        .await
+        .expect_err("a room for a session this daemon does not facilitate must be refused");
+
+    // Then the refusal names the session and says why, and no room was created for it
+    assert_eq!(refused.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        refused.message.contains(&started.session_id),
+        "the refusal must name the session, got: {}",
+        refused.message
+    );
+    assert_eq!(
+        daemon
+            .room_on_the_server(&session_room_name(&started.session_id))
+            .await,
+        None,
+        "a refused session must have no room on the server"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn a_session_connected_locally_becomes_drivable_over_livekit_without_another_call() {
+    // Given a daemon that hosts session rooms, and a session it started
+    let daemon = FacilitatingDaemon::with_livekit().await;
+    let started = daemon.start_agent_session().await;
+    let room = session_room_name(&started.session_id);
+
+    // When the desktop's own window connects to it — and nothing else does
+    daemon
+        .connects_locally_within(&started.session_id, A_LOCAL_CONNECT)
+        .await;
+
+    // Then the background open puts the session's terminal in the lobby — the last thing it does,
+    // after the room itself...
+    eventually_awaiting(
+        "the session's terminal to be bridged in the background",
+        ACTIVITY_TIMEOUT,
+        || async {
+            let lobby = daemon.lobby_participants().await;
+            (lobby == vec![terminal_bridge_identity(&started.session_id)])
+                .then_some(())
+                .ok_or_else(|| format!("the lobby held {lobby:?}"))
+        },
+    )
+    .await;
+    assert!(
+        daemon.room_on_the_server(&room).await.is_some(),
+        "a bridged session must have its room on the server"
+    );
+
+    // ...and a remote client really drives the session's terminal through it. `contains`: a
+    // terminal returns the echo wrapped in the agent's own output and the line discipline's.
+    let seen = daemon
+        .drives_the_terminal_over_livekit(&started.session_id, A_KEYSTROKE_SEQUENCE)
+        .await;
+    assert!(
+        seen.contains(A_KEYSTROKE_SEQUENCE),
+        "the terminal must be drivable over LiveKit after a local connect, got: {seen:?}"
+    );
+    // The board says so too — once the bridge returned, which is after the lobby shows it
+    eventually_awaiting(
+        "the board to report LiveKit connected",
+        ACTIVITY_TIMEOUT,
+        || async {
+            let state = daemon.livekit_integration();
+            (state == IntegrationState::Connected)
+                .then_some(())
+                .ok_or_else(|| format!("the board held {state:?}"))
+        },
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------

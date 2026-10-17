@@ -20,6 +20,7 @@ in `daemon_settings.rs`.
 | `GetConfig` | yes | the effective configuration, **secrets redacted** — an API secret is reported as *set*, never returned — plus the path of the file an update writes |
 | `UpdateConfig` | yes | validate → write that file → apply what can be applied live → name what cannot |
 | `GetClientConfig` | **no** | the payload a browser gets unauthenticated at `GET /api/config` |
+| `GetIntegrationStatus` | yes | the live state of each optional integration the daemon has wired — see [Integration status](#integration-status) |
 
 `GetClientConfig` is deliberately ungated: it is read *before* sign-in, because it is what tells a
 page there is a daemon to sign in to. It carries a LiveKit URL and room name, the agent allowlist,
@@ -27,6 +28,30 @@ the debug mask, the instance id and `auth_flow` — which GitHub sign-in this da
 (`"redirect"`, `"device"`, or absent for none; see [session-auth.md](session-auth.md#minting-login))
 — and no secrets. A gate there makes a desktop webview unable to
 bootstrap at all.
+
+## Integration status
+
+An optional integration — LiveKit is the first — has one answer to "is it configured, is it up", and
+`GetIntegrationStatus` returns it: a list with one entry per wired integration, ordered by id, each
+with its label, its state and when it entered that state. The call is gated like `GetConfig`, and is
+served by the daemon itself rather than by the integration, so it stays readable when the
+integration is the thing that is down.
+
+| State | Means |
+|---|---|
+| `Disabled` | Switched off, or not configured at all. |
+| `Misconfigured` | Configured with a required field missing; the entry names the missing fields (for LiveKit, any of `url`, `api_key`, `api_secret`). |
+| `Connecting` | Configured completely; nothing has answered yet. |
+| `Connected` | The integration is up: LiveKit's common room is joined, or a session room has been opened. |
+| `Unreachable` | Configured and not answering; the entry carries the last failure. |
+
+LiveKit reports from two places: the common-room connection (connecting, joined, failed or lost,
+with retries keeping the moment the outage began) and every session-room open. A room that could not
+be opened because the LiveKit **server** could not be reached makes the entry `Unreachable`; a room
+that failed for a reason that is the session's own — its checkout is gone, its terminal could not be
+exposed — leaves the entry alone. A daemon with no LiveKit configured reports `Disabled`, never an
+error. A **local session attach does not depend on any of this**: it never waits on, or fails with,
+an unreachable LiveKit; the failure appears here instead ([Session rooms](session-room.md)).
 
 ## What an update means
 

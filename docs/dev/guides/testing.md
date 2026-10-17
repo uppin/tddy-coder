@@ -228,6 +228,20 @@ session id names its session room (`session-{id}`), so a fixture's session id co
 *process* is the bar — under nextest each test is its own process and the LiveKit binaries run side
 by side, while `#[serial]` and a `OnceLock` room only order or share within one process.
 
+## Dependency-boundary tests
+
+A test that holds a rule about which crate may depend on which reads the workspace through
+`tddy_testing_commons::dependency_graph::WorkspaceGraph`, not through a manifest parser of its own.
+The graph comes from `cargo metadata`, so a dependency counts however its manifest spells it
+(inline, `[dependencies.name]` sub-table, `{ workspace = true }`); normal, build and optional
+dependencies count and `[dev-dependencies]` do not. Pair every "does not reach X" assertion with an
+assertion that the same walk does reach something it must (a crate the subject certainly depends on),
+so a walk that found nothing cannot pass as a clean result. `names_directly` panics on a crate that
+is not a workspace member for the same reason. See
+[dependency-graph.md](../../../packages/tddy-testing-commons/docs/dependency-graph.md); the
+LiveKit-is-a-satellite ratchet is described in
+[extension-ports.md](../../../packages/tddy-daemon-extensions/docs/extension-ports.md#the-satellite-rule-and-its-ratchet).
+
 ## Test Composition
 
 1. Each test has a primary purpose or subject.

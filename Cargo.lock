@@ -11819,6 +11819,7 @@ dependencies = [
  "tddy-cli-sessions",
  "tddy-core",
  "tddy-credentials",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
@@ -12253,6 +12254,7 @@ dependencies = [
  "tddy-credential-sync",
  "tddy-credentials",
  "tddy-daemon-auth",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-rpc",
@@ -12315,11 +12317,23 @@ dependencies = [
  "tddy-livekit",
  "tddy-rpc",
  "tddy-service",
+ "tddy-testing-commons",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "tddy-daemon-extensions"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pretty_assertions",
+ "tddy-rpc",
+ "tddy-testing-commons",
+ "tokio",
 ]
 
 [[package]]
@@ -12370,6 +12384,7 @@ dependencies = [
  "tddy-core",
  "tddy-credential-sync",
  "tddy-credentials",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-sandbox",
  "tddy-host-service",
@@ -12405,6 +12420,7 @@ dependencies = [
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-auth",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
@@ -13450,6 +13466,7 @@ dependencies = [
  "tddy-core",
  "tddy-credentials",
  "tddy-daemon-auth",
+ "tddy-daemon-extensions",
  "tddy-daemon-kernel",
  "tddy-daemon-livekit",
  "tddy-daemon-sandbox",
@@ -13569,6 +13586,7 @@ dependencies = [
  "serde_json",
  "tddy-livekit",
  "tddy-service",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
 ]
@@ -13778,6 +13796,7 @@ dependencies = [
  "tddy-rpc",
  "tddy-service",
  "tddy-task",
+ "tddy-testing-commons",
  "tempfile",
  "tokio",
  "tokio-stream",

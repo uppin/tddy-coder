@@ -31,17 +31,21 @@ use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use prost::Message;
 use serial_test::serial;
 use tddy_core::agent_activity::{append_agent_activity, AgentActivityRecord, STATUS_COMPLETED};
 use tddy_core::session_lifecycle::unified_session_dir_path;
 use tddy_daemon_auth::SessionTokens;
+use tddy_daemon_extensions::IntegrationStatusBoard;
 use tddy_daemon_kernel::config::DaemonConfig;
+use tddy_daemon_livekit::session_room::SessionRoomRegistry;
+use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::{LiveKitParticipant, RoomOptions};
 use tddy_livekit_testkit::LiveKitTestkit;
 use tddy_projects::project_storage::{write_projects, ProjectData};
-use tddy_service::proto::session::{
-    ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
-};
+use tddy_rpc::{RequestMetadata, RequestTransport, RpcMessage, RpcResult};
+use tddy_service::proto::session::{SessionService as SessionServiceTrait, StartSessionRequest};
+use tddy_service::proto::session_room::OpenSessionRoomRequest;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::RpcFamiliesNotUnderTest;
 use tddy_session_sync::{Credentials, DaemonToken, LiveKitCredentials};
@@ -214,8 +218,18 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     let sessions_base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver =
         Arc::new(move |_| Some(sessions_base.clone()));
-    // The session's room is opened by the attach below; this suite exercises none of the families
-    // served above the lifecycle crate, so the room is given none of them.
+    // Wired as the daemon wires it: one room registry shared by the host and the LiveKit plugin,
+    // and the plugin installed as the host's reach. The session's room is opened by
+    // `SessionRoomService.OpenSessionRoom`, which the syncer's attach calls and the plugin serves;
+    // this suite exercises none of the families served above the lifecycle crate, so the room is
+    // given none of them.
+    let rooms = Arc::new(SessionRoomRegistry::new());
+    let integrations = IntegrationStatusBoard::new();
+    let livekit_reach = LiveKitSessionReach::new(
+        config.clone(),
+        Arc::clone(&rooms),
+        integrations.reporter(LIVEKIT_INTEGRATION_ID, "LiveKit"),
+    );
     let connections = Arc::new(
         DaemonSessionHost::new(
             config.clone(),
@@ -227,13 +241,20 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
             None,
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
+        .with_session_rooms(rooms)
+        .with_session_reach(livekit_reach.clone())
         .with_rpc_families(Arc::new(RpcFamiliesNotUnderTest)),
     );
 
-    // The daemon's Connect-HTTP surface: `attach` lists sessions on it, and the git transport
-    // exchanges its token and mints its room JWT on it.
+    // The daemon's Connect-HTTP surface: `attach` lists sessions and asks for the session's room on
+    // it, and the git transport exchanges its token and mints its room JWT on it.
     let mut entries = auth.entries;
     entries.push(connections.session_lifecycle_entry());
+    let room_service = livekit_reach.session_room_entry(Arc::clone(&connections) as _);
+    entries.push(tddy_rpc::ServiceEntry {
+        name: room_service.name,
+        service: Arc::clone(&room_service.service),
+    });
     let router = tddy_connectrpc::connect_router(tddy_rpc::RpcBridge::new(
         tddy_rpc::MultiRpcService::new(entries),
     ));
@@ -257,11 +278,11 @@ async fn a_mirrored_session(suffix: &str) -> AMirroredSession {
     .await;
 
     let session_id = a_started_session(&connections, &tokens, suffix).await;
-    // A session's room is opened by the first connection to it, not by its creation — and warming
-    // that room below needs it open. In production the syncer's own attach is that first
-    // connection; here the room has to be warm *before* the syncer arrives, so the connect is made
+    // A session's room is opened when something asks the LiveKit plugin for it, not by the
+    // session's creation — and warming that room below needs it open. In production the syncer's
+    // own attach asks; here the room has to be warm *before* the syncer arrives, so the ask is made
     // on its own.
-    a_client_connects_to(&connections, &tokens, &session_id).await;
+    a_client_opens_the_room_of(&room_service, &tokens, &session_id).await;
     let session_dir = unified_session_dir_path(&data_dir, &session_id);
     let worktree = worktree_of(&session_dir);
 
@@ -662,19 +683,28 @@ async fn a_started_session(
     started.session_id
 }
 
-/// Connect to the session, which is what opens the room its worktree is measured in.
-async fn a_client_connects_to(
-    connections: &DaemonSessionHost,
+/// Ask the LiveKit plugin to open the session's room, which is the room its worktree is measured in.
+async fn a_client_opens_the_room_of(
+    room_service: &tddy_rpc::ServiceEntry,
     tokens: &SessionTokens,
     session_id: &str,
 ) {
-    connections
-        .connect_session(tddy_rpc::Request::direct(ConnectSessionRequest {
-            session_token: an_access_token_for(tokens, GITHUB_USER),
-            session_id: session_id.to_string(),
-        }))
+    let request = OpenSessionRoomRequest {
+        session_token: an_access_token_for(tokens, GITHUB_USER),
+        session_id: session_id.to_string(),
+    };
+    let message = RpcMessage::new(
+        request.encode_to_vec(),
+        RequestMetadata::over(RequestTransport::Http),
+    );
+    let RpcResult::Unary(reply) = room_service
+        .service
+        .handle_rpc(room_service.name, "OpenSessionRoom", &message)
         .await
-        .expect("connecting to a started session must open its room");
+    else {
+        panic!("OpenSessionRoom is a unary call");
+    };
+    reply.expect("opening a started session's room must succeed");
 }
 
 /// The checkout the daemon cut for a session, as the session's own metadata records it.

@@ -221,3 +221,77 @@ fn joins_under_a_different_identity_per_nonce_so_a_second_syncer_does_not_evict_
     // joins with the same identity, so a shared identity is two syncers evicting each other.
     assert_ne!(first, second);
 }
+
+// ---------------------------------------------------------------------------
+// Opening the session's room before joining it
+//
+// `ConnectSession` is local work: a daemon answers it without opening a room for a caller that did
+// not arrive over LiveKit, and a mirror is such a caller. The LiveKit integration's own
+// `SessionRoomService.OpenSessionRoom` is what puts the daemon in the room a mirror then joins.
+// ---------------------------------------------------------------------------
+
+const OPEN_SESSION_ROOM: &str = "/rpc/session_room.SessionRoomService/OpenSessionRoom";
+
+/// Patience for a call to a daemon on loopback.
+const A_LOOPBACK_CALL: std::time::Duration = std::time::Duration::from_secs(5);
+
+#[tokio::test]
+async fn asks_the_daemon_to_open_the_session_room_through_the_room_service() {
+    // Given a daemon that serves the room service (and nothing else: any other path is a 404)
+    let daemon = tddy_testing_commons::stub_http_routed::a_stub_http_endpoint_routing(&[(
+        OPEN_SESSION_ROOM,
+        "",
+    )])
+    .await;
+
+    // When a mirror asks for the session's room
+    tddy_session_sync::open_session_room(
+        &daemon.base_url(),
+        "an-access-token",
+        "1780828020298-abc",
+        A_LOOPBACK_CALL,
+    )
+    .await
+    .expect("the room service answered");
+
+    // Then the one call made was to the room service, naming the session and carrying the token
+    let sent = daemon.requests_to(OPEN_SESSION_ROOM);
+    assert_eq!(daemon.paths(), vec![OPEN_SESSION_ROOM.to_string()]);
+    assert_eq!(
+        <tddy_service::proto::session_room::OpenSessionRoomRequest as prost::Message>::decode(
+            sent[0].body.as_bytes()
+        )
+        .expect("the request body is an OpenSessionRoomRequest"),
+        tddy_service::proto::session_room::OpenSessionRoomRequest {
+            session_token: "an-access-token".to_string(),
+            session_id: "1780828020298-abc".to_string(),
+        }
+    );
+}
+
+#[tokio::test]
+async fn reports_a_daemon_without_the_room_service_as_refusing_open_session_room() {
+    // Given a daemon with no LiveKit integration wired: it serves no room service at all
+    let daemon = tddy_testing_commons::stub_http_routed::a_stub_http_endpoint_routing(&[]).await;
+
+    // When a mirror asks for the session's room
+    let refused = tddy_session_sync::open_session_room(
+        &daemon.base_url(),
+        "an-access-token",
+        "1780828020298-abc",
+        A_LOOPBACK_CALL,
+    )
+    .await
+    .expect_err("a daemon without the room service cannot open a room");
+
+    // Then the refusal names the call that was refused, so the operator learns the daemon has no
+    // LiveKit integration rather than that a room is missing
+    assert_eq!(
+        refused,
+        tddy_session_sync::DaemonHttpError::Refused {
+            method: "OpenSessionRoom",
+            code: "404".to_string(),
+            message: String::new(),
+        }
+    );
+}
