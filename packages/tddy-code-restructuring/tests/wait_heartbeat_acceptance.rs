@@ -478,7 +478,7 @@ async fn a_cargo_check_that_does_not_finish_is_narrated_with_its_pid() {
     );
     for beat in &beats {
         assert!(
-            beat.contains("cargo check --all-targets -p origin"),
+            beat.contains("cargo check --all-targets -p destination -p origin"),
             "{beat}"
         );
         assert!(beat.contains("pid"), "{beat}");

@@ -618,6 +618,71 @@ async fn fails_an_apply_that_leaves_a_tree_the_compiler_rejects() {
     );
 }
 
+/// [`a_workspace_whose_test_binary_reads_a_file_beside_it`], with the test binary on disk but
+/// never added to git — which `git mv` will not move.
+fn a_workspace_whose_test_binary_is_untracked() -> tempfile::TempDir {
+    let workspace = a_workspace_whose_test_binary_reads_a_file_beside_it();
+    git(
+        &workspace,
+        &["rm", "--cached", "--quiet", "crates/origin/tests/golden.rs"],
+    );
+    workspace
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_move_of_a_file_git_does_not_track_before_writing_anything() {
+    // Given a plan moving a test binary git does not track, and what the files it touches hold
+    let workspace = a_workspace_whose_test_binary_is_untracked();
+    let plan = a_plan_in(
+        &workspace,
+        &[
+            "{\"op\":\"move_test_binary_to_crate\",\"anchor\":{\"kind\":\"symbol\",\
+           \"file\":\"crates/origin/tests/golden.rs\",\"path\":\"golden\"},\
+           \"to\":\"crates/destination\"}",
+        ],
+    );
+    let read = |path: &str| std::fs::read_to_string(workspace.path().join(path)).ok();
+    let before = (
+        read("crates/origin/tests/golden.rs"),
+        read("crates/destination/Cargo.toml"),
+    );
+    let entry = a_host_over_fake_language_servers();
+
+    // When it is applied through the daemon
+    let refusal = stream_at::<_, RestructureEvent>(
+        &entry,
+        "Apply",
+        ApplyRequest {
+            workspace_root: workspace.path().to_string_lossy().to_string(),
+            plan: plan.to_string_lossy().to_string(),
+            dry_run: false,
+            resume: false,
+            from: None,
+            stop_after: None,
+        },
+    )
+    .await
+    .expect_err("a move of an untracked file is refused");
+
+    // Then the tree is named as what is wrong, and the files are as they were
+    assert_eq!(
+        (
+            refusal.code(),
+            refusal.message().contains("which git does not track")
+        ),
+        (tddy_rpc::Code::FailedPrecondition, true),
+        "{}",
+        refusal.message()
+    );
+    assert_eq!(
+        (
+            read("crates/origin/tests/golden.rs"),
+            read("crates/destination/Cargo.toml")
+        ),
+        before
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_an_apply_whose_plan_names_a_file_no_backend_handles() {
     // Given a plan anchored in a file no language backend claims
