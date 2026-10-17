@@ -45,8 +45,10 @@ export interface UseSessionAttachmentResult {
   state: SessionAttachmentState;
   /** The routing behind {@link state}'s connection; `null` unless connected. */
   hint: SessionAttachmentHint | null;
-  connectSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<void>;
-  resumeSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<void>;
+  /** Resolves `true` once the attach is settled, `false` when it failed (the state is then `error`). */
+  connectSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<boolean>;
+  /** As {@link connectSession}. */
+  resumeSession(sessionId: string, sessionToken: string, host: HostConnection): Promise<boolean>;
   deleteSession(
     sessionId: string,
     sessionToken: string,
@@ -85,6 +87,9 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
    * The reply is turned into a hint and the host opens the session over it — the one place the
    * LiveKit fields of the reply are read, and the branch (`resp.livekitRoom !== ""`) that used to
    * decide which of two statuses every consumer would then have to handle.
+   *
+   * The failure is shown as the `error` state *and* reported to the caller as `false`: the caller
+   * holds an attach claim for this session, and only it can give the claim back.
    */
   const attach = useCallback(
     async (
@@ -95,7 +100,7 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
         livekitUrl: string;
         livekitServerIdentity: string;
       }>,
-    ) => {
+    ): Promise<boolean> => {
       setAttachment({ state: { status: "connecting", sessionId }, hint: null });
       try {
         const reply = await call(host.clientFor(SessionService));
@@ -106,12 +111,14 @@ export function useSessionAttachment(): UseSessionAttachmentResult {
           // started joining a room — and the registry that would otherwise own it will never be
           // told about this one.
           connection.close();
-          return;
+          return true;
         }
         setAttachment({ state: { status: "connected", connection }, hint });
+        return true;
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         setAttachment({ state: { status: "error", error: message }, hint: null });
+        return false;
       }
     },
     [],
