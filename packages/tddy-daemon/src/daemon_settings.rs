@@ -84,7 +84,8 @@ fn merged_livekit(
     // update came from, so leaving it to `stored` would make the toggle unsaveable.
     livekit.enabled = settings.enabled;
     livekit.url = Some(livekit_url(settings.url.as_deref())?);
-    livekit.public_url = settings.public_url.clone();
+    // A blank field means "no public URL"; stored as `Some("")` it would shadow `url`.
+    livekit.public_url = settings.public_url.clone().filter(|u| !u.trim().is_empty());
     livekit.api_key = settings.api_key.clone();
     livekit.common_room = settings.common_room.clone();
     if settings.api_secret.is_some() {
@@ -189,6 +190,7 @@ listen:
         SettingsBuilder {
             livekit_enabled: true,
             livekit_url: CONFIGURED_URL.to_string(),
+            public_url: None,
             api_secret: None,
             common_room: "tddy-lobby".to_string(),
             web_port: 8899,
@@ -199,6 +201,8 @@ listen:
     struct SettingsBuilder {
         livekit_enabled: bool,
         livekit_url: String,
+        /// `None` mirrors `livekit_url`, as the fixture daemon does.
+        public_url: Option<String>,
         api_secret: Option<String>,
         common_room: String,
         web_port: u32,
@@ -208,6 +212,12 @@ listen:
     impl SettingsBuilder {
         fn with_livekit_url(mut self, url: &str) -> Self {
             self.livekit_url = url.to_string();
+            self
+        }
+
+        /// The public URL field as the Settings form sends it — `""` when the operator left it blank.
+        fn with_public_url(mut self, public_url: &str) -> Self {
+            self.public_url = Some(public_url.to_string());
             self
         }
 
@@ -241,7 +251,7 @@ listen:
             DaemonSettings {
                 livekit: Some(LiveKitSettings {
                     url: Some(self.livekit_url.clone()),
-                    public_url: Some(self.livekit_url),
+                    public_url: Some(self.public_url.unwrap_or(self.livekit_url)),
                     api_key: Some("devkey".to_string()),
                     api_secret: self.api_secret,
                     common_room: Some(self.common_room),
@@ -353,6 +363,43 @@ listen:
 
         // Then it is refused, naming the field
         assert_invalid(result, "livekit.url");
+    }
+
+    // -----------------------------------------------------------------------
+    // Public URL
+    // -----------------------------------------------------------------------
+
+    #[rstest]
+    #[case::empty("")]
+    #[case::whitespace("   ")]
+    fn saves_a_blank_public_url_as_unset(#[case] public_url: &str) {
+        // Given an update from a Settings form whose public URL field was left blank
+        let settings = the_current_settings().with_public_url(public_url).build();
+
+        // When it is applied
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+
+        // Then no public URL is stored, so clients are handed `livekit.url`
+        assert_eq!(
+            update.config.livekit.expect("no livekit block").public_url,
+            None
+        );
+    }
+
+    #[test]
+    fn leaves_public_url_out_of_the_saved_file_when_the_update_left_it_blank() {
+        // Given an update from a Settings form whose public URL field was left blank
+        let settings = the_current_settings().with_public_url("").build();
+
+        // When it is applied and serialised, as the daemon writes its own file
+        let update = accepted(apply_update(&a_configured_daemon(), &settings));
+        let yaml = serde_yaml::to_string(&update.config).expect("the config did not serialise");
+
+        // Then the file carries no `public_url` key at all
+        assert!(
+            !yaml.contains("public_url"),
+            "a blank public_url was written to the daemon's file:\n{yaml}"
+        );
     }
 
     // -----------------------------------------------------------------------
