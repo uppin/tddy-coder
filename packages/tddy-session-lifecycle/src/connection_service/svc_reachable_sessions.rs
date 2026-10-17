@@ -4,10 +4,12 @@
 //! [`SessionReach`]; an integration's own RPC resolves sessions and reaches the host's room services
 //! through [`ReachableSessions`], implemented here once.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tddy_daemon_extensions::{ReachableSessions, ReachedSession, SessionReach};
-use tddy_rpc::Status;
+use tddy_daemon_livekit::session_room::SessionTerminalBridge;
+use tddy_rpc::{RequestTransport, Status};
 
 use crate::connection_service::DaemonSessionHost;
 
@@ -29,16 +31,28 @@ impl ReachableSessions for DaemonSessionHost {
         session_token: &str,
         session_id: &str,
     ) -> Result<ReachedSession, Status> {
-        let _ = (session_token, session_id);
-        todo!("DaemonSessionHost::resolve")
+        let (session_dir, metadata) = self
+            .launch_sessions()
+            .resolve_session_for_token(session_token, session_id)?;
+        let worktree_root = metadata.repo_path.map(PathBuf::from).ok_or_else(|| {
+            Status::failed_precondition(format!(
+                "session {session_id} records no checkout on this daemon"
+            ))
+        })?;
+        Ok(ReachedSession {
+            session_id: session_id.to_string(),
+            session_dir,
+            worktree_root,
+            // The extension's own RPC received the request, not the core.
+            arrived_over: RequestTransport::Direct,
+        })
     }
 
     fn session_services(&self) -> Result<tddy_rpc::MultiRpcService, Status> {
-        todo!("DaemonSessionHost::session_services")
+        Arc::new(self.clone()).session_room_roster()
     }
 
     async fn expose_terminal(&self, session_id: &str) -> Result<(), Status> {
-        let _ = session_id;
-        todo!("DaemonSessionHost::expose_terminal")
+        SessionTerminalBridge::bridge(self, session_id).await
     }
 }

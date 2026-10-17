@@ -1,12 +1,13 @@
 //! Family C session RPCs at the `session.SessionService` coordinate.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::launch_ports::LaunchSessions;
 use tddy_core::output::SESSIONS_SUBDIR;
 use tddy_core::read_session_metadata;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
+use tddy_daemon_extensions::ReachedSession;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::peer_forwarding::PeerRoute;
 use tddy_daemon_livekit::os_user_resolution::resolve_os_user;
@@ -102,12 +103,15 @@ impl LaunchSessions {
         )?))
     }
 
-    pub async fn connect_session_at_session_coordinate(
+    /// Authenticate `session_token` and find the session `session_id` of its owner: the directory
+    /// and the metadata recorded there. The path `ConnectSession` and an extension's own RPC
+    /// resolve a session through.
+    pub fn resolve_session_for_token(
         &self,
-        request: Request<ConnectSessionRequest>,
-    ) -> Result<Response<ConnectSessionResponse>, Status> {
-        let req = request.into_inner();
-        let github_user = (self.user_resolver)(&req.session_token)
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<(std::path::PathBuf, tddy_core::SessionMetadata), Status> {
+        let github_user = (self.user_resolver)(session_token)
             .ok_or_else(|| Status::unauthenticated("invalid or expired session"))?;
         let os_user = &self
             .config
@@ -118,18 +122,30 @@ impl LaunchSessions {
             Some(&self.tddy_data_dir),
         )
         .ok_or_else(|| Status::internal("could not resolve sessions path"))?;
-        validate_session_id_segment(&req.session_id)
+        validate_session_id_segment(session_id)
             .map_err(|e| Status::invalid_argument(e.message()))?;
-        let session_dir = unified_session_dir_path(&sessions_base, &req.session_id);
+        let session_dir = unified_session_dir_path(&sessions_base, session_id);
         let metadata = read_session_metadata(&session_dir)
             .map_err(|_| Status::not_found("session not found"))?;
+        Ok((session_dir, metadata))
+    }
+
+    pub async fn connect_session_at_session_coordinate(
+        &self,
+        request: Request<ConnectSessionRequest>,
+    ) -> Result<Response<ConnectSessionResponse>, Status> {
+        let arrived_over = request.metadata().transport();
+        let req = request.into_inner();
+        let (session_dir, metadata) =
+            self.resolve_session_for_token(&req.session_token, &req.session_id)?;
 
         let session_type = metadata.session_type.as_deref().unwrap_or_default();
 
-        // Connecting to a session is what opens its room. Session creation does not touch LiveKit
-        // at all, so this is the moment the daemon has to be in the room a participant is about to
-        // look for — including a `tddy-session-sync` mirror, which joins directly and waits for
-        // `daemon-{instance_id}` to already be there.
+        // Connecting to a session is a reach: whatever extends sessions beyond this host is told,
+        // with the transport the request came in on, and decides what that costs the caller. LiveKit
+        // opens the session's room in the caller's time for a caller that arrived over LiveKit and
+        // in the background for everyone else, so a local client never waits on a server it does
+        // not use.
         //
         // Only for a session this daemon facilitates over a checkout it holds. A session whose
         // agent runs elsewhere has its room over there, and opening one here would put it on a
@@ -137,12 +153,15 @@ impl LaunchSessions {
         if tddy_daemon_livekit::session_room::session_type_is_facilitated_here(session_type) {
             match metadata.repo_path.as_deref() {
                 Some(worktree_root) => {
-                    self.agent_roster
-                        .host
-                        .ensure_session_room(
-                            &req.session_id,
-                            &session_dir,
-                            Path::new(worktree_root),
+                    self.session_reach
+                        .session_reached(
+                            ReachedSession {
+                                session_id: req.session_id.clone(),
+                                session_dir,
+                                worktree_root: PathBuf::from(worktree_root),
+                                arrived_over,
+                            },
+                            Arc::clone(&self.reachable_sessions),
                         )
                         .await?;
                 }

@@ -18,6 +18,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use tddy_daemon_extensions::{ReachableSessions, SessionReach};
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::relay_idle::RpcActivity;
 use tddy_daemon_kernel::SessionUserResolver;
@@ -121,6 +122,11 @@ pub struct LaunchSessions {
     pub worktree_observer: Option<Arc<dyn SessionWorktreeObserver>>,
     /// The host's capabilities that are not fields.
     pub host: Arc<dyn LaunchHost>,
+    /// What extends a session's reach beyond this host when it is connected to.
+    /// [`NoSessionReach`](tddy_daemon_extensions::NoSessionReach) when nothing is wired.
+    pub session_reach: Arc<dyn SessionReach>,
+    /// The host as an extension reaches back into it when it is told of a reach.
+    pub reachable_sessions: Arc<dyn ReachableSessions>,
 }
 
 impl LaunchSessions {
