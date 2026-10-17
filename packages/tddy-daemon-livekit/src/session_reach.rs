@@ -15,12 +15,16 @@ use tddy_daemon_extensions::{
     IntegrationReporter, IntegrationState, ReachableSessions, ReachedSession, SessionReach,
 };
 use tddy_daemon_kernel::config::{DaemonConfig, LiveKitConfig};
-use tddy_rpc::Status;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_rpc::{RequestTransport, Status};
 use tddy_service::proto::session_room::{
     OpenSessionRoomRequest, OpenSessionRoomResponse, SessionRoomService, SessionRoomServiceServer,
 };
 
-use crate::session_room::{OpenedSessionRoom, SessionRoomRegistry};
+use crate::session_room::{
+    session_room_name, DaemonRoomHosting, OpenedSessionRoom, SessionRoomRegistry,
+    SessionTerminalBridge,
+};
 
 /// LiveKit's id on the integration status board.
 pub const LIVEKIT_INTEGRATION_ID: &str = "livekit";
@@ -31,11 +35,28 @@ pub const LIVEKIT_INTEGRATION_ID: &str = "livekit";
 /// credentials; [`IntegrationState::Misconfigured`] naming whichever of `url`, `api_key`,
 /// `api_secret` is blank, in that order; otherwise [`IntegrationState::Connecting`].
 pub fn livekit_integration_state(livekit: Option<&LiveKitConfig>) -> IntegrationState {
-    let _ = livekit;
-    todo!("livekit_integration_state")
+    let Some(livekit) = livekit else {
+        return IntegrationState::Disabled;
+    };
+    let missing: Vec<String> = [
+        ("url", &livekit.url),
+        ("api_key", &livekit.api_key),
+        ("api_secret", &livekit.api_secret),
+    ]
+    .into_iter()
+    .filter(|(_, value)| value.as_deref().map_or(true, |v| v.trim().is_empty()))
+    .map(|(field, _)| field.to_string())
+    .collect();
+    match missing.len() {
+        0 => IntegrationState::Connecting,
+        // Switched off and never filled in: nothing was misconfigured, it is simply not in use.
+        3 if !livekit.enabled => IntegrationState::Disabled,
+        _ => IntegrationState::Misconfigured { missing },
+    }
 }
 
 /// Session rooms, opened for the sessions this daemon facilitates as they are reached.
+#[derive(Clone)]
 pub struct LiveKitSessionReach {
     config: DaemonConfig,
     rooms: Arc<SessionRoomRegistry>,
@@ -62,8 +83,40 @@ impl LiveKitSessionReach {
         session: &ReachedSession,
         host: Arc<dyn ReachableSessions>,
     ) -> Result<Option<OpenedSessionRoom>, Status> {
-        let _ = (session, host);
-        todo!("LiveKitSessionReach::open_now")
+        let outcome = self.open_room(session, host).await;
+        self.status.report(match &outcome {
+            Ok(Some(_)) => IntegrationState::Connected,
+            Ok(None) => livekit_integration_state(self.config.livekit.as_ref()),
+            Err(failure) => IntegrationState::Unreachable {
+                error: failure.message.clone(),
+            },
+        });
+        outcome
+    }
+
+    async fn open_room(
+        &self,
+        session: &ReachedSession,
+        host: Arc<dyn ReachableSessions>,
+    ) -> Result<Option<OpenedSessionRoom>, Status> {
+        let instance_id = local_instance_id_for_config(&self.config);
+        let hosting = DaemonRoomHosting {
+            config: &self.config,
+            instance_id: &instance_id,
+            rooms: &self.rooms,
+        }
+        .for_worktree(
+            &session.session_id,
+            &session.worktree_root,
+            &session.session_dir,
+        );
+        self.rooms
+            .ensure_open(
+                &hosting,
+                || host.session_services(),
+                &TerminalExposedBy(Arc::clone(&host)),
+            )
+            .await
     }
 
     /// The `session_room.SessionRoomService` entry, resolving sessions through `sessions`.
@@ -82,6 +135,16 @@ impl LiveKitSessionReach {
     }
 }
 
+/// The room's terminal bridge: whatever the session host exposes a terminal with.
+struct TerminalExposedBy(Arc<dyn ReachableSessions>);
+
+#[async_trait::async_trait]
+impl SessionTerminalBridge for TerminalExposedBy {
+    async fn bridge(&self, session_id: &str) -> Result<(), Status> {
+        self.0.expose_terminal(session_id).await
+    }
+}
+
 /// `SessionRoomService`, answered by the reach that opens the rooms.
 struct SessionRoomServer {
     reach: Arc<LiveKitSessionReach>,
@@ -94,8 +157,26 @@ impl SessionRoomService for SessionRoomServer {
         &self,
         request: tddy_rpc::Request<OpenSessionRoomRequest>,
     ) -> Result<tddy_rpc::Response<OpenSessionRoomResponse>, Status> {
-        let _ = (request, &self.reach, &self.sessions);
-        todo!("SessionRoomServer::open_session_room")
+        let request = request.into_inner();
+        let session = self
+            .sessions
+            .resolve(&request.session_token, &request.session_id)
+            .await?;
+        let opened = self
+            .reach
+            .open_now(&session, Arc::clone(&self.sessions))
+            .await?
+            .ok_or_else(|| {
+                Status::failed_precondition(format!(
+                    "LiveKit is not configured on this daemon, so {} cannot be opened",
+                    session_room_name(&session.session_id)
+                ))
+            })?;
+        Ok(tddy_rpc::Response::new(OpenSessionRoomResponse {
+            livekit_room: opened.room,
+            livekit_url: opened.url,
+            livekit_server_identity: opened.server_identity,
+        }))
     }
 }
 
@@ -106,8 +187,22 @@ impl SessionReach for LiveKitSessionReach {
         session: ReachedSession,
         host: Arc<dyn ReachableSessions>,
     ) -> Result<(), Status> {
-        let _ = (session, host);
-        todo!("LiveKitSessionReach::session_reached")
+        if session.arrived_over == RequestTransport::LiveKit {
+            return self.open_now(&session, host).await.map(drop);
+        }
+        // Nothing on this host needs the room: open it so the session is reachable from elsewhere,
+        // and let the board carry the outcome rather than a caller that never asked for it.
+        let reach = self.clone();
+        tokio::spawn(async move {
+            if let Err(failure) = reach.open_now(&session, host).await {
+                log::warn!(
+                    "session_reach: could not open the room of session {}: {}",
+                    session.session_id,
+                    failure.message
+                );
+            }
+        });
+        Ok(())
     }
 }
 
