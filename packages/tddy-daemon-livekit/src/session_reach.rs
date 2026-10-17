@@ -101,6 +101,15 @@ impl SessionRoomService for SessionRoomServer {
 
 #[async_trait::async_trait]
 impl SessionReach for LiveKitSessionReach {
+    async fn open_now(
+        &self,
+        session: ReachedSession,
+        host: Arc<dyn ReachableSessions>,
+    ) -> Result<Option<tddy_daemon_extensions::OpenedRoom>, Status> {
+        let _ = (session, host);
+        todo!("LiveKitSessionReach::open_now (the trait's)")
+    }
+
     async fn session_reached(
         &self,
         session: ReachedSession,
