@@ -121,6 +121,10 @@ impl RustBackend {
     /// A document with no symbols has nothing to hover, so the warm-up is skipped rather than spent
     /// on a position that would never resolve — which leaves `indexed` false, and the first real
     /// wait doing the waiting instead.
+    ///
+    /// Bounded on silence as the wait for type inference is: a server that says it is loading and
+    /// then says nothing new for [`SilenceBounds::loading`] is refused as
+    /// [`RestructureError::ServerStalled`] in this stage. There is no bound on total time.
     pub(super) fn ensure_indexed(&mut self, uri: &str) -> Result<()> {
         if self.indexed {
             return self.refuse_degraded_index();
@@ -152,7 +156,7 @@ impl RustBackend {
                 (self.progress)("crate index ready");
                 return self.refuse_degraded_index();
             }
-            if !self.keep_waiting(Some(&mut waiting), INDEXING_POLL) {
+            if !self.keep_waiting_unless_stalled(&mut waiting, uri, &probe)? {
                 return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
         }
@@ -234,7 +238,7 @@ impl RustBackend {
                     .elapsed()
             });
             self.refuse_silence(&waiting, silent_for, uri, position)?;
-            if !self.keep_waiting_for_inference(&mut waiting, uri, position)? {
+            if !self.keep_waiting_unless_stalled(&mut waiting, uri, position)? {
                 return Err(self.incomplete_index(waiting.stage(), started.elapsed()));
             }
         }
@@ -281,12 +285,16 @@ impl RustBackend {
         }
     }
 
-    /// Wait out one poll of a wait for type inference, as [`Self::keep_waiting`] does — `false`
-    /// once the caller has stopped waiting — refusing a server gone silent ([`Self::refuse_silence`]).
+    /// Wait out one poll of a wait on the server, as [`Self::keep_waiting`] does — `false` once the
+    /// caller has stopped waiting — refusing a loading server gone silent ([`Self::refuse_silence`]).
+    ///
+    /// Both waits poll through this: the crate-index warm-up and the wait for type inference at
+    /// `position`. A loading server that says nothing new is as stalled in the one as in the other.
+    /// The ready bound is not judged here — a slice has no hover to judge it on.
     ///
     /// Judged in every slice the poll sleeps in rather than once per poll: a server's busy report
     /// can be folded away by the next poll's request before a once-per-poll look sees it.
-    fn keep_waiting_for_inference(
+    fn keep_waiting_unless_stalled(
         &self,
         waiting: &mut Waiting,
         uri: &str,

@@ -8,10 +8,12 @@
 //!   shape of the `#carve` 17 stage B2 apply that sat at 0% CPU for ten minutes.
 //! - **Loading and silent.** The server says it is loading and then says nothing new. Past
 //!   `LOADING_SILENCE_BOUND` the wait is refused as `ServerStalled`, naming the stage and the
-//!   server's last words. A server that keeps narrating is never refused for how long it takes.
+//!   server's last words — in the wait for type inference and in the crate-index warm-up alike. A
+//!   server that keeps narrating is never refused for how long it takes.
 //!
 //! Driven over `fake_lsp` — `--cold-hovers N --loads-crate-graph` (ready, never types),
-//! `--goes-busy-after-hovers 1` (busy and silent after a ready warm-up) and
+//! `--goes-busy-after-hovers 1` (busy and silent after a ready warm-up), `--never-quiescent` (busy
+//! and silent from the start, so in the warm-up) and
 //! `--narrates-while-loading` (busy and talking) — with the bounds and the heartbeat injected, so
 //! no test waits production's minutes and none branches on being a test.
 
@@ -322,6 +324,40 @@ async fn a_loading_server_silent_past_the_stall_bound_is_refused_as_stalled_nami
     assert!(
         matches!(&refusal, RestructureError::ServerStalled { stage, last, .. }
             if stage.contains("type inference at src/lib.rs:1")
+                && last.contains("build script num-bigint run")),
+        "{refusal:?}\n{:#?}",
+        heard.all()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_never_finishes_loading_and_goes_silent_is_refused_as_stalled_while_warming_the_crate_index(
+) {
+    // Given a rename whose server says it is busy on a build script from the start and then says
+    // nothing new, with a 500 ms loading bound
+    let workspace = a_workspace_holding_foo();
+    let (heard, cancel) = (HeardLines::default(), CancellationToken::new());
+    let backend = a_backend_over_a_fake_started_with(
+        workspace.path(),
+        &["--never-quiescent"],
+        bounds(NEVER_REACHED, A_SHORT_LOADING_BOUND),
+        &heard,
+        &cancel,
+    )
+    .await;
+
+    // When the rename is left to wait
+    let refusal = what_it_ended_with(
+        &cancel,
+        the_rename_of_foo(backend, workspace.path()),
+        LONG_ENOUGH_FOR_A_SHORT_BOUND,
+    )
+    .await;
+
+    // Then it was refused as stalled in the warm-up, quoting the server's last words
+    assert!(
+        matches!(&refusal, RestructureError::ServerStalled { stage, last, .. }
+            if stage == "warming the crate index"
                 && last.contains("build script num-bigint run")),
         "{refusal:?}\n{:#?}",
         heard.all()
