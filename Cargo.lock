@@ -12794,6 +12794,7 @@ dependencies = [
  "serial_test",
  "tddy-core",
  "tddy-livekit-testkit",
+ "tddy-room-client",
  "tddy-rpc",
  "tddy-service",
  "tddy-testing-commons",
@@ -13036,7 +13037,18 @@ dependencies = [
  "rstest 0.24.0",
  "serde_json",
  "tddy-livekit",
+ "tddy-room-client",
  "tddy-service",
+ "tokio",
+]
+
+[[package]]
+name = "tddy-room-client"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "pretty_assertions",
+ "tddy-rpc",
  "tokio",
 ]
 
@@ -13586,6 +13598,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tddy-livekit",
+ "tddy-room-client",
  "tddy-service",
  "tddy-testing-commons",
  "tempfile",
@@ -13599,12 +13612,14 @@ dependencies = [
  "async-trait",
  "livekit",
  "log",
+ "pretty_assertions",
  "prost 0.13.5",
  "reqwest 0.12.28",
  "serde_json",
  "serial_test",
  "tddy-core",
  "tddy-livekit",
+ "tddy-room-client",
  "tddy-rpc",
  "tddy-sandbox",
  "tddy-service",
@@ -13795,6 +13810,7 @@ dependencies = [
  "tddy-daemon-kernel",
  "tddy-livekit",
  "tddy-pty",
+ "tddy-room-client",
  "tddy-rpc",
  "tddy-service",
  "tddy-task",

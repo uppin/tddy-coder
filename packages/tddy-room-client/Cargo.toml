@@ -1,0 +1,23 @@
+[package]
+name = "tddy-room-client"
+version = "0.1.0"
+edition = "2021"
+description = "The client side of joining a room and talking in it, as ports: client tools reach a room through these, and only their binaries know which transport implements them"
+
+[lib]
+name = "tddy_room_client"
+path = "src/lib.rs"
+
+# Reaches no LiveKit crate: client libraries depend on this, their binaries wire an implementation.
+[dependencies]
+async-trait = "0.1"
+tddy-rpc = { path = "../tddy-rpc" }
+tokio = { version = "1", features = ["sync"] }
+
+[features]
+# `in_memory`: a connector for tests of code that joins rooms.
+test-support = []
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt"] }

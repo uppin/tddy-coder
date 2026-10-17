@@ -50,6 +50,7 @@ members = [
     "packages/tddy-daemon",
     "packages/tddy-daemon-kernel",
     "packages/tddy-daemon-extensions",
+    "packages/tddy-room-client",
     "packages/tddy-host-service",
     "packages/tddy-worktree-service",
     "packages/tddy-model-registry",
