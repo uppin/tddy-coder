@@ -169,3 +169,31 @@ async fn a_server_that_exits_before_the_handshake_is_reported_ended_with_its_exi
         .expect("an end was reported");
     assert_eq!(outcome, ProcessOutcome::Exited { code: 0 });
 }
+
+#[tokio::test]
+async fn a_server_program_that_does_not_exist_is_refused_as_not_found_naming_the_program() {
+    // Given a registry whose configured server program is not on disk
+    let observer = Collected::default();
+    let missing = std::env::temp_dir().join("tddy-lsp-test-no-such-language-server");
+    let mut allow = LspAllowList::new();
+    allow.allow(Language::Rust, LaunchSpec::new(missing.to_string_lossy()));
+    let registry = LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60))
+        .with_spawn_observer(Arc::new(observer.clone()));
+
+    // When a server is requested
+    let refusal = registry
+        .get_or_spawn(the_key_of(&an_existing_root()))
+        .await
+        .err();
+
+    // Then the refusal says the program was not found — not that a server it never started exited
+    match refusal {
+        Some(LspError::ServerNotFound(detail)) => assert!(
+            detail.contains(&*missing.to_string_lossy()),
+            "the refusal does not name the program: {detail}"
+        ),
+        other => panic!("expected ServerNotFound, got {other:?}"),
+    }
+    // And no process was reported, because none existed
+    assert!(observer.processes().is_empty());
+}

@@ -42,11 +42,13 @@ fn an_index_daemon_that_binds_and_stays_up() -> AnIndexDaemonHost {
     host.write_program(&format!(
         "#!/bin/sh\n\
          printf '%s' \"$*\" > {argv}\n\
+         printf '%s' \"$TDDY_TEST_TOOLCHAIN\" > {env}\n\
          if [ -e \"$2\" ]; then exit 3; fi\n\
          : > \"$2\"\n\
          echo \"listening on $2\" >&2\n\
          exec sleep 86400\n",
         argv = host.recorded_argv_path().display(),
+        env = host.recorded_env_path().display(),
     ));
     host
 }
@@ -93,6 +95,16 @@ impl AnIndexDaemonHost {
         self.dir.path().join("argv")
     }
 
+    fn recorded_env_path(&self) -> PathBuf {
+        self.dir.path().join("env")
+    }
+
+    /// The `TDDY_TEST_TOOLCHAIN` the stand-in was started with — empty when it was not set.
+    fn toolchain_env_it_was_given(&self) -> String {
+        std::fs::read_to_string(self.recorded_env_path())
+            .expect("the stand-in index daemon recorded no environment")
+    }
+
     /// The command line the stand-in was actually invoked with.
     fn argv_it_was_given(&self) -> String {
         std::fs::read_to_string(self.recorded_argv_path())
@@ -106,6 +118,8 @@ impl AnIndexDaemonHost {
             socket_path: self.socket_path(),
             ready_timeout: A_READINESS_BUDGET_NOTHING_SHOULD_WAIT_OUT,
             idle_timeout: Duration::from_secs(600),
+            rust_analyzer: None,
+            env: Default::default(),
         }
     }
 }
@@ -422,12 +436,19 @@ fn manages_no_index_daemon_unless_the_configuration_asks_for_one() {
 
 #[test]
 fn takes_the_program_the_socket_and_the_budgets_the_configuration_names() {
-    // Given an index daemon section naming all four
+    // Given an index daemon section naming every setting
     let configured = IndexDaemonConfig {
         binary_path: Some(PathBuf::from("/opt/tddy/bin/tddy-index-daemon")),
         socket_path: Some(PathBuf::from("/run/user/1000/code-index.sock")),
         ready_timeout_secs: 90,
         idle_timeout_secs: 900,
+        rust_analyzer_path: Some(PathBuf::from("/opt/toolchain/bin/rust-analyzer")),
+        env: [(
+            "PATH".to_string(),
+            "/opt/toolchain/bin:/usr/bin".to_string(),
+        )]
+        .into_iter()
+        .collect(),
     };
 
     // When the spawn plan is derived from it
@@ -441,6 +462,79 @@ fn takes_the_program_the_socket_and_the_budgets_the_configuration_names() {
             socket_path: PathBuf::from("/run/user/1000/code-index.sock"),
             ready_timeout: Duration::from_secs(90),
             idle_timeout: Duration::from_secs(900),
+            rust_analyzer: Some(PathBuf::from("/opt/toolchain/bin/rust-analyzer")),
+            env: [(
+                "PATH".to_string(),
+                "/opt/toolchain/bin:/usr/bin".to_string()
+            )]
+            .into_iter()
+            .collect(),
         }
     );
+}
+
+#[test]
+fn reads_the_language_server_and_its_environment_from_the_index_daemon_section() {
+    // Given an `index_daemon:` section naming rust-analyzer and the toolchain it runs with
+    let yaml = "rust_analyzer_path: /opt/toolchain/bin/rust-analyzer\n\
+                env:\n  \
+                  PATH: /opt/toolchain/bin:/usr/bin\n  \
+                  RUST_SRC_PATH: /opt/toolchain/lib/rust-src\n";
+
+    // When it is read
+    let configured: IndexDaemonConfig = serde_yaml::from_str(yaml).expect("the section parses");
+
+    // Then both are taken as written, and everything else keeps its default
+    assert_eq!(
+        configured,
+        IndexDaemonConfig {
+            rust_analyzer_path: Some(PathBuf::from("/opt/toolchain/bin/rust-analyzer")),
+            env: [
+                (
+                    "PATH".to_string(),
+                    "/opt/toolchain/bin:/usr/bin".to_string()
+                ),
+                (
+                    "RUST_SRC_PATH".to_string(),
+                    "/opt/toolchain/lib/rust-src".to_string()
+                ),
+            ]
+            .into_iter()
+            .collect(),
+            ..IndexDaemonConfig::default()
+        }
+    );
+}
+
+#[tokio::test]
+async fn tells_the_index_daemon_which_language_server_to_run_and_with_what_environment() {
+    // Given a spawn plan naming rust-analyzer and an environment for the toolchain
+    let host = an_index_daemon_that_binds_and_stays_up();
+    let registry = IndexDaemonRegistry::new(
+        IndexDaemonSpawn {
+            rust_analyzer: Some(PathBuf::from("/opt/toolchain/bin/rust-analyzer")),
+            env: [(
+                "TDDY_TEST_TOOLCHAIN".to_string(),
+                "/opt/toolchain".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            ..host.spawn_plan()
+        },
+        TaskRegistry::new(),
+    );
+
+    // When the index daemon is started
+    registry.get_or_spawn().await.expect("the index daemon");
+
+    // Then it is told which rust-analyzer to run, after the socket it serves on
+    assert_eq!(
+        host.argv_it_was_given(),
+        format!(
+            "--grpc-uds {} --rust-analyzer /opt/toolchain/bin/rust-analyzer",
+            host.socket_path().display()
+        )
+    );
+    // And it runs with the configured environment, which its language server inherits
+    assert_eq!(host.toolchain_env_it_was_given(), "/opt/toolchain");
 }

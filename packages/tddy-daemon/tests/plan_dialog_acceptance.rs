@@ -516,6 +516,8 @@ impl AnIndexDaemonHost {
                 socket_path: self.socket_path(),
                 ready_timeout: A_READINESS_BUDGET_NOTHING_SHOULD_WAIT_OUT,
                 idle_timeout: Duration::from_secs(600),
+                rust_analyzer: None,
+                env: Default::default(),
             },
             TaskRegistry::new(),
         )

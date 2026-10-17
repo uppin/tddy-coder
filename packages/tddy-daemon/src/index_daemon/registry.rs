@@ -192,6 +192,8 @@ impl IndexDaemonRegistry {
             .spawn(
                 IndexDaemonBody {
                     program: self.inner.spawn.program.clone(),
+                    rust_analyzer: self.inner.spawn.rust_analyzer.clone(),
+                    env: self.inner.spawn.env.clone(),
                     socket_path: socket_path.clone(),
                     started_tx,
                 },

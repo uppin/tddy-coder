@@ -1,5 +1,6 @@
 //! Daemon configuration — users, tools, LiveKit, GitHub, etc.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -304,6 +305,18 @@ pub struct IndexDaemonConfig {
     /// the warm index it holds costs minutes to rebuild.
     #[serde(default = "default_index_daemon_idle_timeout_secs")]
     pub idle_timeout_secs: u64,
+    /// The rust-analyzer the index daemon runs, passed to it as `--rust-analyzer`. When unset the
+    /// index daemon runs `rust-analyzer` from its own `PATH`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rust_analyzer_path: Option<PathBuf>,
+    /// Environment variables set on the index daemon, and so inherited by the rust-analyzer it
+    /// starts and the `cargo` / `rustc` that one runs to load a workspace — the toolchain a host
+    /// launched outside a developer shell does not otherwise have. Added to the daemon's own
+    /// environment, overriding a variable of the same name.
+    // TODO: one environment for every workspace root; a per-project toolchain (a checkout's own
+    // nix/direnv shell) is not expressible here yet.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 /// 60s. Binding a socket is immediate; this covers a cold start of the process around it.
@@ -324,6 +337,8 @@ impl Default for IndexDaemonConfig {
             socket_path: None,
             ready_timeout_secs: default_index_daemon_ready_timeout_secs(),
             idle_timeout_secs: default_index_daemon_idle_timeout_secs(),
+            rust_analyzer_path: None,
+            env: BTreeMap::new(),
         }
     }
 }
