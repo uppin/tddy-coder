@@ -1,7 +1,7 @@
 //! `CommonRoom` forwards to peer daemons through a `PeerForwarder` port, and keeps the forwarding
 //! policy itself: the deadline a call gets, the idle timeout a relayed stream gets, and the errors a
 //! caller sees. Driven here over an in-memory forwarder — no LiveKit — which is the point of the
-//! port. PRD: `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-peer-forwarding.md`.
+//! port. Behaviour: `docs/ft/daemon/livekit-peer-discovery.md` § *Forwarding transport*.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

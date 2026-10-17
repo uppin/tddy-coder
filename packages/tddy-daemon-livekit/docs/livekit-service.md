@@ -10,6 +10,7 @@ stream.
 |---|---|
 | `session_room` | the per-session room — naming, the poll loop, the WIP ref and the delta ring, and the four trait ports. Detail: [session-room.md](./session-room.md) |
 | `livekit_peer_discovery` | the metadata advertisement (with `AdvertisedSigningKey`), `CommonRoomPeerRegistry`, `peer_signing_public_keys`, `daemon_rpc_identity`, and the forwarding helpers |
+| `livekit_peer_forwarder` | `LiveKitPeerForwarder`: the kernel's `PeerForwarder` port over the common room — see below |
 | `common_room_supervisor` | the `CommonRoomSupervisor` trait and `SupervisedCommonRoom` — joining the common room and keeping it joined |
 | `livekit_rooms_stream` | `RoomRoster`, `RosterError`, and `pump_rooms`, the 3 s poller behind the rooms stream |
 | `livekit_service` | `LiveKitServiceImpl` and `build_livekit_entry` — **authored here**, because family T needs a service to be served by once it leaves `ConnectionServiceImpl` |
@@ -22,6 +23,28 @@ stream.
 re-exports both by name (`pub use tddy_daemon_livekit::{peer_routing, session_admission_service};`),
 and its host keeps one-line delegations to `PeerRouting` for the methods it serves itself, which is
 why those `PeerRouting` methods are `pub`.
+
+## `LiveKitPeerForwarder` — carrying a forward to a peer daemon
+
+`LiveKitPeerForwarder::new(slot)` implements `tddy_daemon_extensions::PeerForwarder` over the common
+room's `Arc<RwLock<Option<Arc<Room>>>>` slot. The kernel's `CommonRoom` applies the deadline, the stream
+idle rule and the errors a caller sees; this carries the call and nothing else.
+
+- **A client per call.** Each call builds a `tddy_livekit::LiveKitRpcClientFactory::for_room(room)` client
+  addressed at `daemon_rpc_identity(peer)` (`daemon-{peer_id}`). With the room down, a call is a
+  `FailedPrecondition`: "LiveKit common room is not connected; cannot forward an RPC / a stream to a peer".
+  `is_connected()` is whether the slot holds a room.
+- **A stream's client lives as long as the stream.** The client holds the call's registration in the
+  room's shared response loop, so the forwarder moves it into a relay task that feeds the receiver it
+  returns. The relay ends when the peer ends the stream, and also when the reader goes away: it watches
+  `tx.closed()`, so a stream whose reader dropped is released even if the peer never sends again.
+- **The reader must drain promptly.** The relay's channel is 32 frames deep and independent of the
+  transport's own 32-frame channel. A reader that stalls backs the relay up, then that channel, and the
+  room's shared response loop blocks for every call in flight. The kernel's relay drains into an
+  unbounded buffer and never stalls; a second consumer must do the same.
+
+`PeerRouting` and the common-room discovery loop build their `CommonRoom` through it, over the slot they
+already hold.
 
 ## `livekit.LiveKitService`
 
