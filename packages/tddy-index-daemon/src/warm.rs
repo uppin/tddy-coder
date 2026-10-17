@@ -163,12 +163,14 @@ fn ready(root: &Path) -> IndexProgress {
 
 /// One phase the server reported, with where the load has got to so far.
 ///
-/// `phase` and `percentage` are the *furthest* the load has reached rather than whatever the last
-/// notification happened to carry, because the server routinely counts files inside a phase and
-/// then emits sub-steps with no percentage at all — so the last number is not the highest one, and
-/// a client watching the field go backwards would read a load in progress as one going wrong.
+/// `phase` is the phase the server reported on most recently, and `percentage` the highest that
+/// phase has reached rather than whatever the last notification happened to carry: the server
+/// counts files inside a phase and then emits sub-steps with no percentage at all, and a client
+/// watching the field go backwards would read a load in progress as one going wrong. Not the
+/// furthest across phases — an early phase finished at 100% would hide every later one; that
+/// figure travels in `furthest`.
 fn phase_of(line: &str, chatter: &ServerChatter) -> IndexProgress {
-    let (percentage, phase) = chatter.furthest().unwrap_or((0, ""));
+    let (percentage, phase) = chatter.current().unwrap_or((0, ""));
     IndexProgress {
         line: line.to_string(),
         phase: phase.to_string(),
@@ -262,6 +264,51 @@ mod tests {
         assert!(
             !progress.ready,
             "a phase of a load in progress must not claim the index is ready"
+        );
+    }
+
+    /// `phase` and `percentage` are the phase running now. rust-analyzer finishes "Roots Scanned"
+    /// at 100% in seconds and then spends minutes building and indexing; a progress that kept
+    /// naming the phase with the highest number read "Roots Scanned 100%" for the whole load.
+    #[test]
+    fn names_the_phase_running_now_rather_than_the_one_that_reached_the_highest_percentage() {
+        // Given a server that scanned its roots to 100% and then began indexing
+        let mut chatter = ServerChatter::unthrottled();
+        let progress = |token: &str, value: serde_json::Value| {
+            json!({ "method": "$/progress", "params": { "token": token, "value": value } })
+        };
+        chatter.absorb(&progress(
+            "roots",
+            json!({ "kind": "begin", "title": "Roots Scanned", "percentage": 0 }),
+        ));
+        chatter.absorb(&progress(
+            "roots",
+            json!({ "kind": "report", "percentage": 100 }),
+        ));
+        chatter.absorb(&progress("roots", json!({ "kind": "end" })));
+        chatter.absorb(&progress(
+            "index",
+            json!({ "kind": "begin", "title": "Indexing", "percentage": 0 }),
+        ));
+        let line = chatter
+            .absorb(&progress(
+                "index",
+                json!({ "kind": "report", "message": "tddy_core", "percentage": 37 }),
+            ))
+            .expect("an unthrottled report is a line");
+
+        // When that line becomes a progress message
+        let progress = phase_of(&line, &chatter);
+
+        // Then it names indexing at 37%, and the furthest any phase got is still carried
+        assert_eq!(
+            (progress.phase.as_str(), progress.percentage),
+            ("Indexing", 37)
+        );
+        assert!(
+            progress.furthest.contains("Roots Scanned 100%"),
+            "{}",
+            progress.furthest
         );
     }
 

@@ -207,6 +207,12 @@ export const TEST_IDS = {
   // Worktree Code pane (docs/ft/web/session-code-pane.md)
   worktreeCodeToggle: "sessions-code-toggle",
   worktreeCodePane: "worktree-code-pane",
+  /** The Code pane's bottom strip: the session's code-index status (`data-state` names it). */
+  worktreeCodeIndexStatus: "worktree-code-index-status",
+  /** The strip's headline — phase and percentage, ready, failed, or not warmed. */
+  worktreeCodeIndexStatusSummary: "worktree-code-index-status-summary",
+  /** The strip's detail — the index server's own line about what it is doing. */
+  worktreeCodeIndexStatusDetail: "worktree-code-index-status-detail",
   worktreeFileTree: "worktree-file-tree",
   worktreeFilePreview: "worktree-file-preview",
   worktreeCodeHighlight: "worktree-code-highlight",
