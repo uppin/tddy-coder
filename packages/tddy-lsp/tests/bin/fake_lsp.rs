@@ -34,7 +34,8 @@
 //!   answered*, so that hover is already answered by a server that has said it is busy. Sent right
 //!   after the Nth answer instead, whether a client that hovers again at once had heard it by the
 //!   time it read that answer would be a race, and a consumer's test could not name which wait it
-//!   was in.
+//!   was in. A crate-graph load still being narrated when the server goes busy says nothing more —
+//!   above all no late `quiescent: true` — and the hover is answered at once all the same.
 //! - `--narrates-while-loading` — once the server is busy on its build script, report a *new* build
 //!   script (`build script crate-N run`) on the same phase every [`BETWEEN_BUILD_SCRIPT_REPORTS`],
 //!   on a timer of its own rather than per request: a server that stays loading and keeps saying
@@ -344,63 +345,68 @@ const THE_PHASES_OF_A_NARRATED_LOAD: [u64; 3] = [25, 50, 75];
 /// nothing to count is the shape a real server opens with.
 fn narrate_a_crate_graph_load() {
     const LOADING_TOKEN: &str = "fake-lsp-crate-graph";
-    CRATE_GRAPH_LOAD_PENDING.store(true, std::sync::atomic::Ordering::SeqCst);
     std::thread::spawn(|| {
         std::thread::sleep(BEFORE_THE_FIRST_PHASE);
-        send(&json!({
+        if !send_unless_gone_busy(&json!({
             "jsonrpc": "2.0",
             "method": "$/progress",
             "params": {
                 "token": LOADING_TOKEN,
                 "value": { "kind": "begin", "title": "loading crate graph" },
             }
-        }));
+        })) {
+            return;
+        }
         for percentage in THE_PHASES_OF_A_NARRATED_LOAD {
             std::thread::sleep(BETWEEN_PHASES);
-            send(&json!({
+            if !send_unless_gone_busy(&json!({
                 "jsonrpc": "2.0",
                 "method": "$/progress",
                 "params": {
                     "token": LOADING_TOKEN,
                     "value": { "kind": "report", "percentage": percentage },
                 }
-            }));
+            })) {
+                return;
+            }
         }
-        send(&json!({
+        if !send_unless_gone_busy(&json!({
             "jsonrpc": "2.0",
             "method": "$/progress",
             "params": { "token": LOADING_TOKEN, "value": { "kind": "end" } }
-        }));
+        })) {
+            return;
+        }
         // The extension a real rust-analyzer signals a queryable graph with. Sent last, because
         // that is what it means: everything above was the load, and this is it being over.
-        send(&json!({
+        send_unless_gone_busy(&json!({
             "jsonrpc": "2.0",
             "method": "experimental/serverStatus",
             "params": { "health": "ok", "quiescent": true }
         }));
-        CRATE_GRAPH_LOAD_PENDING.store(false, std::sync::atomic::Ordering::SeqCst);
     });
 }
 
-/// Set while [`narrate_a_crate_graph_load`] is still narrating, so a server going busy afterwards
-/// can wait for it to finish.
-static CRATE_GRAPH_LOAD_PENDING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+/// Whether the server has gone busy ([`go_busy_on_a_build_script`]), behind the lock both it and
+/// the narrated load send under — so no line of the load can slip out after the busy report.
+static GONE_BUSY: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
 
-/// Block until a narrated crate-graph load, if one is under way, has reported itself over.
+/// Send one line of the narrated crate-graph load, unless the server has gone busy since; `false`
+/// once it has, for the load to stop.
 ///
-/// `--goes-busy-after-hovers` is a tree that changed *after* a ready index, so its busy report has
-/// to follow the load's `quiescent: true`. A client can be through its warm-up on hover alone
-/// before the load has finished narrating, and a busy report sent then would be overtaken by the
-/// load's own quiescence a moment later — a server that went busy and then, for no reason, ready.
-fn after_the_crate_graph_load() {
-    while CRATE_GRAPH_LOAD_PENDING.load(std::sync::atomic::Ordering::SeqCst) {
-        std::thread::sleep(BETWEEN_LOOKS_AT_THE_LOAD);
+/// `--goes-busy-after-hovers` is a tree that changed after a ready index. A client can be through
+/// its warm-up on hover alone before the load has finished narrating, so the busy report can come
+/// first — and the load's own `quiescent: true` sent after it would read as a server that went busy
+/// and then, for no reason, ready. A busy server supersedes the load instead: the load says nothing
+/// more. Nothing waits, so no request's answer is held while the load plays out.
+fn send_unless_gone_busy(message: &Value) -> bool {
+    let gone_busy = GONE_BUSY.lock().unwrap();
+    if *gone_busy {
+        return false;
     }
+    send(message);
+    true
 }
-
-/// How often [`after_the_crate_graph_load`] looks whether the load has finished narrating.
-const BETWEEN_LOOKS_AT_THE_LOAD: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// Report the server busy on a build script, and never say it is done.
 ///
@@ -409,6 +415,8 @@ const BETWEEN_LOOKS_AT_THE_LOAD: std::time::Duration = std::time::Duration::from
 /// build script runs. Nothing ends the phase and nothing reports quiescence afterwards.
 fn go_busy_on_a_build_script() {
     const BUSY_TOKEN: &str = "fake-lsp-build-script";
+    let mut gone_busy = GONE_BUSY.lock().unwrap();
+    *gone_busy = true;
     send(&json!({
         "jsonrpc": "2.0",
         "method": "experimental/serverStatus",
@@ -584,7 +592,6 @@ fn handle_message(message: &Value, hang: bool, cold_hovers: u32, loads_crate_gra
         "textDocument/hover" => {
             let served = COLD_HOVERS_SERVED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             if the_server_goes_busy_before_this_hover(served) {
-                after_the_crate_graph_load();
                 go_busy_on_a_build_script();
             }
             if HOVER_NEVER_ANSWERS.load(std::sync::atomic::Ordering::SeqCst) {

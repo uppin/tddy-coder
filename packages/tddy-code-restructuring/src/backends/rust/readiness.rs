@@ -36,12 +36,16 @@ pub const READY_HOVER_BOUND: Duration = Duration::from_secs(30);
 /// silence only, with the developer's consent (`#reshape` 9/19).
 pub const LOADING_SILENCE_BOUND: Duration = Duration::from_secs(600);
 
-/// The two silences a wait for type inference tolerates before it refuses.
+/// The two silences a wait on rust-analyzer tolerates before it refuses.
+///
+/// `ready` bounds the wait for type inference at a position; `loading` bounds both that wait and
+/// the crate-index warm-up ([`RustBackend::ensure_indexed`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SilenceBounds {
     /// A ready index leaving the hover `null` at a position nothing excuses.
     pub ready: Duration,
-    /// A loading server whose last words have not changed.
+    /// A loading server whose last words have not changed, in the warm-up or in the wait for type
+    /// inference.
     pub loading: Duration,
 }
 
