@@ -34,7 +34,9 @@ pub use entry_points::{
 pub use options::{command_of, parse_options, Command, Options};
 pub use outcome::{Finding, Outcome, PlanProgress, RunSummary, SnapshotRewrite};
 
-use crate::apply::{apply_workspace_edit, ensure_git_worktree, hash_touched_files};
+use crate::apply::{
+    apply_workspace_edit, ensure_git_worktree, hash_touched_files, untracked_move_sources,
+};
 use crate::journal::{Journal, JournalRecord, ResumeDecision};
 use crate::spawn_record::SpawnRecorder;
 use crate::{LedgerCheckpoint, OpId, Plan, PositionLedger, RestructureError, Result};
@@ -102,6 +104,31 @@ pub fn commit_operation(
         ledger: journal.fold_through(index),
     }
     .write(&paths.ledger)
+}
+
+/// Refuse operation `index` when its resolved edit moves a file git does not track.
+///
+/// What every apply loop calls on an operation's resolved edit **before** it enters a group or
+/// [`commit_operation`] journals it in flight: `git mv` would refuse such a file only after the
+/// operation's text edits were on disk. Refused here, the tree and the journal stay exactly as the
+/// previous operation left them, so the same plan applies cleanly once the file is added. A dry run
+/// passes its `overlay`, so a file an earlier operation of the run created or moved is its own.
+///
+/// # Errors
+///
+/// [`RestructureError::UntrackedMoveSource`] naming every such source.
+pub fn preflight_moves(
+    index: usize,
+    resolved: &crate::Resolution,
+    root: &Path,
+    overlay: &crate::Overlay,
+    spawns: &SpawnRecorder,
+) -> Result<()> {
+    let paths = untracked_move_sources(root, &resolved.edit, overlay, spawns)?;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    Err(RestructureError::UntrackedMoveSource { op: index, paths })
 }
 
 /// Open the journal a run under `root` will append to, refusing a run that must not start.

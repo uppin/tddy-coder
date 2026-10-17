@@ -2,7 +2,7 @@ use super::super::refuse_a_broken_result;
 use crate::backends::rust::ProgressSink;
 use crate::Result;
 
-use super::super::commit_operation;
+use super::super::{commit_operation, preflight_moves};
 
 use super::progress_line;
 
@@ -234,6 +234,37 @@ fn report_settled(
     }
 }
 
+/// Rehearse operation `index` of a dry run: refuse it as the apply would, say it would apply, and
+/// carry its edit forward through `ledger` and `overlay` for the operations after it, writing
+/// nothing.
+///
+/// `done` counts the operations rehearsed before this one.
+// The loop's own state, threaded as it threads it into `commit_operation`: the operation's place in
+// the plan and the run, the tree, and the two projections a dry run folds instead of writing.
+#[allow(clippy::too_many_arguments)]
+fn rehearse_dry_run(
+    plan: &Plan,
+    index: usize,
+    done: usize,
+    resolved: &Resolution,
+    root: &Path,
+    options: &Options,
+    ledger: &mut PositionLedger,
+    overlay: &mut Overlay,
+) -> Result<()> {
+    preflight_moves(index, resolved, root, overlay, &options.spawns)?;
+    (options.account)(&progress_line(
+        index,
+        done,
+        plan.ops.len(),
+        plan.ops[index].op,
+        resolved.edit.changes.len(),
+        false,
+    ));
+    ledger.record(&resolved.edit);
+    overlay.record(root, &resolved.edit)
+}
+
 fn apply_held_plan(
     root: &Path,
     store: &mut PlanStore,
@@ -298,7 +329,11 @@ fn apply_held_plan(
 
             let at = ledger.translate_op(op)?;
             (options.progress)(&format!(
-                "op {index} of {total}: resolving {:?} in `{}`",
+                "op {index}{} of {total}: resolving {:?} in `{}`",
+                op.id
+                    .as_ref()
+                    .map(|id| format!(" ({id})"))
+                    .unwrap_or_default(),
                 op.op,
                 at.anchor.file()
             ));
@@ -320,16 +355,16 @@ fn apply_held_plan(
             let files = resolved.edit.changes.len();
             (options.progress)(&format!("op {index} of {total}: resolved {files} file(s)"));
             if options.dry_run {
-                (options.account)(&progress_line(
+                rehearse_dry_run(
+                    &plan,
                     index,
                     done,
-                    plan.ops.len(),
-                    op.op,
-                    files,
-                    false,
-                ));
-                ledger.record(&resolved.edit);
-                overlay.record(root, &resolved.edit)?;
+                    &resolved,
+                    root,
+                    options,
+                    &mut ledger,
+                    &mut overlay,
+                )?;
                 done += 1;
                 continue;
             }
@@ -338,6 +373,7 @@ fn apply_held_plan(
                 "op {index} of {total}: applying {files} file(s) to disk"
             ));
             let id = op.id.as_ref().filter(|_| !legacy);
+            preflight_moves(index, &resolved, root, &overlay, &options.spawns)?;
             GroupRun::enter(&mut group, &plan, index, id, &resolved, &gate, &mut journal)?;
             commit_operation(
                 index,
