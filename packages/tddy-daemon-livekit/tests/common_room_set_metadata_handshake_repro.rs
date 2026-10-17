@@ -70,6 +70,8 @@ fn spawn_common_room_discovery(
         registry,
         room_slot.clone(),
         Default::default(),
+        tddy_daemon_extensions::IntegrationStatusBoard::new()
+            .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit"),
     );
     room_slot
 }
