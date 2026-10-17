@@ -57,7 +57,7 @@ export type CreateSessionInitialValues = Partial<{
    * remote-tracking refs (`origin/feature/x`) and are matched on the local name behind them.
    */
   selectedBranch: string;
-  /** Pre-check state for the "Create Remote Branch" toggle (new-branch mode). Defaults to checked. */
+  /** Pre-check state for the "Create Remote Branch" toggle (new-branch mode). Defaults to unchecked. */
   createRemoteBranch: boolean;
   /** Concrete base branch shown in the new-branch option: "New branch from base: <baseBranchLabel>". */
   baseBranchLabel: string;
