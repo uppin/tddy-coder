@@ -11,8 +11,8 @@ tests that failed.
 |-------|--------------|-----------------|
 | `Rust lint` | `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets -- -D warnings` | ~8 min |
 | `Rust build` | `cargo build --workspace --bins --examples` | ~10 min |
-| `Rust tests` | `cargo nextest run --workspace --profile ci`, minus the e2e set | |
-| `Rust e2e tests` | the same command, restricted to the e2e set — tests that need real infrastructure | |
+| `Rust tests` | `cargo nextest run --archive-file … --profile ci`, minus the e2e set | |
+| `Rust e2e tests` | the same command, restricted to the e2e set and run as 6 shards — tests that need real infrastructure | |
 | `Generated code` | `bun install --frozen-lockfile`, then `scripts/generated-code.sh check` | ~3 min |
 | `Web tests` | `bun install --frozen-lockfile`, `bun run build`, `tddy-web` unit tests, `tddy-web` + `tddy-livekit-web` Cypress component tests | ~10 min |
 
@@ -37,9 +37,10 @@ If you add a test that shells out to a workspace binary, add that binary to the
 artifact — otherwise it will pass locally and fail in CI with "not built".
 
 Worth being explicit about the limit of this: because the runners are separate,
-building first shares the *binaries*, not the compilation. `Rust tests` still
-compiles its own test targets from the cache. The gain is coverage of the suites
-that need fixtures, not speed — it costs roughly the build's wall-clock time.
+`Rust build` shares the *binaries*, not the compilation. The test targets are compiled
+once, by a job of their own, and shared as an archive (see
+[Rust tests and Rust e2e tests](#rust-tests-and-rust-e2e-tests)). The two compile side by side,
+so the test checks wait for the slower of them, not for the sum.
 
 All three run in the **nix dev shell** via `./dev`, against the pinned
 `flake.lock`. CI therefore uses the same rustc, clippy, bun and system libraries
@@ -55,10 +56,38 @@ The Rust suite is two checks, split by **what a test needs to run**, not by how 
 | `Rust tests` | every test not in the e2e set | nothing outside the process, the files and the sockets it makes itself |
 | `Rust e2e tests` | the e2e set | real infrastructure: a **LiveKit server in Docker**, a **live rust-analyzer**, or a **real `tddy-supervisor`, index-daemon, daemon or `tddy-coder` process** |
 
-They are the two legs of one matrix job in `ci.yml`, so the setup — fixture binaries, nix, caches,
-the JUnit report — exists once. A failing leg does not cancel the other, and each reports its own
-count and uploads its own JUnit XML (`junit-rust`, `junit-rust-e2e`). They share one cargo cache
-(`test`): both build the same workspace test targets, and only `Rust tests` saves it.
+**The test targets are compiled once.** The `Rust test archive` job runs
+`cargo nextest archive --workspace --locked` as a step of its own — so the compile is timed and
+visible while it runs — and uploads the result as the `nextest-archive` artifact (a zstd tarball of
+every test binary and the metadata nextest needs, kept one day). It is the only job that compiles test
+targets, so it is the only writer of the `test` cargo cache (master only). `Rust tests` and every e2e
+shard download it and run `cargo nextest run --archive-file … --extract-to "$PWD" --workspace-remap
+"$PWD"`; they compile nothing. `--locked` belongs to the archive step: `run --archive-file` rejects
+it. The archive is extracted into the workspace, so `target/debug` holds the fixture binaries and the
+archive's own binaries side by side, as after a local build, and the JUnit lands at
+`target/nextest/ci/junit.xml`. Every job runs on the same runner image at the same checkout path, which
+is what lets paths baked in at compile time (`env!("CARGO_MANIFEST_DIR")`) stay valid.
+
+**The e2e leg runs as shards.** Six `Rust e2e shard i/6` jobs each run `--partition hash:i/6` over
+the e2e set. nextest hashes each *test* (binary id and test name), not each binary, so the serial
+`rust-analyzer` group — 52 binaries, 320 tests, 24.5 minutes summed on master, and the entire run
+phase when it was one process — is spread across the shards, and adding a binary rebalances nothing by
+hand. Every shard is its own nextest process and so has its own copy of the group
+(`max-threads = 1` is per process: one rust-analyzer indexing at a time per runner, which is what the
+group protects). Each shard starts its own shared LiveKit server. Shard count is the length of the
+`matrix.shard` list in `ci.yml`; the partition reads it from `strategy.job-total`.
+
+**One check stands for the shards.** Branch protection requires checks by name, so the shards must not
+rename or remove `Rust e2e tests`. Shard jobs are named `Rust e2e shard i/6`; a job named
+`Rust e2e tests` (`rust-e2e`) `needs` them, downloads every shard's JUnit, publishes **one** report named
+`Rust e2e tests` (which is what `scripts/ci-status.sh` reads for counts and failing test names) and fails
+unless every job it needs — `Rust build`, the archive, every shard — ended `success`. It runs with
+`!cancelled()` rather than the default, because a skipped job does not block a merge: without it, a failed
+archive build would skip the shards and the check with them. Each shard fails its own job when nextest
+failed, after uploading its JUnit as `junit-rust-e2e-shard-i`. `Rust tests` is a single job, uploads
+`junit-rust`, and publishes its own report under its own name. A failing shard shows up in
+`scripts/ci-status.sh` as a failed `Rust e2e shard i/6` check with no annotations of its own; the failing
+tests are listed under `Rust e2e tests`.
 
 **The set is written once, in [`.config/rust-e2e.filterset`](../../../.config/rust-e2e.filterset).** The
 `e2e` leg runs that nextest filterset and the other leg runs its complement, both with `-E`, which
@@ -88,12 +117,11 @@ does nothing). Unique names are what make a server shared by the job, and tests 
 test `livekit_tests_use_unique_rooms` in `tddy-livekit-testkit` fails on a fixed room. See
 [testing.md](testing.md#test-rooms-come-from-unique_room).
 
-**Known drift: the `rust-analyzer` group.** `.config/nextest.toml` serialises the rust-analyzer
-binaries (indexing is the contended resource, and two servers loading a crate graph can expire a
-bounded indexing budget), but it names 10 of the 31 restructuring binaries that use the harness. The
-other 21, including the five slowest, run in parallel with each other. Serialising all 31 is the
-intent of the group's own comment, and would cost roughly 8–10 minutes of run time in the e2e leg
-(their summed test time is ~950s); it has not been done.
+**The `rust-analyzer` group.** `.config/nextest.toml` serialises the rust-analyzer binaries within a
+nextest process (indexing is the contended resource, and two servers loading a crate graph can expire a
+bounded indexing budget). It names 52 binaries; their 320 tests take about 5 s each, mostly
+rust-analyzer's cold start, and sum to 24.5 minutes. That serial sum is the floor on a process's run
+time, which is why the e2e leg is sharded: each shard holds about a sixth of the group.
 
 **Whether `Rust e2e tests` is required is set in the repository's branch protection, not in
 `ci.yml`**, so adding the check does not by itself change what `#automerge` waits for. Until it is
@@ -101,9 +129,21 @@ made required, a red `Rust e2e tests` does not block a merge.
 
 ### Where the e2e leg's time goes
 
-- **Per-binary run time**, on every e2e run: the leg's step summary lists each test binary, slowest
-  first, with its test count and the total. It is read from the JUnit nextest already wrote
-  (`scripts/ci-e2e-timing.ts junit`), so it adds no run time.
+- **Phases**, on every run: the archive build is its own step in `Rust test archive` (its duration is in
+  the Actions step list while it runs, and in that job's summary afterwards); each shard's own run
+  is its `cargo nextest` step. The `Rust e2e tests` check's summary puts them together — the archive
+  build, the slowest shard as the run phase, and a row per shard.
+- **Per shard**, on each shard's step summary: the run's wall time, each test binary with its time and
+  test count, the 20 slowest tests, and the `rust-analyzer` group's serial sum against the run's wall
+  time. A shard whose wall time is much above its group's serial sum is waiting on something other than
+  the group (CPU, or a slow LiveKit test); a shard at about 100% is bound by the group, and more shards
+  would help. Read from the JUnit nextest already wrote (`scripts/ci-e2e-timing.ts junit`), so it adds
+  no run time.
+- **Across shards**, on the `Rust e2e tests` summary: the same tables merged
+  (`scripts/ci-e2e-timing.ts merge`), which is where an uneven partition shows.
+- **Live**, in each shard's log: the `ci` profile prints failures, retries and any test still running
+  after 60 seconds (`status-level = "slow"`, `slow-timeout`), so a slow test is named while the run is
+  still going. LiveKit binaries keep their own `60s × 3` bound that terminates a stuck test.
 - **Compile share**, on demand: dispatch the workflow manually and the `Rust compile timings` job
   runs `cargo test --no-run --workspace --locked --timings` **cold**, uploads the HTML as the
   `cargo-timings` artifact and writes how much of the compile went to e2e test targets, to other test
@@ -338,7 +378,7 @@ coming back. A false green is worse than a red one.
 
 ## The shared LiveKit server
 
-The `Rust e2e tests` leg starts one LiveKit server before nextest and removes it after, as two
+The `Rust e2e tests` leg starts one LiveKit server per shard before nextest and removes it after, as two
 workflow steps (`Start shared LiveKit server`, and `Stop shared LiveKit server` with `if: always()`),
 both `scripts/livekit-ci-server.sh`. `start` runs the pinned image, waits for the Twirp API (bounded by
 `LIVEKIT_CI_READY_TIMEOUT_SECS`, default 60; on timeout it prints the URL and the container's logs and
@@ -376,11 +416,11 @@ with the stuck tests named, not run on to the job limit. Leave the input empty f
 
 The LiveKit tests used to run one at a time in a `docker` test-group, because each started its own
 container on a port found by binding `:0` and releasing it, and two tests could race for the same
-port. On CI that race is gone: the e2e leg runs every LiveKit test against one shared server, each
+port. On CI that race is gone: each e2e shard runs every LiveKit test it holds against one shared server, each
 in its own room, so the group was lifted and they run with nextest's default parallelism. Measured
-on the JUnit (`scripts/ci-e2e-timing.ts junit`): the leg's run phase went from 478 s to 344–355 s
-over three runs, the 168 LiveKit tests from a 328 s serial window to ~105 s, and the leg from 2.0×
-to 4.0× parallel on the runner's four vCPUs — CPU is now the limit, not the server. A test
+on the JUnit (`scripts/ci-e2e-timing.ts junit`): the 168 LiveKit tests ran in a ~105 s window instead
+of a 328 s serial one, at about 4× parallelism on the runner's four vCPUs — CPU is the limit, not the
+server. A test
 stuck on a dead server is still killed by the `slow-timeout` above, not left to the job limit. (A
 local run without `LIVEKIT_TESTKIT_WS_URL` still starts a container per test and can still lose
 that race; `./run-livekit-testkit-server` avoids it.)

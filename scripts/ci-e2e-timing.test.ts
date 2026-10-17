@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { compileShare, perBinaryTimings, verdict } from "./ci-e2e-timing";
+import {
+  compileShare,
+  groupSerialSum,
+  mergedSummary,
+  parseJunit,
+  perBinaryTimings,
+  shardLabel,
+  shardSummary,
+  slowestTests,
+  verdict,
+} from "./ci-e2e-timing";
+import { ciSerialisation } from "./nextest-serial-groups";
 
 const JUNIT = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites name="nextest-run" tests="4" time="12.5">
@@ -126,5 +137,90 @@ describe("verdict", () => {
   test("the_verdict_says_proceed_at_or_above_twenty_five_percent_and_stop_below", () => {
     expect(verdict(25)).toBe("proceed");
     expect(verdict(24.9)).toBe("stop");
+  });
+});
+
+const NEXTEST_TOML = `
+[test-groups]
+rust-analyzer = { max-threads = 1 }
+
+[[profile.ci.overrides]]
+filter = "package(tddy-code-restructuring)"
+test-group = "rust-analyzer"
+`;
+
+/** A shard's report: `time` is the run's wall time, each case is `[binary id, test, seconds]`. */
+function aShardReport(wallSeconds: number, cases: Array<[string, string, number]>): string {
+  const suites = [...new Set(cases.map(([suite]) => suite))].map((suite) => {
+    const inSuite = cases
+      .filter(([id]) => id === suite)
+      .map(([id, name, time]) => `<testcase name="${name}" classname="${id}" time="${time}"></testcase>`);
+    return `<testsuite name="${suite}" tests="${inSuite.length}">${inSuite.join("")}</testsuite>`;
+  });
+  return `<testsuites name="nextest-run" time="${wallSeconds}">${suites.join("")}</testsuites>`;
+}
+
+describe("a shard's run phase", () => {
+  const config = ciSerialisation(NEXTEST_TOML);
+  const run = parseJunit(
+    aShardReport(10, [
+      ["tddy-code-restructuring::move_item_acceptance", "moves_one", 5],
+      ["tddy-code-restructuring::move_item_acceptance", "moves_two", 4],
+      ["tddy-livekit::rpc_scenarios", "joins_a_room", 3],
+    ]),
+  );
+
+  test("the_run_wall_time_is_the_reports_own_time_not_the_sum_of_its_tests", () => {
+    expect(run.wallSeconds).toBe(10);
+    expect(run.cases).toHaveLength(3);
+  });
+
+  test("a_report_without_a_wall_time_is_an_error_not_a_zero", () => {
+    expect(() => parseJunit("<testsuites name=\"nextest-run\"></testsuites>")).toThrow(/no <testsuites time/);
+  });
+
+  test("the_serial_group_sum_counts_only_tests_nextest_runs_in_that_group", () => {
+    expect(groupSerialSum(run.cases, config)).toEqual({ seconds: 9, tests: 2 });
+  });
+
+  test("the_slowest_tests_are_listed_slowest_first_and_capped", () => {
+    expect(slowestTests(run.cases, 2).map((testCase) => testCase.name)).toEqual(["moves_one", "moves_two"]);
+  });
+
+  test("the_shard_summary_sets_the_serial_group_against_the_wall_time", () => {
+    const summary = shardSummary(run, config);
+
+    expect(summary).toContain("run wall time: 10.0 s (3 tests)");
+    expect(summary).toContain("2 tests, serial sum 9.0 s = 90% of the run's 10.0 s wall time");
+    expect(summary).toContain("| moves_one | move_item_acceptance | 5.0 |");
+  });
+});
+
+describe("the merged e2e summary", () => {
+  const config = ciSerialisation(NEXTEST_TOML);
+  const shards = [
+    { label: "shard 1", run: parseJunit(aShardReport(8, [["tddy-code-restructuring::a_acceptance", "t1", 6]])) },
+    { label: "shard 2", run: parseJunit(aShardReport(5, [["tddy-code-restructuring::b_acceptance", "t2", 4]])) },
+  ];
+
+  test("the_run_phase_is_the_slowest_shard_and_the_archive_build_is_its_own_phase", () => {
+    const summary = mergedSummary(930, shards, config);
+
+    expect(summary).toContain("test archive build (compile, once for every leg): 930.0 s");
+    expect(summary).toContain("run phase: 8.0 s — the slowest of 2 shards");
+  });
+
+  test("every_shard_gets_a_row_and_the_group_total_is_the_serial_time_one_shard_would_need", () => {
+    const summary = mergedSummary(1, shards, config);
+
+    expect(summary).toContain("| shard 1 | 1 | 8.0 | 1 | 6.0 | 75% |");
+    expect(summary).toContain("| shard 2 | 1 | 5.0 | 1 | 4.0 | 80% |");
+    expect(summary).toContain("2 tests, 10.0 s summed");
+  });
+});
+
+describe("shard labels", () => {
+  test("a_shard_is_named_from_the_artifact_directory_its_report_was_downloaded_to", () => {
+    expect(shardLabel("shards/junit-rust-e2e-shard-3/junit.xml")).toBe("shard 3");
   });
 });

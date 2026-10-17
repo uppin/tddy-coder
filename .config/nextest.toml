@@ -30,8 +30,17 @@ retries = 0
 [profile.ci]
 fail-fast = false
 failure-output = "immediate-final"
-status-level = "fail"
+# `slow` prints, as they happen, every failure, retry and test still running after `slow-timeout`'s
+# period (below) — so a stuck or slow test is named in the live log, not only in the JUnit afterwards.
+# Passing tests stay out of the log: the JUnit and the step summaries carry them.
+status-level = "slow"
 final-status-level = "flaky"
+
+# A test running longer than this is reported as slow, live. No `terminate-after`: this is
+# visibility, not a bound. The LiveKit override at the end of this file sets its own period with a
+# `terminate-after`, and takes precedence for those binaries. A rust-analyzer test takes ~5 s cold, so
+# a minute marks the genuinely slow ones.
+slow-timeout = { period = "60s" }
 
 # Retried tests are reported as "flaky", not hidden. Retries were added for a port race between
 # per-test LiveKit containers, which is gone: the e2e leg runs every LiveKit test against one shared
