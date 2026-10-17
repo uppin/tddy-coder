@@ -43,15 +43,32 @@ const NEW_SESSION_FIXTURE = {
   pendingElicitation: false,
 };
 
-/** Backend that starts with no sessions and returns the new one after creation. */
-function backendThatCreates() {
+/** A session that already exists before the new one is created. */
+const EXISTING_SESSION_FIXTURE = {
+  sessionId: "existing-session-aaaa-0000-0000-0000-000000000001",
+  createdAt: "2026-06-26T12:00:00Z",
+  status: "exited",
+  repoPath: "/home/dev/old-feature",
+  pid: 0,
+  isActive: false,
+  projectId: "proj-1",
+  daemonInstanceId: "",
+  workflowGoal: "Old work",
+  pendingElicitation: false,
+};
+
+/**
+ * Backend that starts with `before` and returns `before` plus the new session after creation.
+ * Defaults to an empty starting list.
+ */
+function backendThatCreates(before: (typeof EXISTING_SESSION_FIXTURE)[] = []) {
   let callCount = 0;
   return aSessionServiceBackend({
     projectsOverride: [{ projectId: "proj-1", name: "Test Project" }],
     agents: [{ id: "claude", label: "Claude (opus)" }],
     listSessionsFactory: () => {
       callCount++;
-      return callCount > 1 ? [NEW_SESSION_FIXTURE] : [];
+      return callCount > 1 ? [...before, NEW_SESSION_FIXTURE] : before;
     },
     startSession: {
       sessionId: NEW_SESSION_ID,
@@ -92,5 +109,19 @@ describe("CreateSession acceptance — drawer auto-close after creation", () => 
 
     // Then — the drawer collapses so the new session's terminal is unobstructed
     sessionsDrawerPage.drawer().should("have.attr", "data-drawer-state", "closed");
+  });
+
+  it("opens the new session when other sessions are already listed", () => {
+    // Given — the list already holds a session, so it is loaded before the new one appears in it
+    const backend = backendThatCreates([EXISTING_SESSION_FIXTURE]);
+    mountWithRecordingLiveKitRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+    byTestId(`sessions-drawer-item-${EXISTING_SESSION_FIXTURE.sessionId}`).should("exist");
+
+    // When — a new session is created
+    createSession();
+
+    // Then — the new session is opened, never the not-found state
+    byTestId("sessions-detail-pane").should("exist");
+    byTestId(TEST_IDS.terminalRouteUnknownSession).should("not.exist");
   });
 });

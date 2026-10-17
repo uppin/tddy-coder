@@ -219,6 +219,10 @@ export function SessionsDrawerScreen({
   // URL already carried (a deep link asked for that tab); later ones recompute the default for the
   // newly selected session, as selecting a session in the drawer has always done.
   const firstActivationPendingRef = useRef(true);
+  // The session this screen just created and navigated to. `StartSession` returns before the list
+  // refresh that carries the new session lands, so until then its absence from an already-loaded
+  // list means "not listed yet", not "unknown" — the activation effect waits for it instead.
+  const awaitingCreatedSessionIdRef = useRef<string | null>(null);
   // A deep link (`#/sessions/:id`) that resolves to no known session after the list loads shows a
   // not-found state instead of silently no-opping. Driven by local state so it dismisses on Home
   // without depending on a hash change.
@@ -558,6 +562,8 @@ export function SessionsDrawerScreen({
     if (activatedSessionIdRef.current === selectedSessionId) return;
     if (sortedSessions.length === 0) return; // list not loaded yet — retry on the next change
     const session = sortedSessions.find((s) => s.sessionId === selectedSessionId);
+    if (!session && awaitingCreatedSessionIdRef.current === selectedSessionId) return; // just created — retry on the next change
+    awaitingCreatedSessionIdRef.current = null;
     activatedSessionIdRef.current = selectedSessionId;
     const honourUrlInspector = firstActivationPendingRef.current && inspectorTabParam !== "";
     firstActivationPendingRef.current = false;
@@ -826,6 +832,7 @@ export function SessionsDrawerScreen({
   const handleSessionCreated = (sessionId: string) => {
     // Auto-close the sessions drawer so the new session's terminal is unobstructed.
     setSessionListOpen(false);
+    awaitingCreatedSessionIdRef.current = sessionId;
     navigate(sessionsDrawerPathForSession(sessionId));
     const creatingHost = connectHost(selectedInstanceId);
     if (!creatingHost) return;
