@@ -29,11 +29,14 @@ enum Answer {
     Frames(mpsc::Receiver<Result<Vec<u8>, Status>>),
 }
 
+/// One call the transport carried: peer, service, method, request body.
+type CarriedCall = (String, String, String, Vec<u8>);
+
 /// A connected transport whose peers answer from a script, and which records what it carried.
 #[derive(Default)]
 struct AScriptedPeer {
     answers: Mutex<HashMap<(String, String), Answer>>,
-    carried: Mutex<Vec<(String, String, String, Vec<u8>)>>,
+    carried: Mutex<Vec<CarriedCall>>,
 }
 
 impl AScriptedPeer {
@@ -45,7 +48,7 @@ impl AScriptedPeer {
         self
     }
 
-    fn carried(&self) -> Vec<(String, String, String, Vec<u8>)> {
+    fn carried(&self) -> Vec<CarriedCall> {
         self.carried.lock().unwrap().clone()
     }
 
@@ -145,9 +148,11 @@ async fn a_forwarded_call_returns_what_the_peer_answered() {
 #[tokio::test(start_paused = true)]
 async fn a_peer_that_does_not_answer_within_the_deadline_is_reported_as_timed_out() {
     // Given a peer that never answers
-    let room = a_room_over(Arc::new(
-        AScriptedPeer::default().answering(SERVICE, METHOD, Answer::Never),
-    ));
+    let room = a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::Never,
+    )));
 
     // When a call to it is given seven seconds (time is paused, so this does not wait)
     let refused = room
@@ -186,9 +191,11 @@ async fn a_relayed_stream_delivers_each_frame_then_ends_when_the_peer_ends() {
     tx.send(Ok(b"one".to_vec())).await.unwrap();
     tx.send(Ok(b"two".to_vec())).await.unwrap();
     drop(tx);
-    let room = a_room_over(Arc::new(
-        AScriptedPeer::default().answering(SERVICE, METHOD, Answer::Frames(rx)),
-    ));
+    let room = a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::Frames(rx),
+    )));
 
     // When the stream is relayed, decoding each frame as text
     let mut relayed = room
@@ -210,9 +217,11 @@ async fn a_relayed_stream_delivers_each_frame_then_ends_when_the_peer_ends() {
 async fn a_stream_that_goes_quiet_ends_with_one_deadline_error() {
     // Given a peer that opens a stream and then sends nothing
     let (_held_open, rx) = mpsc::channel::<Result<Vec<u8>, Status>>(1);
-    let room = a_room_over(Arc::new(
-        AScriptedPeer::default().answering(SERVICE, METHOD, Answer::Frames(rx)),
-    ));
+    let room = a_room_over(Arc::new(AScriptedPeer::default().answering(
+        SERVICE,
+        METHOD,
+        Answer::Frames(rx),
+    )));
 
     // When the relay is read past the idle timeout (time is paused)
     let mut relayed = room
