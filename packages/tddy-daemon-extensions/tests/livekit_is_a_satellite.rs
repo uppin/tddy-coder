@@ -46,12 +46,17 @@ const PLUGINS: &[&str] = &[
 
 /// Crates that build a binary and do nothing but wire it, plus the end-to-end harness that stands
 /// a whole deployment up.
-const WIRING: &[&str] = &["tddy-daemon", "tddy-rdp", "tddy-vnc", "tddy-e2e"];
+const WIRING: &[&str] = &[
+    "tddy-daemon",
+    "tddy-coder-cli",
+    "tddy-rdp",
+    "tddy-vnc",
+    "tddy-e2e",
+];
 
 /// Library crates that still name a LiveKit crate. Strike a crate off when it stops.
 const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-agent-launch",
-    "tddy-coder",
     "tddy-daemon-auth",
     "tddy-daemon-rpc",
     "tddy-session-agents",
