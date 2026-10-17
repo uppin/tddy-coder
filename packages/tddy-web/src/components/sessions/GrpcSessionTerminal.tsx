@@ -24,6 +24,16 @@ import { createForwardHistoryFetcher } from "../../lib/terminalHistoryLoader";
 const dGrpc = tddyDebug("tddy:term:grpc");
 const dResize = tddyDebug("tddy:term:resize");
 
+/** `ESC ] resize;` — the prefix of the grid report `GhosttyTerminalSession` writes into the feed. */
+const RESIZE_OSC_PREFIX = new TextEncoder().encode("\x1b]resize;");
+
+function isResizeOsc(data: Uint8Array): boolean {
+  return (
+    data.length > RESIZE_OSC_PREFIX.length &&
+    RESIZE_OSC_PREFIX.every((byte, i) => data[i] === byte)
+  );
+}
+
 type TerminalClient = Client<typeof TerminalSessionService>;
 
 interface GrpcSessionTerminalProps {
@@ -79,6 +89,11 @@ export function GrpcSessionTerminal({
   // Input sent before the claim resolves (or while the client is null on a transport blip) is
   // queued here and flushed once `connected` and a non-null client both arrive.
   const pendingInputRef = useRef<Uint8Array[]>([]);
+  // The last grid this terminal reported (its resize OSC). The daemon applies a resize only from
+  // the screen driving the session, so one reported while another screen drove it — or while this
+  // screen was displaced — never took effect; it is re-sent each time this screen gains the lease,
+  // or the PTY stays at the previous driver's size and every tap lands on the wrong cell.
+  const lastResizeRef = useRef<Uint8Array | null>(null);
 
   // Replay-once / resume-by-offset tracking. `currentOffset` is the cumulative output byte offset
   // the client has received up to (snapped to the frame's absolute `endOffset` on replay/catch-up
@@ -173,6 +188,7 @@ export function GrpcSessionTerminal({
 
     const terminalStream: TerminalStream = {
       send(data: Uint8Array) {
+        if (isResizeOsc(data)) lastResizeRef.current = data;
         sendInputRequestRef.current(data);
       },
       onMessage(fn: (frame: TerminalFrame) => void) {
@@ -223,6 +239,10 @@ export function GrpcSessionTerminal({
           initialRows,
           mode,
           fromOffset,
+          // The daemon honours `initialCols`/`initialRows` only for the screen driving the session:
+          // a screen still watching (no lease, or another screen's) opens read-only and resizes the
+          // PTY once its claim lands, through the resize OSC queued until then.
+          controlToken: connectedRef.current?.controlToken ?? "",
         }) as AsyncIterable<SessionTerminalOutput>) {
           if (closed) break;
           // Identity guard: the daemon stamps every frame with the session and (resolved) terminal
@@ -274,16 +294,25 @@ export function GrpcSessionTerminal({
   // Release input that was queued while the claim was in flight (or the client was null) once both
   // `connected` and a non-null `client` arrive. Keyed on `connected` and `client` so it fires when
   // either transitions into a usable state.
+  //
+  // Gaining the lease (a first claim, or a re-claim after being displaced) also re-asserts this
+  // screen's grid when the flush does not already carry it.
+  const controlToken = connected?.controlToken ?? null;
   useEffect(() => {
-    if (connected === null || client === null) return;
+    if (controlToken === null || client === null) return;
     const pending = pendingInputRef.current;
-    if (pending.length === 0) return;
     pendingInputRef.current = [];
+    const lastResize = lastResizeRef.current;
+    if (lastResize !== null && !pending.includes(lastResize)) {
+      dGrpc("re-asserting this screen's grid after gaining control");
+      pending.push(lastResize);
+    }
+    if (pending.length === 0) return;
     dGrpc("flushing %d buffered input chunk(s) after ConnectedSession + client ready", pending.length);
     for (const data of pending) {
       sendInputRequest(data);
     }
-  }, [connected, client, sendInputRequest]);
+  }, [controlToken, client, sendInputRequest]);
 
   // Tear down the attachment when the terminal unmounts (session switch / screen
   // close). Empty deps so the cleanup runs only on real unmount, not on prop changes.

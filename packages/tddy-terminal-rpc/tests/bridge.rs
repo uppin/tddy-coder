@@ -477,6 +477,7 @@ async fn serve_stream_terminal_output_from_offset_skips_resize_and_drain_unlike_
             initial_rows: 40,
             mode: StreamReplayMode::FromOffset as i32,
             from_offset: 0,
+            control_token: String::new(),
         },
         64,
     )

@@ -586,6 +586,7 @@ async fn run_grpc_terminal(
         initial_rows: rows as u32,
         mode: StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     };
     let mut resp = connectrpc_post_streaming(
         &http_client,

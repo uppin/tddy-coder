@@ -233,7 +233,10 @@ offset instead of re-replaying the whole retained buffer.
 
 - **`TAIL`** (default, first connect): the server sends the mode prologue + the current last-frame
   tail chunk (tagged with absolute offsets), resizes the PTY to the client's dimensions, drains the
-  pre-resize broadcast, then bridges live output.
+  pre-resize broadcast, then bridges live output. The resize is **driving**, not watching: it is
+  applied only when the open's `control_token` holds the session's control lease, or nobody holds
+  it. A screen watching a session another screen drives opens at the driver's size, and resizes it
+  only once its own claim lands (the client re-sends its grid each time it gains the lease).
 - **`FROM_OFFSET`** (reconnect): the server sends the mode prologue + chunked catch-up via
   `replay_from(from_offset, tip, …)` until `at_end`, then live output. No tail chunk, no PTY
   resize/drain — a terminal that already holds state up to `from_offset` receives only the bytes it

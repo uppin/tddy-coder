@@ -272,6 +272,7 @@ fn an_output_request(mode: StreamReplayMode, from_offset: u64) -> StreamTerminal
         initial_rows: BROWSER_ROWS,
         mode: mode as i32,
         from_offset,
+        control_token: String::new(),
     }
 }
 

@@ -109,6 +109,11 @@ message StreamTerminalOutputRequest {
   // bytes have been evicted. 0 = from the beginning (full replay from the oldest retained byte).
   // Ignored when `mode = STREAM_REPLAY_MODE_TAIL`.
   uint64          from_offset = 7;
+  // Control token from ClaimTerminalControl. Opening the output half is watching, so the stream is
+  // served either way — but `initial_cols`/`initial_rows` resize the PTY, which is driving it: they
+  // are honoured only when this token may drive the session's terminals (or nobody holds the
+  // lease), and ignored otherwise, so a screen watching another screen's session cannot reflow it.
+  string          control_token = 8;
 }
 
 // Selects the replay behavior of StreamTerminalOutput (and the bidi open frame).

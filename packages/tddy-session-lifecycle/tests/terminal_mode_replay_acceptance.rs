@@ -177,6 +177,7 @@ async fn first_frame_seen_by_a_browser_client(
             initial_rows: BROWSER_ROWS,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await
         .expect("stream_terminal_output must accept a valid token");

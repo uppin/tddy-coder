@@ -386,6 +386,7 @@ async fn sandboxed_claude_cli_terminal_io_round_trips() {
             initial_rows: 24,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await
         .expect("stream_terminal_output must succeed for sandbox session");
@@ -542,6 +543,7 @@ async fn sandboxed_claude_cli_start_wires_specialized_agents_env_and_metadata() 
             initial_rows: 24,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await
         .expect("stream_terminal_output must succeed for sandbox session");
