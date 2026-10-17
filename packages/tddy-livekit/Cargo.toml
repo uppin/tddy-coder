@@ -12,7 +12,9 @@ path = "src/lib.rs"
 prost = "0.13"
 tddy-rpc = { path = "../tddy-rpc" }
 tddy-service = { path = "../tddy-service" }
-livekit = "0.7"
+# TLS for the signal websocket, so `wss://` servers connect; feature unification gives every crate
+# in the workspace that uses `livekit` the same backend. Native roots: the OS trust store decides.
+livekit = { version = "0.7", features = ["rustls-tls-native-roots"] }
 livekit-api = "0.5"
 livekit-protocol = "0.7"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "net", "fs", "time"] }
