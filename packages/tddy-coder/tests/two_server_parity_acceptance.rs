@@ -172,6 +172,7 @@ impl SessionUnderBothWirings {
             initial_rows: 0,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }
     }
 
@@ -900,6 +901,7 @@ fn a_terminal_open_request() -> StreamTerminalOutputRequest {
         initial_rows: 0,
         mode: StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     }
 }
 

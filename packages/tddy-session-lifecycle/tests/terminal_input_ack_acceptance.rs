@@ -105,6 +105,7 @@ fn a_stream_request() -> StreamTerminalOutputRequest {
         initial_rows: 24,
         mode: StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     }
 }
 

@@ -406,6 +406,7 @@ async fn stream_terminal_output_is_server_streaming() {
         initial_rows: 24,
         mode: pb::StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     };
     let result = call(&entry, "StreamTerminalOutput", req.encode_to_vec()).await;
 
@@ -440,6 +441,7 @@ async fn stream_terminal_output_streams_a_started_shell_output() {
         initial_rows: 24,
         mode: pb::StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     };
     let mut rx = match call(&entry, "StreamTerminalOutput", stream_req.encode_to_vec()).await {
         RpcResult::ServerStream(Ok(rx)) => rx,

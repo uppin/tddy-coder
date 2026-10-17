@@ -535,6 +535,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             initial_rows: 0,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await
         .expect_err("streaming an unknown terminal must be an error");
@@ -554,6 +555,7 @@ async fn stream_terminal_output_routes_by_terminal_id() {
             initial_rows: 0,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await;
     assert!(

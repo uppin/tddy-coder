@@ -16,7 +16,8 @@ use tddy_terminal_rpc::proto::terminal_session::{
     ClaimTerminalControlRequest, ClaimTerminalControlResponse, ListTerminalSessionsRequest,
     ListTerminalSessionsResponse, SendTerminalInputResponse, SessionTerminalOutput,
     StartTerminalSessionResponse, StopTerminalSessionRequest, StopTerminalSessionResponse,
-    TerminalControlEvent, TerminalHistoryChunk, TerminalSessionServiceServer,
+    StreamTerminalOutputRequest, TerminalControlEvent, TerminalHistoryChunk,
+    TerminalSessionServiceServer,
 };
 use tddy_terminal_rpc::TerminalSessionServiceImpl;
 
@@ -330,6 +331,73 @@ async fn watch_terminal_control_answers_at_the_registered_service() {
             you_are_controller: true,
         }]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Opening the output half is watching, not driving
+// ---------------------------------------------------------------------------
+
+/// The dimensions a phone measures for its terminal pane — narrower than any desktop's.
+const PHONE_GRID: (u32, u32) = (46, 30);
+
+fn an_output_request_measured_at((cols, rows): (u32, u32)) -> StreamTerminalOutputRequest {
+    let mut request = an_output_request();
+    request.initial_cols = cols;
+    request.initial_rows = rows;
+    request
+}
+
+#[tokio::test]
+async fn a_screen_watching_a_session_another_screen_drives_leaves_the_pty_at_its_size() {
+    // Given a session whose terminal another screen (the desktop) is driving
+    let host = TerminalServiceHost::serving_main_terminal(b"0123456789");
+    host.control_held_by("desktop-screen").await;
+
+    // When a phone opens the output half, measured at its own grid, without having claimed control
+    let _: Vec<SessionTerminalOutput> = host
+        .stream_frames(
+            "StreamTerminalOutput",
+            an_output_request_measured_at(PHONE_GRID),
+            1,
+        )
+        .await;
+
+    // Then the PTY is left at the size the driving screen set — watching is read-only
+    assert_eq!(*host.terminal().resizes.lock().unwrap(), vec![]);
+}
+
+#[tokio::test]
+async fn the_screen_driving_a_session_resizes_the_pty_when_it_opens_the_output_half() {
+    // Given a session whose terminal this phone has claimed
+    let host = TerminalServiceHost::serving_main_terminal(b"0123456789");
+    let token = host.control_held_by(SCREEN_ID).await;
+    let mut request = an_output_request_measured_at(PHONE_GRID);
+    request.control_token = token;
+
+    // When the phone opens the output half presenting its lease
+    let _: Vec<SessionTerminalOutput> =
+        host.stream_frames("StreamTerminalOutput", request, 1).await;
+
+    // Then the PTY is resized to the phone's grid before the replay goes live
+    assert_eq!(*host.terminal().resizes.lock().unwrap(), vec![(30, 46)]);
+}
+
+#[tokio::test]
+async fn a_screen_opening_a_session_nobody_drives_resizes_the_pty() {
+    // Given a session whose terminal no screen has claimed yet
+    let host = TerminalServiceHost::serving_main_terminal(b"0123456789");
+
+    // When the first screen opens the output half, before its own claim has resolved
+    let _: Vec<SessionTerminalOutput> = host
+        .stream_frames(
+            "StreamTerminalOutput",
+            an_output_request_measured_at(PHONE_GRID),
+            1,
+        )
+        .await;
+
+    // Then the PTY is resized to its grid — an uncontrolled session takes any screen's input
+    assert_eq!(*host.terminal().resizes.lock().unwrap(), vec![(30, 46)]);
 }
 
 // ---------------------------------------------------------------------------
