@@ -22,6 +22,18 @@ export const worktreeCodePanePage = {
   pane: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodePane, { timeout: 5000, ...options }),
 
+  /** The bottom strip showing the session's code-index status; `data-state` names the state. */
+  indexStatus: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeIndexStatus, { timeout: 5000, ...options }),
+
+  /** The index strip's headline: phase and percentage, ready, failed, or not warmed. */
+  indexStatusSummary: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeIndexStatusSummary, { timeout: 5000, ...options }),
+
+  /** The index strip's detail: the index server's own line about what it is doing. */
+  indexStatusDetail: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeIndexStatusDetail, { timeout: 5000, ...options }),
+
   /** The directory tree region inside the Code pane. */
   tree: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeFileTree, { timeout: 5000, ...options }),

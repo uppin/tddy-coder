@@ -607,7 +607,7 @@ export const prStackScreenPage = {
       .find("option")
       .then(($opts) => [...$opts].map((option) => (option as HTMLOptionElement).value)),
 
-  /** The dialog's pre-checked "Create Remote Branch" toggle. */
+  /** The dialog's "Create Remote Branch" toggle — pre-checked for a stack node. */
   dialogCreateRemoteBranchToggle: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle, { timeout: 5000, ...options }),
 

@@ -135,6 +135,25 @@ it("pre-fills the planned PR's branch and prompt in the dialog", () => {
     .should("have.value", `${NODE_TITLE}\n\n${NODE_DESCRIPTION}`);
 });
 
+it("keeps Create Remote Branch checked for a stack node, so its branch is pushed at start", () => {
+  // Given
+  const backend = aPrStackModalBackend();
+
+  // When
+  mountWithRpc(withSelectedDaemon(<SessionsDrawerScreen />), backend);
+  sessionsDrawerPage.drawerItem(ORCHESTRATOR_SESSION_ID).click();
+  prStackScreenPage.startSessionBtn("n1").click();
+  prStackScreenPage.dialogCreateRemoteBranchToggle().should("be.checked");
+  prStackScreenPage.dialogSubmitBtn().click();
+
+  // Then — a node's branch is the base its successors' PRs target, unlike an ad-hoc session's.
+  cy.wrap(backend).should((b) => {
+    const calls = b.callsTo(SessionService.method.startSession);
+    expect(calls).to.have.length(1);
+    expect(calls[0].createRemoteBranch).to.equal(true);
+  });
+});
+
 it("creates the stack-parented child session when the dialog is submitted", () => {
   // Given
   const backend = aPrStackModalBackend();

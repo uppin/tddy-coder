@@ -13,6 +13,7 @@ import { HoverCard, LocationListCard, NavigationNotice } from "./CodeNavigationO
 import { useCodeNavigation, type SelectedFile } from "./useCodeNavigation";
 import { createRestructurePlanApi, isRestructurePlanFile } from "./restructurePlanApi";
 import { RestructurePlanDialog } from "./RestructurePlanDialog";
+import { CodeIndexStatusStrip } from "./CodeIndexStatusStrip";
 
 export type WorktreeCodePaneProps = {
   client: Client<typeof WorktreeService>;
@@ -26,12 +27,18 @@ export type WorktreeCodePaneProps = {
    * read-only text.
    */
   navigationClient?: Client<typeof CodeNavigationService>;
+  /**
+   * The session whose worktree this is. With `navigationClient`, the pane ends in a strip showing
+   * where the session's code index stands (`CodeIndexStatusStrip`); without either, no strip.
+   */
+  sessionId?: string;
 };
 
 /**
  * Split Code pane: a lazy worktree directory tree on the left and a read-only file preview on the
  * right. Markdown renders as sanitized markup, everything else as monospace text. File content is
- * fetched on demand when a file node is selected.
+ * fetched on demand when a file node is selected. With a navigation client and a session, a strip
+ * along the bottom shows the session's code-index progress.
  */
 export function WorktreeCodePane({
   client,
@@ -39,6 +46,7 @@ export function WorktreeCodePane({
   projectId,
   worktreePath,
   navigationClient,
+  sessionId,
 }: WorktreeCodePaneProps) {
   const api = useMemo(
     () => createWorktreeFilesApi(client, { sessionToken, projectId, worktreePath }),
@@ -79,51 +87,60 @@ export function WorktreeCodePane({
   return (
     <div
       data-testid="worktree-code-pane"
-      className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden"
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
     >
-      <div className="w-56 shrink-0 border-r border-border">
-        <WorktreeFileTree
-          api={api}
-          selectedRelPath={selected?.relPath ?? null}
-          onSelectFile={handleSelectFile}
-        />
-      </div>
-      <div className="relative flex min-h-0 min-w-0 flex-1">
-        <section
-          data-testid="worktree-file-preview"
-          aria-label="Worktree file preview"
-          className="min-w-0 flex-1 overflow-auto p-3"
-        >
-          {planFile !== null && (
-            <div className="mb-2 flex justify-end">
-              <button
-                type="button"
-                data-testid="worktree-code-open-as-plan"
-                className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
-                onClick={() => setOpenPlan(planFile)}
-              >
-                Open as plan
-              </button>
-            </div>
-          )}
-          <FilePreview
-            selected={selected}
-            onNavigate={navigable ? nav.navigate : undefined}
-            onHover={navigable ? nav.showHover : undefined}
+      <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+        <div className="w-56 shrink-0 border-r border-border">
+          <WorktreeFileTree
+            api={api}
+            selectedRelPath={selected?.relPath ?? null}
+            onSelectFile={handleSelectFile}
           />
-        </section>
-        <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-col gap-2">
-          {nav.notice && <NavigationNotice notice={nav.notice} />}
-          {nav.locations && <LocationListCard list={nav.locations} onOpen={nav.openLocation} />}
-          {nav.hover && (
-            <HoverCard
-              hover={nav.hover}
-              onShowReferences={nav.showReferences}
-              onClose={nav.closeHover}
+        </div>
+        <div className="relative flex min-h-0 min-w-0 flex-1">
+          <section
+            data-testid="worktree-file-preview"
+            aria-label="Worktree file preview"
+            className="min-w-0 flex-1 overflow-auto p-3"
+          >
+            {planFile !== null && (
+              <div className="mb-2 flex justify-end">
+                <button
+                  type="button"
+                  data-testid="worktree-code-open-as-plan"
+                  className="rounded border border-border px-2 py-1 text-xs hover:bg-muted"
+                  onClick={() => setOpenPlan(planFile)}
+                >
+                  Open as plan
+                </button>
+              </div>
+            )}
+            <FilePreview
+              selected={selected}
+              onNavigate={navigable ? nav.navigate : undefined}
+              onHover={navigable ? nav.showHover : undefined}
             />
-          )}
+          </section>
+          <div className="pointer-events-none absolute inset-x-3 bottom-3 flex flex-col gap-2">
+            {nav.notice && <NavigationNotice notice={nav.notice} />}
+            {nav.locations && <LocationListCard list={nav.locations} onOpen={nav.openLocation} />}
+            {nav.hover && (
+              <HoverCard
+                hover={nav.hover}
+                onShowReferences={nav.showReferences}
+                onClose={nav.closeHover}
+              />
+            )}
+          </div>
         </div>
       </div>
+      {navigationClient && sessionId && (
+        <CodeIndexStatusStrip
+          client={navigationClient}
+          sessionToken={sessionToken}
+          sessionId={sessionId}
+        />
+      )}
       {plans !== null && openPlan !== null && (
         <RestructurePlanDialog api={plans} relPath={openPlan} onClose={() => setOpenPlan(null)} />
       )}

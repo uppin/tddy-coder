@@ -82,6 +82,14 @@ pub struct ServerChatter {
     /// `last` with no number in it, so the message could not say how far the index had got — which
     /// is the one thing a reader needs in order to decide whether raising the budget will help.
     furthest: Option<(u64, String)>,
+    /// The phase the server reported on most recently, and the highest percentage *that* phase
+    /// reached — what a progress display names as "what is happening now". `furthest` cannot stand
+    /// in for it: an early phase that finished at 100% would outrank every later one.
+    current: Option<(u64, String)>,
+    /// The highest percentage each in-flight progress token has reached, so the current phase's
+    /// number never goes backwards when a sub-step arrives without one. Per token, for the reason
+    /// the titles are.
+    reached_by_token: HashMap<String, u64>,
     /// When the server last said anything *new*: a different progress line, a flip of its
     /// quiescence, or a change of its health.
     ///
@@ -165,6 +173,7 @@ impl ServerChatter {
             }
             "end" => {
                 self.titles.remove(&token);
+                self.reached_by_token.remove(&token);
                 self.shown.remove(&token);
                 self.shown_at.remove(&token);
                 return None;
@@ -180,9 +189,11 @@ impl ServerChatter {
         self.last = Some(line.clone());
 
         let percentage = value.get("percentage").and_then(Value::as_u64);
+        let phase = title.as_deref().unwrap_or(UNTITLED_PHASE);
         if let Some(percentage) = percentage {
-            self.reached(percentage, title.as_deref().unwrap_or(UNTITLED_PHASE));
+            self.reached(percentage, phase);
         }
+        self.reported_on(&token, percentage, phase);
 
         let key = match percentage {
             Some(percentage) => percentage.to_string(),
@@ -202,6 +213,15 @@ impl ServerChatter {
         self.shown.insert(token.clone(), key);
         self.shown_at.insert(token, now);
         Some(line)
+    }
+
+    /// Make `phase` the current one, carrying the highest percentage its token has reached.
+    fn reported_on(&mut self, token: &str, percentage: Option<u64>, phase: &str) {
+        let reached = self.reached_by_token.entry(token.to_string()).or_insert(0);
+        if let Some(percentage) = percentage {
+            *reached = (*reached).max(percentage);
+        }
+        self.current = Some((*reached, phase.to_string()));
     }
 
     /// Keep `percentage` of `phase` as the furthest the index got, unless it has been further.
@@ -316,6 +336,18 @@ impl ServerChatter {
     /// routinely the one with no number in it.
     pub fn furthest(&self) -> Option<(u64, &str)> {
         self.furthest
+            .as_ref()
+            .map(|(percentage, phase)| (*percentage, phase.as_str()))
+    }
+
+    /// The phase the server reported on most recently, and the highest percentage it has reached
+    /// (0 while it has reported none).
+    ///
+    /// What a progress display names, as opposed to [`Self::furthest`]: rust-analyzer finishes
+    /// "Roots Scanned" at 100% early and then spends minutes in later phases, which `furthest`
+    /// would hide behind that first 100%.
+    pub fn current(&self) -> Option<(u64, &str)> {
+        self.current
             .as_ref()
             .map(|(percentage, phase)| (*percentage, phase.as_str()))
     }

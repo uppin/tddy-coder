@@ -51,7 +51,11 @@ function aRecordingBackend() {
 
 describe("Terminal input offset — wire contract", () => {
   it("sends a cumulative byte offset on each SendTerminalInput", () => {
-    // Given — a connected terminal whose input flows over the in-memory backend
+    // Given — a connected terminal on a desktop-sized screen, whose input flows over the in-memory
+    // backend. At the default 500px viewport the terminal counts as mobile and makes its input
+    // read-only until the on-screen keyboard is asked for, so typing would only land if it raced
+    // ahead of the terminal's setup.
+    cy.viewport(1280, 800);
     const backend = aRecordingBackend();
     const client = createClient(TerminalSessionService, backend.transport());
 
@@ -67,7 +71,11 @@ describe("Terminal input offset — wire contract", () => {
         </div>
       </UploadProgressProvider>,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+      "have.attr",
+      "data-terminal-ready",
+      "true",
+    );
 
     // When — the user types into the real terminal. Clicking the terminal focuses it via
     // ghostty-web's canvas mousedown handler (the container only becomes focusable once

@@ -103,7 +103,11 @@ describe("GhosttyTerminalSession", () => {
         feed={{ stream: fake.stream }}
       />,
     );
-    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should("exist");
+    byTestId(TEST_IDS.ghosttyTerminal, { timeout: 10000 }).should(
+      "have.attr",
+      "data-terminal-ready",
+      "true",
+    );
 
     // When
     byTestId(TEST_IDS.ghosttyTerminal).focus().type("ls");

@@ -207,6 +207,12 @@ export const TEST_IDS = {
   // Worktree Code pane (docs/ft/web/session-code-pane.md)
   worktreeCodeToggle: "sessions-code-toggle",
   worktreeCodePane: "worktree-code-pane",
+  /** The Code pane's bottom strip: the session's code-index status (`data-state` names it). */
+  worktreeCodeIndexStatus: "worktree-code-index-status",
+  /** The strip's headline — phase and percentage, ready, failed, or not warmed. */
+  worktreeCodeIndexStatusSummary: "worktree-code-index-status-summary",
+  /** The strip's detail — the index server's own line about what it is doing. */
+  worktreeCodeIndexStatusDetail: "worktree-code-index-status-detail",
   worktreeFileTree: "worktree-file-tree",
   worktreeFilePreview: "worktree-file-preview",
   worktreeCodeHighlight: "worktree-code-highlight",
@@ -369,7 +375,7 @@ export const TEST_IDS = {
   createSessionBranchIntentSelect: "create-session-branch-intent-select",
   createSessionNewBranchNameInput: "create-session-new-branch-name-input",
   createSessionBranchToWorkOnSelect: "create-session-branch-to-work-on-select",
-  /** "Create Remote Branch" checkbox — pre-checked; pushes the new branch to origin at session start. */
+  /** "Create Remote Branch" checkbox — unchecked by default (pre-checked for a PR-stack node); pushes the new branch to origin at session start. */
   createSessionCreateRemoteBranchToggle: "create-session-create-remote-branch-toggle",
   /** Base-branch <select> for a planned-PR child session — lists the node's direct dependency branches
    *  first (ordered by dependency depth, deepest first, ties by `node.parents` order), then the stack's
