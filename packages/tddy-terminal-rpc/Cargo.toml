@@ -44,6 +44,8 @@ tddy-codegen = { path = "../tddy-codegen", features = ["tonic"] }
 tonic-build = "0.12"
 
 [dev-dependencies]
+# `stub_http_routed`: a daemon stand-in that records which RPC path a call reached.
+tddy-testing-commons = { path = "../tddy-testing-commons" }
 # `tddy_user_config`'s tests write a `.tddy/config.yaml` under a temporary home.
 tempfile = "3"
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "test-util"] }

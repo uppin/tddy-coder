@@ -10,10 +10,12 @@ use tddy_daemon::config::{DaemonConfig, LiveKitConfig};
 use tddy_daemon::daemon_config_service::{CommonRoomSupervisor, DaemonConfigServiceImpl};
 use tddy_daemon::server::serving_sandboxed_codebase_support;
 use tddy_rpc::{Code, Request};
+use tddy_daemon_extensions::{IntegrationState, IntegrationStatusBoard};
 use tddy_service::proto::daemon_config::{
     ClientAllowedAgent, DaemonConfigService as DaemonConfigServiceTrait, DaemonSettings,
-    GetClientConfigRequest, GetClientConfigResponse, GetConfigRequest, ListenSettings,
-    LiveKitSettings, UpdateConfigRequest,
+    GetClientConfigRequest, GetClientConfigResponse, GetConfigRequest, GetIntegrationStatusRequest,
+    IntegrationState as WireIntegrationState, IntegrationStatus as WireIntegrationStatus,
+    ListenSettings, LiveKitSettings, UpdateConfigRequest,
 };
 use tokio::sync::Mutex;
 
@@ -666,4 +668,131 @@ async fn reports_the_common_room_as_switched_on_to_the_page_the_daemon_serves() 
 
     // Then it is cleared to join
     assert_eq!(response.livekit_enabled, Some(true));
+}
+
+// ---------------------------------------------------------------------------
+// GetIntegrationStatus — what the daemon's optional integrations report about themselves
+// ---------------------------------------------------------------------------
+
+/// A daemon serving integration status from `board`.
+fn a_daemon_reporting_integrations_from(board: Arc<IntegrationStatusBoard>) -> ADaemonConfigService {
+    let daemon = a_daemon_config_service();
+    ADaemonConfigService {
+        service: daemon.service.with_integration_status(board),
+        ..daemon
+    }
+}
+
+/// When `board`'s entry `id` entered its current state, as the wire carries it.
+fn since_unix_ms_of(board: &IntegrationStatusBoard, id: &str) -> i64 {
+    let since = board
+        .snapshot()
+        .into_iter()
+        .find(|integration| integration.id == id)
+        .expect("the integration is on the board")
+        .since;
+    since
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("an integration's state began after the epoch")
+        .as_millis() as i64
+}
+
+#[tokio::test]
+async fn reports_each_integration_the_board_holds_with_its_state_and_failure() {
+    // Given a board on which LiveKit has reported that its server does not answer, and another
+    // integration that is switched off
+    let board = IntegrationStatusBoard::new();
+    board
+        .reporter("livekit", "LiveKit")
+        .report(IntegrationState::Unreachable {
+            error: "joining ws://10.0.0.5:7880: connection refused".to_string(),
+        });
+    board.reporter("another", "Another");
+    let daemon = a_daemon_reporting_integrations_from(Arc::clone(&board));
+
+    // When the integration status is read
+    let response = daemon
+        .service
+        .get_integration_status(Request::direct(GetIntegrationStatusRequest {
+            session_token: VALID_TOKEN.to_string(),
+        }))
+        .await
+        .expect("the integration status was not served")
+        .into_inner();
+
+    // Then each integration comes back, ordered by id, with what it last reported and since when
+    assert_eq!(
+        response.integrations,
+        vec![
+            WireIntegrationStatus {
+                id: "another".to_string(),
+                label: "Another".to_string(),
+                state: WireIntegrationState::Disabled as i32,
+                error: String::new(),
+                missing_fields: Vec::new(),
+                since_unix_ms: since_unix_ms_of(&board, "another"),
+            },
+            WireIntegrationStatus {
+                id: "livekit".to_string(),
+                label: "LiveKit".to_string(),
+                state: WireIntegrationState::Unreachable as i32,
+                error: "joining ws://10.0.0.5:7880: connection refused".to_string(),
+                missing_fields: Vec::new(),
+                since_unix_ms: since_unix_ms_of(&board, "livekit"),
+            },
+        ]
+    );
+}
+
+#[tokio::test]
+async fn reports_the_fields_a_misconfigured_integration_is_missing() {
+    // Given LiveKit switched on with no API secret
+    let board = IntegrationStatusBoard::new();
+    board
+        .reporter("livekit", "LiveKit")
+        .report(IntegrationState::Misconfigured {
+            missing: vec!["api_secret".to_string()],
+        });
+    let daemon = a_daemon_reporting_integrations_from(Arc::clone(&board));
+
+    // When the integration status is read
+    let response = daemon
+        .service
+        .get_integration_status(Request::direct(GetIntegrationStatusRequest {
+            session_token: VALID_TOKEN.to_string(),
+        }))
+        .await
+        .expect("the integration status was not served")
+        .into_inner();
+
+    // Then the missing field is named, so the settings screen can point at it
+    assert_eq!(
+        response.integrations,
+        vec![WireIntegrationStatus {
+            id: "livekit".to_string(),
+            label: "LiveKit".to_string(),
+            state: WireIntegrationState::Misconfigured as i32,
+            error: String::new(),
+            missing_fields: vec!["api_secret".to_string()],
+            since_unix_ms: since_unix_ms_of(&board, "livekit"),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn refuses_integration_status_to_a_caller_without_a_valid_session_token() {
+    // Given a daemon reporting its integrations
+    let daemon = a_daemon_reporting_integrations_from(IntegrationStatusBoard::new());
+
+    // When a caller without a valid token asks for them
+    let status = daemon
+        .service
+        .get_integration_status(Request::direct(GetIntegrationStatusRequest {
+            session_token: "not-a-token".to_string(),
+        }))
+        .await
+        .expect_err("integration status was served to an unauthenticated caller");
+
+    // Then it is refused like every other gated read: the errors carry server addresses
+    assert_eq!(status.code(), Code::Unauthenticated);
 }

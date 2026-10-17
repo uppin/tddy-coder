@@ -588,6 +588,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .compile_protos(&["proto/daemon_config.proto"], &["proto"])?;
 
+    // `SessionRoomService` — the LiveKit integration's "open this session's room or fail" call
+    // (async trait + RpcService server). Served over the daemon's `/rpc` and IPC routes; no tonic
+    // pass, since nothing reaches it over gRPC.
+    prost_build::Config::new()
+        .out_dir(std::env::var("OUT_DIR")?)
+        .service_generator(Box::new(tddy_codegen::TddyServiceGenerator {
+            generate_rpc_server: true,
+            generate_tonic_adapter: false,
+            rpc_crate_path: "tddy_rpc".to_string(),
+            ..Default::default()
+        }))
+        .compile_protos(&["proto/session_room.proto"], &["proto"])?;
+
     // Worktree activity broadcast payload. Unlike every block above, this one installs no service
     // generator: `worktree_activity.proto` declares messages only. The events travel as bare protobuf
     // bytes on the `worktree.activity` data-channel topic — no method to dispatch, no reply to
@@ -643,6 +656,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "proto/screen_sharing_input.proto",
                 "proto/sandbox.proto",
                 "proto/daemon_config.proto",
+                "proto/session_room.proto",
                 "proto/grpc/reflection/v1/reflection.proto",
             ],
             &["proto"],
