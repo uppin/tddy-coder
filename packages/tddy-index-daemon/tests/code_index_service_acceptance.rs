@@ -262,7 +262,8 @@ async fn warming_a_root_forwards_the_servers_phases_and_reports_ready_only_once_
     .await
     .expect("warming a reachable root succeeds");
 
-    // Then the server's own phases reached the caller, named and with the percentage they carried
+    // Then the server's own phases reached the caller, named from the moment they began (a begin
+    // carries no percentage yet, so 0) and with the percentage each report carried
     let narrated: Vec<(String, u32)> = progress
         .iter()
         .filter(|message| !message.phase.is_empty())
@@ -271,6 +272,7 @@ async fn warming_a_root_forwards_the_servers_phases_and_reports_ready_only_once_
     assert_eq!(
         narrated,
         vec![
+            ("loading crate graph".to_string(), 0),
             ("loading crate graph".to_string(), 25),
             ("loading crate graph".to_string(), 50),
             ("loading crate graph".to_string(), 75),
