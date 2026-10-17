@@ -11,7 +11,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use livekit::Room;
 use tddy_daemon_kernel::config::DaemonConfig;
 use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_daemon_kernel::peer_forwarding::{classify_peer_route, CommonRoom, PeerRoute};
@@ -142,11 +141,11 @@ impl HostServiceImpl {
         self
     }
 
-    /// The common-room connection a forwarded call travels over; forwards wait the deadline this
-    /// service's config names (`peer_forward_timeout_secs`).
+    /// The common room a forwarded call travels through. It carries its own deadline, so build it
+    /// with the same config this service was given.
     #[must_use]
-    pub fn with_common_room(mut self, room: Arc<tokio::sync::RwLock<Option<Arc<Room>>>>) -> Self {
-        self.common_room_livekit_room = Some(CommonRoom::from_config(room, &self.config));
+    pub fn with_common_room(mut self, room: CommonRoom) -> Self {
+        self.common_room_livekit_room = Some(room);
         self
     }
 

@@ -36,8 +36,12 @@ impl PeerRouting {
         eligible_daemon_source: Arc<dyn EligibleDaemonSource>,
         common_room_livekit_room: Option<Arc<tokio::sync::RwLock<Option<Arc<Room>>>>>,
     ) -> Self {
-        let common_room_livekit_room =
-            common_room_livekit_room.map(|slot| CommonRoom::from_config(slot, &config));
+        let common_room_livekit_room = common_room_livekit_room.map(|slot| {
+            CommonRoom::new(
+                crate::livekit_peer_forwarder::LiveKitPeerForwarder::new(slot),
+                &config,
+            )
+        });
         Self {
             config,
             eligible_daemon_source,
