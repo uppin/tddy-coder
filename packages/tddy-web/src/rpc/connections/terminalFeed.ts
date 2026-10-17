@@ -139,6 +139,9 @@ export function openDaemonTerminalFeed({
         initialRows,
         mode,
         fromOffset,
+        // Without a lease that may drive the session, the daemon ignores the grid above: watching
+        // another screen's session must not reflow it.
+        controlToken: options.controlToken(),
       })) {
         if (closed) break;
         // Every frame is stamped with the terminal it came from. One that is not this terminal's is

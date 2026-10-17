@@ -95,6 +95,7 @@ interface OutputOpen {
   initialRows: number;
   mode: StreamReplayMode;
   fromOffset: bigint;
+  controlToken: string;
 }
 
 /** One `SendTerminalInput` as the feed issues it. */
@@ -233,7 +234,8 @@ describe("a daemon-served terminal feed", () => {
 
     // Then the open asked for a tail of this session's bash terminal, at the measured grid — the
     // PTY is resized before the replay, which is what stopped a buffer captured at one width being
-    // re-wrapped into a terminal of another
+    // re-wrapped into a terminal of another — presenting the lease, without which the daemon
+    // ignores the grid (watching another screen's session must not reflow it)
     expect(daemon.opens).toEqual([
       {
         sessionToken: A_SESSION_TOKEN,
@@ -243,6 +245,7 @@ describe("a daemon-served terminal feed", () => {
         initialRows: A_GRID.rows,
         mode: StreamReplayMode.TAIL,
         fromOffset: 0n,
+        controlToken: "lease-one",
       },
     ]);
   });

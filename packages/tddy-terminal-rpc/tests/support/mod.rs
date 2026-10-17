@@ -165,6 +165,7 @@ pub fn req(
         initial_rows: rows,
         mode: StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     }
 }
 
@@ -182,6 +183,7 @@ pub fn req_from_offset(
         initial_rows: 0,
         mode: StreamReplayMode::FromOffset as i32,
         from_offset,
+        control_token: String::new(),
     }
 }
 
@@ -719,6 +721,7 @@ pub fn an_output_request() -> StreamTerminalOutputRequest {
         initial_rows: 0,
         mode: StreamReplayMode::Tail as i32,
         from_offset: 0,
+        control_token: String::new(),
     }
 }
 

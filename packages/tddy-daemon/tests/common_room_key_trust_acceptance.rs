@@ -198,6 +198,8 @@ impl Fleet {
             Arc::clone(&registry),
             Arc::clone(&room_slot),
             advertised_signing_key(&key),
+            tddy_daemon_extensions::IntegrationStatusBoard::new()
+                .reporter(tddy_daemon_livekit::LIVEKIT_INTEGRATION_ID, "LiveKit"),
         );
         Daemon {
             instance_id: local_instance_id_for_config(&config),

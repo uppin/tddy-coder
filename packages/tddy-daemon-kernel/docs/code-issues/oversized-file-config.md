@@ -65,10 +65,9 @@ predicting its contents: a reader looking for "how does the daemon decide which 
 run" has no reason to open `config.rs`, and a reader changing a config struct has 426 lines of
 unrelated path logic between them and the next struct.
 
-It also sits under two other open findings on this crate. `heavy-dependency-livekit-peer-forwarding`
-wants `peer_forwarding` extracted; this file is the other large thing in the same crate, and both
-extractions want the same warm index and the same `restructure check --deep` pass. Whoever does one
-should cost the other at the same time.
+`peer_forwarding` is the other large module in the same crate, and an extraction of either wants the
+same warm index and the same `restructure check --deep` pass. Whoever does one should cost the other at
+the same time.
 
 **For `#keyring`.** `#keyring` 1/9 changes what this file *means* rather than its shape:
 `LiveKitConfig::api_secret` (`:994`) stops being the daemon's signing key, and `build_auth_entries`

@@ -33,6 +33,13 @@ pub fn install_cursor_hooks_in_worktree(
         session_id,
         os_user,
         hook_token: &hook_token,
+        // TODO: on an embedded daemon (Tddy Desktop) `daemon_url` is only the GitHub sign-in
+        // callback, so every cursor hook report is a swallowed 404 — the bug claude-cli hooks were
+        // fixed for by passing the agent-tool socket. Not done here: this installer is also called
+        // for sandboxed cursor sessions (whose jail may not reach a $TMPDIR socket) and from
+        // tddy-telegram-control, and neither caller hands it the daemon's resolved data dir.
+        // Tracked in `docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`.
+        daemon_socket: None,
     });
     let cursor_dir = worktree_path.join(".cursor");
     if let Err(e) = std::fs::create_dir_all(&cursor_dir).and_then(|_| {

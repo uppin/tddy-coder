@@ -209,6 +209,8 @@ impl DaemonSessionHost {
             session_admissions: Arc::clone(&self.session_admissions),
             worktree_observer: self.worktree_observer.clone(),
             host: Arc::new(self.clone()),
+            session_reach: Arc::clone(&self.session_reach),
+            reachable_sessions: Arc::new(self.clone()),
         }
     }
 }

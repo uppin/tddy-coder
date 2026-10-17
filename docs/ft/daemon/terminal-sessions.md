@@ -233,7 +233,10 @@ offset instead of re-replaying the whole retained buffer.
 
 - **`TAIL`** (default, first connect): the server sends the mode prologue + the current last-frame
   tail chunk (tagged with absolute offsets), resizes the PTY to the client's dimensions, drains the
-  pre-resize broadcast, then bridges live output.
+  pre-resize broadcast, then bridges live output. The resize is **driving**, not watching: it is
+  applied only when the open's `control_token` holds the session's control lease, or nobody holds
+  it. A screen watching a session another screen drives opens at the driver's size, and resizes it
+  only once its own claim lands (the client re-sends its grid each time it gains the lease).
 - **`FROM_OFFSET`** (reconnect): the server sends the mode prologue + chunked catch-up via
   `replay_from(from_offset, tip, …)` until `at_end`, then live output. No tail chunk, no PTY
   resize/drain — a terminal that already holds state up to `from_offset` receives only the bytes it
@@ -300,6 +303,13 @@ connecting to a daemon session (including a sandboxed one) over HTTP or LiveKit,
 selected by which fields are set. `tddy-tools pty-relay` keeps only the clap surface that builds the
 config. Both relays share one termios guard and terminal-size probe (`local_terminal`) rather than
 declaring one each.
+
+Attaching to a daemon session over **HTTP** never touches LiveKit, so a LiveKit server that is down
+or misconfigured does not affect it. Over **LiveKit** (`--livekit-url`) the relay first asks the
+daemon to open the session's room with `OpenSessionRoom`, then joins it and waits for the daemon's
+participant; a daemon whose LiveKit cannot be reached fails that call, naming the room, and the
+relay exits with it rather than waiting for a participant nobody put there. See
+[Session rooms](session-room.md#when-the-room-is-created).
 
 ---
 

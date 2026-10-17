@@ -25,14 +25,15 @@ starts them against one shared container. And **nothing skips without Docker** �
 | Service | Methods |
 |---|---|
 | `livekit.LiveKitService` | `StreamLiveKitRooms` |
+| `session_room.SessionRoomService` | `OpenSessionRoom` |
 
-That one method is the crate's only protocol change: it left `connection.ConnectionService`, which
-is down to 72. `packages/tddy-web`'s rooms panel addresses the new coordinate.
+`StreamLiveKitRooms` is the method that left `connection.ConnectionService`, which
+is down to 72; `OpenSessionRoom` is the plugin's own call, registered only on a daemon that wires it. `packages/tddy-web`'s rooms panel addresses the new coordinate.
 
 ## Two rules this crate exists to hold
 
 **It never depends on `tddy-daemon`, and never on `tddy-daemon-auth`.**
-`tests/dependency_boundary_unit.rs` walks the transitive manifest closure and fails if it ever does.
+`tests/dependency_boundary_unit.rs` reads the workspace graph (`tddy-testing-commons`'s `WorkspaceGraph`) and fails if it ever does.
 The second half matters as much as the first: session tokens are signed by the auth crate with the
 daemon's own key, and the only way this crate reaches minting is the `SessionTokenMinter` **port**.
 If that port stopped being one, this crate could grow a second signer. The same rule shapes key
@@ -51,6 +52,7 @@ That is why the extraction was relocation rather than redesign.
 ### Technical implementation (how)
 - [LiveKitService](./docs/livekit-service.md) — the rooms stream, the cut edges, and the known gaps
 - [Session room module](./docs/session-room.md) — naming, the poll loop, the WIP ref and the delta ring
+- [Session reach](./docs/livekit-service.md#livekitsessionreach--opening-the-room-for-a-reached-session) — `LiveKitSessionReach`, `OpenSessionRoom` and the status it reports
 - [Changesets](./docs/changesets/) — applied changeset history
 
 ### Product requirements (what)
@@ -60,5 +62,6 @@ That is why the extraction was relocation rather than redesign.
 
 ### Neighbours
 - [`tddy-daemon-auth`](../tddy-daemon-auth/README.md) — who mints the room JWTs
+- [`tddy-daemon-extensions`](../tddy-daemon-extensions/README.md) — the ports this crate implements and the status board it reports on
 - [`tddy-livekit`](../tddy-livekit/docs/room-roster.md) — the LiveKit server-API client behind `RoomRoster`
 - [`connection-service.md`](../tddy-daemon/docs/connection-service.md) — the other 72 methods

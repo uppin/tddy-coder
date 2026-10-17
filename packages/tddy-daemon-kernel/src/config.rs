@@ -23,6 +23,15 @@ fn default_common_room_set_metadata_timeout_secs() -> u64 {
     60
 }
 
+/// An optional string whose empty or whitespace-only value means "not set".
+fn blank_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value: Option<String> = serde::Deserialize::deserialize(deserializer)?;
+    Ok(value.filter(|s| !s.trim().is_empty()))
+}
+
 /// How long a freshly spawned session process is watched for an immediate exit before it is
 /// reported as started. Long enough to catch a binary that dies on its own arguments, short
 /// enough not to stall the caller.
@@ -270,9 +279,8 @@ pub struct SandboxCgroupConfig {
 
 /// The warm code-intelligence index this daemon manages (`index_daemon:` YAML section).
 ///
-/// Presence of the section is the switch, the way it is for `supervisor:`: without it this daemon
-/// starts no index daemon at all, so an existing deployment behaves exactly as it did. With it,
-/// a `tddy-index-daemon` that cannot be started is an error on the request that needed it — not a
+/// The section is optional and only overrides the defaults: every daemon manages an index daemon
+/// lazily, started by the first request that needs it. A `tddy-index-daemon` that cannot be started is an error on the request that needed it — not a
 /// quiet fall back to a cold rust-analyzer, which would turn a misconfiguration into six minutes
 /// of unexplained latency per request.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
@@ -327,9 +335,18 @@ impl IndexDaemonConfig {
         if let Some(path) = &self.socket_path {
             return path.clone();
         }
+        // `/run` exists only on Linux hosts; elsewhere (Tddy Desktop on macOS) the temp dir is the
+        // one place an unprivileged process can bind.
         let runtime_dir = std::env::var_os("XDG_RUNTIME_DIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/run"));
+            .unwrap_or_else(|| {
+                let run = PathBuf::from("/run");
+                if run.is_dir() {
+                    run
+                } else {
+                    std::env::temp_dir()
+                }
+            });
         runtime_dir.join("tddy-index-daemon.sock")
     }
 }
@@ -466,8 +483,7 @@ pub struct DaemonConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supervisor: Option<SupervisorClientConfig>,
     /// The warm code-intelligence index daemon this daemon starts, supervises and stops (see
-    /// [`IndexDaemonConfig`]). Absent = this daemon manages none, which is every deployment that
-    /// has not asked for one.
+    /// [`IndexDaemonConfig`]). Absent = [`IndexDaemonConfig::default`]; the section only overrides.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_daemon: Option<IndexDaemonConfig>,
 
@@ -1069,7 +1085,14 @@ pub struct LiveKitConfig {
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_secret: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// URL handed to clients and session terminal bridges in place of `url`. A blank value reads
+    /// as absent: the Settings form saves an empty field as `''`, and kept as `Some("")` it would
+    /// shadow `url` for every reader that prefers the public URL.
+    #[serde(
+        default,
+        deserialize_with = "blank_as_none",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub public_url: Option<String>,
     /// Shared LiveKit room for presence (browser + tddy-* tools). Exposed to web as `common_room` in `/api/config`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2605,5 +2628,50 @@ mod peer_forward_timeout_tests {
             ..Default::default()
         };
         assert_eq!(c.peer_forward_timeout().as_secs(), 1);
+    }
+}
+
+#[cfg(test)]
+mod livekit_public_url_tests {
+    use super::*;
+    use rstest::rstest;
+
+    /// A complete LiveKit block whose `public_url` line is `public_url_value` verbatim.
+    fn a_daemon_whose_public_url_is(public_url_value: &str) -> DaemonConfig {
+        serde_yaml::from_str(&format!(
+            "livekit:\n  enabled: true\n  url: wss://livekit.example.com:7883\n  \
+             public_url: {public_url_value}\n  api_key: devkey\n  api_secret: the-secret\n  \
+             common_room: tddy-lobby\n"
+        ))
+        .expect("the daemon fixture did not parse")
+    }
+
+    #[rstest]
+    #[case::empty("''")]
+    #[case::whitespace("'   '")]
+    fn reads_a_blank_public_url_as_absent(#[case] public_url_value: &str) {
+        // Given a LiveKit block whose public URL was saved blank
+        let config = a_daemon_whose_public_url_is(public_url_value);
+
+        // When the block is read
+        let livekit = config.livekit.expect("the fixture has a livekit block");
+
+        // Then there is no public URL, so every reader falls back to `url`
+        assert_eq!(livekit.public_url, None);
+    }
+
+    #[test]
+    fn writes_no_public_url_key_back_when_the_stored_one_was_blank() {
+        // Given a LiveKit block whose public URL was saved blank
+        let config = a_daemon_whose_public_url_is("''");
+
+        // When it is serialised back to YAML, as an update to the daemon's own file does
+        let yaml = serde_yaml::to_string(&config).expect("the config did not serialise");
+
+        // Then the key is gone rather than carried forward as an empty string
+        assert!(
+            !yaml.contains("public_url"),
+            "a blank public_url was written back:\n{yaml}"
+        );
     }
 }

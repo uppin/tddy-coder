@@ -163,6 +163,16 @@ the optional `livekit` feature.
 `#[cfg(unix)]` kernel items (`resolve_pty_os_user`, `ResolvedPtyUser`), so the crate does not build
 on a non-unix target.
 
+## Opening the session's room for the LiveKit relay
+
+`pty_relay`'s LiveKit path (`tddy-tools pty-relay --livekit-url`) waits for the session's
+`daemon-{instance_id}` participant, so it first calls `open_session_room_over_http(daemon_url,
+session_token, session_id)` (the `livekit` feature): a Connect-HTTP POST of `OpenSessionRoomRequest`
+to `session_room.SessionRoomService/OpenSessionRoom`, returning the decoded
+`OpenSessionRoomResponse`. `ConnectSession` is not used for this: it opens no room for a caller that
+did not arrive over LiveKit. A daemon whose LiveKit cannot be reached fails the call naming the room.
+`tests/pty_relay_room_opening.rs` pins that only the room service's path is hit, with the request body.
+
 ## Login shells
 
 `StartTerminalSession` spawns the user's login shell in the session's checkout.

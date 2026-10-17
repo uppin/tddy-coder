@@ -169,6 +169,24 @@ login from the window authorized at once and written as the only row; a second a
 not enrolled; logins over the common room and the agent tool socket not enrolled, and the window's
 login still enrolled after each; a server mapping nobody enrolling no one; and the refusal above.
 
+### Integration status and the LiveKit plugin
+
+`runtime::build` creates one `IntegrationStatusBoard` and, from it, one reporter for LiveKit
+(`LIVEKIT_INTEGRATION_ID`, labelled "LiveKit"). That reporter is held by the `LiveKitSessionReach`
+the session host is built with (`with_session_reach`; the reach shares the host's room registry, so
+the rooms it opens are the ones deletion closes) and, cloned, by the common-room discovery loop, so
+both report into one entry. The plugin's `session_room.SessionRoomService` entry is registered
+beside the daemon's other entries and resolves sessions through the host.
+
+`DaemonConfigServiceImpl::with_integration_status(board)` serves **`GetIntegrationStatus`**, gated on
+the session token exactly like `GetConfig` (`unauthenticated` without a valid one). It lists the
+board's entries ordered by id; each carries `id`, `label`, the state, `error` (only for
+`UNREACHABLE`), `missing_fields` (only for `MISCONFIGURED`) and `since_unix_ms`, the moment the
+integration entered that kind of state. A service built without a board answers
+`failed_precondition`. The method is served here, not by the integration, so it stays readable when
+the integration is the thing that is down. `runtime::spawn_common_room_discovery_task`, the
+embedder's entry, has no board and reports on a private one nobody reads.
+
 ### The declared sign-in flow
 
 `GET /api/config` (`server.rs`, set from `main.rs`) and `DaemonConfigService.GetClientConfig`

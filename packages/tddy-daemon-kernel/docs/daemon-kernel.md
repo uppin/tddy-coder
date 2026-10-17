@@ -41,9 +41,7 @@ stays exactly one definition of each.
 - **Anything the moving families do not reach.** `pty_registry.rs` was moved here and then retracted
   untouched on exactly that test.
 - **The daemon's signing key and key directory.** They are auth's (`tddy-daemon-auth`), and they
-  must not land here even if several crates reach them: `peer_forwarding.rs` makes this crate carry
-  the LiveKit SDK, which cannot enter `tddy-tools`' `--no-default-features` in-jail build, so
-  anything placed here inherits that unreachability.
+  must not land here even if several crates reach them.
 - **The participant-identity rule.** `SPLIT_AGENT_IDENTITY_PREFIX` and the other non-daemon
   prefixes are defined in `tddy_service::participant_identity`, beside
   `may_be_daemon_discovery_identity`, because the kernel depends on `tddy-service` and the rule must
@@ -200,13 +198,21 @@ to answer a forwarded unary RPC, or to open a forwarded server stream. `peer_for
 it as a `Duration`, clamped to at least one second, so `0` means one second (as for
 `spawn_worker_request_timeout_secs`). An absent key means 30 s.
 
-`peer_forwarding::CommonRoom` is the handle every forwarding call goes through. It holds the room slot
-and that deadline, built once with `CommonRoom::from_config(slot, &config)`; `slot()` gives the
-`Arc<RwLock<Option<Arc<Room>>>>` to the code that joins or replaces the connection, and
-`forward_timeout()` the deadline. `forward_to_peer`, `forward_to_peer_within` (an explicit deadline, for
-a call the peer spends minutes serving) and `forward_server_stream_to_peer` are its methods. The deadline
-rides with the slot because the slot is the one thing every call site already holds, and because a
-process-wide value would be shared by the several daemons the e2e tests run in one process.
+`peer_forwarding::CommonRoom` is the handle every forwarding call goes through. It holds an
+`Arc<dyn PeerForwarder>` — the transport, a port defined in `tddy-daemon-extensions` — and that
+deadline, built once with `CommonRoom::new(forwarder, &config)`; `is_connected()` says whether a peer
+can be reached at all, and `forward_timeout()` gives the deadline. `forward_to_peer`,
+`forward_to_peer_within` (an explicit deadline, for a call the peer spends minutes serving) and
+`forward_server_stream_to_peer` are its methods. The deadline rides with the handle because it is the
+one thing every call site already holds, and because a process-wide value would be shared by the
+several daemons the e2e tests run in one process.
+
+The kernel owns the forwarding **policy** and the transport owns the **carrying**: every transport
+gets the same deadline, the same stream idle rule and the same errors, because they are applied here
+rather than inside each implementation. The kernel names no LiveKit crate; the LiveKit integration
+implements the port (see [`tddy-daemon-livekit`](../../tddy-daemon-livekit/docs/livekit-service.md)),
+and a daemon with no transport wired holds `NoPeerForwarding`, for which `is_connected()` is false and
+every forward is a `FailedPrecondition` naming the call and the peer.
 
 - The **open** of a forwarded stream waits `forward_timeout()`. The idle wait **between frames** of a
   forwarded stream is the fixed `PEER_FORWARD_STREAM_IDLE_TIMEOUT` (30 s), not a setting: it is held
@@ -219,6 +225,9 @@ process-wide value would be shared by the several daemons the e2e tests run in o
   success.
 - A timeout is `DeadlineExceeded` naming the seconds waited. A peer that has left the common room is
   still refused up front (`refuse_departed_daemon`), never waited out.
+- A relayed stream ends at the first terminal frame: a peer's error frame is relayed once, and a frame
+  that cannot be decoded ends the relay with that error. A consumer that drops its receiver releases the
+  transport's stream no later than the idle timeout.
 - The remote managed worktree's split-start forward, and the plain `StartSession` forward, use
   `spawn_worker_request_timeout + peer_forward_timeout` (`split_forward_deadline`, 330 s by default) so a
   peer that clones first, and may stop to ask for a passphrase, is waited for; a longer setting lengthens it too.

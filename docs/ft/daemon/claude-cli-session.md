@@ -225,15 +225,34 @@ worktree configuring six Claude Code lifecycle hooks. Each hook invokes
 ### Hook wiring
 
 `start_claude_cli_session` generates a per-session UUID `hook_token` and calls
-`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, session_id, os_user, hook_token })`.
+`tddy_core::build_claude_hooks_settings(&HookCommandParams { tddy_tools_path, daemon_url, daemon_socket, session_id, os_user, hook_token })`.
 The resulting JSON is written to `<worktree>/.claude/settings.local.json`. The `hook_token` is also
 stored in `.session.yaml` for validation on inbound `ReportSessionStatus` calls.
 
 Config (`claude_cli:` block) may override `tddy_tools_path` (default: `current_exe` sibling → `"tddy-tools"`) and `daemon_url` (default: `http://127.0.0.1:{web_port}`).
 
+### Which transport a hook reports over
+
+| Host | Hook command carries | Reports go over |
+|---|---|---|
+| Binary daemon (`tddy-daemon`) | `--daemon <daemon_url>` | HTTP: `{daemon_url}/rpc/activity.ActivityService/<method>` |
+| Tddy Desktop (embedded daemon) | `--daemon <daemon_url> --daemon-socket '<path>'` | The daemon's **agent-tool socket** — the Unix socket an embedded daemon binds for co-located processes, serving its full RPC roster |
+
+An embedded daemon serves no HTTP RPC: its `listen.web_port` is only where a GitHub sign-in returns,
+and answers `/rpc` with 404. The socket is passed exactly when one is **listening** at
+`agent_tool_socket_path(<resolved data dir>)` at session start (`embedded_host_agent_tool_socket`) —
+a live connect, not the file existing, because the embedded daemon does not unlink the socket on
+exit and a binary daemon later started on the same data dir must keep using HTTP. The data dir is the
+one the daemon resolved (`TDDY_DATA_DIR` wins over `tddy_data_dir` in the config), the same one it
+bound the socket under. When `--daemon-socket` is given, `session-hook` uses only the socket. Hooks
+are written at session start, so a session keeps the transport it started with until it restarts.
+
+Split agents' hooks are written the same way. Cursor-cli hooks still report over HTTP only — see
+[`docs/dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md`](../../dev/todo/2026-10-17-desktop-cursor-hooks-reach-daemon.md).
+
 ### Fail-quiet contract
 
-`tddy-tools session-hook` always exits 0. A 2-second reqwest timeout prevents a dead daemon from blocking Claude. On no-op events (unrecognized event names, unrecognized `notification_type`) the tool exits immediately without making any network call.
+`tddy-tools session-hook` always exits 0. A 2-second ceiling on each report — over HTTP or the agent-tool socket — prevents a dead daemon from blocking Claude; a socket nobody listens on is refused at once. On no-op events (unrecognized event names, unrecognized `notification_type`) the tool exits immediately without making any network call.
 
 ### Auth model
 
@@ -261,7 +280,8 @@ message StartSessionRequest {
 
 `activity.proto` — the activity-status hooks, on `activity.ActivityService` (served by
 `tddy-session-activity`; `#unbundle` node 7 moved them off `connection.ConnectionService`, so the
-hook posts to `{daemon_url}/rpc/activity.ActivityService/ReportSessionStatus`):
+hook calls `activity.ActivityService/ReportSessionStatus` — over HTTP at `{daemon_url}/rpc/…`, or over
+the agent-tool socket on Tddy Desktop):
 
 ```proto
 rpc ReportSessionStatus(ReportSessionStatusRequest) returns (ReportSessionStatusResponse);

@@ -10,9 +10,11 @@ stream.
 |---|---|
 | `session_room` | the per-session room — naming, the poll loop, the WIP ref and the delta ring, and the four trait ports. Detail: [session-room.md](./session-room.md) |
 | `livekit_peer_discovery` | the metadata advertisement (with `AdvertisedSigningKey`), `CommonRoomPeerRegistry`, `peer_signing_public_keys`, `daemon_rpc_identity`, and the forwarding helpers |
+| `livekit_peer_forwarder` | `LiveKitPeerForwarder`: the kernel's `PeerForwarder` port over the common room — see below |
 | `common_room_supervisor` | the `CommonRoomSupervisor` trait and `SupervisedCommonRoom` — joining the common room and keeping it joined |
 | `livekit_rooms_stream` | `RoomRoster`, `RosterError`, and `pump_rooms`, the 3 s poller behind the rooms stream |
 | `livekit_service` | `LiveKitServiceImpl` and `build_livekit_entry` — **authored here**, because family T needs a service to be served by once it leaves `ConnectionServiceImpl` |
+| `session_reach` | LiveKit's implementation of the core's `SessionReach` port: `LiveKitSessionReach`, its `session_room.SessionRoomService` entry (`OpenSessionRoom`), `livekit_integration_state` and `LIVEKIT_INTEGRATION_ID`. Detail: [below](#livekitsessionreach--opening-the-room-for-a-reached-session) |
 | `peer_routing` | `PeerRouting`: this daemon's routing identity, the eligible peers (`set_eligible_daemon_source`, `eligible_instance_ids`), the route an addressed request takes (`classify_daemon_route`, `classify_addressed_daemon_route`, `stream_served_by_peer`) and the `CommonRoom` handle (room slot plus the peer-forward deadline) a forward travels through; `PeerRouting::new` builds it from its `DaemonConfig`. Shared, not copied, by the session host and the RPC families above it, so a session RPC and an exec-tool RPC addressed at one daemon agree on who owns the call |
 | `session_admission_service` | the room-admission handshake: `SessionAdmissionRegistry`, the short-TTL admission token (`ADMISSION_TOKEN_TTL`, `ADMISSION_RENEW_MARGIN`) and `SessionAdmissionServiceImpl`, whose `AdmitOwningDaemon` re-mints a token only for a daemon the registry still holds, so a revoked daemon stays out of the room |
 | `livekit_peer_transport` | `LiveKitPeerTransport`: `tddy-credential-sync`'s `PeerTransport` over the common room, for `#keyring` 6/9's credential propagation — see below |
@@ -21,6 +23,28 @@ stream.
 re-exports both by name (`pub use tddy_daemon_livekit::{peer_routing, session_admission_service};`),
 and its host keeps one-line delegations to `PeerRouting` for the methods it serves itself, which is
 why those `PeerRouting` methods are `pub`.
+
+## `LiveKitPeerForwarder` — carrying a forward to a peer daemon
+
+`LiveKitPeerForwarder::new(slot)` implements `tddy_daemon_extensions::PeerForwarder` over the common
+room's `Arc<RwLock<Option<Arc<Room>>>>` slot. The kernel's `CommonRoom` applies the deadline, the stream
+idle rule and the errors a caller sees; this carries the call and nothing else.
+
+- **A client per call.** Each call builds a `tddy_livekit::LiveKitRpcClientFactory::for_room(room)` client
+  addressed at `daemon_rpc_identity(peer)` (`daemon-{peer_id}`). With the room down, a call is a
+  `FailedPrecondition`: "LiveKit common room is not connected; cannot forward an RPC / a stream to a peer".
+  `is_connected()` is whether the slot holds a room.
+- **A stream's client lives as long as the stream.** The client holds the call's registration in the
+  room's shared response loop, so the forwarder moves it into a relay task that feeds the receiver it
+  returns. The relay ends when the peer ends the stream, and also when the reader goes away: it watches
+  `tx.closed()`, so a stream whose reader dropped is released even if the peer never sends again.
+- **The reader must drain promptly.** The relay's channel is 32 frames deep and independent of the
+  transport's own 32-frame channel. A reader that stalls backs the relay up, then that channel, and the
+  room's shared response loop blocks for every call in flight. The kernel's relay drains into an
+  unbounded buffer and never stalls; a second consumer must do the same.
+
+`PeerRouting` and the common-room discovery loop build their `CommonRoom` through it, over the slot they
+already hold.
 
 ## `livekit.LiveKitService`
 
@@ -80,6 +104,60 @@ open subscription**, not per daemon. It is bounded by panels actually open. One 
 broadcasting full rosters, with each subscriber diffing locally, would preserve the same
 per-subscriber guarantee at one poller per daemon — the escape hatch if this panel becomes
 commonly-open.
+
+## `LiveKitSessionReach` — opening the room for a reached session
+
+`session_reach` implements [`SessionReach`](../../tddy-daemon-extensions/docs/extension-ports.md), the
+port `ConnectSession` reports every reach of a session through. LiveKit is optional, so the room a
+reach opens is an addition to a session and never a prerequisite for using it.
+
+`LiveKitSessionReach::new(config, rooms, status)` takes the daemon's `DaemonConfig`, the shared
+`SessionRoomRegistry` (the rooms it opens are the ones session deletion closes) and an
+`IntegrationReporter`, and reports `livekit_integration_state(config.livekit)` immediately, so a
+daemon with LiveKit configured is not `Disabled` merely because nothing has dialled it yet.
+
+| Caller | What `session_reached` does |
+|---|---|
+| Arrived over LiveKit (`RequestTransport::LiveKit`) | Opens the room and exposes the terminal **now**, in the caller's time; a failure fails the request. A remote client needs the room to be answered at all. |
+| Anyone else (`Direct`, `InProcess`, HTTP, a local socket) | Spawns the open in the background and returns `Ok(())`. Nothing on this host needs the room, so the caller never waits on, or fails with, LiveKit; the outcome lands on the status board and in a `warn` log line. |
+
+**`OpenSessionRoom` is loud.** `session_room.SessionRoomService.OpenSessionRoom(session_token,
+session_id)` is registered by the plugin (`session_room_entry`) and is what a client that is about to
+join a session's room asks first: `tddy-session-sync` and `tddy-tools pty-relay --livekit-url`. It
+resolves the session through `ReachableSessions::resolve`, which authenticates the token and refuses
+a session this daemon does not facilitate, or one that records no checkout, with
+`failed_precondition`; it then opens the room (or reuses the open one) and answers the room name
+(`session-{id}`), the URL a client joins at and the daemon's server identity. A LiveKit failure fails
+the call, naming the room; a daemon with no LiveKit credentials answers `failed_precondition`
+("LiveKit is not configured on this daemon") rather than coordinates nothing serves.
+
+### Status reporting
+
+`livekit_integration_state(Option<&LiveKitConfig>)` is what the `livekit:` block alone says, before
+anything is dialled: `Disabled` with no block, or with `enabled: false` and no credentials;
+`Misconfigured { missing }` naming whichever of `url`, `api_key`, `api_secret` is blank, in that
+order; otherwise `Connecting`. Every outcome of `open_now` reports on the same reporter:
+
+| Outcome | Reported |
+|---|---|
+| Room opened or reused | `Connected` |
+| No credentials (`Ok(None)`) | What the block alone says |
+| `RoomOpenFailure::Server` (creating or joining the room on the LiveKit server failed) | `Unreachable { error }`, the same text the caller is given |
+| `RoomOpenFailure::Elsewhere` (the session's services, its checkout, its terminal bridge, the session deleted mid-open) | Nothing: the request still fails, but the server was not the problem, so the entry is left alone |
+
+`SessionRoomRegistry::ensure_open_staged` is `ensure_open` saying which stage failed; `ensure_open`
+maps either variant to its `Status`.
+
+The common-room discovery loop (`spawn_common_room_discovery_loop`) reports on the same reporter,
+which the daemon clones into `PeerDiscoveryHandles.status`: the configuration's state while the first
+attempt runs, `Connected` once the common room is joined, and `Unreachable { error }` for a failed
+connect or a lost room. A failure that is really the configuration (`Disabled`, `Misconfigured`) is
+reported as that. Retries do not report `Connecting` again, so an outage keeps the `since` of its
+first failure. The room-opening reach and the loop are two connections writing one entry, last writer
+wins: a session room that opens reports `Connected` while the common room is down.
+
+An embedder that calls `runtime::spawn_common_room_discovery_task` has no board and reports on a
+private one nobody reads.
 
 ## The direction was already right
 

@@ -16,6 +16,7 @@ tddy-accounts = { path = "../tddy-accounts" }
 tddy-cli-sessions = { path = "../tddy-cli-sessions" }
 tddy-core = { path = "../tddy-core" }
 tddy-credentials = { path = "../tddy-credentials" }
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }

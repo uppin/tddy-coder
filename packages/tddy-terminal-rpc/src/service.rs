@@ -217,6 +217,29 @@ impl TerminalSessionServiceImpl {
         resolved.ok_or_else(|| Status::not_found("terminal not found or not running"))
     }
 
+    /// Whether an output-half open may resize the PTY to the grid it measured.
+    ///
+    /// Opening the output half is watching, so it is served without a lease — but the grid it
+    /// carries resizes the PTY, and that is driving: a phone merely looking at a session a desktop
+    /// drives would otherwise reflow the desktop's terminal to the phone's width. So the grid is
+    /// honoured under the same rule as input ([`Self::controlled_terminal`]), and a watcher's open
+    /// is served at whatever size the driving screen set.
+    async fn may_resize_on_open(&self, req: &StreamTerminalOutputRequest) -> bool {
+        let terminal_id = resolved_terminal_id(&req.terminal_id);
+        let gated = self
+            .ports
+            .terminals
+            .get_terminal(&req.session_id, terminal_id)
+            .await
+            .is_some_and(|session| session.requires_control());
+        !gated
+            || self
+                .ports
+                .control
+                .verify(&req.session_id, &req.control_token)
+                .await
+    }
+
     /// A `verify_control` closure for the bidi bridge, which re-checks every subsequent input chunk
     /// so a screen that loses the lease mid-stream stops being able to type.
     fn control_verifier(&self) -> impl Fn(&str, &str) -> ControlVerification + Send + Sync + use<> {
@@ -291,6 +314,10 @@ impl TerminalSessionService for TerminalSessionServiceImpl {
         let mut req = request.into_inner();
         self.os_user(&req.session_token)?;
         req.session_id = keyed_session_id(&req.session_id);
+        if !self.may_resize_on_open(&req).await {
+            req.initial_cols = 0;
+            req.initial_rows = 0;
+        }
 
         let rx = serve_stream_terminal_output_with(
             &*self.ports.terminals,

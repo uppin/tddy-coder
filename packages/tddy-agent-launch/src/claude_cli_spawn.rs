@@ -171,6 +171,7 @@ pub(crate) async fn spawn_claude_cli_session_inner(
 
     let (tddy_tools_path, hook_token) = claude_cli_spawn_steps::install_claude_cli_hooks(
         config,
+        tddy_data_dir,
         os_user,
         session_id,
         &worktree_path,

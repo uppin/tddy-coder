@@ -21,16 +21,18 @@ use livekit::Room;
 use prost::Message;
 use serial_test::serial;
 use tddy_core::session_lifecycle::unified_session_dir_path;
+use tddy_daemon_extensions::IntegrationStatusBoard;
 use tddy_daemon_kernel::config::DaemonConfig;
-use tddy_daemon_livekit::session_room::session_room_name;
+use tddy_daemon_livekit::session_room::{session_room_name, SessionRoomRegistry};
+use tddy_daemon_livekit::{LiveKitSessionReach, LIVEKIT_INTEGRATION_ID};
 use tddy_livekit::{LiveKitRpcClientFactory, RpcClient};
 use tddy_livekit_testkit::LiveKitTestkit;
-use tddy_rpc::Request;
+use tddy_rpc::{Request, RequestMetadata, RequestTransport, RpcMessage, RpcResult};
 use tddy_service::proto::exec_tools::{ExecuteToolRequest, ExecuteToolResponse};
 use tddy_service::proto::session::{
-    ConnectSessionRequest, SessionService as SessionServiceTrait, StartSessionRequest,
-    StartSessionResponse,
+    SessionService as SessionServiceTrait, StartSessionRequest, StartSessionResponse,
 };
+use tddy_service::proto::session_room::OpenSessionRoomRequest;
 use tddy_session_lifecycle::connection_service::DaemonSessionHost;
 use tddy_session_lifecycle::test_util::TEST_TOKEN;
 use tddy_testing_commons::stub_scripts::a_stub_agent_script;
@@ -195,6 +197,8 @@ fn an_agent_session_request() -> StartSessionRequest {
 /// The daemon running the agent: it hosts the session room and answers tool calls in it.
 struct FacilitatingDaemon {
     service: DaemonSessionHost,
+    /// The LiveKit plugin's `SessionRoomService`, which is what opens a session's room.
+    room_service: tddy_rpc::ServiceEntry,
     sessions_base: PathBuf,
     ws_url: String,
     livekit: LiveKitTestkit,
@@ -237,6 +241,16 @@ impl FacilitatingDaemon {
             Arc::new(|token| (token == TEST_TOKEN).then(|| "testuser".to_string()));
 
         let staging = tempfile::tempdir().unwrap();
+        // Wired as the daemon wires it: one room registry shared by the host and the LiveKit
+        // plugin, the plugin installed as the host's reach before the RPC families, and its own
+        // service built over the finished host.
+        let rooms = Arc::new(SessionRoomRegistry::new());
+        let integrations = IntegrationStatusBoard::new();
+        let reach = LiveKitSessionReach::new(
+            config.clone(),
+            Arc::clone(&rooms),
+            integrations.reporter(LIVEKIT_INTEGRATION_ID, "LiveKit"),
+        );
         let service = DaemonSessionHost::new(
             config,
             resolver,
@@ -247,11 +261,15 @@ impl FacilitatingDaemon {
             None,
             Arc::new(tddy_session_lifecycle::claude_cli_session::ClaudeCliSessionManager::new()),
         )
-        .with_staging_base_dir(staging.path().to_path_buf());
+        .with_staging_base_dir(staging.path().to_path_buf())
+        .with_session_rooms(rooms)
+        .with_session_reach(reach.clone());
         let (service, _) = tddy_daemon_rpc::RpcHandlers::install(service);
+        let room_service = reach.session_room_entry(Arc::new(service.clone()));
 
         Self {
             service,
+            room_service,
             sessions_base: sessions.path().to_path_buf(),
             ws_url,
             livekit,
@@ -263,21 +281,32 @@ impl FacilitatingDaemon {
         }
     }
 
-    /// A started agent session that something has connected to, so its room is open.
-    async fn a_session_being_connected_to(&self) -> StartSessionResponse {
+    /// A started agent session whose room the LiveKit plugin has opened, the way
+    /// `tddy-session-sync` and `pty-relay` ask for it: `SessionRoomService.OpenSessionRoom`.
+    async fn a_session_with_an_open_room(&self) -> StartSessionResponse {
         let started = self
             .service
             .start_session(Request::direct(an_agent_session_request()))
             .await
             .expect("an agent session must start")
             .into_inner();
-        self.service
-            .connect_session(Request::direct(ConnectSessionRequest {
-                session_token: TEST_TOKEN.to_string(),
-                session_id: started.session_id.clone(),
-            }))
+        let request = OpenSessionRoomRequest {
+            session_token: TEST_TOKEN.to_string(),
+            session_id: started.session_id.clone(),
+        };
+        let message = RpcMessage::new(
+            request.encode_to_vec(),
+            RequestMetadata::over(RequestTransport::Http),
+        );
+        let RpcResult::Unary(reply) = self
+            .room_service
+            .service
+            .handle_rpc(self.room_service.name, "OpenSessionRoom", &message)
             .await
-            .expect("connecting to a started session must open its room");
+        else {
+            panic!("OpenSessionRoom is a unary call");
+        };
+        reply.expect("opening a started session's room must succeed");
         started
     }
 
@@ -363,7 +392,7 @@ fn commit_a_file(worktree: &Path, path: &str, contents: &str) -> String {
 async fn a_participant_reads_a_worktree_file_through_execute_tool_in_the_session_room() {
     // Given a worktree holding a committed file, and an agent that joined only the session room
     let daemon = FacilitatingDaemon::with_livekit().await;
-    let started = daemon.a_session_being_connected_to().await;
+    let started = daemon.a_session_with_an_open_room().await;
     let worktree = daemon.worktree_of(&started.session_id);
     commit_a_file(&worktree, "greeting.txt", "hello from the worktree");
 

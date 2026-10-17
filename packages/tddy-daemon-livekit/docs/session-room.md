@@ -32,7 +32,8 @@ lower layer knows about LiveKit.
 | **`session_type_is_facilitated_here`** | Whether a session of this type runs an agent on this daemon and therefore has a room here — the product doc's Roles table as a predicate. Deliberately not a statement about whether a session type "uses LiveKit": there are three rooms in play and this names one. |
 | **`SessionTerminalBridge`** | Puts a participant serving a session's terminal into the room a remote client drives it from. A trait so the registry can establish it in the same breath as the room without knowing what a PTY is. |
 | **`DaemonRoomHosting`** | This daemon as a host of rooms; `for_worktree` (local) and `for_remote_worktree` (split) build a `SessionRoomHosting`. |
-| **`SessionRoomRegistry`** | `ensure_open`, `open`, `open_measured_by`, `hosts`, `close`, `close_for_worktree`. Holds the live rooms, keyed by session. |
+| **`SessionRoomRegistry`** | `ensure_open`, `ensure_open_staged`, `open`, `open_measured_by`, `hosts`, `close`, `close_for_worktree`. Holds the live rooms, keyed by session. |
+| **`RoomOpenFailure`** | Which stage of an open failed: `Server` (creating or joining the room on the LiveKit server) or `Elsewhere` (the session's services, its checkout, its terminal bridge, the session going away mid-open). `ensure_open_staged` returns it so a caller reporting on the LiveKit server tells the two apart; `ensure_open` maps either to its `Status`. |
 | **`SESSION_ACTIVITY_TOPIC`** | Re-export of `session.activity`, the topic each `AgentActivityRecord` is broadcast on. Distinct from `worktree.activity`, which still carries only *that* the checkout moved. |
 | **`write_wip_tree_within`** | Stage the whole checkout into a **scratch index** and `write-tree` it. Returns `""` on any failure, since a poll's only recourse is the next tick. |
 | **`tick_delta`** | Two snapshots plus a `seq` → the `ActivityDelta` between their WIP trees, or `None`. |
@@ -70,8 +71,9 @@ snapshot. An empty `head_commit` differs from the previous one, so reporting it 
 
 `ensure_open` is what almost everything calls: `open` unless the session's room is already open, and
 where it is either way. It exists because a room is created when something first needs to reach the
-session over LiveKit rather than when the session is created, so the callers are connects and
-attaches, arriving in any order and possibly at once. `open` and `open_measured_by` are called
+session over LiveKit rather than when the session is created, so the callers are reaches
+([`LiveKitSessionReach`](./livekit-service.md#livekitsessionreach--opening-the-room-for-a-reached-session)),
+`OpenSessionRoom` calls and attaches, arriving in any order and possibly at once. `open` and `open_measured_by` are called
 directly only by a split session's start, whose agent is handed a token for the room before anything
 could have connected.
 
@@ -192,10 +194,12 @@ exists to establish, pinned by `tests/dependency_boundary_unit.rs`.
 |---|---|
 | `tests/session_room_livekit_acceptance.rs` | One daemon, real LiveKit: the tick ring, the WIP ref's parentage and its release at close, a call served the patch its tick produced, and a record broadcast into the room stamped with its tick. |
 | `tests/session_room_wiring_acceptance.rs` | The registry's contract without a LiveKit deployment: what `open` and `ensure_open` promise, and what they refuse. |
+| `tests/livekit_integration_status.rs` | `LiveKitSessionReach::open_now` against the status board: a room that cannot be opened reports `Unreachable` with the failure the caller received, no `livekit:` block opens no room and reports `Disabled`, a terminal or room services that cannot be provided fail the open and leave the entry alone, and a room opened on a reachable server reports `Connected` (real LiveKit). |
+| `tests/common_room_integration_status.rs` | The common-room discovery loop's reports: `Connected` once the room is joined, `Unreachable` when the server does not answer (real LiveKit). |
 | `tests/livekit_peer_daemons_acceptance.rs` | Common-room peer discovery listing another daemon. |
 | `tests/common_room_duplicate_identity_repro.rs`, `tests/common_room_set_metadata_handshake_repro.rs` | The two common-room repros. |
 | `tests/stream_livekit_rooms_rpc.rs` | `livekit.LiveKitService.StreamLiveKitRooms` — snapshot, changes, and clean termination. |
-| `tests/dependency_boundary_unit.rs` | Neither `tddy-daemon` nor `tddy-daemon-auth` is on this crate's dependency path, walked over the transitive manifest closure. |
+| `tests/dependency_boundary_unit.rs` | Neither `tddy-daemon` nor `tddy-daemon-auth` is on this crate's dependency path, read from [`WorkspaceGraph`](../../tddy-testing-commons/docs/dependency-graph.md). |
 
 **The four Docker-backed suites contend with one another.** They are `#[serial]` *within* a binary,
 but cargo runs binaries in parallel, and they are four of a small crate's suites rather than four of
@@ -210,7 +214,7 @@ an absent `/var/run/docker.sock` makes these suites *fail*, loudly, naming
 | Suite | Covers |
 |---|---|
 | `tests/worktree_activity.rs` | Naming, snapshotting a real checkout, every event rule, metadata shape, the log line. No LiveKit. |
-| `tests/session_room_acceptance.rs` | One daemon, real LiveKit: that a start dials LiveKit not at all, that the first connect opens the room and bridges the terminal, that a second connect reuses both and two at once produce one of each, that a connect whose room cannot be created fails naming it, plus first-joiner, file access, broadcast fan-out, idle silence, late-joiner metadata, attachments, no-credentials, and that a `workspace` session gets no room. |
+| `tests/session_room_acceptance.rs` (in `tddy-session-lifecycle`, which owns the session host) | One daemon, real LiveKit: that a start dials LiveKit not at all; that a `ConnectSession` from a local caller answers within two seconds against a LiveKit that never answers or refuses connections, and a host without the plugin never contacts LiveKit; that a caller that arrived over LiveKit still hears a room failure naming the room; that `OpenSessionRoom` is loud, names the room and the daemon waiting in it, and refuses a session type this daemon does not facilitate; that a locally connected session becomes drivable over LiveKit in the background and reports `Connected`, or `Unreachable` when its room could not be opened; that a second open reuses the room and the terminal bridge and two at once produce one of each; plus first-joiner, file access, broadcast fan-out, idle silence, late-joiner metadata, attachments, no-credentials, and that a `workspace` session gets no room. |
 | `tests/session_room_cross_host_acceptance.rs` | Two daemons, a real split session: a forwarded read is indistinguishable from a local one, and a commit on the codebase daemon is broadcast in the facilitating daemon's room. |
 | `tests/session_activity_delta_acceptance.rs` | Real git repositories, ticks driven explicitly, no LiveKit: staging a WIP tree without touching the agent's index, delta scoping per call, the residual, and ring eviction. |
 | `tests/session_activity_wiring_acceptance.rs` | `read_head_commit` checked against what git itself reports, and what one tick produces. |

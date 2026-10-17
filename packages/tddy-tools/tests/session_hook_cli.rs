@@ -292,22 +292,32 @@ impl AnActivityEndpoint {
     /// The body the endpoint was asked `method` with, or `None` when it was never asked — which is
     /// what a hook posting to another coordinate leaves behind.
     fn body_of(&self, method: &str) -> Option<Vec<u8>> {
-        self.calls
-            .lock()
-            .expect("recorded calls")
-            .iter()
-            .find(|(name, _)| name == method)
-            .map(|(_, body)| body.clone())
+        recorded_body(&self.calls, method)
     }
 
     fn methods(&self) -> Vec<String> {
-        self.calls
-            .lock()
-            .expect("recorded calls")
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect()
+        recorded_methods(&self.calls)
     }
+}
+
+/// The body `calls` recorded for `method`, or `None` when it was never asked.
+fn recorded_body(calls: &Mutex<Vec<RecordedCall>>, method: &str) -> Option<Vec<u8>> {
+    calls
+        .lock()
+        .expect("recorded calls")
+        .iter()
+        .find(|(name, _)| name == method)
+        .map(|(_, body)| body.clone())
+}
+
+/// Every method `calls` recorded, in the order asked.
+fn recorded_methods(calls: &Mutex<Vec<RecordedCall>>) -> Vec<String> {
+    calls
+        .lock()
+        .expect("recorded calls")
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect()
 }
 
 impl Drop for AnActivityEndpoint {
@@ -319,22 +329,19 @@ impl Drop for AnActivityEndpoint {
 /// Run `session-hook` against `daemon`, feeding it `stdin_json`. Blocking, so it runs off the
 /// reactor: the endpoint under test is served by this same runtime.
 async fn run_session_hook_against(daemon: &str, session: &str, stdin_json: &str) {
-    let daemon = daemon.to_string();
+    run_session_hook_reaching(vec!["--daemon".into(), daemon.into()], session, stdin_json).await;
+}
+
+/// Run `session-hook` with `daemon_args` naming the daemon, feeding it `stdin_json`. Blocking, so
+/// it runs off the reactor: the endpoint under test is served by this same runtime.
+async fn run_session_hook_reaching(daemon_args: Vec<String>, session: &str, stdin_json: &str) {
     let session = session.to_string();
     let stdin_json = stdin_json.to_string();
     tokio::task::spawn_blocking(move || {
         tddy_tools_bin()
-            .args([
-                "session-hook",
-                "--session",
-                &session,
-                "--daemon",
-                &daemon,
-                "--os-user",
-                "testuser",
-                "--hook-token",
-                "tok-coordinate",
-            ])
+            .args(["session-hook", "--session", &session])
+            .args(&daemon_args)
+            .args(["--os-user", "testuser", "--hook-token", "tok-coordinate"])
             .write_stdin(stdin_json)
             .assert()
             .success();
@@ -387,4 +394,175 @@ async fn posts_both_hook_reports_to_the_activity_service_the_daemon_serves() {
     assert_eq!(activity.session_id, "coordinate-session-1");
     assert_eq!(activity.event, "PostToolUse");
     assert_eq!(activity.tool_name, "Bash");
+}
+
+// ---------------------------------------------------------------------------
+// Reaching a daemon embedded in an application
+//
+// Tddy Desktop's daemon serves no HTTP RPC: `--daemon` there names the GitHub sign-in callback,
+// which answers every report with an empty 404 the fail-quiet contract swallows. Its agent-tool
+// socket — `tddy-rpc` length-prefixed framing over a Unix stream, the full RPC roster behind it —
+// is the channel a co-located process has, and `--daemon-socket` names it.
+// ---------------------------------------------------------------------------
+
+/// A daemon's agent-tool socket serving **only** `activity.ActivityService`, one endpoint per
+/// connection exactly as `tddy_daemon::agent_tool_socket` serves its roster. Dropping it stops
+/// accepting connections and removes the socket.
+struct AnAgentToolSocket {
+    path: std::path::PathBuf,
+    calls: Arc<Mutex<Vec<RecordedCall>>>,
+    serving: tokio::task::JoinHandle<()>,
+}
+
+impl AnAgentToolSocket {
+    fn bind(tag: &str) -> Self {
+        let calls: Arc<Mutex<Vec<RecordedCall>>> = Arc::new(Mutex::new(Vec::new()));
+        let path = tddy_sandbox::SandboxSpec::short_ipc_socket_path(tag);
+        let _ = std::fs::remove_file(&path);
+        let listener = tokio::net::UnixListener::bind(&path).expect("bind the agent-tool socket");
+        let served_calls = Arc::clone(&calls);
+        let serving = tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let calls = Arc::clone(&served_calls);
+                tokio::spawn(async move {
+                    let (read_half, write_half) = tokio::io::split(stream);
+                    let (_client, endpoint) = tddy_stdio::StdioEndpoint::from_duplex(
+                        read_half,
+                        write_half,
+                        MultiRpcService::new(vec![ServiceEntry {
+                            name: tddy_service::session_activity::ACTIVITY_SERVICE,
+                            service: Arc::new(RecordingActivityService { calls })
+                                as Arc<dyn RpcService>,
+                        }]),
+                        tddy_rpc::RequestTransport::UnixSocket,
+                    );
+                    endpoint.run().await;
+                });
+            }
+        });
+        Self {
+            path,
+            calls,
+            serving,
+        }
+    }
+
+    fn body_of(&self, method: &str) -> Option<Vec<u8>> {
+        recorded_body(&self.calls, method)
+    }
+
+    fn methods(&self) -> Vec<String> {
+        recorded_methods(&self.calls)
+    }
+}
+
+impl Drop for AnAgentToolSocket {
+    fn drop(&mut self) {
+        self.serving.abort();
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Where Tddy Desktop's `listen.web_port` points a hook: a port answering no RPC. Unroutable here,
+/// so a report that went to it instead of the socket is lost, as it was on the desktop.
+const NO_HTTP_RPC: &str = "http://127.0.0.1:1";
+
+/// On an embedded daemon a `PostToolUse` hook given the agent-tool socket delivers **both** reports
+/// over it — the status that moves the session and the tool row its Activity pane is built from.
+#[tokio::test]
+async fn a_hook_given_the_agent_tool_socket_delivers_both_reports_over_it() {
+    // Given an embedded daemon's agent-tool socket, and an HTTP address that answers no RPC
+    let socket = AnAgentToolSocket::bind("hooksocket");
+
+    // When a PostToolUse hook fires, told of both
+    run_session_hook_reaching(
+        vec![
+            "--daemon".into(),
+            NO_HTTP_RPC.into(),
+            "--daemon-socket".into(),
+            socket.path.to_string_lossy().into_owned(),
+        ],
+        "embedded-session-1",
+        r#"{"hook_event_name":"PostToolUse","session_id":"embedded-session-1","tool_name":"Bash","tool_input":{"command":"cargo build"},"tool_response":{"stdout":"done"}}"#,
+    )
+    .await;
+
+    // Then the status report arrived over the socket, naming the session it was run for
+    let status_body = socket.body_of("ReportSessionStatus").unwrap_or_else(|| {
+        panic!(
+            "ReportSessionStatus never reached the agent-tool socket; it was asked for {:?}",
+            socket.methods()
+        )
+    });
+    let status = ReportSessionStatusRequest::decode(&status_body[..])
+        .expect("decode the ReportSessionStatusRequest the hook sent");
+    assert_eq!(status.session_id, "embedded-session-1");
+    assert_eq!(status.hook_token, "tok-coordinate");
+    assert_eq!(status.status, "ExecutingTool");
+
+    // …and so did the agent-activity report, carrying the tool the hook fired for
+    let activity_body = socket.body_of("ReportAgentActivity").unwrap_or_else(|| {
+        panic!(
+            "ReportAgentActivity never reached the agent-tool socket; it was asked for {:?}",
+            socket.methods()
+        )
+    });
+    let activity = ReportAgentActivityRequest::decode(&activity_body[..])
+        .expect("decode the ReportAgentActivityRequest the hook sent");
+    assert_eq!(activity.session_id, "embedded-session-1");
+    assert_eq!(activity.hook_token, "tok-coordinate");
+    assert_eq!(activity.tool_name, "Bash");
+}
+
+/// A hook must finish promptly even when its socket is dead, or Claude Code waits on it.
+const A_PROMPT_HOOK: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// The socket file an exited embedded daemon leaves behind: bound once, nobody listening since.
+/// Dropping it removes the file.
+struct ADeadAgentToolSocket {
+    path: std::path::PathBuf,
+}
+
+impl ADeadAgentToolSocket {
+    fn left_behind(tag: &str) -> Self {
+        let path = tddy_sandbox::SandboxSpec::short_ipc_socket_path(tag);
+        let _ = std::fs::remove_file(&path);
+        drop(std::os::unix::net::UnixListener::bind(&path).expect("bind the agent-tool socket"));
+        Self { path }
+    }
+}
+
+impl Drop for ADeadAgentToolSocket {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// The fail-quiet contract over the socket transport: a hook pointed at an agent-tool socket
+/// nobody listens on — the file an exited Tddy Desktop left behind — still exits 0, and promptly.
+#[tokio::test]
+async fn a_hook_given_a_dead_agent_tool_socket_still_exits_zero_promptly() {
+    // Given an agent-tool socket file nobody listens on, and an HTTP address that answers no RPC
+    let socket = ADeadAgentToolSocket::left_behind("deadsocket");
+
+    // When a PostToolUse hook fires, told of both
+    let started = std::time::Instant::now();
+    run_session_hook_reaching(
+        vec![
+            "--daemon".into(),
+            NO_HTTP_RPC.into(),
+            "--daemon-socket".into(),
+            socket.path.to_string_lossy().into_owned(),
+        ],
+        "embedded-session-dead",
+        r#"{"hook_event_name":"PostToolUse","session_id":"embedded-session-dead","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":""}}"#,
+    )
+    .await;
+
+    // Then it exited 0 (asserted by the runner) without keeping Claude Code waiting
+    let took = started.elapsed();
+    assert!(
+        took < A_PROMPT_HOOK,
+        "a hook on a dead socket must return within {A_PROMPT_HOOK:?}; took {took:?}"
+    );
 }

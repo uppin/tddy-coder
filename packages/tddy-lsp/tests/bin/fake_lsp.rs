@@ -34,7 +34,15 @@
 //!   answered*, so that hover is already answered by a server that has said it is busy. Sent right
 //!   after the Nth answer instead, whether a client that hovers again at once had heard it by the
 //!   time it read that answer would be a race, and a consumer's test could not name which wait it
-//!   was in.
+//!   was in. A crate-graph load still being narrated when the server goes busy says nothing more —
+//!   above all no late `quiescent: true` — and the hover is answered at once all the same.
+//! - `--narrates-while-loading` — once the server is busy on its build script, report a *new* build
+//!   script (`build script crate-N run`) on the same phase every [`BETWEEN_BUILD_SCRIPT_REPORTS`],
+//!   on a timer of its own rather than per request: a server that stays loading and keeps saying
+//!   so, the way a long but healthy load does. Alone it behaves like `--never-quiescent`, so it is
+//!   busy from the start; with `--goes-busy-after-hovers N` it is busy, and narrating, only once N
+//!   hovers have been answered — past the warm-up, in the wait for type inference. Lets a test
+//!   prove that a wait bounded on silence never ends a server that is still talking.
 //! - `--hover-never-answers` — receive `textDocument/hover` and send no response, as
 //!   `tddy/neverAnswers` does for its method. Every other request is answered.
 //!
@@ -84,11 +92,16 @@ fn main() {
         std::process::exit(0);
     }
     let hang = args.iter().any(|a| a == "--hang");
-    let never_quiescent = args.iter().any(|a| a == "--never-quiescent");
+    let narrates_while_loading = args.iter().any(|a| a == "--narrates-while-loading");
+    NARRATES_WHILE_LOADING.store(narrates_while_loading, std::sync::atomic::Ordering::SeqCst);
+    let goes_busy_after_hovers = args.iter().any(|a| a == "--goes-busy-after-hovers");
+    // Narration alone is a server busy from the start; with `--goes-busy-after-hovers` it waits to
+    // go busy like that mode does, and narrates from then on.
+    let never_quiescent = (narrates_while_loading && !goes_busy_after_hovers)
+        || args.iter().any(|a| a == "--never-quiescent");
     // `--never-quiescent` wins: a server that never finishes loading must not narrate a finished one.
     let loads_crate_graph = !never_quiescent
-        && (args.iter().any(|a| a == "--loads-crate-graph")
-            || args.iter().any(|a| a == "--goes-busy-after-hovers"));
+        && (args.iter().any(|a| a == "--loads-crate-graph") || goes_busy_after_hovers);
     NEVER_QUIESCENT.store(never_quiescent, std::sync::atomic::Ordering::SeqCst);
     HOVER_NEVER_ANSWERS.store(
         args.iter().any(|a| a == "--hover-never-answers"),
@@ -133,6 +146,10 @@ fn main() {
 
 /// Set by `--answers-in-its-workspace`: locations are reported under the client's `rootUri`.
 static ANSWERS_IN_ITS_WORKSPACE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Set by `--narrates-while-loading`: a busy server reports a new build script on a timer.
+static NARRATES_WHILE_LOADING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 /// Set by `--never-quiescent`: the server reports itself busy and never reports itself ready.
@@ -330,38 +347,65 @@ fn narrate_a_crate_graph_load() {
     const LOADING_TOKEN: &str = "fake-lsp-crate-graph";
     std::thread::spawn(|| {
         std::thread::sleep(BEFORE_THE_FIRST_PHASE);
-        send(&json!({
+        if !send_unless_gone_busy(&json!({
             "jsonrpc": "2.0",
             "method": "$/progress",
             "params": {
                 "token": LOADING_TOKEN,
                 "value": { "kind": "begin", "title": "loading crate graph" },
             }
-        }));
+        })) {
+            return;
+        }
         for percentage in THE_PHASES_OF_A_NARRATED_LOAD {
             std::thread::sleep(BETWEEN_PHASES);
-            send(&json!({
+            if !send_unless_gone_busy(&json!({
                 "jsonrpc": "2.0",
                 "method": "$/progress",
                 "params": {
                     "token": LOADING_TOKEN,
                     "value": { "kind": "report", "percentage": percentage },
                 }
-            }));
+            })) {
+                return;
+            }
         }
-        send(&json!({
+        if !send_unless_gone_busy(&json!({
             "jsonrpc": "2.0",
             "method": "$/progress",
             "params": { "token": LOADING_TOKEN, "value": { "kind": "end" } }
-        }));
+        })) {
+            return;
+        }
         // The extension a real rust-analyzer signals a queryable graph with. Sent last, because
         // that is what it means: everything above was the load, and this is it being over.
-        send(&json!({
+        send_unless_gone_busy(&json!({
             "jsonrpc": "2.0",
             "method": "experimental/serverStatus",
             "params": { "health": "ok", "quiescent": true }
         }));
     });
+}
+
+/// Whether the server has gone busy ([`go_busy_on_a_build_script`]), behind the lock both it and
+/// the narrated load send under — so no line of the load can slip out after the busy report.
+static GONE_BUSY: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+
+/// Send one line of the narrated crate-graph load, unless the server has gone busy since; `false`
+/// once it has, for the load to stop.
+///
+/// `--goes-busy-after-hovers` is a tree that changed after a ready index. A client can be through
+/// its warm-up on hover alone before the load has finished narrating, so the busy report can come
+/// first — and the load's own `quiescent: true` sent after it would read as a server that went busy
+/// and then, for no reason, ready. A busy server supersedes the load instead: the load says nothing
+/// more. Nothing waits, so no request's answer is held while the load plays out.
+fn send_unless_gone_busy(message: &Value) -> bool {
+    let gone_busy = GONE_BUSY.lock().unwrap();
+    if *gone_busy {
+        return false;
+    }
+    send(message);
+    true
 }
 
 /// Report the server busy on a build script, and never say it is done.
@@ -371,6 +415,8 @@ fn narrate_a_crate_graph_load() {
 /// build script runs. Nothing ends the phase and nothing reports quiescence afterwards.
 fn go_busy_on_a_build_script() {
     const BUSY_TOKEN: &str = "fake-lsp-build-script";
+    let mut gone_busy = GONE_BUSY.lock().unwrap();
+    *gone_busy = true;
     send(&json!({
         "jsonrpc": "2.0",
         "method": "experimental/serverStatus",
@@ -390,6 +436,44 @@ fn go_busy_on_a_build_script() {
         "params": {
             "token": BUSY_TOKEN,
             "value": { "kind": "report", "message": "build script num-bigint run" },
+        }
+    }));
+    if NARRATES_WHILE_LOADING.load(std::sync::atomic::Ordering::SeqCst) {
+        keep_narrating_build_scripts();
+    }
+}
+
+/// How often a server narrating its load (`--narrates-while-loading`) reports a new build script.
+const BETWEEN_BUILD_SCRIPT_REPORTS: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Set once the narrator thread has started, so going busy twice does not start a second one.
+static NARRATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Report a new build script every [`BETWEEN_BUILD_SCRIPT_REPORTS`], for ever.
+///
+/// On a thread of its own, so the server talks between requests as a real loading one does, and
+/// a client measuring its silence sees new words however often or seldom it asks.
+fn keep_narrating_build_scripts() {
+    if NARRATING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        for reported in 0.. {
+            std::thread::sleep(BETWEEN_BUILD_SCRIPT_REPORTS);
+            report_another_build_script(reported);
+        }
+    });
+}
+
+/// Report the `reported`-th build script on the busy phase — new words, so a client measuring how
+/// long the server has been silent sees it talking.
+fn report_another_build_script(reported: u32) {
+    send(&json!({
+        "jsonrpc": "2.0",
+        "method": "$/progress",
+        "params": {
+            "token": "fake-lsp-build-script",
+            "value": { "kind": "report", "message": format!("build script crate-{reported} run") },
         }
     }));
 }

@@ -33,8 +33,8 @@ crate, authenticates with a clone of it.
 
 ## Two rules this crate exists to hold
 
-**It never depends on `tddy-daemon`.** `tests/dependency_boundary_unit.rs` walks the transitive
-manifest closure and fails if it ever does. A re-export would defeat the split, so the test proves
+**It never depends on `tddy-daemon`.** `tests/dependency_boundary_unit.rs` reads the workspace
+graph (`WorkspaceGraph`) and fails if it ever does. A re-export would defeat the split, so the test proves
 the extraction rather than assuming it.
 
 **One key signs one thing.** Each daemon signs session tokens with an Ed25519 key of its own

@@ -118,16 +118,17 @@ it("a ?host= deep link selects that host over the one stored for this tab", () =
   daemonSelectorPage.expectShowsSelected("laptop-b");
 });
 
-it("falls back to the stored host when the URL names a daemon that is not in the room", () => {
-  // Given — a link naming a daemon that has since left the common room
+it("waits for the host the URL names rather than falling back to the stored one", () => {
+  // Given — a link naming a daemon the common room does not list
   window.sessionStorage.setItem(SELECTED_DAEMON_STORAGE_KEY, "laptop-b");
   appLocationPage.startAt("/sessions?host=retired-host");
 
   // When
   mountWithBothHosts();
 
-  // Then
-  daemonSelectorPage.expectShowsSelected("laptop-b");
+  // Then — the link's host stays chosen; only the operator moves away from it
+  daemonSelectorPage.expectWaitingFor("retired-host");
+  appLocationPage.expectParam("host", "retired-host");
 });
 
 it("a ?host= deep link selects that host in a tab that has no stored selection", () => {

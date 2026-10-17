@@ -5,7 +5,8 @@
 
 use crate::crate_move::{self, Survey};
 use crate::plan::RefactorKind;
-use crate::registry::{BackendRegistry, Workspace};
+use crate::registry::{BackendRegistry, LanguageBackend, Workspace};
+use crate::spawn_record::SpawnRecorder;
 use crate::{Overlay, PositionLedger, Result, VisibilityChange};
 use std::path::Path;
 
@@ -33,7 +34,9 @@ impl Rehearsal {
         &mut self,
         root: &Path,
         registry: &mut BackendRegistry,
+        index: usize,
         op: &crate::plan::RefactorOp,
+        spawns: &SpawnRecorder,
     ) -> Result<Rehearsed> {
         let at = self.ledger.translate_op(op)?;
 
@@ -52,17 +55,8 @@ impl Rehearsal {
             }
         };
 
-        let resolved = registry
-            .backend_for(Path::new(at.anchor.file()), at.op)?
-            .resolve(
-                &at,
-                &Workspace {
-                    root,
-                    overlay: &self.overlay,
-                },
-            );
-
-        match resolved {
+        let backend = registry.backend_for(Path::new(at.anchor.file()), at.op)?;
+        match self.resolve_and_preflight(backend, root, index, &at, spawns) {
             Ok(resolved) => {
                 self.ledger.record(&resolved.edit);
                 self.overlay.record(root, &resolved.edit)?;
@@ -80,6 +74,35 @@ impl Rehearsal {
                 widenings: Vec::new(),
             }),
         }
+    }
+
+    /// Resolve `at`, operation `index`, on `backend` over the rehearsal's overlay — refusing an
+    /// untracked move the way `apply` does before it writes ([`super::preflight_moves`]).
+    ///
+    /// The id is the operation's own: a deep check reads no journal, so there is no earlier epoch's
+    /// id-less record for it to continue, which is what the apply loops' `legacy` filter is for.
+    fn resolve_and_preflight(
+        &self,
+        backend: &mut dyn LanguageBackend,
+        root: &Path,
+        index: usize,
+        at: &crate::plan::RefactorOp,
+        spawns: &SpawnRecorder,
+    ) -> Result<crate::Resolution> {
+        let workspace = Workspace {
+            root,
+            overlay: &self.overlay,
+        };
+        let resolved = backend.resolve(at, &workspace)?;
+        super::preflight_moves(
+            index,
+            at.id.as_ref(),
+            &resolved,
+            root,
+            &self.overlay,
+            spawns,
+        )?;
+        Ok(resolved)
     }
 
     /// The blast radius of a cross-crate move, asked of the backend's own reference engine.
@@ -122,6 +145,42 @@ impl Rehearsal {
 
         crate_move::survey(engine, &workspace, op).map(Some)
     }
+}
+
+/// A finding for each operation of `ops` that moves a file git does not track, read from the anchor
+/// files of the moves whose anchors name the files they move — a static check's half of the refusal
+/// `apply` gives before it writes ([`super::preflight_moves`]).
+///
+/// A cross-crate module move anchors the module's own file, a cluster names one file per member,
+/// and a test-binary move anchors the binary. A file not on disk is not judged here: an earlier
+/// operation of the plan may be what puts it there, and a missing file is refused for that reason
+/// elsewhere.
+///
+/// # Errors
+///
+/// Refuses when git cannot be asked.
+pub(super) fn untracked_move_anchors(
+    root: &Path,
+    ops: &[crate::plan::RefactorOp],
+    spawns: &SpawnRecorder,
+) -> Result<Vec<(usize, String)>> {
+    let mut findings = Vec::new();
+    for (index, op) in ops.iter().enumerate() {
+        if !(op.op.moves_across_crates() || op.op == RefactorKind::MoveTestBinaryToCrate) {
+            continue;
+        }
+        let on_disk: Vec<&str> = op
+            .anchors()
+            .map(|anchor| anchor.file())
+            .filter(|file| root.join(file).is_file())
+            .collect();
+        let paths = crate::apply::untracked_paths(root, &on_disk, spawns)?;
+        if !paths.is_empty() {
+            let refusal = crate::RestructureError::UntrackedMoveSource { op: index, paths };
+            findings.push((index, refusal.to_string()));
+        }
+    }
+    Ok(findings)
 }
 
 /// A surveyed cross-crate move, as `check --deep` reports it: where the module is going, what

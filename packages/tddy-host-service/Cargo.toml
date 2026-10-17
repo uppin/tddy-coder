@@ -31,7 +31,6 @@ tddy-service = { path = "../tddy-service" }
 tddy-askpass = { path = "../tddy-askpass" }
 # The askpass endpoint's loopback HTTP server.
 axum = "0.8"
-livekit = "0.7"
 # `default = ["agent"]` is the *server* side. The blocking client and the protocol types are ungated.
 ssh-agent-lib = { version = "0.6.0", default-features = false }
 # `encryption` (and ed25519): an OpenSSH private key on disk is passphrase-protected, and unlocking
@@ -49,6 +48,8 @@ uuid = { version = "1", features = ["v4", "v7"] }
 libc = "0.2"
 
 [dev-dependencies]
+# `NoPeerForwarding`: a common room that is configured but carries nothing.
+tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 futures-util = "0.3"
 # `gh_cli::a_gh_cli`: the `gh` stub `github_cli`'s tests ask. Workspace-internal.
 tddy-testing-commons = { path = "../tddy-testing-commons" }

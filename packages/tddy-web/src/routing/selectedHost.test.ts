@@ -1,8 +1,9 @@
 /**
- * `resolveSelectedDaemonInstanceId` precedence once the URL joins the chain:
- * URL → sessionStorage → serving daemon → first daemon → none.
+ * `resolveSelectedDaemonInstanceId` precedence: a choice (URL, then sessionStorage) is kept whether
+ * or not that daemon is listed; only without one does it default to the serving daemon, then the
+ * first listed daemon, then none.
  *
- * PRD: docs/ft/web/1-WIP/PRD-2026-08-01-url-state-routing.md § Host in the URL.
+ * PRD: docs/ft/web/url-state-routing.md § Host in the URL.
  *
  * The resolution rule moves out of `rpc/selectedDaemon.tsx` into this pure module: importing it
  * from the `.tsx` provider drags React's JSX runtime into a pure unit test, which is why the
@@ -12,50 +13,19 @@
 
 import { describe, expect, it } from "bun:test";
 import type { DaemonHost } from "../lib/participantRole";
+import { withMockedSessionStorage } from "../test-utils/sessionStorage";
 import {
   readStoredSelectedDaemon,
   resolveSelectedDaemonInstanceId,
   writeStoredSelectedDaemon,
 } from "./selectedHost";
 
-/** Provides an isolated in-memory sessionStorage for the duration of fn. */
-function withMockedSessionStorage(fn: () => void): void {
-  const store = new Map<string, string>();
-  const mock: Storage = {
-    get length() {
-      return store.size;
-    },
-    clear() {
-      store.clear();
-    },
-    getItem(k: string) {
-      return store.get(k) ?? null;
-    },
-    key(i: number) {
-      return [...store.keys()][i] ?? null;
-    },
-    removeItem(k: string) {
-      store.delete(k);
-    },
-    setItem(k: string, v: string) {
-      store.set(k, v);
-    },
-  };
-  const prev = globalThis.sessionStorage;
-  globalThis.sessionStorage = mock;
-  try {
-    fn();
-  } finally {
-    globalThis.sessionStorage = prev;
-  }
-}
-
 const UDOO: DaemonHost = { instanceId: "udoo", label: "udoo (this daemon)" };
 const LAPTOP_B: DaemonHost = { instanceId: "laptop-b", label: "laptop-b" };
 const BOTH = [UDOO, LAPTOP_B];
 
 // ---------------------------------------------------------------------------
-// Precedence rules 2–5, unchanged by the URL joining the chain. Relocated from
+// Precedence rules 2–5: the stored choice, then the defaults. Relocated from
 // `src/rpc/selectedDaemon.test.ts`, which could not run: it imported a `.tsx` module.
 // ---------------------------------------------------------------------------
 
@@ -72,7 +42,7 @@ describe("resolveSelectedDaemonInstanceId — without a URL host", () => {
     expect(selected).toBe("udoo");
   });
 
-  it("prefers the stored selection over the serving daemon when it is still present", () => {
+  it("prefers the stored selection over the serving daemon", () => {
     // Given / When
     const selected = resolveSelectedDaemonInstanceId({
       daemons: BOTH,
@@ -84,7 +54,7 @@ describe("resolveSelectedDaemonInstanceId — without a URL host", () => {
     expect(selected).toBe("laptop-b");
   });
 
-  it("falls back to the serving daemon when the stored selection has left the room", () => {
+  it("keeps the stored selection when it has left the room", () => {
     // Given — the previously selected peer is no longer in the common room
     const selected = resolveSelectedDaemonInstanceId({
       daemons: [UDOO],
@@ -92,23 +62,35 @@ describe("resolveSelectedDaemonInstanceId — without a URL host", () => {
       storedInstanceId: "laptop-b",
     });
 
-    // Then
-    expect(selected).toBe("udoo");
+    // Then — a choice is kept; the selector waits for it
+    expect(selected).toBe("laptop-b");
   });
 
-  it("falls back to the first available daemon when neither the stored nor serving daemon is present", () => {
+  it("falls back to the first available daemon when nothing is chosen and the serving daemon is not listed", () => {
     // Given — this web session's own serving daemon has itself dropped off the common room
     const selected = resolveSelectedDaemonInstanceId({
       daemons: [LAPTOP_B],
       servingInstanceId: "udoo",
-      storedInstanceId: "some-other-host",
+      storedInstanceId: null,
     });
 
     // Then
     expect(selected).toBe("laptop-b");
   });
 
-  it("returns null when there are no daemons in the room yet", () => {
+  it("keeps the stored selection when nothing is listed", () => {
+    // Given / When — the directory has not heard from any source yet
+    const selected = resolveSelectedDaemonInstanceId({
+      daemons: [],
+      servingInstanceId: "udoo",
+      storedInstanceId: "laptop-b",
+    });
+
+    // Then
+    expect(selected).toBe("laptop-b");
+  });
+
+  it("returns null when nothing is chosen and no daemons are listed", () => {
     // Given / When
     const selected = resolveSelectedDaemonInstanceId({
       daemons: [],
@@ -167,7 +149,7 @@ describe("resolveSelectedDaemonInstanceId — URL precedence", () => {
     expect(result).toBe("laptop-b");
   });
 
-  it("falls back to the stored host when the URL names a daemon that is not present", () => {
+  it("keeps the URL host when it is not listed", () => {
     // When
     const result = resolveSelectedDaemonInstanceId({
       daemons: BOTH,
@@ -177,10 +159,10 @@ describe("resolveSelectedDaemonInstanceId — URL precedence", () => {
     });
 
     // Then
-    expect(result).toBe("laptop-b");
+    expect(result).toBe("retired-host");
   });
 
-  it("falls back to the serving daemon when neither the URL nor the store names a present daemon", () => {
+  it("keeps the URL host over the stored one when neither is listed", () => {
     // When
     const result = resolveSelectedDaemonInstanceId({
       daemons: BOTH,
@@ -190,36 +172,36 @@ describe("resolveSelectedDaemonInstanceId — URL precedence", () => {
     });
 
     // Then
-    expect(result).toBe("udoo");
+    expect(result).toBe("retired-url-host");
   });
 
-  it("falls back to the first daemon when the serving daemon has left too", () => {
-    // When
+  it("keeps the URL host even when the directory is empty", () => {
+    // When — the page has not heard from any source yet
     const result = resolveSelectedDaemonInstanceId({
-      daemons: [LAPTOP_B],
+      daemons: [],
       servingInstanceId: "udoo",
       storedInstanceId: null,
-      urlInstanceId: "retired-url-host",
+      urlInstanceId: "laptop-b",
     });
 
     // Then
     expect(result).toBe("laptop-b");
   });
 
-  it("resolves to none when the room holds no daemons yet", () => {
-    // When
+  it("treats an empty URL host as no choice", () => {
+    // When — `?host=` is present but names nothing
     const result = resolveSelectedDaemonInstanceId({
-      daemons: [],
+      daemons: BOTH,
       servingInstanceId: "udoo",
-      storedInstanceId: "udoo",
-      urlInstanceId: "udoo",
+      storedInstanceId: null,
+      urlInstanceId: "",
     });
 
-    // Then
-    expect(result).toBeNull();
+    // Then — the serving daemon is the default, as with no URL host at all
+    expect(result).toBe("udoo");
   });
 
-  it("keeps the existing precedence when the URL names no host", () => {
+  it("uses the stored host when the URL names none", () => {
     // When
     const result = resolveSelectedDaemonInstanceId({
       daemons: BOTH,

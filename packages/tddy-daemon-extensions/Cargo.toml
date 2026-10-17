@@ -1,0 +1,23 @@
+[package]
+name = "tddy-daemon-extensions"
+version = "0.1.0"
+edition = "2021"
+description = "Extension ports the daemon's core exposes to optional integrations (LiveKit first), and the board their live status is reported on"
+
+[lib]
+name = "tddy_daemon_extensions"
+path = "src/lib.rs"
+
+# Nothing here may reach a LiveKit crate, transitively: an integration implements these ports, and
+# the core depends on them instead of on the integration. `tests/livekit_is_a_satellite.rs` holds
+# that line.
+[dependencies]
+async-trait = "0.1"
+tddy-rpc = { path = "../tddy-rpc" }
+# `mpsc::Receiver` — the shape a forwarded server stream is handed back in.
+tokio = { version = "1", features = ["sync"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+tddy-testing-commons = { path = "../tddy-testing-commons" }
+pretty_assertions = { workspace = true }

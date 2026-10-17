@@ -72,6 +72,10 @@ to Details, an unknown `channel` to the task's first channel, an unregistered `p
 listed one, an unresolvable `method` to no selection. Where the app resolves a default this way it
 **writes the answer back**, so the address bar always names what is actually shown.
 
+`host` is the exception. A host the link names is a **choice**, so it never degrades: a `?host=` whose
+daemon is not listed stays in the address bar, and the selector shows that daemon as *waiting* (see
+[Host in the URL](#host-in-the-url)).
+
 A param can also name a tab that exists but is **not offered on this host**. `inspector=vnc` and
 `inspector=screen-sharing` are video, and a host reached over a wire that carries no tracks has
 neither tab in its strip; such a link degrades to Details for exactly as long as that is true, and is
@@ -109,20 +113,30 @@ would fill Back with states nobody chose, so they rewrite the current entry inst
 
 Precedence for the selected daemon, highest first:
 
-1. `?host=` from the URL, **if that instance id is among the daemons in the common room**
-2. `sessionStorage` (`tddy_selected_daemon`) — still per-tab
-3. `servingInstanceId` (the daemon that served the bundle)
-4. The first daemon in the room
-5. `null` when the room has no daemons yet
+1. `?host=` from the URL — whether or not that daemon is listed
+2. `sessionStorage` (`tddy_selected_daemon`), per-tab — whether or not that daemon is listed
+3. `servingInstanceId` (the daemon that served the bundle), if listed
+4. The first listed daemon
+5. `null`
 
-The URL leads because it is the only source a shared link carries. Rules 2–5 are unchanged, including
-the invariant that an **empty daemon list means "no information yet", never "no daemons exist"** — the
-common room is briefly empty on connect and on a reconnect, and clearing the selection then would
-flash every screen to "nothing selected".
+Rules 1–2 are **choices** and rules 3–4 are **defaults**: a default is used only when nothing was
+chosen, and a choice is never replaced by the app. The host directory lists the serving daemon before
+the common room has joined, and a daemon can leave the room mid-session; in both cases the chosen host
+stays selected and the selector shows it **waiting** — its label, a pulsing amber dot, tooltip
+"Waiting for daemon" — until it is listed again or the operator picks another. An empty directory
+therefore never clears a selection either.
 
+The URL leads because it is the only source a shared link carries. A `?host=` changes only by
+navigation — choosing a host, Back/Forward, an edited address bar, a followed link — never by the app.
 Choosing a host writes **both** `?host=` (push) and `sessionStorage`, so a tab opened from a plain
-`#/sessions` link still restores the last host used in that tab. When the URL carries no `host`, the
-resolved id is written back with **replace**.
+`#/sessions` link still restores the last host used in that tab. When the URL carries **no** `host`,
+the resolved id is written in with **replace**.
+
+A waiting daemon is named by the label this tab last saw it listed under, kept in `sessionStorage`
+(`tddy_known_daemon_labels`, the protobuf JSON of `web_state.RememberedDaemonLabels`). A daemon the tab
+has never listed — a shared link opened in a fresh tab — waits under its instance id. An unreadable
+stored value, or a `sessionStorage` that refuses reads or writes, means no memory rather than an
+error.
 
 **A host change drops the sub-selection.** `SelectedDaemonProvider` remounts the screen subtree on a
 host change, and a session id from the old host means nothing on the new one — switching from
@@ -145,7 +159,8 @@ string, not the hash.
 | `routing/appLocation.ts` | Pure model — `AppLocation { path, params }`, parse/format, `withParams`, `withPath`, `screenRootOf`, and the param-name constants. The only place the URL's spelling is known. |
 | `routing/useAppLocation.ts` | A **module-level store** over `window.location.hash`, read via `useSyncExternalStore`. Module-level, not a React context, so a nested pane — and a component test that mounts one screen bare — shares the same source of truth without prop-drilling. Push assigns `location.hash`; replace uses `history.replaceState`; both notify synchronously. |
 | `routing/appRoutes.ts` | Path grammar: the route constants, `parse*`/`*Path` helpers, and `isInspectorTabName`. |
-| `routing/selectedHost.ts` | `resolveSelectedDaemonInstanceId` (the precedence above) plus the `sessionStorage` accessors, pure so they are unit-testable. |
+| `routing/selectedHost.ts` | `resolveSelectedDaemonInstanceId` (the precedence above), `findListedDaemon`, the selection's `sessionStorage` accessors and the label memory (`rememberDaemonLabels`, `readRememberedDaemonLabel`), pure so they are unit-testable. |
+| `rpc/useSelectedDaemonLabel.ts` | Records every listed label and names the selected daemon: its listed label while listed, the remembered one while waiting. |
 
 `onNavigate` props remain the screen-change seam the shell uses; they are thin wrappers over the
 store.

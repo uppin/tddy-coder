@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package web_state;
+
+// Browser-local dashboard state that `tddy-web` persists in `sessionStorage`, as protobuf JSON.
+//
+// Nothing here is ever sent over the wire: no service takes or returns these messages, and no
+// daemon reads them. They are declared as protos so the stored shape has one schema and one
+// decoder, rather than a hand-rolled JSON parser per key. TypeScript only — deliberately absent
+// from `build.rs`, since no Rust code has a reason to read a browser tab's storage.
+
+// The labels this browser tab has seen daemons listed under, so a selected daemon that is not
+// listed right now — the common room still joining after a reload, or the daemon gone — is shown
+// by a name the operator recognises instead of a bare instance id.
+message RememberedDaemonLabels {
+  // Key: a daemon's instance id. Value: the label it was last listed under in this tab. Merged on
+  // every listing, so a daemon that drops out of the list keeps its last label.
+  map<string, string> labels = 1;
+}

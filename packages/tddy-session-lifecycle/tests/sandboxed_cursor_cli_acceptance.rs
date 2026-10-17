@@ -322,6 +322,7 @@ async fn sandboxed_cursor_cli_terminal_io_round_trips() {
             initial_rows: 24,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await
         .expect("stream_terminal_output");
@@ -408,6 +409,7 @@ async fn sandboxed_cursor_cli_start_wires_specialized_agents_env_and_metadata() 
             initial_rows: 24,
             mode: StreamReplayMode::Tail as i32,
             from_offset: 0,
+            control_token: String::new(),
         }))
         .await
         .expect("stream_terminal_output");

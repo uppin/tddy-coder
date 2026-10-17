@@ -18,8 +18,11 @@ branch, a session directory, an agent process — and on the ordinary placement,
 its checkout are on one daemon, a start contacts LiveKit nowhere at all. It therefore costs the same
 whether LiveKit is unconfigured, configured and answering, or configured and unreachable, and a
 session created while the server was down becomes reachable over LiveKit as soon as the server is,
-without being restarted. See [When the room is created](#when-the-room-is-created) for the two
-places that are deliberately not lazy.
+without being restarted. **Attaching to a session from the same machine does not wait on its room
+either**: a desktop window, the daemon's HTTP route and a local socket reach the session without
+LiveKit, so a LiveKit server that is down, slow or misconfigured neither delays nor fails a local
+attach. See [When the room is created](#when-the-room-is-created) for the places that are
+deliberately not lazy.
 
 The room belongs to the **session**, not to the checkout. A session has exactly one agent-running
 daemon, but its repo may live elsewhere; keying the room on the worktree would leave it homeless
@@ -45,15 +48,22 @@ A room is opened by the first thing that needs it, and by nothing earlier.
 
 | What opens it | When |
 |---|---|
-| **`ConnectSession`** | Something connects to the session over LiveKit — a browser or desktop client, a `tddy-session-sync` mirror, a `tddy-tools pty-relay --livekit-url`. This is the ordinary case and covers every co-located placement. |
+| **`ConnectSession` from a caller that arrived over LiveKit** | A remote browser or desktop client connects to the session. The room is opened before the call answers, and a failure fails the call: that caller needs the room. |
+| **`ConnectSession` from any other caller** | The desktop's own window, the daemon's HTTP route, a local socket. Nothing on this host needs the room, so the call answers at once and the room is opened in the background, making the session reachable from elsewhere. The outcome is reported on the [integration status](daemon-settings.md#integration-status), never to the caller. |
+| **`OpenSessionRoom`** | A client that is about to join the room asks for it by name: a `tddy-session-sync` mirror, a `tddy-tools pty-relay --livekit-url`. LiveKit's own RPC (`session_room.SessionRoomService`), present only on a daemon that has LiveKit wired. It answers with the room's coordinates once the room is open and fails, naming the room, when it cannot be — and when the daemon has no LiveKit credentials. A session this daemon does not facilitate, or one that records no checkout, is refused. |
 | **`AttachSessionAgent`** | An agent owned by another daemon is attached to the session, or a seeded agent's clone is claimed for it. Done before that peer is contacted, so it is never asked to join a room nobody hosts; a daemon with no LiveKit credentials refuses the attach outright rather than recording a roster entry that resolves to nothing. |
 | **A [split session](remote-managed-worktree.md)'s start** | The facilitating daemon opens the room itself. The agent it is about to spawn is handed a token minted for exactly that room and no connection precedes it — and LiveKit is that placement's transport to its own checkout rather than an addition to it, so there is nothing to defer. |
 
-Everything else that needs the room arrives through one of those three. Participant admission
+Everything else that needs the room arrives through one of those. Participant admission
 refuses a session this daemon does not host rather than opening one, and the attach above is what
 guarantees there is something to be admitted to. A `tddy-session-sync` mirror and a
-`tddy-tools pty-relay --livekit-url` each call `ConnectSession` before joining, because each then
-waits for `daemon-{instance_id}` to already be there.
+`tddy-tools pty-relay --livekit-url` each call `OpenSessionRoom` before joining, because each then
+waits for `daemon-{instance_id}` to already be there; `ConnectSession` is not what they ask, since
+for a caller that did not arrive over LiveKit it opens nothing they could wait on.
+
+Only sessions this daemon **facilitates** and which record a checkout on it get a room from either
+call; any other session type is answered without one (`ConnectSession`) or refused
+(`OpenSessionRoom`).
 
 **Lazily, not conditionally.** The alternative was to decide up front which sessions need a room,
 and the only signal available that early is the session type — which cannot answer the question. The
@@ -73,17 +83,19 @@ disconnect the participant that was already there. Without the interlock two sim
 would leave the room the winner registered served by a connection the loser had already been dropped
 from.
 
-**A failure is a failure.** A caller that asked to reach a session over LiveKit and could not get a
-room is told so, naming the room it could not create. It is *session creation* that does not depend
-on a reachable LiveKit server; the room plainly does, and a caller handed coordinates nothing is
-serving would only discover that by waiting.
+**A failure is a failure, for the caller that asked for the room.** A caller that arrived over
+LiveKit, or that called `OpenSessionRoom`, and could not get a room is told so, naming the room it
+could not create. It is *session creation* and *local attach* that do not depend on a reachable
+LiveKit server; the room plainly does, and a caller handed coordinates nothing is serving would only
+discover that by waiting. A local caller is never told: its attach succeeds whatever LiveKit does,
+and the failed background open shows as `Unreachable` in the integration status.
 
 ### The terminal bridge shares this lifecycle
 
 A `claude-cli` session's PTY is also served to LiveKit clients, by a participant in the common room
 under `daemon-{instance_id}-{session_id}`. That is how a client which is *not* on this host drives
 the terminal, and it is LiveKit work for the same reason the room is — so it is established by the
-same connect, under the same lock: a session cannot end up with a room a remote client can find and
+same open, under the same lock: a session cannot end up with a room a remote client can find and
 a terminal it cannot type at. The desktop reaches its own host over IPC and drives that terminal
 without a bridge at all, so a desktop-only deployment creates neither, ever.
 
@@ -107,8 +119,9 @@ invitation. That bridge is announced on success and logged on failure, never fat
 
 First-joiner-ness is a consequence of ordering, not a race. The daemon creates the room and joins it
 before the call that opened it answers, and a participant learns where the room is from that same
-answer — `ConnectSession` is both what puts the daemon in the room and what tells the caller which
-room to look in, so nothing can arrive ahead of it. On a split placement the ordering is the older
+answer — `OpenSessionRoom` (or, for a caller that arrived over LiveKit, `ConnectSession`) is both what
+puts the daemon in the room and what tells the caller which room to look in, so nothing can arrive
+ahead of it. On a split placement the ordering is the older
 one: the room is joined while the only thing that could join it, the agent about to be spawned with a
 token for it, does not yet exist.
 
@@ -201,8 +214,10 @@ a copy beside the checkout would move bytes across the network to a host nobody 
 
 Requires the `livekit:` block. Without credentials no room is created and nothing that connects to a
 session asks for one — the room is an addition to a session, never a prerequisite for one. With
-credentials the same holds of a session's *start*: it is connecting that needs LiveKit, so a
-deployment whose server is merely down goes on starting sessions.
+credentials the same holds of a session's *start* and of a *local* attach: it is a remote caller, or
+a client that asks for the room by name, that needs LiveKit, so a deployment whose server is merely
+down goes on starting and attaching to sessions. What LiveKit is doing — disabled, misconfigured,
+connecting, connected, unreachable — is readable as the [integration status](daemon-settings.md#integration-status).
 
 | Key | Default | Role |
 |---|---|---|
@@ -232,9 +247,11 @@ daemon's common-room participant behaves.
   its checkout is on another host, so a split agent resumed against a restarted daemon times out on
   its ten-second wait for the participant. Tracked in `docs/dev/TODO.md`.
 - **The room-creation call is not bounded by a timeout.** A configured server that accepts a
-  connection and then never answers makes the *connection that asked for the room* wait rather than
-  fail fast. It is scoped to that connection: a session's start makes no such call, so a wait here
-  never costs anyone a session. Tracked in [`docs/dev/todo/`](../../dev/todo/).
+  connection and then never answers makes the *call that asked for the room* — an `OpenSessionRoom`,
+  or a `ConnectSession` that arrived over LiveKit — wait rather than fail fast. A session's start and
+  a local attach make no such wait, so it never costs anyone a session. A background open against
+  such a server holds that session's opening lock until LiveKit gives up, and an `OpenSessionRoom`
+  for the same session waits behind it. Tracked in [`docs/dev/todo/`](../../dev/todo/).
 - **A claude-cli split agent cannot read its own attachments.** They are served in its room over
   `session_files.SessionFilesService`'s `ReadHostDocument`, which a browser or a second agent can
   call, but that agent speaks only `ExecuteTool` — whose tools are worktree-rooted with traversal
@@ -250,5 +267,7 @@ daemon's common-room participant behaves.
 - [Remote managed worktree](remote-managed-worktree.md) — the split placement this builds on
 - [LiveKit common-room peer discovery](livekit-peer-discovery.md) — the room this one sits beside
 - [Session room module](../../../packages/tddy-daemon-livekit/docs/session-room.md) — the implementation
+- [LiveKit session reach](../../../packages/tddy-daemon-livekit/docs/livekit-service.md#livekitsessionreach--opening-the-room-for-a-reached-session) — which callers wait, and how status is reported
+- [Daemon settings](daemon-settings.md) — the integration status
 - [The identity boundary and the LiveKit service](auth-livekit-services.md) — the crate that owns it, and who mints its room JWTs
 - [Daemon changelog](changelog/)

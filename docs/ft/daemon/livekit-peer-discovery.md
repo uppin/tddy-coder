@@ -19,6 +19,11 @@ When **`livekit.enabled`** is `true` and **`livekit.common_room`** is set togeth
 
 **Peer-forward deadline.** A peer that is in the room but silent is the case the deadline exists for, so a forward always has one. An operator on a fleet with fast links can shorten it and one on a slow link can lengthen it; a daemon with no `peer_forward_timeout_secs` waits 30 s. A peer that has left the room is refused immediately rather than waited out. The kernel mechanics are in [`daemon-kernel.md`](../../../packages/tddy-daemon-kernel/docs/daemon-kernel.md#peer_forward_timeout_secs-and-commonroom--how-long-a-forward-to-a-peer-waits).
 
+**Forwarding transport.** A forward to a peer is carried by the LiveKit integration behind a
+`PeerForwarder` port, and the daemon's core keeps the deadline and the errors. A daemon with no
+transport wired reports no peer connected and refuses a forward as `FAILED_PRECONDITION`, the same
+answer a daemon whose common room is down gives.
+
 Spawned sessions continue to use **`livekit.common_room`** for collaboration when configured; per-session LiveKit identities follow existing **`livekit_server_identity_for_session`** rules.
 
 ## Trust model

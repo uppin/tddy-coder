@@ -1411,6 +1411,35 @@ mod resolve_livekit_room_name_tests {
 }
 
 #[cfg(test)]
+mod livekit_creds_from_config_tests {
+    use super::livekit_creds_from_config;
+    use tddy_daemon_kernel::config::DaemonConfig;
+
+    const LIVEKIT_URL: &str = "wss://livekit.example.com:7883";
+
+    /// A complete LiveKit block whose `public_url` line is `public_url_value` verbatim.
+    fn a_daemon_whose_public_url_is(public_url_value: &str) -> DaemonConfig {
+        serde_yaml::from_str(&format!(
+            "livekit:\n  enabled: true\n  url: {LIVEKIT_URL}\n  public_url: {public_url_value}\n  \
+             api_key: devkey\n  api_secret: the-secret\n  common_room: tddy-lobby\n"
+        ))
+        .expect("the daemon fixture did not parse")
+    }
+
+    #[test]
+    fn dials_the_livekit_url_when_the_public_url_was_saved_blank() {
+        // Given a daemon whose Settings screen saved the public URL blank
+        let config = a_daemon_whose_public_url_is("''");
+
+        // When the coordinates a session's terminal is bridged with are derived
+        let creds = livekit_creds_from_config(&config).expect("the fixture has complete creds");
+
+        // Then the server the daemon itself connects to is dialled, not an empty URL
+        assert_eq!(creds.url, LIVEKIT_URL);
+    }
+}
+
+#[cfg(test)]
 mod livekit_server_identity_multi_host_tests {
     use super::livekit_server_identity_for_session;
 

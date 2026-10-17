@@ -117,8 +117,12 @@ pub(super) fn spawned_claude_cli_branch(
     Ok(spawned_branch)
 }
 
+/// `tddy_data_dir` is the data dir the daemon *resolved* — `TDDY_DATA_DIR` included, which a
+/// configuration file need not agree with (`./desktop-dev` sets it absolute beside a relative
+/// `tmp/.tddy`) — because an embedded daemon's agent-tool socket path is digested from it.
 pub(super) fn install_claude_cli_hooks(
     config: &DaemonConfig,
+    tddy_data_dir: &Path,
     os_user: &str,
     session_id: &str,
     worktree_path: &Path,
@@ -131,6 +135,8 @@ pub(super) fn install_claude_cli_hooks(
     );
 
     let daemon_url = daemon_hook_urls::claude_hook_daemon_url(config);
+    // An embedded daemon serves no HTTP RPC; its hooks report over this socket.
+    let daemon_socket = tddy_daemon_kernel::embedded_host_agent_tool_socket(tddy_data_dir);
 
     // Generate a per-session hook token and write .claude/settings.local.json into the
     // worktree. Claude Code reads this file on startup and wires the six lifecycle hooks.
@@ -144,6 +150,7 @@ pub(super) fn install_claude_cli_hooks(
             session_id,
             os_user,
             hook_token: &hook_token,
+            daemon_socket: daemon_socket.as_deref(),
         },
     );
     (tddy_tools_path, hook_token)
