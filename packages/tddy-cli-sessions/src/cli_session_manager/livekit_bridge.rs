@@ -228,3 +228,12 @@ pub async fn spawn_livekit_bridge(
 
     Ok(serving)
 }
+
+/// The RPC surface driving one PTY — `terminal.TerminalService` — built from `tddy-rpc` types only,
+/// for whatever exposes it.
+pub fn pty_terminal_service(
+    handle: Arc<pty_handle::PtyHandle>,
+) -> Arc<dyn tddy_rpc::RpcService> {
+    let _ = handle;
+    todo!("pty_terminal_service")
+}

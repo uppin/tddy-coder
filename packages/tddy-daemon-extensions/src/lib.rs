@@ -17,11 +17,15 @@ pub mod peer_forwarder;
 pub mod room_tokens;
 pub mod session_reach;
 pub mod session_rooms;
+pub mod terminal_exposure;
 
 pub use integration_status::{
     IntegrationReporter, IntegrationState, IntegrationStatus, IntegrationStatusBoard,
 };
 pub use peer_forwarder::{NoPeerForwarding, PeerForwarder};
 pub use room_tokens::{NoRoomTokens, RoomTokenMinter};
+pub use terminal_exposure::{
+    ExposedTerminal, NoTerminalExposure, TerminalAddress, TerminalExposure,
+};
 pub use session_rooms::{NoSessionRooms, SessionRooms};
 pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};

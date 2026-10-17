@@ -51,7 +51,6 @@ const WIRING: &[&str] = &["tddy-daemon", "tddy-rdp", "tddy-vnc", "tddy-e2e"];
 /// Library crates that still name a LiveKit crate. Strike a crate off when it stops.
 const KNOWN_OFFENDERS: &[&str] = &[
     "tddy-agent-launch",
-    "tddy-cli-sessions",
     "tddy-coder",
     "tddy-daemon-auth",
     "tddy-daemon-rpc",
