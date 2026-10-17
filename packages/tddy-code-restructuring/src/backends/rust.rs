@@ -497,10 +497,6 @@ pub struct RustBackend {
     /// How often a wait that lasts says what it is waiting for. Not a budget: nothing ends at it.
     wait_heartbeat: Duration,
     /// How long a wait for type inference tolerates a server that has gone silent.
-    #[allow(
-        dead_code,
-        reason = "TODO(reshape-apply-robust): implement — read by readiness::await_answer at green"
-    )]
     silence_bounds: SilenceBounds,
 }
 
@@ -727,6 +723,7 @@ impl RustBackend {
             elapsed: waiting.elapsed(now),
             on: self.waited_on(),
             loading: self.chatter.loading(),
+            said_ready: self.chatter.quiescent(),
             last_words: self.chatter.last.as_deref(),
             quiet_for: self.chatter.quiet_for(now),
             furthest: self.chatter.furthest(),
@@ -1580,7 +1577,7 @@ impl RustBackend {
         // there, because there is no symbol to resolve.
         if assist_for(op.op).is_some_and(|assist| assist.needs_inference) {
             let probe = selection::hover_bearing_position(original, range);
-            self.wait_until_resolved_within_bound(uri, &lsp_edits::lsp_position(probe))?;
+            self.wait_until_resolved(uri, &lsp_edits::lsp_position(probe))?;
         }
 
         let moved = if relocates {

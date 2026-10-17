@@ -6,8 +6,11 @@
 //! that closes that: a [`Waiting`] gives a wait a stage and a clock, and [`heartbeat_line`] turns
 //! what is known into one line for the run's own `progress` sink.
 //!
-//! **It adds no deadline.** Nothing here ends a wait, and nothing here sets a readiness flag: the
-//! heartbeat reads the chatter and the clock and writes neither.
+//! **It adds no *total* deadline; `readiness` bounds silence.** Nothing here ends a wait, and
+//! nothing here sets a readiness flag: the heartbeat reads the chatter and the clock and writes
+//! neither. What ends a wait for type inference early is a server gone silent — ready with no
+//! answer, or loading with nothing new to say — and that is `readiness`'s `SilenceBounds`, never a
+//! limit on how long a talking server may take.
 //!
 //! **It prints nothing.** The line goes back to the caller as a string; the only printer in this
 //! crate stays `restructure_cli.rs`.
@@ -73,6 +76,9 @@ pub(super) struct Beat<'a> {
     pub(super) on: WaitedOn,
     /// Whether the server has said it is still loading.
     pub(super) loading: bool,
+    /// Whether the server has said it is ready — reported itself quiescent — and so is waited on
+    /// for an answer, not for a load.
+    pub(super) said_ready: bool,
     /// The server's last words, or `None` when it has said nothing at all.
     pub(super) last_words: Option<&'a str>,
     /// How long ago the server last said anything new.
@@ -127,12 +133,13 @@ impl Waiting {
 /// stage, which server, whether it has said it is loading, its last words with how long they have
 /// been unchanged, and the furthest phase it reported.
 pub(super) fn heartbeat_line(beat: &Beat<'_>) -> String {
-    let server = match beat.on {
-        WaitedOn::OwnServer { pid } => format!("rust-analyzer (pid {pid})"),
-        WaitedOn::SharedClient => "rust-analyzer behind a shared client".to_string(),
-    };
+    let server = server_name(beat.on);
+    // "Has not said it is ready" is kept for a server that has said nothing about its state: one
+    // that said it is ready and still leaves the position unanswered is a different wait.
     let state = if beat.loading {
         "is still loading"
+    } else if beat.said_ready {
+        "is ready and gives no answer here"
     } else {
         "has not said it is ready"
     };
@@ -152,6 +159,14 @@ pub(super) fn heartbeat_line(beat: &Beat<'_>) -> String {
         line.push_str(&format!("; furthest: {phase} {percentage}%"));
     }
     line
+}
+
+/// The server `on` names, as a heartbeat and a stall refusal say it.
+pub(super) fn server_name(on: WaitedOn) -> String {
+    match on {
+        WaitedOn::OwnServer { pid } => format!("rust-analyzer (pid {pid})"),
+        WaitedOn::SharedClient => "rust-analyzer behind a shared client".to_string(),
+    }
 }
 
 /// A span of time as a reader counts it: whole seconds below a minute, then minutes and
@@ -178,6 +193,7 @@ mod tests {
             elapsed: Duration::from_secs(120),
             on: WaitedOn::SharedClient,
             loading: true,
+            said_ready: false,
             last_words: Some("working: build script num-bigint run"),
             quiet_for: Duration::from_secs(118),
             furthest: Some((100, "Roots Scanned")),
