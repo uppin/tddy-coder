@@ -325,6 +325,7 @@ export const TEST_IDS = {
   createSessionTypeClaudeCliBtn: "create-session-type-claude-cli",
   createSessionTypeCursorCliBtn: "create-session-type-cursor-cli",
   createSessionTypeOpenCodeCliBtn: "create-session-type-opencode-cli",
+  createSessionTypeMuseCliBtn: "create-session-type-muse-cli",
   createSessionProjectSelect: "create-session-project-select",
   createSessionAgentSelect: "create-session-agent-select",
   createSessionAgentEmptyOption: "create-session-agent-empty-option",

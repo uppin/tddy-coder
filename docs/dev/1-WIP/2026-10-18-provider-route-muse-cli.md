@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 6/9. Base: `feature/provider-route/default-route`.
+**Stack**: #provider-route 6/9. Base: `feature/provider-route/default-route`. PR: [#667](https://github.com/uppin/tddy-coder/pull/667).
 
 ## Initial Discovery
 
@@ -32,11 +32,18 @@ the curated Muse model list, `MuseCliConfig { binary_path }`, and the web "Muse 
 ## Draft PR contract
 
 ```rust
-pub static MUSE_CLI: CliHarness = CliHarness { session_type: "muse-cli", route_harness: Harness::MuseCli, /* … */ };
-pub const MUSE_CLI_AGENT: &str = "muse-cli";
-pub fn muse_cli_models() -> Vec<BackendModel>;      // muse-spark-1.3, muse-wonder-1.0 (curated fallback)
-// provider_route.rs — Muse arm: secret_env = [(MUSE_KEY_VAR, key)], env = [] ; MUSE_KEY_VAR confirmed against `muse --help`
+// tddy-agent-backend/src/cli_harness_muse.rs
+pub const MUSE_ROUTE_KEY_ENV: &str = "META_API_KEY";   // secondary sources; /green confirms against `muse --help`
+pub fn muse_cli_models() -> BackendModels;              // muse-spark-1.3 (default), muse-wonder-1.0
+fn muse_argv(launch: &CliLaunch) -> Vec<String>;        // start: muse [--model m] [prompt]; resume: muse --continue
+pub static MUSE_CLI: CliHarness = CliHarness { session_type: "muse-cli", label: "Muse Code", route_harness: Harness::MuseCli,
+    context_agent: "muse", default_binary: "muse", binary_env: "TDDY_MUSE_CLI", route_config_env: None, argv: muse_argv,
+    models: CliModelSource::Curated(muse_cli_models) };
+// Muse arm of resolve_route (owned here): meta only; secret_env = [(MUSE_ROUTE_KEY_ENV, key)]; no env, files or args
+// green also: register MUSE_CLI in cli_harnesses(); the `muse` row of context_globs_for_agent (AGENTS.md, .agents/skills/**, .muse/**)
 ```
+
+Web: `SessionType` gains `"muse-cli"`; toggle `create-session-type-muse-cli`.
 
 ## Green wave
 
@@ -80,14 +87,14 @@ Launch acceptance with a fake `muse` binary recording argv/env; route unit tests
 
 | Test | File | Validates |
 |---|---|---|
-| `a_muse_session_on_a_meta_account_spawns_muse_with_the_model_and_key` | `packages/tddy-agent-launch/tests/muse_cli_session_acceptance.rs` (new) | argv/env |
-| `a_muse_session_without_an_account_injects_no_key` | same | env |
-| `a_resumed_muse_session_continues_its_session` | same | resume argv |
-| `muse_accepts_only_meta_accounts` | `packages/tddy-agent-backend/tests/provider_route_acceptance.rs` | `PresetNotAccepted` for fireworks |
+| `muse_code_is_registered_as_a_cli_harness` / `a_muse_session_starts_with_its_model_and_first_prompt` / `a_resumed_muse_session_continues_its_session` / `muse_on_meta_is_handed_the_key_and_nothing_else` / `muse_accepts_only_meta_accounts` / `the_curated_muse_models_default_to_spark` | `packages/tddy-agent-backend/tests/muse_cli_acceptance.rs` (new) | descriptor, argv, route arm, models |
+| Cypress: starts a muse-cli session with a Muse model | `packages/tddy-web/cypress/component/CreateSessionMuseAcceptance.cy.tsx` (new) | toggle + request |
 
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
+- **Registry tripwire**: node 3's `the_registry_offers_claude_cursor_and_opencode_in_order` lists the registry exactly; registering `muse-cli` here must extend that expected list in the same commit (a shared registry, not node 3's behaviour changing).
+- **Muse CLI facts are unconfirmed** (`META_API_KEY`, `--model`, `--continue`): Muse Code is not installed here. `/green` begins by recording `muse --help` in discovery and adjusting these tests to what it says.
 - **TUI only**: `muse exec --json` / `muse serve` protocols are undocumented; a headless backend is a backlog entry.
 
 ## Refactoring Needed
@@ -95,6 +102,13 @@ Launch acceptance with a fake `muse` binary recording argv/env; route unit tests
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-agent-backend` clippy `-D warnings` clean.
+
+- `muse_cli_acceptance`: 1 fails at this node's `muse_cli_models` `todo!()`; 3 first at node 3's `cli_harness` `todo!()`; 2 first at node 2's `resolve_route` `todo!()` — green after #663/#664.
+- `CreateSessionMuseAcceptance.cy.tsx` 1/1 fails: no Muse toggle.
 
 ## Validation Results
 ### /validate-changes
@@ -108,10 +122,10 @@ Launch acceptance with a fake `muse` binary recording argv/env; route unit tests
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
