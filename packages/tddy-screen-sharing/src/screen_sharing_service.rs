@@ -159,7 +159,6 @@ impl ScreenSharingServiceImpl {
         self.with_target_store(Arc::new(SessionVaultTargetStore::new(vaults, resolver)))
     }
 
-    /// Supply daemon config for bridge binary path resolution and LiveKit token generation.
     /// Mint bridges' room tokens through `minter` (builder) — the daemon's one minter, built from
     /// its `livekit:` block.
     pub fn with_room_tokens(
@@ -170,6 +169,7 @@ impl ScreenSharingServiceImpl {
         self
     }
 
+    /// Supply daemon config for bridge binary path resolution and the LiveKit URL.
     pub fn with_config(mut self, config: Arc<DaemonConfig>) -> Self {
         self.config = Some(config);
         self

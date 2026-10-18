@@ -134,9 +134,9 @@ through the port.
 | ratchet | strike `tddy-screen-sharing` |
 
 ## Implementation Milestones
-- [ ] M1 Port, null object, plugin minter with verify tests
-- [ ] M2 Screen sharing and daemon-auth switched
-- [ ] M3 Manifest trimmed; ratchet green
+- [x] M1 Port, null object, plugin minter with verify tests
+- [x] M2 Screen sharing and daemon-auth switched
+- [x] M3 Manifest trimmed; ratchet green
 
 ## Testing Plan
 
@@ -177,6 +177,19 @@ Unit (`tddy-daemon-extensions/src/room_tokens.rs`): `with_nothing_wired_every_mi
 
 ## Validation Results
 ### /validate-changes
+Stack gate: base `feature/satellite/session-rooms` current, leak check clean (4 commits, this PR only), no deletions.
+Boundary: Responsibility delivered (no `todo!()` left in this PR's files); nothing from `## Dependencies` or
+`## Boundaries` implemented. Scoped build: `cargo check --all-targets` clean for tddy-daemon-extensions,
+-livekit, -auth, tddy-screen-sharing, tddy-daemon.
+- Fixed: `with_room_tokens` had been inserted between `with_config` and its doc comment.
+- INFO: all three `build_auth_entries*` builders gained a trailing `minter` parameter (the auth
+  `LiveKitTokenService` is built inside them); ~18 test call sites repeat the same
+  `room_token_minter(config.livekit.as_ref())` argument — a fixture helper would cut that.
+- INFO: `tddy-daemon-auth` keeps `tddy-livekit` for `DEFAULT_LIVEKIT_JWT_TTL_SECS` and `oauth_loopback_tunnel.rs` (node 10).
+- INFO: `BRIDGE_TOKEN_TTL` duplicates `DEFAULT_LIVEKIT_JWT_TTL_SECS`; pinned by a screen-sharing test.
+- Not run (need LiveKit testkit containers; compile only): `common_room_key_trust_acceptance`,
+  `remote_git_livekit_acceptance`, `session_sync_livekit_acceptance`.
+
 ### /validate-tests
 ### /validate-prod-ready
 ### /analyze-clean-code
@@ -191,7 +204,7 @@ Unit (`tddy-daemon-extensions/src/room_tokens.rs`): `with_nothing_wired_every_mi
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
