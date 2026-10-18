@@ -113,6 +113,10 @@ pub struct ScreenSharingServiceImpl {
     /// a service built without one reports that rather than answering as though the person has no
     /// desktops.
     target_store: Option<Arc<dyn ScreenSharingTargetStore>>,
+    /// How long a start waits for its bridge to report the desktop ready.
+    // TODO(bridge-ready): read by the spawn path once it waits for the readiness line.
+    #[allow(dead_code)]
+    bridge_ready_timeout: std::time::Duration,
 }
 
 impl ScreenSharingServiceImpl {
@@ -125,7 +129,16 @@ impl ScreenSharingServiceImpl {
             active_bridges: Arc::new(Mutex::new(HashMap::new())),
             host_scope: None,
             target_store: None,
+            bridge_ready_timeout: crate::bridge_readiness::DEFAULT_BRIDGE_READY_TIMEOUT,
         }
+    }
+
+    /// How long a start waits for its bridge's readiness line before failing the start and
+    /// stopping the bridge.
+    #[must_use]
+    pub fn with_bridge_ready_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.bridge_ready_timeout = timeout;
+        self
     }
 
     /// Supply the credential store a session's screen-sharing targets are records in.

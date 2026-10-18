@@ -13295,6 +13295,7 @@ dependencies = [
  "tddy-host-service",
  "tddy-livekit",
  "tddy-rpc",
+ "tddy-screenshare",
  "tddy-service",
  "tddy-testing-commons",
  "tempfile",

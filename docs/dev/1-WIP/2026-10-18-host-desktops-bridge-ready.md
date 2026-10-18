@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#658](https://github.com/uppin/tddy-coder/pull/658)
 **Type**: Feature + Bug fix
 **Stack**: `#host-desktops` 6/8. Base: `feature/host-desktops/viewer-fullscreen`.
 
@@ -56,7 +56,28 @@ pub fn read_readiness(line: &str) -> Result<BridgeReadiness, serde_json::Error>;
 #[derive(Debug, thiserror::Error)] #[error("the desktop refused the sign-in: {0}")]
 pub struct AuthenticationRefused(pub String);
 ```
-Daemon: `spawn_bridge(...) -> Result<BridgeStarted { width, height }, Status>` (signature in node 1's module). Failing tests below.
+Published (node 1's split has not happened — developer decision 2026-10-18 — so the daemon seam is a
+**new module**, not `screen_sharing_service.rs`):
+
+```rust
+// packages/tddy-screen-sharing/src/bridge_readiness.rs  (re-exported from lib.rs)
+pub const DEFAULT_BRIDGE_READY_TIMEOUT: Duration;            // 30 s
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeStarted { pub width: u32, pub height: u32 }
+pub async fn await_bridge_readiness<R: AsyncRead + Unpin + Send>(stdout: R, within: Duration)
+    -> Result<BridgeStarted, Status>;                          // todo!()
+// packages/tddy-screen-sharing/src/screen_sharing_service.rs (minimum to publish the config)
+impl ScreenSharingServiceImpl {
+    pub fn with_bridge_ready_timeout(self, timeout: Duration) -> Self; // real setter; field unread until green
+}
+```
+
+Green: `spawn_bridge` pipes stdout, calls `await_bridge_readiness(child.stdout, self.bridge_ready_timeout)`,
+terminates the child on every `Err`, and returns `BridgeStarted`; both start calls return its size.
+
+Deviation from the drafted contract: `AuthenticationRefused` implements `Display`/`Error` by hand
+instead of `#[derive(thiserror::Error)]` — `tddy-screenshare` has no `thiserror` dependency, and
+adding one needs approval. Same message, same type.
 
 ## Green wave
 
@@ -80,6 +101,8 @@ Daemon: `spawn_bridge(...) -> Result<BridgeStarted { width, height }, Status>` (
 A wrong password says so; clicks land right on any desktop size.
 
 ## Scope
+
+- [~] Testing — acceptance and unit tests written and failing (draft PR contract)
 
 - [ ] Readiness protocol + `run_bridge` emission
 - [ ] Authentication tagging in both bridges
@@ -122,7 +145,7 @@ Web: Cypress with the in-memory backend answering `StartHostStream` with `Code.U
 
 | Test | File | Validates |
 |---|---|---|
-| `a_desktop_that_refuses_the_sign_in_fails_the_start_as_unauthenticated` | `packages/tddy-screen-sharing` bridge-lifecycle module `tests` (path per node 1) | mapping + reason |
+| `a_desktop_that_refuses_the_sign_in_fails_the_start_as_unauthenticated` | `packages/tddy-screen-sharing/tests/bridge_readiness_acceptance.rs` (placed outside the service file so node 1's split does not move them; fixtures in `tests/common/mod.rs`) | mapping + reason |
 | `a_refused_start_leaves_no_bridge_running` | same | reaped |
 | `a_started_desktop_reports_the_size_its_bridge_saw` | same | no 1920×1080 |
 | `a_bridge_that_exits_before_reporting_fails_the_start` | same | early exit |
@@ -141,6 +164,11 @@ Unit (`tddy-screenshare/src/readiness.rs`): `a_ready_line_round_trips`, `a_failu
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- `tests/common/mod.rs` re-creates a minimal copy of the inline `mod tests` fixtures in `screen_sharing_service.rs` (stand-in bridge script, prompt-answering operator, in-memory session credential store, daemon builder). Once node 1 splits the file, fold the inline suite onto `tests/common/` (or a shared `testing` module) so there is one stand-in bridge.
+- The inline suite's `FakeBridge` prints nothing on stdout: once `spawn_bridge` waits for readiness, every inline test that expects a start to succeed needs its stand-in to print a `ready` line (green must update it, or those tests hit the readiness timeout).
+- `tddy-screen-sharing` gained `tddy-screenshare` as a **dev**-dependency (stand-ins print the real `BridgeReadiness` serialisation). Green moves it to `[dependencies]` when `await_bridge_readiness` parses with `read_readiness`.
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -158,8 +186,8 @@ Unit (`tddy-screenshare/src/readiness.rs`): `a_ready_line_round_trips`, `a_failu
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail) — 6/6 daemon, 1/1 tddy-vnc, 2/2 readiness unit fail; Cypress: 1 fails, `scales a click into the size the host reported` **already passes** (the overlay already scales into the reply's `width/height`) and is kept as a guard
 - [ ] USER REVIEW — acceptance tests
 - [ ] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code

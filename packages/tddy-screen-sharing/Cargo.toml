@@ -55,3 +55,6 @@ rsa = "=0.9.10"
 # The RSA keygen the inline suite needs a source of randomness for.
 rand = "0.8"
 sha2 = "0.10"
+# The readiness protocol's own types, so the stand-in bridges in `tests/bridge_readiness_acceptance.rs`
+# print exactly the line a real bridge writes. A workspace path crate, nothing external.
+tddy-screenshare = { path = "../tddy-screenshare" }
