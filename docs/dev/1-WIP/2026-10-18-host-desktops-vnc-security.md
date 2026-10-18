@@ -137,6 +137,7 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 (count byte, then the types).
 
 ## Decisions & Trade-offs
+- **TLSPlain accepts an unverified server certificate** (developer, 2026-10-18). rustls has no anonymous-DH suites, so TLSPlain works with servers that present a certificate (verified or not) and not with anonymous-only ones (e.g. GnuTLS anon). Same posture as tddy-rdp's TLS; documented as a limit at wrap.
 - **Crates approved** (developer, 2026-10-18), at the versions already in Cargo.lock (no version moves): normal deps `rustls` 0.23 and `tokio-rustls` 0.26 (both `default-features = false`, `ring` + `tls12` + `logging`, matching tddy-livekit's ring choice), `num-bigint` 0.4, `aes` 0.8, `md-5` 0.10, `thiserror` 2; dev-dep `rcgen` 0.13.
 - **Open for green — TLSPlain trust model:** real VeNCrypt TLSPlain (259) servers (TigerVNC/GnuTLS) use *anonymous* Diffie-Hellman cipher suites, which rustls does not implement. The fake server presents a self-signed certificate, so the client must accept an unverified certificate for TLSPlain; that interoperates with certificate-presenting servers but not with anon-DH-only ones. X509Plain (262) would be the verified variant. Decide in green.
 - **Own security layer rather than a vnc-rs fork** (developer, 2026-10-18). Fallback to a pinned patch only if vnc-rs cannot be entered after SecurityResult — recorded here when decided.
@@ -166,7 +167,7 @@ all written, failing on `todo!()`. `parse_security_types` takes the whole securi
 - [x] Create changeset (this document)
 - [x] Create failing acceptance tests (8 of 8)
 - [x] Run acceptance tests (verify they fail) — 6 fail, 2 pass today as regression guards
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
 - [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
