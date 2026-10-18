@@ -219,13 +219,10 @@ fn wait_until_pid_stopped(pid: u32, total: Duration, step: Duration) -> bool {
 ///
 /// A session that is not hosting a room has nothing registered under its id and this does nothing —
 /// which is the ordinary case, not the exception: a room is opened when something first connects to
-/// the session over LiveKit ([`crate::session_room::SessionRoomRegistry::ensure_open`]), so a
+/// the session over LiveKit (`SessionRoomRegistry::ensure_open`), so a
 /// session nobody connected to, and every session on a daemon with no LiveKit credentials, has
 /// none.
-pub fn close_session_room(
-    rooms: &tddy_daemon_livekit::session_room::SessionRoomRegistry,
-    session_id: &str,
-) {
+pub fn close_session_room(rooms: &dyn tddy_daemon_extensions::SessionRooms, session_id: &str) {
     rooms.close(session_id.trim());
 }
 

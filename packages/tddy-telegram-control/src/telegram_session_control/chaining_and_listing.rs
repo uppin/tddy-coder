@@ -406,7 +406,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
         // Before the directory goes, as `delete_session_directory` requires: the room's poll loop
         // measures the checkout on an interval, and this path removes the worktree with it.
         tddy_session_lifecycle::session_deletion::close_session_room(
-            &self.session_rooms,
+            &*self.session_rooms,
             session_id,
         );
         tddy_session_lifecycle::session_deletion::delete_session_directory(

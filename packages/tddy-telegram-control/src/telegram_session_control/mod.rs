@@ -240,11 +240,11 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// The session rooms this daemon hosts, so **Delete** stops hosting the deleted session's room
     /// before its checkout is removed — the same order `DeleteSession` uses.
     ///
-    /// Defaults to a registry of this harness's own, which hosts nothing: a harness built without
-    /// the daemon's registry (every test fixture) has no rooms to close, and the call still happens
+    /// Defaults to [`tddy_daemon_extensions::NoSessionRooms`], which hosts nothing: a harness built
+    /// without the daemon's rooms (every test fixture) has none to close, and the call still happens
     /// on one code path rather than on a branch. `main` injects the daemon's own with
     /// [`Self::with_session_rooms`].
-    session_rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
+    session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
 }
 
 impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
@@ -343,7 +343,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
             elicitation_replay_bridge: Arc::new(Mutex::new(
                 TelegramElicitationReplayBridge::default(),
             )),
-            session_rooms: Arc::new(tddy_daemon_livekit::session_room::SessionRoomRegistry::new()),
+            session_rooms: Arc::new(tddy_daemon_extensions::NoSessionRooms),
         }
     }
 
@@ -351,7 +351,7 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
     /// session it deletes instead of leaving it polling a checkout that is being removed.
     pub fn with_session_rooms(
         mut self,
-        rooms: Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>,
+        rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
     ) -> Self {
         self.session_rooms = rooms;
         self

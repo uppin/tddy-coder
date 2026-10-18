@@ -51,6 +51,7 @@ Full-daemon wiring (OAuth callback **`state`** validation on the HTTP side, **`T
 
 - Delegates to the same **`session_deletion::delete_session_directory`** logic as **`ConnectionService::DeleteSession`**.
 - If a live PID exists in **`.session.yaml`**, the daemon terminates the process before directory removal.
+- The session's room is closed first, through the `SessionRooms` port, before the directory goes.
 - Bot sends a confirmation message after successful deletion.
 
 ### Branch/worktree intent (`/start-workflow` after recipe)

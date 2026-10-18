@@ -7,7 +7,7 @@
 //! git's own `worktree list`, so filesystem access can never escape a real checkout.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -33,27 +33,22 @@ use crate::worktrees::{
     WorktreeSizeStatus, WorktreeStatsCache,
 };
 
-/// What must stop watching a checkout before it is taken away.
+/// What must stop watching a checkout before it is taken away: the daemon's session rooms, through
+/// the shared [`SessionRooms`] port.
 ///
-/// A port rather than a direct call, because the thing that watches is a **session room** — family
-/// C, which stays in `tddy-daemon` deliberately. The ordering it exists to preserve is the whole
-/// point: a room measures its directory on an interval, so one still open on a path that has just
-/// been removed shells out to git in a directory that no longer exists, and warns at the poll rate
-/// for the life of the daemon. `RemoveWorktree` knows a path and never a session id, so the ask is
-/// by path.
-pub trait WorktreeRoomCloser: Send + Sync {
-    fn close_for_worktree(&self, worktree_path: &Path);
-}
+/// A port rather than a direct call, because the thing that watches is a **session room**, which
+/// belongs to an integration this crate does not name. The ordering it exists to preserve is the
+/// whole point: a room measures its directory on an interval, so one still open on a path that has
+/// just been removed shells out to git in a directory that no longer exists, and warns at the poll
+/// rate for the life of the daemon. `RemoveWorktree` knows a path and never a session id, so the
+/// ask is by path.
+pub use tddy_daemon_extensions::SessionRooms as WorktreeRoomCloser;
 
-/// A daemon with no session rooms — every fixture, and any embedder that hosts no LiveKit rooms.
+/// A daemon with no session rooms — every fixture, and any embedder that hosts no rooms.
 ///
 /// Named rather than an `Option<…>` on the service so the "nothing to close" case is a decision
 /// somebody wrote down, not a `None` that could equally mean "wiring forgotten".
-pub struct NoSessionRooms;
-
-impl WorktreeRoomCloser for NoSessionRooms {
-    fn close_for_worktree(&self, _worktree_path: &Path) {}
-}
+pub use tddy_daemon_extensions::NoSessionRooms;
 
 /// Everything `worktree.WorktreeService` answers from.
 ///
