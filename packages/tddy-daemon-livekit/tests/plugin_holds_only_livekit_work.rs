@@ -1,5 +1,5 @@
-//! The LiveKit plugin crate holds LiveKit work and nothing else — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-core-modules.md`.
+//! The LiveKit plugin crate holds LiveKit work and nothing else — see
+//! `docs/dev/changesets/2026-10-18-satellite-5-core-modules-leave-the-plugin.md`.
 //!
 //! A module with no LiveKit in it, kept here, makes every consumer of it depend on the plugin — and
 //! the ratchet would then count that consumer as needing LiveKit when it does not. Read from the
