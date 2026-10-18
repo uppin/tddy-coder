@@ -3,9 +3,15 @@ name: CI
 # Every PR gets a build, a lint pass, and a test run with per-test pass/fail
 # counts reported back as check runs. See docs/dev/guides/ci.md for how to query
 # results from a terminal or an agent.
+#
+# Except a draft: the `gate` job skips every other job on a draft PR until it is
+# marked ready for review, or until someone comments `#forcebuild` on it
+# (build-gate.yml, forcebuild.yml). See docs/dev/guides/ci.md § Draft PRs.
 
 on:
   pull_request:
+    # The defaults plus `ready_for_review`, which is when a draft first builds.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
   workflow_dispatch:
@@ -20,13 +26,17 @@ on:
 
 # One run per PR. A new push cancels the run still in flight rather than
 # queueing behind it — the older result is worthless once the branch moves.
+#
+# `ref_name`, not `ref`: a `#forcebuild` dispatch runs on refs/heads/<branch>
+# while the PR's own runs report `head_ref` = <branch>; both must share a group.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   checks: write # action-junit-report publishes the test check runs
+  pull-requests: read # the build gate reads a draft's comments for #forcebuild
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,8 +48,13 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
+  gate:
+    uses: ./.github/workflows/build-gate.yml
+
   rust-lint:
     name: Rust lint
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -92,6 +107,8 @@ jobs:
   # 983 binaries), so only the e2e targets — about a tenth — are archived.
   rust-test-build:
     name: Rust e2e test archive
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     # Independent of `Rust build` and of `Rust tests`: it needs no fixture binary to compile, so all
     # three compile side by side and the e2e shards wait for the slower of this and `Rust build`.
@@ -372,8 +389,10 @@ jobs:
   rust-e2e:
     name: Rust e2e tests
     runs-on: ubuntu-latest
-    needs: [rust-build, rust-test-build, rust-e2e-shard]
-    if: ${{ !cancelled() }}
+    needs: [gate, rust-build, rust-test-build, rust-e2e-shard]
+    # `!cancelled()` alone would run this summary on a gated draft too, where
+    # every job it reports on was skipped.
+    if: ${{ !cancelled() && needs.gate.outputs.build == 'true' }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
@@ -439,7 +458,9 @@ jobs:
   # docs/dev/guides/ci.md. It never runs on a push or a PR.
   rust-compile-timings:
     name: Rust compile timings
-    if: github.event_name == 'workflow_dispatch'
+    # A manual dispatch only — not the one forcebuild.yml sends for a draft PR,
+    # which is a build request, not a timing experiment.
+    if: github.event_name == 'workflow_dispatch' && github.triggering_actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -482,6 +503,8 @@ jobs:
 
   rust-build:
     name: Rust build
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     # Runs first. Both test checks depend on it, because several suites exec
     # workspace binaries rather than linking them, and jobs get separate
@@ -613,6 +636,8 @@ jobs:
 
   rust-build-arm64:
     name: Rust build (arm64)
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-24.04-arm
     # The same build on the other architecture this project ships to. Native, not
     # emulated: GitHub's arm64 Linux runners are free for public repositories, and
@@ -656,6 +681,8 @@ jobs:
 
   generated-code:
     name: Generated code
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     # No build, no browser: bun install for the pinned buf/protoc-gen-es, then
     # regenerate every committed *_pb.ts and diff. Deliberately its own check

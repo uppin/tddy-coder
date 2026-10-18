@@ -1,0 +1,65 @@
+name: Build gate
+
+# Called by ci.yml and vm-tests.yml as their first job: decides whether the
+# expensive jobs run at all. See docs/dev/guides/ci.md § Draft PRs.
+#
+#   pushes to master, manual dispatches   → build
+#   a ready-for-review PR                 → build
+#   a draft PR                            → skip, unless the PR carries a
+#                                           `#forcebuild` comment from someone
+#                                           with write access
+#
+# The `#forcebuild` comment is sticky: once it is on the PR, every later push to
+# the draft builds too. Delete the comment to go back to skipping. The comment
+# itself starts a build of the current head through forcebuild.yml — a comment
+# is not a `pull_request` event, so nothing here would otherwise notice it.
+
+on:
+  workflow_call:
+    outputs:
+      build:
+        description: "'true' when the calling workflow should run its build and test jobs"
+        value: ${{ jobs.decide.outputs.build }}
+
+jobs:
+  decide:
+    name: Draft build gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Decide
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" != pull_request ] || [ "$DRAFT" != true ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Not a draft PR ($EVENT) — building."
+            exit 0
+          fi
+
+          # Same bar as automerge.yml: the actual permission level, not the
+          # comment's author_association, which reports MEMBER for any org member.
+          authors=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                      --jq '.[] | select(.body | contains("#forcebuild")) | .user.login' | sort -u)
+          for author in $authors; do
+            level=$(gh api "repos/$REPO/collaborators/$author/permission" \
+                      --jq .permission 2>/dev/null || echo none)
+            case "$level" in
+              admin|write|maintain)
+                echo "build=true" >> "$GITHUB_OUTPUT"
+                echo "Draft PR #$PR has a #forcebuild comment from $author — building."
+                exit 0 ;;
+            esac
+          done
+
+          echo "build=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::Draft PR #$PR — build skipped. Comment #forcebuild or mark the PR ready for review to run CI."

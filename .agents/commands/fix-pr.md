@@ -114,8 +114,19 @@ Scope rules:
 
 ## Step 3: Collect workstream B — checks, without waiting for the full run
 
-Every PR gets four required checks, all defined in `.github/workflows/ci.yml`
-(see [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md)):
+Every PR that is built gets four required checks, all defined in `.github/workflows/ci.yml`
+(see [`docs/dev/guides/ci.md`](../../docs/dev/guides/ci.md)).
+
+**A draft is not built** unless it carries a `#forcebuild` comment — its checks report *skipped*,
+which is not green and is nothing to fix. When the PR is a draft (`isDraft` from Step 1) and
+`scripts/ci-status.sh <N>` warns that it is not being built, start the build before collecting
+workstream B:
+
+```bash
+gh pr comment <N> --body '#forcebuild'   # sticky: later pushes to the draft build too
+```
+
+Do **not** `gh pr ready` to get a build — readying triggers the PR's wrap, which is `/pr-wrap`'s step.
 
 | Check | What it runs |
 |---|---|

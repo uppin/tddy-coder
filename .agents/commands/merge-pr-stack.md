@@ -18,6 +18,12 @@ matters more here than it looks: a cold-cache `Rust tests` run is ~15 minutes an
 and the test checks *wait on the build*, so a serialized stack of five PRs spends hours in a queue
 it never needed to form.
 
+That pipelining assumes the PRs are **built**. CI skips a draft PR unless it carries a `#forcebuild`
+comment ([ci.md § Draft PRs](../../docs/dev/guides/ci.md#draft-prs)) — so a stack still in draft gets
+no CI from Wave 2's pushes. This command expects every PR ready for review; if one is still a draft,
+comment `gh pr comment <N> --body '#forcebuild'` so Wave 2's push warms its run, and route the readying
+itself through `/pr-wrap`.
+
 Load the `pr-stack` skill (`.agents/skills/pr-stack/SKILL.md`) first — its **Golden rules for
 landing** and **Landing sequence** define the mechanics this command drives. The product-level
 model — the DAG, `StackNode`, the `pr_*` tools, merge and repoint — is
@@ -549,6 +555,10 @@ scripts/ci-status.sh <N>              # per-check state plus pass/fail test coun
 scripts/ci-status.sh <N> --watch      # block until the run finishes, then report
 scripts/ci-status.sh <N> --failures   # failing test names, files, assertion messages, failing-step log tails
 ```
+
+**Skipped is not passed.** A draft that was never built reports its required checks as *skipped*,
+which GitHub counts as satisfied. 3a's `draft=false` requirement is what rules that out — never wait on
+CI for a PR that fails it.
 
 **Wait on the checks, not on a count of pending ones.** A check is registered on the rollup a short
 while *after* a push, so "zero pending" is `true` before CI has started — a count-based wait reports

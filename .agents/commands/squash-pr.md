@@ -56,6 +56,9 @@ scripts/ci-status.sh <N> --watch      # block until the run finishes, then repor
 - Checks **failing** → stop and report; do not squash. `/fix-pr` is the command that makes a PR
   mergeable.
 - Checks **pending** → wait for them to settle (`--watch`), or report and ask before proceeding.
+- PR is a **draft** → stop. A draft is not built unless it has a `#forcebuild` comment, so its
+  *skipped* checks say nothing — and a draft cannot be merged anyway. Readying it is `/pr-wrap`'s
+  step; report and ask.
 
 **Also read the repo's merge settings once, before anything destructive.** One of them can close a
 successor behind your back:

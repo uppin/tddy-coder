@@ -1,0 +1,81 @@
+name: Forcebuild
+
+# Comment `#forcebuild` on a draft pull request to run CI on it without marking
+# it ready for review. See docs/dev/guides/ci.md § Draft PRs.
+#
+# Draft PRs skip CI (build-gate.yml). A comment is not a `pull_request` event,
+# so this workflow starts the build itself: it dispatches ci.yml and
+# vm-tests.yml on the PR's head branch. Their check runs attach to the head
+# commit, so they show in the PR's checks and in scripts/ci-status.sh like any
+# other run. The comment then stays on the PR, and build-gate.yml lets every
+# later push to the draft build as well.
+#
+# Like automerge.yml, this runs from the default branch — editing it on a PR
+# changes nothing until it is on master.
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  actions: write # gh workflow run
+  pull-requests: write # the reaction on the comment
+  contents: read
+
+jobs:
+  forcebuild:
+    name: Build on comment
+    if: >-
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '#forcebuild')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require write access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+        run: |
+          level=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" \
+                    --jq .permission 2>/dev/null || echo none)
+          echo "$ACTOR has '$level' permission"
+          case "$level" in
+            admin|write|maintain) ;;
+            *) echo "::error::$ACTOR lacks write access; ignoring the build request"
+               exit 1 ;;
+          esac
+
+      - name: Dispatch CI on the PR head
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          read -r head cross < <(gh pr view "$PR" --repo "$REPO" \
+                                   --json headRefName,isCrossRepository \
+                                   --jq '"\(.headRefName) \(.isCrossRepository)"')
+          # A dispatch runs on a branch of *this* repo; a fork's head is not one.
+          if [ "$cross" = true ]; then
+            echo "::error::#$PR comes from a fork; #forcebuild cannot dispatch on its branch"
+            exit 1
+          fi
+          # CI first: the VM chain leg polls for CI's run on the same commit.
+          # Dispatch is the one event GITHUB_TOKEN may start a workflow with.
+          gh workflow run ci.yml --repo "$REPO" --ref "$head"
+          gh workflow run vm-tests.yml --repo "$REPO" --ref "$head"
+          echo "Dispatched CI and VM tests on $head for #$PR"
+
+      - name: React to the comment
+        if: always() && steps.dispatch.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          REACTION: ${{ steps.dispatch.outcome == 'success' && 'rocket' || 'confused' }}
+        run: |
+          gh api --silent -X POST \
+            "repos/$REPO/issues/comments/$COMMENT_ID/reactions" \
+            -f content="$REACTION"

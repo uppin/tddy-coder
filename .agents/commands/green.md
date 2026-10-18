@@ -191,6 +191,8 @@ Other tests in this PR may still be red for parts not yet implemented; never the
 
 When a milestone unblocks a dependent, **say so** — that worktree needs to run `/pr-stack-rebase` to pick it up. Its own documents belong to whoever works it, not to you to edit from here.
 
+**A push to a draft PR does not start CI** — CI skips drafts that have no `#forcebuild` comment. Local scoped gates are this phase's evidence; when a full CI run is wanted before the PR is readied, comment `gh pr comment <N> --body '#forcebuild'` once (it is sticky) rather than `gh pr ready`, which triggers the wrap.
+
 If the push is rejected because the base moved, run **`/pr-stack-rebase`** (this branch only) and push again. Do not cascade a sync across the whole stack from here. Never `--force`; if a force-push is genuinely needed after a rebase, ask the user first and use `--force-with-lease`.
 
 **3c. Hand off to `/validate-changes`**
