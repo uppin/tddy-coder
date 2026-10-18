@@ -13524,6 +13524,7 @@ dependencies = [
  "serde_json",
  "tddy-core",
  "tddy-sandbox",
+ "tddy-testing-commons",
  "tddy-workflow-recipes",
  "tempfile",
 ]
