@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#655](https://github.com/uppin/tddy-coder/pull/655)
 **Type**: Feature
 **Stack**: `#host-desktops` 3/8. Base: `feature/host-desktops/rdp-nla`.
 
@@ -114,26 +114,39 @@ parameters (RFC-documented algorithm), not by calling the client's code.
 
 ## Acceptance Tests
 
-| Test | File | Validates |
-|---|---|---|
-| `signs_in_with_vnc_authentication` | `packages/tddy-vnc/tests/vnc_security_integration.rs` (new) | VncAuth then a frame |
-| `signs_in_with_vencrypt_plain` | same | username + password over Plain |
-| `signs_in_with_vencrypt_tls_plain` | same | Plain inside TLS |
-| `signs_in_with_apple_remote_desktop` | same | type 30 DH exchange |
-| `chooses_vnc_authentication_when_no_username_is_given_and_ard_is_also_offered` | same | method choice by credentials |
-| `chooses_apple_remote_desktop_when_a_username_is_given` | same | method choice by credentials |
-| `a_server_offering_only_unknown_types_is_refused_naming_them` | same | error names the numbers |
-| `a_refused_sign_in_fails_to_connect_with_the_servers_reason` | same | SecurityResult failure reason surfaced |
+| Test | File | Validates | Status |
+|---|---|---|---|
+| `signs_in_with_vnc_authentication` | `packages/tddy-vnc/tests/vnc_security_integration.rs` (new) | VncAuth then a frame | [x] written — **passes today** through vnc-rs; regression guard for the new layer |
+| `signs_in_with_vencrypt_plain` | same | username + password over Plain | [x] written, failing (`VNC handshake failed`) |
+| `signs_in_with_vencrypt_tls_plain` | same | Plain inside TLS | [x] written, failing (`VNC handshake failed`); fake server offers Plain + TLSPlain, records the chosen subtype, accepts with `1`, then runs Plain inside rustls with an rcgen self-signed cert |
+| `signs_in_with_apple_remote_desktop` | same | type 30 DH exchange | [x] written, failing (`VNC handshake failed`); fake server uses RFC 2409 group 2 (g=2, 128-byte key), derives the shared secret from its own private key, MD5 → AES-128-ECB decrypts the 128-byte block and checks both null-terminated fields |
+| `chooses_vnc_authentication_when_no_username_is_given_and_ard_is_also_offered` | same | method choice by credentials | [x] written, failing (`VNC handshake failed` — vnc-rs rejects type 30) |
+| `chooses_apple_remote_desktop_when_a_username_is_given` | same | method choice by credentials | [x] written, failing (`VNC handshake failed` — vnc-rs rejects type 30); asserts type 30 was selected **and** a frame after a completed ARD exchange |
+| `a_server_offering_only_unknown_types_is_refused_naming_them` | same | error names the numbers | [x] written, failing (`Unknow VNC security type: 77` — 99 not named) |
+| `a_refused_sign_in_fails_to_connect_with_the_servers_reason` | same | SecurityResult failure reason surfaced | [x] written — **passes today** (vnc-rs surfaces the reason); regression guard |
 
-Unit (`src/security.rs`): `parses_a_list_that_mixes_known_and_unknown_types`,
-`a_method_needing_a_username_is_not_chosen_without_one`, `prefers_tls_plain_over_plain`.
+The fake server's VNC Authentication check uses a known-answer vector (DES of a fixed challenge
+under the key for `secret`, computed with `openssl enc -des-ecb`), so no DES crate is needed in
+tests; `signs_in_with_vnc_authentication` passing against vnc-rs confirms the vector. The ARD and
+TLSPlain server sides were checked once with a throwaway client written against the fake server
+(not committed): both reached SecurityResult OK and ServerInit.
+
+Unit (`src/security.rs`): [x] `parses_a_list_that_mixes_known_and_unknown_types`,
+[x] `a_method_needing_a_username_is_not_chosen_without_one`, [x] `prefers_tls_plain_over_plain` —
+all written, failing on `todo!()`. `parse_security_types` takes the whole security-types message
+(count byte, then the types).
 
 ## Decisions & Trade-offs
+- **Crates approved** (developer, 2026-10-18), at the versions already in Cargo.lock (no version moves): normal deps `rustls` 0.23 and `tokio-rustls` 0.26 (both `default-features = false`, `ring` + `tls12` + `logging`, matching tddy-livekit's ring choice), `num-bigint` 0.4, `aes` 0.8, `md-5` 0.10, `thiserror` 2; dev-dep `rcgen` 0.13.
+- **Open for green — TLSPlain trust model:** real VeNCrypt TLSPlain (259) servers (TigerVNC/GnuTLS) use *anonymous* Diffie-Hellman cipher suites, which rustls does not implement. The fake server presents a self-signed certificate, so the client must accept an unverified certificate for TLSPlain; that interoperates with certificate-presenting servers but not with anon-DH-only ones. X509Plain (262) would be the verified variant. Decide in green.
 - **Own security layer rather than a vnc-rs fork** (developer, 2026-10-18). Fallback to a pinned patch only if vnc-rs cannot be entered after SecurityResult — recorded here when decided.
 
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- The fake RFB server in `vnc_security_integration.rs` duplicates the ServerInit/event loop of the one in `vnc_client_integration.rs`; a shared `tests/common` fake server would serve both.
+
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -151,10 +164,10 @@ Unit (`src/security.rs`): `parses_a_list_that_mixes_known_and_unknown_types`,
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests (8 of 8)
+- [x] Run acceptance tests (verify they fail) — 6 fail, 2 pass today as regression guards
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
