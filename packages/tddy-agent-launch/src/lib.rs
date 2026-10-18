@@ -14,6 +14,7 @@ pub mod conversation_spawn_handler;
 pub mod conversation_worktree_op;
 pub mod cursor_cli_spawn;
 pub mod family_proto_bridge;
+pub mod harness_profile_start;
 pub mod hooks_and_urls;
 pub mod host_session_socket;
 pub mod inherited_host_sockets;
@@ -64,6 +65,8 @@ mod conversation_spawn_wiring_tests;
 #[cfg(test)]
 mod default_route_tests;
 mod facilitation;
+#[cfg(test)]
+mod harness_profile_start_tests;
 #[cfg(test)]
 mod host_session_socket_tests;
 #[cfg(test)]

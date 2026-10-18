@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 8/9. Base: `feature/provider-route/opencode-acp`.
+**Stack**: #provider-route 8/9. Base: `feature/provider-route/opencode-acp`. PR: [#669](https://github.com/uppin/tddy-coder/pull/669).
 
 ## Initial Discovery
 
@@ -19,10 +19,7 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 
 ## Responsibility
 
-The **agent-definition** level of route precedence. Owns `SpecializedAgentDef.harness: Option<HarnessProfile>`
-(`HarnessProfile { harness, provider_account, model }`), its load-time validation (no `base_url` /
-`api_key` beside it), `ListAgents` rows for profiles, and the start-time resolution that maps a profile
-to its session type / agent and feeds `RouteSources.agent_definition`.
+The **agent-definition** level of route precedence. Owns `tddy_discovery::harness_profile::{HarnessProfile, load_harness_profiles, parse_harness_profile, harness_profile_rows}` — a **separate type**, not a field on `SpecializedAgentDef` — the change to `load_agent_defs` that leaves profile files to their own loader, the agent-list rows for profiles, and `tddy_agent_launch::harness_profile_start::{ProfileStart, profile_start}` with the start-time feed of `RouteSources.agent_definition`.
 
 ## Boundaries
 
@@ -41,14 +38,18 @@ to its session type / agent and feeds `RouteSources.agent_definition`.
 ## Draft PR contract
 
 ```rust
-// tddy-discovery (agent_def sibling module)
-#[derive(Deserialize)] pub struct HarnessProfile { pub harness: String, pub provider_account: String, pub model: String }
-// SpecializedAgentDef
-#[serde(default)] pub harness: Option<HarnessProfile>,
-pub fn validate_profile(def: &SpecializedAgentDef) -> Result<(), String>;
-// tddy-agent-launch
-pub(crate) fn profile_start(def: &SpecializedAgentDef) -> Option<(SessionKind, RouteChoice)>;
+// tddy-discovery/src/harness_profile.rs
+#[serde(deny_unknown_fields)]   // so base_url / api_key beside a profile are refused
+pub struct HarnessProfile { pub name: String, pub label: Option<String>, pub harness: String, pub provider_account: String, pub model: String }
+pub fn load_harness_profiles(dir: &Path) -> Vec<HarnessProfile>;
+pub fn parse_harness_profile(yaml: &str) -> Result<HarnessProfile, String>;
+pub fn harness_profile_rows(profiles: &[HarnessProfile]) -> Vec<(String, String)>;
+// tddy-agent-launch/src/harness_profile_start.rs
+pub struct ProfileStart { pub session_type: Option<String>, pub agent: Option<String>, pub choice: RouteChoice, pub model: String }
+pub fn profile_start(profile: &HarnessProfile) -> Result<ProfileStart, String>;
 ```
+
+An account the starting person does not hold is refused by node 2's `resolve_session_route` (`NOT_FOUND`); `/green` resolves a label to an id before calling it.
 
 ## Green wave
 
@@ -81,15 +82,13 @@ Def parse/validation unit tests; launch acceptance for a claude-cli profile and 
 
 | Test | File | Validates |
 |---|---|---|
-| `a_claude_cli_profile_starts_claude_cli_on_its_account_and_model` | `packages/tddy-agent-launch/tests/harness_profile_acceptance.rs` (new) | start |
-| `a_session_level_account_overrides_the_profiles` | same | precedence |
-| `a_profile_naming_an_account_the_person_does_not_hold_is_refused` | same | refusal |
-| `a_profile_with_a_base_url_is_rejected_at_load` | `packages/tddy-discovery/tests/harness_profile_def.rs` (new) | validation |
-| `profiles_appear_in_the_agent_list` | `packages/tddy-session-agents/tests/harness_profile_rows.rs` (new) | rows |
+| `a_profile_parses_from_its_yaml` / `a_profile_with_a_base_url_is_rejected_at_load` / `profiles_and_openai_definitions_load_side_by_side` / `profiles_appear_in_the_agent_list` | `packages/tddy-discovery/tests/harness_profile_def.rs` (new) | profile type, loaders side by side, rows |
+| `a_claude_cli_profile_starts_claude_cli_on_its_account_and_model` / `a_codex_profile_starts_a_tool_session_with_the_codex_agent` / `a_profile_naming_no_known_harness_is_refused` / `a_session_level_account_overrides_the_profiles` | `packages/tddy-agent-launch/src/harness_profile_start_tests.rs` (new) | start mapping, precedence |
 
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
+- **Profiles are their own type** (wave 2): `SpecializedAgentDef.base_url` is required and the def has 73 struct literals; a profile is a harness pointed at an account, not an endpoint.
 - **Profiles are agent definitions** (house preference for agent-driven config over flags).
 
 ## Refactoring Needed
@@ -97,6 +96,12 @@ Def parse/validation unit tests; launch acceptance for a claude-cli profile and 
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-discovery`, `tddy-agent-launch` — clippy `-D warnings` clean.
+
+- `harness_profile_def` 4/4 and `harness_profile_start_tests` 4/4 fail at this node's `todo!()`.
 
 ## Validation Results
 ### /validate-changes
@@ -110,10 +115,10 @@ Def parse/validation unit tests; launch acceptance for a claude-cli profile and 
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
