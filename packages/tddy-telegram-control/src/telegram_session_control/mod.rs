@@ -349,7 +349,10 @@ impl<S: TelegramSender + Send + Sync> TelegramSessionControlHarness<S> {
 
     /// Share the daemon's session-room registry (builder), so **Delete** closes the room of a
     /// session it deletes instead of leaving it polling a checkout that is being removed.
-    pub fn with_session_rooms(mut self, rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>) -> Self {
+    pub fn with_session_rooms(
+        mut self,
+        rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,
+    ) -> Self {
         self.session_rooms = rooms;
         self
     }

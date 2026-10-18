@@ -50,7 +50,6 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 tddy-projects = { path = "../tddy-projects" }
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-daemon-sandbox = { path = "../tddy-daemon-sandbox" }
-tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 # `SessionRooms`: the port deleting a session closes its room through.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tonic = { version = "0.12", default-features = false, features = ["transport"] }

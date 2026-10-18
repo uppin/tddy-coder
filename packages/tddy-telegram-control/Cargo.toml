@@ -25,8 +25,6 @@ tddy-core = { path = "../tddy-core" }
 # `PresenterEventSink`, the port `TelegramDaemonHooks` implements. (`DaemonConfig` is the kernel's
 # too, but this crate names it through `tddy_session_lifecycle::config`, which re-exports it.)
 tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
-# `SessionRoomRegistry`: the harness's Delete stops hosting a session's room first.
-tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 # `SessionRooms`: Delete closes a session's room through the port.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 # `GithubCli`: a Local gh project's Telegram start asks the host's `gh` who it acts as. Already in

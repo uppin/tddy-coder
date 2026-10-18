@@ -333,15 +333,6 @@ struct LocalSocketTransport {
     services: BinaryLocalSocketServices,
 }
 
-/// This daemon's session rooms, as the closer `tddy-worktree-service` asks for before a removal.
-struct SessionRoomWorktreeCloser(Arc<tddy_daemon_livekit::session_room::SessionRoomRegistry>);
-
-impl tddy_worktree_service::WorktreeRoomCloser for SessionRoomWorktreeCloser {
-    fn close_for_worktree(&self, worktree_path: &std::path::Path) {
-        self.0.close_for_worktree(worktree_path);
-    }
-}
-
 /// The Telegram bot's inbound dispatcher: the buttons an operator presses in a chat.
 struct TelegramInbound {
     bot: Bot,
@@ -1111,9 +1102,9 @@ pub async fn build(
                 tddy_data_dir.clone(),
                 Arc::clone(&user_resolver),
             )
-            .with_session_rooms(Arc::new(SessionRoomWorktreeCloser(Arc::clone(
-                &shared_session_rooms,
-            ))));
+            .with_session_rooms(
+                Arc::clone(&shared_session_rooms) as Arc<dyn tddy_daemon_extensions::SessionRooms>
+            );
             if let Some(ref tracker) = idle_tracker {
                 worktree_service = worktree_service.with_idle_tracker(tracker.clone());
             }

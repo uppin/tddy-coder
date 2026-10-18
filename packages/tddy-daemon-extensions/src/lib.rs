@@ -21,5 +21,5 @@ pub use integration_status::{
     IntegrationReporter, IntegrationState, IntegrationStatus, IntegrationStatusBoard,
 };
 pub use peer_forwarder::{NoPeerForwarding, PeerForwarder};
-pub use session_rooms::{NoSessionRooms, SessionRooms};
 pub use session_reach::{NoSessionReach, ReachableSessions, ReachedSession, SessionReach};
+pub use session_rooms::{NoSessionRooms, SessionRooms};

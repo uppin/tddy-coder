@@ -10,17 +10,14 @@ use crate::session_room::SessionRoomRegistry;
 
 impl SessionRooms for SessionRoomRegistry {
     fn hosts(&self, session_id: &str) -> bool {
-        let _ = session_id;
-        todo!("SessionRoomRegistry as SessionRooms: hosts")
+        self.contains(session_id)
     }
 
     fn close(&self, session_id: &str) {
-        let _ = session_id;
-        todo!("SessionRoomRegistry as SessionRooms: close")
+        SessionRoomRegistry::close(self, session_id);
     }
 
     fn close_for_worktree(&self, worktree: &Path) {
-        let _ = worktree;
-        todo!("SessionRoomRegistry as SessionRooms: close_for_worktree")
+        SessionRoomRegistry::close_for_worktree(self, worktree);
     }
 }

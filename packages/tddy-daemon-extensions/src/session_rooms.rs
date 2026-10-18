@@ -25,16 +25,12 @@ pub struct NoSessionRooms;
 
 impl SessionRooms for NoSessionRooms {
     fn hosts(&self, _session_id: &str) -> bool {
-        todo!("NoSessionRooms::hosts")
+        false
     }
 
-    fn close(&self, _session_id: &str) {
-        todo!("NoSessionRooms::close")
-    }
+    fn close(&self, _session_id: &str) {}
 
-    fn close_for_worktree(&self, _worktree: &Path) {
-        todo!("NoSessionRooms::close_for_worktree")
-    }
+    fn close_for_worktree(&self, _worktree: &Path) {}
 }
 
 #[cfg(test)]
