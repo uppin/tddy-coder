@@ -83,6 +83,12 @@ deferral is approved by the user — never gated on CI. The CI build and full te
 actions: their result is read after the push, a failure is fixed in a new commit (`/fix-pr`), and a
 red run neither postpones nor reverses the wrap. See `/wrap-context-docs` § *When to wrap*.
 
+**Drafts are not built.** CI skips a draft PR until it is readied or carries a `#forcebuild` comment
+(`gh pr comment <N> --body '#forcebuild'`, sticky — every later push builds too). A stack lives in
+draft for most of its life, so a node that needs CI evidence before its wrap comments `#forcebuild`;
+it never readies itself to get a build. A gated draft's checks read *skipped*, and skipped is not
+green. See [ci.md § Draft PRs](../../../docs/dev/guides/ci.md#draft-prs).
+
 | Command | What it does | When |
 |---|---|---|
 | `gh stack link` | register existing PRs as a stack on GitHub, no local state | **the default here** |
@@ -983,7 +989,8 @@ committed shared manifest was rejected above.
 
 **Then apply the fixes in their own bottom-up pass, before any merge, gated locally only** —
 `cargo build`, `cargo clippy -- -D warnings`, `./test -p <package>` per node, push, next node,
-**without waiting for CI**. Each push starts that PR's CI in the background, so the merge loop below
+**without waiting for CI**. Each push starts that PR's CI in the background — provided the PR is ready
+for review or carries a `#forcebuild` comment; a plain draft builds nothing — so the merge loop below
 consumes runs that are already warm; each node rebases onto its just-pushed parent first, with the
 recorded-tip `--onto` mechanics from `/pr-stack-rebase` cascade mode.
 
@@ -1001,6 +1008,7 @@ reports merged:
    ```
 
    The four required checks are `Rust lint`, `Rust build`, `Rust tests`, `Web tests`. **Do not treat
+   *skipped* as green** — that is what a never-built draft reports. **Do not treat
    "zero pending checks" as green** — a check is registered on the rollup a moment *after* a push, so
    "no checks pending" is true before CI has even started. That false positive is worst right after a
    force-push, which is exactly when a stack is being repaired. `--watch` exists so you do not have

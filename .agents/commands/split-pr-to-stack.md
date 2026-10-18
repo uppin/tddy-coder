@@ -525,7 +525,9 @@ A (`<A>`) → B1 (`<B>`, PR #<n1>) → B2 (`<B2>`, PR #<n2>) → C (`<C>`, PR #<
 - Renumbered `(#<slug> K/N)` across the stack: ✅ (merged PRs skipped)
 
 ### Next
-- CI: `scripts/ci-status.sh <PR#> --failures` (add `--watch` to block until the run finishes)
+- CI: `scripts/ci-status.sh <PR#> --failures` (add `--watch` to block until the run finishes). The
+  slices are drafts, which CI skips: comment `gh pr comment <PR#> --body '#forcebuild'` on each one
+  that needs a build now — never `gh pr ready`, which triggers its wrap
 - `/green` per PR in its own worktree (create worktrees only for PRs being implemented)
 - A force-pushed PR may have lost its approval — re-request review before arming `#automerge`
 - Further slices: `/split-pr-to-stack` again on B1 or B2 (this command is two layers only)

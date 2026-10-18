@@ -14,8 +14,11 @@ name: VM tests
 # the fail-fast virtualisation check and the false-green guard rather than
 # keeping three copies that drift.
 
+# Draft PRs skip it like ci.yml does — see build-gate.yml.
+
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # Master too, for two reasons. It is the only ref that writes the cargo cache
   # (`save-if` below), so without it the `vm` cache is never populated and every
   # PR compiles tddy-vm from scratch. And a check that never runs on master
@@ -25,12 +28,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: vm-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: vm-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
   contents: read
   actions: read # reading CI's run to fetch the binaries it built
+  pull-requests: read # the build gate reads a draft's comments for #forcebuild
 
 env:
   CARGO_TERM_COLOR: always
@@ -39,8 +43,13 @@ env:
   CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
 jobs:
+  gate:
+    uses: ./.github/workflows/build-gate.yml
+
   vm-suite:
     name: ${{ matrix.name }}
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
     runs-on: ubuntu-latest
     # Per leg: the two cheap ones boot a guest, the chain bakes three images and
     # compiles the workspace inside one of them. 350 is under GitHub's 360-minute
@@ -181,11 +190,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The CI run of the same trigger. A `#forcebuild` dispatch shares its
+          # head commit with the draft's gated `pull_request` run, whose
+          # `Rust build` was skipped — `--limit 1` must not land on that one.
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
           deadline=$((SECONDS + 3600))
           while :; do
-            run_id=$(gh run list --commit "$HEAD_SHA" --workflow CI --limit 1 \
+            run_id=$(gh run list --commit "$HEAD_SHA" --workflow CI --event "$EVENT" --limit 1 \
                        --json databaseId --jq '.[0].databaseId // empty')
             if [ -n "$run_id" ]; then
               build=$(gh run view "$run_id" --json jobs \

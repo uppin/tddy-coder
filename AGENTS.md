@@ -43,6 +43,8 @@ scripts/ci-status.sh --watch        # block until the run finishes
 scripts/ci-status.sh --failures     # failing test names, files, assertion messages, log tails
 ```
 
+**A draft PR is not built.** CI skips drafts until they are marked ready for review or carry a `#forcebuild` comment (`gh pr comment <N> --body '#forcebuild'`), and a skipped check is **not** green. Readying a PR is what triggers its wrap, so it belongs to `/pr-wrap` — to get CI on a draft, comment `#forcebuild`. See [docs/dev/guides/ci.md § Draft PRs](docs/dev/guides/ci.md#draft-prs).
+
 `scripts/ci-status.sh` reports per-check state plus **pass/fail test counts** for the current
 branch's PR; a bare number targets that PR (`scripts/ci-status.sh <PR>`). See
 [docs/dev/guides/ci.md](docs/dev/guides/ci.md) for what each check covers and what the gate

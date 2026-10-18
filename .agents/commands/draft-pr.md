@@ -56,7 +56,8 @@ You should:
 4. Push to a remote branch (create one if needed — see branch selection below).
 5. Create a **draft** PR with `gh pr create --draft --base <base>`, giving it a concise title and a
    Markdown body that summarizes the scope and explicitly notes this is a WIP draft with checks
-   skipped.
+   skipped. CI does not build a draft either; if the user wants a build without readying it, comment
+   `gh pr comment <N> --body '#forcebuild'` (see `docs/dev/guides/ci.md` § Draft PRs).
    - **Detect the base; do not assume `master`.** If an open PR's `headRefName` is an ancestor of
      `HEAD`, this branch is stacked on it and that branch is the base — the same detection `/pr` uses
      (`gh pr list --state open --json number,headRefName,baseRefName` plus

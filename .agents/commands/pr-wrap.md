@@ -358,7 +358,10 @@ gh pr edit <N> --title "<type>(<package>): <what it delivers> (#<stack-slug> K/N
 **Wrap on scope, not on CI.** Steps 7 and 8 run once the planned scope is developed and every gap or
 deferral has been **approved by the user** — not once CI is green. The CI build and full test run
 are **post-wrap**: push, read them with `scripts/ci-status.sh`, and fix failures with `/fix-pr` in new
-commits. A red CI run does not reverse or delay the wrap, and never blocks `gh pr ready` on its own
+commits. On a draft, **`gh pr ready` is what starts that build** — CI skips drafts unless they carry a
+`#forcebuild` comment ([ci.md § Draft PRs](../../docs/dev/guides/ci.md#draft-prs)). A PR that wraps
+without being readied (not a stack branch, left as a draft) gets no CI until someone comments
+`#forcebuild`; say so in the summary. A red CI run does not reverse or delay the wrap, and never blocks `gh pr ready` on its own
 account; report its state in the summary instead. (A required check that stays red still blocks the
 *merge*, which is `/squash-pr`'s and `/merge-pr-stack`'s gate, not this command's.)
 

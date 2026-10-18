@@ -63,7 +63,8 @@ file** in each; it never opens an existing one.
 
 **CI is not a precondition of the wrap.** The CI build and the full-workspace test run are
 **post-wrap actions**: they run against the pushed result, and their outcome is read afterwards
-(`scripts/ci-status.sh`, `/fix-pr`). A CI failure — even one that stays red — does **not** un-wrap the
+(`scripts/ci-status.sh`, `/fix-pr`) — on a draft, only once it has been readied or carries a
+`#forcebuild` comment, since CI skips drafts otherwise. A CI failure — even one that stays red — does **not** un-wrap the
 PR, does **not** postpone the wrap, and is never a reason to wait. A failure found after the wrap is a
 code or test fix in a new commit; if it changes what the permanent docs state, the correction is its
 own follow-up commit to those docs (never a re-opened changeset). The local, **scoped** gate of

@@ -11,6 +11,11 @@
 # by mikepenz/action-junit-report (see .github/workflows/ci.yml), so a red check
 # tells you *which tests* failed without downloading or parsing any artifact.
 #
+# A draft PR is not built (see docs/dev/guides/ci.md § Draft PRs): its checks
+# report *skipped*, which is not green. The script says so up front. To build a
+# draft, comment `#forcebuild` (gh pr comment <N> --body '#forcebuild') or mark
+# it ready for review (gh pr ready <N>).
+#
 # Requires: gh, authenticated with at least the `repo` scope.
 set -euo pipefail
 
@@ -50,10 +55,24 @@ fi
 
 SHA="$(gh pr view "$PR" --json headRefOid -q .headRefOid)"
 TITLE="$(gh pr view "$PR" --json title -q .title)"
+DRAFT="$(gh pr view "$PR" --json isDraft -q .isDraft)"
 
 echo "PR #$PR  $TITLE"
 echo "repo: $REPO   head: ${SHA:0:12}"
 echo
+
+if [[ "$DRAFT" == true ]]; then
+  FORCED="$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+    --jq '[.[] | select(.body | contains("#forcebuild"))] | length' | awk '{n += $1} END {print n + 0}')"
+  if [[ "$FORCED" == 0 ]]; then
+    echo "⚠️  DRAFT PR with no #forcebuild comment — CI does not build it. Skipped checks are NOT green."
+    echo "    To build it: gh pr comment $PR --body '#forcebuild'   (or mark it ready: gh pr ready $PR)"
+    echo
+  else
+    echo "Draft PR with a #forcebuild comment — CI builds it like a ready PR."
+    echo
+  fi
+fi
 
 if [[ "$WATCH" == 1 ]]; then
   # --watch exits non-zero when a check fails; that is a report, not an error here.

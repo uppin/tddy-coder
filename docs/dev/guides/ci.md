@@ -3,7 +3,9 @@
 CI runs on **GitHub Actions** (`.github/workflows/ci.yml`). The repo is public, so
 Actions is free with unlimited minutes on 4-vCPU / 16 GB Linux runners.
 
-Every pull request gets six checks, plus the arm64 build described below. The
+Every pull request that is **ready for review** gets six checks, plus the arm64 build described
+below. A **draft** PR builds nothing until it is marked ready or someone comments `#forcebuild` —
+see [Draft PRs](#draft-prs). The
 test checks publish a **test count**, not just a colour, so a red check names the
 tests that failed.
 
@@ -167,7 +169,8 @@ made required, a red `Rust e2e tests` does not block a merge.
 - **Live**, in each shard's log: the `ci` profile prints failures, retries and any test still running
   after 60 seconds (`status-level = "slow"`, `slow-timeout`), so a slow test is named while the run is
   still going. LiveKit binaries keep their own `60s × 3` bound that terminates a stuck test.
-- **Compile share**, on demand: dispatch the workflow manually and the `Rust compile timings` job
+- **Compile share**, on demand: dispatch the workflow manually (a person, not `#forcebuild`'s bot
+  dispatch) and the `Rust compile timings` job
   runs `cargo test --no-run --workspace --locked --timings` **cold**, uploads the HTML as the
   `cargo-timings` artifact and writes how much of the compile went to e2e test targets, to other test
   targets and to everything else (`scripts/ci-e2e-timing.ts compile-share`). It never runs on a push
@@ -245,6 +248,8 @@ scripts/ci-status.sh --failures   # + failing test names, files, assertion messa
 scripts/ci-status.sh --watch      # block until the run finishes, then report
 scripts/ci-status.sh 396          # a specific PR
 ```
+
+On a **draft** PR, check first that it is being built at all — see [Draft PRs](#draft-prs).
 
 The counts and the failing test names come from check runs published by
 `mikepenz/action-junit-report`, so they are available over the API — no artifact
@@ -566,6 +571,51 @@ reopening the hole, it can break `#automerge` outright: if the PR author's own
 role may bypass the required checks, GitHub can consider that PR already clean
 and refuse to arm auto-merge on it. The one bypass actor the repo does grant is
 the GitHub Actions app, which is not a PR author — see the next section.
+
+## Draft PRs
+
+A draft PR does not build. Both `ci.yml` and `vm-tests.yml` start with a `gate` job
+(`.github/workflows/build-gate.yml`), and every other job waits on its answer:
+
+| Run | Builds? |
+|-----|---------|
+| push to `master`, manual `workflow_dispatch` | yes |
+| PR ready for review | yes |
+| PR marked ready (`ready_for_review`) | yes — the draft's first build |
+| draft PR | **no** — unless it carries a `#forcebuild` comment |
+
+To build a draft without marking it ready:
+
+```bash
+gh pr comment <N> --body '#forcebuild'
+```
+
+`.github/workflows/forcebuild.yml` picks the comment up, checks the commenter's permission (same
+`write` bar as [Automerge](#automerge)), dispatches `ci.yml` and `vm-tests.yml` on the PR's head
+branch and reacts 🚀 (😕 on failure). The dispatched runs' check runs attach to the head commit, so
+they appear in the PR's checks and in `scripts/ci-status.sh` like any other run.
+
+**The comment is sticky.** While it is on the PR, the gate lets every later push to the draft build
+too — so a stack's milestone pushes keep getting CI once one `#forcebuild` is in. Delete the comment
+to go back to skipping. Commenting again re-dispatches a build of the current head.
+
+What to know when reading a draft's checks:
+
+- **A gated draft's checks report *skipped*, and skipped is not green.** GitHub counts a skipped
+  required check as satisfied, so `gh pr checks` and the rollup look clean on a draft that never
+  built. `scripts/ci-status.sh` prints a warning when the PR is a draft with no `#forcebuild`
+  comment. Nothing merges past this — a draft cannot be merged — but an agent that reads "no
+  failures" as green would be wrong.
+- **A forced build runs the head commit, not the merge commit.** `pull_request` runs build the head
+  merged into its base; a `workflow_dispatch` on the branch builds the branch as it is. Behind its
+  base, a forced build can pass where the ready-for-review build later fails.
+- **The dispatch runs the branch's own `ci.yml`.** A branch cut before this gate existed has no
+  `gate` job in its copy, so a forced build there also runs `Rust compile timings` — which is
+  otherwise skipped for a bot-sent dispatch. Rebase it to get the current workflow.
+- **Forks cannot be force-built** — a dispatch needs a branch in this repo. Mark the PR ready.
+
+The same [`issue_comment` trap](#two-traps-in-the-implementation) as automerge applies:
+`forcebuild.yml` runs from `master`, so changing it on a branch changes nothing until it merges.
 
 ## Automerge
 
