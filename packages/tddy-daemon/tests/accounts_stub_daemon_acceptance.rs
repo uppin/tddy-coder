@@ -65,6 +65,7 @@ async fn a_stub_users_pre_opened_vault_is_listed_without_its_secret() {
                     sync_status: SyncStatus::Unspecified as i32,
                     preset: String::new(),
                     wire_protocols: Vec::new(),
+                    default_for: Vec::new(),
                 }],
             }],
             vault_locked: false,

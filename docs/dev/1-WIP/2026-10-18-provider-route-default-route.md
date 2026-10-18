@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 5/9. Base: `feature/provider-route/tool-route`.
+**Stack**: #provider-route 5/9. Base: `feature/provider-route/tool-route`. PR: [#666](https://github.com/uppin/tddy-coder/pull/666).
 
 ## Initial Discovery
 
@@ -49,10 +49,20 @@ repeated string default_for = 10;
 ```
 
 ```rust
-// tddy-accounts
+// tddy-accounts (provider_account.rs)
+pub const META_DEFAULT_FOR: &str = "default_for";       // comma-separated harness ids in the record metadata
 pub fn default_account_for(held: &[CredentialRecord], harness: &str) -> Option<AccountId>;
-fn set_provider_account_defaults(&self, session_token: &str, account: &AccountId, harnesses: &[String]) -> Result<Vec<CredentialRecord>, AccountsError>; // AccountStore
+pub fn defaults_of(record: &CredentialRecord) -> Vec<String>;
+pub trait ProviderAccountDefaults: Send + Sync {          // a new port: node 1's ProviderAccountStore is not widened
+    fn set_provider_account_defaults(&self, session_token: &str, account: &AccountId, harnesses: &[String]) -> Result<Vec<CredentialRecord>, AccountsError>;
+}
+impl ProviderAccountDefaults for SessionVaultAccountStore;
+impl AccountsServiceImpl<S> { pub fn with_provider_account_defaults(self, defaults: Arc<dyn ProviderAccountDefaults>) -> Self; }
+// tddy-agent-launch
+impl SessionAccountAccess { pub fn default_provider_account(&self, harness: &str) -> Result<Option<String>, SessionIdentityRefusal>; }
 ```
+
+The start path feeds `RouteSources.user_default` from `default_provider_account` (node 2's `choose_route` decides).
 
 ## Green wave
 
@@ -95,15 +105,15 @@ Service acceptance over an in-memory store; launch acceptance for the start; Cyp
 
 | Test | File | Validates |
 |---|---|---|
-| `a_claude_cli_start_without_an_account_uses_the_persons_default` | `packages/tddy-agent-launch/tests/claude_cli_provider_route_acceptance.rs` | default fed |
-| `an_explicit_built_in_choice_overrides_the_default` | same | precedence via node 2 |
-| `setting_a_second_default_for_a_harness_clears_the_first` | `packages/tddy-accounts/tests/provider_account_defaults_acceptance.rs` (new) | one holder |
-| `a_default_the_account_cannot_drive_is_refused` | same | matrix check |
-| `marking_an_account_default_shows_on_its_row_and_preselects_it` | `packages/tddy-web/cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` (new) | UI |
+| `setting_a_second_default_for_a_harness_clears_the_first` / `a_default_the_account_cannot_drive_is_refused` / `an_accounts_defaults_are_listed_on_its_row` / `no_account_is_the_default_for_a_harness_nobody_chose` | `packages/tddy-accounts/tests/provider_account_defaults_acceptance.rs` (new) | RPC + metadata |
+| `a_claude_cli_start_without_an_account_uses_the_persons_default` / `an_explicit_built_in_choice_overrides_the_default` / `a_harness_with_no_default_has_none` | `packages/tddy-agent-launch/src/default_route_tests.rs` (new) | real vault, start-time feed |
+| Cypress: marks the Claude CLI default from the row / pre-selects it on Create | `packages/tddy-web/cypress/component/ProviderAccountDefaultsAcceptance.cy.tsx` (new) | UI |
 
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
+- **A new `ProviderAccountDefaults` port** (wave 2) rather than a method on node 1's `ProviderAccountStore`, so this node does not change a parent's trait.
+- **Open question for /green (ask the developer):** a start that names no account while the owner's vault is **locked** cannot read the default. Refusing blocks every start for a person with a locked vault; proceeding on the vendor is a fallback the house rules forbid without consent. Not pinned by a test yet.
 - **Per person, in the vault record** — survives restarts and syncs with the account; a daemon default
   cannot exist without a daemon-held key.
 
@@ -112,6 +122,13 @@ Service acceptance over an in-memory store; launch acceptance for the start; Cyp
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-accounts`, `tddy-agent-launch`, `tddy-daemon` — clippy `-D warnings` clean (the stub-daemon assertion gained the empty `default_for` field).
+
+- `provider_account_defaults_acceptance` 4/4 and `default_route_tests` 3/3 fail first at node 1's `preset()` (their fixtures build real records) — green after #662; then at this node's `todo!()`.
+- `ProviderAccountDefaultsAcceptance.cy.tsx` 2/2 fail: no default-for control; no picker (node 2).
 
 ## Validation Results
 ### /validate-changes
@@ -125,10 +142,10 @@ Service acceptance over an in-memory store; launch acceptance for the start; Cyp
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

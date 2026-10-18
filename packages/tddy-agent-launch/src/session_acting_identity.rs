@@ -170,6 +170,17 @@ impl SessionAccountAccess {
             })
     }
 
+    /// The provider account the session owner made their default for `harness`, if any — the
+    /// `user_default` level of a session's route.
+    pub fn default_provider_account(
+        &self,
+        harness: &str,
+    ) -> Result<Option<String>, SessionIdentityRefusal> {
+        let _ = harness;
+        // TODO(default-route): implement
+        todo!()
+    }
+
     /// The GitHub records the session's vault holds right now.
     fn held_github_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
         Ok(self

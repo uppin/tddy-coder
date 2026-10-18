@@ -7,7 +7,9 @@ use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
 
-use crate::provider_account::{unclaimed_account_id, ProviderAccount, ProviderAccountStore};
+use crate::provider_account::{
+    unclaimed_account_id, ProviderAccount, ProviderAccountDefaults, ProviderAccountStore,
+};
 use crate::store::{AccountStore, AccountsError};
 
 /// Resolve a `session_token` to the subject whose vault it may open, or `None` when the token names
@@ -199,6 +201,19 @@ fn now_secs() -> Result<u64, AccountsError> {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())
         .map_err(|error| AccountsError::Unavailable(error.to_string()))
+}
+
+impl ProviderAccountDefaults for SessionVaultAccountStore {
+    fn set_provider_account_defaults(
+        &self,
+        session_token: &str,
+        account: &AccountId,
+        harnesses: &[String],
+    ) -> Result<Vec<CredentialRecord>, AccountsError> {
+        let _ = (session_token, account, harnesses);
+        // TODO(default-route): implement
+        todo!()
+    }
 }
 
 #[cfg(test)]

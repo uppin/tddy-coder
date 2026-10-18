@@ -14,7 +14,7 @@ use tddy_service::proto::accounts::{
     ListProviderRoutesRequest, ListProviderRoutesResponse, PollLinkAccountRequest,
     PollLinkAccountResponse, ProviderAccounts, ProviderRouteOption, RemoveAccountRequest,
     RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
-    SyncStatus,
+    SetProviderAccountDefaultsRequest, SetProviderAccountDefaultsResponse, SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
@@ -23,8 +23,8 @@ use crate::linking::{
     LinkedIdentity, META_SUBJECT,
 };
 use crate::provider_account::{
-    account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
-    ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
+    account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountDefaults,
+    ProviderAccountError, ProviderAccountStore, ProviderModelProbe, RouteSupport, WireProtocol,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -65,6 +65,7 @@ pub struct AccountsServiceImpl<S> {
     linking: Option<Linking>,
     provider_accounts: Option<ProviderAccountPorts>,
     route_support: Option<Arc<dyn RouteSupport>>,
+    defaults: Option<Arc<dyn ProviderAccountDefaults>>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -77,6 +78,7 @@ impl<S> AccountsServiceImpl<S> {
             linking: None,
             provider_accounts: None,
             route_support: None,
+            defaults: None,
         }
     }
 
@@ -129,6 +131,17 @@ impl<S> AccountsServiceImpl<S> {
     #[must_use]
     pub fn with_route_support(mut self, support: Arc<dyn RouteSupport>) -> Self {
         self.route_support = Some(support);
+        self
+    }
+
+    /// Wire where per-harness defaults are kept. Unwired, `SetProviderAccountDefaults` answers
+    /// `FAILED_PRECONDITION`. Validation uses the route matrix (`with_route_support`).
+    #[must_use]
+    pub fn with_provider_account_defaults(
+        mut self,
+        defaults: Arc<dyn ProviderAccountDefaults>,
+    ) -> Self {
+        self.defaults = Some(defaults);
         self
     }
 
@@ -223,6 +236,15 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
             harness_routable: harness_reason.is_none(),
             harness_reason: harness_reason.unwrap_or_default(),
         }))
+    }
+
+    async fn set_provider_account_defaults(
+        &self,
+        request: Request<SetProviderAccountDefaultsRequest>,
+    ) -> Result<Response<SetProviderAccountDefaultsResponse>, Status> {
+        let _ = (request, &self.defaults);
+        // TODO(default-route): implement
+        todo!()
     }
 
     async fn list_provider_account_models(

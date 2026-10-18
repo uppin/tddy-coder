@@ -63,6 +63,8 @@ mod cli_route_launch_tests;
 mod conversation_spawn_wiring_tests;
 mod facilitation;
 #[cfg(test)]
+mod default_route_tests;
+#[cfg(test)]
 mod host_session_socket_tests;
 #[cfg(test)]
 mod session_acting_identity_tests;

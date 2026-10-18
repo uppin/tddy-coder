@@ -435,6 +435,38 @@ pub trait RouteSupport: Send + Sync {
     fn supports(&self, harness: &str, preset: &str, protocols: &[&str]) -> Result<(), String>;
 }
 
+/// The record metadata key listing the harnesses a provider account is its owner's default for,
+/// comma-separated.
+pub const META_DEFAULT_FOR: &str = "default_for";
+
+/// The provider account in `held` that is the default for `harness`, if one is.
+#[must_use]
+pub fn default_account_for(held: &[CredentialRecord], harness: &str) -> Option<AccountId> {
+    let _ = (held, harness);
+    // TODO(default-route): implement
+    todo!()
+}
+
+/// The harnesses `record` is the default for (empty for any other kind of account).
+#[must_use]
+pub fn defaults_of(record: &CredentialRecord) -> Vec<String> {
+    let _ = record;
+    // TODO(default-route): implement
+    todo!()
+}
+
+/// Where a person's per-harness defaults are changed.
+pub trait ProviderAccountDefaults: Send + Sync {
+    /// Make `account` the default for each of `harnesses`, clearing those harnesses from any other
+    /// account; returns every record that changed.
+    fn set_provider_account_defaults(
+        &self,
+        session_token: &str,
+        account: &AccountId,
+        harnesses: &[String],
+    ) -> Result<Vec<CredentialRecord>, AccountsError>;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

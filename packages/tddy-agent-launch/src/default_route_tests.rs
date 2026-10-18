@@ -1,0 +1,106 @@
+//! Unit tests: a start that names no account runs on the owner's default for that harness.
+//!
+//! Changeset: docs/dev/1-WIP/2026-10-18-provider-route-default-route.md
+
+use std::sync::Arc;
+
+use tddy_accounts::{endpoints_for, preset, ProviderAccount, META_DEFAULT_FOR};
+use tddy_core::provider_route::{Harness, RouteChoice, RouteSources};
+use tddy_credentials::{AccountId, CredentialStore, SecretString, SessionVaults};
+
+use crate::session_acting_identity::SessionAccountAccess;
+use crate::session_provider_route::{pty_route_env, resolve_session_route};
+
+const ADA: &str = "ada";
+const ADAS_SESSION: &str = "session-token-for-ada";
+const PASSPHRASE: &str = "correct horse battery staple";
+
+fn ada_whose_meta_account_is_the_claude_cli_default() -> (tempfile::TempDir, SessionAccountAccess) {
+    let dir = tempfile::tempdir().expect("dir");
+    let passphrase = SecretString::new(PASSPHRASE);
+    let store =
+        CredentialStore::create(&CredentialStore::path_in(dir.path(), ADA), &passphrase, ADA)
+            .expect("vault");
+    let meta = preset("meta").expect("meta");
+    let mut record = ProviderAccount {
+        account: AccountId::new("meta-hackathon"),
+        preset: meta,
+        label: "Meta".to_string(),
+        endpoints: endpoints_for(meta, None, None).expect("endpoints"),
+        api_key: SecretString::new("a-meta-key"),
+    }
+    .to_record(1_760_000_000);
+    record
+        .metadata
+        .insert(META_DEFAULT_FOR.to_string(), "claude-cli".to_string());
+    store.put(record).expect("stored");
+    let vaults = Arc::new(SessionVaults::new(dir.path()));
+    vaults.unlock(ADA, &passphrase).expect("unlocked");
+    let access = SessionAccountAccess::new(
+        Some(vaults),
+        Arc::new(|t: &str| (t == ADAS_SESSION).then(|| ADA.to_string())),
+        ADAS_SESSION,
+    );
+    (dir, access)
+}
+
+fn value_of<'a>(pairs: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    pairs
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+}
+
+#[test]
+fn a_claude_cli_start_without_an_account_uses_the_persons_default() {
+    // Given
+    let (_dir, access) = ada_whose_meta_account_is_the_claude_cli_default();
+    let sources = RouteSources {
+        user_default: access
+            .default_provider_account("claude-cli")
+            .expect("readable"),
+        ..RouteSources::default()
+    };
+
+    // When
+    let route = resolve_session_route(&access, Harness::ClaudeCli, &sources, "muse-spark-1.3")
+        .expect("resolves")
+        .expect("the default applies");
+
+    // Then
+    assert_eq!(
+        value_of(&pty_route_env(&route), "ANTHROPIC_BASE_URL"),
+        Some("https://api.meta.ai")
+    );
+}
+
+#[test]
+fn an_explicit_built_in_choice_overrides_the_default() {
+    // Given
+    let (_dir, access) = ada_whose_meta_account_is_the_claude_cli_default();
+    let sources = RouteSources {
+        session: Some(RouteChoice::BuiltIn),
+        user_default: access
+            .default_provider_account("claude-cli")
+            .expect("readable"),
+        ..RouteSources::default()
+    };
+
+    // Then
+    assert_eq!(
+        resolve_session_route(&access, Harness::ClaudeCli, &sources, "opus").expect("resolves"),
+        None
+    );
+}
+
+#[test]
+fn a_harness_with_no_default_has_none() {
+    // Given
+    let (_dir, access) = ada_whose_meta_account_is_the_claude_cli_default();
+
+    // Then
+    assert_eq!(
+        access.default_provider_account("codex").expect("readable"),
+        None
+    );
+}
