@@ -361,6 +361,7 @@ impl DaemonBuilder {
             Arc::new(move |_user: &str| Some(sessions_base.clone())),
         )
         .with_config(config)
+        .with_room_tokens(Arc::new(AMinterThatAlwaysMints))
         .with_host_scope(
             targets,
             keypair as Arc<dyn HostKeypair>,
@@ -475,5 +476,15 @@ impl Drop for DaemonUnderTest {
     /// A stand-in left sleeping is a bad neighbour to every run after it.
     fn drop(&mut self) {
         self.bridge.kill_if_running();
+    }
+}
+
+/// Mints a fixed token for any room: these suites are about what the daemon does with a bridge,
+/// not about LiveKit, so the daemon is always able to hand its bridge a token.
+struct AMinterThatAlwaysMints;
+
+impl tddy_daemon_extensions::RoomTokenMinter for AMinterThatAlwaysMints {
+    fn mint(&self, _room: &str, _identity: &str, _ttl: Duration) -> Result<String, Status> {
+        Ok("a-minted-bridge-token".to_string())
     }
 }
