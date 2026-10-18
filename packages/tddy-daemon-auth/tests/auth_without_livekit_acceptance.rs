@@ -65,10 +65,15 @@ async fn a_token_from_a_livekit_less_sign_in_resolves_to_the_user_who_signed_in(
     let session_token = sign_in(&config).await;
 
     // When that token is presented to the identity function every RPC is gated on
-    let resolve = build_auth_entries(&config, "127.0.0.1", 8080)
-        .expect("a daemon with github configured builds its auth entries")
-        .user_resolver
-        .expect("a daemon with github configured has an identity function");
+    let resolve = build_auth_entries(
+        &config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon with github configured builds its auth entries")
+    .user_resolver
+    .expect("a daemon with github configured has an identity function");
 
     // Then it names the operator who signed in
     assert_eq!(resolve(&session_token), Some(THE_LOGIN.to_string()));
@@ -118,12 +123,17 @@ fn a_desktop_daemon_with_no_livekit() -> (DaemonConfig, tempfile::TempDir) {
 }
 
 fn the_auth_service(config: &DaemonConfig) -> ServiceEntry {
-    build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a daemon with github configured builds its auth entries")
-        .entries
-        .into_iter()
-        .find(|entry| entry.name == "auth.AuthService")
-        .expect("auth.AuthService is one of the entries")
+    build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon with github configured builds its auth entries")
+    .entries
+    .into_iter()
+    .find(|entry| entry.name == "auth.AuthService")
+    .expect("auth.AuthService is one of the entries")
 }
 
 async fn call<Req: prost::Message, Res: prost::Message + Default>(

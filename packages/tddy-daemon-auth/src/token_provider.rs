@@ -1,18 +1,4 @@
-//! TokenProvider that delegates to TokenGenerator for LiveKit token generation.
-
-/// TokenProvider that delegates to TokenGenerator. Used when the daemon has LiveKit API key/secret.
-pub struct LiveKitTokenProvider(pub std::sync::Arc<tddy_livekit::TokenGenerator>);
-
-impl tddy_service::TokenProvider for LiveKitTokenProvider {
-    fn generate_token(&self, room: &str, identity: &str) -> Result<String, String> {
-        self.0
-            .generate_for(room, identity)
-            .map_err(|e| e.to_string())
-    }
-    fn ttl_seconds(&self) -> u64 {
-        self.0.ttl().as_secs()
-    }
-}
+//! The token service's [`tddy_service::TokenProvider`], answered by the daemon's room-token minter.
 
 /// `tddy_service::TokenProvider` over the daemon's [`tddy_daemon_extensions::RoomTokenMinter`]: the
 /// token service's own port, answered by the one minter the daemon built from its configuration.
@@ -33,11 +19,12 @@ impl MinterTokenProvider {
 
 impl tddy_service::TokenProvider for MinterTokenProvider {
     fn generate_token(&self, room: &str, identity: &str) -> Result<String, String> {
-        let _ = (room, identity, &self.minter);
-        todo!("MinterTokenProvider::generate_token")
+        self.minter
+            .mint(room, identity, self.ttl)
+            .map_err(|status| status.message)
     }
 
     fn ttl_seconds(&self) -> u64 {
-        todo!("MinterTokenProvider::ttl_seconds")
+        self.ttl.as_secs()
     }
 }

@@ -73,8 +73,14 @@ fn starts_a_daemon_on(auth_storage: &Path) {
     let key = DaemonSigningKey::load_or_generate(&auth_storage.join(SIGNING_KEY_FILE))
         .expect("the daemon generates its keypair");
     let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
-    build_auth_entries_with(&config, "127.0.0.1", 0, &tokens)
-        .expect("the daemon's auth services build");
+    build_auth_entries_with(
+        &config,
+        "127.0.0.1",
+        0,
+        &tokens,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("the daemon's auth services build");
 }
 
 fn a_config_with_auth_storage(auth_storage: &Path) -> DaemonConfig {

@@ -29,8 +29,6 @@ tddy-daemon-kernel = { path = "../tddy-daemon-kernel" }
 # password to, and the prompt channel that password is asked for on. Reused rather than
 # reimplemented — one key per host, and one decryption path for everything the browser encrypts.
 tddy-host-service = { path = "../tddy-host-service" }
-# The LiveKit access token a bridge process joins the room with.
-tddy-livekit = { path = "../tddy-livekit" }
 # `RoomTokenMinter`: a bridge's room token is minted through the daemon's one minter.
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 
@@ -39,6 +37,9 @@ tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 libc = "0.2"
 
 [dev-dependencies]
+# `DEFAULT_LIVEKIT_JWT_TTL_SECS`: pins the bridge token's TTL to the length the rest of the daemon
+# mints under, so the two cannot drift apart. Not a dependency: nothing here mints through it.
+tddy-livekit = { path = "../tddy-livekit" }
 rstest = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = "3"

@@ -90,7 +90,12 @@ mod tests {
         let (config, _dir) = a_daemon_with_no_github_block();
 
         // When
-        let outcome = build_auth_entries(&config, "127.0.0.1", 8080);
+        let outcome = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            8080,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        );
 
         // Then
         let built = outcome.expect("building the entries themselves does not fail");

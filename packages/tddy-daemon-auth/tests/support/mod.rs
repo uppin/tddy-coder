@@ -347,12 +347,17 @@ pub fn a_demo_daemon_retaining_credentials_in(
 
 /// The `auth.AuthService` a configured daemon serves.
 pub fn the_auth_service(config: &DaemonConfig) -> ServiceEntry {
-    tddy_daemon_auth::auth::build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a daemon with github configured builds its auth entries")
-        .entries
-        .into_iter()
-        .find(|entry| entry.name == "auth.AuthService")
-        .expect("auth.AuthService is one of the entries")
+    tddy_daemon_auth::auth::build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon with github configured builds its auth entries")
+    .entries
+    .into_iter()
+    .find(|entry| entry.name == "auth.AuthService")
+    .expect("auth.AuthService is one of the entries")
 }
 
 /// One unary call through the served entry, as a client would make it.

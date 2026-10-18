@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{error, info};
@@ -482,7 +483,12 @@ fn prepare_bridge(
     })
 }
 
-/// Extract LiveKit credentials, mint a token, and assemble a `BridgeSpawnConfig`.
+/// How long a bridge's room token is valid: six hours, the length of a LiveKit access token's own
+/// default, so a published desktop is not cut off by token expiry under normal use (the bridge has
+/// no reconnect loop that fetches another).
+const BRIDGE_TOKEN_TTL: Duration = Duration::from_secs(6 * 3600);
+
+/// Extract the LiveKit URL, mint a token, and assemble a `BridgeSpawnConfig`.
 ///
 /// Says what is missing rather than logging it: a host desktop that cannot be published anywhere
 /// has to be refused, and the caller is the only place that knows whether that refusal reaches an
@@ -513,21 +519,11 @@ fn build_bridge_spawn_config(
         };
     }
 
-    // TODO(room-tokens): mint through `room_tokens` instead of the generator below.
-    let _ = room_tokens;
     let livekit_url_internal = require_field!(lk.url, "no LiveKit URL is configured");
-    let api_key = require_field!(lk.api_key, "no LiveKit API key is configured");
-    let api_secret = require_field!(lk.api_secret, "no LiveKit API secret is configured");
 
-    let token = tddy_livekit::token::TokenGenerator::new(
-        api_key,
-        api_secret,
-        livekit_room.to_string(),
-        bridge_identity.to_string(),
-        std::time::Duration::from_secs(tddy_livekit::token::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-    )
-    .generate()
-    .map_err(|e| format!("minting the bridge's LiveKit token: {e}"))?;
+    let token = room_tokens
+        .mint(livekit_room, bridge_identity, BRIDGE_TOKEN_TTL)
+        .map_err(|refused| refused.message)?;
 
     Ok(BridgeSpawnConfig {
         host: target.host.clone(),
@@ -1430,6 +1426,17 @@ mod tests {
             ..Default::default()
         };
         adjust(&mut config);
+        // The daemon's minter is decided from the same block: one that holds both credentials
+        // mints, one that does not refuses every mint.
+        let holds_credentials = config
+            .livekit
+            .as_ref()
+            .is_some_and(|lk| lk.api_key.is_some() && lk.api_secret.is_some());
+        let minter: Arc<dyn tddy_daemon_extensions::RoomTokenMinter> = if holds_credentials {
+            Arc::new(RecordingMinter::default())
+        } else {
+            Arc::new(tddy_daemon_extensions::NoRoomTokens)
+        };
         let config = Arc::new(config);
 
         let sessions_base = storage.path().to_path_buf();
@@ -1446,6 +1453,7 @@ mod tests {
             Arc::new(move |_user: &str| Some(sessions_base.clone())),
         )
         .with_config(config)
+        .with_room_tokens(minter)
         .with_host_scope(
             targets,
             Arc::clone(&keypair) as Arc<dyn HostKeypair>,

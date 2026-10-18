@@ -34,7 +34,11 @@ fn a_minted_token_grants_the_requested_room_to_the_requested_identity() {
         .verify(&token)
         .expect("the token verifies against the configured secret");
     assert_eq!(
-        (claims.sub.as_str(), claims.video.room.as_str(), claims.video.room_join),
+        (
+            claims.sub.as_str(),
+            claims.video.room.as_str(),
+            claims.video.room_join
+        ),
         ("bridge-1", "session-abc", true)
     );
 }

@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use tddy_credentials::SessionVaults;
+use tddy_daemon_extensions::RoomTokenMinter;
 use tddy_github::{
     AuthServiceImpl, GitHubOAuthProvider, LoginAdmission, RealGitHubProvider, StubGitHubProvider,
     TokenKind,
 };
-use tddy_livekit::TokenGenerator;
 use tddy_rpc::{Request, Response, ServiceEntry, Status};
 use tddy_service::proto::auth::{
     LiveKitTokenService as LiveKitTokenServiceTrait, MintLiveKitTokenRequest,
@@ -129,13 +129,14 @@ pub fn build_auth_entries(
     config: &DaemonConfig,
     web_host: &str,
     web_port: u16,
+    minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
     if config.github.is_none() {
         return Ok(AuthBuildResult::unauthenticated());
     }
     let key = load_signing_key(config)?;
     let tokens = SessionTokens::new(&key, Arc::new(StandaloneKeyDirectory));
-    build_auth_entries_with(config, web_host, web_port, &tokens)
+    build_auth_entries_with(config, web_host, web_port, &tokens, minter)
 }
 
 /// Build RPC entries for AuthService when GitHub is configured, signing and verifying with
@@ -157,8 +158,9 @@ pub fn build_auth_entries_with(
     web_host: &str,
     web_port: u16,
     tokens: &SessionTokens,
+    minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
-    build_auth_entries_admitting(config, web_host, web_port, tokens, None)
+    build_auth_entries_admitting(config, web_host, web_port, tokens, None, minter)
 }
 
 /// [`build_auth_entries_with`], with `admission` asked about every completed login before a
@@ -171,6 +173,7 @@ pub fn build_auth_entries_admitting(
     web_port: u16,
     tokens: &SessionTokens,
     admission: Option<Arc<dyn LoginAdmission>>,
+    minter: Arc<dyn RoomTokenMinter>,
 ) -> anyhow::Result<AuthBuildResult> {
     let github = match &config.github {
         Some(g) => g,
@@ -264,7 +267,7 @@ pub fn build_auth_entries_admitting(
     let livekit_token_entry = ServiceEntry {
         name: "auth.LiveKitTokenService",
         service: Arc::new(LiveKitTokenServiceServer::new(
-            LiveKitTokenServiceImpl::new(user_resolver.clone(), Arc::new(config.clone())),
+            LiveKitTokenServiceImpl::new(user_resolver.clone(), Arc::new(config.clone()), minter),
         )) as Arc<dyn tddy_rpc::RpcService>,
     };
 
@@ -319,23 +322,19 @@ pub fn session_token_authenticator(
 pub fn build_token_service_entry(
     config: &DaemonConfig,
     user_resolver: Option<&SessionUserResolver>,
+    minter: Arc<dyn RoomTokenMinter>,
 ) -> Option<ServiceEntry> {
     let livekit = config.livekit.as_ref()?;
-    let (api_key, api_secret) = (livekit.api_key.as_ref()?, livekit.api_secret.as_ref()?);
+    livekit.api_key.as_ref()?;
+    livekit.api_secret.as_ref()?;
 
     let authenticate = session_token_authenticator(user_resolver, "token.TokenService");
 
-    // Room and identity are per-request, so the generator is constructed with placeholders it
-    // never mints under; `TokenProvider::generate_token` overrides both.
-    let token_generator = Arc::new(TokenGenerator::new(
-        api_key.clone(),
-        api_secret.clone(),
-        "daemon".to_string(),
-        "token-provider".to_string(),
-        Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
-    ));
     let service = tddy_service::TokenServiceImpl::authenticated(
-        crate::token_provider::LiveKitTokenProvider(token_generator),
+        crate::token_provider::MinterTokenProvider::new(
+            minter,
+            Duration::from_secs(tddy_livekit::DEFAULT_LIVEKIT_JWT_TTL_SECS),
+        ),
         authenticate,
     );
     let service = CommonRoomSwitch {
@@ -455,13 +454,19 @@ pub const MINTED_IDENTITY_PREFIX: &str =
 pub struct LiveKitTokenServiceImpl {
     user_resolver: SessionUserResolver,
     config: Arc<DaemonConfig>,
+    minter: Arc<dyn RoomTokenMinter>,
 }
 
 impl LiveKitTokenServiceImpl {
-    pub fn new(user_resolver: SessionUserResolver, config: Arc<DaemonConfig>) -> Self {
+    pub fn new(
+        user_resolver: SessionUserResolver,
+        config: Arc<DaemonConfig>,
+        minter: Arc<dyn RoomTokenMinter>,
+    ) -> Self {
         Self {
             user_resolver,
             config,
+            minter,
         }
     }
 }
@@ -501,13 +506,13 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
                 .filter(|s| !s.is_empty())
                 .map(str::to_string)
         };
-        let (url, api_key, api_secret, room) = match (
+        let (url, room) = match (
             configured(livekit.and_then(|lk| lk.url.as_ref())),
             configured(livekit.and_then(|lk| lk.api_key.as_ref())),
             configured(livekit.and_then(|lk| lk.api_secret.as_ref())),
             configured(livekit.and_then(|lk| lk.common_room.as_ref())),
         ) {
-            (Some(url), Some(key), Some(secret), Some(room)) => (url, key, secret, room),
+            (Some(url), Some(_), Some(_), Some(room)) => (url, room),
             _ => {
                 return Err(Status::failed_precondition(
                     "this daemon has no LiveKit url, api_key, api_secret and common_room \
@@ -520,15 +525,7 @@ impl LiveKitTokenServiceTrait for LiveKitTokenServiceImpl {
         // a room roster is visible to every participant, and the identity's only job is to be
         // unique so two concurrent git commands do not evict one another.
         let identity = format!("{MINTED_IDENTITY_PREFIX}{}", uuid::Uuid::new_v4());
-        let token = TokenGenerator::new(
-            api_key,
-            api_secret,
-            room.clone(),
-            identity,
-            MINTED_ROOM_TOKEN_TTL,
-        )
-        .generate()
-        .map_err(|e| Status::internal(format!("could not mint a livekit token: {e}")))?;
+        let token = self.minter.mint(&room, &identity, MINTED_ROOM_TOKEN_TTL)?;
 
         log::info!(
             target: crate::AUTH_LOG_TARGET,
@@ -687,10 +684,15 @@ mod tests {
     fn the_resolver_accepts_a_token_this_daemon_signed() {
         // Given auth wired for a daemon
         let (config, _dir) = a_config();
-        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver
-            .expect("auth should produce a resolver");
+        let resolver = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver
+        .expect("auth should produce a resolver");
         // and a token minted with that daemon's own key
         let token = the_daemons_key(&config)
             .signer()
@@ -707,10 +709,15 @@ mod tests {
     fn the_resolver_rejects_a_token_signed_by_a_daemon_it_has_never_heard_of() {
         // Given auth wired for a daemon that belongs to no fleet
         let (config, _dir) = a_config();
-        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver
-            .expect("auth should produce a resolver");
+        let resolver = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver
+        .expect("auth should produce a resolver");
         // and a token minted by some other daemon's key
         let (stranger, _home) = a_stranger_daemon();
         let token = stranger
@@ -728,10 +735,15 @@ mod tests {
     fn the_resolver_accepts_an_access_kind_token() {
         // Given auth wired for a daemon
         let (config, _dir) = a_config();
-        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver
-            .expect("auth should produce a resolver");
+        let resolver = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver
+        .expect("auth should produce a resolver");
         // and an access-kind token minted with its key
         let token = the_daemons_key(&config)
             .signer()
@@ -748,10 +760,15 @@ mod tests {
     fn the_resolver_rejects_a_refresh_kind_token() {
         // Given auth wired for a daemon
         let (config, _dir) = a_config();
-        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver
-            .expect("auth should produce a resolver");
+        let resolver = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver
+        .expect("auth should produce a resolver");
         // and a *refresh*-kind token minted with its own key
         let refresh = the_daemons_key(&config)
             .signer()
@@ -771,15 +788,25 @@ mod tests {
     fn a_token_issued_before_a_restart_still_authenticates_after_it() {
         // Given a daemon that issued a token, and then restarted
         let (config, _dir) = a_config();
-        let before_restart = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .session_tokens
-            .expect("a daemon with github configured signs tokens");
+        let before_restart = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .session_tokens
+        .expect("a daemon with github configured signs tokens");
         let token = before_restart.signer().mint_access(&a_github_user("u"));
-        let after_restart = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build after a restart")
-            .user_resolver
-            .expect("auth should produce a resolver");
+        let after_restart = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build after a restart")
+        .user_resolver
+        .expect("auth should produce a resolver");
 
         // When the restarted daemon resolves the token
         let login = (after_restart)(&token);
@@ -802,10 +829,15 @@ mod tests {
         let (config, _dir) = a_config_storing_tokens_in(&auth_storage);
 
         // When auth is wired
-        let vaults = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("a writable auth_storage should let the daemon start")
-            .credential_vaults
-            .expect("a configured auth_storage should produce the credential vaults");
+        let vaults = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("a writable auth_storage should let the daemon start")
+        .credential_vaults
+        .expect("a configured auth_storage should produce the credential vaults");
 
         // Then each operator's vault lives where the operator configured, and the probe left
         // nothing of its own behind
@@ -829,9 +861,14 @@ mod tests {
         let (config, _config_dir) = a_config_storing_tokens_in(&occupied.join("auth"));
 
         // When auth is wired
-        let failure = build_auth_entries(&config, "127.0.0.1", 0)
-            .err()
-            .map(|e| e.to_string());
+        let failure = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .err()
+        .map(|e| e.to_string());
 
         // Then startup fails naming the setting at fault, rather than the daemon serving an auth
         // surface on which every login would fail one operator at a time
@@ -886,11 +923,20 @@ mod tests {
 
     /// The mint, wired to the same resolver every other token-gated RPC uses.
     fn a_mint(config: &DaemonConfig) -> LiveKitTokenServiceImpl {
-        let user_resolver = build_auth_entries(config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver
-            .expect("auth should produce a resolver");
-        LiveKitTokenServiceImpl::new(user_resolver, Arc::new(config.clone()))
+        let user_resolver = build_auth_entries(
+            config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver
+        .expect("auth should produce a resolver");
+        LiveKitTokenServiceImpl::new(
+            user_resolver,
+            Arc::new(config.clone()),
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
     }
 
     /// An access token for `login`, issued by the daemon `config` describes.
@@ -1094,11 +1140,20 @@ mod tests {
     /// The daemon's own registration of the mint, wired to the same resolver every other
     /// token-gated RPC uses.
     fn a_registered_mint(config: &DaemonConfig) -> ServiceEntry {
-        let user_resolver = build_auth_entries(config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver;
-        build_token_service_entry(config, user_resolver.as_ref())
-            .expect("a daemon with livekit credentials should register the mint")
+        let user_resolver = build_auth_entries(
+            config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver;
+        build_token_service_entry(
+            config,
+            user_resolver.as_ref(),
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("a daemon with livekit credentials should register the mint")
     }
 
     /// A request the web UI would send: a room, a `web-*` identity, and a credential.
@@ -1228,8 +1283,12 @@ mod tests {
              api_key: \"devkey\"\n  api_secret: \"{LIVEKIT_API_SECRET}\"\n  \
              common_room: \"{COMMON_ROOM}\"\n"
         ));
-        let entry = build_token_service_entry(&config, None)
-            .expect("livekit credentials alone should still register the mint");
+        let entry = build_token_service_entry(
+            &config,
+            None,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("livekit credentials alone should still register the mint");
 
         // When a caller presents a token that would verify on an authenticated daemon
         let refusal = generate_through(
@@ -1251,7 +1310,11 @@ mod tests {
         ));
 
         // When
-        let entry = build_token_service_entry(&config, None);
+        let entry = build_token_service_entry(
+            &config,
+            None,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        );
 
         // Then there is nothing to mint with, so nothing is served
         assert!(
@@ -1282,9 +1345,14 @@ mod tests {
         let (config, _dir) = a_daemon_serving_a_common_room();
 
         // When
-        let entries = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .entries;
+        let entries = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .entries;
 
         // Then both services are registered — `main.rs` seeds `rpc_entries` from these, and that
         // one list feeds Connect-HTTP, the local socket and the common room alike
@@ -1306,10 +1374,15 @@ mod tests {
     fn keeps_authenticating_gated_rpcs_when_the_common_room_is_switched_off() {
         // Given a daemon whose common room the operator switched off
         let (config, _dir) = a_daemon_with_its_common_room_switched_off();
-        let resolver = build_auth_entries(&config, "127.0.0.1", 0)
-            .expect("auth should build")
-            .user_resolver
-            .expect("auth should produce a resolver");
+        let resolver = build_auth_entries(
+            &config,
+            "127.0.0.1",
+            0,
+            tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+        )
+        .expect("auth should build")
+        .user_resolver
+        .expect("auth should produce a resolver");
         // and an operator's access token that daemon issued
         let token = an_access_token_for(&config, "operator");
 

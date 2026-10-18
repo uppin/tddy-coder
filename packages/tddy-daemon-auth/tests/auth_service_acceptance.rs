@@ -179,12 +179,17 @@ fn a_daemon_with_github_configured() -> (DaemonConfig, tempfile::TempDir) {
 
 /// The `auth.AuthService` entry this crate registers, as `runtime.rs` receives it.
 fn the_auth_service(config: &DaemonConfig) -> ServiceEntry {
-    build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a configured daemon builds its auth entries")
-        .entries
-        .into_iter()
-        .find(|entry| entry.name == "auth.AuthService")
-        .expect("auth.AuthService is one of the entries")
+    build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a configured daemon builds its auth entries")
+    .entries
+    .into_iter()
+    .find(|entry| entry.name == "auth.AuthService")
+    .expect("auth.AuthService is one of the entries")
 }
 
 fn a_github_user(login: &str) -> tddy_github::GitHubUser {
@@ -218,10 +223,15 @@ fn an_access_token_for(config: &DaemonConfig, login: &str) -> String {
 /// The login the daemon's single identity function reads out of a token — the rule every other
 /// service in every other crate admits a caller by.
 fn the_login_the_resolver_reads(config: &DaemonConfig, token: &str) -> Option<String> {
-    let resolver = build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a configured daemon builds its auth entries")
-        .user_resolver
-        .expect("a configured daemon has an identity function");
+    let resolver = build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a configured daemon builds its auth entries")
+    .user_resolver
+    .expect("a configured daemon has an identity function");
     resolver(token)
 }
 

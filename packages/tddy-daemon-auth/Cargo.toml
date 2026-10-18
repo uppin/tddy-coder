@@ -40,6 +40,9 @@ url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 
 [dev-dependencies]
+# The minter the daemon wires from its `livekit:` block, so the mint suites run the production
+# adapter rather than a stand-in. A dev-dependency only: this crate reaches LiveKit through the port.
+tddy-daemon-livekit = { path = "../tddy-daemon-livekit" }
 pretty_assertions = { workspace = true }
 # `test-util` pauses tokio's clock, so the pending-login sweep's ticks are driven by hand.
 tokio = { version = "1", features = ["test-util"] }

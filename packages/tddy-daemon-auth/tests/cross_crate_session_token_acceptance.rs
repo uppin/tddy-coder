@@ -136,22 +136,36 @@ fn a_daemon_serving_a_common_room() -> (DaemonConfig, tempfile::TempDir) {
 }
 
 fn the_auth_service(config: &DaemonConfig) -> ServiceEntry {
-    build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a configured daemon builds its auth entries")
-        .entries
-        .into_iter()
-        .find(|entry| entry.name == "auth.AuthService")
-        .expect("auth.AuthService is one of the entries")
+    build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a configured daemon builds its auth entries")
+    .entries
+    .into_iter()
+    .find(|entry| entry.name == "auth.AuthService")
+    .expect("auth.AuthService is one of the entries")
 }
 
 /// `token.TokenService`, gated by the identity function this crate produced.
 fn the_web_mint(config: &DaemonConfig) -> ServiceEntry {
-    let user_resolver = build_auth_entries(config, "127.0.0.1", 8080)
-        .expect("a configured daemon builds its auth entries")
-        .user_resolver
-        .expect("a configured daemon has an identity function");
-    build_token_service_entry(config, Some(&user_resolver))
-        .expect("a daemon holding livekit credentials registers the mint")
+    let user_resolver = build_auth_entries(
+        config,
+        "127.0.0.1",
+        8080,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a configured daemon builds its auth entries")
+    .user_resolver
+    .expect("a configured daemon has an identity function");
+    build_token_service_entry(
+        config,
+        Some(&user_resolver),
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("a daemon holding livekit credentials registers the mint")
 }
 
 async fn call<Req: prost::Message, Res: prost::Message + Default>(

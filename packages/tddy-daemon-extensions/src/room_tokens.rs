@@ -19,8 +19,10 @@ pub trait RoomTokenMinter: Send + Sync {
 pub struct NoRoomTokens;
 
 impl RoomTokenMinter for NoRoomTokens {
-    fn mint(&self, _room: &str, _identity: &str, _ttl: Duration) -> Result<String, Status> {
-        todo!("NoRoomTokens::mint")
+    fn mint(&self, room: &str, _identity: &str, _ttl: Duration) -> Result<String, Status> {
+        Err(Status::failed_precondition(format!(
+            "this daemon has no room integration configured, so it can mint no room token for {room}"
+        )))
     }
 }
 

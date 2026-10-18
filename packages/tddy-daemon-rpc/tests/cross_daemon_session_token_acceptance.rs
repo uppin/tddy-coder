@@ -76,11 +76,16 @@ fn a_peer_daemon(
     tokens: &SessionTokens,
     data_dir: std::path::PathBuf,
 ) -> TestDaemon {
-    let resolver =
-        tddy_session_lifecycle::auth::build_auth_entries_with(&config, "127.0.0.1", 0, tokens)
-            .expect("auth wiring should build")
-            .user_resolver
-            .expect("auth wiring should produce a session resolver");
+    let resolver = tddy_session_lifecycle::auth::build_auth_entries_with(
+        &config,
+        "127.0.0.1",
+        0,
+        tokens,
+        tddy_daemon_livekit::room_tokens::room_token_minter(config.livekit.as_ref()),
+    )
+    .expect("auth wiring should build")
+    .user_resolver
+    .expect("auth wiring should produce a session resolver");
     let base = data_dir.clone();
     let sessions_base_resolver: SessionsBaseResolver = Arc::new(move |_| Some(base.clone()));
     TestDaemon::from_host(DaemonSessionHost::new(
