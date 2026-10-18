@@ -7,6 +7,7 @@ pub mod codex_acp;
 mod cursor;
 mod mock;
 pub mod model_catalog;
+mod opencode_acp;
 mod routed;
 mod stub;
 mod tool_executor;
@@ -24,6 +25,7 @@ pub use mock::MockBackend;
 pub use model_catalog::{
     render_models_json, resolve_agent_models, BackendCliPaths, CLAUDE_CLI_AGENT, CURSOR_CLI_AGENT,
 };
+pub use opencode_acp::OpenCodeAcpBackend;
 pub use stub::StubBackend;
 pub use tddy_workflow::questions::{ClarificationQuestion, QuestionOption};
 use tddy_workflow::{GoalHints, GoalId};
@@ -41,6 +43,7 @@ pub enum AnyBackend {
     /// OpenAI Codex via `codex-acp` (ACP over stdio).
     CodexAcp(CodexAcpBackend),
     Stub(StubBackend),
+    OpenCode(OpenCodeAcpBackend),
 }
 
 /// Shared backend wrapper for "create once at startup" pattern.
@@ -104,6 +107,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.invoke(request).await,
             AnyBackend::CodexAcp(b) => b.invoke(request).await,
             AnyBackend::Stub(b) => b.invoke(request).await,
+            AnyBackend::OpenCode(b) => b.invoke(request).await,
         }
     }
 
@@ -115,6 +119,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.name(),
             AnyBackend::CodexAcp(b) => b.name(),
             AnyBackend::Stub(b) => b.name(),
+            AnyBackend::OpenCode(b) => b.name(),
         }
     }
 
@@ -126,6 +131,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.submit_channel(),
             AnyBackend::CodexAcp(b) => b.submit_channel(),
             AnyBackend::Stub(b) => b.submit_channel(),
+            AnyBackend::OpenCode(b) => b.submit_channel(),
         }
     }
 
@@ -137,6 +143,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.action_invoke_cache_eligible(),
             AnyBackend::CodexAcp(b) => b.action_invoke_cache_eligible(),
             AnyBackend::Stub(b) => b.action_invoke_cache_eligible(),
+            AnyBackend::OpenCode(b) => b.action_invoke_cache_eligible(),
         }
     }
 
@@ -148,6 +155,7 @@ impl CodingBackend for AnyBackend {
             AnyBackend::Codex(b) => b.list_models().await,
             AnyBackend::CodexAcp(b) => b.list_models().await,
             AnyBackend::Stub(b) => b.list_models().await,
+            AnyBackend::OpenCode(b) => b.list_models().await,
         }
     }
 }

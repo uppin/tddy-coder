@@ -34,6 +34,8 @@ pub struct BackendCliPaths {
     pub claude_acp_cli_path: Option<PathBuf>,
     /// Override the `codex-acp` binary path.
     pub codex_acp_cli_path: Option<PathBuf>,
+    /// Override the `opencode` binary path (run as `opencode acp`).
+    pub opencode_cli_path: Option<PathBuf>,
 }
 
 impl BackendCliPaths {

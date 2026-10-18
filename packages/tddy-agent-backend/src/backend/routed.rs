@@ -8,7 +8,10 @@
 
 use crate::provider_route::{Harness, HarnessRoute, RouteRefusal};
 
-use super::{AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend};
+use super::{
+    AnyBackend, ClaudeAcpBackend, ClaudeCodeBackend, CodexAcpBackend, CodexBackend,
+    OpenCodeAcpBackend,
+};
 
 impl AnyBackend {
     /// Run this backend on `route`. Refused, with the reason, for a backend that cannot be routed —
@@ -150,5 +153,16 @@ mod tests {
                 "model=\"muse-wonder-1.0\"".to_string(),
             ]
         );
+    }
+}
+
+impl OpenCodeAcpBackend {
+    /// `opencode acp` on a provider account: the generated configuration (`OPENCODE_CONFIG`) and the
+    /// key on the agent child.
+    #[must_use]
+    pub fn with_provider_route(self, route: HarnessRoute) -> Self {
+        let _ = route;
+        // TODO(opencode-acp): implement
+        todo!()
     }
 }

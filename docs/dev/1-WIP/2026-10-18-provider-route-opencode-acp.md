@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 7/9. Base: `feature/provider-route/muse-cli`.
+**Stack**: #provider-route 7/9. Base: `feature/provider-route/muse-cli`. PR: [#668](https://github.com/uppin/tddy-coder/pull/668).
 
 ## Initial Discovery
 
@@ -20,10 +20,7 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 
 ## Responsibility
 
-`AnyBackend::OpenCode` over `opencode acp`, and its registration in every backend list. Owns
-`OpenCodeAcpBackend`, `--opencode-cli-path` / `TDDY_OPENCODE_CLI` / coder-config `opencode_cli_path`,
-`BackendCliPaths.opencode_cli_path`, `tddy-tools list-models --opencode-cli-path`, and the `opencode`
-rows in `allowed_agents` of the dev and desktop configs.
+`AnyBackend::OpenCode` over `opencode acp`, and its registration in every backend list. Owns `OpenCodeAcpBackend` (`backend/opencode_acp.rs`), its `with_provider_route` builder (in `backend/routed.rs`), `BackendCliPaths.opencode_cli_path`, `tddy-tools list-models --opencode-cli-path`, `--opencode-cli-path` / `TDDY_OPENCODE_CLI` / coder-config `opencode_cli_path` in `tddy-coder`, the `opencode` entries of `backend_selection_question`, `backend_from_label`, `default_model_for_agent`, `curated_models_for_agent`, `preselected_index_for_agent`, `model_catalog::build_backend`, `BUILTIN_BACKEND_AGENT_IDS`, and the `opencode` rows in `allowed_agents` of the dev and desktop configs. **Not** the `opencode` row of `context_globs_for_agent` — node 3 (`opencode-cli`) owns it and this node consumes it.
 
 ## Boundaries
 
@@ -40,11 +37,20 @@ rows in `allowed_agents` of the dev and desktop configs.
 ## Draft PR contract
 
 ```rust
-pub struct OpenCodeAcpBackend { /* agent path */ }
-impl OpenCodeAcpBackend { pub fn new() -> Self; pub fn with_agent_path(path: PathBuf) -> Self; }
-impl CodingBackend for OpenCodeAcpBackend { fn name(&self) -> &str { "opencode" } /* … */ }
-pub enum AnyBackend { /* … */ OpenCode(OpenCodeAcpBackend) }
+// tddy-agent-backend/src/backend/opencode_acp.rs
+pub struct OpenCodeAcpBackend { agent_path: PathBuf }
+impl OpenCodeAcpBackend { pub const DEFAULT_CLI_BINARY: &str = "opencode"; pub fn new() -> Self; pub fn with_agent_path(path: PathBuf) -> Self; }
+impl CodingBackend for OpenCodeAcpBackend { fn name(&self) -> &str { "opencode" } /* invoke, list_models: todo!() */ }
+pub enum AnyBackend { /* … */ OpenCode(OpenCodeAcpBackend) }   // five dispatch arms delegate
+// backend/routed.rs
+impl OpenCodeAcpBackend { pub fn with_provider_route(self, route: HarnessRoute) -> Self; }
+// model_catalog.rs
+pub struct BackendCliPaths { /* … */ pub opencode_cli_path: Option<PathBuf> }
+// tddy-tools list-models
+--opencode-cli-path <PATH>
 ```
+
+The existing pinned list tests in `backend/mod.rs` (`backend_selection_question_returns_six_options…`, label order, preselected indexes) are updated by `/green` together with the registration: a shared list, appended to.
 
 ## Green wave
 
@@ -89,10 +95,8 @@ test, updated pinned-list tests.
 
 | Test | File | Validates |
 |---|---|---|
-| `tddy_coder_completes_a_turn_with_opencode_over_acp` | `packages/tddy-integration-tests/tests/opencode_acp_backend.rs` (new) | ACP turn |
-| `opencode_lists_the_models_its_agent_advertises` | same | `list_models` |
-| `a_routed_opencode_agent_gets_the_generated_config_and_key` | same | child env |
-| `backend_selection_question_appends_opencode` | `packages/tddy-agent-backend/src/backend/mod.rs` (tests) | seven options, existing order |
+| `tddy_coder_completes_a_turn_with_opencode_over_acp` / `opencode_lists_the_models_its_agent_advertises` / `list_models_asks_the_opencode_binary_it_is_given` / `a_routed_opencode_agent_gets_the_generated_config_and_key` | `packages/tddy-integration-tests/tests/opencode_acp_backend.rs` (new) | ACP turn against `tddy-acp-stub`, model listing, routed child env |
+| `backend_selection_question_appends_opencode` / `opencode_has_a_default_model_in_its_curated_list` | `packages/tddy-agent-backend/tests/opencode_registration.rs` (new) | appended entry; a `provider/model` default, not the Claude fallback |
 
 ## Technical Debt & Production Readiness
 
@@ -104,6 +108,13 @@ test, updated pinned-list tests.
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-agent-backend`, `tddy-tools`, `tddy-integration-tests` (`opencode_acp_backend` target) — clippy `-D warnings` clean.
+
+- `opencode_acp_backend` 4/4 fail at this node's `todo!()` (`opencode_acp.rs`, `routed.rs`) or its missing `build_backend` arm (`unknown agent`).
+- `opencode_registration` 2/2 fail (no appended entry; default falls back to Claude's — the first draft of that test passed vacuously and was tightened).
 
 ## Validation Results
 ### /validate-changes
@@ -117,10 +128,10 @@ test, updated pinned-list tests.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [ ] USER REVIEW — acceptance tests (per-node gate waived by the developer on 2026-10-18 — "finish remaining waves without stopping"; review at stack hand-off)
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

@@ -35,6 +35,10 @@ pub struct ListModelsArgs {
     /// Override the `codex-acp` binary path.
     #[arg(long)]
     pub codex_acp_cli_path: Option<PathBuf>,
+
+    /// Override the `opencode` binary path (enumerated through `opencode acp`).
+    #[arg(long)]
+    pub opencode_cli_path: Option<PathBuf>,
 }
 
 impl ListModelsArgs {
@@ -45,6 +49,7 @@ impl ListModelsArgs {
             opencode_cli_path: self.opencode_cli_path.clone(),
             claude_acp_cli_path: self.claude_acp_cli_path.clone(),
             codex_acp_cli_path: self.codex_acp_cli_path.clone(),
+            opencode_cli_path: self.opencode_cli_path.clone(),
         }
     }
 }
