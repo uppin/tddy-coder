@@ -63,6 +63,8 @@ async fn a_stub_users_pre_opened_vault_is_listed_without_its_secret() {
                     updated_at: A_RECORD_WRITTEN_AT as i64,
                     has_secret: true,
                     sync_status: SyncStatus::Unspecified as i32,
+                    preset: String::new(),
+                    wire_protocols: Vec::new(),
                 }],
             }],
             vault_locked: false,

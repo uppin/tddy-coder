@@ -8,10 +8,12 @@ use tddy_credential_sync::AccountSyncSummary;
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId};
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::accounts::{
-    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse, LinkState,
-    ListAccountsRequest, ListAccountsResponse, PollLinkAccountRequest, PollLinkAccountResponse,
-    ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse, SessionAccount,
-    SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
+    AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
+    ConnectProviderAccountRequest, ConnectProviderAccountResponse, LinkState, ListAccountsRequest,
+    ListAccountsResponse, ListProviderAccountModelsRequest, ListProviderAccountModelsResponse,
+    PollLinkAccountRequest, PollLinkAccountResponse, ProviderAccounts, RemoveAccountRequest,
+    RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
+    SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
@@ -19,6 +21,7 @@ use crate::linking::{
     record_for_link, removal_allowed, AccountLinker, LinkError, LinkProgress, LinkedAccountStore,
     LinkedIdentity, META_SUBJECT,
 };
+use crate::provider_account::{ProviderAccountStore, ProviderModelProbe};
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
 
@@ -37,6 +40,13 @@ struct Linking {
     attempts: Attempts,
 }
 
+/// The two ports connecting a model-provider account needs: somewhere to keep it, and a way to ask
+/// its endpoint whether the key works. Wired together for the reason [`Linking`] is.
+struct ProviderAccountPorts {
+    store: Arc<dyn ProviderAccountStore>,
+    probe: Arc<dyn ProviderModelProbe>,
+}
+
 /// Serves `accounts.AccountsService` by reading and curating one [`AccountStore`], and — when the
 /// linking half is wired — by adding accounts to it.
 pub struct AccountsServiceImpl<S> {
@@ -49,6 +59,7 @@ pub struct AccountsServiceImpl<S> {
     /// `SYNC_STATUS_UNSPECIFIED`, exactly as it did before this port existed.
     sync_status: Option<Arc<dyn SyncStatusSource>>,
     linking: Option<Linking>,
+    provider_accounts: Option<ProviderAccountPorts>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -59,6 +70,7 @@ impl<S> AccountsServiceImpl<S> {
             clock: Arc::new(Instant::now),
             sync_status: None,
             linking: None,
+            provider_accounts: None,
         }
     }
 
@@ -92,6 +104,20 @@ impl<S> AccountsServiceImpl<S> {
         self
     }
 
+    /// Wire the half that connects model-provider accounts by key.
+    ///
+    /// Additive, like [`with_linking`](Self::with_linking): a daemon that skips it answers the two
+    /// provider-account methods with `FAILED_PRECONDITION` and nothing else changes.
+    #[must_use]
+    pub fn with_provider_accounts(
+        mut self,
+        store: Arc<dyn ProviderAccountStore>,
+        probe: Arc<dyn ProviderModelProbe>,
+    ) -> Self {
+        self.provider_accounts = Some(ProviderAccountPorts { store, probe });
+        self
+    }
+
     /// Replace the clock attempt deadlines and poll pacing are read from. For tests, which would
     /// otherwise sleep to cross a window or an interval.
     #[must_use]
@@ -114,6 +140,28 @@ impl<S> AccountsServiceImpl<S> {
 
 #[async_trait]
 impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
+    async fn connect_provider_account(
+        &self,
+        request: Request<ConnectProviderAccountRequest>,
+    ) -> Result<Response<ConnectProviderAccountResponse>, Status> {
+        let _ = request;
+        let _ports = self
+            .provider_accounts
+            .as_ref()
+            .map(|ports| (&ports.store, &ports.probe));
+        // TODO(accounts): implement
+        todo!()
+    }
+
+    async fn list_provider_account_models(
+        &self,
+        request: Request<ListProviderAccountModelsRequest>,
+    ) -> Result<Response<ListProviderAccountModelsResponse>, Status> {
+        let _ = request;
+        // TODO(accounts): implement
+        todo!()
+    }
+
     async fn list_accounts(
         &self,
         request: Request<ListAccountsRequest>,
@@ -428,6 +476,8 @@ fn summary_of(
         updated_at: i64::try_from(record.updated_at).unwrap_or(i64::MAX),
         has_secret: !record.secret.expose().is_empty(),
         sync_status: sync_status as i32,
+        // TODO(accounts): a provider account's preset and wire protocols
+        ..AccountSummary::default()
     }
 }
 

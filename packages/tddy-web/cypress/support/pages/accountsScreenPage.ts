@@ -75,4 +75,26 @@ export const accountsScreenPage = {
   linkExpiredNotice: () => byTestId("accounts-link-expired"),
   /** Approval succeeded and there was nowhere to put it. Nothing to do with the operator. */
   linkLockedNotice: () => byTestId("accounts-link-locked"),
+
+  /** Open the form that adds a model-provider account from a pasted API key. */
+  connectApiKeyButton: () => byTestId("accounts-connect-api-key"),
+  connectPreset: () => byTestId("accounts-connect-preset"),
+  connectLabel: () => byTestId("accounts-connect-label"),
+  connectApiKey: () => byTestId("accounts-connect-api-key-input"),
+  connectOpenAiBaseUrl: () => byTestId("accounts-connect-openai-base-url"),
+  connectSubmit: () => byTestId("accounts-connect-submit"),
+  /** The daemon's reason a connect was refused, verbatim. */
+  connectError: () => byTestId("accounts-connect-error"),
+  /** A provider account's preset and the protocols it serves, beside its label. */
+  presetBadge: (provider: string, accountId: string) =>
+    byTestId(`${ROW_TEST_ID_PREFIX}${provider}-${accountId}-preset`),
+
+  /** Connect a provider account the way a person does: open the form, fill it, submit. */
+  connectProviderAccount: (preset: string, label: string, apiKey: string) => {
+    accountsScreenPage.connectApiKeyButton().click();
+    accountsScreenPage.connectPreset().select(preset);
+    accountsScreenPage.connectLabel().clear().type(label);
+    accountsScreenPage.connectApiKey().clear().type(apiKey, { log: false });
+    accountsScreenPage.connectSubmit().click();
+  },
 };

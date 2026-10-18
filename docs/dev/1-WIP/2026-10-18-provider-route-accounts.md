@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 1/9. Base: `master`.
+**Stack**: #provider-route 1/9. Base: `master`. PR: [#662](https://github.com/uppin/tddy-coder/pull/662).
 
 ## Initial Discovery
 
@@ -169,6 +169,12 @@ test for the form using `mountWithRpc` + `anInMemoryRpcBackend`.
 
 ## Technical Debt & Production Readiness
 
+- **Draft-PR contract state (2026-10-18):** every owned body is `todo!()` / `TODO(accounts)` and the web
+  form renders nothing; `summary_of` fills the new `AccountSummary` fields with defaults. None of this
+  may merge — `/green` implements it in this PR.
+- The existing `accounts_stub_daemon_acceptance.rs` assertion gained the two new (empty) fields — a
+  compile consequence of the additive proto change, not a behaviour change.
+
 ## Decisions & Trade-offs
 - **Vault, not registry** (developer decision 2026-10-18): sealed, per person, syncable; costs a second
   provider concept beside the registry and an unlocked vault at use time.
@@ -181,6 +187,18 @@ test for the form using `mountWithRpc` + `anInMemoryRpcBackend`.
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped verification — `tddy-accounts`, `tddy-daemon` (Rust), one Cypress spec (web):
+
+- `cargo clippy --all-targets -p tddy-accounts -p tddy-daemon -- -D warnings` — clean on the published surface.
+- `provider_accounts_acceptance` — 8/8 fail, each at `service.rs` `todo!()` (this node).
+- `provider_account::tests` — 9/9 fail at this node's `todo!()`.
+- `provider_model_probe` — 3/3 fail at `provider_model_probe.rs` `todo!()`.
+- `ProviderAccountConnectAcceptance.cy.tsx` — 4/4 fail: `[data-testid='accounts-connect-api-key']` never rendered.
+- Baseline caveat: the pre-edit baseline build overlapped the surface edits, so no clean pre-edit build of
+  these packages was captured; master is green on CI at `515c00149`.
 
 ## Validation Results
 ### /validate-changes
@@ -198,10 +216,10 @@ test for the form using `mountWithRpc` + `anInMemoryRpcBackend`.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

@@ -20,6 +20,7 @@ mod deadline;
 mod identity;
 mod linking;
 pub mod local_gh;
+mod provider_account;
 mod resolver;
 mod service;
 mod store;
@@ -31,6 +32,10 @@ pub use identity::{acting_identity, ActingIdentity, GitIdentity, IdentityError, 
 pub use linking::{
     record_for_link, removal_allowed, AccountLinker, LinkChallenge, LinkError, LinkProgress,
     LinkedAccountStore, LinkedIdentity, RemovalRefusal, META_SUBJECT, META_SUBJECT_ID,
+};
+pub use provider_account::{
+    endpoints_for, preset, presets, PresetEndpoint, ProviderAccount, ProviderAccountError,
+    ProviderAccountStore, ProviderEndpoints, ProviderModelProbe, ProviderPreset, WireProtocol,
 };
 pub use resolver::{resolve_account, AccountResolution};
 pub use service::{build_accounts_entry, AccountsServiceImpl, Clock};

@@ -6,6 +6,7 @@ use tddy_credentials::{
     AccountId, CredentialRecord, ProviderId, SessionVault, SessionVaults, VaultError, VaultState,
 };
 
+use crate::provider_account::{ProviderAccount, ProviderAccountStore};
 use crate::store::{AccountStore, AccountsError};
 
 /// Resolve a `session_token` to the subject whose vault it may open, or `None` when the token names
@@ -136,6 +137,28 @@ fn refusal_of(subject: &str, error: VaultError) -> AccountsError {
         | VaultError::AlreadyOpen
         | VaultError::TooManySetAside { .. }
         | VaultError::Crypto) => AccountsError::Unavailable(told.to_string()),
+    }
+}
+
+impl ProviderAccountStore for SessionVaultAccountStore {
+    fn put_provider_account(
+        &self,
+        session_token: &str,
+        account: &ProviderAccount,
+    ) -> Result<CredentialRecord, AccountsError> {
+        let _ = (session_token, account);
+        // TODO(accounts): implement
+        todo!()
+    }
+
+    fn provider_account(
+        &self,
+        session_token: &str,
+        account: &AccountId,
+    ) -> Result<ProviderAccount, AccountsError> {
+        let _ = (session_token, account);
+        // TODO(accounts): implement
+        todo!()
     }
 }
 
