@@ -129,9 +129,9 @@ methods to the registry methods of the same name.
 | ratchet test | strike two entries |
 
 ## Implementation Milestones
-- [ ] M1 Port and null object
-- [ ] M2 Plugin impl; registry-through-port tests green
-- [ ] M3 Consumers switched; manifests trimmed; ratchet green
+- [x] M1 Port and null object
+- [x] M2 Plugin impl; registry-through-port tests green
+- [x] M3 Consumers switched; manifests trimmed; ratchet green
 
 ## Testing Plan
 
@@ -185,7 +185,7 @@ Unit (`tddy-daemon-extensions/src/session_rooms.rs`): `with_nothing_wired_no_ses
 - [x] Run acceptance tests (verify they fail)
 - [x] USER REVIEW — acceptance tests (waived: developer asked to finish the stack without stopping, 2026-10-16)
 - [x] TDD Red — write failing unit/integration tests
-- [ ] TDD Green — implement with quality code
+- [x] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
 - [ ] Validate changes (/validate-changes)
