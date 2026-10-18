@@ -92,9 +92,10 @@ UDS socket, added to the same `Server::builder()` as `ConnectionService`.
 request in this service carries a `daemon_instance_id` to route by — which is what makes this
 service's wiring simpler than `host.HostService`'s.
 
-`WorktreeRoomCloser` is the seam back to the daemon's LiveKit rooms — a worktree that is removed or
-restored may need its session's room closed, and `NoSessionRooms` is the no-op a deployment without
-rooms uses.
+`WorktreeRoomCloser` is the seam back to the daemon's session rooms — a worktree that is removed or
+restored may need its session's room closed. It is the `SessionRooms` port of
+[`tddy-daemon-extensions`](../../tddy-daemon-extensions/docs/extension-ports.md#the-session-rooms-port-session_rooms),
+re-exported under this name, and `NoSessionRooms` is the no-op a deployment without rooms uses.
 
 ## Testing
 

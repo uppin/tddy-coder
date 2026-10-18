@@ -53,6 +53,22 @@ Semantics:
 - All reporters of one `id` write the same entry; the last writer wins.
 - A reporter's entry is registered when the reporter is made, so `report` cannot miss it.
 
+## The session-rooms port (`session_rooms`)
+
+Code that only needs to close a session's room, or ask whether this daemon hosts one, holds a
+`SessionRooms` instead of naming the integration's registry.
+
+| Item | Role |
+|---|---|
+| `SessionRooms` | `hosts(session_id)`: whether this daemon currently hosts the session's room. `close(session_id)`: stop hosting it, if one is hosted. `close_for_worktree(worktree)`: stop hosting every room measuring the checkout, before the checkout is removed. |
+| `NoSessionRooms` | No integration hosting rooms: nothing is hosted, and closing is a no-op. |
+
+`SessionRoomRegistry` implements the port in `tddy-daemon-livekit` (`hosts` is the registry's
+`contains`). The daemon hands the one shared registry to the consumers as `Arc<dyn SessionRooms>`:
+`tddy-session-activity::session_deletion::close_session_room`, the Telegram control harness
+(`with_session_rooms`, defaulting to `NoSessionRooms`) and `tddy-worktree-service`, which re-exports
+the port as `WorktreeRoomCloser`. Opening a room is not on this port.
+
 ## The satellite rule and its ratchet
 
 **Nothing in this crate may reach a LiveKit crate**, transitively, so a core crate that depends on
@@ -77,9 +93,9 @@ The lists, in the test file:
   `tddy-vnc`, `tddy-e2e`.
 - `KNOWN_OFFENDERS` (library crates that still name a LiveKit crate): `tddy-agent-launch`,
   `tddy-cli-sessions`, `tddy-coder`, `tddy-daemon-auth`, `tddy-daemon-kernel`, `tddy-daemon-rpc`,
-  `tddy-host-service`, `tddy-remote-git-repo`, `tddy-screen-sharing`, `tddy-session-activity`,
+  `tddy-host-service`, `tddy-remote-git-repo`, `tddy-screen-sharing`,
   `tddy-session-agents`, `tddy-session-files`, `tddy-session-lifecycle`, `tddy-session-split`,
-  `tddy-session-sync`, `tddy-session-tool-client`, `tddy-telegram-control`, `tddy-terminal-rpc`.
+  `tddy-session-sync`, `tddy-session-tool-client`, `tddy-terminal-rpc`.
 
 "Names" is a `[dependencies]` or `[build-dependencies]` entry, optional ones included;
 `[dev-dependencies]` are not counted, because a test may stand up a real LiveKit server. The

@@ -1,5 +1,5 @@
-//! The plugin's session-room registry, seen through the core's `SessionRooms` port — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-session-rooms.md`.
+//! The plugin's session-room registry, seen through the core's `SessionRooms` port — see
+//! `packages/tddy-daemon-extensions/docs/extension-ports.md`.
 //!
 //! A registry hosting nothing is the ordinary case (a room is opened when something first reaches
 //! the session over LiveKit), so this needs no LiveKit server.

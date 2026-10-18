@@ -232,7 +232,9 @@ Both are overridable by `TDDY_SESSION_ROOM_*`, following the daemon's usual
 A room is closed when its session is deleted — through the `DeleteSession` RPC, through Telegram's
 delete, or when `RemoveWorktree` destroys the checkout it was measuring (matched by path). Closing
 aborts both the serving connection and the poll loop; without it the room would keep shelling out to
-git in a directory that no longer exists.
+git in a directory that no longer exists. Each of those paths reaches the room through the
+`SessionRooms` port, so a daemon with no rooms closes nothing and the code that deletes a session does
+not depend on LiveKit.
 
 If the hosting connection ends on its own, the daemon logs at `error` and stops the poll loop rather
 than publishing into a dead connection. It does not rejoin — the LiveKit SDK handles connection-level

@@ -240,8 +240,8 @@ pub struct TelegramSessionControlHarness<S: TelegramSender + Send + Sync> {
     /// The session rooms this daemon hosts, so **Delete** stops hosting the deleted session's room
     /// before its checkout is removed — the same order `DeleteSession` uses.
     ///
-    /// Defaults to a registry of this harness's own, which hosts nothing: a harness built without
-    /// the daemon's registry (every test fixture) has no rooms to close, and the call still happens
+    /// Defaults to [`tddy_daemon_extensions::NoSessionRooms`], which hosts nothing: a harness built
+    /// without the daemon's rooms (every test fixture) has none to close, and the call still happens
     /// on one code path rather than on a branch. `main` injects the daemon's own with
     /// [`Self::with_session_rooms`].
     session_rooms: Arc<dyn tddy_daemon_extensions::SessionRooms>,

@@ -1,5 +1,5 @@
-//! Deleting a session closes its room through the `SessionRooms` port — PRD
-//! `docs/ft/daemon/1-WIP/PRD-2026-10-16-livekit-satellite-session-rooms.md`.
+//! Deleting a session closes its room through the `SessionRooms` port — see
+//! `packages/tddy-daemon-extensions/docs/extension-ports.md`.
 
 use std::path::Path;
 use std::sync::Mutex;
