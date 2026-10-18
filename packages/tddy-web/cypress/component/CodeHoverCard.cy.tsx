@@ -10,27 +10,20 @@
  */
 
 import "../../src/index.css";
-import { aCodeIndexHost, anIndexReady, type CodeIndexHost } from "../support/rpc/codeSessionBackend";
+import { anIndexReady, type CodeIndexHost } from "../support/rpc/codeSessionBackend";
 import { aCodePaneOn } from "../support/drivers/worktreeCodePaneDriver";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
+import {
+  AREA_TYPE,
+  THE_CALL_TO_AREA,
+  aGeometryWorktreeHost,
+} from "../support/fixtures/geometryWorktree";
 
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
-// `src/main.rs` calls `geometry::area` on line 4; the call's `area` starts at byte column 26.
-const MAIN_RS = [
-  "mod geometry;",
-  "",
-  "fn main() {",
-  "    let area = geometry::area(3, 4);",
-  '    println!("{area}");',
-  "}",
-  "",
-].join("\n");
-const THE_CALL_TO_AREA = { line: 4, column: 26 };
-
-const AREA_TYPE = "fn area(width: u32, height: u32) -> u32";
+const THE_DOC = "Computes the area of a rectangle.";
 
 // A doc comment long enough, in both directions, to overflow any reasonable card: an unbroken
 // 300-character path and 120 paragraphs.
@@ -45,15 +38,20 @@ const A_HOVER_WITH_A_HEADING = [
   "",
   "## Examples",
   "",
-  "Computes the area of a rectangle.",
+  THE_DOC,
 ].join("\n");
 
-/** A worktree holding `src/main.rs`, whose loaded index answers the call to `area` with `hover`. */
+const THE_BODY = "    width * height";
+
+// What rust-analyzer answers for a function: its signature in a fenced rust block, then its docs.
+const A_HOVER_WITH_A_FENCED_BLOCK = ["```rust", AREA_TYPE, THE_BODY, "```", "", THE_DOC].join("\n");
+
+// A fence that is never closed: everything after it is code.
+const A_HOVER_WITH_AN_UNCLOSED_FENCE = [THE_DOC, "", "```rust", AREA_TYPE, THE_BODY].join("\n");
+
+/** The geometry worktree, whose loaded index answers the call to `area` with `hover`. */
 function aHostHovering(hover: string): CodeIndexHost {
-  return aCodeIndexHost()
-    .withFile("src/main.rs", MAIN_RS)
-    .startingAt(anIndexReady())
-    .knowing({ at: { relPath: "src/main.rs", ...THE_CALL_TO_AREA }, hover });
+  return aGeometryWorktreeHost(hover).startingAt(anIndexReady());
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +112,7 @@ it("the hover card opens beside the hovered identifier", () => {
   pane.dwellOn(THE_CALL_TO_AREA);
 
   // Then its card opens just below it
-  worktreeCodePanePage.hoverBody().should("contain.text", AREA_TYPE);
+  worktreeCodePanePage.hoverBody().should("have.text", AREA_TYPE);
   expectTheHoverCardJustBelowTheCallToArea();
 });
 
@@ -145,8 +143,40 @@ it("renders hover markdown headings as headings", () => {
   // Then the heading is its own heading element, apart from the paragraphs around it
   worktreeCodePanePage.hoverBodyHeadings().should("have.length", 1).and("have.text", "Examples");
   worktreeCodePanePage.hoverBodyParagraphs().first().should("have.text", AREA_TYPE);
+  worktreeCodePanePage.hoverBodyParagraphs().last().should("have.text", THE_DOC);
+});
+
+it("renders a fenced rust block as one code block, apart from the docs after it", () => {
+  // Given main.rs previewed with the index loaded
+  const pane = aCodePaneOn(aHostHovering(A_HOVER_WITH_A_FENCED_BLOCK))
+    .mount()
+    .previewing("src/main.rs");
+
+  // When the pointer rests on the call to `area`
+  pane.dwellOn(THE_CALL_TO_AREA);
+
+  // Then the fenced lines are one code block, without their fences
   worktreeCodePanePage
-    .hoverBodyParagraphs()
-    .last()
-    .should("have.text", "Computes the area of a rectangle.");
+    .hoverBodyCodeBlocks()
+    .should("have.length", 1)
+    .and("have.text", `${AREA_TYPE}\n${THE_BODY}`);
+  // And the docs after it are a paragraph of their own
+  worktreeCodePanePage.hoverBodyParagraphs().should("have.length", 1).and("have.text", THE_DOC);
+});
+
+it("renders everything after a fence that is never closed as code", () => {
+  // Given main.rs previewed with the index loaded
+  const pane = aCodePaneOn(aHostHovering(A_HOVER_WITH_AN_UNCLOSED_FENCE))
+    .mount()
+    .previewing("src/main.rs");
+
+  // When the pointer rests on the call to `area`
+  pane.dwellOn(THE_CALL_TO_AREA);
+
+  // Then the docs before the fence are a paragraph, and every line after it is code
+  worktreeCodePanePage.hoverBodyParagraphs().should("have.length", 1).and("have.text", THE_DOC);
+  worktreeCodePanePage
+    .hoverBodyCodeBlocks()
+    .should("have.length", 1)
+    .and("have.text", `${AREA_TYPE}\n${THE_BODY}`);
 });

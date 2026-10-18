@@ -9,6 +9,7 @@ import { workflowPreviewKind } from "./sessionWorkflowPreview";
 import { renderSimpleMarkdown } from "./renderSimpleMarkdown";
 import { CodeBlock } from "./CodeBlock";
 import type { CodePosition } from "./codeNavigationApi";
+import type { DefinableSource } from "./codeProbes";
 import { HoverCard, LocationListCard, NavigationNotice } from "./CodeNavigationOverlays";
 import { useCodeNavigation, type SelectedFile } from "./useCodeNavigation";
 import { useCodeSession } from "./useCodeSession";
@@ -31,14 +32,6 @@ export type WorktreeCodePaneProps = {
    * strip.
    */
   navigationClient?: Client<typeof CodeNavigationService>;
-  /**
-   * The session whose worktree this is. Unused since the strip follows the pane's `CodeSession`
-   * rather than the session's `WatchCodeIndex`.
-   *
-   * TODO: remove, together with the `sessionId` that `SessionMainPane` and the Cypress pane
-   * driver pass.
-   */
-  sessionId?: string;
 };
 
 /** `Index loading — <phase> <n>%`: what a query the loading index holds shows. */
@@ -127,7 +120,7 @@ export function WorktreeCodePane({
               selected={selected}
               onNavigate={navigable ? nav.navigate : undefined}
               onHover={navigable ? nav.dwell : undefined}
-              isDefinable={navigable ? nav.isDefinable : undefined}
+              definable={navigable ? nav.definable : undefined}
             />
           </section>
           {nav.hover && (
@@ -156,12 +149,12 @@ function FilePreview({
   selected,
   onNavigate,
   onHover,
-  isDefinable,
+  definable,
 }: {
   selected: SelectedFile | null;
   onNavigate?: (at: CodePosition) => void;
-  onHover?: (at: CodePosition, anchor: HTMLElement) => void;
-  isDefinable?: (at: CodePosition) => boolean;
+  onHover?: (at: CodePosition) => void;
+  definable?: DefinableSource;
 }) {
   if (selected === null) {
     return <p className="text-sm text-muted-foreground">Select a file to preview</p>;
@@ -178,7 +171,7 @@ function FilePreview({
       relPath={selected.relPath}
       onNavigate={onNavigate}
       onHover={onHover}
-      isDefinable={isDefinable}
+      definable={definable}
       focusLine={selected.focusLine}
     />
   );

@@ -4,14 +4,14 @@
 use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_service::proto::code_navigation::code_query_answer::Result as Answered;
-use tddy_service::proto::code_navigation::{
-    CodeQuery, CodeQueryKind, Definability, DefinitionResponse, HoverResponse, ProbeAnswer,
-    ReferencesResponse,
-};
+use tddy_service::proto::code_navigation::{CodeQuery, CodeQueryKind, Definability, ProbeAnswer};
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tonic::transport::Channel;
 
-use crate::code_navigation::{index_position, web_location, web_state};
+use crate::code_navigation::convert::{
+    index_position, web_definition, web_hover, web_locations, web_references,
+};
+use crate::code_navigation::position_query::PositionQuery;
 
 /// What a query asks the index.
 #[derive(Clone, Copy)]
@@ -72,65 +72,43 @@ pub(super) async fn ask_index(
     workspace_root: String,
     query: &Query,
 ) -> Result<Reply, tonic::Status> {
-    let file = query.file.clone();
-    let position = query.position;
-    let loading = |state: index::IndexState| state == index::IndexState::Loading;
+    let asked = PositionQuery {
+        workspace_root,
+        file: query.file.clone(),
+        position: query.position,
+    };
     Ok(match query.kind {
         Kind::Hover => {
-            let answer = client
-                .hover(index::HoverRequest {
-                    workspace_root,
-                    file,
-                    position,
-                })
-                .await?
-                .into_inner();
-            if loading(answer.state()) {
-                Reply::Loading
-            } else {
-                Reply::Answer(Answered::Hover(HoverResponse {
-                    state: web_state(answer.state()) as i32,
-                    markdown: answer.markdown,
-                }))
-            }
+            let answer = asked.hover(&mut client).await?;
+            settled(answer.state(), || Answered::Hover(web_hover(answer)))
         }
-        Kind::Definition | Kind::Probe => {
-            let answer = client
-                .definition(index::DefinitionRequest {
-                    workspace_root,
-                    file,
-                    position,
-                })
-                .await?
-                .into_inner();
-            match query.kind {
-                Kind::Probe => Reply::Answer(Answered::Probe(probe_answer(answer))),
-                _ if loading(answer.state()) => Reply::Loading,
-                _ => Reply::Answer(Answered::Definition(DefinitionResponse {
-                    state: web_state(answer.state()) as i32,
-                    locations: answer.locations.into_iter().map(web_location).collect(),
-                })),
-            }
+        Kind::Definition => {
+            let answer = asked.definition(&mut client).await?;
+            settled(answer.state(), || {
+                Answered::Definition(web_definition(answer))
+            })
         }
         Kind::References => {
-            let answer = client
-                .references(index::ReferencesRequest {
-                    workspace_root,
-                    file,
-                    position,
-                })
-                .await?
-                .into_inner();
-            if loading(answer.state()) {
-                Reply::Loading
-            } else {
-                Reply::Answer(Answered::References(ReferencesResponse {
-                    state: web_state(answer.state()) as i32,
-                    locations: answer.locations.into_iter().map(web_location).collect(),
-                }))
-            }
+            let answer = asked.references(&mut client).await?;
+            settled(answer.state(), || {
+                Answered::References(web_references(answer))
+            })
+        }
+        Kind::Probe => {
+            let answer = asked.definition(&mut client).await?;
+            Reply::Answer(Answered::Probe(probe_answer(answer)))
         }
     })
+}
+
+/// An answer the index gave in `state`: not final while it is loading, so the query waits;
+/// otherwise the pane's answer.
+fn settled(state: index::IndexState, answered: impl FnOnce() -> Answered) -> Reply {
+    if state == index::IndexState::Loading {
+        Reply::Loading
+    } else {
+        Reply::Answer(answered())
+    }
 }
 
 /// Whether a definition answer gives the pane somewhere to go: `UNKNOWN` while the index loads,
@@ -149,6 +127,6 @@ fn probe_answer(answer: index::DefinitionResponse) -> ProbeAnswer {
     };
     ProbeAnswer {
         definability: definability as i32,
-        locations: answer.locations.into_iter().map(web_location).collect(),
+        locations: web_locations(answer.locations),
     }
 }

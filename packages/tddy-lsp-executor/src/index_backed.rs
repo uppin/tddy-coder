@@ -16,8 +16,9 @@
 //! zero-based LSP positions in and out, `file://` URIs, the same top-level keys. The coordinate
 //! translation to the index's one-based byte positions is this module's. One addition: a
 //! definition, references or hover answer given while the index is still loading its crate graph
-//! carries `"index": "loading"` and a `note` beside the tool's own (empty) key, so the agent does not
-//! read "not loaded yet" as "nothing there".
+//! carries `"index": "loading"` and a `note` beside the tool's own key — that an empty answer is not
+//! final, or that one which found something may be incomplete — so the agent does not read "not
+//! loaded yet" as "nothing there".
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -74,7 +75,7 @@ fn message_of(status: tonic::Status) -> String {
 impl LspExecutor for IndexLspExecutor {
     /// Whether the worktree holds a Rust workspace, the one language the index serves.
     fn is_available(&self, repo_dir: &Path) -> bool {
-        repo_dir.join("Cargo.toml").is_file()
+        tddy_index_daemon::is_rust_workspace(repo_dir)
     }
 
     fn diagnostics(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
@@ -110,17 +111,21 @@ impl LspExecutor for IndexLspExecutor {
 
     fn definition(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
         let (locations, state) = self.navigate(repo_dir, query, Navigation::Definition)?;
+        let found_nothing = locations.is_empty();
         Ok(noting_the_index_state(
             json!({ "locations": locations }),
             state,
+            found_nothing,
         ))
     }
 
     fn references(&self, repo_dir: &Path, query: &LspQuery) -> Result<Value, String> {
         let (locations, state) = self.navigate(repo_dir, query, Navigation::References)?;
+        let found_nothing = locations.is_empty();
         Ok(noting_the_index_state(
             json!({ "references": locations }),
             state,
+            found_nothing,
         ))
     }
 
@@ -139,9 +144,11 @@ impl LspExecutor for IndexLspExecutor {
         })?
         .into_inner();
         let state = answered.state();
+        let found_nothing = answered.markdown.is_none();
         Ok(noting_the_index_state(
             json!({ "hover": answered.markdown }),
             state,
+            found_nothing,
         ))
     }
 
@@ -240,7 +247,7 @@ impl IndexLspExecutor {
         let request = self.position_request(repo_dir, query)?;
         let answered = block_on(async {
             let mut client = self.client().await?;
-            match navigation {
+            let answered = match navigation {
                 Navigation::Definition => client
                     .definition(code_index::DefinitionRequest {
                         workspace_root: request.workspace_root,
@@ -248,10 +255,7 @@ impl IndexLspExecutor {
                         position: request.position,
                     })
                     .await
-                    .map(|answer| {
-                        let answer = answer.into_inner();
-                        (answer.state(), answer.locations)
-                    }),
+                    .map(|answer| answer.into_inner().into_state_and_locations()),
                 Navigation::References => client
                     .references(code_index::ReferencesRequest {
                         workspace_root: request.workspace_root,
@@ -259,12 +263,9 @@ impl IndexLspExecutor {
                         position: request.position,
                     })
                     .await
-                    .map(|answer| {
-                        let answer = answer.into_inner();
-                        (answer.state(), answer.locations)
-                    }),
-            }
-            .map_err(message_of)
+                    .map(|answer| answer.into_inner().into_state_and_locations()),
+            };
+            answered.map_err(message_of)
         })?;
         let (state, locations) = answered;
         let mut columns = Columns::within(repo_dir);
@@ -276,17 +277,49 @@ impl IndexLspExecutor {
     }
 }
 
-/// What a loading answer tells the agent beside its empty result.
-const THE_INDEX_IS_STILL_LOADING: &str =
+/// A navigation answer's locations, and the state the index gave them in — read the same way
+/// whichever navigation it answers.
+trait LocationsAnswer {
+    fn into_state_and_locations(self) -> (code_index::IndexState, Vec<code_index::CodeLocation>);
+}
+
+impl LocationsAnswer for code_index::DefinitionResponse {
+    fn into_state_and_locations(self) -> (code_index::IndexState, Vec<code_index::CodeLocation>) {
+        (self.state(), self.locations)
+    }
+}
+
+impl LocationsAnswer for code_index::ReferencesResponse {
+    fn into_state_and_locations(self) -> (code_index::IndexState, Vec<code_index::CodeLocation>) {
+        (self.state(), self.locations)
+    }
+}
+
+/// What a loading answer with nothing in it tells the agent.
+const AN_EMPTY_ANSWER_WHILE_LOADING: &str =
     "The code index is still loading, so this empty answer is not final; ask again once it is ready.";
 
+/// What a loading answer that found something tells the agent.
+const A_PARTIAL_ANSWER_WHILE_LOADING: &str =
+    "The code index is still loading, so this answer may be incomplete; ask again once it is ready.";
+
 /// `answer` as the tool returns it: unchanged, unless the index gave it while loading — then it also
-/// says so (`"index": "loading"`) and that the answer is not final (`note`).
-fn noting_the_index_state(mut answer: Value, state: code_index::IndexState) -> Value {
+/// says so (`"index": "loading"`) with a `note`: that the answer is not final when `found_nothing`,
+/// otherwise that it may be incomplete.
+fn noting_the_index_state(
+    mut answer: Value,
+    state: code_index::IndexState,
+    found_nothing: bool,
+) -> Value {
     if state == code_index::IndexState::Loading {
+        let note = if found_nothing {
+            AN_EMPTY_ANSWER_WHILE_LOADING
+        } else {
+            A_PARTIAL_ANSWER_WHILE_LOADING
+        };
         if let Some(fields) = answer.as_object_mut() {
             fields.insert("index".to_string(), json!("loading"));
-            fields.insert("note".to_string(), json!(THE_INDEX_IS_STILL_LOADING));
+            fields.insert("note".to_string(), json!(note));
         }
     }
     answer

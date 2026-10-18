@@ -28,8 +28,8 @@ use tddy_code_restructuring::{Overlay, Resolution, Result};
 use tddy_lsp::client::LspClient;
 use tokio_util::sync::CancellationToken;
 
-use crate::index::SharedPlanStore;
 use crate::operations::{note_event, EventSender};
+use crate::plan_flush::SharedPlanStore;
 use crate::proto::code_index::{restructure_event, OperationApplied, RestructureEvent, RunOutcome};
 
 /// The plan a run executes: the store that holds it, and what it is held under.

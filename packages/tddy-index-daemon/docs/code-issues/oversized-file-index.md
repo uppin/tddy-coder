@@ -14,6 +14,7 @@
 |---|---|---|
 | 2026-10-06 | 508 | first detection, on #591. 491 → 508 (+17): `WorkspaceIndex::wait_heartbeat`, `with_wait_heartbeat` and the `wait_heartbeat` field, carried so a run queued on a root can beat at the host's cadence. The logic of the heartbeat lives in `operations.rs` (`hold_saying_so`) and `tddy-code-restructuring`; only the field and its accessors are here. Split deferred (see below) |
 | 2026-10-06 | 522 | re-measure after #591 rebased onto `#sharpen` 3/8 (`spawn-record`, `a5735bd9`): 508 → 522 (+14), the `spawn_recorder` method the parent node added. #591's own +17 is unchanged; the total over the pre-`#sharpen` baseline is +31. Still over budget; the split stays deferred |
+| 2026-10-18 | 458 | `feat/code-index-warm-on-demand` (code index warms on demand): 522 → 532 (+10, the `signals: RootSignals` field, its accessor and two call sites), then offset at pr-wrap 3.5 by an engine move (`restructure` `move_item` ×2, `reexport: none`, no hand edits) of the plan write-back seam — `PLAN_FLUSH_DEBOUNCE`, `PLAN_FLUSH_TICK`, `SharedPlanStore`, `PlanStores`, `flush_eventually` — into the new private module `plan_flush.rs` (84 lines). Final: **458**, under the 500 budget. Record left open for the developer to close at wrap |
 
 ## What the gate found
 

@@ -9,111 +9,53 @@
  *
  * All RPC flows through the in-memory backend. The host is `CodeIndexHost`, a fake of the daemon's
  * `CodeSession` handler: it records every frame the pane sends, holds queries while loading, and
- * the test releases them with `finishLoading()`, so held → answered is deterministic.
+ * the test releases them with `finishLoading()` / `failLoading()`, so held → answered is
+ * deterministic. What a dropped session does is `WorktreeCodePaneReconnect.cy.tsx`'s.
  */
 
 import "../../src/index.css";
-import {
-  aCodeIndexHost,
-  aCodeLocation,
-  anIndexLoading,
-  anIndexReady,
-  type AskedQuery,
-  type CodeIndexHost,
-  type IndexPhase,
-  type OpenedWorktree,
-} from "../support/rpc/codeSessionBackend";
+import { anIndexLoading, anIndexReady } from "../support/rpc/codeSessionBackend";
+import { expectTheHost } from "../support/rpc/codeSessionAssertions";
 import { aCodePaneOn, THE_WORKTREE } from "../support/drivers/worktreeCodePaneDriver";
 import { worktreeCodePanePage } from "../support/pages/worktreeCodePanePage";
+import {
+  AREA_TYPE,
+  DEFINITION_LINE,
+  FETCHING_20,
+  INDEXING_38,
+  INDEXING_61,
+  MAIN,
+  THE_CALL_TO_AREA,
+  THE_LINE_DEFINING_AREA,
+  aGeometryWorktreeHost,
+  inMainRs,
+} from "../support/fixtures/geometryWorktree";
 
-// ---------------------------------------------------------------------------
-// Fixtures
-// ---------------------------------------------------------------------------
-
-// `src/main.rs` calls `geometry::area` on line 4; the call's `area` starts at byte column 26, and
-// `main` on line 3 starts at byte column 4.
-const MAIN_RS = [
-  "mod geometry;",
-  "",
-  "fn main() {",
-  "    let area = geometry::area(3, 4);",
-  '    println!("{area}");',
-  "}",
-  "",
-].join("\n");
-const THE_CALL_TO_AREA = { line: 4, column: 26 };
-const MAIN = { line: 3, column: 4 };
-
-// `src/geometry.rs` defines `area` on line 120 — far enough down that opening the file at its top
-// would leave the definition out of view, so "scrolled to its line" is observable.
-const DEFINITION_LINE = 120;
-const GEOMETRY_RS = [
-  ...Array.from({ length: DEFINITION_LINE - 1 }, (_, i) => `// geometry note ${i + 1}`),
-  "pub fn area(width: u32, height: u32) -> u32 {",
-  "    width * height",
-  "}",
-  "",
-].join("\n");
-
-const AREA_TYPE = "fn area(width: u32, height: u32) -> u32";
-const THE_DEFINITION_OF_AREA = aCodeLocation("src/geometry.rs", DEFINITION_LINE, 8, 12);
-
-const FETCHING_20: IndexPhase = { title: "Fetching", percentage: 20, message: "crates.io index" };
-const INDEXING_38: IndexPhase = { title: "Indexing", percentage: 38, message: "120/310 (tddy_core)" };
-const INDEXING_61: IndexPhase = { title: "Indexing", percentage: 61, message: "190/310 (tddy_web)" };
-
-/** A host for the two-file worktree whose index knows `area` and nothing about `main`. */
-function aGeometryWorktreeHost(): CodeIndexHost {
-  return aCodeIndexHost()
-    .withFile("src/main.rs", MAIN_RS)
-    .withFile("src/geometry.rs", GEOMETRY_RS)
-    .knowing({
-      at: { relPath: "src/main.rs", ...THE_CALL_TO_AREA },
-      hover: AREA_TYPE,
-      definition: [THE_DEFINITION_OF_AREA],
-    });
+/** The definition of `area` is open in the preview, scrolled to its line and marked as the target. */
+function expectTheDefinitionOfAreaOpen() {
+  worktreeCodePanePage
+    .line(DEFINITION_LINE)
+    .should("be.visible")
+    .and("have.attr", "data-navigation-target", "true")
+    .and("contain.text", THE_LINE_DEFINING_AREA);
 }
 
-// ---------------------------------------------------------------------------
-// Host assertions (retried until the host has seen what is expected)
-// ---------------------------------------------------------------------------
+/** The identifier at `at` is underlined, with a pointer cursor: a plain click goes to its definition. */
+function expectUnderlined(at: { line: number; column: number }) {
+  worktreeCodePanePage
+    .identifier(at.line, at.column)
+    .should("have.attr", "data-definable", "true")
+    .and("have.css", "text-decoration-line", "underline")
+    .and("have.css", "cursor", "pointer");
+}
 
-function expectTheHostToHaveOpened(host: CodeIndexHost, expected: OpenedWorktree[]) {
-  cy.wrap(null).should(() => {
-    expect(host.openedWorktrees()).to.deep.equal(expected);
+/** The identifier at `at` is plain text: not marked definable, not underlined. */
+function expectPlain(at: { line: number; column: number }) {
+  worktreeCodePanePage.identifier(at.line, at.column).should(($identifier) => {
+    expect($identifier).not.to.have.attr("data-definable");
+    expect($identifier).to.have.css("text-decoration-line", "none");
   });
 }
-
-function expectTheHostToHaveBeenAsked(host: CodeIndexHost, expected: AskedQuery[]) {
-  cy.wrap(null).should(() => {
-    expect(host.queriesAsked()).to.have.deep.members(expected);
-  });
-}
-
-function expectTheHostToHaveBeenAskedOfKind(
-  host: CodeIndexHost,
-  kind: AskedQuery["kind"],
-  expected: AskedQuery[],
-) {
-  cy.wrap(null).should(() => {
-    expect(host.queriesAsked().filter((query) => query.kind === kind)).to.deep.equal(expected);
-  });
-}
-
-function expectOpenAndEndedSessions(host: CodeIndexHost, open: number, ended: number) {
-  cy.wrap(null).should(() => {
-    expect({ open: host.openSessionCount(), ended: host.endedSessionCount() }).to.deep.equal({
-      open,
-      ended,
-    });
-  });
-}
-
-const inMainRs = (at: { line: number; column: number }) => ({ relPath: "src/main.rs", ...at });
-
-// ---------------------------------------------------------------------------
-// Setup
-// ---------------------------------------------------------------------------
 
 beforeEach(() => {
   cy.viewport(1280, 900);
@@ -131,7 +73,7 @@ it("opening the pane opens a code session for its worktree and shows live progre
   aCodePaneOn(host).mount();
 
   // Then it opened one code session naming its worktree
-  expectTheHostToHaveOpened(host, [THE_WORKTREE]);
+  expectTheHost(host).toHaveOpened([THE_WORKTREE]);
   // And the strip shows the phase running now with its message
   worktreeCodePanePage.indexStatus().should("have.attr", "data-state", "progress");
   worktreeCodePanePage.indexStatusSummary().should("have.text", "Indexing — Fetching 20%");
@@ -165,14 +107,14 @@ it("shows every phase the index is running at once", () => {
   worktreeCodePanePage.indexStatusSummary().should("have.text", "Indexing — Indexing 38%");
   worktreeCodePanePage.indexStatusDetail().should("have.text", "120/310 (tddy_core)");
   worktreeCodePanePage.indexStatusMore().should("have.text", "+1 more");
-  // And its tooltip lists every phase with its percentage and message
+  // And its tooltip lists every phase, in the order they began, with its percentage and message
   worktreeCodePanePage
     .indexStatusMore()
-    .should("have.attr", "title")
-    .and("include", "Fetching 20%")
-    .and("include", "crates.io index")
-    .and("include", "Indexing 38%")
-    .and("include", "120/310 (tddy_core)");
+    .should(
+      "have.attr",
+      "title",
+      "Fetching 20% — crates.io index\nIndexing 38% — 120/310 (tddy_core)",
+    );
 });
 
 // ---------------------------------------------------------------------------
@@ -188,7 +130,7 @@ it("a hover while the index loads shows it loading and fills in when answered", 
   pane.dwellOn(THE_CALL_TO_AREA);
 
   // Then the pane probed it and asked for its hover
-  expectTheHostToHaveBeenAsked(host, [
+  expectTheHost(host).toHaveBeenAsked([
     { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
     { kind: "HOVER", ...inMainRs(THE_CALL_TO_AREA) },
   ]);
@@ -207,7 +149,40 @@ it("a hover while the index loads shows it loading and fills in when answered", 
 
   // Then the card fills in with the type
   worktreeCodePanePage.hoverLoading().should("not.exist");
-  worktreeCodePanePage.hoverBody().should("be.visible").and("contain.text", AREA_TYPE);
+  worktreeCodePanePage.hoverBody().should("be.visible").and("have.text", AREA_TYPE);
+});
+
+it("closing a loading hover card cancels its query on the host", () => {
+  // Given a hover on the call to `area` held by the loading index
+  const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.dwellOn(THE_CALL_TO_AREA);
+  worktreeCodePanePage.hoverLoading().should("be.visible");
+
+  // When the card is closed
+  pane.closeHoverCard();
+
+  // Then the pane cancelled the held hover, and only it
+  expectTheHost(host).toHaveCancelled([{ kind: "HOVER", ...inMainRs(THE_CALL_TO_AREA) }]);
+  worktreeCodePanePage.hoverCard().should("not.exist");
+});
+
+it("moving to another identifier cancels the held hover of the one before", () => {
+  // Given a hover on the call to `area` held by the loading index
+  const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.dwellOn(THE_CALL_TO_AREA);
+  worktreeCodePanePage.hoverLoading().should("be.visible");
+
+  // When the pointer rests on `main` instead
+  pane.dwellOn(MAIN);
+
+  // Then the pane asked for `main`'s hover and cancelled `area`'s
+  expectTheHost(host).toHaveBeenAskedOfKind("HOVER", [
+    { kind: "HOVER", ...inMainRs(THE_CALL_TO_AREA) },
+    { kind: "HOVER", ...inMainRs(MAIN) },
+  ]);
+  expectTheHost(host).toHaveCancelled([{ kind: "HOVER", ...inMainRs(THE_CALL_TO_AREA) }]);
 });
 
 it("go to definition while the index loads never says no definition found", () => {
@@ -219,7 +194,7 @@ it("go to definition while the index loads never says no definition found", () =
   pane.goToDefinitionOf(THE_CALL_TO_AREA);
 
   // Then the pane asked for it once
-  expectTheHostToHaveBeenAskedOfKind(host, "DEFINITION", [
+  expectTheHost(host).toHaveBeenAskedOfKind("DEFINITION", [
     { kind: "DEFINITION", ...inMainRs(THE_CALL_TO_AREA) },
   ]);
   // And the notice says the index is loading rather than that nothing was found
@@ -229,12 +204,28 @@ it("go to definition while the index loads never says no definition found", () =
   cy.then(() => host.finishLoading());
 
   // Then the definition opens, scrolled to its line, and the notice is gone
-  worktreeCodePanePage
-    .line(DEFINITION_LINE)
-    .should("be.visible")
-    .and("have.attr", "data-navigation-target", "true")
-    .and("contain.text", "pub fn area(width: u32, height: u32) -> u32 {");
+  expectTheDefinitionOfAreaOpen();
   worktreeCodePanePage.notice().should("not.exist");
+});
+
+it("a held go-to-definition reports that the index failed to load, and why", () => {
+  // Given a definition of `area` held by the loading index
+  const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.goToDefinitionOf(THE_CALL_TO_AREA);
+  worktreeCodePanePage.notice().should("have.text", "Index loading — Indexing 38%");
+
+  // When the index fails to load
+  cy.then(() => host.failLoading("rust-analyzer exited: no toolchain"));
+
+  // Then the notice is an alert naming the failure
+  worktreeCodePanePage
+    .notice()
+    .should("have.attr", "role", "alert")
+    .and(
+      "have.text",
+      "Go to definition failed: the code index failed: rust-analyzer exited: no toolchain",
+    );
 });
 
 it("says no definition found only for an answer from a loaded index", () => {
@@ -246,9 +237,7 @@ it("says no definition found only for an answer from a loaded index", () => {
   pane.goToDefinitionOf(MAIN);
 
   // Then the loaded index's empty answer reads as no definition
-  expectTheHostToHaveBeenAskedOfKind(host, "DEFINITION", [
-    { kind: "DEFINITION", ...inMainRs(MAIN) },
-  ]);
+  expectTheHost(host).toHaveBeenAskedOfKind("DEFINITION", [{ kind: "DEFINITION", ...inMainRs(MAIN) }]);
   worktreeCodePanePage.notice().should("have.text", "No definition found");
 });
 
@@ -263,20 +252,85 @@ it("underlines an identifier that has a definition and leaves one without plain"
 
   // When the pointer rests on `main`, which has no definition, and then on the call to `area`
   pane.dwellOn(MAIN);
-  expectTheHostToHaveBeenAskedOfKind(host, "PROBE", [{ kind: "PROBE", ...inMainRs(MAIN) }]);
+  // (waits for `main`'s probe, so the second dwell is a separate one)
+  expectTheHost(host).toHaveBeenAskedOfKind("PROBE", [{ kind: "PROBE", ...inMainRs(MAIN) }]);
   pane.dwellOn(THE_CALL_TO_AREA);
 
   // Then `area` is underlined with a pointer cursor
-  worktreeCodePanePage
-    .identifier(THE_CALL_TO_AREA.line, THE_CALL_TO_AREA.column)
-    .should("have.attr", "data-definable", "true")
-    .and("have.css", "text-decoration-line", "underline")
-    .and("have.css", "cursor", "pointer");
+  expectUnderlined(THE_CALL_TO_AREA);
   // And `main` stays plain
-  worktreeCodePanePage
-    .identifier(MAIN.line, MAIN.column)
-    .should("not.have.attr", "data-definable", "true")
-    .and("have.css", "text-decoration-line", "none");
+  expectPlain(MAIN);
+});
+
+it("probes a position once however often the pointer rests on it", () => {
+  // Given main.rs previewed with the index loaded, and the call to `area` underlined after a dwell
+  const host = aGeometryWorktreeHost().startingAt(anIndexReady());
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.dwellOn(THE_CALL_TO_AREA);
+  expectUnderlined(THE_CALL_TO_AREA);
+
+  // When the pointer rests on it again
+  pane.dwellOn(THE_CALL_TO_AREA);
+
+  // Then its hover was asked twice but its probe only once
+  expectTheHost(host).toHaveBeenAskedOfKind("HOVER", [
+    { kind: "HOVER", ...inMainRs(THE_CALL_TO_AREA) },
+    { kind: "HOVER", ...inMainRs(THE_CALL_TO_AREA) },
+  ]);
+  expectTheHost(host).toHaveBeenAskedOfKind("PROBE", [
+    { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
+  ]);
+});
+
+it("a probe the loading index cannot answer leaves the identifier plain and is asked again once it is ready", () => {
+  // Given main.rs previewed while the index is indexing, the pointer resting on the call to `area`
+  const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.dwellOn(THE_CALL_TO_AREA);
+  // (the held hover follows the probe on the stream, so its probe has been answered by now)
+  worktreeCodePanePage.hoverLoading().should("be.visible");
+
+  // Then the probe's "unknown" leaves `area` plain
+  expectPlain(THE_CALL_TO_AREA);
+
+  // When the index finishes loading and the pointer rests on `area` again
+  cy.then(() => host.finishLoading());
+  worktreeCodePanePage.hoverBody().should("have.text", AREA_TYPE);
+  pane.dwellOn(THE_CALL_TO_AREA);
+
+  // Then it was probed again, and is underlined now
+  expectTheHost(host).toHaveBeenAskedOfKind("PROBE", [
+    { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
+    { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
+  ]);
+  expectUnderlined(THE_CALL_TO_AREA);
+});
+
+it("opening another file cancels the probes in flight, and their late answers underline nothing", () => {
+  // Given main.rs previewed with the index loaded, and a probe of the call to `area` in flight
+  const host = aGeometryWorktreeHost().startingAt(anIndexReady()).holdingProbeAnswers();
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.dwellOn(THE_CALL_TO_AREA);
+  expectTheHost(host).toHaveBeenAskedOfKind("PROBE", [
+    { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
+  ]);
+
+  // When another file is opened, then main.rs again, and only then the probe is answered
+  pane.opening("src/geometry.rs").opening("src/main.rs");
+  cy.then(() => host.answerHeldProbes());
+
+  // Then the pane cancelled the probe when it left the file
+  expectTheHost(host).toHaveCancelled([{ kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) }]);
+  // And a fresh dwell probes `area` again rather than trusting the stale answer
+  pane.dwellOn(THE_CALL_TO_AREA);
+  expectTheHost(host).toHaveBeenAskedOfKind("PROBE", [
+    { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
+    { kind: "PROBE", ...inMainRs(THE_CALL_TO_AREA) },
+  ]);
+  // And `area` stays plain until that probe is answered
+  expectPlain(THE_CALL_TO_AREA);
+  cy.then(() => host.answerHeldProbes());
+  expectUnderlined(THE_CALL_TO_AREA);
 });
 
 it("a plain click on an underlined identifier opens its definition", () => {
@@ -284,21 +338,31 @@ it("a plain click on an underlined identifier opens its definition", () => {
   const host = aGeometryWorktreeHost().startingAt(anIndexReady());
   const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
   pane.dwellOn(THE_CALL_TO_AREA);
-  worktreeCodePanePage
-    .identifier(THE_CALL_TO_AREA.line, THE_CALL_TO_AREA.column)
-    .should("have.attr", "data-definable", "true");
+  expectUnderlined(THE_CALL_TO_AREA);
 
   // When clicking it with no modifier key
   pane.plainClick(THE_CALL_TO_AREA);
 
   // Then the definition opens, scrolled to its line
-  worktreeCodePanePage
-    .line(DEFINITION_LINE)
-    .should("be.visible")
-    .and("have.attr", "data-navigation-target", "true")
-    .and("contain.text", "pub fn area(width: u32, height: u32) -> u32 {");
+  expectTheDefinitionOfAreaOpen();
   // And it went where the probe pointed, without asking for the definition again
-  expectTheHostToHaveBeenAskedOfKind(host, "DEFINITION", []);
+  expectTheHost(host).toHaveBeenAskedOfKind("DEFINITION", []);
+});
+
+it("a plain click on an identifier without a definition asks nothing", () => {
+  // Given main.rs previewed with the index loaded, and `main` probed and found to have no definition
+  const host = aGeometryWorktreeHost().startingAt(anIndexReady());
+  const pane = aCodePaneOn(host).mount().previewing("src/main.rs");
+  pane.dwellOn(MAIN);
+  expectTheHost(host).toHaveBeenAskedOfKind("PROBE", [{ kind: "PROBE", ...inMainRs(MAIN) }]);
+
+  // When clicking `main` with no modifier key, and then ctrl-clicking it
+  pane.plainClick(MAIN).goToDefinitionOf(MAIN);
+
+  // Then only the ctrl-click asked for a definition — frames arrive in order on the one stream, so
+  // a definition asked by the plain click would have come first
+  expectTheHost(host).toHaveBeenAskedOfKind("DEFINITION", [{ kind: "DEFINITION", ...inMainRs(MAIN) }]);
+  worktreeCodePanePage.notice().should("have.text", "No definition found");
 });
 
 // ---------------------------------------------------------------------------
@@ -309,11 +373,11 @@ it("closing the pane ends its code session", () => {
   // Given an open pane holding its code session
   const host = aGeometryWorktreeHost().startingAt(anIndexReady());
   const pane = aCodePaneOn(host).mount();
-  expectOpenAndEndedSessions(host, 1, 0);
+  expectTheHost(host).toHaveOpenAndEndedSessions(1, 0);
 
   // When the pane closes
   pane.close();
 
   // Then its code session has ended
-  expectOpenAndEndedSessions(host, 0, 1);
+  expectTheHost(host).toHaveOpenAndEndedSessions(0, 1);
 });

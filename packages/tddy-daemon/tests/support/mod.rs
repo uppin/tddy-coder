@@ -3,11 +3,12 @@
 //! `code_session_acceptance.rs` (the code pane's `CodeSession`).
 //!
 //! - [`AScriptedIndex`] — an in-memory `code_index` server holding **one root's progress**, which the
-//!   test moves (`IDLE` → `LOADING` → `READY`) and which every progress RPC follows: `WatchRoot`
-//!   forwards it until the caller leaves, `Warm` forwards it until `READY`. Its navigation answers
-//!   follow the same state — empty and `LOADING` until the root is ready, the canned definition of
-//!   `foo` and its hover text once it is — so "held until ready" is behaviour of the fake, not a
-//!   script of canned replies.
+//!   test moves (`IDLE` → `LOADING` → `READY`, or `FAILED`) and which every progress RPC follows:
+//!   `WatchRoot` forwards it until the caller leaves (or the test stops it following), `Warm`
+//!   forwards it until `READY`. Its navigation answers follow the same state — empty and `LOADING`
+//!   until the root is ready, empty and `FAILED` once it failed, and once it is ready the canned
+//!   definition, references and hover of the call to `foo` (nothing anywhere else) — so "held until
+//!   ready" is behaviour of the fake, not a script of canned replies.
 //! - [`AnIndexDaemonHost`] — real process management over a stand-in, as in
 //!   `code_navigation_acceptance.rs`: the registry starts a shell script that points the socket it
 //!   was told to bind at the fake.
@@ -15,8 +16,8 @@
 //!   holding a crate, and a session whose `.session.yaml` records that worktree, under the user
 //!   [`TEST_TOKEN`] authenticates.
 //!
-//! Each suite uses a subset of what is here.
-#![allow(dead_code)]
+//! Each suite uses a subset of what is here; an item only one suite uses carries a targeted
+//! `#[allow(dead_code)]` naming that suite, so a helper neither uses surfaces as dead.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -45,8 +46,12 @@ pub use tddy_worktree_service::test_util::TEST_TOKEN;
 /// Long enough that only a stand-in that never binds could exhaust it.
 pub const A_READINESS_BUDGET_NOTHING_SHOULD_WAIT_OUT: Duration = Duration::from_secs(60);
 
-/// Per awaited event: everything here is a local socket round-trip to a fake, not an index load.
-pub const AN_EVENT_IS_DUE_WITHIN: Duration = Duration::from_secs(30);
+/// Per awaited event: everything here is a local socket round-trip to a fake, not an index load —
+/// except the first, which waits on the registry starting the stand-in index daemon (a `sh`
+/// process). The figure is headroom for a loaded CI machine, not an expected wait: at 5 s the
+/// code-session suite timed out 2–9 of 17 tests on a host at load ~100, and a bound only delays a
+/// failure's report, never a pass.
+pub const AN_EVENT_IS_DUE_WITHIN: Duration = Duration::from_secs(15);
 
 /// The session the header watches.
 pub const THE_SESSION: &str = "019d105b-ac0f-78d3-9a89-409731145a01";
@@ -62,6 +67,8 @@ pub struct AProjectWithASession {
     /// The listed worktree, canonical.
     pub worktree_path: String,
     pub worktree_service: tddy_worktree_service::WorktreeServiceImpl,
+    /// [`THE_SESSION`]'s directory, holding its `.session.yaml`.
+    session_dir: PathBuf,
     _data_dir: TempDir,
     _repos: TempDir,
 }
@@ -144,6 +151,7 @@ pub fn a_project_with_a_session_on_its_worktree() -> AProjectWithASession {
         project_id,
         worktree_path,
         worktree_service,
+        session_dir,
         _data_dir: data_dir,
         _repos: repos,
     }
@@ -153,15 +161,50 @@ impl AProjectWithASession {
     pub fn worktree(&self) -> PathBuf {
         PathBuf::from(&self.worktree_path)
     }
+
+    /// The worktree no longer holds a crate: its `Cargo.toml` is gone, so it is not a Rust
+    /// worktree.
+    pub fn without_a_cargo_manifest(self) -> Self {
+        std::fs::remove_file(self.worktree().join("Cargo.toml")).expect("remove the manifest");
+        self
+    }
+
+    /// [`THE_SESSION`]'s record names no worktree — as for a session whose worktree is still being
+    /// created.
+    #[allow(dead_code)] // code_index_warmup_acceptance only
+    pub fn whose_session_has_no_worktree_yet(self) -> Self {
+        tddy_core::write_session_metadata(
+            &self.session_dir,
+            &a_session_metadata()
+                .with_session_id(THE_SESSION)
+                .with_project_id(&self.project_id)
+                .build(),
+        )
+        .expect("the session's .session.yaml");
+        self
+    }
+
+    /// [`THE_SESSION`]'s `.session.yaml` holds something that is not a session record.
+    #[allow(dead_code)] // code_index_warmup_acceptance only
+    pub fn whose_session_record_is_unreadable(self) -> Self {
+        std::fs::write(
+            self.session_dir.join(".session.yaml"),
+            "this: [is not a session record",
+        )
+        .expect("overwrite the session's .session.yaml");
+        self
+    }
 }
 
 /// A git repository nobody registered — a real checkout, just not one of the project's.
+#[allow(dead_code)] // code_session_acceptance only
 pub fn a_checkout_outside_the_project() -> TempDir {
     let elsewhere = TempDir::new().expect("an unrelated directory");
     git(elsewhere.path(), &["init", "-q"]);
     elsewhere
 }
 
+#[allow(dead_code)] // used by the fixture, and directly by code_session_acceptance only
 pub fn canonical(path: &Path) -> String {
     path.canonicalize()
         .expect("an existing path")
@@ -277,6 +320,7 @@ pub fn the_web_sees_ready() -> CodeIndexProgress {
 }
 
 /// [`the_index_failed`] as the web receives it.
+#[allow(dead_code)] // code_index_warmup_acceptance only
 pub fn the_web_sees_failed(reason: &str) -> CodeIndexProgress {
     CodeIndexProgress {
         state: CodeIndexState::Failed as i32,
@@ -289,8 +333,45 @@ pub fn the_web_sees_failed(reason: &str) -> CodeIndexProgress {
 // The answers a loaded index gives about the call to `foo`
 
 /// The call to `foo` on line 2 of `src/main.rs` — one-based line, one-based byte column.
+#[allow(dead_code)] // code_session_acceptance only
 pub fn the_call_to_foo() -> SourcePosition {
     SourcePosition { line: 2, column: 5 }
+}
+
+/// [`the_call_to_foo`] in the index's terms.
+pub fn the_index_s_call_to_foo() -> index::SourcePosition {
+    index::SourcePosition { line: 2, column: 5 }
+}
+
+/// The `fn` keyword on line 1 of `src/main.rs`: nothing is defined there.
+#[allow(dead_code)] // code_session_acceptance only
+pub fn the_fn_keyword() -> SourcePosition {
+    SourcePosition { line: 1, column: 1 }
+}
+
+/// Where a loaded index finds `foo` referenced: the call on line 2 of `src/main.rs`, bytes 5 to 8.
+fn the_index_s_reference_to_foo() -> index::CodeLocation {
+    index::CodeLocation {
+        file: "src/main.rs".to_string(),
+        range: Some(index::SourceRange {
+            start: Some(index::SourcePosition { line: 2, column: 5 }),
+            end: Some(index::SourcePosition { line: 2, column: 8 }),
+        }),
+        outside_root: false,
+    }
+}
+
+/// [`the_index_s_reference_to_foo`] as the web receives it.
+#[allow(dead_code)] // code_session_acceptance only
+pub fn the_web_s_reference_to_foo() -> CodeLocation {
+    CodeLocation {
+        rel_path: "src/main.rs".to_string(),
+        range: Some(SourceRange {
+            start: Some(SourcePosition { line: 2, column: 5 }),
+            end: Some(SourcePosition { line: 2, column: 8 }),
+        }),
+        outside_worktree: false,
+    }
 }
 
 /// Where a loaded index says `foo` is defined: `src/lib.rs`, line 11, bytes 4 to 7.
@@ -312,6 +393,7 @@ pub fn the_index_s_location_of_foo() -> index::CodeLocation {
 }
 
 /// [`the_index_s_location_of_foo`] as the web receives it.
+#[allow(dead_code)] // code_session_acceptance only
 pub fn the_web_s_location_of_foo() -> CodeLocation {
     CodeLocation {
         rel_path: "src/lib.rs".to_string(),
@@ -340,6 +422,9 @@ pub const THE_INDEX_S_HOVER_OF_FOO: &str = "```rust\nfn foo()\n```";
 #[derive(Clone)]
 pub struct AScriptedIndex {
     root: Arc<watch::Sender<index::IndexProgress>>,
+    /// Whether `WatchRoot` streams keep following the root; [`AScriptedIndex::stops_following`]
+    /// ends them all.
+    following: Arc<watch::Sender<bool>>,
     warms_asked: Arc<Mutex<Vec<index::WarmRequest>>>,
     watches_asked: Arc<Mutex<Vec<index::WatchRootRequest>>>,
     definitions_asked: Arc<Mutex<Vec<index::DefinitionRequest>>>,
@@ -350,6 +435,7 @@ pub struct AScriptedIndex {
 pub fn a_scripted_index() -> AScriptedIndex {
     AScriptedIndex {
         root: Arc::new(watch::channel(the_root_is_idle()).0),
+        following: Arc::new(watch::channel(true).0),
         warms_asked: Arc::default(),
         watches_asked: Arc::default(),
         definitions_asked: Arc::default(),
@@ -363,18 +449,27 @@ impl AScriptedIndex {
         self.root.send_replace(progress);
     }
 
+    /// Every `WatchRoot` stream ends — as when the index daemon stops following the root.
+    #[allow(dead_code)] // code_session_acceptance only
+    pub fn stops_following(&self) {
+        self.following.send_replace(false);
+    }
+
     pub fn warms_it_was_asked_for(&self) -> Vec<index::WarmRequest> {
         self.warms_asked.lock().expect("the request log").clone()
     }
 
+    #[allow(dead_code)] // code_index_warmup_acceptance only
     pub fn roots_it_was_asked_to_watch(&self) -> Vec<index::WatchRootRequest> {
         self.watches_asked.lock().expect("the request log").clone()
     }
 
+    #[allow(dead_code)] // code_session_acceptance only
     pub fn hovers_it_was_asked(&self) -> Vec<index::HoverRequest> {
         self.hovers_asked.lock().expect("the request log").clone()
     }
 
+    #[allow(dead_code)] // code_session_acceptance only
     pub fn definitions_it_was_asked(&self) -> Vec<index::DefinitionRequest> {
         self.definitions_asked
             .lock()
@@ -382,28 +477,35 @@ impl AScriptedIndex {
             .clone()
     }
 
-    fn is_ready(&self) -> bool {
-        self.root.borrow().state == index::IndexState::Ready as i32
-    }
-
-    fn state(&self) -> i32 {
-        if self.is_ready() {
-            index::IndexState::Ready as i32
-        } else {
-            // Asking about a root nothing holds starts its server, which then loads.
-            index::IndexState::Loading as i32
+    /// The state a navigation answer carries: the root's own once it is `READY` or `FAILED`;
+    /// otherwise `LOADING`, since asking about a root nothing holds starts its server, which then
+    /// loads.
+    fn state(&self) -> index::IndexState {
+        match self.root.borrow().state() {
+            index::IndexState::Ready => index::IndexState::Ready,
+            index::IndexState::Failed => index::IndexState::Failed,
+            _ => index::IndexState::Loading,
         }
     }
 
+    /// Whether a loaded index knows the symbol at `position` of `file`: only the call to `foo`.
+    fn knows(&self, file: &str, position: Option<index::SourcePosition>) -> bool {
+        self.state() == index::IndexState::Ready
+            && file == "src/main.rs"
+            && position == Some(the_index_s_call_to_foo())
+    }
+
     /// The root's progress from its current value on: every change, until the caller leaves —
-    /// or, `until_ready`, until a `READY` message has been sent.
+    /// or, `until_ready`, until a `READY` message has been sent. A `WatchRoot` stream
+    /// (`until_ready` false) also ends when the test stops the index following the root.
     fn follow_the_root(&self, until_ready: bool) -> EventStream<index::IndexProgress> {
         let mut root = self.root.subscribe();
+        let mut following = self.following.subscribe();
         let (tx, rx) = mpsc::channel(16);
         tokio::spawn(async move {
             loop {
                 let current = root.borrow_and_update().clone();
-                let ready = current.state == index::IndexState::Ready as i32;
+                let ready = current.state() == index::IndexState::Ready;
                 if tx.send(Ok(current)).await.is_err() || (until_ready && ready) {
                     return;
                 }
@@ -413,6 +515,7 @@ impl AScriptedIndex {
                             return;
                         }
                     }
+                    _ = following.wait_for(|following| !following), if !until_ready => return,
                     () = tx.closed() => return,
                 }
             }
@@ -460,42 +563,53 @@ impl CodeIndexService for AScriptedIndex {
         &self,
         request: tddy_rpc::Request<index::DefinitionRequest>,
     ) -> Result<tddy_rpc::Response<index::DefinitionResponse>, tddy_rpc::Status> {
-        self.definitions_asked
-            .lock()
-            .expect("the request log")
-            .push(request.into_inner());
-        let locations = if self.is_ready() {
+        let request = request.into_inner();
+        let locations = if self.knows(&request.file, request.position) {
             vec![the_index_s_location_of_foo()]
         } else {
             vec![]
         };
+        self.definitions_asked
+            .lock()
+            .expect("the request log")
+            .push(request);
         Ok(tddy_rpc::Response::new(index::DefinitionResponse {
             locations,
-            state: self.state(),
+            state: self.state() as i32,
         }))
     }
 
     async fn references(
         &self,
-        _request: tddy_rpc::Request<index::ReferencesRequest>,
+        request: tddy_rpc::Request<index::ReferencesRequest>,
     ) -> Result<tddy_rpc::Response<index::ReferencesResponse>, tddy_rpc::Status> {
-        Err(not_part_of_this_fake())
+        let request = request.into_inner();
+        let locations = if self.knows(&request.file, request.position) {
+            vec![the_index_s_reference_to_foo()]
+        } else {
+            vec![]
+        };
+        Ok(tddy_rpc::Response::new(index::ReferencesResponse {
+            locations,
+            state: self.state() as i32,
+        }))
     }
 
     async fn hover(
         &self,
         request: tddy_rpc::Request<index::HoverRequest>,
     ) -> Result<tddy_rpc::Response<index::HoverResponse>, tddy_rpc::Status> {
+        let request = request.into_inner();
+        let markdown = self
+            .knows(&request.file, request.position)
+            .then(|| THE_INDEX_S_HOVER_OF_FOO.to_string());
         self.hovers_asked
             .lock()
             .expect("the request log")
-            .push(request.into_inner());
-        let markdown = self
-            .is_ready()
-            .then(|| THE_INDEX_S_HOVER_OF_FOO.to_string());
+            .push(request);
         Ok(tddy_rpc::Response::new(index::HoverResponse {
             markdown,
-            state: self.state(),
+            state: self.state() as i32,
         }))
     }
 
@@ -655,7 +769,19 @@ impl AnIndexDaemonHost {
         self.dir.path().join("fake-index.sock")
     }
 
-    /// The registry an `index_daemon:` section pointing at this host would build.
+    /// The registry an `index_daemon:` section pointing at this host would build, with its index
+    /// daemon already started — as once anything has asked it something.
+    #[allow(dead_code)] // code_index_warmup_acceptance only
+    pub async fn a_running_registry(&self) -> IndexDaemonRegistry {
+        let registry = self.registry();
+        registry
+            .get_or_spawn()
+            .await
+            .expect("the stand-in index daemon starts");
+        registry
+    }
+
+    /// The registry an `index_daemon:` section pointing at this host would build. Starts nothing.
     pub fn registry(&self) -> IndexDaemonRegistry {
         IndexDaemonRegistry::new(
             IndexDaemonSpawn {

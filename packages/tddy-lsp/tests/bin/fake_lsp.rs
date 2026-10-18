@@ -54,7 +54,8 @@
 //!   it waits — as `--answers-in-its-workspace` says when combined with it. Wins over
 //!   `--loads-crate-graph`.
 //!
-//! All three are off unless asked for, so every other mode is byte-identical to what it was.
+//! Every mode above is off unless asked for, so adding one leaves a server started without it
+//! byte-identical to what it was.
 //!
 //! Two methods model failure modes a real rust-analyzer has and the fixed replies above do
 //! not: `textDocument/codeAction` answers with a JSON-RPC `ContentModified` error, and

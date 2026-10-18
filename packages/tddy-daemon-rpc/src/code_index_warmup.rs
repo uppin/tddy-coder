@@ -19,7 +19,7 @@ use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeI
 
 use tddy_session_lifecycle::connection_service::SessionWorktreeObserver;
 
-use crate::code_navigation::IndexChannelSource;
+use crate::code_navigation::{index_daemon_error, IndexChannelSource};
 
 /// Starts warming `worktree`'s code index for `session_id` in the background.
 ///
@@ -33,7 +33,7 @@ pub fn warm_for_session(
     worktree: &Path,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let source = Arc::clone(index_daemon?);
-    if !worktree.join("Cargo.toml").is_file() {
+    if !tddy_index_daemon::is_rust_workspace(worktree) {
         return None;
     }
     let session_id = session_id.to_string();
@@ -51,25 +51,35 @@ async fn warm(source: &dyn IndexChannelSource, workspace_root: String) -> Result
     let channel = source
         .connect()
         .await
-        .map_err(|err| format!("index daemon: {err}"))?;
-    let mut stream = CodeIndexServiceClient::new(channel)
+        .map_err(|err| index_daemon_error(&err))?;
+    let stream = CodeIndexServiceClient::new(channel)
         .warm(index::WarmRequest { workspace_root })
         .await
-        .map_err(|status| format!("warm: {}", status.message()))?
+        .map_err(warm_failed)?
         .into_inner();
-    let mut ready = false;
-    while let Some(update) = stream
-        .message()
-        .await
-        .map_err(|status| format!("warm: {}", status.message()))?
-    {
-        ready = update.ready;
-    }
-    if ready {
+    if drain_warm(stream).await.map_err(warm_failed)? {
         Ok(())
     } else {
         Err("warm: the index daemon ended the stream before the index was ready".to_string())
     }
+}
+
+/// Reads a `Warm` stream to its end — the warm is the trigger, its messages are not the progress
+/// anyone reads — and answers whether its last message said the index is ready. An `Err` is the
+/// status the stream broke off with.
+pub(crate) async fn drain_warm(
+    mut stream: tonic::Streaming<index::IndexProgress>,
+) -> Result<bool, tonic::Status> {
+    let mut ready = false;
+    while let Some(update) = stream.message().await? {
+        ready = update.ready;
+    }
+    Ok(ready)
+}
+
+/// A warm the index daemon refused or broke off, as one line.
+fn warm_failed(status: tonic::Status) -> String {
+    format!("warm: {}", status.message())
 }
 
 /// Starts a session's warm-up when its worktree appears: the daemon's end of the session host's

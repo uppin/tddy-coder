@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
-import type { CodeLocationRef } from "./codeNavigationApi";
+import type { CodeLocationRef, CodePosition } from "./codeNavigationApi";
 import { renderSimpleMarkdown } from "./renderSimpleMarkdown";
 import type { Hover, LocationList, Notice } from "./useCodeNavigation";
 
@@ -26,23 +26,100 @@ type CardPosition = { left: number; top: number };
 
 /**
  * Where the card goes inside its containing block (the preview's positioned wrapper): just below
- * its anchor, flipped above when it would run past the bottom and there is room above, and shifted
- * left when it would run past the right edge — never past the anchor's own left edge.
+ * the identifier at `at`, flipped above when it would run past the bottom and there is room above,
+ * and shifted left when it would run past the right edge — never past the identifier's own left
+ * edge. The identifier is looked up afresh each time, so a preview that re-rendered it is followed;
+ * `null` when it is not shown (the card keeps where it was).
  */
-function positionBeside(card: HTMLElement, anchor: HTMLElement): CardPosition | null {
+function positionBeside(card: HTMLElement, at: CodePosition): CardPosition | null {
   const container = card.offsetParent;
   if (container === null) return null;
+  const anchor = container.querySelector<HTMLElement>(
+    `[data-identifier-at="${at.line}:${at.column}"]`,
+  );
+  if (anchor === null) return null;
   const box = container.getBoundingClientRect();
-  const at = anchor.getBoundingClientRect();
+  const word = anchor.getBoundingClientRect();
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
   const width = card.offsetWidth;
   const height = card.offsetHeight;
 
-  const below = at.bottom - box.top + ANCHOR_GAP_PX;
-  const above = at.top - box.top - ANCHOR_GAP_PX - height;
+  const below = word.bottom - box.top + ANCHOR_GAP_PX;
+  const above = word.top - box.top - ANCHOR_GAP_PX - height;
   const top = below + height > box.height && above >= 0 ? above : below;
-  const left = Math.max(0, Math.min(at.left - box.left, box.width - rem - width));
+  const left = Math.max(0, Math.min(word.left - box.left, box.width - rem - width));
   return { left, top };
+}
+
+/**
+ * Where the card in `cardRef` goes beside the identifier at `at`: `null` until it is first laid
+ * out. Runs after every render, since the card's size follows its content (loading text, then
+ * markdown).
+ */
+function useCardPosition(
+  cardRef: RefObject<HTMLDivElement | null>,
+  at: CodePosition,
+): CardPosition | null {
+  const [position, setPosition] = useState<CardPosition | null>(null);
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (card === null) return;
+    const next = positionBeside(card, at);
+    if (next === null) return;
+    setPosition((prev) =>
+      prev !== null && prev.left === next.left && prev.top === next.top ? prev : next,
+    );
+  });
+  return position;
+}
+
+/** The card's content: `loadingText` while the index holds the query, then the markdown, scrolling. */
+function HoverCardBody({ content, loadingText }: { content: Hover["content"]; loadingText: string }) {
+  if (content.kind === "loading") {
+    return (
+      <p data-testid="worktree-code-hover-loading" className="p-2 text-sm text-muted-foreground">
+        {loadingText}
+      </p>
+    );
+  }
+  return (
+    <div
+      data-testid="worktree-code-hover-body"
+      className="min-h-0 flex-1 overflow-auto p-2 text-sm [overflow-wrap:anywhere]"
+    >
+      {renderSimpleMarkdown(content.markdown)}
+    </div>
+  );
+}
+
+/** References / Close, kept in view below the scrolling body. */
+function HoverCardActions({
+  onShowReferences,
+  onClose,
+}: {
+  onShowReferences: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 gap-2 border-t border-border px-2 py-1">
+      <button
+        type="button"
+        data-testid="worktree-code-references-action"
+        className="text-sm underline"
+        onClick={onShowReferences}
+      >
+        References
+      </button>
+      <button
+        type="button"
+        data-testid="worktree-code-hover-close"
+        className="text-sm underline"
+        onClick={onClose}
+      >
+        Close
+      </button>
+    </div>
+  );
 }
 
 /**
@@ -62,18 +139,7 @@ export function HoverCard({
   onClose: () => void;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
-  const [position, setPosition] = useState<CardPosition | null>(null);
-
-  // Runs after every render: the card's size follows its content (loading text, then markdown).
-  useLayoutEffect(() => {
-    const card = cardRef.current;
-    if (card === null) return;
-    const next = positionBeside(card, hover.anchor);
-    if (next === null) return;
-    setPosition((prev) =>
-      prev !== null && prev.left === next.left && prev.top === next.top ? prev : next,
-    );
-  });
+  const position = useCardPosition(cardRef, hover.at);
 
   return (
     <div
@@ -88,36 +154,8 @@ export function HoverCard({
         visibility: position === null ? "hidden" : undefined,
       }}
     >
-      {hover.content.kind === "loading" ? (
-        <p data-testid="worktree-code-hover-loading" className="p-2 text-sm text-muted-foreground">
-          {loadingText}
-        </p>
-      ) : (
-        <div
-          data-testid="worktree-code-hover-body"
-          className="min-h-0 flex-1 overflow-auto p-2 text-sm [overflow-wrap:anywhere]"
-        >
-          {renderSimpleMarkdown(hover.content.markdown)}
-        </div>
-      )}
-      <div className="flex shrink-0 gap-2 border-t border-border px-2 py-1">
-        <button
-          type="button"
-          data-testid="worktree-code-references-action"
-          className="text-sm underline"
-          onClick={onShowReferences}
-        >
-          References
-        </button>
-        <button
-          type="button"
-          data-testid="worktree-code-hover-close"
-          className="text-sm underline"
-          onClick={onClose}
-        >
-          Close
-        </button>
-      </div>
+      <HoverCardBody content={hover.content} loadingText={loadingText} />
+      <HoverCardActions onShowReferences={onShowReferences} onClose={onClose} />
     </div>
   );
 }

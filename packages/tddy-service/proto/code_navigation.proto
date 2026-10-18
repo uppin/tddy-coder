@@ -100,6 +100,9 @@ enum CodeIndexState {
   CODE_INDEX_STATE_READY       = 3;
   // The index could not start, or went away: `CodeIndexProgress.error` says why.
   CODE_INDEX_STATE_FAILED      = 4;
+  // The worktree has no code index at all — it is not a Rust worktree — so nothing will load:
+  // `CodeIndexProgress.error` says why. Distinct from `IDLE`, which is an index about to load.
+  CODE_INDEX_STATE_NONE        = 5;
 }
 
 // One phase the language server is running — `code_index.ActivePhase`.

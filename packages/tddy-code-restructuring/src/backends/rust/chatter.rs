@@ -2,13 +2,16 @@
 //!
 //! Split out of `backends/rust.rs`, which is past its size budget.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 /// What a progress line calls a phase the server never gave a title.
 const UNTITLED_PHASE: &str = "working";
+
+/// The `$/progress` kind that opens a phase — its title arrives only with it.
+const BEGIN: &str = "begin";
 
 /// What a message says of a server that has reported nothing, in place of its words or its phase.
 pub(super) const NOTHING_REPORTED: &str = "nothing reported";
@@ -105,6 +108,11 @@ pub struct ServerChatter {
     /// keyed like the fields above — because a display lists the phases in the order the server
     /// started them.
     in_flight: Vec<(String, ActivePhase)>,
+    /// Tokens that were in flight when the reader feeding this chatter lost sight of some
+    /// notifications, and have not been heard from since: their `end` may have been among the lost
+    /// ones. Dropped from [`Self::in_flight`] once the server says it is quiescent (see
+    /// [`Self::lost_sight`]).
+    unconfirmed: HashSet<String>,
     /// When the server last said anything *new*: a different progress line, a flip of its
     /// quiescence, or a change of its health.
     ///
@@ -154,6 +162,9 @@ impl ServerChatter {
                 changed |= self.quiescent != quiescent;
                 self.quiescent = quiescent;
                 self.reported_status = true;
+                if quiescent {
+                    self.forget_unconfirmed_phases();
+                }
                 if changed {
                     self.changed_at = Some(now);
                 }
@@ -180,8 +191,9 @@ impl ServerChatter {
         let token = token_key(params.get("token")?);
         let value = params.get("value")?;
         let kind = value.get("kind").and_then(Value::as_str)?;
+        self.unconfirmed.remove(&token);
         match kind {
-            "begin" => {
+            BEGIN => {
                 if let Some(title) = value.get("title").and_then(Value::as_str) {
                     self.titles.insert(token.clone(), title.to_string());
                 }
@@ -224,7 +236,7 @@ impl ServerChatter {
                 .shown_at
                 .get(&token)
                 .is_none_or(|at| now.duration_since(*at) >= PROGRESS_INTERVAL);
-        if kind != "begin" && percentage.is_none_or(|pct| pct < 100) && !due {
+        if kind != BEGIN && percentage.is_none_or(|pct| pct < 100) && !due {
             return None;
         }
         self.shown.insert(token.clone(), key);
@@ -247,7 +259,7 @@ impl ServerChatter {
     /// highest percentage the token has reached, so a sub-step without a number does not erase it.
     fn track_in_flight(&mut self, token: &str, kind: &str, phase: &str, value: &Value) {
         let position = match self.in_flight.iter().position(|(key, _)| key == token) {
-            Some(position) if kind != "begin" => position,
+            Some(position) if kind != BEGIN => position,
             found => {
                 if let Some(position) = found {
                     self.in_flight.remove(position);
@@ -270,6 +282,15 @@ impl ServerChatter {
         if let Some(percentage) = value.get("percentage").and_then(Value::as_u64) {
             active.percentage = Some(active.percentage.map_or(percentage, |p| p.max(percentage)));
         }
+    }
+
+    /// Drop every phase whose `end` may have been lost, now that the server says it has nothing
+    /// left to do. Their titles are kept: a token that was in fact still running reappears under
+    /// its own name the next time it reports.
+    fn forget_unconfirmed_phases(&mut self) {
+        let unconfirmed = std::mem::take(&mut self.unconfirmed);
+        self.in_flight
+            .retain(|(token, _)| !unconfirmed.contains(token));
     }
 
     /// Keep `percentage` of `phase` as the furthest the index got, unless it has been further.
@@ -411,6 +432,17 @@ impl ServerChatter {
             .map(|(_, active)| active.clone())
             .collect()
     }
+
+    /// The reader feeding this chatter fell behind the server and lost some notifications.
+    ///
+    /// Any phase in flight may have ended unseen, and without its `end` it would stay in
+    /// [`Self::active_phases`] for the server's life. Each such phase is kept until the server
+    /// next says it is quiescent — by which point a phase that really ended has stopped reporting —
+    /// and then dropped, unless it has reported since the gap, which proves it is still running.
+    pub fn lost_sight(&mut self) {
+        self.unconfirmed
+            .extend(self.in_flight.iter().map(|(token, _)| token.clone()));
+    }
 }
 
 /// A progress token as a map key. The specification allows a string or a number.
@@ -457,6 +489,13 @@ mod tests {
 
     fn end(token: &str) -> Value {
         json!({ "token": token, "value": { "kind": "end" } })
+    }
+
+    fn server_status(quiescent: bool) -> Value {
+        json!({
+            "method": "experimental/serverStatus",
+            "params": { "health": "ok", "quiescent": quiescent }
+        })
     }
 
     fn at(start: Instant, millis: u64) -> Instant {
@@ -581,6 +620,100 @@ mod tests {
             active,
             vec![phase("Indexing", "57/310 (subject)", Some(18))]
         );
+    }
+
+    #[test]
+    fn a_second_begin_on_a_running_token_restarts_its_phase_in_begin_order() {
+        // Given indexing that began, reached 40%, and was followed by fetching
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("index", "Indexing"), t0);
+        chatter.progress_at(
+            &report("index", Some("124/310 (tddy_core)"), Some(40)),
+            at(t0, 1),
+        );
+        chatter.progress_at(&begin("fetch", "Fetching"), at(t0, 2));
+
+        // When the server begins the indexing token again, under a new title
+        chatter.progress_at(&begin("index", "Reindexing"), at(t0, 3));
+
+        // Then it is a fresh phase — no message, no percentage — listed after fetching
+        assert_eq!(
+            chatter.active_phases(),
+            vec![phase("Fetching", "", None), phase("Reindexing", "", None)]
+        );
+    }
+
+    #[test]
+    fn an_active_phase_keeps_its_highest_percentage_when_a_lower_one_follows() {
+        // Given an indexing phase that reached 60%
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("index", "Indexing"), t0);
+        chatter.progress_at(
+            &report("index", Some("186/310 (tddy_core)"), Some(60)),
+            at(t0, 1),
+        );
+
+        // When it reports a lower percentage
+        chatter.progress_at(
+            &report("index", Some("93/310 (tddy_web)"), Some(30)),
+            at(t0, 2),
+        );
+
+        // Then it keeps the 60% it reached, with the latest message
+        assert_eq!(
+            chatter.active_phases(),
+            vec![phase("Indexing", "93/310 (tddy_web)", Some(60))]
+        );
+    }
+
+    #[test]
+    fn a_phase_whose_end_may_have_been_lost_is_dropped_once_the_server_is_quiescent() {
+        // Given fetching in flight when the reader lost sight of some notifications
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("fetch", "Fetching"), t0);
+        chatter.lost_sight();
+
+        // When the server then says it is quiescent
+        chatter.absorb_at(&server_status(true), at(t0, 1));
+
+        // Then fetching is no longer active
+        assert_eq!(chatter.active_phases(), vec![]);
+    }
+
+    #[test]
+    fn a_phase_heard_from_after_a_gap_outlives_quiescence() {
+        // Given fetching and indexing in flight across a gap, and indexing reporting after it
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("fetch", "Fetching"), t0);
+        chatter.progress_at(&begin("index", "Indexing"), at(t0, 1));
+        chatter.lost_sight();
+        chatter.progress_at(
+            &report("index", Some("300/310 (subject)"), Some(97)),
+            at(t0, 2),
+        );
+
+        // When the server then says it is quiescent
+        chatter.absorb_at(&server_status(true), at(t0, 3));
+
+        // Then only the phase that proved itself running is still active
+        assert_eq!(
+            chatter.active_phases(),
+            vec![phase("Indexing", "300/310 (subject)", Some(97))]
+        );
+    }
+
+    #[test]
+    fn a_gap_drops_no_phase_while_the_server_is_still_busy() {
+        // Given fetching in flight when the reader lost sight of some notifications
+        let (mut chatter, t0) = (ServerChatter::unthrottled(), Instant::now());
+        chatter.progress_at(&begin("fetch", "Fetching"), t0);
+        chatter.lost_sight();
+
+        // When the server says it is still busy
+        chatter.absorb_at(&server_status(false), at(t0, 1));
+
+        // Then fetching is still active: nothing says it ended
+        assert_eq!(chatter.active_phases(), vec![phase("Fetching", "", None)]);
     }
 
     #[test]

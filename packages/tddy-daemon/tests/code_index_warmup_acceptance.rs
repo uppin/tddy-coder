@@ -1,7 +1,8 @@
 //! What the daemon owes the session header's indexing indicator: once a session's worktree exists,
 //! start warming its code index in the background through the index daemon this daemon manages;
 //! and over `code_navigation.WatchCodeIndex`, follow that worktree's index — **whoever** started its
-//! load (a session start, the code pane, the agent's code tools) — without ever starting one.
+//! load (a session start, the code pane, the agent's code tools) — without ever starting one, nor
+//! the index daemon itself. With nothing to follow the watch ends at once with no message.
 //!
 //! Feature docs: docs/ft/web/session-drawer.md (Start progress), docs/ft/web/session-code-pane.md
 //! (Indexing indicator) and docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md
@@ -116,6 +117,17 @@ struct AWatch {
 }
 
 impl AWatch {
+    /// The watch ends without telling the header anything — so no indicator shows.
+    async fn ends_with_nothing(&mut self) {
+        let item = tokio::time::timeout(AN_EVENT_IS_DUE_WITHIN, self.stream.recv())
+            .await
+            .expect("WatchCodeIndex neither delivered nor ended within the timeout");
+        assert!(
+            item.is_none(),
+            "expected the watch to end empty, got {item:?}"
+        );
+    }
+
     /// The next progress the header is told.
     async fn next_progress(&mut self) -> CodeIndexProgress {
         let item = tokio::time::timeout(AN_EVENT_IS_DUE_WITHIN, self.stream.recv())
@@ -129,10 +141,14 @@ impl AWatch {
     }
 }
 
+/// Why the scripted index's language server went away, in the failure tests.
+const THE_SERVER_WENT_AWAY: &str =
+    "the language server holding the worktree went away before its crate graph was loaded";
+
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_session_on_a_rust_worktree_starts_warm_once_its_worktree_exists() {
+async fn a_session_s_rust_worktree_handed_to_the_warm_up_is_warmed_through_the_index_daemon() {
     // Given a session's Rust worktree and a managed index daemon whose index of it is loaded
     let project = a_project_with_a_session_on_its_worktree();
     let index = a_scripted_index();
@@ -174,7 +190,7 @@ async fn watch_code_index_follows_a_load_another_caller_started_and_never_warms(
     let project = a_project_with_a_session_on_its_worktree();
     let index = a_scripted_index();
     let host = an_index_daemon_host_serving(index.clone()).await;
-    let entry = a_freshly_started_daemon_over(&project, host.registry());
+    let entry = a_freshly_started_daemon_over(&project, host.a_running_registry().await);
     index.reports(indexing_at(40));
 
     // When the session header watches the session's code index, and the load then finishes
@@ -206,7 +222,7 @@ async fn watch_code_index_for_a_session_after_a_restart_follows_its_worktree() {
     let index = a_scripted_index();
     let host = an_index_daemon_host_serving(index.clone()).await;
     index.reports(the_index_is_ready());
-    let entry = a_freshly_started_daemon_over(&project, host.registry());
+    let entry = a_freshly_started_daemon_over(&project, host.a_running_registry().await);
 
     // When the session header watches the session's code index
     let mut watching = watch_code_index_at(&entry).await;
@@ -229,24 +245,108 @@ async fn watch_code_index_reports_an_index_that_failed_with_its_reason() {
     let project = a_project_with_a_session_on_its_worktree();
     let index = a_scripted_index();
     let host = an_index_daemon_host_serving(index.clone()).await;
-    let entry = a_freshly_started_daemon_over(&project, host.registry());
+    let entry = a_freshly_started_daemon_over(&project, host.a_running_registry().await);
     index.reports(indexing_at(40));
 
     // When the session header watches it, and the language server then goes away mid-load
     let mut watching = watch_code_index_at(&entry).await;
     let _joined_at = watching.next_progress().await;
-    index.reports(the_index_failed(
-        "the language server holding the worktree went away before its crate graph was loaded",
-    ));
+    index.reports(the_index_failed(THE_SERVER_WENT_AWAY));
     let then = watching.next_progress().await;
 
     // Then the header is told the index failed, and why
-    assert_eq!(
-        then,
-        the_web_sees_failed(
-            "the language server holding the worktree went away before its crate graph was loaded"
-        )
+    assert_eq!(then, the_web_sees_failed(THE_SERVER_WENT_AWAY));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_code_index_while_no_index_daemon_runs_ends_with_nothing_and_starts_none() {
+    // Given a session's Rust worktree and an index daemon nothing has started yet
+    let project = a_project_with_a_session_on_its_worktree();
+    let index = a_scripted_index();
+    let host = an_index_daemon_host_serving(index.clone()).await;
+    let registry = host.registry();
+    let entry = a_freshly_started_daemon_over(&project, registry.clone());
+
+    // When the session header watches the session's code index
+    let mut watching = watch_code_index_at(&entry).await;
+
+    // Then the watch ends with nothing to show
+    watching.ends_with_nothing().await;
+    // And watching did not start the index daemon
+    assert!(registry.running().await.is_none());
+    assert_eq!(index.roots_it_was_asked_to_watch(), vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_code_index_for_a_session_whose_worktree_is_not_created_yet_ends_with_nothing() {
+    // Given a session whose record names no worktree yet, and a running index daemon
+    let project = a_project_with_a_session_on_its_worktree().whose_session_has_no_worktree_yet();
+    let index = a_scripted_index();
+    let host = an_index_daemon_host_serving(index.clone()).await;
+    let entry = a_freshly_started_daemon_over(&project, host.a_running_registry().await);
+
+    // When the session header watches the session's code index
+    let mut watching = watch_code_index_at(&entry).await;
+
+    // Then the watch ends with nothing to show, having followed no root
+    watching.ends_with_nothing().await;
+    assert_eq!(index.roots_it_was_asked_to_watch(), vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_code_index_of_a_worktree_without_a_cargo_manifest_ends_with_nothing() {
+    // Given a session whose worktree is not a Rust worktree, and a running index daemon
+    let project = a_project_with_a_session_on_its_worktree().without_a_cargo_manifest();
+    let index = a_scripted_index();
+    let host = an_index_daemon_host_serving(index.clone()).await;
+    let entry = a_freshly_started_daemon_over(&project, host.a_running_registry().await);
+
+    // When the session header watches the session's code index
+    let mut watching = watch_code_index_at(&entry).await;
+
+    // Then the watch ends with nothing to show, having followed no root
+    watching.ends_with_nothing().await;
+    assert_eq!(index.roots_it_was_asked_to_watch(), vec![]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_code_index_without_an_index_daemon_section_ends_with_nothing() {
+    // Given a daemon configured without an `index_daemon:` section
+    let project = a_project_with_a_session_on_its_worktree();
+    let entry = the_navigation_entry_over(project.worktree_service.clone(), None);
+
+    // When the session header watches the session's code index
+    let mut watching = watch_code_index_at(&entry).await;
+
+    // Then the watch ends with nothing to show
+    watching.ends_with_nothing().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn watch_code_index_of_a_session_whose_record_is_unreadable_is_a_failed_precondition() {
+    // Given a session whose `.session.yaml` is not a session record, and a running index daemon
+    let project = a_project_with_a_session_on_its_worktree().whose_session_record_is_unreadable();
+    let index = a_scripted_index();
+    let host = an_index_daemon_host_serving(index.clone()).await;
+    let entry = a_freshly_started_daemon_over(&project, host.a_running_registry().await);
+
+    // When the session header watches the session's code index
+    let refusal = try_watch_code_index_at(&entry)
+        .await
+        .map(|_| ())
+        .expect_err("an unreadable record is refused");
+
+    // Then it is refused as a failed precondition naming the record — the parser's own detail
+    // follows the prefix and is not this daemon's to pin
+    assert_eq!(refusal.code, tddy_rpc::Code::FailedPrecondition);
+    assert!(
+        refusal
+            .message
+            .starts_with("the session's .session.yaml cannot be read: "),
+        "{}",
+        refusal.message
     );
+    assert_eq!(index.roots_it_was_asked_to_watch(), vec![]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

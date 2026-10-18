@@ -85,20 +85,26 @@ impl IndexDaemonRegistry {
         started
     }
 
-    /// A gRPC channel to the index daemon, starting it if nothing has yet.
-    ///
-    /// [`tddy_sandbox_runner::connect_uds_channel`] is the shared AF_UNIX connector every tonic
-    /// client in this workspace dials through, so the index daemon is reached the same way the
-    /// in-jail `SandboxService` and the daemon's own `ConnectionService` are. Dialled per call
-    /// rather than cached: a channel is bound to one connection, and a restarted index daemon is
-    /// behind a new one.
+    /// A gRPC channel to the index daemon, starting it if nothing has yet — reached the same way
+    /// the in-jail `SandboxService` and the daemon's own `ConnectionService` are (see [`dial`]).
     pub async fn connect(&self) -> Result<tonic::transport::Channel, IndexDaemonError> {
         let running = self.get_or_spawn().await?;
-        tddy_sandbox_runner::connect_uds_channel(&running.socket_path)
-            .await
-            .map_err(|err| IndexDaemonError::NotDialable {
-                detail: format!("{}: {err:#}", running.socket_path.display()),
-            })
+        dial(&running).await
+    }
+
+    /// A gRPC channel to the index daemon if its process is already up, `None` otherwise. Never
+    /// starts one, and does not count as use: a passive watcher must neither spawn the process nor
+    /// keep it from its idle stop.
+    pub async fn connect_if_running(
+        &self,
+    ) -> Result<Option<tonic::transport::Channel>, IndexDaemonError> {
+        let Some(running) = self.running().await else {
+            return Ok(None);
+        };
+        if self.has_ended(&running).await {
+            return Ok(None);
+        }
+        dial(&running).await.map(Some)
     }
 
     /// The index daemon this registry is currently holding, if it is holding one.
@@ -160,11 +166,7 @@ impl IndexDaemonRegistry {
         let (existing, tracker) = live
             .as_ref()
             .map(|(running, tracker)| (Arc::clone(running), Arc::clone(tracker)))?;
-        let alive = match self.inner.tasks.get(&existing.task_id).await {
-            Some(handle) => !handle.status().is_terminal(),
-            None => false,
-        };
-        if alive {
+        if !self.has_ended(&existing).await {
             tracker.record_activity();
             return Some(existing);
         }
@@ -175,6 +177,14 @@ impl IndexDaemonRegistry {
         );
         *live = None;
         None
+    }
+
+    /// Whether `running`'s task has reached a terminal state, or is gone from the task registry.
+    async fn has_ended(&self, running: &IndexDaemon) -> bool {
+        match self.inner.tasks.get(&running.task_id).await {
+            Some(handle) => handle.status().is_terminal(),
+            None => true,
+        }
     }
 
     /// Start the process, wait for it to bind, and record it as the live one.
@@ -322,6 +332,28 @@ impl tddy_daemon_rpc::code_navigation::IndexChannelSource for IndexDaemonRegistr
         // The inherent method, not this one: inherent methods win the path lookup.
         Ok(IndexDaemonRegistry::connect(self).await?)
     }
+
+    async fn connect_if_running(
+        &self,
+    ) -> Result<
+        Option<tonic::transport::Channel>,
+        tddy_daemon_rpc::code_navigation::IndexChannelError,
+    > {
+        Ok(IndexDaemonRegistry::connect_if_running(self).await?)
+    }
+}
+
+/// A channel to `running`'s socket.
+///
+/// [`tddy_sandbox_runner::connect_uds_channel`] is the shared AF_UNIX connector every tonic
+/// client in this workspace dials through. Dialled per call rather than cached: a channel is bound
+/// to one connection, and a restarted index daemon is behind a new one.
+async fn dial(running: &IndexDaemon) -> Result<tonic::transport::Channel, IndexDaemonError> {
+    tddy_sandbox_runner::connect_uds_channel(&running.socket_path)
+        .await
+        .map_err(|err| IndexDaemonError::NotDialable {
+            detail: format!("{}: {err:#}", running.socket_path.display()),
+        })
 }
 
 /// How a task that has reached a terminal state got there, or `None` while it is still running.

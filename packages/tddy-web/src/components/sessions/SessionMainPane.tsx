@@ -617,7 +617,6 @@ export function SessionMainPane({
                         projectId={resolvedProjectId}
                         worktreePath={selectedSession.repoPath}
                         navigationClient={codeNavigationClient}
-                        sessionId={selectedSession.sessionId}
                       />
                     </Panel>
                   </>

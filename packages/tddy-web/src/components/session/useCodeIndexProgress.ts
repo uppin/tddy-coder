@@ -13,17 +13,22 @@ import {
  *
  * - `waiting` — nothing heard yet.
  * - `idle` — nothing holds the index (no server for the worktree, or the watch ended unheard).
+ * - `none` — the worktree has no code index at all (not a Rust worktree); why.
  * - `progress` — loading: the latest progress message, naming the phase reported most recently,
  *   its percentage, and every phase running now.
  * - `ready` — the index is loaded and queryable.
  * - `failed` — the index, or the stream following it, failed; the reason.
+ * - `reconnecting` — the Code pane's `CodeSession` dropped and is being reopened; why it dropped.
+ *   The header's watch never reports it.
  */
 export type CodeIndexStatus =
   | { kind: "waiting" }
   | { kind: "idle" }
+  | { kind: "none"; reason: string }
   | { kind: "progress"; progress: CodeIndexProgress }
   | { kind: "ready" }
-  | { kind: "failed"; reason: string };
+  | { kind: "failed"; reason: string }
+  | { kind: "reconnecting"; reason: string };
 
 const failed = (reason: string): CodeIndexStatus => ({
   kind: "failed",
@@ -42,6 +47,8 @@ export function codeIndexStatusOf(progress: CodeIndexProgress): CodeIndexStatus 
       return { kind: "ready" };
     case CodeIndexState.IDLE:
       return { kind: "idle" };
+    case CodeIndexState.NONE:
+      return { kind: "none", reason: progress.error };
     case CodeIndexState.LOADING:
       return { kind: "progress", progress };
     case CodeIndexState.UNSPECIFIED:

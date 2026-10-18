@@ -6,11 +6,20 @@
 //! the root (`code_index.WatchRoot`), relaying every message as a `progress` event for as long as the
 //! stream is open — so a reload after an edit shows here too.
 //!
+//! An open pane is demand for its root: when the root reports `IDLE` after it held a server since
+//! the session's last warm — the server was let go for sitting unused — the session warms it again.
+//! An `IDLE` before that (the session's own warm has not reached a server yet) starts nothing.
+//!
 //! Each query is asked of the index on a task of its own, so a slow hover never delays a probe. A
 //! hover, definition or references query the index answers `LOADING` is **held**: the pane is told
 //! (`held`), and the query is asked again once the root reports `READY` after it was asked — or
-//! answered with the root's `error` once it reports `FAILED`. A probe never waits: while loading it
+//! answered with the root's `error` once it reports `FAILED`. A held query stays held through
+//! `IDLE`, since the session is warming the root again. A probe never waits: while loading it
 //! answers `UNKNOWN`. `cancel` drops a query, held or in flight, so no answer is ever sent for it.
+//!
+//! A worktree with no `Cargo.toml` at its root is not a Rust worktree and has no index: the session
+//! neither warms nor follows it, reports it `IDLE` once, and answers every query with an `error`
+//! ([`without_an_index`]).
 //!
 //! Every event is sent from the one loop that owns the session's state, which reads the pane's frames
 //! before anything else: a `cancel` the pane sent before the index became ready is always applied
@@ -26,7 +35,7 @@ use tddy_service::proto::code_navigation::code_query_answer::Result as Answered;
 use tddy_service::proto::code_navigation::code_session_event::Event;
 use tddy_service::proto::code_navigation::code_session_request::Frame;
 use tddy_service::proto::code_navigation::{
-    CodeQueryAnswer, CodeQueryHeld, CodeSessionEvent, CodeSessionRequest,
+    CodeQuery, CodeQueryAnswer, CodeQueryHeld, CodeSessionEvent, CodeSessionRequest,
 };
 use tddy_worktree_service::WorktreeServiceImpl;
 use tokio::sync::mpsc;
@@ -35,9 +44,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 use tonic::transport::Channel;
 
-use crate::code_navigation::{connect_index, web_progress, IndexChannelSource};
+use crate::code_index_warmup::drain_warm;
+use crate::code_navigation::convert::web_progress;
+use crate::code_navigation::{connect_index, IndexChannelSource};
 
 mod ask;
+mod without_an_index;
 
 use ask::{ask_index, Query, Reply};
 
@@ -83,6 +95,9 @@ async fn run(
         &open.project_id,
         &open.worktree_path,
     )?;
+    if !tddy_index_daemon::is_rust_workspace(&root) {
+        return without_an_index::serve(frames, events).await;
+    }
     let mut client = connect_index(index_daemon).await?;
     let workspace_root = root.display().to_string();
 
@@ -94,13 +109,9 @@ async fn run(
         .await
         .map_err(tddy_service::to_rpc_status)?
         .into_inner();
-    let served = Session::new(client, workspace_root, events.clone())
+    Session::new(client, workspace_root, events.clone(), warming)
         .serve(frames, progress)
-        .await;
-    if let Some(warming) = warming {
-        warming.abort();
-    }
-    served
+        .await
 }
 
 /// Asks the index daemon to warm `workspace_root` and drains the answer on a task of its own: the
@@ -110,7 +121,7 @@ async fn start_warm(
     mut client: CodeIndexServiceClient<Channel>,
     workspace_root: String,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    let mut stream = match client
+    let stream = match client
         .warm(index::WarmRequest {
             workspace_root: workspace_root.clone(),
         })
@@ -126,18 +137,11 @@ async fn start_warm(
         }
     };
     Some(tokio::spawn(async move {
-        loop {
-            match stream.message().await {
-                Ok(Some(_)) => {}
-                Ok(None) => return,
-                Err(status) => {
-                    log::warn!(
-                        "code index warm of {workspace_root} broke off: {}",
-                        status.message()
-                    );
-                    return;
-                }
-            }
+        if let Err(status) = drain_warm(stream).await {
+            log::warn!(
+                "code index warm of {workspace_root} broke off: {}",
+                status.message()
+            );
         }
     }))
 }
@@ -154,6 +158,11 @@ struct Session {
     client: CodeIndexServiceClient<Channel>,
     workspace_root: String,
     events: Events,
+    /// The latest warm this session started, drained on a task of its own; aborted with the session.
+    warming: Option<tokio::task::JoinHandle<()>>,
+    /// Whether the root has reported anything but `IDLE` since the session last warmed it — so an
+    /// `IDLE` now means its server was let go, not that the warm has yet to reach one.
+    served_since_warmed: bool,
     /// The root's state on the latest progress message, and its `error` when `FAILED`.
     state: index::IndexState,
     error: String,
@@ -171,11 +180,14 @@ impl Session {
         client: CodeIndexServiceClient<Channel>,
         workspace_root: String,
         events: Events,
+        warming: Option<tokio::task::JoinHandle<()>>,
     ) -> Self {
         Self {
             client,
             workspace_root,
             events,
+            warming,
+            served_since_warmed: false,
             state: index::IndexState::Unspecified,
             error: String::new(),
             progress_seen: 0,
@@ -220,26 +232,26 @@ impl Session {
 
     async fn on_frame(&mut self, frame: CodeSessionRequest) -> Result<(), Status> {
         match frame.frame {
-            Some(Frame::Query(query)) => {
-                let request_id = query.request_id;
-                // A query reusing an id replaces the one asked under it.
-                self.forget(request_id);
-                match Query::parse(query) {
-                    Ok(query) => {
-                        self.ask(query);
-                        Ok(())
-                    }
-                    Err(reason) => self.answer(request_id, Answered::Error(reason)).await,
-                }
-            }
+            Some(Frame::Query(query)) => self.on_query(query).await,
             Some(Frame::Cancel(cancel)) => {
                 self.forget(cancel.request_id);
                 Ok(())
             }
-            Some(Frame::Open(_)) => Err(Status::invalid_argument("a code session is opened once")),
-            None => Err(Status::invalid_argument(
-                "a code session frame carries `open`, `query` or `cancel`",
-            )),
+            misplaced @ (Some(Frame::Open(_)) | None) => Err(misplaced_frame(&misplaced)),
+        }
+    }
+
+    /// Asks `query` — a query reusing an id replaces the one asked under it — or answers why it
+    /// cannot be asked.
+    async fn on_query(&mut self, query: CodeQuery) -> Result<(), Status> {
+        let request_id = query.request_id;
+        self.forget(request_id);
+        match Query::parse(query) {
+            Ok(query) => {
+                self.ask(query);
+                Ok(())
+            }
+            Err(reason) => self.answer(request_id, Answered::Error(reason)).await,
         }
     }
 
@@ -247,6 +259,11 @@ impl Session {
         self.progress_seen += 1;
         self.state = update.state();
         self.error.clone_from(&update.error);
+        if self.state != index::IndexState::Idle {
+            self.served_since_warmed = true;
+        } else if self.served_since_warmed {
+            self.warm_again().await;
+        }
         self.send(Event::Progress(web_progress(update))).await?;
         if matches!(
             self.state,
@@ -254,7 +271,7 @@ impl Session {
         ) {
             let held: Vec<Query> = self.held.drain().map(|(_, query)| query).collect();
             for query in held {
-                self.release(query).await?;
+                self.settle_held(query).await?;
             }
         }
         Ok(())
@@ -330,16 +347,31 @@ impl Session {
             .await?;
         }
         if self.progress_seen > asked_at {
-            self.release(query).await
+            self.settle_held(query).await
         } else {
             self.held.insert(query.request_id, query);
             Ok(())
         }
     }
 
+    /// The root was let go while this session is open — the pane is still using it — so warm it
+    /// again, replacing the previous warm.
+    async fn warm_again(&mut self) {
+        log::info!(
+            "code index of {} was let go while its code pane is open; warming it again",
+            self.workspace_root
+        );
+        self.served_since_warmed = false;
+        if let Some(previous) = self.warming.take() {
+            previous.abort();
+        }
+        self.warming = start_warm(self.client.clone(), self.workspace_root.clone()).await;
+    }
+
     /// A held query, once the root's state may settle it: asked again when ready, answered with the
-    /// reason when failed, held on otherwise.
-    async fn release(&mut self, query: Query) -> Result<(), Status> {
+    /// reason when failed, held on otherwise — through `IDLE` too, since the session warms an idle
+    /// root again.
+    async fn settle_held(&mut self, query: Query) -> Result<(), Status> {
         match self.state {
             index::IndexState::Ready => {
                 self.ask(query);
@@ -373,9 +405,31 @@ impl Session {
     }
 
     async fn send(&self, event: Event) -> Result<(), Status> {
-        self.events
-            .send(Ok(CodeSessionEvent { event: Some(event) }))
-            .await
-            .map_err(|_| Status::cancelled("the code pane left its code session"))
+        send(&self.events, event).await
     }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        if let Some(warming) = &self.warming {
+            warming.abort();
+        }
+    }
+}
+
+/// The refusal of a frame that has no place in an open session: a second `open`, or a frame
+/// carrying nothing. Shared with [`without_an_index`], which refuses the same two.
+fn misplaced_frame(frame: &Option<Frame>) -> Status {
+    match frame {
+        Some(Frame::Open(_)) => Status::invalid_argument("a code session is opened once"),
+        _ => Status::invalid_argument("a code session frame carries `open`, `query` or `cancel`"),
+    }
+}
+
+/// Sends `event` to the pane, or `CANCELLED` when the pane has left.
+async fn send(events: &Events, event: Event) -> Result<(), Status> {
+    events
+        .send(Ok(CodeSessionEvent { event: Some(event) }))
+        .await
+        .map_err(|_| Status::cancelled("the code pane left its code session"))
 }

@@ -571,9 +571,22 @@ fn an_empty_definition_while_the_graph_loads() -> index::DefinitionResponse {
     }
 }
 
+/// What references asked while the crate graph loads answer: the one reference found so far, and
+/// the index says it is loading.
+fn a_partial_references_answer_while_the_graph_loads() -> index::ReferencesResponse {
+    index::ReferencesResponse {
+        locations: vec![the_index_s_location_of_foo()],
+        state: index::IndexState::Loading as i32,
+    }
+}
+
 /// The note a loading answer carries, so the agent neither trusts the empty answer nor gives up.
 const THE_INDEX_IS_STILL_LOADING: &str =
     "The code index is still loading, so this empty answer is not final; ask again once it is ready.";
+
+/// The note a loading answer that found something carries: it may not be all there is.
+const A_LOADING_ANSWER_MAY_BE_INCOMPLETE: &str =
+    "The code index is still loading, so this answer may be incomplete; ask again once it is ready.";
 
 // ---------------------------------------------------------------------------------------------
 
@@ -622,8 +635,8 @@ async fn lsp_definition_while_the_index_loads_tells_the_agent_it_is_loading() {
     // Given a session worktree and an index still loading its crate graph, which answers the
     // definition with nothing yet and says it is loading
     let worktree = a_session_worktree();
-    let fake = a_fake_index()
-        .answering_definitions_with(an_empty_definition_while_the_graph_loads());
+    let fake =
+        a_fake_index().answering_definitions_with(an_empty_definition_while_the_graph_loads());
     let existing = the_existing_executor();
     let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
 
@@ -649,6 +662,40 @@ async fn lsp_definition_while_the_index_loads_tells_the_agent_it_is_loading() {
     );
     // And no language server of the existing executor's was asked in the index's place
     assert_eq!(existing.what_it_was_asked(), Vec::<String>::new());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn lsp_references_found_while_the_index_loads_are_marked_possibly_incomplete() {
+    // Given a session worktree and an index still loading its crate graph, which has found one
+    // reference to `foo` so far
+    let worktree = a_session_worktree();
+    let fake = a_fake_index()
+        .answering_references_with(a_partial_references_answer_while_the_graph_loads());
+    let existing = the_existing_executor();
+    let executor = the_registered_executor(Some(an_index_serving(fake.clone()).await), &existing);
+
+    // When the agent asks for the references of the call to `foo`
+    let answer = the_agent_calls(
+        &executor,
+        LspTool::References,
+        worktree.root(),
+        a_query_at("src/main.rs", 1, 4),
+    )
+    .await;
+
+    // Then the agent gets what was found, told the index is loading and that the answer may be
+    // incomplete — not that an answer with something in it is empty
+    assert_eq!(
+        answer,
+        Ok(json!({
+            "references": [{
+                "uri": worktree.uri_of("src/lib.rs"),
+                "range": an_lsp_range_on_line(10, 3, 6),
+            }],
+            "index": "loading",
+            "note": A_LOADING_ANSWER_MAY_BE_INCOMPLETE,
+        }))
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

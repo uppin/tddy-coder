@@ -7,12 +7,21 @@
  * - A session starts on the client's `open` frame, answering with the index's current progress, and
  *   pushes every later change to every open session.
  * - While the index loads, a hover / definition / references query is **held** (`held`) and answered
- *   once the test calls `finishLoading()`; a probe never waits and answers `UNKNOWN`.
+ *   once the test calls `finishLoading()` — or answered with an `error`, as the daemon does, once it
+ *   calls `failLoading(reason)`; a probe never waits and answers `UNKNOWN`.
  * - Once loaded, queries are answered at once from the symbols the scenario names; a probe answers
- *   `DEFINABLE` with the symbol's definition, or `NONE`.
+ *   `DEFINABLE` with the symbol's definition, or `NONE`. A hover on a position the scenario does not
+ *   name answers no markdown, as rust-analyzer does for a token it has nothing to say about.
  * - `cancel` drops a held query.
+ * - `holdingProbeAnswers()` keeps probe answers back until `answerHeldProbes()`, so a spec can act
+ *   while a probe is in flight.
+ * - `dropSessions(reason)` ends every open session under the pane, as a transport blip or a daemon
+ *   restart does; `failingNextOpens` / `refusingEveryOpen` make the next sessions end at once.
  *
- * Every frame the pane sends is recorded, so a spec asserts what the pane asked for.
+ * Every frame the pane sends is recorded, so a spec asserts what the pane asked for and cancelled.
+ *
+ * The fake refuses what the daemon refuses, loudly: a query without a position ends its session
+ * `INVALID_ARGUMENT`, and reading a file the scenario never declared is `NOT_FOUND`.
  *
  * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md.
  */
@@ -73,6 +82,48 @@ export function anIndexLoading(...phases: [IndexPhase, ...IndexPhase[]]): IndexP
     furthest: "",
     ready: false,
     error: "",
+  };
+}
+
+/** No server holds the index: it was let go for sitting unused, and has not started again yet. */
+/** A worktree with no code index at all — not a Rust worktree — for `reason`. */
+export function noIndexForTheWorktree(reason: string): IndexProgressInit {
+  return {
+    state: CodeIndexState.NONE,
+    phases: [],
+    phase: "",
+    percentage: 0,
+    line: "",
+    furthest: "",
+    ready: false,
+    error: reason,
+  };
+}
+
+export function anIndexIdle(): IndexProgressInit {
+  return {
+    state: CodeIndexState.IDLE,
+    phases: [],
+    phase: "",
+    percentage: 0,
+    line: "",
+    furthest: "",
+    ready: false,
+    error: "",
+  };
+}
+
+/** The index could not load, for `reason`. */
+export function anIndexFailed(reason: string): IndexProgressInit {
+  return {
+    state: CodeIndexState.FAILED,
+    phases: [],
+    phase: "",
+    percentage: 0,
+    line: "",
+    furthest: "",
+    ready: false,
+    error: reason,
   };
 }
 
@@ -197,8 +248,17 @@ class EventQueue<T> implements AsyncIterable<T> {
 interface FakeSession {
   readonly outbox: EventQueue<CodeSessionEvent>;
   opened: boolean;
-  ended: boolean;
+  /** Who ended the session: the pane (its request stream ended) or the host. */
+  endedBy: "pane" | "host" | null;
 }
+
+interface RecordedFrame {
+  readonly session: FakeSession;
+  readonly frame: CodeSessionRequest;
+}
+
+/** What the daemon answers a held query with once the index failed to load. */
+const failedIndexAnswer = (reason: string) => `the code index failed: ${reason}`;
 
 interface HeldQuery {
   readonly session: FakeSession;
@@ -207,13 +267,29 @@ interface HeldQuery {
 
 const keyOf = (at: SourcePoint) => `${at.relPath}:${at.line}:${at.column}`;
 
+/** A query as a spec names it; the host refuses one without a position before it gets here. */
+function askedQuery(query: CodeQuery): AskedQuery {
+  if (query.position === undefined) throw new Error(`query ${query.requestId} names no position`);
+  return {
+    kind: CodeQueryKind[query.kind] as keyof typeof CodeQueryKind,
+    relPath: query.relPath,
+    line: query.position.line,
+    column: query.position.column,
+  };
+}
+
 export class CodeIndexHost {
   private progress: IndexProgressInit = anIndexReady();
   private readonly files: Record<string, string> = {};
   private readonly symbols = new Map<string, KnownSymbol>();
   private readonly sessions: FakeSession[] = [];
   private held: HeldQuery[] = [];
-  private readonly frames: CodeSessionRequest[] = [];
+  private readonly frames: RecordedFrame[] = [];
+  /** How every next session attempt fails at once, in order; a refusal fails every one. */
+  private readonly openFailures: ConnectError[] = [];
+  private refusal: ConnectError | null = null;
+  /** Probes whose answers are kept back, while `holdingProbeAnswers` is on. */
+  private probesInFlight: HeldQuery[] | null = null;
   private builtBackend: InMemoryRpcBackend | null = null;
 
   /** The worktree holds `relPath` with `content`; its directories are listed from the paths. */
@@ -250,46 +326,101 @@ export class CodeIndexHost {
     for (const { session, query } of held) session.outbox.push(this.answer(query));
   }
 
-  /** Every open session's stream fails with `message`. */
-  failSessions(message: string): void {
-    for (const session of this.openSessions()) {
-      session.outbox.fail(new ConnectError(message, Code.Unavailable));
+  /**
+   * The index fails to load, for `reason`: every open session hears so, and every held query is
+   * answered with the daemon's error naming it.
+   */
+  failLoading(reason: string): void {
+    this.reportProgress(anIndexFailed(reason));
+    const held = this.held;
+    this.held = [];
+    for (const { session, query } of held) {
+      session.outbox.push(this.answerWith(query, { case: "error", value: failedIndexAnswer(reason) }));
     }
+  }
+
+  /**
+   * Every open session ends under the pane with `reason` (`UNAVAILABLE`), as a transport blip or a
+   * daemon restart does; what it held is gone with it.
+   */
+  dropSessions(reason: string): void {
+    for (const session of this.openSessions()) {
+      session.endedBy = "host";
+      session.outbox.fail(new ConnectError(reason, Code.Unavailable));
+    }
+    this.held = this.held.filter(({ session }) => session.endedBy === null);
+    this.probesInFlight =
+      this.probesInFlight?.filter(({ session }) => session.endedBy === null) ?? null;
+  }
+
+  /** Probe answers are kept back until `answerHeldProbes()`. */
+  holdingProbeAnswers(): this {
+    this.probesInFlight = [];
+    return this;
+  }
+
+  /**
+   * Answer every probe kept back — cancelled ones too, as an answer already on the wire when the
+   * pane's `cancel` arrived would be.
+   */
+  answerHeldProbes(): void {
+    if (this.probesInFlight === null) throw new Error("the host is not holding probe answers");
+    const probes = this.probesInFlight;
+    this.probesInFlight = [];
+    for (const { session, query } of probes) session.outbox.push(this.answer(query));
+  }
+
+  /**
+   * The next sessions end at once after their `open`, one per reason, each `UNAVAILABLE` with its
+   * own reason — so a spec sees, in the strip, which attempt the pane last heard fail.
+   */
+  failingNextOpens(...reasons: string[]): this {
+    for (const reason of reasons) this.openFailures.push(new ConnectError(reason, Code.Unavailable));
+    return this;
+  }
+
+  /** Every session from now on is refused with `reason` (`PERMISSION_DENIED`) after its `open`. */
+  refusingEveryOpen(reason: string): this {
+    this.refusal = new ConnectError(reason, Code.PermissionDenied);
+    return this;
   }
 
   // -- observations ----------------------------------------------------------
 
-  /** The worktree every `open` frame named, in the order the sessions opened. */
+  /** The worktree every `open` frame named, in the order the sessions opened — refused ones too. */
   openedWorktrees(): OpenedWorktree[] {
-    return this.frames.flatMap((frame) =>
+    return this.frames.flatMap(({ frame }) =>
       frame.frame.case === "open" ? [requestFields(frame.frame.value)] : [],
     );
   }
 
-  /** Every query the pane sent, in order, without request ids. */
+  /** Every query the pane sent, on every session, in order, without request ids. */
   queriesAsked(): AskedQuery[] {
-    return this.frames.flatMap((frame) =>
-      frame.frame.case === "query"
-        ? [
-            {
-              kind: CodeQueryKind[frame.frame.value.kind] as keyof typeof CodeQueryKind,
-              relPath: frame.frame.value.relPath,
-              line: frame.frame.value.position?.line ?? 0,
-              column: frame.frame.value.position?.column ?? 0,
-            },
-          ]
-        : [],
+    return this.frames.flatMap(({ frame }) =>
+      frame.frame.case === "query" ? [askedQuery(frame.frame.value)] : [],
     );
   }
 
-  /** How many sessions are open now (opened and not yet ended by the client). */
+  /** Every query the pane cancelled, in the order it cancelled them, without request ids. */
+  queriesCancelled(): AskedQuery[] {
+    return this.frames.flatMap(({ session, frame }) => {
+      if (frame.frame.case !== "cancel") return [];
+      const cancelled = this.queryOf(session, frame.frame.value.requestId);
+      if (cancelled === undefined) {
+        throw new Error(`the pane cancelled request ${frame.frame.value.requestId}, which it never asked`);
+      }
+      return [askedQuery(cancelled)];
+    });
+  }
+
+  /** How many sessions are open now (opened and not yet ended by either side). */
   openSessionCount(): number {
     return this.openSessions().length;
   }
 
-  /** How many sessions the client has ended. */
+  /** How many sessions the pane has ended. */
   endedSessionCount(): number {
-    return this.sessions.filter((session) => session.ended).length;
+    return this.sessions.filter((session) => session.endedBy === "pane").length;
   }
 
   // -- the backend -----------------------------------------------------------
@@ -309,26 +440,41 @@ export class CodeIndexHost {
               .directoryEntries(req.relPath)
               .map((entry) => create(WorktreeDirEntrySchema, entry)),
           }),
-        readWorktreeFile: (req) =>
-          create(ReadWorktreeFileResponseSchema, {
-            contentUtf8: host.files[req.relPath] ?? "",
+        readWorktreeFile: (req) => {
+          const content = host.files[req.relPath];
+          if (content === undefined) {
+            throw new ConnectError(`the scenario declares no file ${req.relPath}`, Code.NotFound);
+          }
+          return create(ReadWorktreeFileResponseSchema, {
+            contentUtf8: content,
             truncated: false,
-            byteSize: BigInt((host.files[req.relPath] ?? "").length),
-          }),
+            byteSize: BigInt(content.length),
+          });
+        },
       })
       .implement(CodeNavigationService, {
         async *codeSession(requests: AsyncIterable<CodeSessionRequest>, ctx: HandlerContext) {
-          const session: FakeSession = { outbox: new EventQueue(), opened: false, ended: false };
+          const session: FakeSession = { outbox: new EventQueue(), opened: false, endedBy: null };
           host.sessions.push(session);
+          const failure = host.refusal ?? host.openFailures.shift();
+          if (failure !== undefined) {
+            // Read the `open`, so the attempt is recorded, then end the session at once.
+            for await (const frame of requests) {
+              host.frames.push({ session, frame });
+              break;
+            }
+            session.endedBy = "host";
+            throw failure;
+          }
           const end = () => {
-            session.ended = true;
+            session.endedBy ??= "pane";
             session.outbox.close();
           };
           ctx.signal.addEventListener("abort", end);
           void (async () => {
             try {
               for await (const frame of requests) {
-                host.frames.push(frame);
+                host.frames.push({ session, frame });
                 host.handle(session, frame);
               }
             } catch {
@@ -345,7 +491,18 @@ export class CodeIndexHost {
   // -- internals -------------------------------------------------------------
 
   private openSessions(): FakeSession[] {
-    return this.sessions.filter((session) => session.opened && !session.ended);
+    return this.sessions.filter((session) => session.opened && session.endedBy === null);
+  }
+
+  /** The query `requestId` named on `session`. */
+  private queryOf(session: FakeSession, requestId: bigint): CodeQuery | undefined {
+    return this.frames
+      .flatMap((recorded) =>
+        recorded.session === session && recorded.frame.frame.case === "query"
+          ? [recorded.frame.frame.value]
+          : [],
+      )
+      .find((query) => query.requestId === requestId);
   }
 
   private broadcastProgress(): void {
@@ -384,6 +541,17 @@ export class CodeIndexHost {
   }
 
   private ask(session: FakeSession, query: CodeQuery): void {
+    if (query.position === undefined) {
+      session.endedBy = "host";
+      session.outbox.fail(
+        new ConnectError(`query ${query.requestId} names no position`, Code.InvalidArgument),
+      );
+      return;
+    }
+    if (query.kind === CodeQueryKind.PROBE && this.probesInFlight !== null) {
+      this.probesInFlight.push({ session, query });
+      return;
+    }
     if (query.kind === CodeQueryKind.PROBE || this.loaded()) {
       session.outbox.push(this.answer(query));
       return;
@@ -397,13 +565,7 @@ export class CodeIndexHost {
   }
 
   private answer(query: CodeQuery): CodeSessionEvent {
-    const symbol = this.symbols.get(
-      keyOf({
-        relPath: query.relPath,
-        line: query.position?.line ?? 0,
-        column: query.position?.column ?? 0,
-      }),
-    );
+    const symbol = this.symbols.get(keyOf(askedQuery(query)));
     const state = CodeIndexState.READY;
     const result = ((): MessageInitShape<typeof CodeQueryAnswerSchema>["result"] => {
       switch (query.kind) {
@@ -419,11 +581,15 @@ export class CodeIndexHost {
           return { case: "error", value: `unsupported query kind ${query.kind}` };
       }
     })();
+    return this.answerWith(query, result);
+  }
+
+  private answerWith(
+    query: CodeQuery,
+    result: MessageInitShape<typeof CodeQueryAnswerSchema>["result"],
+  ): CodeSessionEvent {
     return create(CodeSessionEventSchema, {
-      event: {
-        case: "answer",
-        value: { requestId: query.requestId, result },
-      },
+      event: { case: "answer", value: { requestId: query.requestId, result } },
     });
   }
 

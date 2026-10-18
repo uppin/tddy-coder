@@ -21,24 +21,22 @@ use tddy_lsp::{Language, LaunchSpec, LspAllowList, LspRegistry};
 use tddy_task::TaskRegistry;
 use tokio::sync::mpsc;
 
-/// The longest any one progress message may take to arrive. Generous: the fake answers in
-/// milliseconds, and this bounds a failure rather than paces a success.
-const A_PROGRESS_STEP: Duration = Duration::from_secs(10);
+/// The longest any one progress message may take to arrive. It bounds a failure rather than paces
+/// a success: every step here is answered in milliseconds, the slowest being the first message after
+/// a cold spawn of `fake_lsp` (process start plus the `initialize` handshake) and a load the fake
+/// notices within its 20 ms signal poll. Five seconds leaves room for a loaded CI runner without
+/// letting a missing message hold the suite for long.
+const A_PROGRESS_STEP: Duration = Duration::from_secs(5);
 
 // ---------------------------------------------------------------------------------------------
 // Fixtures
 
-/// A host whose language servers hold their crate-graph load until `signal` exists, answering every
-/// request in their own workspace meanwhile.
-fn a_host_whose_graph_loads_once(signal: &TheGraphLoadSignal) -> tddy_rpc::ServiceEntry {
+/// A host whose language server is `fake_lsp` started with `args`.
+fn a_host_running_fake_lsp(args: Vec<String>) -> tddy_rpc::ServiceEntry {
     let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
         .with_capabilities(tddy_code_restructuring::client_capabilities())
         .with_initialization_options(tddy_code_restructuring::server_settings());
-    spec.args = vec![
-        "--answers-in-its-workspace".to_string(),
-        "--loads-crate-graph-on-signal".to_string(),
-        signal.path().to_string_lossy().to_string(),
-    ];
+    spec.args = args;
     let mut allow = LspAllowList::new();
     allow.allow(Language::Rust, spec);
     build_code_index_entry(CodeIndexPorts {
@@ -47,18 +45,19 @@ fn a_host_whose_graph_loads_once(signal: &TheGraphLoadSignal) -> tddy_rpc::Servi
     })
 }
 
+/// A host whose language servers hold their crate-graph load until `signal` exists, answering every
+/// request in their own workspace meanwhile.
+fn a_host_whose_graph_loads_once(signal: &TheGraphLoadSignal) -> tddy_rpc::ServiceEntry {
+    a_host_running_fake_lsp(vec![
+        "--answers-in-its-workspace".to_string(),
+        "--loads-crate-graph-on-signal".to_string(),
+        signal.path().to_string_lossy().to_string(),
+    ])
+}
+
 /// A host whose language server exits as soon as it is spawned.
 fn a_host_whose_server_cannot_start() -> tddy_rpc::ServiceEntry {
-    let mut spec = LaunchSpec::new(env!("CARGO_BIN_EXE_fake_lsp"))
-        .with_capabilities(tddy_code_restructuring::client_capabilities())
-        .with_initialization_options(tddy_code_restructuring::server_settings());
-    spec.args = vec!["--exit-immediately".to_string()];
-    let mut allow = LspAllowList::new();
-    allow.allow(Language::Rust, spec);
-    build_code_index_entry(CodeIndexPorts {
-        servers: LspRegistry::new(allow, TaskRegistry::new(), Duration::from_secs(60)),
-        wait_heartbeat: tddy_code_restructuring::backends::rust::WAIT_HEARTBEAT,
-    })
+    a_host_running_fake_lsp(vec!["--exit-immediately".to_string()])
 }
 
 /// The file whose appearance tells the fake server its crate graph has finished loading.
@@ -293,6 +292,14 @@ impl ProgressStream {
         .await
     }
 
+    /// Every message until the root is reported failed.
+    async fn until_failed(&mut self) -> Vec<IndexProgress> {
+        self.until("the root failed", |progress| {
+            progress.state == IndexState::Failed as i32
+        })
+        .await
+    }
+
     /// Every message until the index is reported ready.
     async fn until_ready(&mut self) -> Vec<IndexProgress> {
         self.until("the index ready", |progress| {
@@ -432,10 +439,9 @@ async fn watching_a_root_whose_server_cannot_start_reports_it_failed_with_the_re
     let entry = a_host_whose_server_cannot_start();
     let workspace = a_workspace_calling_foo();
     let mut watch = a_watch_on(&entry, workspace.path()).await;
-    let _idle = watch.next().await;
 
     // When a navigation request tries to start the root's server
-    let refused = unary_at::<_, DefinitionResponse>(
+    let refusal = unary_at::<_, DefinitionResponse>(
         &entry,
         "Definition",
         DefinitionRequest {
@@ -444,17 +450,25 @@ async fn watching_a_root_whose_server_cannot_start_reports_it_failed_with_the_re
             position: Some(SourcePosition { line: 2, column: 5 }),
         },
     )
-    .await;
-    let after = watch.next().await;
+    .await
+    .expect_err("a root whose server cannot start cannot answer");
+    let failed = watch
+        .until_failed()
+        .await
+        .pop()
+        .expect("the message reporting the failure");
 
-    // Then the request is refused, and the watch reports the root failed, saying why
-    assert!(refused.is_err(), "a root with no server cannot answer");
+    // Then the request is refused as unavailable
     assert_eq!(
-        (state_named(after.state), after.error.is_empty()),
-        (IndexState::Failed, false),
-        "the watch reports the failure with its reason: {after:?}"
+        (refusal.code(), refusal.message()),
+        (tddy_rpc::Code::Unavailable, A_SERVER_THAT_EXITS_AT_ONCE)
     );
+    // and the watch reports the root failed, giving the refusal's reason
+    assert_eq!(failed.error, A_SERVER_THAT_EXITS_AT_ONCE);
 }
+
+/// Why a root whose server exits as soon as it is spawned has no index.
+const A_SERVER_THAT_EXITS_AT_ONCE: &str = "lsp server exited";
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_watch_that_joins_mid_load_names_every_phase_already_running() {

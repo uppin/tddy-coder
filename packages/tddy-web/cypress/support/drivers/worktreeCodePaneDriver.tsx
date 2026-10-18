@@ -27,8 +27,6 @@ export const THE_WORKTREE: OpenedWorktree = {
   worktreePath: "/home/dev/repo/.worktrees/code-session",
 };
 
-const THE_SESSION = "session-code-session";
-
 /** The pane's outer size, in CSS pixels. */
 export interface PaneSize {
   width: number;
@@ -43,6 +41,37 @@ export interface PreviewPoint {
   column: number;
 }
 
+/**
+ * What a user does in the Code pane's preview, wherever the pane is mounted — on its own (the
+ * driver below) or inside the sessions drawer.
+ */
+export const codePreview = {
+  /** Rest the pointer on the identifier at `at` (the pane asks about it after its dwell). */
+  dwellOn(at: PreviewPoint) {
+    worktreeCodePanePage.identifier(at.line, at.column).trigger("mouseover");
+  },
+
+  /** Ctrl-click the identifier at `at`: go to its definition. */
+  goToDefinitionOf(at: PreviewPoint) {
+    worktreeCodePanePage.identifier(at.line, at.column).click({ ctrlKey: true });
+  },
+
+  /** Click the identifier at `at` with no modifier key. */
+  plainClick(at: PreviewPoint) {
+    worktreeCodePanePage.identifier(at.line, at.column).click();
+  },
+
+  /** List the references of the hovered identifier from its card. */
+  listReferences() {
+    worktreeCodePanePage.referencesAction().click();
+  },
+
+  /** Close the hover card. */
+  closeHoverCard() {
+    worktreeCodePanePage.hoverClose().click();
+  },
+};
+
 export function aCodePaneOn(host: CodeIndexHost) {
   const driver = {
     /** Mount the pane, `size` large (default 900×600). */
@@ -56,7 +85,6 @@ export function aCodePaneOn(host: CodeIndexHost) {
             projectId={THE_WORKTREE.projectId}
             worktreePath={THE_WORKTREE.worktreePath}
             navigationClient={createClient(CodeNavigationService, backend.transport())}
-            sessionId={THE_SESSION}
           />
         </div>,
         backend,
@@ -74,21 +102,34 @@ export function aCodePaneOn(host: CodeIndexHost) {
       return driver;
     },
 
+    /** Open `relPath`, whose directory the tree already shows, in the preview. */
+    opening(relPath: string) {
+      worktreeCodePanePage.node(relPath).click();
+      worktreeCodePanePage.highlight().should("be.visible");
+      return driver;
+    },
+
     /** Rest the pointer on the identifier at `at` (the pane asks about it after its dwell). */
     dwellOn(at: PreviewPoint) {
-      worktreeCodePanePage.identifier(at.line, at.column).trigger("mouseover");
+      codePreview.dwellOn(at);
       return driver;
     },
 
     /** Ctrl-click the identifier at `at`: go to its definition. */
     goToDefinitionOf(at: PreviewPoint) {
-      worktreeCodePanePage.identifier(at.line, at.column).click({ ctrlKey: true });
+      codePreview.goToDefinitionOf(at);
       return driver;
     },
 
     /** Click the identifier at `at` with no modifier key. */
     plainClick(at: PreviewPoint) {
-      worktreeCodePanePage.identifier(at.line, at.column).click();
+      codePreview.plainClick(at);
+      return driver;
+    },
+
+    /** Close the hover card. */
+    closeHoverCard() {
+      codePreview.closeHoverCard();
       return driver;
     },
 

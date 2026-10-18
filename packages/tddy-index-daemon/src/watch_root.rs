@@ -20,18 +20,24 @@ use tddy_rpc::Status;
 use tokio::sync::watch;
 
 use crate::activity::{Activity, Warmth};
-use crate::graph::RootProgress;
+use crate::graph::{state_of_quiescence, RootProgress};
 use crate::index::WorkspaceIndex;
 use crate::operations::{event_stream, EventSender};
 use crate::proto::code_index::{ActivePhase, IndexProgress, IndexState};
 use crate::service::EventStream;
 
 /// Where a root's index stands for a follower that must not start one.
-pub(crate) enum RootView {
-    /// No language server holds the root.
-    Idle,
+enum RootView {
     /// A language server holds it; its progress, to follow until the sender drops.
     Held(watch::Receiver<RootProgress>),
+    /// No live language server holds it.
+    Unheld(Standing),
+}
+
+/// What a root no live server holds is, as one message reports it.
+enum Standing {
+    /// No language server holds the root.
+    Idle,
     /// The root's server could not start, or exited without being let go — and why.
     Failed(String),
 }
@@ -96,17 +102,17 @@ impl RootSignals {
 /// request respawns it.
 async fn view_of(index: &WorkspaceIndex, root: &Path) -> RootView {
     if let Some(reason) = index.signals().failure_of(root) {
-        return RootView::Failed(reason);
+        return RootView::Unheld(Standing::Failed(reason));
     }
     match index.graph_load_of(root).await {
         Some(graph) if graph.still_watching() => RootView::Held(graph.progress()),
         Some(_) if matches!(index.warmth_of(root).await, Warmth::AlreadyWarm) => {
-            RootView::Failed(format!(
+            RootView::Unheld(Standing::Failed(format!(
                 "the language server holding `{}` exited without being asked to",
                 root.display()
-            ))
+            )))
         }
-        _ => RootView::Idle,
+        _ => RootView::Unheld(Standing::Idle),
     }
 }
 
@@ -134,36 +140,42 @@ async fn follow(index: &WorkspaceIndex, root: &Path, events: &EventSender<IndexP
         // Marked seen *before* the root is read, so a server attached in between still wakes the
         // wait below rather than being missed.
         roots_changed.borrow_and_update();
-        match view_of(index, root).await {
-            RootView::Held(progress) => {
-                if forward(progress, events, &mut sent).await == Followed::CallerGone {
-                    return;
-                }
+        let following = match view_of(index, root).await {
+            RootView::Held(progress) => forward(progress, events, &mut sent).await == Gone::Server,
+            RootView::Unheld(standing) => {
+                sent.send_if_new(events, standing_of(root, standing)).await
+                    && next_change(&mut roots_changed, events).await.is_ok()
             }
-            standing => {
-                if !sent.send_if_new(events, standing_of(root, &standing)).await {
-                    return;
-                }
-                tokio::select! {
-                    changed = roots_changed.changed() => {
-                        if changed.is_err() {
-                            return;
-                        }
-                    }
-                    () = events.closed() => return,
-                }
-            }
+        };
+        if !following {
+            return;
         }
     }
 }
 
-/// How following one server's progress ended.
+/// Who went away while a follower waited for the next change.
 #[derive(Debug, PartialEq, Eq)]
-enum Followed {
-    /// The server is gone; what the root is now has to be read afresh.
-    ServerGone,
-    /// Nobody is left to hear about it.
-    CallerGone,
+pub(crate) enum Gone {
+    /// The changes' sender — a server's progress, or the index's root signals — is gone; what the
+    /// root is now has to be read afresh.
+    Server,
+    /// Nobody is left on `events` to hear about it.
+    Caller,
+}
+
+/// Wait for `changes` to change, or for the caller on `events` to leave.
+///
+/// The channel's own closing is the only disconnect signal a stream has besides a send that finds
+/// nobody listening, and a root can go a long time between changes — a cold root's load takes
+/// minutes — so without it a caller that hung up would leave this waiting on nothing.
+pub(crate) async fn next_change<T, E>(
+    changes: &mut watch::Receiver<T>,
+    events: &EventSender<E>,
+) -> Result<(), Gone> {
+    tokio::select! {
+        changed = changes.changed() => changed.map_err(|_| Gone::Server),
+        () = events.closed() => Err(Gone::Caller),
+    }
 }
 
 /// Forward every change of one server's progress, until the server or the caller is gone.
@@ -171,21 +183,14 @@ async fn forward(
     mut progress: watch::Receiver<RootProgress>,
     events: &EventSender<IndexProgress>,
     sent: &mut Sent,
-) -> Followed {
+) -> Gone {
     loop {
         let now = reported(&progress.borrow_and_update());
         if !sent.send_if_new(events, now).await {
-            return Followed::CallerGone;
+            return Gone::Caller;
         }
-        tokio::select! {
-            changed = progress.changed() => {
-                if changed.is_err() {
-                    return Followed::ServerGone;
-                }
-            }
-            // The only disconnect signal a stream has besides a failed send, and a root can go a
-            // long time between changes.
-            () = events.closed() => return Followed::CallerGone,
+        if let Err(gone) = next_change(&mut progress, events).await {
+            return gone;
         }
     }
 }
@@ -227,11 +232,7 @@ pub(crate) fn reported(progress: &RootProgress) -> IndexProgress {
         percentage: percentage as u32,
         furthest: progress.furthest.clone(),
         ready: false,
-        state: if progress.quiescent {
-            IndexState::Ready
-        } else {
-            IndexState::Loading
-        } as i32,
+        state: state_of_quiescence(progress.quiescent) as i32,
         phases: progress
             .phases
             .iter()
@@ -246,15 +247,15 @@ pub(crate) fn reported(progress: &RootProgress) -> IndexProgress {
 }
 
 /// The message for a root no live server holds.
-fn standing_of(root: &Path, standing: &RootView) -> IndexProgress {
+fn standing_of(root: &Path, standing: Standing) -> IndexProgress {
     match standing {
-        RootView::Failed(reason) => IndexProgress {
+        Standing::Failed(reason) => IndexProgress {
             line: format!("the index of {} failed: {reason}", root.display()),
             state: IndexState::Failed as i32,
-            error: reason.clone(),
+            error: reason,
             ..IndexProgress::default()
         },
-        RootView::Idle | RootView::Held(_) => IndexProgress {
+        Standing::Idle => IndexProgress {
             line: format!("no language server holds {}", root.display()),
             state: IndexState::Idle as i32,
             ..IndexProgress::default()

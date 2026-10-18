@@ -80,6 +80,10 @@ export const worktreeCodePanePage = {
   hoverBodyParagraphs: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodeHoverBody, { timeout: 5000, ...options }).find("p"),
 
+  /** Code blocks (`pre > code`) rendered inside the hover card's body. */
+  hoverBodyCodeBlocks: (options?: Parameters<typeof cy.get>[1]) =>
+    byTestId(TEST_IDS.worktreeCodeHoverBody, { timeout: 5000, ...options }).find("pre > code"),
+
   /** The hover card's loading state while its query is held by a loading index. */
   hoverLoading: (options?: Parameters<typeof cy.get>[1]) =>
     byTestId(TEST_IDS.worktreeCodeHoverLoading, { timeout: 5000, ...options }),

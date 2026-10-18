@@ -14,6 +14,7 @@ use tddy_lsp::{Location, LspClient, Position};
 use tddy_rpc::Status;
 
 use crate::activity::Activity;
+use crate::graph::state_of_quiescence;
 use crate::index::WorkspaceIndex;
 use crate::proto::code_index::{
     CodeLocation, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse, IndexState,
@@ -138,11 +139,7 @@ fn index_state_of(client: &LspClient) -> IndexState {
     if let Some(status) = client.server_status() {
         chatter.absorb(&status);
     }
-    if chatter.quiescent() {
-        IndexState::Ready
-    } else {
-        IndexState::Loading
-    }
+    state_of_quiescence(chatter.quiescent())
 }
 
 /// What a navigation query is put to: the root's warm server, which has been told the file's

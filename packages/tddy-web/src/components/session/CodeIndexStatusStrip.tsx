@@ -15,6 +15,10 @@ export interface CodeIndexStatusStripProps {
  * can be read against it. Unlike the header's indicator it stays visible once the index is ready,
  * and while loading it adds the message of the phase it names (the crate being indexed); when
  * several phases run at once it counts the others, listing every one in its tooltip.
+ *
+ * While the pane is open the session warms its index, so a root reported `idle` (its server was let
+ * go for sitting unused) is about to load again: it reads as starting, never as "not loaded". While
+ * the session's stream is being reopened it says so, with why it dropped.
  */
 export function CodeIndexStatusStrip({ status }: CodeIndexStatusStripProps) {
   const { summary, detail } = describe(status);
@@ -58,7 +62,9 @@ function describe(status: CodeIndexStatus): { summary: string; detail: string } 
     case "waiting":
       return { summary: "Code index: checking…", detail: "" };
     case "idle":
-      return { summary: "Code index not loaded", detail: "" };
+      return { summary: "Code index starting…", detail: "" };
+    case "none":
+      return { summary: "No code index for this worktree", detail: status.reason };
     case "progress":
       return {
         summary: `Indexing — ${currentPhaseHeadline(status.progress)}`,
@@ -68,6 +74,8 @@ function describe(status: CodeIndexStatus): { summary: string; detail: string } 
       return { summary: "Code index ready", detail: "" };
     case "failed":
       return { summary: `Indexing failed — ${status.reason}`, detail: "" };
+    case "reconnecting":
+      return { summary: "Reconnecting…", detail: status.reason };
   }
 }
 

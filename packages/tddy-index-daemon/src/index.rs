@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tddy_code_analysis::complexity_cache::InMemoryComplexityCache;
@@ -31,6 +31,10 @@ use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::activity::{reaped_line, Warmth};
 use crate::graph::GraphLoad;
+use crate::plan_flush::flush_eventually;
+use crate::plan_flush::PlanStores;
+use crate::plan_flush::SharedPlanStore;
+use crate::plan_flush::PLAN_FLUSH_DEBOUNCE;
 use crate::plan_upkeep::reresolve_loaded_plans;
 use crate::proto::code_index::WarmWorkspace;
 use crate::status::status_of_lsp;
@@ -49,26 +53,6 @@ use crate::watch_root::RootSignals;
 /// it clear of any single request against a cold graph. The same number, for the same reason, as
 /// the one a one-shot command line installs.
 const REQUEST_BOUND_ABOVE_ANY_COLD_INDEX: Duration = Duration::from_secs(600);
-
-/// How long a changed plan may wait in memory before it is written back.
-///
-/// Short enough that a plan a person opens in an editor a moment after a run sees the run's work,
-/// long enough that a burst of changes is one write. A run's own per-operation writes do not wait
-/// for it, and neither do unload and shutdown.
-const PLAN_FLUSH_DEBOUNCE: Duration = Duration::from_secs(1);
-
-/// How often the flusher looks for plans that have been dirty for longer than the debounce.
-const PLAN_FLUSH_TICK: Duration = Duration::from_millis(250);
-
-/// One root's loaded plans, shared between the requests that load, run and unload them and the
-/// flusher.
-///
-/// A `std` mutex, not a tokio one: every holder is a blocking thread or a handler that has moved to
-/// one, and a run holds it across the language-server calls that refresh its plan. The flusher only
-/// ever `try_lock`s it, so a run in progress is never what it waits on.
-pub type SharedPlanStore = Arc<std::sync::Mutex<PlanStore>>;
-
-type PlanStores = std::sync::Mutex<BTreeMap<PathBuf, SharedPlanStore>>;
 
 /// What this process knows about one workspace root.
 struct RootState {
@@ -434,64 +418,6 @@ impl WorkspaceIndex {
         };
         state.tree = Some(tree);
         changes
-    }
-}
-
-/// Write each store's plans that have been dirty for longer than the debounce, until the index
-/// that owns the stores is gone.
-///
-/// A store a run is using is skipped for this tick rather than waited for: the run writes its own
-/// plan after every operation, and a flusher that queued behind the run's language-server calls
-/// would hold a thread for as long as they take.
-async fn flush_eventually(plans: Weak<PlanStores>) {
-    let mut tick = tokio::time::interval(PLAN_FLUSH_TICK);
-    // What was last refused per root, so a plan that stays refused is reported once and not on
-    // every tick for as long as it stays so.
-    let mut reported: BTreeMap<PathBuf, String> = BTreeMap::new();
-    loop {
-        tick.tick().await;
-        let Some(plans) = plans.upgrade() else {
-            return;
-        };
-        let stores: Vec<(PathBuf, SharedPlanStore)> = plans
-            .lock()
-            .expect("the table of plan stores")
-            .iter()
-            .map(|(root, store)| (root.clone(), Arc::clone(store)))
-            .collect();
-        drop(plans);
-
-        let outcomes = tokio::task::spawn_blocking(move || {
-            stores
-                .into_iter()
-                .filter_map(|(root, store)| {
-                    let mut held = store.try_lock().ok()?;
-                    Some((
-                        root,
-                        held.flush_dirty().map(|_| ()).map_err(|f| f.to_string()),
-                    ))
-                })
-                .collect::<Vec<_>>()
-        })
-        .await
-        .expect("flushing the plans does not panic");
-
-        for (root, outcome) in outcomes {
-            match outcome {
-                Ok(()) => {
-                    reported.remove(&root);
-                }
-                Err(refusal) => {
-                    if reported.get(&root) != Some(&refusal) {
-                        log::warn!(
-                            target: "tddy_index_daemon::index",
-                            "could not write back a plan of {}: {refusal}", root.display()
-                        );
-                        reported.insert(root, refusal);
-                    }
-                }
-            }
-        }
     }
 }
 

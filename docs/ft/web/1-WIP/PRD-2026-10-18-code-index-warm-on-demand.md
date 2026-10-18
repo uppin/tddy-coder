@@ -97,7 +97,13 @@ After this change:
 - The pane opens one `CodeSession` while mounted (keyed by project + worktree) and closes it on unmount.
 - The status strip reads progress from that stream: `Indexing — <phase> <n>%` plus the phase's message; when
   more than one phase runs, `+N more`, with every active phase in the strip's tooltip. `ready` reads *Code index
-  ready*; `idle` cannot occur while the pane is open. *Code index not warmed for this session* is removed.
+  ready*; `idle` cannot occur while the pane is open — an index let go while it is open is warmed again, and
+  reads *Code index starting…* until its reload reports progress. *Code index not warmed for this session* is
+  removed.
+- A session that ends under the pane (transport blip, daemon restart) is reopened after 1 s, then 2 s, 4 s … up to
+  30 s between attempts (back to 1 s once a reopened session delivers); the strip reads *Reconnecting…* with the
+  reason, and queries still waiting are asked again on the new session. A session the host refuses is not
+  reopened: the strip reads *Indexing failed — <reason>*. Closing the pane stops reopening.
 - **Hover**: after the existing dwell the pane sends a `Probe` and a `Hover`.
   - `Probe` says definable → the identifier is **underlined** with a pointer cursor; a **plain click** goes to the
     definition (ctrl/cmd-click keeps working). The answer is cached per file and position.

@@ -14,7 +14,8 @@
 //! language server: two indexes answering the same pane would disagree.
 //!
 //! `CodeSession` — the code pane's bidirectional stream — lives in [`crate::code_session`];
-//! `WatchCodeIndex` follows `code_index.WatchRoot` for the session's worktree and never warms it.
+//! `WatchCodeIndex` follows `code_index.WatchRoot` for the session's worktree and never warms it —
+//! it dials only an index daemon that is already running ([`IndexChannelSource::connect_if_running`]).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -23,11 +24,10 @@ use tddy_index_daemon::proto::code_index as index;
 use tddy_index_daemon::proto::tonic_code_index::code_index_service_client::CodeIndexServiceClient;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::code_navigation::{
-    CodeIndexPhase, CodeIndexProgress, CodeIndexState, CodeLocation, CodeNavigationService,
-    CodeNavigationServiceServer, CodeSessionEvent, CodeSessionRequest, DefinitionRequest,
-    DefinitionResponse, HoverRequest, HoverResponse, OpenPlanRequest, PlanRunEvent, PlanSnapshot,
-    ReferencesRequest, ReferencesResponse, RunPlanRequest, SourcePosition, SourceRange,
-    WatchCodeIndexRequest, WatchPlanRequest,
+    CodeIndexProgress, CodeNavigationService, CodeNavigationServiceServer, CodeSessionEvent,
+    CodeSessionRequest, DefinitionRequest, DefinitionResponse, HoverRequest, HoverResponse,
+    OpenPlanRequest, PlanRunEvent, PlanSnapshot, ReferencesRequest, ReferencesResponse,
+    RunPlanRequest, SourcePosition, WatchCodeIndexRequest, WatchPlanRequest,
 };
 use tddy_worktree_service::worktree_files::validate_rel_path_shape;
 use tddy_worktree_service::WorktreeServiceImpl;
@@ -37,7 +37,12 @@ use tonic::transport::Channel;
 /// How many progress messages `WatchCodeIndex` buffers for a reader that has not drained them yet.
 const WATCH_BUFFER: usize = 8;
 
+pub(crate) mod convert;
 mod plan;
+pub(crate) mod position_query;
+
+use convert::{index_position, web_definition, web_hover, web_progress, web_references};
+use position_query::PositionQuery;
 
 /// The coordinate the web addresses this service at: `package code_navigation` +
 /// `service CodeNavigationService` in `tddy-service/proto/code_navigation.proto`.
@@ -52,6 +57,10 @@ pub type IndexChannelError = Box<dyn std::error::Error + Send + Sync>;
 pub trait IndexChannelSource: Send + Sync {
     /// A channel to the index daemon, starting it if nothing has yet.
     async fn connect(&self) -> Result<Channel, IndexChannelError>;
+
+    /// A channel to the index daemon only if it is already running — `None` otherwise. Never starts
+    /// it: a passive watcher has no business spawning the process it watches.
+    async fn connect_if_running(&self) -> Result<Option<Channel>, IndexChannelError>;
 }
 
 /// `code_navigation.CodeNavigationService`, over this daemon's worktree authorisation and its
@@ -110,6 +119,28 @@ impl CodeNavigationServiceImpl {
     }
 }
 
+impl Forward {
+    /// The client, and the position question this request asks of it.
+    fn into_position_query(self) -> (CodeIndexServiceClient<Channel>, PositionQuery) {
+        let query = PositionQuery {
+            workspace_root: self.workspace_root,
+            file: self.file,
+            position: self.position,
+        };
+        (self.client, query)
+    }
+}
+
+/// `UNAVAILABLE`, naming why the index daemon's channel could not be had.
+pub(crate) fn index_daemon_unavailable(err: &IndexChannelError) -> Status {
+    Status::unavailable(index_daemon_error(err))
+}
+
+/// Why the index daemon's channel could not be had, as one line.
+pub(crate) fn index_daemon_error(err: &IndexChannelError) -> String {
+    format!("index daemon: {err}")
+}
+
 /// A client on the index daemon's channel — dialling it starts the index daemon on first use — or
 /// `FAILED_PRECONDITION` when this daemon has no `index_daemon:` section.
 pub(crate) async fn connect_index(
@@ -124,7 +155,7 @@ pub(crate) async fn connect_index(
     let channel = source
         .connect()
         .await
-        .map_err(|err| Status::unavailable(format!("index daemon: {err}")))?;
+        .map_err(|err| index_daemon_unavailable(&err))?;
     Ok(CodeIndexServiceClient::new(channel))
 }
 
@@ -141,7 +172,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<DefinitionRequest>,
     ) -> Result<Response<DefinitionResponse>, Status> {
         let r = request.into_inner();
-        let mut forward = self
+        let (mut client, query) = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -149,21 +180,13 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 &r.rel_path,
                 r.position,
             )
-            .await?;
-        let answer = forward
-            .client
-            .definition(index::DefinitionRequest {
-                workspace_root: forward.workspace_root,
-                file: forward.file,
-                position: forward.position,
-            })
+            .await?
+            .into_position_query();
+        let answer = query
+            .definition(&mut client)
             .await
-            .map_err(tddy_service::to_rpc_status)?
-            .into_inner();
-        Ok(Response::new(DefinitionResponse {
-            state: web_state(answer.state()) as i32,
-            locations: answer.locations.into_iter().map(web_location).collect(),
-        }))
+            .map_err(tddy_service::to_rpc_status)?;
+        Ok(Response::new(web_definition(answer)))
     }
 
     /// Every reference to the symbol at a position.
@@ -172,7 +195,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<ReferencesRequest>,
     ) -> Result<Response<ReferencesResponse>, Status> {
         let r = request.into_inner();
-        let mut forward = self
+        let (mut client, query) = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -180,21 +203,13 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 &r.rel_path,
                 r.position,
             )
-            .await?;
-        let answer = forward
-            .client
-            .references(index::ReferencesRequest {
-                workspace_root: forward.workspace_root,
-                file: forward.file,
-                position: forward.position,
-            })
+            .await?
+            .into_position_query();
+        let answer = query
+            .references(&mut client)
             .await
-            .map_err(tddy_service::to_rpc_status)?
-            .into_inner();
-        Ok(Response::new(ReferencesResponse {
-            state: web_state(answer.state()) as i32,
-            locations: answer.locations.into_iter().map(web_location).collect(),
-        }))
+            .map_err(tddy_service::to_rpc_status)?;
+        Ok(Response::new(web_references(answer)))
     }
 
     /// The hover text of the symbol at a position.
@@ -203,7 +218,7 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         request: Request<HoverRequest>,
     ) -> Result<Response<HoverResponse>, Status> {
         let r = request.into_inner();
-        let mut forward = self
+        let (mut client, query) = self
             .authorise_and_connect(
                 &r.session_token,
                 &r.project_id,
@@ -211,26 +226,19 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
                 &r.rel_path,
                 r.position,
             )
-            .await?;
-        let answer = forward
-            .client
-            .hover(index::HoverRequest {
-                workspace_root: forward.workspace_root,
-                file: forward.file,
-                position: forward.position,
-            })
+            .await?
+            .into_position_query();
+        let answer = query
+            .hover(&mut client)
             .await
-            .map_err(tddy_service::to_rpc_status)?
-            .into_inner();
-        Ok(Response::new(HoverResponse {
-            state: web_state(answer.state()) as i32,
-            markdown: answer.markdown,
-        }))
+            .map_err(tddy_service::to_rpc_status)?;
+        Ok(Response::new(web_hover(answer)))
     }
 
     /// The session's worktree's code index: its current state, then every change, whoever started
-    /// the load — until the client leaves. Never starts a load. A session whose record names no
-    /// Rust worktree yet, or a daemon without an index daemon, ends at once with no message.
+    /// the load — until the client leaves. Never starts a load, nor the index daemon: a session
+    /// whose record names no Rust worktree yet, a daemon without an `index_daemon:` section, or an
+    /// index daemon nothing has started yet ends the stream at once with no message.
     async fn watch_code_index(
         &self,
         request: Request<WatchCodeIndexRequest>,
@@ -244,14 +252,21 @@ impl CodeNavigationService for CodeNavigationServiceImpl {
         let worktree = session_worktree(&session_dir)?;
         let (tx, rx) = tokio::sync::mpsc::channel(WATCH_BUFFER);
         let (Some(worktree), Some(source)) = (
-            worktree.filter(|root| root.join("Cargo.toml").is_file()),
+            worktree.filter(|root| tddy_index_daemon::is_rust_workspace(root)),
             self.index_daemon.as_ref(),
         ) else {
             // Nothing to follow: an empty stream, so no indicator shows.
             return Ok(Response::new(ReceiverStream::new(rx)));
         };
-        let progress = connect_index(Some(source))
-            .await?
+        let Some(channel) = source
+            .connect_if_running()
+            .await
+            .map_err(|err| index_daemon_unavailable(&err))?
+        else {
+            // No index daemon running, so no index is loaded or loading: nothing to follow.
+            return Ok(Response::new(ReceiverStream::new(rx)));
+        };
+        let progress = CodeIndexServiceClient::new(channel)
             .watch_root(index::WatchRootRequest {
                 workspace_root: worktree.display().to_string(),
             })
@@ -406,67 +421,6 @@ async fn forward_progress(
     }
 }
 
-/// The index's state of a root in the web's vocabulary.
-pub(crate) fn web_state(state: index::IndexState) -> CodeIndexState {
-    match state {
-        index::IndexState::Unspecified => CodeIndexState::Unspecified,
-        index::IndexState::Idle => CodeIndexState::Idle,
-        index::IndexState::Loading => CodeIndexState::Loading,
-        index::IndexState::Ready => CodeIndexState::Ready,
-        index::IndexState::Failed => CodeIndexState::Failed,
-    }
-}
-
-/// A root's progress, as the index reports it, in the web's vocabulary — field for field.
-pub(crate) fn web_progress(update: index::IndexProgress) -> CodeIndexProgress {
-    CodeIndexProgress {
-        state: web_state(update.state()) as i32,
-        line: update.line,
-        phase: update.phase,
-        percentage: update.percentage,
-        furthest: update.furthest,
-        ready: update.ready,
-        error: update.error,
-        phases: update
-            .phases
-            .into_iter()
-            .map(|phase| CodeIndexPhase {
-                title: phase.title,
-                message: phase.message,
-                percentage: phase.percentage,
-            })
-            .collect(),
-    }
-}
-
-pub(crate) fn index_position(position: SourcePosition) -> index::SourcePosition {
-    index::SourcePosition {
-        line: position.line,
-        column: position.column,
-    }
-}
-
-fn web_position(position: index::SourcePosition) -> SourcePosition {
-    SourcePosition {
-        line: position.line,
-        column: position.column,
-    }
-}
-
-/// The index's location in the web's vocabulary: `file` becomes `rel_path` and `outside_root`
-/// becomes `outside_worktree`; the path is already relative to the root when inside it and
-/// absolute otherwise, which is what `rel_path` is documented to hold.
-pub(crate) fn web_location(location: index::CodeLocation) -> CodeLocation {
-    CodeLocation {
-        rel_path: location.file,
-        range: location.range.map(|range| SourceRange {
-            start: range.start.map(web_position),
-            end: range.end.map(web_position),
-        }),
-        outside_worktree: location.outside_root,
-    }
-}
-
 /// The `code_navigation.CodeNavigationService` entry the runtime registers.
 #[must_use]
 pub fn build_code_navigation_entry(service: CodeNavigationServiceImpl) -> tddy_rpc::ServiceEntry {
@@ -482,52 +436,6 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-
-    #[test]
-    fn a_location_inside_the_root_maps_field_for_field() {
-        // Given an index location inside the workspace root
-        let inside = index::CodeLocation {
-            file: "src/lib.rs".to_string(),
-            range: Some(index::SourceRange {
-                start: Some(index::SourcePosition { line: 3, column: 1 }),
-                end: Some(index::SourcePosition { line: 3, column: 9 }),
-            }),
-            outside_root: false,
-        };
-
-        // When it is mapped for the web
-        let mapped = web_location(inside);
-
-        // Then it keeps its path and range and is not marked outside the worktree
-        assert_eq!(
-            mapped,
-            CodeLocation {
-                rel_path: "src/lib.rs".to_string(),
-                range: Some(SourceRange {
-                    start: Some(SourcePosition { line: 3, column: 1 }),
-                    end: Some(SourcePosition { line: 3, column: 9 }),
-                }),
-                outside_worktree: false,
-            }
-        );
-    }
-
-    #[test]
-    fn a_location_outside_the_root_is_marked_outside_the_worktree() {
-        // Given an index location in a dependency, which the index names by absolute path
-        let dependency = index::CodeLocation {
-            file: "/home/u/.cargo/registry/src/serde/lib.rs".to_string(),
-            range: None,
-            outside_root: true,
-        };
-
-        // When it is mapped for the web
-        let mapped = web_location(dependency);
-
-        // Then the pane is told not to offer opening it, and still gets the absolute path
-        assert!(mapped.outside_worktree);
-        assert_eq!(mapped.rel_path, "/home/u/.cargo/registry/src/serde/lib.rs");
-    }
 
     #[test]
     fn a_rel_path_that_leaves_the_worktree_is_refused_before_anything_is_forwarded() {

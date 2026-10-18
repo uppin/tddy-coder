@@ -1185,10 +1185,8 @@ pub async fn build(
         // nothing to warm, so nothing is installed.
         if let Some(registry) = index_daemon_registry.clone() {
             connection_impl = connection_impl.with_worktree_observer(Arc::new(
-                tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver::new(
-                    Arc::new(registry)
-                        as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>,
-                ),
+                tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver::new(Arc::new(registry)
+                    as Arc<dyn tddy_daemon_rpc::code_navigation::IndexChannelSource>),
             ));
         }
         if let Some(ref tracker) = idle_tracker {

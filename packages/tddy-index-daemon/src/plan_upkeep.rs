@@ -19,8 +19,8 @@ use tddy_lsp::client::LspClient;
 use tddy_rpc::Status;
 use tokio_util::sync::CancellationToken;
 
-use crate::index::SharedPlanStore;
 use crate::operations::joined;
+use crate::plan_flush::SharedPlanStore;
 use crate::status::status_of;
 use crate::tree_changes::FileChange;
 
