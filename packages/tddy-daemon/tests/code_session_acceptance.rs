@@ -3,8 +3,10 @@
 //! it again when its index is let go while the pane is open — streams its index's progress for as
 //! long as it is open, and answers the pane's queries — **holding** a hover, definition or
 //! references asked while the index loads until it is ready (or answering the failure, when it
-//! fails), never holding a probe, and dropping a held query the pane cancels. A worktree that is not
-//! a Rust worktree has no index: nothing is warmed, and every query is answered with why.
+//! fails), never holding a probe, and dropping a held query the pane cancels. An open session is use
+//! of the index daemon and of its worktree's root, so neither is let go for sitting idle while the
+//! pane is open. A worktree that is not a Rust worktree has no index: nothing is warmed, and every
+//! query is answered with why.
 //!
 //! Feature docs: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md
 //!
@@ -22,6 +24,7 @@
 mod support;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use prost::Message;
 use support::{
@@ -46,6 +49,7 @@ use tddy_service::proto::code_navigation::{
     CodeQueryKind, CodeSessionEvent, CodeSessionRequest, Definability, DefinitionResponse,
     HoverResponse, OpenCodeSession, ProbeAnswer, ReferencesResponse, SourcePosition,
 };
+use tddy_task::TaskId;
 use tokio::sync::mpsc;
 
 // ---------------------------------------------------------------------------------------------
@@ -361,11 +365,56 @@ async fn a_pane_s_daemon_over(
     tddy_rpc::ServiceEntry,
     support::AnIndexDaemonHost,
 ) {
+    a_pane_s_daemon_letting_its_index_daemon_go_after(index, Duration::from_secs(600)).await
+}
+
+/// [`a_pane_s_daemon_over`], whose index daemon is stopped once it has sat unused for
+/// `idle_timeout` — which also sets how often an open session says it is still in use.
+async fn a_pane_s_daemon_letting_its_index_daemon_go_after(
+    index: &AScriptedIndex,
+    idle_timeout: Duration,
+) -> (
+    AProjectWithASession,
+    IndexDaemonRegistry,
+    tddy_rpc::ServiceEntry,
+    support::AnIndexDaemonHost,
+) {
     let project = a_project_with_a_session_on_its_worktree();
     let host = an_index_daemon_host_serving(index.clone()).await;
-    let registry = host.registry();
+    let registry = host.registry_letting_its_process_go_after(idle_timeout);
     let entry = the_entry_for(&project, registry.clone());
     (project, registry, entry, host)
+}
+
+/// An idle timeout short enough to outlast in a test: the registry derives the keep-alive beat from
+/// it (a third of it), so an open session says it is in use several times within one timeout.
+const A_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// How often the tests' idle reaper looks, as the daemon's ticker does — only more often.
+const THE_REAPER_LOOKS_EVERY: Duration = Duration::from_millis(100);
+
+/// Every process the idle reaper stops while it looks over `span`.
+async fn what_the_reaper_stops_over(registry: &IndexDaemonRegistry, span: Duration) -> Vec<TaskId> {
+    let until = tokio::time::Instant::now() + span;
+    let mut stopped = Vec::new();
+    while tokio::time::Instant::now() < until {
+        stopped.extend(registry.reap_idle().await);
+        tokio::time::sleep(THE_REAPER_LOOKS_EVERY).await;
+    }
+    stopped
+}
+
+/// The process the idle reaper stops first, looking for up to [`AN_EVENT_IS_DUE_WITHIN`] — or
+/// `None`, when it stops nothing by then.
+async fn what_the_reaper_stops_first(registry: &IndexDaemonRegistry) -> Option<TaskId> {
+    let until = tokio::time::Instant::now() + AN_EVENT_IS_DUE_WITHIN;
+    while tokio::time::Instant::now() < until {
+        if let Some(stopped) = registry.reap_idle().await {
+            return Some(stopped);
+        }
+        tokio::time::sleep(THE_REAPER_LOOKS_EVERY).await;
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -775,4 +824,64 @@ async fn a_code_session_on_a_worktree_that_is_not_a_rust_worktree_has_no_index()
     // And nothing was warmed or followed — the index daemon was not even started for it
     assert_eq!(index.warms_it_was_asked_for(), vec![]);
     assert!(registry.running().await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_open_code_session_keeps_the_index_daemon_running_and_lets_it_go_once_closed() {
+    // Given a daemon that stops its index daemon once it has sat unused for a second
+    let index = a_scripted_index();
+    let (project, registry, entry, _host) =
+        a_pane_s_daemon_letting_its_index_daemon_go_after(&index, A_SHORT_IDLE_TIMEOUT).await;
+    index.reports(the_index_is_ready());
+    // And a pane's open code session on a loaded worktree, which asks nothing more
+    let mut session = a_code_session_opened_with(&entry, opening_its_worktree(&project)).await;
+    session.progress_until_ready().await;
+    let serving = registry
+        .running()
+        .await
+        .expect("opening the session started the index daemon")
+        .task_id
+        .clone();
+
+    // When the session stays open for well over the idle timeout, the idle reaper looking all along
+    let stopped_while_open =
+        what_the_reaper_stops_over(&registry, A_SHORT_IDLE_TIMEOUT * 5 / 2).await;
+    // And the pane then closes it
+    drop(session);
+    let stopped_once_closed = what_the_reaper_stops_first(&registry).await;
+
+    // Then the index daemon was not stopped while the session was open, and is once it closed
+    assert_eq!(
+        (stopped_while_open, stopped_once_closed),
+        (vec![], Some(serving))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_open_code_session_keeps_its_loaded_root_in_use_by_warming_it_again() {
+    // Given a pane's open code session on a loaded worktree, under a daemon whose keep-alive beat
+    // is a third of a second
+    let index = a_scripted_index();
+    let (project, _registry, entry, _host) =
+        a_pane_s_daemon_letting_its_index_daemon_go_after(&index, A_SHORT_IDLE_TIMEOUT).await;
+    index.reports(the_index_is_ready());
+    let mut session = a_code_session_opened_with(&entry, opening_its_worktree(&project)).await;
+    session.progress_until_ready().await;
+
+    // When the session stays open for two beats, its root never being let go
+    let warms = index.the_first_warms(3, AN_EVENT_IS_DUE_WITHIN).await;
+
+    // Then each beat warmed that worktree again — which is what the index daemon counts as using
+    // its root — after the warm opening the session asked for
+    let a_warm_of_the_worktree = index::WarmRequest {
+        workspace_root: project.worktree_path.clone(),
+    };
+    assert_eq!(
+        warms,
+        vec![
+            a_warm_of_the_worktree.clone(),
+            a_warm_of_the_worktree.clone(),
+            a_warm_of_the_worktree
+        ]
+    );
 }

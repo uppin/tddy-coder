@@ -6,13 +6,15 @@ import {
   type CodeIndexProgress,
   type CodeNavigationService,
 } from "../../gen/code_navigation_pb";
+import { StreamReopener, streamEndOf, type StreamEnd } from "./streamReopening";
 
 /**
  * Where a worktree's code index stands, as a `CodeIndexProgress` stream reports it — the header's
  * `WatchCodeIndex(session)` or the Code pane's `CodeSession`.
  *
  * - `waiting` — nothing heard yet.
- * - `idle` — nothing holds the index (no server for the worktree, or the watch ended unheard).
+ * - `idle` — nothing holds the index (no server for the worktree), or the header's watch ended and
+ *   the next has not reported yet.
  * - `none` — the worktree has no code index at all (not a Rust worktree); why.
  * - `progress` — loading: the latest progress message, naming the phase reported most recently,
  *   its percentage, and every phase running now.
@@ -58,11 +60,6 @@ export function codeIndexStatusOf(progress: CodeIndexProgress): CodeIndexStatus 
   }
 }
 
-/** The status a failed stream leaves behind. */
-export function codeIndexStatusOfError(err: unknown): CodeIndexStatus {
-  return failed(err instanceof Error ? err.message : String(err));
-}
-
 /** `<phase> <n>%` — the phase reported most recently and its percentage. */
 export function currentPhaseHeadline(progress: CodeIndexProgress): string {
   return `${progress.phase} ${progress.percentage}%`;
@@ -73,7 +70,74 @@ export function phaseHeadline(phase: CodeIndexPhase): string {
   return phase.percentage === undefined ? phase.title : `${phase.title} ${phase.percentage}%`;
 }
 
-/** Follow `code_navigation.WatchCodeIndex(session)` on `client` until it ends or the deps change. */
+/**
+ * Follows `code_navigation.WatchCodeIndex(session)` on `client` from `start` to `stop`, re-watching
+ * whenever a watch ends — on `StreamReopener`'s schedule — unless the host refused it.
+ *
+ * The host never starts an index for a watch: with no index daemon running, the watch ends at once
+ * and empty, and a watch also ends when the index daemon stops. Re-watching is what lets the header
+ * show a load the Code pane or the agent starts later. A watch that ended reports `idle` — whatever
+ * it said last (*Indexing … 40%*) is no longer known — until the next one reports.
+ *
+ * The LiveKit transport accepts a signal for server-streaming calls and never reads it, so `stopped`
+ * drops whatever arrives after `stop`; the signal ends the call sooner on transports that read it.
+ */
+class CodeIndexWatcher {
+  private stopped = false;
+  private abort: AbortController | null = null;
+  private readonly reopener = new StreamReopener();
+
+  constructor(
+    private readonly client: Client<typeof CodeNavigationService>,
+    private readonly session: { sessionToken: string; sessionId: string },
+    private readonly onStatus: (status: CodeIndexStatus) => void,
+  ) {}
+
+  start(): void {
+    void this.follow();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.reopener.stop();
+    this.abort?.abort();
+  }
+
+  private async follow(): Promise<void> {
+    const ended = await this.watch();
+    if (ended === null || this.stopped) return;
+    if (ended !== "ended" && ended.refused) {
+      this.onStatus(failed(ended.reason));
+      return;
+    }
+    // A watch that failed says why until the next one reports; one that ended knows nothing more.
+    this.onStatus(ended === "ended" ? { kind: "idle" } : failed(ended.reason));
+    this.reopener.reopenLater(() => void this.follow());
+  }
+
+  /** Read one watch to its end: `"ended"`, how it failed, or `null` once stopped. */
+  private async watch(): Promise<"ended" | StreamEnd | null> {
+    this.abort = new AbortController();
+    try {
+      const progress = this.client.watchCodeIndex(this.session, { signal: this.abort.signal });
+      this.reopener.opened();
+      for await (const message of progress) {
+        if (this.stopped) return null;
+        this.reopener.heard();
+        this.onStatus(codeIndexStatusOf(message));
+      }
+      return "ended";
+    } catch (err) {
+      if (this.stopped) return null;
+      return streamEndOf(err);
+    }
+  }
+}
+
+/**
+ * Follow the session's code index (`code_navigation.WatchCodeIndex`) for as long as the caller is
+ * mounted, re-watching after each watch ends (see `CodeIndexWatcher`). New deps start afresh.
+ */
 export function useCodeIndexProgress(
   client: Client<typeof CodeNavigationService>,
   sessionToken: string,
@@ -82,28 +146,10 @@ export function useCodeIndexProgress(
   const [status, setStatus] = useState<CodeIndexStatus>({ kind: "waiting" });
 
   useEffect(() => {
-    // Consumed with a `cancelled` flag rather than an `AbortSignal`: the LiveKit transport accepts a
-    // signal for server-streaming calls and never reads it.
-    let cancelled = false;
-    let heard = false;
     setStatus({ kind: "waiting" });
-    (async () => {
-      try {
-        for await (const progress of client.watchCodeIndex({ sessionToken, sessionId })) {
-          if (cancelled) return;
-          heard = true;
-          setStatus(codeIndexStatusOf(progress));
-        }
-        // Ended without a message: nothing on the host follows this session's index (no
-        // `index_daemon:`, or a worktree that is not a Cargo workspace).
-        if (!cancelled && !heard) setStatus({ kind: "idle" });
-      } catch (err) {
-        if (!cancelled) setStatus(codeIndexStatusOfError(err));
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    const watcher = new CodeIndexWatcher(client, { sessionToken, sessionId }, setStatus);
+    watcher.start();
+    return () => watcher.stop();
   }, [client, sessionToken, sessionId]);
 
   return status;

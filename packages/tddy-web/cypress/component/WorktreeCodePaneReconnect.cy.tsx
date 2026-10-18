@@ -1,7 +1,8 @@
 /**
  * The Code pane keeps its `code_navigation.CodeSession` for as long as it is mounted: a session that
  * ends under it — a transport blip, a daemon restart — is reopened, after 1 s and then twice as long
- * after each failed attempt, up to 30 s, back to 1 s once a reopened session has delivered. The
+ * after each failed attempt, up to 30 s, back to 1 s once a reopened session has delivered and stayed
+ * open for 10 s — so a host that accepts a session and drops it at once is backed off too. The
  * strip says it is reconnecting meanwhile, and queries still waiting are asked again on the new
  * session. A session the host refuses is not reopened; unmounting stops reopening.
  *
@@ -105,7 +106,7 @@ it("waits twice as long after each failed attempt, up to 30 seconds", () => {
   expectTheStripIndexing();
 });
 
-it("a reopened session that delivered waits a second again after the next drop", () => {
+it("a reopened session that stayed open for 10 seconds waits a second again after the next drop", () => {
   // Given a pane whose session failed to reopen once before it was reopened
   cy.clock();
   const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
@@ -120,15 +121,37 @@ it("a reopened session that delivered waits a second again after the next drop",
   expectTheHost(host).toHaveOpened(attempts(3));
   expectTheStripIndexing();
 
-  // When the host drops the reopened session
+  // When the reopened session stays open for 10 seconds, then the host drops it
+  cy.tick(10_000);
   cy.then(() => host.dropSessions(A_RESTART));
   expectTheStripReconnecting();
 
   // Then it is reopened a second later, not four
   cy.tick(999);
-  expectTheHost(host).toHaveOpened(attempts(3));
+  expectTheHost(host).toStillHaveOpened(attempts(3));
   cy.tick(1);
   expectTheHost(host).toHaveOpened(attempts(4));
+});
+
+it("a host that accepts each session and drops it at once is backed off, not asked every second", () => {
+  // Given an open pane following an index that is indexing
+  cy.clock();
+  const host = aGeometryWorktreeHost().startingAt(anIndexLoading(INDEXING_38));
+  aCodePaneOn(host).mount();
+  expectTheStripIndexing();
+
+  // When the host drops every session right after it reported progress on it
+  // Then each reopening follows the last drop by twice the wait before it: 1, 2, then 4 seconds
+  const waitsBeforeReopeningMs = [1_000, 2_000, 4_000];
+  waitsBeforeReopeningMs.forEach((waitMs, i) => {
+    cy.then(() => host.dropSessions(A_RESTART));
+    expectTheStripReconnecting();
+    cy.tick(waitMs - 1);
+    expectTheHost(host).toStillHaveOpened(attempts(i + 1));
+    cy.tick(1);
+    expectTheHost(host).toHaveOpened(attempts(i + 2));
+    expectTheStripIndexing();
+  });
 });
 
 it("a hover held when the session dropped is asked again on the reopened one and fills in", () => {

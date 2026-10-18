@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
-import { Code, ConnectError, type Client } from "@connectrpc/connect";
+import type { Client } from "@connectrpc/connect";
 import { AsyncQueue } from "tddy-livekit-web";
 
 import {
@@ -15,6 +15,7 @@ import {
 } from "../../gen/code_navigation_pb";
 import type { CodePosition } from "./codeNavigationApi";
 import { codeIndexStatusOf, type CodeIndexStatus } from "./useCodeIndexProgress";
+import { StreamReopener, streamEndOf, type StreamEnd } from "./streamReopening";
 
 /** The worktree a code session is opened on, as the daemon authorises it. */
 export type CodeSessionConfig = {
@@ -56,28 +57,6 @@ export interface CodeSession {
   /** Drop the query `id`: the host stops holding it and its outcome resolves `cancelled`. */
   cancel(id: bigint): void;
 }
-
-/** The first wait before reopening a stream that ended under the pane, in milliseconds. */
-const FIRST_REOPEN_DELAY_MS = 1_000;
-/** The longest wait between two reopening attempts, in milliseconds. */
-const LONGEST_REOPEN_DELAY_MS = 30_000;
-
-/** How long to wait before reopening attempt `attempt` (zero-based): doubling, capped. */
-export const reopenDelayMs = (attempt: number) =>
-  Math.min(FIRST_REOPEN_DELAY_MS * 2 ** attempt, LONGEST_REOPEN_DELAY_MS);
-
-/**
- * Refusals: the host answered, and asking again cannot change its answer, so the stream is not
- * reopened. Everything else (the transport dropped, the daemon restarted) is reopened.
- */
-const REFUSALS: ReadonlySet<Code> = new Set([
-  Code.InvalidArgument,
-  Code.NotFound,
-  Code.PermissionDenied,
-  Code.Unauthenticated,
-  Code.FailedPrecondition,
-  Code.Unimplemented,
-]);
 
 type QueryFrame = MessageInitShape<typeof CodeQuerySchema>;
 
@@ -193,22 +172,11 @@ class CodeSessionChannel implements CodeSession {
   }
 }
 
-type StreamEnd = { reason: string; refused: boolean };
-
-/** Why a stream ended: its own words for an RPC error, without the code prefix. */
-function endReason(err: unknown): StreamEnd {
-  if (err instanceof ConnectError)
-    return { reason: err.rawMessage, refused: REFUSALS.has(err.code) };
-  return {
-    reason: err instanceof Error ? err.message : String(err),
-    refused: false,
-  };
-}
-
 /**
  * Follows `channel` over `client`'s `CodeSession` streams from `start` to `stop`: delivers each
- * stream's events, and reopens one that ended under the pane after `reopenDelayMs` — unless the host
- * refused the session, which fails the channel. `onStatus` hears progress and how a stream ended.
+ * stream's events, and reopens one that ended under the pane on `StreamReopener`'s schedule —
+ * unless the host refused the session, which fails the channel. `onStatus` hears progress and how
+ * a stream ended.
  *
  * The LiveKit transport never reads an `AbortSignal`, so closing the request stream (`channel.close`)
  * is what ends the session on every transport; the signal ends it sooner on those that do read it,
@@ -217,8 +185,7 @@ function endReason(err: unknown): StreamEnd {
 class CodeSessionFollower {
   private stopped = false;
   private abort: AbortController | null = null;
-  private reopen: ReturnType<typeof setTimeout> | null = null;
-  private attempt = 0;
+  private readonly reopener = new StreamReopener();
 
   constructor(
     private readonly client: Client<typeof CodeNavigationService>,
@@ -232,7 +199,7 @@ class CodeSessionFollower {
 
   stop(): void {
     this.stopped = true;
-    if (this.reopen !== null) clearTimeout(this.reopen);
+    this.reopener.stop();
     this.channel.close();
     this.abort?.abort();
   }
@@ -247,7 +214,7 @@ class CodeSessionFollower {
     }
     this.channel.disconnect();
     this.onStatus({ kind: "reconnecting", reason: ended.reason });
-    this.scheduleReopen();
+    this.reopener.reopenLater(() => void this.follow());
   }
 
   /** Read one stream to its end: how it ended, or `null` once stopped. */
@@ -255,29 +222,21 @@ class CodeSessionFollower {
     this.abort = new AbortController();
     try {
       const events = this.client.codeSession(this.channel.connect(), { signal: this.abort.signal });
+      this.reopener.opened();
       for await (const event of events) {
         if (this.stopped) return null;
         this.deliver(event);
       }
       return { reason: "the code session ended", refused: false };
     } catch (err) {
-      return endReason(err);
+      return streamEndOf(err);
     }
   }
 
   private deliver(event: CodeSessionEvent): void {
-    // The host has the session: a later drop waits the first delay again.
-    this.attempt = 0;
+    this.reopener.heard();
     const progress = this.channel.receive(event);
     if (progress !== null) this.onStatus(codeIndexStatusOf(progress));
-  }
-
-  private scheduleReopen(): void {
-    this.reopen = setTimeout(() => {
-      this.reopen = null;
-      void this.follow();
-    }, reopenDelayMs(this.attempt));
-    this.attempt += 1;
   }
 }
 
@@ -287,8 +246,9 @@ class CodeSessionFollower {
  * `status`, and `session` asks hover / definition / references / probe queries on the same stream.
  *
  * A stream that ends or fails under the pane is reopened — after 1 s, then 2 s, 4 s … up to 30 s
- * between attempts, back to 1 s once a reopened stream has delivered — with `status` reading
- * `reconnecting` meanwhile and every query still waiting asked again on the new stream. A refusal
+ * between attempts, back to 1 s only once a stream has delivered and stayed open for 10 s
+ * (`streamReopening.ts`), so a host that accepts and drops at once is backed off — with `status`
+ * reading `reconnecting` meanwhile and every query still waiting asked again on the new stream. A refusal
  * (the host answered, e.g. permission denied) is not retried: `status` reads `failed`. Unmounting
  * stops retrying. A new client or worktree closes the old session and opens a fresh one.
  */

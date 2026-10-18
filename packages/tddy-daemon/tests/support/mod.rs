@@ -459,6 +459,20 @@ impl AScriptedIndex {
         self.warms_asked.lock().expect("the request log").clone()
     }
 
+    /// The first `count` warms it is asked for, waiting up to `budget` for them to arrive — or
+    /// every warm asked by then, when fewer were.
+    #[allow(dead_code)] // code_session_acceptance only
+    pub async fn the_first_warms(&self, count: usize, budget: Duration) -> Vec<index::WarmRequest> {
+        let deadline = tokio::time::Instant::now() + budget;
+        loop {
+            let warms = self.warms_it_was_asked_for();
+            if warms.len() >= count || tokio::time::Instant::now() >= deadline {
+                return warms.into_iter().take(count).collect();
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     #[allow(dead_code)] // code_index_warmup_acceptance only
     pub fn roots_it_was_asked_to_watch(&self) -> Vec<index::WatchRootRequest> {
         self.watches_asked.lock().expect("the request log").clone()
@@ -783,12 +797,21 @@ impl AnIndexDaemonHost {
 
     /// The registry an `index_daemon:` section pointing at this host would build. Starts nothing.
     pub fn registry(&self) -> IndexDaemonRegistry {
+        self.registry_letting_its_process_go_after(Duration::from_secs(600))
+    }
+
+    /// [`Self::registry`], configured to stop the index daemon once it has sat unused for
+    /// `idle_timeout`.
+    pub fn registry_letting_its_process_go_after(
+        &self,
+        idle_timeout: Duration,
+    ) -> IndexDaemonRegistry {
         IndexDaemonRegistry::new(
             IndexDaemonSpawn {
                 program: self.dir.path().join("tddy-index-daemon"),
                 socket_path: self.dir.path().join("index.sock"),
                 ready_timeout: A_READINESS_BUDGET_NOTHING_SHOULD_WAIT_OUT,
-                idle_timeout: Duration::from_secs(600),
+                idle_timeout,
                 rust_analyzer: None,
                 env: Default::default(),
             },

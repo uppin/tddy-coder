@@ -201,7 +201,7 @@ export interface OpenedWorktree {
 // ---------------------------------------------------------------------------
 
 /** An async queue of events one session's response stream drains. */
-class EventQueue<T> implements AsyncIterable<T> {
+export class EventQueue<T> implements AsyncIterable<T> {
   private readonly items: T[] = [];
   private wake: (() => void) | null = null;
   private closed = false;

@@ -80,8 +80,8 @@ Code pane watches but never warms; navigation answers empty while loading; the h
 - [x] **Agent tools**: `Lsp*` loading answer
 - [x] **Web**: `useCodeSession`, strip, held requests, probe underline + plain click, floating hover card
 - [ ] **Package documentation**
-- [~] **Testing**: Rust suites green locally, scoped (2026-10-18 /validate-changes): `root_progress_acceptance` 7/7, `code_index_service_acceptance` 44/44, `tddy-index-daemon --lib` 54/54, `chatter` 27/27, `code_session_acceptance` 7/7, `code_index_warmup_acceptance` 6/6, `code_navigation_acceptance` 7/7, `plan_dialog_acceptance` 5/5, `lsp_tools_via_index` 14/14, `restructure_tools_via_index` 14/14. Cypress specs reported green by /green, not re-run here. Coverage gaps: see Refactoring Needed → /validate-tests
-- [~] **Code quality**: scoped clippy `-D warnings --all-targets` clean; ❌ `cargo fmt --check` fails in 2 files (see /validate-changes); CI not run (no PR)
+- [~] **Testing**: Rust suites green locally, scoped — first /validate-changes run: `root_progress_acceptance` 7/7, `code_index_service_acceptance` 44/44, `tddy-index-daemon --lib` 54/54, `chatter` 27/27, `restructure_tools_via_index` 14/14; after the refactor round (Validation Results → Daemon-side refactor): `code_session_acceptance` 17/17, `code_index_warmup_acceptance` 11/11, `code_navigation_acceptance` 7/7, `plan_dialog_acceptance` 5/5, `lsp_tools_via_index` 15/15. Cypress specs reported green by the web refactor, not re-run at validation. Final scoped gates run separately at pr-wrap step 5; CI not run (no PR)
+- [~] **Code quality**: scoped clippy `-D warnings --all-targets` clean (daemon-side refactor); `cargo fmt --check` clean on all seven touched Rust packages (re-checked at final /validate-changes); open clean-code items listed under Validation Results → /validate-changes → Final
 
 ## Technical Changes
 
@@ -115,6 +115,7 @@ enum IndexState {
   INDEX_STATE_IDLE        = 1;  // no server holds this root
   INDEX_STATE_LOADING     = 2;  // a server is loading its crate graph
   INDEX_STATE_READY       = 3;  // the graph is loaded and queryable
+  INDEX_STATE_FAILED      = 4;  // 🆕 the server could not start, or exited unasked; `error` says why
 }
 
 // One work-done progress token in flight, as the language server titled it.
@@ -127,6 +128,7 @@ message ActivePhase {
 message IndexProgress {            // fields 1–5 unchanged
   IndexState           state  = 6;
   repeated ActivePhase phases = 7; // begin order; empty when idle
+  string               error  = 8; // 🆕 why, when FAILED
 }
 
 message DefinitionResponse { repeated CodeLocation locations = 1; IndexState state = 2; }
@@ -215,6 +217,8 @@ enum CodeIndexState {
   CODE_INDEX_STATE_IDLE        = 1;
   CODE_INDEX_STATE_LOADING     = 2;
   CODE_INDEX_STATE_READY       = 3;
+  CODE_INDEX_STATE_FAILED      = 4;  // 🆕 `error` (field 6, existing) says why
+  CODE_INDEX_STATE_NONE        = 5;  // 🆕 pr-wrap: not a Rust worktree, nothing will load; `error` says why
 }
 message CodeIndexPhase { string title = 1; string message = 2; optional uint32 percentage = 3; }
 
@@ -350,6 +354,8 @@ Written; all six fail against the stubs (`WatchRoot` UNIMPLEMENTED, `state` UNSP
 - `a_code_session_whose_index_stops_following_its_worktree_ends_unavailable`
 - `a_code_session_opened_with_a_token_nobody_holds_is_refused`
 - `a_code_session_on_a_worktree_that_is_not_a_rust_worktree_has_no_index`
+- `an_open_code_session_keeps_the_index_daemon_running_and_lets_it_go_once_closed` (FV1)
+- `an_open_code_session_keeps_its_loaded_root_in_use_by_warming_it_again` (FV3)
 
 ### tddy-daemon — `packages/tddy-daemon/tests/code_index_warmup_acceptance.rs` (rewritten)
 
@@ -390,10 +396,19 @@ Written; all six fail against the stubs (`WatchRoot` UNIMPLEMENTED, `state` UNSP
 
 - [x] `a session dropped under the pane is reopened after a second, saying it is reconnecting meanwhile`
 - [x] `waits twice as long after each failed attempt, up to 30 seconds`
-- [x] `a reopened session that delivered waits a second again after the next drop`
+- [x] `a reopened session that stayed open for 10 seconds waits a second again after the next drop` (was: *…that
+  delivered…*; FV5)
+- [x] `a host that accepts each session and drops it at once is backed off, not asked every second` (FV5)
 - [x] `a hover held when the session dropped is asked again on the reopened one and fills in`
 - [x] `closing the pane while it is reconnecting stops reopening`
 - [x] `a session the host refuses is not reopened, and the strip names why`
+
+### tddy-web — `packages/tddy-web/cypress/component/SessionIndexingIndicatorResubscribe.cy.tsx` (new, FV2/FV6)
+
+- [x] `the header shows a load that starts after its first watch ended empty`
+- [x] `the header drops what it last said once its watch ends mid-load`
+- [x] `the header watches again after 1, 2 and 4 seconds while no index daemon runs`
+- [x] `a watch the host refuses is not asked again, and the header names why`
 
 ### tddy-web — `packages/tddy-web/cypress/component/CodeHoverCard.cy.tsx` (new)
 
@@ -405,6 +420,7 @@ Written; all six fail against the stubs (`WatchRoot` UNIMPLEMENTED, `state` UNSP
 
 ### tddy-web — `packages/tddy-web/cypress/component/CodeIndexStatusStrip.cy.tsx` (rewritten onto `CodeSession`)
 
+- [x] pr-wrap: `says a worktree that is not a Rust worktree has no code index, and why` (`NONE`)
 - [x] Web refactor (2026-10-18), strip-only concerns: `names the reason when the index fails to load`; `an index let go while the pane is open reads as starting, never as not loaded`; `says it is reconnecting, and why, while the code session is down`. Removed: `untracked`; `shows the phase running now …` (duplicated the first `WorktreeCodePaneCodeSession` test, W9); `names the reason when the code session fails` (a dropped session now reconnects).
 
 **Web test contract** (test ids in `cypress/support/testIds.ts`, page object `worktreeCodePanePage`): `worktree-code-index-status-more` (`+N more`, `title` lists every phase); `worktree-code-hover-loading` (*Index loading — <phase> <n>%*); `worktree-code-hover-body` (scrolling rendered markdown); `worktree-code-hover-close`; `worktree-code-notice` (the navigation notice). The strip headline names the phase reported on **most recently** (`CodeIndexProgress.phase` / `percentage`); its detail is that phase's `message` from `phases`. An identifier the probe found definable carries `data-definable="true"` and computes `text-decoration-line: underline` and `cursor: pointer`. The specs import `src/index.css` so Tailwind utilities apply.
@@ -467,23 +483,23 @@ _(populated during development)_
 - ✅ RESOLVED (web refactor, 2026-10-18) — Web: probe answers are cached per file + position and forgotten whenever
   a file is opened; forgetting now also cancels the probes in flight and drops their late answers. An index that
   goes back to loading after an edit still does not clear the cache (unchanged).
-- Web: an `IDLE` progress on the pane's session reads *Code index starting…*. The daemon sends `IDLE` both for an
-  evicted root it is about to re-warm and, once, for a worktree with no `Cargo.toml` (VC1,
-  `code_session/without_an_index.rs`) — so a non-Rust worktree's strip also reads *starting…* for as long as it is
-  open. The web cannot tell the two apart from the stream; telling them apart needs a distinct signal from the
-  daemon (e.g. a `NO_INDEX` state). **Open question for the developer.**
+- ✅ RESOLVED (pr-wrap, `CODE_INDEX_STATE_NONE` — see Decisions) — Web: an `IDLE` progress on the pane's session
+  reads *Code index starting…*; a worktree with no `Cargo.toml` now gets one `NONE` progress
+  (`code_session/without_an_index.rs`) and reads *No code index for this worktree*, so the two are told apart.
 
 ## Decisions & Trade-offs
 
 - **Code pane reconnect (VC5) — developer's choice (2026-10-18): auto-reopen with backoff.** When the
   `CodeSession` stream ends or errors while the pane is mounted, `useCodeSession` reopens it after 1 s, 2 s, 4 s …
-  capped at 30 s, back to 1 s once a reopened stream has delivered an event; the strip reads *Reconnecting…* with
+  capped at 30 s, back to 1 s once a stream has delivered and stayed open ≥ 10 s (FV5 — was: once it delivered any
+  event); the strip reads *Reconnecting…* with
   why it dropped; every query still waiting (held or awaiting its answer, probes included) is asked again on the
   new stream with the same request id. Unmounting stops retrying. The queries live on one `CodeSession` object for
   the pane's life, so `useCodeNavigation` never sees the reconnect. **Added in the refactor (flagged for review):**
   a *refusal* — `INVALID_ARGUMENT`, `NOT_FOUND`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, `FAILED_PRECONDITION`,
   `UNIMPLEMENTED` — is not retried (asking again cannot change the host's answer): the strip reads *Indexing failed
-  — <reason>* and waiting queries reject. Pinned by `WorktreeCodePaneReconnect.cy.tsx` (6, with `cy.clock`).
+  — <reason>* and waiting queries reject. Pinned by `WorktreeCodePaneReconnect.cy.tsx` (7, with `cy.clock`). The
+  session header's `WatchCodeIndex` follows the same policy through the shared `StreamReopener` (FV2).
 - **Idle eviction while the pane is open — developer's choice (2026-10-18):** the daemon re-warms the root (Rust
   side, VC4), so the pane shows the reload's progress; an `IDLE` progress reads *Code index starting…*, never
   *Code index not loaded* (PRD: "`idle` cannot occur while the pane is open" — as a resting state). See Technical
@@ -523,12 +539,30 @@ _(populated during development)_
   session's last warm, the session calls `code_index.Warm` again; held queries stay held through `IDLE` and are
   answered once `READY`. `FAILED` still answers held queries with `error`. An `IDLE` before the root ever held a
   server (the session's own warm has not reached one yet) starts nothing — a flag, not "is the warm task
-  finished", so the rule is deterministic. Fixes VC4 and /validate-prod-ready #5.
+  finished", so the rule is deterministic. Fixes VC4 and /validate-prod-ready #5. Since the keep-alive decision
+  below, this is the safety net, not the expected path.
+- **Keep alive while open** — developer's choice (2026-10-18), resolves FV1 and FV3. An open `CodeSession` is use of
+  both the index-daemon **process** and its root's **language server**, so neither is let go while a pane is open.
+  `IndexChannelSource` gains `keep_alive()` (the registry refreshes the running process's idle timer; never spawns)
+  and `keep_alive_every()` (the registry derives it from its idle timeout: a third of it, clamped to 100 ms–60 s, so
+  the same beat also stays well under the index daemon's `A_SERVER_MAY_SIT_UNUSED_FOR` of 600 s). The session calls
+  `keep_alive()` on every query and on a heartbeat at that period; the heartbeat also calls `code_index.Warm` when
+  the root is `READY`/`LOADING` and no warm of this session is in flight — idempotent (a loaded root answers at once)
+  and, through `WorkspaceIndex::client_for`, exactly what records the root's use (`record_use` → `last_used`, and the
+  `LspRegistry` tracker via `get_or_spawn`). **No proto RPC added.** An `IDLE` or `FAILED` root is not warmed by the
+  heartbeat — starting a load stays the re-warm-on-`IDLE` rule's decision (`code_session/keep_alive.rs`).
+  **Trade-off (developer accepted):** a forgotten open tab keeps rust-analyzer — and the index-daemon process —
+  resident until the tab closes. Note: `tddy-index-daemon` does not yet call `LspRegistry::reap_idle` (its
+  `TODO(M6)` in `main.rs`), so the root half is pre-emptive until that lands. Pinned by
+  `an_open_code_session_keeps_the_index_daemon_running_and_lets_it_go_once_closed` and
+  `an_open_code_session_keeps_its_loaded_root_in_use_by_warming_it_again` (`code_session_acceptance.rs`, 1 s idle
+  timeout configured on the test registry — a real constructor parameter).
 - **The header never spawns the index daemon** — developer's choice (2026-10-18). `IndexChannelSource` gains
   `connect_if_running` (`IndexDaemonRegistry::connect_if_running` dials only a process that is already up and does
   not refresh its idle timer); `WatchCodeIndex` uses it and ends with no message when nothing is running. Fixes VC3.
 - **A non-Rust worktree has no code index** (VC1): `CodeSession` on a worktree with no `Cargo.toml` neither dials
-  the index daemon nor warms/watches; it sends one `IDLE` progress and answers every query with `error: "this
+  the index daemon nor warms/watches; it sends one `NONE` progress (was `IDLE` before the `CODE_INDEX_STATE_NONE`
+  decision above) and answers every query with `error: "this
   worktree has no Cargo.toml at its root, so it is not a Rust worktree and has no code index"`
   (`code_session/without_an_index.rs`).
 - **`Lsp*` loading note by emptiness** (/validate-prod-ready #3): an empty loading answer says "this empty answer is
@@ -631,8 +665,8 @@ Run 2026-10-18 against `71ae6a42c`. Prioritised; overlaps with /validate-prod-re
   `query.kind` inside; split into a `definition_of` helper used by two arms for readability.
 - **VC10** `.claude/settings.json` — unrelated allow-list change (`Read(~/.claude/projects/**)`); same as
   /validate-prod-ready #6.
-- **VC11** Changeset State B snippet (`code_index.proto` / `code_navigation.proto`) omits `FAILED` and
-  `IndexProgress.error` that the Decisions section added — update the snippet at wrap.
+- ✅ FIXED (final /validate-changes, doc only) — **VC11** Changeset State B snippet (`code_index.proto` / `code_navigation.proto`) omits `FAILED` and
+  `IndexProgress.error` that the Decisions section added — snippet now carries `FAILED`, `NONE` and `error`.
 
 ### From /validate-tests
 
@@ -669,6 +703,7 @@ Run 2026-10-18. Prioritised; `R*` Rust, `W*` web. None critical.
 - ✅ FIXED (`the_index_s_call_to_foo()`; `THE_SERVER_WENT_AWAY` const) — **R9** `code_session_acceptance.rs:267` hardcodes `SourcePosition { line: 2, column: 5 }` instead of `the_call_to_foo()`; `code_index_warmup_acceptance.rs:239,247` repeats the failure reason — make it a const.
 - ✅ FIXED for the daemon (`AN_EVENT_IS_DUE_WITHIN` 30 s → 5 s, justified: the first event waits on the registry starting the stand-in `sh` process; tests take ~0.2–2 s each). ⏸ DEFERRED: `A_PROGRESS_STEP` in `tddy-index-daemon` — that package is being restructured — **R10** `packages/tddy-daemon/tests/support/mod.rs:49` — `AN_EVENT_IS_DUE_WITHIN` = 30 s, above the 1 s integration ceiling, while its comment says every event is a local round-trip; lower it (e.g. 5 s) or justify the figure. Same for `A_PROGRESS_STEP` (10 s) in `root_progress_acceptance.rs:26`.
   ◐ **Partly fixed**: `A_PROGRESS_STEP` lowered 10 s → 5 s with the justification in its doc. `AN_EVENT_IS_DUE_WITHIN` (`tddy-daemon`) left to the agent owning that package.
+  **Final /validate-changes sync**: as committed, `AN_EVENT_IS_DUE_WITHIN` is **15 s**, not 5 s (`support/mod.rs:54`) — its doc records that 5 s timed out 2–9 of 17 code-session tests on a loaded host. Both figures are justified in place; R10 closed.
 - ✅ FIXED (module-wide allow removed; each item one suite does not use carries `#[allow(dead_code)] // <suite> only`) — **R11** `support/mod.rs:19` — crate-wide `#![allow(dead_code)]`; prefer per-item allows so dead helpers surface.
 - ✅ FIXED (asserts code and message) — **R12** `code_session_acceptance.rs:454` asserts only `InvalidArgument`, not the message.
 - **R13** `packages/tddy-lsp/tests/bin/fake_lsp.rs:57` — "All three are off unless asked for" is stale (many modes now).
@@ -852,6 +887,103 @@ Scoped to `tddy-daemon-rpc`, `tddy-daemon`, `tddy-lsp-executor` (never workspace
   `validate_rel_path_shape`; `WatchCodeIndex` authorises with `resolve_owned_session_dir` before reading the record.
   No secrets, no `unsafe`, no stdout in TUI paths, no test-only branches.
 
+#### Final (pr-wrap step 5)
+
+- **Run**: 2026-10-18 against `888740395` (`git diff master...HEAD`, 70 files; ordinary branch — base `master`, no
+  PR, no stack headings). Read-only review: no build or test run here (the scoped gates run in a separate process);
+  `cargo fmt --check -p` on the seven touched Rust packages ✅ clean.
+- **Status**: ⚠ Pass with warnings — **0 critical**, 3 warnings (1 high, 2 medium), 6 info. Nothing blocks on
+  correctness, security or build; **FV1 is a behaviour regression the developer should fix or explicitly accept
+  before merge.**
+- **Refactor round introduced** (new since `71ae6a42c`):
+  - ⚠ **FV1 (high)** `packages/tddy-daemon-rpc/src/code_session.rs:101,325-329` — a `CodeSession` dials the index
+    daemon **once** (`connect_index` at open) and asks every query over that one client. The index-daemon
+    *process*'s idle timer is refreshed only by `IndexDaemonRegistry::get_or_spawn` → `live()`
+    (`packages/tddy-daemon/src/index_daemon/registry.rs:162-171`), so a pane in active use stops counting as use
+    after open. Before this branch the pane's unary navigation called `connect_index` per request and kept the
+    process alive. With nothing else dialling (no agent tool call, no session start), the process is reaped
+    `idle_timeout_secs` (default 30 min) after the pane opened → `WatchRoot` ends → session `UNAVAILABLE` → the web
+    reconnects → `connect` respawns → a **cold rust-analyzer reload** (6–10 min on this workspace) under a pane
+    being used. No test pins it. Fix options: refresh the registry's idle timer per query (e.g. an
+    `IndexChannelSource::touch`, or `connect` per query as the unary path does), or count an open `CodeSession` as
+    use for its life.
+    ✅ **Fixed (2026-10-18, keep alive while open — see Decisions):** `IndexChannelSource::keep_alive` /
+    `keep_alive_every` (`IndexDaemonRegistry::keep_alive` refreshes the running process's idle timer without
+    spawning; the beat is a third of the idle timeout, clamped to 100 ms–60 s); the session calls it on every query
+    and on a heartbeat while open (`code_session/keep_alive.rs`). Pinned by
+    `an_open_code_session_keeps_the_index_daemon_running_and_lets_it_go_once_closed` (1 s idle timeout: not stopped
+    over 2.5 s open, stopped once closed); both new tests fail with the heartbeat disabled.
+  - ⚠ **FV2 (medium)** `packages/tddy-daemon-rpc/src/code_navigation.rs` `watch_code_index` +
+    `packages/tddy-web/src/components/session/useCodeIndexProgress.ts:84-107` — VC3's `connect_if_running` makes
+    the header's watch end empty when no index daemon is up, and `useCodeIndexProgress` never re-subscribes (deps
+    are client / token / session id only). A header mounted before the index-daemon process starts — host restart,
+    or after the process's idle stop — never shows the load the pane or the agent then starts until it remounts.
+    This narrows PRD criterion *"The agent's first `Lsp*` / `restructure_*` call on a cold worktree makes the
+    header indicator show live progress"* to hosts whose index daemon is already running. Same for a header whose
+    `WatchRoot` ended when the process stopped. Fix: re-subscribe on stream end (with backoff, like the pane), or
+    record the narrowed criterion in the PRD.
+    ✅ **Fixed (2026-10-18, web):** `useCodeIndexProgress` now follows the watch with a `CodeIndexWatcher` that
+    re-watches after every end or retryable failure, on the pane's schedule (shared `StreamReopener`,
+    `src/components/session/streamReopening.ts`: 1 s doubling to 30 s); a refusal is not re-watched and reads
+    *Indexing failed — <reason>* (now without the `[code]` prefix, as the pane does); unmount stops it. Pinned
+    by `SessionIndexingIndicatorResubscribe.cy.tsx` (*shows a load that starts after its first watch ended
+    empty*, *watches again after 1, 2 and 4 seconds*, *a watch the host refuses is not asked again*). Cost: a
+    header on a host with no index daemon (or a non-Rust worktree) asks one cheap empty `WatchCodeIndex` every
+    30 s once backed off, so a later load can take up to 30 s to show there.
+  - ⚠ **FV3 (medium)** re-warm on `IDLE` (VC4 fix, `code_session.rs:262-266,359-369`) — an open but unused pane
+    (a forgotten tab) keeps rust-analyzer cycling: evicted after `A_SERVER_MAY_SIT_UNUSED_FOR` (600 s,
+    `tddy-index-daemon/src/main.rs:60`), re-warmed at once, a full cold load, evicted again 600 s after it — for
+    as long as the tab is open; and FV1 restarts the whole process every 30 min on top. The developer chose
+    re-warm; this cost is not recorded in Decisions. Alternatives: an open session keeps its root's `last_used`
+    fresh (no reload), or re-warm lazily on the next query instead of on `IDLE`.
+    ✅ **Fixed (2026-10-18, keep alive while open — see Decisions):** the session's heartbeat warms a `READY` /
+    `LOADING` root again (idempotent; reaching the server is the index daemon's `record_use`), so an open pane's root
+    is not let go; re-warm on `IDLE` stays as the safety net. The cost — a forgotten tab keeps rust-analyzer
+    resident until it closes — is recorded in Decisions as accepted. Pinned by
+    `an_open_code_session_keeps_its_loaded_root_in_use_by_warming_it_again`.
+  - ℹ **FV4** `packages/tddy-daemon-rpc/src/code_session.rs:20-22` — module doc says a non-Rust worktree is
+    reported "`IDLE` once"; the code (`code_session/without_an_index.rs:21-31`) sends `NONE`. Doc-comment fix.
+    ✅ **Fixed (2026-10-18):** the module doc now says it is reported "`NONE` once with why".
+  - **FV1/FV3/FV4 fix gates (2026-10-18, scoped):** `cargo check -p tddy-daemon-rpc -p tddy-daemon -p
+    tddy-index-daemon --all-targets` ✅; `code_session_acceptance` 19/19 ✅; `cargo clippy -p tddy-daemon-rpc -p
+    tddy-daemon --all-targets -- -D warnings` ✅; `cargo fmt` on the three packages ✅. Full run left to CI.
+  - ℹ **FV5** `packages/tddy-web/src/components/session/useCodeSession.ts:268-273` — `attempt` resets to 0 on
+    any delivered event, so a host that opens the session, sends its first progress and then drops (e.g. an
+    index daemon crashing on start) is retried every ~1 s indefinitely, each retry dialling `connect` (which spawns).
+    Documented as the decided behaviour; worth a cap or a "delivered for N s" rule if it shows up.
+    ✅ **Fixed (2026-10-18, web):** the waits start from 1 s again only once a stream has delivered **and** stayed
+    open ≥ 10 s (`STABLE_STREAM_MS` in `streamReopening.ts`) — chosen over "after READY" so a long, healthy load
+    that drops mid-way still reconnects fast. The reconnect spec's *a reopened session that delivered waits a
+    second again* depended on the old rule (it dropped the reopened session at once); it now keeps the session
+    open 10 s first and is renamed accordingly. New: *a host that accepts each session and drops it at once is
+    backed off, not asked every second* (1, 2, 4 s).
+  - ℹ **FV6** `useCodeIndexProgress.ts:92-99` — a header watch that ends after it has heard something keeps its
+    last status; a stream that ends mid-load (index daemon gone) leaves *Indexing — X n%* until remount.
+    ✅ **Fixed (2026-10-18, web):** a watch that ends reports `idle` (no indicator) until the next watch reports;
+    one that fails retryably shows its reason until then. Pinned by *the header drops what it last said once its
+    watch ends mid-load*.
+- **Carried open (not regressions)**: VC10 / prod-ready #6 `.claude/settings.json` allow-list line unrelated to
+  the feature; CC19 (`err instanceof Error ? …` at `useCodeSession.ts:203`, `useCodeIndexProgress.ts:63`), CC23 web
+  half (`CodeNavigationOverlays.tsx:50` `rem` vs `:153` `2rem`), CC26 (`WorktreeCodePane.tsx:61` `const code`);
+  CC8–CC10b pre-existing; W12, R14 deferred. Package docs still describe `SessionIndexProgress` /
+  `with_index_progress` / *not warmed* (`tddy-daemon-rpc/docs/architecture.md`, `tddy-daemon/docs/code-navigation-service.md`,
+  `tddy-daemon/docs/daemon-endpoint.md`, `tddy-web/docs/session-start-and-indexing-progress.md`,
+  `docs/ft/web/session-code-pane.md:117`) — wrap's job, as planned. PRD *What's Changing* still gives the `Lsp*`
+  loading example with a percentage (*Indexing 38%*), which the acceptance-test review dropped.
+- **`TODO(code-index-warm-on-demand)`**: none in the tree. New `TODO`/`FIXME`/`unimplemented!`/`todo!`/debug
+  output in the diff: none (the one `println!` is inside a Cypress fixture string).
+- **Changeset claims checked against code**: every listed acceptance test exists by name (Rust: 17 + 11 + 7 + 3
+  `lsp_tools_via_index` loading/answer tests + chatter/graph units; Cypress: 19 + 6 + 5 + 4 + 3); State B matches
+  the protos once VC11 was applied (this run); `connect_if_running` does not refresh the idle timer, as claimed;
+  `misplaced_frame`, `drain_warm`, `next_change`/`Gone`, `state_of_quiescence`, `is_rust_workspace`,
+  `convert.rs`, `position_query.rs`, `plan_flush.rs` (index.rs 458) all present as described. Fixed-finding
+  markers verified for VC1–VC9, R1–R13, W1–W15, CC1–CC7, CC11–CC18, CC20–CC22, CC24, CC25.
+- **Changeset sync (this run)**: Scope Testing / Code-quality lines refreshed (stale `7/7`, `6/6`, fmt ❌);
+  State B snippets gain `FAILED` / `NONE` / `error` (VC11 ✅); Technical Debt "IDLE for a non-Rust worktree — open
+  question" → ✅ resolved by `NONE`; Decisions "sends one `IDLE`" → `NONE`; R10 corrected (`AN_EVENT_IS_DUE_WITHIN`
+  is 15 s, not 5 s); prod-ready #2's fix note moved off #6; strip spec list gains the `NONE` test; TODO checklist
+  synced.
+
 ### /validate-tests
 
 - **Last run**: 2026-10-18 — static review against fluent-tests (generic + `rust/std-test.md` + `typescript/cypress-component.md`); no tests run.
@@ -903,9 +1035,10 @@ blockers, 6 warnings, 6 acceptable/informational).
    reports `IDLE` (server let go) or `UNSPECIFIED`; only `READY`/`FAILED` release it, so such a query is never
    answered until the pane closes while the UI shows "Index loading". Fix: on `IDLE`, answer held queries with an
    error (or re-ask, accepting that it re-spawns the server) — and pin it with a test.
+   ✅ **#2 fixed (refactor, 2026-10-18)**: `RootView::{Held(_), Unheld(Standing)}` with `Standing::{Idle, Failed(String)}`; `standing_of` takes a `Standing`, so a held root cannot reach it. Both enums are now module-private (no other user).
 6. `.claude/settings.json` — the branch adds `"Read(~/.claude/projects/**)"` to the allow list; unrelated to the
-   feature (agent harness config). Fix: confirm it is wanted in this PR or drop it from the branch.
-   ✅ **Fixed (refactor, 2026-10-18)**: `RootView::{Held(_), Unheld(Standing)}` with `Standing::{Idle, Failed(String)}`; `standing_of` takes a `Standing`, so a held root cannot reach it. Both enums are now module-private (no other user).
+   feature (agent harness config). Fix: confirm it is wanted in this PR or drop it from the branch. **Still open at
+   final /validate-changes.**
 
 **Acceptable / informational:**
 
@@ -1016,15 +1149,15 @@ multiset of `index.rs` at `HEAD` equals `index.rs` + `plan_flush.rs` after, modu
 - [ ] Repeat Red→Green→Update cycle until feature complete
 - [ ] Run all tests (scoped locally, full on CI) — verify 100% pass
 - [x] Validate changes (/validate-changes)
-- [~] Refactor issues from change validation — daemon side done 2026-10-18 (VC1–VC4, VC9); web side (VC5–VC7) with the web agent
+- [x] Refactor issues from change validation — VC1–VC7, VC9, VC11 fixed; VC8 fixed; VC10 open (developer's call)
 - [ ] USER REVIEW — development complete
-- [ ] Validate tests (/validate-tests)
-- [ ] Refactor test issues
-- [ ] Validate production readiness (/validate-prod-ready)
-- [ ] Refactor production readiness issues
-- [ ] Analyze code quality (/analyze-clean-code)
-- [ ] Refactor code quality issues
-- [ ] Final validation (/validate-changes)
+- [x] Validate tests (/validate-tests)
+- [x] Refactor test issues — all but W12 (deferred, deliberate timelines) and R14 (repo-wide naming)
+- [x] Validate production readiness (/validate-prod-ready)
+- [~] Refactor production readiness issues — #1–#5 fixed; #6 (`.claude/settings.json`) open
+- [x] Analyze code quality (/analyze-clean-code)
+- [~] Refactor code quality issues — CC1–CC7, CC11–CC18, CC20–CC22, CC24, CC25 fixed; CC19, CC23 (web half), CC26 open; CC8–CC10b pre-existing, report only
+- [x] Final validation (/validate-changes) — 2026-10-18 against `888740395`, see Validation Results
 - [ ] Linting and formatting (scoped `cargo clippy -p <pkg> -- -D warnings`, `cargo fmt`)
 - [ ] Wrap documentation (/wrap-context-docs) — when the PR is set ready for review; also deletes `2026-10-18-code-index-warm-on-demand-initial-discovery.md`
 - [ ] USER REVIEW — work complete, decide next steps

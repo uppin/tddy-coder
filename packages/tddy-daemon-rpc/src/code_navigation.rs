@@ -61,6 +61,13 @@ pub trait IndexChannelSource: Send + Sync {
     /// A channel to the index daemon only if it is already running — `None` otherwise. Never starts
     /// it: a passive watcher has no business spawning the process it watches.
     async fn connect_if_running(&self) -> Result<Option<Channel>, IndexChannelError>;
+
+    /// Counts a holder of a channel from [`Self::connect`] as use of the running index daemon, so
+    /// it is not stopped for sitting idle while that holder is open. Never starts it.
+    async fn keep_alive(&self);
+
+    /// How often a holder of a long-lived channel calls [`Self::keep_alive`] to stay counted as use.
+    fn keep_alive_every(&self) -> std::time::Duration;
 }
 
 /// `code_navigation.CodeNavigationService`, over this daemon's worktree authorisation and its
@@ -146,17 +153,24 @@ pub(crate) fn index_daemon_error(err: &IndexChannelError) -> String {
 pub(crate) async fn connect_index(
     index_daemon: Option<&Arc<dyn IndexChannelSource>>,
 ) -> Result<CodeIndexServiceClient<Channel>, Status> {
-    let source = index_daemon.ok_or_else(|| {
-        Status::failed_precondition(
-            "code navigation needs the index daemon, and this daemon has no `index_daemon:` \
-             configuration section",
-        )
-    })?;
-    let channel = source
+    let channel = index_source(index_daemon)?
         .connect()
         .await
         .map_err(|err| index_daemon_unavailable(&err))?;
     Ok(CodeIndexServiceClient::new(channel))
+}
+
+/// The index daemon's source, or `FAILED_PRECONDITION` when this daemon has no `index_daemon:`
+/// section.
+pub(crate) fn index_source(
+    index_daemon: Option<&Arc<dyn IndexChannelSource>>,
+) -> Result<&Arc<dyn IndexChannelSource>, Status> {
+    index_daemon.ok_or_else(|| {
+        Status::failed_precondition(
+            "code navigation needs the index daemon, and this daemon has no `index_daemon:` \
+             configuration section",
+        )
+    })
 }
 
 #[async_trait::async_trait]

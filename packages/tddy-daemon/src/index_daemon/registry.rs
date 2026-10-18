@@ -27,6 +27,16 @@ const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// been given up on; it bounds daemon shutdown rather than letting a wedged child hold it open.
 const STOP_OBSERVATION: Duration = Duration::from_secs(6);
 
+/// The longest a holder of a long-lived channel waits between two [`IndexDaemonRegistry::keep_alive`]
+/// calls. A third of the idle timeout, so two missed beats still do not let the process go — but no
+/// longer than this, so the same beat also keeps the index daemon's own per-root servers in use,
+/// which it lets go after ten minutes unused.
+const KEEP_ALIVE_AT_MOST_EVERY: Duration = Duration::from_secs(60);
+
+/// The shortest beat: a heartbeat needs a period, and an idle timeout of zero stops the process on
+/// the reaper's next tick whatever a holder does.
+const KEEP_ALIVE_AT_LEAST_EVERY: Duration = Duration::from_millis(100);
+
 /// The live process, with the idle timer that decides when it has outstayed its use.
 type Live = (Arc<IndexDaemon>, Arc<IdleTimeoutTracker>);
 
@@ -105,6 +115,20 @@ impl IndexDaemonRegistry {
             return Ok(None);
         }
         dial(&running).await.map(Some)
+    }
+
+    /// Count a holder of a channel dialled earlier as use of the running process, so it is not
+    /// stopped for sitting idle while that holder is still asking through it. Starts nothing;
+    /// `false` when no process is running.
+    pub async fn keep_alive(&self) -> bool {
+        self.live().await.is_some()
+    }
+
+    /// How often a holder of a long-lived channel calls [`Self::keep_alive`] to keep the process
+    /// from its idle stop: derived from the configured idle timeout, never zero.
+    pub fn keep_alive_every(&self) -> Duration {
+        (self.inner.spawn.idle_timeout / 3)
+            .clamp(KEEP_ALIVE_AT_LEAST_EVERY, KEEP_ALIVE_AT_MOST_EVERY)
     }
 
     /// The index daemon this registry is currently holding, if it is holding one.
@@ -340,6 +364,14 @@ impl tddy_daemon_rpc::code_navigation::IndexChannelSource for IndexDaemonRegistr
         tddy_daemon_rpc::code_navigation::IndexChannelError,
     > {
         Ok(IndexDaemonRegistry::connect_if_running(self).await?)
+    }
+
+    async fn keep_alive(&self) {
+        IndexDaemonRegistry::keep_alive(self).await;
+    }
+
+    fn keep_alive_every(&self) -> Duration {
+        IndexDaemonRegistry::keep_alive_every(self)
     }
 }
 

@@ -18,6 +18,17 @@ export function expectTheHost(host: CodeIndexHost) {
     toHaveOpened: (expected: OpenedWorktree[]) =>
       retried(() => expect(host.openedWorktrees()).to.deep.equal(expected)),
 
+    /**
+     * Still exactly these `open` frames, checked only after a real macrotask: everything a
+     * `cy.tick` set off (a reopening timer, the pane's stream reaching the host) runs as promise
+     * continuations, which a retried assertion can otherwise outrun and pass on before an early
+     * reopening has landed.
+     */
+    toStillHaveOpened: (expected: OpenedWorktree[]) => {
+      cy.wait(0);
+      return retried(() => expect(host.openedWorktrees()).to.deep.equal(expected));
+    },
+
     /** Exactly these queries arrived, in any order. */
     toHaveBeenAsked: (expected: AskedQuery[]) =>
       retried(() => expect(host.queriesAsked()).to.have.deep.members(expected)),

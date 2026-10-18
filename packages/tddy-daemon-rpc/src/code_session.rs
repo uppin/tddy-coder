@@ -6,9 +6,12 @@
 //! the root (`code_index.WatchRoot`), relaying every message as a `progress` event for as long as the
 //! stream is open — so a reload after an edit shows here too.
 //!
-//! An open pane is demand for its root: when the root reports `IDLE` after it held a server since
-//! the session's last warm — the server was let go for sitting unused — the session warms it again.
-//! An `IDLE` before that (the session's own warm has not reached a server yet) starts nothing.
+//! An open pane is demand for its root, and for the index daemon serving it ([`keep_alive`]): every
+//! query, and a heartbeat while the session is open, counts as use of the index-daemon process, and
+//! the heartbeat warms a held root again — idempotent, and what marks the root used — so neither is
+//! let go for sitting idle under an open pane. Should the root be let go all the same — it reports
+//! `IDLE` after it held a server since the session's last warm — the session warms it again. An
+//! `IDLE` before that (the session's own warm has not reached a server yet) starts nothing.
 //!
 //! Each query is asked of the index on a task of its own, so a slow hover never delays a probe. A
 //! hover, definition or references query the index answers `LOADING` is **held**: the pane is told
@@ -18,7 +21,7 @@
 //! answers `UNKNOWN`. `cancel` drops a query, held or in flight, so no answer is ever sent for it.
 //!
 //! A worktree with no `Cargo.toml` at its root is not a Rust worktree and has no index: the session
-//! neither warms nor follows it, reports it `IDLE` once, and answers every query with an `error`
+//! neither warms nor follows it, reports it `NONE` once with why, and answers every query with an `error`
 //! ([`without_an_index`]).
 //!
 //! Every event is sent from the one loop that owns the session's state, which reads the pane's frames
@@ -46,9 +49,10 @@ use tonic::transport::Channel;
 
 use crate::code_index_warmup::drain_warm;
 use crate::code_navigation::convert::web_progress;
-use crate::code_navigation::{connect_index, IndexChannelSource};
+use crate::code_navigation::{connect_index, index_source, IndexChannelSource};
 
 mod ask;
+mod keep_alive;
 mod without_an_index;
 
 use ask::{ask_index, Query, Reply};
@@ -98,7 +102,8 @@ async fn run(
     if !tddy_index_daemon::is_rust_workspace(&root) {
         return without_an_index::serve(frames, events).await;
     }
-    let mut client = connect_index(index_daemon).await?;
+    let source = Arc::clone(index_source(index_daemon)?);
+    let mut client = connect_index(Some(&source)).await?;
     let workspace_root = root.display().to_string();
 
     let warming = start_warm(client.clone(), workspace_root.clone()).await;
@@ -109,7 +114,7 @@ async fn run(
         .await
         .map_err(tddy_service::to_rpc_status)?
         .into_inner();
-    Session::new(client, workspace_root, events.clone(), warming)
+    Session::new(source, client, workspace_root, events.clone(), warming)
         .serve(frames, progress)
         .await
 }
@@ -155,6 +160,8 @@ struct Outcome {
 
 /// One open code session's state, owned by its loop.
 struct Session {
+    /// Where `client`'s channel came from, told of every use so the index daemon is kept running.
+    source: Arc<dyn IndexChannelSource>,
     client: CodeIndexServiceClient<Channel>,
     workspace_root: String,
     events: Events,
@@ -177,12 +184,14 @@ struct Session {
 
 impl Session {
     fn new(
+        source: Arc<dyn IndexChannelSource>,
         client: CodeIndexServiceClient<Channel>,
         workspace_root: String,
         events: Events,
         warming: Option<tokio::task::JoinHandle<()>>,
     ) -> Self {
         Self {
+            source,
             client,
             workspace_root,
             events,
@@ -204,6 +213,7 @@ impl Session {
         mut frames: tddy_rpc::Streaming<CodeSessionRequest>,
         mut progress: tonic::Streaming<index::IndexProgress>,
     ) -> Result<(), Status> {
+        let mut heartbeat = self.heartbeat();
         loop {
             tokio::select! {
                 biased;
@@ -225,6 +235,7 @@ impl Session {
                         Err(failed) => self.on_task_failure(failed).await?,
                     }
                 }
+                _ = heartbeat.tick() => self.keep_in_use().await,
                 () = self.events.closed() => return Ok(()),
             }
         }
@@ -246,6 +257,7 @@ impl Session {
     async fn on_query(&mut self, query: CodeQuery) -> Result<(), Status> {
         let request_id = query.request_id;
         self.forget(request_id);
+        self.source.keep_alive().await;
         match Query::parse(query) {
             Ok(query) => {
                 self.ask(query);
