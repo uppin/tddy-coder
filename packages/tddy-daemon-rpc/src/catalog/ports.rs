@@ -15,7 +15,7 @@ use super::agent_models::{
 };
 use super::subagent_row::subagent_info;
 use super::CatalogRpcHandler;
-use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 use tddy_session_lifecycle::agent_list_mapping::agent_allowlist_rows;
 use tddy_session_lifecycle::connection_service::{
     resolvable_agent_defs, resolve_tddy_tools_path, wire_same,

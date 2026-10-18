@@ -17,7 +17,7 @@
 //! # Identity
 //!
 //! Entries are keyed by the **durable host id** — the un-suffixed
-//! [`crate::livekit_peer_discovery::local_base_instance_id_for_config`], not the per-process
+//! [`tddy_daemon_kernel::daemon_identity::local_base_instance_id_for_config`], not the per-process
 //! instance id LiveKit routes on. A daemon configured with
 //! `daemon_instance_id_append_startup_timestamp` gets a fresh instance id on every restart, and
 //! "never delete a host" would otherwise turn every restart into a permanent extra offline row.

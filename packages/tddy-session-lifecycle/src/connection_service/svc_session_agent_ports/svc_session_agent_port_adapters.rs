@@ -17,10 +17,8 @@ use tddy_session_agents::ports::AgentSessions;
 
 use tddy_session_agents::ports::RosterBroadcast;
 
-use crate::{
-    connection_service::{agent_roster, seed_codebase},
-    livekit_peer_discovery::local_instance_id_for_config,
-};
+use crate::connection_service::{agent_roster, seed_codebase};
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use tddy_session_agents::ports::AdmittedAgent;
 

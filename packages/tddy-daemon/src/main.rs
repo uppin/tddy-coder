@@ -136,9 +136,7 @@ fn main() -> anyhow::Result<()> {
                 })
                 .collect();
         let daemon_instance_id =
-            tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(
-                &daemon.config,
-            );
+            tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&daemon.config);
 
         // The children this daemon will have to reap, captured before `tasks` moves out of the
         // runtime below.

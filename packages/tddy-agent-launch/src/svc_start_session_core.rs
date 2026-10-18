@@ -9,14 +9,14 @@ use uuid::Uuid;
 
 use tddy_core::session_lifecycle::unified_session_dir_path;
 
-use tddy_daemon_livekit::placement::CodebasePlacement;
+use crate::placement::CodebasePlacement;
 
 use tddy_session_split::split_start::resolve_split_agent_placement;
 
 use tddy_session_split::split_start::resolve_caller_chosen_session_id;
 
-use tddy_daemon_livekit::placement::classify_placement;
-use tddy_daemon_livekit::placement::PlacementRequest;
+use crate::placement::classify_placement;
+use crate::placement::PlacementRequest;
 
 use tddy_rpc::Status;
 

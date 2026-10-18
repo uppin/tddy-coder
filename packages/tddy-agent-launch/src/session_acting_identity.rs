@@ -11,6 +11,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::session_git::{session_git_environment, session_git_environment_of};
 use tddy_accounts::local_gh::{github_hostname_of, local_gh_git_identity};
 use tddy_accounts::{
     acting_identity, AccountStore, AccountsError, ActingIdentity, IdentityError,
@@ -19,7 +20,6 @@ use tddy_accounts::{
 use tddy_core::toolcall::{local_gh_source_value, GITHUB_SOURCE_ENV};
 use tddy_core::{read_session_github_source, SessionGithubSource};
 use tddy_credentials::{AccountId, CredentialRecord, ProviderId, SessionVaults};
-use tddy_daemon_livekit::session_git::{session_git_environment, session_git_environment_of};
 use tddy_host_service::GithubCli;
 use tddy_projects::project_storage::{AccountAssignment, ProjectData};
 

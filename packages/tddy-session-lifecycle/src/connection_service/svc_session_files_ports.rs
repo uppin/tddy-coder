@@ -23,7 +23,7 @@ use tddy_session_files::service::{SessionContextScope, SessionContextScopes};
 use tddy_session_files::{SessionFilesPorts, SessionFilesServiceImpl};
 
 use super::DaemonSessionHost;
-use crate::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 /// The coordinate a forward is addressed at on the peer. A forwarded call has to land on the same
 /// method of the same service there, which is where the peer declares these eight — so the name is

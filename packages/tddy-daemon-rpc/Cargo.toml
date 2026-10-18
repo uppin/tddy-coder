@@ -36,7 +36,6 @@ tddy-worktree-service = { path = "../tddy-worktree-service" }
 tddy-workflow-recipes = { path = "../tddy-workflow-recipes" }
 anyhow = "1"
 async-trait = "0.1"
-livekit = "0.7"
 log = "0.4"
 prost = "0.13"
 serde = { version = "1", features = ["derive"] }
@@ -69,6 +68,8 @@ serde_yaml = "0.9"
 tddy-daemon-extensions = { path = "../tddy-daemon-extensions" }
 tddy-livekit = { path = "../tddy-livekit" }
 tddy-livekit-testkit = { path = "../tddy-livekit-testkit" }
+# The session-room exec-tool suite joins a room with the SDK directly; `src/` never names it.
+livekit = "0.7"
 tddy-session-files = { path = "../tddy-session-files" }
 tddy-testing-commons = { path = "../tddy-testing-commons" }
 # `in_jail_conversation_acceptance` reads the jail's task registry; nothing in `src/` does.

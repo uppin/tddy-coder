@@ -82,12 +82,12 @@ The plugin crate holds only LiveKit work, and two dead SDK edges disappear.
 
 ## Scope
 
-- [ ] Move `placement` → `tddy-agent-launch` (engine)
-- [ ] Move `session_git` → `tddy-agent-launch` with its suite (engine)
-- [ ] Move `os_user_resolution` → `tddy-daemon-kernel` (engine)
-- [ ] Repoint re-exports in `tddy-session-lifecycle` (`connection_service.rs:512`, `svc_resolve_os_user.rs:128-129`)
-- [ ] Repoint the 24 identity imports
-- [ ] Remove `livekit = "0.7"` from `tddy-daemon-rpc` and `tddy-session-lifecycle`
+- [x] Move `placement` → `tddy-agent-launch` (engine)
+- [x] Move `session_git` → `tddy-agent-launch` with its suite (engine)
+- [x] Move `os_user_resolution` → `tddy-daemon-kernel` (engine)
+- [x] Repoint re-exports in `tddy-session-lifecycle` (`connection_service.rs:512`, `svc_resolve_os_user.rs:128-129`)
+- [x] Repoint the 24 identity imports
+- [x] Remove `livekit = "0.7"` from `tddy-daemon-rpc` and `tddy-session-lifecycle`
 
 ## Technical Changes
 
@@ -114,9 +114,9 @@ the two manifests are clean of the SDK.
 Moves and import rewrites in the listed packages; two manifest lines removed.
 
 ## Implementation Milestones
-- [ ] M1 Three engine moves, each building and testing green in its new crate
-- [ ] M2 Imports repointed
-- [ ] M3 Edges removed; shape tests green
+- [x] M1 Three engine moves, each building and testing green in its new crate
+- [x] M2 Imports repointed
+- [x] M3 Edges removed; shape tests green
 
 ## Testing Plan
 

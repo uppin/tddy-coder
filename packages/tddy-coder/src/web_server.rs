@@ -51,7 +51,7 @@ pub struct ClientConfig {
     /// the web app enables scoped `[tddy]` diagnostics from this. None = off.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub debug: Option<String>,
-    /// The serving daemon's own instance id (`livekit_peer_discovery::local_instance_id_for_config`).
+    /// The serving daemon's own instance id (`tddy_daemon_kernel::daemon_identity::local_instance_id_for_config`).
     /// Every daemon's own LiveKit advertisement self-labels `"{id} (this daemon)"` from its own
     /// perspective, so the web cannot otherwise tell which common-room daemon actually served this
     /// bundle; the daemon selector uses this to default its selection and to show "(this daemon)"

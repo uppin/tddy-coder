@@ -24,7 +24,6 @@ serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "fs", "sync", "net", "time", "signal", "process", "io-util"] }
 bytes = "1"
 tonic = { version = "0.12", default-features = false, features = ["transport"] }
-livekit = "0.7"
 prost = "0.13"
 tddy-coder = { path = "../tddy-coder" }
 tddy-core = { path = "../tddy-core" }

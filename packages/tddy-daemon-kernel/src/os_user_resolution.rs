@@ -1,8 +1,8 @@
 use tddy_rpc::Status;
 
-use tddy_daemon_kernel::SessionUserResolver;
+use crate::SessionUserResolver;
 
-use tddy_daemon_kernel::config::DaemonConfig;
+use crate::config::DaemonConfig;
 
 /// Resolve a caller's session token to the OS user this daemon runs its work as.
 ///

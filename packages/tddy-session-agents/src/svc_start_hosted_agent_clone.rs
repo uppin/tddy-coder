@@ -6,7 +6,7 @@ use std::{path::Path, sync::Arc};
 
 use crate::agent_roster;
 use crate::peer_session_answer;
-use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use tddy_daemon_kernel::user_paths::projects_path_for_user;
 
