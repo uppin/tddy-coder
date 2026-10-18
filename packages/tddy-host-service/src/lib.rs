@@ -18,6 +18,7 @@ pub mod host_registry;
 pub mod host_session_service;
 pub mod host_stats;
 pub mod host_tooling;
+pub mod host_tooling_cache;
 pub mod multi_host;
 pub mod peer_routing;
 pub mod remote_desktop_probe;

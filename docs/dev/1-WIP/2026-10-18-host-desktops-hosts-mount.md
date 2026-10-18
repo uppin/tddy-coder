@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#656](https://github.com/uppin/tddy-coder/pull/656)
 **Type**: Feature
 **Stack**: `#host-desktops` 4/8. Base: `feature/host-desktops/vnc-security`.
 
@@ -124,6 +124,25 @@ clock and a probe that counts invocations and can be held open (to prove dedup).
 | `a_request_within_the_ttl_runs_no_probe` | same | cache hit |
 | `a_request_after_the_ttl_probes_again` | same | expiry |
 | `different_hosts_are_cached_separately` | same | key isolation |
+| `different_os_users_on_one_host_are_cached_separately` | same | key isolation by OS user (added in red, see below) |
+
+**Status (contract written 2026-10-18):** all 4 Cypress tests fail on behaviour (the tooling never
+appears on a row — `HostRowToolingCell` is published but not yet mounted by `HostsScreen`); all 5 cache
+tests fail on `todo!("TODO(hosts-mount): implement ToolingCache::new")`.
+
+**Deviations from the draft contract, recorded at red:**
+- **`ToolingKey` carries the OS user** — `{daemon_instance_id, os_user, github_hostname: Option<String>}`,
+  not just (daemon instance, github hostname). The probe is per OS user (`git config --global` and
+  `gh auth status` read that user's `$HOME`, `host_tooling.rs` module doc), so a key without it would
+  serve one operator's git identity / `gh` login to another — the same reason `list_agent_models`
+  keys its cache by account. Pinned by the fifth unit test.
+- **`Clock` is a trait defined in `host_tooling_cache.rs`** (`trait Clock: Send + Sync { fn now(&self) -> Instant }`,
+  plus `SystemClock`). The only workspace clocks are `type Clock = Arc<dyn Fn() -> Instant + Send + Sync>`
+  aliases in `tddy-credentials` and `tddy-accounts`, neither a dependency of `tddy-host-service`; the
+  contract's `Arc<dyn Clock>` asked for a trait.
+- **Page object:** `hostToolingCellPage` (`loading`, `failed`, `expectCouldNotBeRead`) added to
+  `cypress/support/pages/hostsScreenPage.ts`; the cell's test ids are `hosts-row-<id>-tooling-loading`
+  and `hosts-row-<id>-tooling-failed`, and the failed text must match `/could not (be )?read/i`.
 
 ## Decisions & Trade-offs
 - **Online rows only** — an offline host cannot answer, and asking would only produce failures.
@@ -132,6 +151,10 @@ clock and a probe that counts invocations and can be held open (to prove dedup).
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- `aKnownHost` is now defined in four Hosts specs (including `HostsScreen.cy.tsx` and this node's spec) — a shared `knownHosts.ts` builder in `cypress/support/rpc/` would remove the copies.
+- Green: decide whether a **failed** probe answer is cached for the full TTL (the unit tests do not pin it); `list_agent_models` does not cache failures.
+- Green: wiring `ToolingCache` into `get_host_tooling` (`service.rs`, not `host_tooling.rs` — the probe call is in `service.rs:486-495`) needs a TTL constant and a `HostServiceImpl` field; no test pins the call site.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -149,10 +172,10 @@ clock and a probe that counts invocations and can be held open (to prove dedup).
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
