@@ -64,6 +64,7 @@ impl ScreenSharingServiceImpl {
                     port,
                     protocol: req.protocol,
                     username: req.username,
+                    display: req.x11_display,
                 },
             )
             .map_err(Status::internal)?;

@@ -622,6 +622,14 @@ pub struct ScreenSharingConfig {
     /// Empty string (default) → resolved at runtime: current_exe sibling, then PATH.
     #[serde(default)]
     pub rdp_binary_path: String,
+    /// Path to `x11vnc`, which serves an X11 display to the VNC bridge. Not shipped with tddy.
+    /// Empty string (default) → `x11vnc` on PATH.
+    #[serde(default)]
+    pub x11vnc_binary_path: String,
+    /// Directory holding the X server sockets (`X<N>`) whose displays are offered as channels.
+    /// Empty string (default) → `/tmp/.X11-unix`.
+    #[serde(default)]
+    pub x11_socket_dir: String,
 }
 
 /// Resolve the actual path to the `tddy-vnc` binary.
@@ -666,6 +674,14 @@ pub fn resolve_rdp_binary_path(config: &DaemonConfig) -> String {
         .and_then(|p| p.parent().map(|d| d.join("tddy-rdp")))
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "tddy-rdp".to_string())
+}
+
+/// Resolve the path to `x11vnc`: the explicit `x11vnc_binary_path`, else the bare name for a PATH
+/// lookup. No current-exe sibling step — x11vnc is a system package, never shipped beside tddy.
+pub fn resolve_x11vnc_binary_path(config: &ScreenSharingConfig) -> std::path::PathBuf {
+    // TODO(x11-channels): implement
+    let _ = config;
+    todo!()
 }
 
 fn default_claude_cli_binary_path() -> String {

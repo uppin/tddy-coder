@@ -47,6 +47,8 @@ message ScreenSharingTarget {
   uint32   port     = 4;
   Protocol protocol = 5;
   string   username = 6;  // Login user (required for RDP, optional for VNC)
+  // Host scope only: the X11 display this target streams through a daemon-started x11vnc.
+  optional uint32 x11_display = 7;
 }
 
 // --- ListTargets ---
@@ -149,6 +151,9 @@ message AddHostTargetRequest {
   uint32 port = 5;
   Protocol protocol = 6;
   string username = 7;
+  // An X11 display to serve through a daemon-started x11vnc instead of `host`:`port`. Set when the
+  // operator opens an X11_DISPLAY channel (host.proto `DesktopChannelKind`).
+  optional uint32 x11_display = 8;
 }
 message AddHostTargetResponse {
   string target_id = 1;

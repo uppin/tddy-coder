@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#659](https://github.com/uppin/tddy-coder/pull/659)
 **Type**: Feature
 **Stack**: `#host-desktops` 7/8. Base: `feature/host-desktops/bridge-ready`.
 
@@ -83,7 +83,9 @@ A host with several X displays offers each as a desktop.
 
 ## Scope
 
-- [ ] Proto channel identity; regenerated TS
+- [~] Testing — failing tests written (contract stage)
+
+- [x] Proto channel identity; regenerated TS
 - [ ] Display enumeration + config
 - [ ] x11vnc lifecycle around the bridge
 - [ ] Row lists channels; overlay opens a given channel
@@ -123,19 +125,50 @@ a manual check against a real `Xvfb :1` + `x11vnc` is recorded in Validation Res
 
 ## Acceptance Tests
 
-| Test | File | Validates |
-|---|---|---|
-| `lists_each_display_the_user_can_connect_to` | `packages/tddy-host-service/src/x11_displays.rs` (`tests`) | enumeration |
-| `skips_a_display_socket_nothing_answers_on` | same | stale sockets |
-| `does_not_list_a_display_already_served_on_its_vnc_port_twice` | `packages/tddy-host-service/src/host_tooling.rs` (`tests`) | de-dup |
-| `reports_x11_channels_as_unbridgeable_without_x11vnc` | same | `can_bridge = false` |
-| `opening_an_x11_channel_starts_x11vnc_for_that_display_on_loopback_only` | `packages/tddy-screen-sharing` x11vnc module `tests` | argv `-display :1 -localhost` |
-| `closing_an_x11_channel_stops_its_x11vnc` | same | stop |
-| `reopening_an_x11_channel_leaves_one_x11vnc_running` | same | no orphan |
-| `an_x11vnc_that_never_accepts_fails_the_start_and_starts_no_bridge` | same | failure path |
-| `offers one connect per connectable channel` | `packages/tddy-web/cypress/component/HostsScreenDesktopChannelsAcceptance.cy.tsx` (new) | many Connects |
-| `opens the channel whose connect was pressed` | same | `x11Display` sent |
-| `names each x11 channel by its display` | same | "Display :1" |
+Daemon tests are placed outside `screen_sharing_service.rs` so node 1's split does not move them;
+they drive `ScreenSharingServiceImpl` through the `ScreenSharingService` trait, reusing node 6's
+`tests/common/` (extended, not duplicated).
+
+| Status | Test | File | Validates |
+|---|---|---|---|
+| [x] | `lists_each_display_the_user_can_connect_to` | `packages/tddy-host-service/src/x11_displays.rs` (`tests`) | enumeration, ordered by number |
+| [x] | `skips_a_display_socket_nothing_answers_on` | same | stale sockets |
+| [x] | `a_host_with_no_x11_socket_directory_lists_no_displays` (added) | same | missing `/tmp/.X11-unix` is not an error |
+| [x] | `does_not_list_a_display_already_served_on_its_vnc_port_twice` | `packages/tddy-host-service/src/host_tooling.rs` (`tests`) | de-dup via the injected endpoint probe on `5900+N` |
+| [x] | `reports_x11_channels_as_unbridgeable_without_x11vnc` | same | `can_bridge = false` |
+| [x] | `names_an_x11_channel_by_its_display` (added) | `packages/tddy-host-service/src/host_messages.rs` (`tests`) | wire `kind`, `display`, `channel_id = "x11:1"`, `label = "Display :1"` |
+| [x] | `identifies_an_endpoint_channel_by_its_protocol_and_port` (added) | same | `kind = ENDPOINT`, `channel_id = "vnc:5900"` |
+| [x] | `resolves_x11vnc_to_the_configured_path` (added) | `packages/tddy-daemon-kernel/tests/x11vnc_binary_resolution.rs` | resolver |
+| [x] | `resolves_an_unconfigured_x11vnc_to_a_path_lookup_of_its_bare_name` (added) | same | resolver default |
+| [x] | `opening_an_x11_channel_starts_x11vnc_for_that_display_on_loopback_only` | `packages/tddy-screen-sharing/tests/x11_channels_acceptance.rs` (moved from the x11vnc module) | argv `-display :1 -localhost` |
+| [x] | `the_bridge_of_an_x11_channel_connects_to_its_x11vnc` (added) | same | bridge config `host 127.0.0.1`, `port` = x11vnc `-rfbport` |
+| [x] | `closing_an_x11_channel_stops_its_x11vnc` | same | stop |
+| [x] | `reopening_an_x11_channel_leaves_one_x11vnc_running` | same | no orphan |
+| [x] | `an_x11vnc_that_never_accepts_fails_the_start_and_starts_no_bridge` | same | failure path (`DeadlineExceeded`, node 6's mapping) |
+| [x] | `an_x11vnc_that_never_accepts_is_stopped` (added) | same | no orphan on failure |
+| [x] | `an_x11_channel_whose_bridge_exits_stops_its_x11vnc` (added) | same | stop on bridge exit |
+| [x] | `offers one connect per connectable channel` | `packages/tddy-web/cypress/component/HostsScreenDesktopChannelsAcceptance.cy.tsx` (new) | many Connects |
+| [x] | `opens the channel whose connect was pressed` | same | `x11Display` sent, start on that target |
+| [x] | `names each x11 channel by its display` | same | "Display :1" |
+
+**Stand-in x11vnc:** a `/bin/sh` script that appends `<pid> <argv>` to a launch log and sleeps; the
+listening half is done by a watcher thread in the test that binds `127.0.0.1:<-rfbport>` for each
+launch (so the suite needs no `nc`/`perl`). Node 6's stand-in bridge now records its stdin config.
+
+**Contract surface published (bodies `todo!()` / `throw`):**
+- `tddy_host_service::x11_displays::{X11Display, list_x11_displays, DEFAULT_X11_SOCKET_DIR}`; `with_x11_channels` (crate-private)
+- `remote_desktop_probe::DesktopChannel { Endpoint, X11Display(u32) }`, `DesktopReachability.channel`
+- `SubprocessHostToolingProbe::listing_x11_displays_for(&DaemonConfig)` (real setter; `for_config` not yet wired — TODO)
+- `HostDesktopTarget.display: Option<u32>` (serde default, skipped when `None`); `add_host_target` stores `req.x11_display`
+- `ScreenSharingConfig.{x11vnc_binary_path, x11_socket_dir}`; `resolve_x11vnc_binary_path(&ScreenSharingConfig) -> PathBuf` (`todo!()` — no current-exe sibling step, so not identical to the two bridge resolvers)
+- `tddy_screen_sharing::x11vnc::{X11vncServers, X11vncStarted, x11vnc_arguments, DEFAULT_X11VNC_ACCEPT_TIMEOUT}`; `ScreenSharingServiceImpl::with_x11vnc_accept_timeout`
+- Web: `connectableChannels(readings)`, `ConnectableDesktop.{channelId, x11Display}`, `HostDesktopOverlay` prop `x11Display`; page object `hostDesktopChannelsPage` (Connect carries `data-channel-id`, channel reading `hosts-row-<id>-channel-<channelId>`)
+
+**Resolved in the contract (2026-10-18):** `ListHostTargets` returns `ScreenSharingTarget`, which had no
+display, so the overlay could not find an existing X11 target and would add one per open.
+`ScreenSharingTarget` gains `optional uint32 x11_display = 7`; `host_target_to_proto` maps `HostDesktopTarget.display`
+into it (a pass-through), session-scope literals set `None`. Green matches an existing X11 target by
+`(protocol, x11_display)` in `HostDesktopOverlay`.
 
 ## Decisions & Trade-offs
 - **Daemon-spawned x11vnc per display, daemon user's displays only, loopback `-nopw`** (developer, 2026-10-18).
@@ -145,6 +178,10 @@ a manual check against a real `Xvfb :1` + `x11vnc` is recorded in Validation Res
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- `AnX11SocketDir` lives in `tddy-host-service/src/test_util.rs` (shared by `x11_displays` and `host_tooling` tests).
+- `tests/common/mod.rs` (screen-sharing) grows `StandInX11vnc`/`TheX11vnc`; it still duplicates the inline suite's fixtures (node 6's note) — fold together once node 1 splits the service file.
+- `host_tooling.rs` grew by ~150 lines (mostly tests); record the delta against `oversized-file-host-tooling.md`.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -162,10 +199,10 @@ a manual check against a real `Xvfb :1` + `x11vnc` is recorded in Validation Res
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

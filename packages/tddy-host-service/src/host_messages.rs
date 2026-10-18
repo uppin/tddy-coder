@@ -239,5 +239,66 @@ pub(crate) fn host_remote_desktop_message(
         desktop_reachable: reading.desktop_reachable,
         port: u32::from(reading.port),
         failure_reason: probe_failure_reason(&reading.outcome),
+        // TODO(x11-channels): channel_id, kind, display and label from `reading.channel`.
+        ..HostRemoteDesktop::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host_tooling::ProbeOutcome;
+    use crate::remote_desktop_probe::{DesktopChannel, DesktopProtocol, DesktopReachability};
+    use tddy_service::proto::host::DesktopChannelKind;
+
+    fn a_reading_for(channel: DesktopChannel, port: u16) -> DesktopReachability {
+        DesktopReachability {
+            outcome: ProbeOutcome::Ok,
+            channel,
+            protocol: DesktopProtocol::Vnc,
+            can_bridge: true,
+            desktop_reachable: true,
+            port,
+        }
+    }
+
+    #[test]
+    fn names_an_x11_channel_by_its_display() {
+        // Given
+        let reading = a_reading_for(DesktopChannel::X11Display(1), 0);
+
+        // When
+        let message = host_remote_desktop_message(&reading);
+
+        // Then
+        assert_eq!(
+            (
+                message.kind,
+                message.display,
+                message.channel_id.as_str(),
+                message.label.as_str()
+            ),
+            (
+                DesktopChannelKind::X11Display as i32,
+                1,
+                "x11:1",
+                "Display :1"
+            )
+        );
+    }
+
+    #[test]
+    fn identifies_an_endpoint_channel_by_its_protocol_and_port() {
+        // Given
+        let reading = a_reading_for(DesktopChannel::Endpoint, 5900);
+
+        // When
+        let message = host_remote_desktop_message(&reading);
+
+        // Then
+        assert_eq!(
+            (message.kind, message.channel_id.as_str()),
+            (DesktopChannelKind::Endpoint as i32, "vnc:5900")
+        );
     }
 }

@@ -113,6 +113,10 @@ pub struct ScreenSharingServiceImpl {
     target_store: Option<Arc<dyn ScreenSharingTargetStore>>,
     /// How long a start waits for its bridge to report the desktop ready.
     bridge_ready_timeout: std::time::Duration,
+    /// The x11vnc serving each open X11 channel.
+    // TODO(x11-channels): started before the bridge and stopped with it on the host path.
+    #[allow(dead_code)]
+    x11vnc: crate::x11vnc::X11vncServers,
 }
 
 impl ScreenSharingServiceImpl {
@@ -126,6 +130,7 @@ impl ScreenSharingServiceImpl {
             host_scope: None,
             target_store: None,
             bridge_ready_timeout: crate::bridge_readiness::DEFAULT_BRIDGE_READY_TIMEOUT,
+            x11vnc: crate::x11vnc::X11vncServers::default(),
         }
     }
 
@@ -134,6 +139,13 @@ impl ScreenSharingServiceImpl {
     #[must_use]
     pub fn with_bridge_ready_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.bridge_ready_timeout = timeout;
+        self
+    }
+
+    /// How long opening an X11 channel waits for its x11vnc to accept before failing the open.
+    #[must_use]
+    pub fn with_x11vnc_accept_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.x11vnc = crate::x11vnc::X11vncServers::new(timeout);
         self
     }
 
@@ -321,6 +333,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             port: req.port,
             protocol: req.protocol,
             username: req.username,
+            x11_display: None,
         };
 
         let target = store
@@ -959,6 +972,7 @@ mod tests {
                     port,
                     protocol: Protocol::Vnc as i32,
                     username: "ada".to_string(),
+                    x11_display: None,
                 }))
                 .await
                 .map(|attached| attached.into_inner().target_id)
@@ -1103,6 +1117,7 @@ mod tests {
                     port: 5900,
                     protocol: Protocol::Vnc as i32,
                     username: "ada".to_string(),
+                    x11_display: None,
                 }))
                 .await
                 .expect_err("a stranger must not attach a desktop to a host")

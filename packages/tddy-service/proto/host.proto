@@ -179,7 +179,8 @@ message GetHostToolingResponse {
   HostGitIdentity git = 2;
   HostGithubCli github_cli = 3;
   HostSshAgent ssh_agent = 4;
-  // One entry per probed protocol (VNC, RDP).
+  // One entry per desktop channel: the endpoint probes (VNC :5900, RDP :3389) plus one per X11
+  // display the daemon's OS user can open that is not already served on its VNC port.
   repeated HostRemoteDesktop remote_desktop = 5;
 }
 
@@ -302,6 +303,24 @@ message HostRemoteDesktop {
   // somewhere non-default. Port discovery is out of scope.
   uint32 port = 5;
   string failure_reason = 6;
+  // Identifies this channel among the host's channels, stable across probes (e.g. `vnc:5900`,
+  // `x11:1`), so a viewer can name the one an operator pressed Connect on.
+  string channel_id = 7;
+  DesktopChannelKind kind = 8;
+  // The X display number for an X11_DISPLAY channel (`:1` → 1). Zero and meaningless otherwise.
+  uint32 display = 9;
+  // What the Hosts screen calls this channel, e.g. "Display :1".
+  string label = 10;
+}
+
+// What a desktop channel is.
+enum DesktopChannelKind {
+  DESKTOP_CHANNEL_KIND_UNSPECIFIED = 0;
+  // A desktop server already listening on a port of this host's loopback (`port`).
+  DESKTOP_CHANNEL_KIND_ENDPOINT = 1;
+  // An X11 display (`display`) the daemon serves on demand by starting x11vnc for it. `port` is
+  // zero: x11vnc is given a free loopback port when the channel is opened.
+  DESKTOP_CHANNEL_KIND_X11_DISPLAY = 2;
 }
 
 // Whether a host has a reachable ssh-agent, and what it is holding.

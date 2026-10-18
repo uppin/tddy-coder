@@ -56,6 +56,23 @@ function desktopFact(reading: HostRemoteDesktop): string {
 export interface ConnectableDesktop {
   protocol: Protocol;
   port: number;
+  /** The reading's `channelId`, which tells two channels on one host apart. */
+  channelId?: string;
+  /** Set for an X11-display channel: the display the daemon serves through x11vnc. */
+  x11Display?: number;
+}
+
+/**
+ * Every channel a connect could act on, in the probe's order — one Connect each.
+ *
+ * The same three conditions as {@link connectableDesktop}, applied per channel rather than stopping
+ * at the first: a host with several X displays offers each one.
+ */
+export function connectableChannels(
+  readings: readonly HostRemoteDesktop[],
+): ConnectableDesktop[] {
+  void readings;
+  throw new Error("TODO(x11-channels): implement");
 }
 
 /**

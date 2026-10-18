@@ -43,6 +43,12 @@ export interface HostDesktopOverlayProps {
   port: number;
   /** `screen_sharing.proto`'s `Protocol`, as node 7's reading reports it. */
   protocol: Protocol;
+  /**
+   * The X11 display to open, for an X11-display channel: sent as `AddHostTarget.x11Display` so the
+   * daemon starts x11vnc for it. Absent for a desktop already listening on `port`.
+   */
+  // TODO(x11-channels): open the channel given here rather than matching on (host, port, protocol).
+  x11Display?: number;
   onClose: () => void;
 }
 
