@@ -163,7 +163,7 @@ Contract-commit notes:
 - [x] Create changeset (this document)
 - [x] Create failing acceptance tests
 - [x] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
+- [x] USER REVIEW — acceptance tests (approved with the wave-1 batch, 2026-10-18)
 - [~] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
