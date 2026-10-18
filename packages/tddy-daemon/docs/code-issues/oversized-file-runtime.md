@@ -38,6 +38,7 @@
 | 2026-10-17 | 1,781 → 1,811 (+30) | `#satellite` 1/13 (#623): the integration board, the LiveKit plugin behind the `SessionReach` port, `with_session_reach`, the `SessionRoomService` entry and `GetIntegrationStatus` wiring in `build`. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` — and because #624 also edits this file |
 | 2026-10-17 | 1,811 → 1,816 (+5) | `#satellite` 2/13 (#624): the two `CommonRoom` constructions (host-service wiring and credential-sync) go through `LiveKitPeerForwarder::new(slot)`. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` — and because later `#satellite` nodes also edit this file |
 | 2026-10-18 | 1,813 → 1,820 (+7) | `#satellite` 4/13 (#626): `room_token_minter(..)` built once before auth, and the minter handed to the two auth builders, `build_token_service_entry` and `with_room_tokens`. Grown; split deferred with the developer's consent — `docs/dev/todo/2026-10-17-satellite-1-left-files-over-the-500-production-line-budget.md` |
+| 2026-10-18 | 1,820 → 1,818 (−2) | `#satellite` 5/13 (#627): the `local_instance_id_for_config` call goes through `tddy_daemon_kernel::daemon_identity` and fits on one line instead of three. Touched and smaller; split not attempted (move-only node), still ~3.6× over. Not claimed by any PR |
 
 ## What the gate found
 

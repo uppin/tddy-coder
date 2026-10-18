@@ -6,9 +6,10 @@ connect, signal and delete handlers; `tddy-session-lifecycle` wires it to the ho
 ([module-layout](../../tddy-session-lifecycle/docs/module-layout.md)) and re-exports it at the old
 `tddy_session_lifecycle::…` paths.
 
-About **9.2k production lines** in 52 modules, under the 10k receiver budget. One file is over 500:
+About **9.4k production lines** in 54 modules, under the 10k receiver budget. Two files are over 500:
 `cursor_cli_spawn.rs` (563), moved whole, with its split deferred
-([`docs/dev/todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md`](../../../docs/dev/todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md)).
+([`docs/dev/todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md`](../../../docs/dev/todo/2026-10-08-cursor-cli-spawn-rs-in-tddy-agent-launch-is-563-production-lines.md)),
+and `session_coordinate_handlers.rs` (503, [`code-issues/`](code-issues/oversized-file-session-coordinate-handlers.md)).
 Standing findings are in [`code-issues/`](code-issues/). A production line is any line of a `src/` file
 outside an inline `#[cfg(test)] mod x { … }` block, excluding `*_tests.rs`.
 
@@ -119,6 +120,21 @@ unset `StartSessionRequest.github_source` from this host's row before a start is
 (a request that already names one keeps it; no row names none), and `record_requested_github_source`
 writes the source a start named into the new session's directory (`github-source.yaml`, owned by
 `tddy-changeset`). A start that named none records nothing.
+
+## Placement and the session's git environment
+
+`placement.rs` classifies where a start's codebase goes: `CodebasePlacement` (co-located, split, or
+sandboxed), `PlacementRequest` (everything a start says about it, gathered into one value) and
+`classify_placement`, which refuses any request asking for more than one placement and names both it
+found. `svc_start_session_core.rs` is its only caller.
+
+`session_git.rs` builds the git environment a session's own commits are made under:
+`session_git_environment(&ActingIdentity)` (and `session_git_environment_of(&GitIdentity)`) returns the four
+`GIT_AUTHOR_*` / `GIT_COMMITTER_*` variables, from the identity and nothing else, so the identity and the token that pushes it come from one value.
+It is not the identity of a work-in-progress snapshot, which the daemon signs as itself.
+`session_acting_identity.rs` is its caller; the suite is `tests/session_git_identity.rs`.
+
+Neither module names LiveKit, and `tddy-daemon-livekit` declares neither.
 
 ## Session RPC handlers
 
