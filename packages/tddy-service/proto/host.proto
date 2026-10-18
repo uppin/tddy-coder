@@ -269,6 +269,10 @@ message HostPromptEvent {
   string host_public_key_fingerprint = 6;
   // When this prompt stops being answerable. An unanswered prompt must not pin an operation forever.
   int64 expires_at_unix_ms = 7;
+  // DESKTOP_CREDENTIALS only: the sign-in methods the desktop advertises, as screen_sharing.proto's
+  // `DesktopAuthMethod` values (an int rather than the enum, as `HostRemoteDesktop.protocol` reuses
+  // `Protocol`). Empty for every other kind.
+  repeated int32 offered_auth_methods = 8;
 }
 
 // What the host is asking for.
@@ -280,6 +284,10 @@ enum HostPromptKind {
   // Reuses this channel rather than storing the password: a host desktop password is prompted,
   // encrypted under the host's key, used and dropped (#hosts-screen 8/8, AC-7).
   HOST_PROMPT_KIND_DESKTOP_PASSWORD = 2;
+  // The credential a host's remote desktop signs in with, shaped by the method it advertises
+  // (#host-desktops 8/8). The answer's plaintext is a protobuf-encoded
+  // screen_sharing.DesktopCredentialAnswer — method, username, domain, password and remember.
+  HOST_PROMPT_KIND_DESKTOP_CREDENTIALS = 3;
 }
 
 // Whether a host's desktop can be reached, per protocol.

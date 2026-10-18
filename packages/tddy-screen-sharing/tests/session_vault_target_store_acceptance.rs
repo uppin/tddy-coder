@@ -30,6 +30,7 @@ fn a_desktop() -> ScreenSharingTarget {
         protocol: Protocol::Vnc as i32,
         username: "ada".to_string(),
         x11_display: None,
+        domain: String::new(),
     }
 }
 

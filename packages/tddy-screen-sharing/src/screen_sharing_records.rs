@@ -147,6 +147,7 @@ pub fn target_from(record: &CredentialRecord) -> Result<ScreenSharingTarget, Tar
             .cloned()
             .unwrap_or_default(),
         x11_display: None,
+        domain: String::new(),
     })
 }
 

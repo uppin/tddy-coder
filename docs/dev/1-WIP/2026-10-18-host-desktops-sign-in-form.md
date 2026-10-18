@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#660](https://github.com/uppin/tddy-coder/pull/660)
 **Type**: Feature
 **Stack**: `#host-desktops` 8/8. Base: `feature/host-desktops/x11-channels`.
 
@@ -42,6 +42,21 @@
 | n6 `bridge-ready` | `Unauthenticated` with the server's reason | re-asks; marks remembered credential refused | change the readiness protocol |
 | n7 `x11-channels` | channel-addressed overlay, `display` targets | inspects the channel being opened (X11 channels report `NONE`) | change enumeration |
 
+**Sequencing facts (recorded with the failing tests):**
+
+- `vnc_inspect_integration.rs` fails today on this node's `todo!()`, but its green implementation runs
+  node 3's `parse_security_types`, which is still `todo!()` — **n3 must be green first**.
+- `a_remembered_credential_the_desktop_refuses_is_not_used_again` fails today at its *Given* (the
+  refused open must come back `Unauthenticated`), which is node 6's readiness wait — **n6 must be
+  green first**. Every other daemon sign-in test also reaches `StartHostStream`'s readiness wait
+  once n6 is green, so the stand-in bridge reports `ready` after reading its config.
+- `the_domain_the_operator_typed_reaches_the_bridge_on_stdin` needs a `domain` on the daemon's
+  bridge config, which node 2's `BridgeConfig.domain` reads — the bridge half is n2's; this node adds
+  the daemon half.
+- Module placement: the sign-in surface is `tddy-screen-sharing/src/host_desktop_sign_in.rs`; the
+  service file gained only the one-line `inspect_host_desktop` delegator, so n1's split moves nothing
+  of this node's.
+
 ## Draft PR contract
 
 ```proto
@@ -64,6 +79,48 @@ pub async fn run_inspect<C: ScreenSharingClient>(target: InspectTarget) -> anyho
 export function HostDesktopSignInDialog(props: { question: HostPromptEvent; offered: DesktopAuthMethod[]; onSubmit(answer: Uint8Array): void; onCancel(): void; error?: string }): JSX.Element;
 ```
 Failing tests below.
+
+**As published (red phase, 2026-10-18)** — where the real code differed from the sketch above:
+
+- `HostPromptEvent.offered_auth_methods` is field **8**, not 9: 8 was the next free number and
+  nothing reserves it.
+- `domain` is `string domain = 8` on `ScreenSharingTarget` (after node 7's `x11_display = 7`) and
+  `string domain = 9` on `AddHostTargetRequest` (after its `x11_display = 8`). Rust literals fill
+  `String::new()`; nothing persists it yet (`HostDesktopTarget` has no `domain`).
+- `HostDesktopSignInDialog`'s `question` is `HostPromptEventLike`, not `HostPromptEvent`: the
+  overlay latches the feed's `HostPromptEventLike`, and requiring the wire message would force a
+  cast at the only call site.
+- Rust surface (bodies `todo!()` unless marked real):
+  ```rust
+  // tddy-screenshare/src/inspect.rs (new)
+  pub struct InspectTarget { pub host: String, pub port: u16 }                 // serde, real
+  pub enum AdvertisedMethod { None, VncPassword, VencryptPlain, VencryptTlsPlain,
+      AppleRemoteDesktop, RdpTls, RdpNla, UnsupportedVnc { security_type: u8 } } // serde snake_case, real
+  pub struct InspectReport { pub methods: Vec<AdvertisedMethod> }              // serde, real
+  pub enum BridgeMode { Bridge, Inspect }  pub const INSPECT_FLAG: &str = "--inspect";
+  impl BridgeMode { pub fn from_args(args: impl Iterator<Item = String>) -> anyhow::Result<Self> } // real
+  pub fn write_inspect_report(out: &mut impl Write, report: &InspectReport) -> io::Result<()>;
+  pub fn read_inspect_report(line: &str) -> Result<InspectReport, serde_json::Error>;
+  pub async fn run_inspect<C: ScreenSharingClient>(target: InspectTarget) -> anyhow::Result<()>;
+  // ScreenSharingClient
+  async fn inspect(host: &str, port: u16) -> anyhow::Result<Vec<AdvertisedMethod>>;
+  // tddy-vnc / tddy-rdp main.rs: `BridgeMode::from_args` → run_bridge | run_inspect (real)
+  // tddy-host-service
+  PromptKind::DesktopCredentials  → HostPromptKind::DesktopCredentials           // real
+  // tddy-screen-sharing/src/host_desktop_sign_in.rs (new)
+  pub async fn inspect_host_desktop(&ScreenSharingServiceImpl, Request<InspectHostDesktopRequest>)
+      -> Result<Response<InspectHostDesktopResponse>, Status>;
+  pub fn decrypt_desktop_credential_answer(&dyn HostKeypair, &[u8]) -> Result<DesktopCredentialAnswer, Status>;
+  pub fn remembered_account(daemon_instance_id: &str, target_id: &str) -> AccountId;
+  pub struct RememberedDesktopCredentials { .. }  // new(Arc<SessionVaults>), usable, remember, mark_refused
+  ```
+- The stand-in bridge's inspect line is `serde_json` of `InspectReport`, e.g.
+  `{"methods":["apple_remote_desktop",{"unsupported_vnc":{"security_type":16}}]}`.
+
+**Open for green:** a `NONE` desktop opens "without asking" — either the daemon does not prompt for
+a target whose inspection said `NONE` (inspection cached per target), or the overlay answers the
+prompt itself without a form. The web test pins only the outcome (no form, no answer sent, the
+desktop opens after an inspection); the daemon tests do not pin either choice.
 
 ## Green wave
 
@@ -88,7 +145,8 @@ The desktop asks for what it needs, and only once if the operator says so.
 
 ## Scope
 
-- [ ] Protos + generated TS
+- [~] Testing — failing acceptance and unit tests written (red phase, 2026-10-18)
+- [x] Protos + generated TS
 - [ ] Inspect mode in both bridges
 - [ ] Daemon inspect, remembered credential, prompt with method, remember write, refused marking
 - [ ] Sign-in dialog; overlay inspect → form → start → re-ask
@@ -130,24 +188,42 @@ what is and is not written. Web: Cypress with `anInMemoryRpcBackend`, `aHostProm
 
 ## Acceptance Tests
 
-| Test | File | Validates |
-|---|---|---|
-| `opens a desktop that needs no sign in without asking` | `packages/tddy-web/cypress/component/HostDesktopSignInAcceptance.cy.tsx` (new) | `NONE` path |
-| `asks only for a password for vnc authentication` | same | field set |
-| `asks for a username and password for apple remote desktop` | same | field set |
-| `asks for a username domain and password for nla` | same | field set |
-| `preselects the strongest method and lets the operator switch` | same | switcher |
-| `sends remember with the credential when it is checked` | same | decrypted answer |
-| `asks again with the desktops reason after a refused sign in` | same | re-ask |
-| `says the desktop offers no sign in tddy supports` | same | no form |
-| `inspecting_a_desktop_reports_the_methods_its_bridge_read` | `packages/tddy-screen-sharing` host-target module `tests` | inspect RPC |
-| `a_remembered_credential_opens_the_desktop_without_asking` | same | no prompt |
-| `a_credential_given_with_remember_is_sealed_in_the_operators_vault` | same | record written |
-| `a_credential_given_without_remember_is_written_nowhere` | same | nothing on disk |
-| `a_remembered_credential_the_desktop_refuses_is_not_used_again` | same | refused marking |
-| `the_domain_the_operator_typed_reaches_the_bridge_on_stdin` | same | stdin JSON |
-| `inspect_reports_the_security_types_a_vnc_server_advertises` | `packages/tddy-vnc/tests/vnc_inspect_integration.rs` (new) | VNC inspect |
-| `inspect_reports_nla_for_a_server_that_requires_it` | `packages/tddy-rdp/tests/rdp_inspect_integration.rs` (new) | RDP inspect |
+Daemon tests are placed in `packages/tddy-screen-sharing/tests/`, outside the service file, so node
+1's split does not move them; they extend node 6/7's `tests/common/mod.rs`.
+
+| Test | File | Validates | Fails today because |
+|---|---|---|---|
+| [x] `opens a desktop that needs no sign in without asking` | `packages/tddy-web/cypress/component/HostDesktopSignInAcceptance.cy.tsx` (new) | `NONE` path: inspected first, no form, no answer, opens | the overlay never calls `InspectHostDesktop` |
+| [x] `asks only for a password for vnc authentication` | same | field set | no sign-in form is mounted |
+| [x] `asks for a username and password for apple remote desktop` | same | field set | no sign-in form is mounted |
+| [x] `asks for a username domain and password for nla` | same | field set | no sign-in form is mounted |
+| [x] `preselects the strongest method and lets the operator switch` | same | switcher; decrypted answer's method | no sign-in form is mounted |
+| [x] `sends remember with the credential when it is checked` | same | decrypted `DesktopCredentialAnswer` | no sign-in form is mounted |
+| [x] `asks again with the desktops reason after a refused sign in` | same | re-ask with reason | no sign-in form is mounted |
+| [x] `says the desktop offers no sign in tddy supports` | same | no form, names the types, no start | the overlay says "Connecting…" |
+| [x] `inspecting_a_desktop_reports_the_methods_its_bridge_read` | `packages/tddy-screen-sharing/tests/host_desktop_sign_in_acceptance.rs` (new) | inspect RPC | `todo!()` in `host_desktop_sign_in::inspect_host_desktop` |
+| [x] `inspecting_a_desktop_tells_its_bridge_only_where_the_desktop_is` (added) | same | `{host, port}` on the inspect stdin | `todo!()` |
+| [x] `inspecting_a_desktop_with_a_remembered_credential_says_so` (added) | same | `remembered` | `todo!()` |
+| [x] `opening_a_desktop_asks_the_operator_for_its_credentials` (added) | same | prompt kind `DesktopCredentials` | asks `DesktopPassword` |
+| [x] `a_remembered_credential_opens_the_desktop_without_asking` | same | no prompt on reopen | asked twice |
+| [x] `a_credential_given_with_remember_is_sealed_in_the_operators_vault` | same | record `screen-sharing` / `host:<instance>:<target>` | no record |
+| [x] `a_credential_given_without_remember_is_written_nowhere` | same | no record, no file holds it | the bridge got the encoded answer as its password |
+| [x] `a_remembered_credential_the_desktop_refuses_is_not_used_again` | same | refused marking | its Given needs n6's `Unauthenticated` (start succeeds) |
+| [x] `the_domain_the_operator_typed_reaches_the_bridge_on_stdin` | same | stdin JSON `username`/`domain`/`password` | no `domain`; answer not decoded |
+| [x] `inspect_reports_the_security_types_a_vnc_server_advertises` | `packages/tddy-vnc/tests/vnc_inspect_integration.rs` (new) | VNC inspect | `todo!()` in `VncClientState::inspect` |
+| [x] `inspect_reports_no_authentication_for_a_server_that_asks_for_none` (added) | same | `None` | `todo!()` |
+| [x] `inspect_reports_the_vencrypt_subtypes_a_vnc_server_offers` (added) | same | VeNCrypt subtypes | `todo!()` |
+| [x] `inspect_selects_no_sign_in_method` (added) | same | never starts a sign-in | `todo!()` |
+| [x] `inspect_reports_nla_for_a_server_that_requires_it` | `packages/tddy-rdp/tests/rdp_inspect_integration.rs` (new) | RDP inspect | `todo!()` in `RdpClient::inspect` |
+| [x] `inspect_reports_tls_for_a_server_that_offers_only_tls` (added) | same | RDP TLS | `todo!()` |
+| [x] `an_inspect_report_is_one_line_that_reads_back_as_written` (unit) | `packages/tddy-screenshare/src/inspect.rs` | report line round-trip | `todo!()` |
+| [x] `an_inspect_line_names_each_method_in_snake_case` (unit) | same | wire spelling | `todo!()` |
+| `a_bridge_given_no_arguments_bridges`, `…_the_inspect_flag_inspects`, `…_any_other_argument_refuses_it_by_name` (unit) | same | `--inspect` parsing | pass — the parsing is real |
+
+Unchanged and still green: `HostDesktopConnectAcceptance.cy.tsx` (13), `HostAddKeyAcceptance.cy.tsx`
+(15). **Green will have to update `HostDesktopConnectAcceptance`'s backends** once the overlay
+inspects first and answers `DESKTOP_CREDENTIALS` instead of `DESKTOP_PASSWORD`: they implement no
+`inspectHostDesktop` and raise `DESKTOP_PASSWORD` questions answered through `HostPassphraseDialog`.
 
 ## Decisions & Trade-offs
 - **On-demand handshake via the bridge's inspect mode** (developer, 2026-10-18) — keeps protocol knowledge in the bridge crates and the periodic probe byte-free.
@@ -156,6 +232,30 @@ what is and is not written. Web: Cypress with `anInMemoryRpcBackend`, `aHostProm
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- `tests/common/mod.rs` (screen-sharing) grows a stand-in that answers `--inspect`, a re-scriptable
+  bridge (`StandInBridge::now_does`), a configs log, a generalised operator (`TheOperator`, replacing
+  `AnOperatorWhoTypesNoPassword`) and the operator's real vault (`with_the_operators_vault`). It still
+  duplicates the inline suite's fixtures (node 6/7's note) — fold together once node 1 splits the
+  service file. Stand-ins now live in a `tools` tempdir apart from the daemon's storage, so "written
+  nowhere" can search the daemon's files without finding the stand-in's own records.
+- `rdp_inspect_integration.rs` copies the TLS-identity and `ironrdp-server` desktop setup from
+  `rdp_nla_integration.rs`; `vnc_inspect_integration.rs` has its own advertising-only RFB server next
+  to `vnc_security_integration.rs`'s full one. Extract a shared fake RDP desktop and RFB handshake into
+  a `tests/support` module per crate.
+- `host_desktop_sign_in::inspect_host_desktop` takes `&ScreenSharingServiceImpl`, whose fields are
+  private to `screen_sharing_service.rs`: green needs `pub(crate)` accessors (host scope, config, the
+  remembered-credential store) — or node 1's split, which makes those modules siblings anyway.
+- `with_credential_vaults` turns the vaults into a `SessionVaultTargetStore` and keeps nothing else;
+  green has to keep a `RememberedDesktopCredentials` beside it from the same `Arc<SessionVaults>`.
+- `host_prompt_stream.rs` sends `offered_auth_methods: Vec::new()` (TODO): `PendingPrompt` carries no
+  methods. Either `PendingPrompt` grows them or the field is dropped in favour of `InspectHostDesktop`.
+- `BridgeConfig` has `domain` (n2) but the daemon's `BridgeSpawnConfig` does not; add it.
+- Node 6's web test `says the desktop refused the sign in instead of waiting` asserts the overlay's
+  status line; after this node the overlay re-asks instead — keep the status, or move that test's
+  assertion onto `hostDesktopSignInPage.error()`.
+- `prost = "0.13"` added as a **dev**-dependency of `tddy-screen-sharing` (already in the lockfile
+  via `tddy-service`); the green decode of the answer will need it as a normal dependency.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -173,10 +273,10 @@ what is and is not written. Web: Cypress with `anInMemoryRpcBackend`, `aHostProm
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

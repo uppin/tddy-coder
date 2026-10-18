@@ -28,8 +28,9 @@ use tddy_host_service::host_prompts::HostPromptRegistry;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::screen_sharing::{
     AddHostTargetRequest, AddHostTargetResponse, AddTargetRequest, AddTargetResponse,
-    ListHostTargetsRequest, ListHostTargetsResponse, ListTargetsRequest, ListTargetsResponse,
-    Protocol, RemoveTargetRequest, RemoveTargetResponse, ScreenSharingService,
+    InspectHostDesktopRequest, InspectHostDesktopResponse, ListHostTargetsRequest,
+    ListHostTargetsResponse, ListTargetsRequest, ListTargetsResponse, Protocol,
+    RemoveTargetRequest, RemoveTargetResponse, ScreenSharingService,
     ScreenSharingTarget as ProtoScreenSharingTarget, StartHostStreamRequest, StartStreamRequest,
     StartStreamResponse, StopHostStreamRequest, StopHostStreamResponse, StopStreamRequest,
     StopStreamResponse,
@@ -292,6 +293,13 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
         self.stop_host_stream_impl(request).await
     }
 
+    async fn inspect_host_desktop(
+        &self,
+        request: Request<InspectHostDesktopRequest>,
+    ) -> Result<Response<InspectHostDesktopResponse>, Status> {
+        crate::host_desktop_sign_in::inspect_host_desktop(self, request).await
+    }
+
     async fn list_targets(
         &self,
         request: Request<ListTargetsRequest>,
@@ -332,6 +340,7 @@ impl ScreenSharingService for ScreenSharingServiceImpl {
             protocol: req.protocol,
             username: req.username,
             x11_display: None,
+            domain: String::new(),
         };
 
         let target = store
@@ -971,6 +980,7 @@ mod tests {
                     protocol: Protocol::Vnc as i32,
                     username: "ada".to_string(),
                     x11_display: None,
+                    domain: String::new(),
                 }))
                 .await
                 .map(|attached| attached.into_inner().target_id)
@@ -1116,6 +1126,7 @@ mod tests {
                     protocol: Protocol::Vnc as i32,
                     username: "ada".to_string(),
                     x11_display: None,
+                    domain: String::new(),
                 }))
                 .await
                 .expect_err("a stranger must not attach a desktop to a host")

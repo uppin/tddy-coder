@@ -28,6 +28,14 @@ service ScreenSharingService {
   rpc AddHostTarget(AddHostTargetRequest) returns (AddHostTargetResponse);
   rpc StartHostStream(StartHostStreamRequest) returns (StartStreamResponse);
   rpc StopHostStream(StopHostStreamRequest) returns (StopHostStreamResponse);
+
+  // --- Desktop sign-in (#host-desktops 8/8) ---
+  //
+  // Which sign-in methods a host's desktop advertises, read on demand when an operator opens it: the
+  // daemon runs the target's bridge in inspect mode, which reads the RFB security-type list (VNC) or
+  // the X.224 negotiation response (RDP) and disconnects without signing in. The periodic probe stays
+  // a bare TCP connect; this runs only on an operator's open.
+  rpc InspectHostDesktop(InspectHostDesktopRequest) returns (InspectHostDesktopResponse);
 }
 
 // --- Protocol ---
@@ -49,6 +57,8 @@ message ScreenSharingTarget {
   string   username = 6;  // Login user (required for RDP, optional for VNC)
   // Host scope only: the X11 display this target streams through a daemon-started x11vnc.
   optional uint32 x11_display = 7;
+  // Windows domain the RDP account belongs to (empty for local accounts and for VNC).
+  string   domain   = 8;
 }
 
 // --- ListTargets ---
@@ -154,6 +164,8 @@ message AddHostTargetRequest {
   // An X11 display to serve through a daemon-started x11vnc instead of `host`:`port`. Set when the
   // operator opens an X11_DISPLAY channel (host.proto `DesktopChannelKind`).
   optional uint32 x11_display = 8;
+  // Windows domain the RDP account belongs to (empty for local accounts and for VNC).
+  string domain = 9;
 }
 message AddHostTargetResponse {
   string target_id = 1;
@@ -165,8 +177,9 @@ message AddHostTargetResponse {
 // The desktop password is deliberately NOT a field here. It is asked for on the #hosts-screen 6/8
 // prompt channel while this call is blocked: HostPromptEvent is the only place a host publishes the
 // public key an answer is encrypted under, so a caller has nothing to encrypt with until the daemon
-// has asked. Nothing persists the answer either — the session-scoped vault's storing model is
-// deliberately not followed for a host desktop.
+// has asked. Nothing persists the answer unless the operator ticked Remember (#host-desktops 8/8):
+// then it is a `screen-sharing` record in the operator's own credential vault, and the next start
+// uses it instead of asking.
 message StartHostStreamRequest {
   string session_token = 1;
   string daemon_instance_id = 2;
@@ -180,4 +193,53 @@ message StopHostStreamRequest {
 }
 message StopHostStreamResponse {
   bool ok = 1;
+}
+
+// --- Desktop sign-in (#host-desktops 8/8) ---
+
+// A sign-in method a desktop advertises, and the one an operator's credential is for.
+enum DesktopAuthMethod {
+  DESKTOP_AUTH_METHOD_UNSPECIFIED = 0;
+  // VNC security type 1: no authentication. The desktop opens without a form.
+  DESKTOP_AUTH_METHOD_NONE = 1;
+  // VNC security type 2 (VNC Authentication): a password.
+  DESKTOP_AUTH_METHOD_VNC_PASSWORD = 2;
+  // VeNCrypt subtype Plain (256): username and password in the clear.
+  DESKTOP_AUTH_METHOD_VENCRYPT_PLAIN = 3;
+  // VeNCrypt subtype TLSPlain (259): username and password inside TLS.
+  DESKTOP_AUTH_METHOD_VENCRYPT_TLS_PLAIN = 4;
+  // VNC security type 30 (Apple Remote Desktop): username and password.
+  DESKTOP_AUTH_METHOD_APPLE_REMOTE_DESKTOP = 5;
+  // RDP over TLS only: username and password, checked after the connection.
+  DESKTOP_AUTH_METHOD_RDP_TLS = 6;
+  // RDP Network Level Authentication (CredSSP): username, optional domain and password.
+  DESKTOP_AUTH_METHOD_RDP_NLA = 7;
+}
+
+message InspectHostDesktopRequest {
+  string session_token = 1;
+  string daemon_instance_id = 2;
+  string target_id = 3;
+}
+
+message InspectHostDesktopResponse {
+  // The methods the desktop advertises that tddy can sign in with, in the order it advertised them.
+  // Empty when it advertises none of them — `unsupported_vnc_types` then says what it did advertise.
+  repeated DesktopAuthMethod offered = 1;
+  // VNC security type numbers the desktop advertised that tddy cannot sign in with.
+  repeated uint32 unsupported_vnc_types = 2;
+  // The operator has a remembered credential for this desktop that has not been refused: opening it
+  // will not ask.
+  bool remembered = 3;
+}
+
+// The plaintext of a DESKTOP_CREDENTIALS answer (host.proto `HostPromptKind`): protobuf-encoded, then
+// RSA-OAEP(SHA-256)-encrypted under the host's published key, exactly as a password answer is.
+message DesktopCredentialAnswer {
+  DesktopAuthMethod method = 1;
+  string username = 2;
+  string domain = 3;
+  string password = 4;
+  // Keep this credential in the operator's credential vault, so the next open does not ask.
+  bool remember = 5;
 }

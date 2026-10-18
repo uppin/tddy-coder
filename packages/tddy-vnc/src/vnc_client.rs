@@ -318,6 +318,17 @@ impl tddy_screenshare::ScreenSharingClient for VncClientState {
         VncClientState::connect_with_credentials(host, port, credentials).await
     }
 
+    /// Reads the server's security-type list (with `security::parse_security_types`) and, when
+    /// VeNCrypt is offered, its subtype list; then disconnects without selecting a sign-in.
+    async fn inspect(
+        host: &str,
+        port: u16,
+    ) -> anyhow::Result<Vec<tddy_screenshare::AdvertisedMethod>> {
+        // TODO(sign-in-form): implement
+        let _ = (host, port);
+        todo!()
+    }
+
     fn framebuffer_dimensions(&self) -> (u32, u32) {
         self.dimensions()
     }

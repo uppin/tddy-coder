@@ -143,6 +143,9 @@ fn forward(
         host_public_key: published.spki_der,
         host_public_key_fingerprint: published.fingerprint,
         expires_at_unix_ms: prompt.expires_at_unix_ms,
+        // TODO(sign-in-form): carry the methods the desktop advertises on a DESKTOP_CREDENTIALS
+        // prompt — `PendingPrompt` holds none yet.
+        offered_auth_methods: Vec::new(),
     }))
     .is_ok()
 }
@@ -151,5 +154,6 @@ fn wire_kind(kind: PromptKind) -> HostPromptKind {
     match kind {
         PromptKind::SshKeyPassphrase => HostPromptKind::SshKeyPassphrase,
         PromptKind::DesktopPassword => HostPromptKind::DesktopPassword,
+        PromptKind::DesktopCredentials => HostPromptKind::DesktopCredentials,
     }
 }

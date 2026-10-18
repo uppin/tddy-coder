@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file screen_sharing.proto.
  */
 export const file_screen_sharing: GenFile = /*@__PURE__*/
-  fileDesc("ChRzY3JlZW5fc2hhcmluZy5wcm90bxIOc2NyZWVuX3NoYXJpbmcitAEKE1NjcmVlblNoYXJpbmdUYXJnZXQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDAoEaG9zdBgDIAEoCRIMCgRwb3J0GAQgASgNEioKCHByb3RvY29sGAUgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYBiABKAkSGAoLeDExX2Rpc3BsYXkYByABKA1IAIgBAUIOCgxfeDExX2Rpc3BsYXkiPwoSTGlzdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSJhChNMaXN0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0EhQKDHZhdWx0X2xvY2tlZBgCIAEoCCK4AQoQQWRkVGFyZ2V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDAoEaG9zdBgEIAEoCRIMCgRwb3J0GAUgASgNEhAKCHBhc3N3b3JkGAYgASgJEioKCHByb3RvY29sGAcgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYCCABKAkiSAoRQWRkVGFyZ2V0UmVzcG9uc2USMwoGdGFyZ2V0GAEgASgLMiMuc2NyZWVuX3NoYXJpbmcuU2NyZWVuU2hhcmluZ1RhcmdldCJTChNSZW1vdmVUYXJnZXRSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiIgoUUmVtb3ZlVGFyZ2V0UmVzcG9uc2USCgoCb2sYASABKAgiUgoSU3RhcnRTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkijAEKE1N0YXJ0U3RyZWFtUmVzcG9uc2USFAoMbGl2ZWtpdF9yb29tGAEgASgJEhMKC2xpdmVraXRfdXJsGAIgASgJEhcKD2JyaWRnZV9pZGVudGl0eRgDIAEoCRISCgp0cmFja19uYW1lGAQgASgJEg0KBXdpZHRoGAUgASgNEg4KBmhlaWdodBgGIAEoDSJRChFTdG9wU3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIiAKElN0b3BTdHJlYW1SZXNwb25zZRIKCgJvaxgBIAEoCCJLChZMaXN0SG9zdFRhcmdldHNSZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJIk8KF0xpc3RIb3N0VGFyZ2V0c1Jlc3BvbnNlEjQKB3RhcmdldHMYASADKAsyIy5zY3JlZW5fc2hhcmluZy5TY3JlZW5TaGFyaW5nVGFyZ2V0ItwBChRBZGRIb3N0VGFyZ2V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRINCgVsYWJlbBgDIAEoCRIMCgRob3N0GAQgASgJEgwKBHBvcnQYBSABKA0SKgoIcHJvdG9jb2wYBiABKA4yGC5zY3JlZW5fc2hhcmluZy5Qcm90b2NvbBIQCgh1c2VybmFtZRgHIAEoCRIYCgt4MTFfZGlzcGxheRgIIAEoDUgAiAEBQg4KDF94MTFfZGlzcGxheSIqChVBZGRIb3N0VGFyZ2V0UmVzcG9uc2USEQoJdGFyZ2V0X2lkGAEgASgJIl4KFlN0YXJ0SG9zdFN0cmVhbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIl0KFVN0b3BIb3N0U3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiJAoWU3RvcEhvc3RTdHJlYW1SZXNwb25zZRIKCgJvaxgBIAEoCCpICghQcm90b2NvbBIYChRQUk9UT0NPTF9VTlNQRUNJRklFRBAAEhAKDFBST1RPQ09MX1ZOQxABEhAKDFBST1RPQ09MX1JEUBACMssGChRTY3JlZW5TaGFyaW5nU2VydmljZRJWCgtMaXN0VGFyZ2V0cxIiLnNjcmVlbl9zaGFyaW5nLkxpc3RUYXJnZXRzUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLkxpc3RUYXJnZXRzUmVzcG9uc2USUAoJQWRkVGFyZ2V0EiAuc2NyZWVuX3NoYXJpbmcuQWRkVGFyZ2V0UmVxdWVzdBohLnNjcmVlbl9zaGFyaW5nLkFkZFRhcmdldFJlc3BvbnNlElkKDFJlbW92ZVRhcmdldBIjLnNjcmVlbl9zaGFyaW5nLlJlbW92ZVRhcmdldFJlcXVlc3QaJC5zY3JlZW5fc2hhcmluZy5SZW1vdmVUYXJnZXRSZXNwb25zZRJWCgtTdGFydFN0cmVhbRIiLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USUwoKU3RvcFN0cmVhbRIhLnNjcmVlbl9zaGFyaW5nLlN0b3BTdHJlYW1SZXF1ZXN0GiIuc2NyZWVuX3NoYXJpbmcuU3RvcFN0cmVhbVJlc3BvbnNlEmIKD0xpc3RIb3N0VGFyZ2V0cxImLnNjcmVlbl9zaGFyaW5nLkxpc3RIb3N0VGFyZ2V0c1JlcXVlc3QaJy5zY3JlZW5fc2hhcmluZy5MaXN0SG9zdFRhcmdldHNSZXNwb25zZRJcCg1BZGRIb3N0VGFyZ2V0EiQuc2NyZWVuX3NoYXJpbmcuQWRkSG9zdFRhcmdldFJlcXVlc3QaJS5zY3JlZW5fc2hhcmluZy5BZGRIb3N0VGFyZ2V0UmVzcG9uc2USXgoPU3RhcnRIb3N0U3RyZWFtEiYuc2NyZWVuX3NoYXJpbmcuU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBojLnNjcmVlbl9zaGFyaW5nLlN0YXJ0U3RyZWFtUmVzcG9uc2USXwoOU3RvcEhvc3RTdHJlYW0SJS5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlcXVlc3QaJi5zY3JlZW5fc2hhcmluZy5TdG9wSG9zdFN0cmVhbVJlc3BvbnNlYgZwcm90bzM");
+  fileDesc("ChRzY3JlZW5fc2hhcmluZy5wcm90bxIOc2NyZWVuX3NoYXJpbmcixAEKE1NjcmVlblNoYXJpbmdUYXJnZXQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSDAoEaG9zdBgDIAEoCRIMCgRwb3J0GAQgASgNEioKCHByb3RvY29sGAUgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYBiABKAkSGAoLeDExX2Rpc3BsYXkYByABKA1IAIgBARIOCgZkb21haW4YCCABKAlCDgoMX3gxMV9kaXNwbGF5Ij8KEkxpc3RUYXJnZXRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkiYQoTTGlzdFRhcmdldHNSZXNwb25zZRI0Cgd0YXJnZXRzGAEgAygLMiMuc2NyZWVuX3NoYXJpbmcuU2NyZWVuU2hhcmluZ1RhcmdldBIUCgx2YXVsdF9sb2NrZWQYAiABKAgiuAEKEEFkZFRhcmdldFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEg0KBWxhYmVsGAMgASgJEgwKBGhvc3QYBCABKAkSDAoEcG9ydBgFIAEoDRIQCghwYXNzd29yZBgGIAEoCRIqCghwcm90b2NvbBgHIAEoDjIYLnNjcmVlbl9zaGFyaW5nLlByb3RvY29sEhAKCHVzZXJuYW1lGAggASgJIkgKEUFkZFRhcmdldFJlc3BvbnNlEjMKBnRhcmdldBgBIAEoCzIjLnNjcmVlbl9zaGFyaW5nLlNjcmVlblNoYXJpbmdUYXJnZXQiUwoTUmVtb3ZlVGFyZ2V0UmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIiIKFFJlbW92ZVRhcmdldFJlc3BvbnNlEgoKAm9rGAEgASgIIlIKElN0YXJ0U3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIowBChNTdGFydFN0cmVhbVJlc3BvbnNlEhQKDGxpdmVraXRfcm9vbRgBIAEoCRITCgtsaXZla2l0X3VybBgCIAEoCRIXCg9icmlkZ2VfaWRlbnRpdHkYAyABKAkSEgoKdHJhY2tfbmFtZRgEIAEoCRINCgV3aWR0aBgFIAEoDRIOCgZoZWlnaHQYBiABKA0iUQoRU3RvcFN0cmVhbVJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIgChJTdG9wU3RyZWFtUmVzcG9uc2USCgoCb2sYASABKAgiSwoWTGlzdEhvc3RUYXJnZXRzUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCSJPChdMaXN0SG9zdFRhcmdldHNSZXNwb25zZRI0Cgd0YXJnZXRzGAEgAygLMiMuc2NyZWVuX3NoYXJpbmcuU2NyZWVuU2hhcmluZ1RhcmdldCLsAQoUQWRkSG9zdFRhcmdldFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSDQoFbGFiZWwYAyABKAkSDAoEaG9zdBgEIAEoCRIMCgRwb3J0GAUgASgNEioKCHByb3RvY29sGAYgASgOMhguc2NyZWVuX3NoYXJpbmcuUHJvdG9jb2wSEAoIdXNlcm5hbWUYByABKAkSGAoLeDExX2Rpc3BsYXkYCCABKA1IAIgBARIOCgZkb21haW4YCSABKAlCDgoMX3gxMV9kaXNwbGF5IioKFUFkZEhvc3RUYXJnZXRSZXNwb25zZRIRCgl0YXJnZXRfaWQYASABKAkiXgoWU3RhcnRIb3N0U3RyZWFtUmVxdWVzdBIVCg1zZXNzaW9uX3Rva2VuGAEgASgJEhoKEmRhZW1vbl9pbnN0YW5jZV9pZBgCIAEoCRIRCgl0YXJnZXRfaWQYAyABKAkiXQoVU3RvcEhvc3RTdHJlYW1SZXF1ZXN0EhUKDXNlc3Npb25fdG9rZW4YASABKAkSGgoSZGFlbW9uX2luc3RhbmNlX2lkGAIgASgJEhEKCXRhcmdldF9pZBgDIAEoCSIkChZTdG9wSG9zdFN0cmVhbVJlc3BvbnNlEgoKAm9rGAEgASgIImEKGUluc3BlY3RIb3N0RGVza3RvcFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCRIaChJkYWVtb25faW5zdGFuY2VfaWQYAiABKAkSEQoJdGFyZ2V0X2lkGAMgASgJIoMBChpJbnNwZWN0SG9zdERlc2t0b3BSZXNwb25zZRIyCgdvZmZlcmVkGAEgAygOMiEuc2NyZWVuX3NoYXJpbmcuRGVza3RvcEF1dGhNZXRob2QSHQoVdW5zdXBwb3J0ZWRfdm5jX3R5cGVzGAIgAygNEhIKCnJlbWVtYmVyZWQYAyABKAgikgEKF0Rlc2t0b3BDcmVkZW50aWFsQW5zd2VyEjEKBm1ldGhvZBgBIAEoDjIhLnNjcmVlbl9zaGFyaW5nLkRlc2t0b3BBdXRoTWV0aG9kEhAKCHVzZXJuYW1lGAIgASgJEg4KBmRvbWFpbhgDIAEoCRIQCghwYXNzd29yZBgEIAEoCRIQCghyZW1lbWJlchgFIAEoCCpICghQcm90b2NvbBIYChRQUk9UT0NPTF9VTlNQRUNJRklFRBAAEhAKDFBST1RPQ09MX1ZOQxABEhAKDFBST1RPQ09MX1JEUBACKsACChFEZXNrdG9wQXV0aE1ldGhvZBIjCh9ERVNLVE9QX0FVVEhfTUVUSE9EX1VOU1BFQ0lGSUVEEAASHAoYREVTS1RPUF9BVVRIX01FVEhPRF9OT05FEAESJAogREVTS1RPUF9BVVRIX01FVEhPRF9WTkNfUEFTU1dPUkQQAhImCiJERVNLVE9QX0FVVEhfTUVUSE9EX1ZFTkNSWVBUX1BMQUlOEAMSKgomREVTS1RPUF9BVVRIX01FVEhPRF9WRU5DUllQVF9UTFNfUExBSU4QBBIsCihERVNLVE9QX0FVVEhfTUVUSE9EX0FQUExFX1JFTU9URV9ERVNLVE9QEAUSHwobREVTS1RPUF9BVVRIX01FVEhPRF9SRFBfVExTEAYSHwobREVTS1RPUF9BVVRIX01FVEhPRF9SRFBfTkxBEAcyuAcKFFNjcmVlblNoYXJpbmdTZXJ2aWNlElYKC0xpc3RUYXJnZXRzEiIuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuTGlzdFRhcmdldHNSZXNwb25zZRJQCglBZGRUYXJnZXQSIC5zY3JlZW5fc2hhcmluZy5BZGRUYXJnZXRSZXF1ZXN0GiEuc2NyZWVuX3NoYXJpbmcuQWRkVGFyZ2V0UmVzcG9uc2USWQoMUmVtb3ZlVGFyZ2V0EiMuc2NyZWVuX3NoYXJpbmcuUmVtb3ZlVGFyZ2V0UmVxdWVzdBokLnNjcmVlbl9zaGFyaW5nLlJlbW92ZVRhcmdldFJlc3BvbnNlElYKC1N0YXJ0U3RyZWFtEiIuc2NyZWVuX3NoYXJpbmcuU3RhcnRTdHJlYW1SZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuU3RhcnRTdHJlYW1SZXNwb25zZRJTCgpTdG9wU3RyZWFtEiEuc2NyZWVuX3NoYXJpbmcuU3RvcFN0cmVhbVJlcXVlc3QaIi5zY3JlZW5fc2hhcmluZy5TdG9wU3RyZWFtUmVzcG9uc2USYgoPTGlzdEhvc3RUYXJnZXRzEiYuc2NyZWVuX3NoYXJpbmcuTGlzdEhvc3RUYXJnZXRzUmVxdWVzdBonLnNjcmVlbl9zaGFyaW5nLkxpc3RIb3N0VGFyZ2V0c1Jlc3BvbnNlElwKDUFkZEhvc3RUYXJnZXQSJC5zY3JlZW5fc2hhcmluZy5BZGRIb3N0VGFyZ2V0UmVxdWVzdBolLnNjcmVlbl9zaGFyaW5nLkFkZEhvc3RUYXJnZXRSZXNwb25zZRJeCg9TdGFydEhvc3RTdHJlYW0SJi5zY3JlZW5fc2hhcmluZy5TdGFydEhvc3RTdHJlYW1SZXF1ZXN0GiMuc2NyZWVuX3NoYXJpbmcuU3RhcnRTdHJlYW1SZXNwb25zZRJfCg5TdG9wSG9zdFN0cmVhbRIlLnNjcmVlbl9zaGFyaW5nLlN0b3BIb3N0U3RyZWFtUmVxdWVzdBomLnNjcmVlbl9zaGFyaW5nLlN0b3BIb3N0U3RyZWFtUmVzcG9uc2USawoSSW5zcGVjdEhvc3REZXNrdG9wEikuc2NyZWVuX3NoYXJpbmcuSW5zcGVjdEhvc3REZXNrdG9wUmVxdWVzdBoqLnNjcmVlbl9zaGFyaW5nLkluc3BlY3RIb3N0RGVza3RvcFJlc3BvbnNlYgZwcm90bzM");
 
 /**
  * @generated from message screen_sharing.ScreenSharingTarget
@@ -58,6 +58,13 @@ export type ScreenSharingTarget = Message<"screen_sharing.ScreenSharingTarget"> 
    * @generated from field: optional uint32 x11_display = 7;
    */
   x11Display?: number;
+
+  /**
+   * Windows domain the RDP account belongs to (empty for local accounts and for VNC).
+   *
+   * @generated from field: string domain = 8;
+   */
+  domain: string;
 };
 
 /**
@@ -442,6 +449,13 @@ export type AddHostTargetRequest = Message<"screen_sharing.AddHostTargetRequest"
    * @generated from field: optional uint32 x11_display = 8;
    */
   x11Display?: number;
+
+  /**
+   * Windows domain the RDP account belongs to (empty for local accounts and for VNC).
+   *
+   * @generated from field: string domain = 9;
+   */
+  domain: string;
 };
 
 /**
@@ -475,8 +489,9 @@ export const AddHostTargetResponseSchema: GenMessage<AddHostTargetResponse> = /*
  * The desktop password is deliberately NOT a field here. It is asked for on the #hosts-screen 6/8
  * prompt channel while this call is blocked: HostPromptEvent is the only place a host publishes the
  * public key an answer is encrypted under, so a caller has nothing to encrypt with until the daemon
- * has asked. Nothing persists the answer either — the session-scoped vault's storing model is
- * deliberately not followed for a host desktop.
+ * has asked. Nothing persists the answer unless the operator ticked Remember (#host-desktops 8/8):
+ * then it is a `screen-sharing` record in the operator's own credential vault, and the next start
+ * uses it instead of asking.
  *
  * @generated from message screen_sharing.StartHostStreamRequest
  */
@@ -549,6 +564,110 @@ export const StopHostStreamResponseSchema: GenMessage<StopHostStreamResponse> = 
   messageDesc(file_screen_sharing, 17);
 
 /**
+ * @generated from message screen_sharing.InspectHostDesktopRequest
+ */
+export type InspectHostDesktopRequest = Message<"screen_sharing.InspectHostDesktopRequest"> & {
+  /**
+   * @generated from field: string session_token = 1;
+   */
+  sessionToken: string;
+
+  /**
+   * @generated from field: string daemon_instance_id = 2;
+   */
+  daemonInstanceId: string;
+
+  /**
+   * @generated from field: string target_id = 3;
+   */
+  targetId: string;
+};
+
+/**
+ * Describes the message screen_sharing.InspectHostDesktopRequest.
+ * Use `create(InspectHostDesktopRequestSchema)` to create a new message.
+ */
+export const InspectHostDesktopRequestSchema: GenMessage<InspectHostDesktopRequest> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 18);
+
+/**
+ * @generated from message screen_sharing.InspectHostDesktopResponse
+ */
+export type InspectHostDesktopResponse = Message<"screen_sharing.InspectHostDesktopResponse"> & {
+  /**
+   * The methods the desktop advertises that tddy can sign in with, in the order it advertised them.
+   * Empty when it advertises none of them — `unsupported_vnc_types` then says what it did advertise.
+   *
+   * @generated from field: repeated screen_sharing.DesktopAuthMethod offered = 1;
+   */
+  offered: DesktopAuthMethod[];
+
+  /**
+   * VNC security type numbers the desktop advertised that tddy cannot sign in with.
+   *
+   * @generated from field: repeated uint32 unsupported_vnc_types = 2;
+   */
+  unsupportedVncTypes: number[];
+
+  /**
+   * The operator has a remembered credential for this desktop that has not been refused: opening it
+   * will not ask.
+   *
+   * @generated from field: bool remembered = 3;
+   */
+  remembered: boolean;
+};
+
+/**
+ * Describes the message screen_sharing.InspectHostDesktopResponse.
+ * Use `create(InspectHostDesktopResponseSchema)` to create a new message.
+ */
+export const InspectHostDesktopResponseSchema: GenMessage<InspectHostDesktopResponse> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 19);
+
+/**
+ * The plaintext of a DESKTOP_CREDENTIALS answer (host.proto `HostPromptKind`): protobuf-encoded, then
+ * RSA-OAEP(SHA-256)-encrypted under the host's published key, exactly as a password answer is.
+ *
+ * @generated from message screen_sharing.DesktopCredentialAnswer
+ */
+export type DesktopCredentialAnswer = Message<"screen_sharing.DesktopCredentialAnswer"> & {
+  /**
+   * @generated from field: screen_sharing.DesktopAuthMethod method = 1;
+   */
+  method: DesktopAuthMethod;
+
+  /**
+   * @generated from field: string username = 2;
+   */
+  username: string;
+
+  /**
+   * @generated from field: string domain = 3;
+   */
+  domain: string;
+
+  /**
+   * @generated from field: string password = 4;
+   */
+  password: string;
+
+  /**
+   * Keep this credential in the operator's credential vault, so the next open does not ask.
+   *
+   * @generated from field: bool remember = 5;
+   */
+  remember: boolean;
+};
+
+/**
+ * Describes the message screen_sharing.DesktopCredentialAnswer.
+ * Use `create(DesktopCredentialAnswerSchema)` to create a new message.
+ */
+export const DesktopCredentialAnswerSchema: GenMessage<DesktopCredentialAnswer> = /*@__PURE__*/
+  messageDesc(file_screen_sharing, 20);
+
+/**
  * @generated from enum screen_sharing.Protocol
  */
 export enum Protocol {
@@ -573,6 +692,73 @@ export enum Protocol {
  */
 export const ProtocolSchema: GenEnum<Protocol> = /*@__PURE__*/
   enumDesc(file_screen_sharing, 0);
+
+/**
+ * A sign-in method a desktop advertises, and the one an operator's credential is for.
+ *
+ * @generated from enum screen_sharing.DesktopAuthMethod
+ */
+export enum DesktopAuthMethod {
+  /**
+   * @generated from enum value: DESKTOP_AUTH_METHOD_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * VNC security type 1: no authentication. The desktop opens without a form.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_NONE = 1;
+   */
+  NONE = 1,
+
+  /**
+   * VNC security type 2 (VNC Authentication): a password.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_VNC_PASSWORD = 2;
+   */
+  VNC_PASSWORD = 2,
+
+  /**
+   * VeNCrypt subtype Plain (256): username and password in the clear.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_VENCRYPT_PLAIN = 3;
+   */
+  VENCRYPT_PLAIN = 3,
+
+  /**
+   * VeNCrypt subtype TLSPlain (259): username and password inside TLS.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_VENCRYPT_TLS_PLAIN = 4;
+   */
+  VENCRYPT_TLS_PLAIN = 4,
+
+  /**
+   * VNC security type 30 (Apple Remote Desktop): username and password.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_APPLE_REMOTE_DESKTOP = 5;
+   */
+  APPLE_REMOTE_DESKTOP = 5,
+
+  /**
+   * RDP over TLS only: username and password, checked after the connection.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_RDP_TLS = 6;
+   */
+  RDP_TLS = 6,
+
+  /**
+   * RDP Network Level Authentication (CredSSP): username, optional domain and password.
+   *
+   * @generated from enum value: DESKTOP_AUTH_METHOD_RDP_NLA = 7;
+   */
+  RDP_NLA = 7,
+}
+
+/**
+ * Describes the enum screen_sharing.DesktopAuthMethod.
+ */
+export const DesktopAuthMethodSchema: GenEnum<DesktopAuthMethod> = /*@__PURE__*/
+  enumDesc(file_screen_sharing, 1);
 
 /**
  * Control-plane service: add/list/remove a user's screen-sharing targets, and start/stop the
@@ -667,6 +853,21 @@ export const ScreenSharingService: GenService<{
     methodKind: "unary";
     input: typeof StopHostStreamRequestSchema;
     output: typeof StopHostStreamResponseSchema;
+  },
+  /**
+   * --- Desktop sign-in (#host-desktops 8/8) ---
+   *
+   * Which sign-in methods a host's desktop advertises, read on demand when an operator opens it: the
+   * daemon runs the target's bridge in inspect mode, which reads the RFB security-type list (VNC) or
+   * the X.224 negotiation response (RDP) and disconnects without signing in. The periodic probe stays
+   * a bare TCP connect; this runs only on an operator's open.
+   *
+   * @generated from rpc screen_sharing.ScreenSharingService.InspectHostDesktop
+   */
+  inspectHostDesktop: {
+    methodKind: "unary";
+    input: typeof InspectHostDesktopRequestSchema;
+    output: typeof InspectHostDesktopResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_screen_sharing, 0);

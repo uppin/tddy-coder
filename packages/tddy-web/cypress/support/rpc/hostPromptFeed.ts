@@ -24,8 +24,9 @@ export interface HostPromptFrame {
   readonly daemonInstanceId: string;
   /**
    * What the host is asking for. Defaults to the key passphrase this channel was built for
-   * (`#hosts-screen 6/8`); `#hosts-screen 8/8` raises a desktop password on the same feed, and a
-   * spec that is about one of them has to be able to say which.
+   * (`#hosts-screen 6/8`); `#hosts-screen 8/8` raises a desktop password on the same feed, and
+   * `#host-desktops 8/8` a desktop's structured credentials — a spec that is about one of them has
+   * to be able to say which.
    */
   readonly kind?: HostPromptKind;
   /** What is being unlocked — the key path the operator named, or the desktop being opened. Never a secret. */
@@ -35,6 +36,12 @@ export interface HostPromptFrame {
   readonly hostPublicKeyFingerprint: string;
   /** Defaults to a minute out, which is what a live daemon stamps. */
   readonly expiresAtUnixMs?: number;
+  /**
+   * `DESKTOP_CREDENTIALS` only (`#host-desktops 8/8`): the sign-in methods the desktop advertises,
+   * as `screen_sharing.proto`'s `DesktopAuthMethod` values. Defaults to none, which is what every
+   * other kind carries.
+   */
+  readonly offeredAuthMethods?: readonly number[];
 }
 
 export interface HostPromptFeed {
@@ -90,6 +97,7 @@ export function aHostPromptFeed(): HostPromptFeed {
         hostPublicKey: frame.hostPublicKey,
         hostPublicKeyFingerprint: frame.hostPublicKeyFingerprint,
         expiresAtUnixMs: BigInt(frame.expiresAtUnixMs ?? Date.now() + 60_000),
+        offeredAuthMethods: [...(frame.offeredAuthMethods ?? [])],
       });
       deliverToSubscriber.forEach((deliver) => deliver(event));
     },

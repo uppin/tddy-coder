@@ -54,6 +54,14 @@ pub struct RdpClient {
 
 #[async_trait::async_trait]
 impl tddy_screenshare::ScreenSharingClient for RdpClient {
+    /// Sends an X.224 Connection Request offering TLS and CredSSP, and reads the protocol the
+    /// Connection Confirm selects (or the failure code it answers with); then disconnects.
+    async fn inspect(host: &str, port: u16) -> Result<Vec<tddy_screenshare::AdvertisedMethod>> {
+        // TODO(sign-in-form): implement
+        let _ = (host, port);
+        todo!()
+    }
+
     async fn connect(
         host: &str,
         port: u16,
