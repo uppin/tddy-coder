@@ -151,6 +151,17 @@ impl SessionAccountAccess {
             .map_err(SessionIdentityRefusal::Identity)
     }
 
+    /// The model-provider account `account_id` names in the session owner's vault — read the same
+    /// way, with the same refusals, as the GitHub identity.
+    pub fn provider_account(
+        &self,
+        account_id: &str,
+    ) -> Result<tddy_accounts::ProviderAccount, SessionIdentityRefusal> {
+        let _ = account_id;
+        // TODO(claude-route): implement
+        todo!()
+    }
+
     /// The GitHub records the session's vault holds right now.
     fn held_github_accounts(&self) -> Result<Vec<CredentialRecord>, SessionIdentityRefusal> {
         let vaults = self

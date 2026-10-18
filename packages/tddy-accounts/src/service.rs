@@ -11,9 +11,9 @@ use tddy_service::proto::accounts::{
     AccountSummary, AccountsService, BeginLinkAccountRequest, BeginLinkAccountResponse,
     ConnectProviderAccountRequest, ConnectProviderAccountResponse, LinkState, ListAccountsRequest,
     ListAccountsResponse, ListProviderAccountModelsRequest, ListProviderAccountModelsResponse,
-    PollLinkAccountRequest, PollLinkAccountResponse, ProviderAccounts, RemoveAccountRequest,
-    RemoveAccountResponse, SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse,
-    SyncStatus,
+    ListProviderRoutesRequest, ListProviderRoutesResponse, PollLinkAccountRequest,
+    PollLinkAccountResponse, ProviderAccounts, RemoveAccountRequest, RemoveAccountResponse,
+    SessionAccount, SetAccountLabelRequest, SetAccountLabelResponse, SyncStatus,
 };
 
 use crate::attempts::{Attempts, PollAdmission};
@@ -23,7 +23,7 @@ use crate::linking::{
 };
 use crate::provider_account::{
     account_id_for, endpoints_for, preset, ProviderAccount, ProviderAccountError,
-    ProviderAccountStore, ProviderModelProbe,
+    ProviderAccountStore, ProviderModelProbe, RouteSupport,
 };
 use crate::store::{AccountStore, AccountsError};
 use crate::sync_status::SyncStatusSource;
@@ -63,6 +63,7 @@ pub struct AccountsServiceImpl<S> {
     sync_status: Option<Arc<dyn SyncStatusSource>>,
     linking: Option<Linking>,
     provider_accounts: Option<ProviderAccountPorts>,
+    route_support: Option<Arc<dyn RouteSupport>>,
 }
 
 impl<S> AccountsServiceImpl<S> {
@@ -74,6 +75,7 @@ impl<S> AccountsServiceImpl<S> {
             sync_status: None,
             linking: None,
             provider_accounts: None,
+            route_support: None,
         }
     }
 
@@ -118,6 +120,14 @@ impl<S> AccountsServiceImpl<S> {
         probe: Arc<dyn ProviderModelProbe>,
     ) -> Self {
         self.provider_accounts = Some(ProviderAccountPorts { store, probe });
+        self
+    }
+
+    /// Wire the route matrix `ListProviderRoutes` marks each account with. Unwired, that method
+    /// answers `FAILED_PRECONDITION`.
+    #[must_use]
+    pub fn with_route_support(mut self, support: Arc<dyn RouteSupport>) -> Self {
+        self.route_support = Some(support);
         self
     }
 
@@ -182,6 +192,15 @@ impl<S: AccountStore + 'static> AccountsService for AccountsServiceImpl<S> {
         Ok(Response::new(ConnectProviderAccountResponse {
             account: Some(summary_of(&record, self.sync_status.as_deref())),
         }))
+    }
+
+    async fn list_provider_routes(
+        &self,
+        request: Request<ListProviderRoutesRequest>,
+    ) -> Result<Response<ListProviderRoutesResponse>, Status> {
+        let _ = (request, &self.route_support);
+        // TODO(claude-route): implement
+        todo!()
     }
 
     async fn list_provider_account_models(

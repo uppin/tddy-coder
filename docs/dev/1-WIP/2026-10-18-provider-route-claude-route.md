@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 2/9. Base: `feature/provider-route/accounts`.
+**Stack**: #provider-route 2/9. Base: `feature/provider-route/accounts`. PR: [#663](https://github.com/uppin/tddy-coder/pull/663).
 
 ## Initial Discovery
 
@@ -25,9 +25,12 @@ RouteRefusal, RouteSources, RouteChoice, resolve_route, choose_route}` and the c
 **every** harness (claude, claude-acp, claude-cli, codex, codex-acp, opencode, opencode-cli, muse-cli,
 cursor, cursor-cli) — but **implements route bodies for the Claude harnesses only**; other harnesses'
 arms return `RouteRefusal::NotYetRoutable(harness)` until their node replaces that arm. Owns
-`StartSessionRequest.provider_account_id`, `SessionMetadata.provider_account_id`,
-`catalog.ListProviderRoutes`, the claude-cli start/resume application, the vault read
-`SessionAccountAccess::provider_account`, and the web `CreateSessionProviderField`.
+`StartSessionRequest.{provider_account_id, provider_built_in}`, the per-session record
+`tddy_changeset::session_provider_account` (`provider-account.yaml`), `accounts.ListProviderRoutes`
+with its `tddy_accounts::RouteSupport` port and the daemon's `HarnessRouteSupport`, the claude-cli
+start/resume application (`tddy_agent_launch::session_provider_route`), the vault read
+`SessionAccountAccess::provider_account`, and the web `CreateSessionProviderField` plus
+`CreateSessionPaneProps.accountsClient`.
 
 ## Boundaries
 
@@ -63,22 +66,44 @@ pub fn choose_route(sources: &RouteSources) -> Option<String>;   // account id, 
 
 ```proto
 // session.proto StartSessionRequest
-optional string provider_account_id = 41;   // "" / absent = no session-level choice; "builtin" = explicit built-in
-// catalog.proto
+string provider_account_id = 41;   // "" = no choice at this level
+bool provider_built_in = 42;       // explicitly the vendor; overrides agent definition and default
+// accounts.proto AccountsService (served by tddy-accounts; the matrix comes in through RouteSupport)
 rpc ListProviderRoutes(ListProviderRoutesRequest) returns (ListProviderRoutesResponse);
-message ListProviderRoutesRequest { string session_token = 1; string harness = 2; string daemon_instance_id = 3; }
+message ListProviderRoutesRequest { string session_token = 1; string harness = 2; }
 message ProviderRouteOption { string account_id = 1; string label = 2; string preset = 3; bool supported = 4; string reason = 5; }
 message ListProviderRoutesResponse { repeated ProviderRouteOption options = 1; bool harness_routable = 2; string harness_reason = 3; }
 ```
 
 ```rust
-// tddy-changeset SessionMetadata (additive)
-#[serde(default, skip_serializing_if = "Option::is_none")] pub provider_account_id: Option<String>,
-// tddy-agent-launch SessionAccountAccess
-pub fn provider_account(&self, account_id: &str) -> Result<ProviderAccount, SessionIdentityRefusal>;
+// tddy-accounts
+pub trait RouteSupport: Send + Sync {
+    fn harness_routable(&self, harness: &str) -> Result<(), String>;
+    fn supports(&self, harness: &str, preset: &str, protocols: &[&str]) -> Result<(), String>;
+}
+impl AccountsServiceImpl<S> { pub fn with_route_support(self, support: Arc<dyn RouteSupport>) -> Self; }
+// tddy-daemon
+pub struct HarnessRouteSupport;   // RouteSupport over tddy_core::provider_route
+// tddy-changeset — beside .session.yaml, not in it (deny_unknown_fields; ~48 struct literals)
+pub const SESSION_PROVIDER_ACCOUNT_FILENAME: &str = "provider-account.yaml";
+pub struct SessionProviderAccount { pub account_id: String, pub model: String }
+pub fn write_session_provider_account(session_dir: &Path, account: &SessionProviderAccount) -> Result<(), WorkflowError>;
+pub fn read_session_provider_account(session_dir: &Path) -> Result<Option<SessionProviderAccount>, WorkflowError>;
+// tddy-agent-launch
+impl SessionAccountAccess { pub fn provider_account(&self, account_id: &str) -> Result<ProviderAccount, SessionIdentityRefusal>; }
+pub fn session_route_sources(req: &StartSessionRequest) -> RouteSources;
+pub fn resolve_session_route(access: &SessionAccountAccess, harness: Harness, sources: &RouteSources, model: &str) -> Result<Option<HarnessRoute>, Status>;
+pub fn pty_route_env(route: &HarnessRoute) -> Vec<(String, String)>;
+pub fn route_sources_on_resume(session_dir: &Path) -> Result<(RouteSources, Option<String>), Status>;
 ```
 
-Bodies `todo!()` until green. Field number 41 is checked against `session.proto` in wave 2.
+```ts
+// tddy-web
+export interface CreateSessionProviderFieldProps { harnessRoutable; harnessReason; choices: ProviderRouteChoice[]; value: string /* "builtin" | account id */; onChange }
+// CreateSessionPaneProps.accountsClient?: Client<typeof AccountsService>
+```
+
+Bodies `todo!()` until green. Field numbers 41/42 verified free in `StartSessionRequest` (max was 40; 19–23 reserved).
 
 ## Green wave
 
@@ -145,21 +170,38 @@ for a session on a fake vault holding a Meta account (no real CLI). Cypress comp
 
 | Test | File | Validates |
 |---|---|---|
-| `claude_code_on_meta_gets_the_messages_root_the_key_and_every_alias_pinned` | `packages/tddy-agent-backend/tests/provider_route_acceptance.rs` (new) | env keys/values; key only in `secret_env` |
-| `claude_code_refuses_an_account_without_anthropic_messages` | same | Baseten → `ProtocolNotServed` |
-| `cursor_cannot_be_routed_whatever_the_account` | same | `HarnessCannotBeRouted` |
-| `a_session_choice_beats_an_agent_definition_which_beats_a_default` | same | `choose_route` precedence, incl. explicit built-in |
-| `a_claude_cli_start_on_a_meta_account_launches_with_the_route_env` | `packages/tddy-agent-launch/tests/claude_cli_provider_route_acceptance.rs` (new) | launch env from vault account; `--model` |
-| `a_locked_vault_refuses_a_routed_start_before_anything_spawns` | same | refusal text; no spawn |
-| `a_resumed_claude_cli_session_reapplies_its_account` | same | `.session.yaml` → resume env |
-| `session_metadata_round_trips_the_provider_account_id` | `packages/tddy-changeset/src/session_metadata.rs` (unit) | additive field; legacy file parses |
-| `list_provider_routes_marks_each_account_for_the_harness` | `packages/tddy-daemon-rpc/tests/provider_routes_catalog.rs` (new) | supported + reason per account |
-| `choosing_an_account_lists_its_models_and_sends_it_on_create` | `packages/tddy-web/cypress/component/CreateSessionProviderAcceptance.cy.tsx` (new) | picker; cursor-cli disabled with reason |
+| `claude_code_on_meta_gets_the_messages_root_the_key_and_every_alias_pinned` | `packages/tddy-agent-backend/tests/provider_route_acceptance.rs` (new) | env keys/values for claude, claude-acp, claude-cli; key only in `secret_env`, never env or args |
+| `claude_code_refuses_an_account_without_anthropic_messages` | same | Baseten → `ProtocolNotServed`, message names Anthropic Messages |
+| `cursor_cannot_be_routed_whatever_the_account` | same | `HarnessCannotBeRouted` for cursor and cursor-cli |
+| `the_matrix_answers_without_building_a_route` | same | `route_supported` |
+| `every_harness_id_names_its_harness_and_back` | same | ten ids round-trip; `stub`, `tool` are none |
+| `a_session_choice_beats_an_agent_definition_which_beats_a_default` | same | `choose_route` |
+| `an_explicit_built_in_choice_overrides_every_lower_level` | same | `RouteChoice::BuiltIn` |
+| `a_route_can_be_logged_without_its_key` | same | redacted `Debug` |
+| `list_provider_routes_marks_each_account_for_the_harness` | `packages/tddy-accounts/tests/provider_routes_acceptance.rs` (new) | provider accounts only, vault order, matrix verdicts verbatim |
+| `a_harness_that_cannot_be_routed_says_so_once_and_marks_every_account` | same | Cursor |
+| `a_daemon_without_the_matrix_refuses_rather_than_guessing` | same | unwired → `FAILED_PRECONDITION` |
+| `a_session_on_its_vendor_reads_as_no_account` / `a_recorded_account_reads_back_as_written` / `the_record_holds_no_secret_shaped_field` | `packages/tddy-changeset/src/session_provider_account.rs` (unit) | per-session record |
+| `a_claude_cli_start_on_a_meta_account_launches_with_the_route_env` | `packages/tddy-agent-launch/src/session_provider_route_tests.rs` (new) | real unlocked vault → PTY env |
+| `a_start_that_chooses_nothing_runs_on_the_vendor` | same | `None` |
+| `a_locked_vault_refuses_a_routed_start_before_anything_spawns` | same | `FAILED_PRECONDITION` "locked" |
+| `an_account_the_vault_does_not_hold_is_refused` | same | `NOT_FOUND` |
+| `a_harness_that_cannot_run_on_the_account_is_refused_with_the_reason` | same | `INVALID_ARGUMENT` naming Cursor |
+| `a_start_request_names_its_session_level_choice` | same | `provider_account_id` / `provider_built_in` → `RouteSources.session` |
+| `a_resumed_claude_cli_session_reapplies_its_account` / `a_resumed_session_with_no_record_runs_on_the_vendor` | same | resume via `provider-account.yaml` |
+| Cypress: defaults to built-in / lists the account's models / sends the account and model / Cursor shows why | `packages/tddy-web/cypress/component/CreateSessionProviderAcceptance.cy.tsx` (new) | picker |
 
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
 - **Matrix owned once, here**: later nodes replace their harness's `NotYetRoutable` arm; no node adds a second matrix.
+- **`ListProviderRoutes` on `AccountsService`, not `CatalogService`** (changed in wave 2): the catalog is
+  defined as answered from configuration rows, not daemon state, and this answer needs the vault. The
+  matrix reaches `tddy-accounts` through the `RouteSupport` port, so that crate does not depend on
+  the harness crates.
+- **Per-session record beside `.session.yaml`** (changed in wave 2): a `SessionMetadata` field would
+  touch ~48 struct literals across the workspace; `provider-account.yaml` follows the
+  `github-source.yaml` precedent and holds the account id and model only.
 - **Precedence owned here** with all three levels, so nodes 5 and 8 only feed sources (no edge 5 → 8).
 - **Key in the PTY env**: the harness CLI reads its key from env; unlike the GitHub token, there is no per-call socket it could use.
 - **No fallback**: a routed start never silently runs on Anthropic.
@@ -169,6 +211,20 @@ for a session on a fake vault holding a Meta account (no real CLI). Cypress comp
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped verification — `tddy-agent-backend`, `tddy-accounts`, `tddy-changeset`, `tddy-agent-launch`,
+`tddy-daemon` (Rust); one Cypress spec (web):
+
+- `cargo clippy --all-targets -p tddy-agent-backend -p tddy-accounts -p tddy-changeset -p tddy-agent-launch -p tddy-daemon -- -D warnings` — clean.
+- `provider_route_acceptance` 8/8 fail at `provider_route.rs` `todo!()` (this node).
+- `session_provider_account` 3/3 fail at this node's `todo!()`.
+- `provider_routes_acceptance` 3/3 and five of `session_provider_route_tests` fail **first at
+  `tddy-accounts/src/provider_account.rs` `preset()`** — node 1's codec, which these tests write real
+  records through. Sequencing fact: they turn green only after #662 is green. The other three
+  `session_provider_route_tests` fail at this node's `todo!()`.
+- `CreateSessionProviderAcceptance.cy.tsx` 4/4 fail: the picker is not rendered.
 
 ## Validation Results
 ### /validate-changes
@@ -186,10 +242,10 @@ for a session on a fake vault holding a Meta account (no real CLI). Cypress comp
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

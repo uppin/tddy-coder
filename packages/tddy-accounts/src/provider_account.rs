@@ -426,6 +426,15 @@ pub trait ProviderAccountStore: Send + Sync {
     ) -> Result<ProviderAccount, AccountsError>;
 }
 
+/// Which harness can run on which provider account — the daemon's route matrix, behind a port so
+/// this crate does not depend on the harness crates.
+pub trait RouteSupport: Send + Sync {
+    /// `Err(reason)` when `harness` cannot run on any provider account (Cursor's agent).
+    fn harness_routable(&self, harness: &str) -> Result<(), String>;
+    /// `Err(reason)` when `harness` cannot run on an account of `preset` serving `protocols`.
+    fn supports(&self, harness: &str, preset: &str, protocols: &[&str]) -> Result<(), String>;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;

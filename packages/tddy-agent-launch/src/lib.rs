@@ -29,6 +29,7 @@ pub mod resume;
 pub mod session_acting_identity;
 pub mod session_coordinate_handlers;
 pub mod session_git;
+pub mod session_provider_route;
 pub mod session_worktree_observer;
 pub mod stack_child_spawn;
 pub mod stack_parent;
@@ -59,6 +60,8 @@ mod facilitation;
 mod host_session_socket_tests;
 #[cfg(test)]
 mod session_acting_identity_tests;
+#[cfg(test)]
+mod session_provider_route_tests;
 #[cfg(test)]
 mod start_request_checks_unit_tests;
 

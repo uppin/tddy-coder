@@ -36,7 +36,7 @@ pub use linking::{
 pub use provider_account::{
     account_id_for, endpoints_for, preset, presets, unclaimed_account_id, PresetEndpoint,
     ProviderAccount, ProviderAccountError, ProviderAccountStore, ProviderEndpoints,
-    ProviderModelProbe, ProviderPreset, WireProtocol,
+    ProviderModelProbe, ProviderPreset, RouteSupport, WireProtocol,
 };
 pub use resolver::{resolve_account, AccountResolution};
 pub use service::{build_accounts_entry, AccountsServiceImpl, Clock};
