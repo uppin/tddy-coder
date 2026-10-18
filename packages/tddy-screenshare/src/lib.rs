@@ -4,4 +4,4 @@ pub mod common;
 pub mod streamer;
 
 pub use bridge::{run_bridge, BridgeConfig};
-pub use client::ScreenSharingClient;
+pub use client::{Credentials, ScreenSharingClient};

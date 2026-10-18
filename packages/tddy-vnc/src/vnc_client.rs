@@ -280,10 +280,9 @@ impl tddy_screenshare::ScreenSharingClient for VncClientState {
     async fn connect(
         host: &str,
         port: u16,
-        _username: Option<&str>,
-        password: Option<&str>,
+        credentials: &tddy_screenshare::Credentials,
     ) -> anyhow::Result<Self> {
-        VncClientState::connect(host, port, password).await
+        VncClientState::connect(host, port, credentials.password.as_deref()).await
     }
 
     fn framebuffer_dimensions(&self) -> (u32, u32) {

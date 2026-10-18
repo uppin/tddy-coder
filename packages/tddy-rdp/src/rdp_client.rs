@@ -52,8 +52,7 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
     async fn connect(
         host: &str,
         port: u16,
-        username: Option<&str>,
-        password: Option<&str>,
+        credentials: &tddy_screenshare::Credentials,
     ) -> Result<Self> {
         // 1. TCP
         let stream = TcpStream::connect(format!("{host}:{port}"))
@@ -69,10 +68,11 @@ impl tddy_screenshare::ScreenSharingClient for RdpClient {
             },
             desktop_scale_factor: 0,
             credentials: Credentials::UsernamePassword {
-                username: username.unwrap_or("").into(),
-                password: password.unwrap_or("").into(),
+                username: credentials.username.clone().unwrap_or_default(),
+                password: credentials.password.clone().unwrap_or_default(),
             },
             enable_tls: true,
+            // TODO(rdp-nla): enable CredSSP (NTLM) and pass `credentials.domain`.
             enable_credssp: false,
             domain: None,
             client_build: 0,

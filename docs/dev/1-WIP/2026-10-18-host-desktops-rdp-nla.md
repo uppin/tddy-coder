@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#654](https://github.com/uppin/tddy-coder/pull/654)
 **Type**: Feature
 **Stack**: `#host-desktops` 2/8. Base: `feature/host-desktops/service-split`.
 
@@ -82,10 +82,10 @@ Windows desktops with NLA on (the default) can be opened; the bridge credential 
 
 ## Scope
 
-- [ ] `Credentials` + new `connect` signature; both bridges adapted
+- [x] `Credentials` + new `connect` signature; both bridges adapted
 - [ ] `BridgeConfig.domain`, back-compatible
 - [ ] tddy-rdp CredSSP (NTLM) with domain; protocol from negotiation
-- [ ] NLA test server in the integration suite
+- [x] NLA test server in the integration suite
 
 ## Technical Changes
 
@@ -128,6 +128,12 @@ do not test NLA against a mock of IronRDP itself.
 | `still_signs_in_to_a_server_that_offers_only_tls` | same | TLS-only path preserved |
 | `a_bridge_config_without_a_domain_still_parses` | `packages/tddy-screenshare/src/bridge.rs` (`tests`) | back-compat of stdin JSON |
 | `empty_config_fields_become_absent_credentials` | same | `""` → `None` for each field |
+| `a_bridge_config_with_a_domain_carries_it_into_the_credentials` | same | `domain` reaches `credentials()` (added in the contract commit) |
+
+Contract-commit notes:
+- `ironrdp-server 0.12` **can** act as the CredSSP acceptor: `RdpServer::builder().with_hybrid(tls_acceptor, tls_public_key)` plus `server.set_credentials(..)` runs `ironrdp_acceptor::accept_credssp` (NTLM via `sspi`). It matches the account by name and password only — the domain sent in CredSSP is not checked by the acceptor — so the domain is pinned on the TLS-only path instead, where the acceptor compares the whole Client Info `Credentials { username, password, domain }`.
+- The wrong-password test pins the refusal as an error whose `{:#}` chain contains `authentication`; node 6 maps that error.
+- `run_bridge` keeps its inline empty→`None` mapping (with `domain: None`) until `credentials()` is implemented.
 
 ## Decisions & Trade-offs
 - **One `Credentials` value** instead of growing positional `Option<&str>` parameters: node 3 needs the username, node 8 the domain, and a fourth positional would be unreadable.
@@ -136,6 +142,8 @@ do not test NLA against a mock of IronRDP itself.
 ## Technical Debt & Production Readiness
 
 ## Refactoring Needed
+### From @red (TDD Red Phase)
+- `tests/rdp_nla_integration.rs` duplicates the QR display and TLS helpers of `tests/rdp_client_integration.rs`; extract a shared `tests/support/` fake-desktop module once both suites are green.
 ### From /validate-changes
 ### From /validate-tests
 ### From /validate-prod-ready
@@ -153,10 +161,10 @@ do not test NLA against a mock of IronRDP itself.
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
 - [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [~] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI
