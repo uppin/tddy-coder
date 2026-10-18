@@ -6,7 +6,8 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { init, Terminal, FitAddon } from "ghostty-web";
+import { Terminal, FitAddon } from "ghostty-web";
+import { newGhosttyInstance } from "../lib/ghosttyInstance";
 import {
   canPitchIn,
   canPitchOut,
@@ -280,11 +281,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
       async function setup() {
         logLife("init cols=%d rows=%d fontSize=%d", cols, rows, fontSize);
-        await init();
+        // Each terminal gets its own WASM instance rather than ghostty-web's process-wide one —
+        // see `newGhosttyInstance` for why.
+        const ghostty = await newGhosttyInstance();
         if (!isMounted || !containerRef.current) return;
         logLife("creating Terminal");
 
         const term = new Terminal({
+          ghostty,
           cols,
           rows,
           fontSize,
@@ -1327,6 +1331,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         data-testid={testId}
         data-terminal-font-size={String(displayFontSize)}
         data-session-active={sessionActive ? "true" : "false"}
+        // Set once the emulator is open in this element: it takes focus and input from then on.
+        data-terminal-ready={ready ? "true" : "false"}
         aria-disabled={sessionActive ? undefined : true}
         ref={containerRef}
         style={{

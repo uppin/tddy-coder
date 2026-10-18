@@ -301,7 +301,9 @@ export function aGhosttyTerminalSession(opts: GhosttyTerminalSessionDriverOption
 
     /** Settle once the terminal canvas is mounted and ready to be driven. */
     expectReady() {
-      driver.terminal().should("exist");
+      // The emulator open in its element, not just the element mounted: before then the terminal
+      // takes no focus and no input.
+      driver.terminal().should("have.attr", "data-terminal-ready", "true");
       return driver;
     },
 

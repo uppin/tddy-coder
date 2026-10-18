@@ -1,7 +1,8 @@
 /**
- * Acceptance tests: the shared Start-Session dialog offers a pre-checked "Create Remote Branch"
- * toggle in new-branch mode. Leaving it checked sends `createRemoteBranch = true` on StartSession
- * (the daemon pushes the new branch to origin at session start); unchecking sends `false`.
+ * Acceptance tests: the shared Start-Session dialog offers an unchecked "Create Remote Branch"
+ * toggle in new-branch mode. Leaving it unchecked sends `createRemoteBranch = false` on StartSession;
+ * checking it sends `true` (the daemon pushes the new branch to origin at session start). A PR-stack
+ * node's dialog pre-checks it — see PrStackStartSessionModalAcceptance.
  *
  * PRD: docs/ft/coder/1-WIP/PRD-2026-07-25-branch-query-and-remote-branch.md.
  * Changeset: docs/dev/1-WIP/2026-07-25-branch-query-and-remote-branch.md.
@@ -96,7 +97,7 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-it("shows the Create Remote Branch toggle pre-checked in new-branch mode", () => {
+it("shows the Create Remote Branch toggle unchecked in new-branch mode", () => {
   // Given
   const backend = aCreateSessionBackend();
 
@@ -104,16 +105,17 @@ it("shows the Create Remote Branch toggle pre-checked in new-branch mode", () =>
   mountPane(backend);
 
   // Then
-  byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).should("be.checked");
+  byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).should("not.be.checked");
 });
 
-it("sends createRemoteBranch = true when the toggle is left checked", () => {
+it("sends createRemoteBranch = true when the toggle is checked", () => {
   // Given
   const backend = aCreateSessionBackend();
 
   // When
   mountPane(backend);
   byTestId(TEST_IDS.createSessionNewBranchNameInput).clear().type("feature/x/n1");
+  byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).check();
   byTestId(TEST_IDS.createSessionSubmitBtn).click();
 
   // Then
@@ -124,14 +126,13 @@ it("sends createRemoteBranch = true when the toggle is left checked", () => {
   });
 });
 
-it("sends createRemoteBranch = false when the toggle is unchecked", () => {
+it("sends createRemoteBranch = false when the toggle is left unchecked", () => {
   // Given
   const backend = aCreateSessionBackend();
 
   // When
   mountPane(backend);
   byTestId(TEST_IDS.createSessionNewBranchNameInput).clear().type("feature/x/n1");
-  byTestId(TEST_IDS.createSessionCreateRemoteBranchToggle).uncheck();
   byTestId(TEST_IDS.createSessionSubmitBtn).click();
 
   // Then

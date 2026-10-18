@@ -12,6 +12,7 @@
 | Run | Lines | Note |
 |---|---|---|
 | 2026-10-04 | 785 | first detection — already over before #571 (783 at base `c3567fde`); +2 in #571. Deferred because dependent #572 touches this file (the stack rule: no split lands mid-stack) |
+| 2026-10-18 | 795 | unchanged — #652 touched one line (the Create Remote Branch default) |
 
 ## What would close it
 

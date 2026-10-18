@@ -452,7 +452,7 @@ A toggle at the top of the form switches between:
 | Permission mode | claude-cli | no — auto/default/acceptEdits/plan/bypassPermissions |
 | Initial prompt | claude-cli | no — textarea |
 | Branch mode | both | — New branch from base (optional name + base ref) or Work on existing branch (select from `ListProjectBranches`) |
-| Create Remote Branch | claude-cli / cursor-cli | no — **pre-checked** toggle shown in new-branch mode; pushes the new branch to `origin` at session start |
+| Create Remote Branch | claude-cli / cursor-cli | no — toggle shown in new-branch mode, **unchecked** by default (pre-checked when starting a PR-stack node); pushes the new branch to `origin` at session start |
 
 The tool binary (`toolPath`) is auto-selected from `ListTools`; shown as a select only
 when multiple tools are available.
@@ -460,8 +460,8 @@ when multiple tools are available.
 > **Updated 2026-07-25** — the new-branch option now reads **"New branch from base: `<name>`"**,
 > naming the concrete base ref the branch will be created from (`CreateSessionInitialValues.baseBranchLabel`).
 > A **"Create Remote Branch"** checkbox (`create-session-create-remote-branch-toggle`, shown only for
-> `claude-cli` / `cursor-cli` session types in `new_branch_from_base` mode, **default checked** via
-> `initialValues?.createRemoteBranch ?? true`) sends `StartSessionRequest.create_remote_branch` (proto
+> `claude-cli` / `cursor-cli` session types in `new_branch_from_base` mode, **default unchecked** via
+> `initialValues?.createRemoteBranch ?? false`; the PR-stack Start-session dialog passes `true`) sends `StartSessionRequest.create_remote_branch` (proto
 > field 28). When set, the daemon runs `git push -u origin <branch>` after worktree creation
 > (`tddy_core::worktree::push_new_branch_to_origin`) and records `Changeset.remote_pushed = true`; a
 > push failure fails session start (no fallback).
@@ -1016,7 +1016,7 @@ orchestrator, so the operator can review and adjust before spawning:
   dialog reads **"New branch from base: `<predecessor branch>`"**. A parent holding only a
   `branchSuggestion` is passed over like an absent one: a suggestion names no ref, so previewing it
   would promise a base the daemon's branch-gated spawn then refuses.
-- `createRemoteBranch` is pre-checked, so submitting also pushes the new branch to `origin` (see
+- `createRemoteBranch: true` — pre-checked here (the general default is unchecked), so submitting also pushes the new branch to `origin` (see
   [Create Session § Fields](#fields)).
 - Initial prompt = the node's title + description.
 

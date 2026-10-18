@@ -356,6 +356,9 @@ export function PrStackScreen({
           remoteTrackingName(deriveStackBaseBranch(startSessionNode, nodes, defaultBranch), remote),
         baseBranchOptions,
         selectedBaseBranch,
+        // A stack node's branch is the base its successors' PRs target, so it goes to origin at
+        // start — unlike an ad-hoc session, where the toggle defaults to unchecked.
+        createRemoteBranch: true,
         initialPrompt: [startSessionNode.title, startSessionNode.description]
           .filter(Boolean)
           .join("\n\n"),

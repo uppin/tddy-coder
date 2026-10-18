@@ -40,7 +40,7 @@ describe("GhosttyTerminal", () => {
 
   it("fires onData when keyboard input is sent", () => {
     // Given
-    const driver = aGhosttyTerminal({ onData: cy.stub().as("onData") }).mount();
+    const driver = aGhosttyTerminal({ onData: cy.stub().as("onData") }).mount().expectExists();
 
     // When
     driver.click();

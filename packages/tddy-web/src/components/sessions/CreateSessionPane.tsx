@@ -119,7 +119,7 @@ export function CreateSessionPane({
   );
   const [newBranchName, setNewBranchName] = useState(initialValues?.newBranchName ?? "");
   const [createRemoteBranch, setCreateRemoteBranch] = useState(
-    initialValues?.createRemoteBranch ?? true,
+    initialValues?.createRemoteBranch ?? false,
   );
   const [baseBranchOptions] = useState<BaseBranchOption[]>(initialValues?.baseBranchOptions ?? []);
   const [selectedBaseBranch, setSelectedBaseBranch] = useState<string>(

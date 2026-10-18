@@ -50,7 +50,10 @@ a fixed heartbeat (`WAIT_HEARTBEAT`, 30 s), emits one line through the run's `pr
 loading; its last words, unchanged for 1m58s: "…"; furthest: …`. The line names the **stage**, the
 **elapsed** time, **which server** (a pid this backend started, or "behind a shared client"), the
 server's **last words** and how long they have been **unchanged** (`ServerChatter::quiet_for` — the
-figure that separates a slow server from a stuck one), and the furthest phase reported. The cadence
+figure that separates a slow server from a stuck one), and the furthest phase reported
+(`ServerChatter::furthest`, the highest percentage of any phase). A consumer that names what the server
+is doing **now** reads `ServerChatter::current` instead: the phase reported on most recently, with the
+highest percentage that phase reached — which the index daemon's `Warm` stream does. The cadence
 is a collaborator a host or a test injects (`with_wait_heartbeat`, `Options.wait_heartbeat`,
 `CodeIndexPorts.wait_heartbeat`), never a budget: nothing ends at it. A request already **in flight**
 on the shared client is narrated too — `LspClientBridge` polls it in heartbeat-sized slices and beats

@@ -106,6 +106,22 @@ shows the load:
   Rust workspace (no `Cargo.toml` at its root), and a session whose start does not trigger a warm-up
   show no indicator at all.
 
+The **Code pane** ends in a status strip that follows the same load in more detail, and stays:
+
+- **Checking** — *Code index: checking…* until the host answers.
+- **Loading** — *Indexing — `<phase>` `<n>`%* followed by the index server's own line about what it
+  is doing (e.g. the crate being indexed), truncated with the full text on hover.
+- **Ready** — *Code index ready*. A definition or hover that finds nothing now means the code does
+  not resolve, not that the index is still loading.
+- **Failed** — *Indexing failed — `<reason>`*, in the error color.
+- **Nothing warming** — *Code index not warmed for this session*: the index loads on the first
+  definition or hover, which may answer nothing until it has. This includes a session whose warm the
+  host no longer remembers, e.g. after the host restarted.
+
+`<phase>` is the phase the index is in **now**, and `<n>` the furthest that phase has got, so the
+minutes of building and indexing are reported as themselves rather than behind an early phase that
+finished at 100% (rust-analyzer's *Roots Scanned*).
+
 Progress comes from the session's **owning host**, over the same client as code navigation, and only the
 session's owner may watch it. "Ready" means the index has loaded the worktree's graph, not merely that
 its server is running.
