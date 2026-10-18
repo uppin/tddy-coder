@@ -547,8 +547,14 @@ disabled button and shows no step text.
 
 The same stream carries each attachment's materialisation progress; see
 [Session attachments](../coder/session-attachments.md#streamstartsession--start-with-materialization-progress).
-Once the session exists, the code index loads in the background and the session header shows its
-progress: [Indexing indicator](session-code-pane.md#indexing-indicator).
+Once the session exists, the session header follows its worktree's code index:
+[Indexing indicator](session-code-pane.md#indexing-indicator). The indicator follows the **worktree**,
+not the session's start — it shows a load whoever started it (a workspace or non-sandboxed claude-cli /
+cursor-cli start, the Code pane opening, the session agent's first code-tool call), including after the
+host restarted. It only watches: it never starts a load, nor the index daemon. When its watch ends —
+no index daemon is running yet, or it stopped — it shows nothing and watches again after 1 s, 2 s, 4 s …
+up to 30 s, so a load started later appears within that wait; a watch the host refuses is not repeated,
+and the indicator names why.
 
 ### Post-Create
 

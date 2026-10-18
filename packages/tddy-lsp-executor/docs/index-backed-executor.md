@@ -55,13 +55,22 @@ an editor clamps it.
 **Locations.** An index location inside the worktree is joined onto it; one the index marks
 `outside_root` is already an absolute path and is used as it is.
 
+**While the index loads.** rust-analyzer answers definition, references and hover empty (or partly)
+while its crate graph loads, and the index says so with each answer's `state`. A `LOADING` answer keeps
+the tool's own key and adds `"index": "loading"` and a `note`, so the agent does not read "nothing found"
+from it: an empty answer says *"The code index is still loading, so this empty answer is not final; ask
+again once it is ready."*, one that found something says *"…so this answer may be incomplete; ask again
+once it is ready."*. A `READY` answer is unchanged. No progress figure is attached, so a loading answer
+costs no extra call. The executor never waits for the index: the call that reached a cold index has
+already started its load.
+
 **Errors.** A failing index answers with its status message, which is the tool's error text. The
 executor that would have answered without an index is not asked in its place.
 
 ## Availability and `ReadLints`
 
-`is_available` is true when the worktree's root holds a `Cargo.toml` — the one language the index
-serves.
+`is_available` is true when the worktree's root holds a `Cargo.toml` (`tddy_index_daemon::is_rust_workspace`)
+— the one language the index serves.
 
 `workspace_diagnostics` (the `ReadLints` tool) is **refused**: the index answers diagnostics for one file
 at a time. The message points the agent at `LspDiagnostics` with a file. Answering it from a language
@@ -124,7 +133,9 @@ their own; see `docs/dev/todo/2026-10-04-session-restructure-tools-no-jail-end-t
 `tests/lsp_tools_via_index.rs` runs every call through `select_lsp_executor` on a blocking thread, as
 `tddy_tool_engine`'s `Lsp*` dispatch does, against a fake `code_index` server on an AF_UNIX socket
 behind a test `IndexChannel` and a recording stand-in for the existing executor. The worktree fixture
-includes a line with a multi-byte character and an emoji, for the column conversion. The binding is
+includes a line with a multi-byte character and an emoji, for the column conversion; the loading answers
+are pinned by `lsp_definition_while_the_index_loads_tells_the_agent_it_is_loading` and
+`lsp_references_found_while_the_index_loads_are_marked_possibly_incomplete`. The binding is
 unit-tested in `src/index_backed.rs`.
 
 No daemon-level test proves that the runtime selects the index executor: the registration is

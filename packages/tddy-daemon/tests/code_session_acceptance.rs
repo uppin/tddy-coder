@@ -8,7 +8,7 @@
 //! pane is open. A worktree that is not a Rust worktree has no index: nothing is warmed, and every
 //! query is answered with why.
 //!
-//! Feature docs: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md
+//! Feature docs: docs/ft/web/session-code-pane.md
 //!
 //! Every test drives the stream the way a bidi transport does — `start_bidi_stream` at the
 //! registered coordinate, encoded `CodeSessionRequest` frames pushed into the input channel,

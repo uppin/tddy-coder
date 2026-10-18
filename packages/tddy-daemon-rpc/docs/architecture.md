@@ -19,23 +19,80 @@ are served from `tddy-session-lifecycle`.
 
 ## Code navigation
 
-`CodeNavigationServiceImpl` serves `code_navigation.CodeNavigationService` (go to definition,
-references, hover for the web's code pane). It is not a `from_host` family: it holds the daemon's
-`WorktreeServiceImpl`, whose `resolve_listed_worktree` authorises every request, and an optional
-`Arc<dyn IndexChannelSource>` — the port through which it dials the warm code-intelligence index. The
-daemon implements the port for the registry that manages the index daemon process, so this crate
-never names that registry and `tddy-daemon` keeps only wiring. Without a source every method answers
-`FailedPrecondition`; there is no fallback to another language server. The request path and the
-end-to-end test are in [tddy-daemon's code-navigation-service.md](../../tddy-daemon/docs/code-navigation-service.md).
+`CodeNavigationServiceImpl` serves `code_navigation.CodeNavigationService` (the code pane's
+`CodeSession`, the unary go to definition / references / hover, the header's `WatchCodeIndex`, and the
+plan calls). It is not a `from_host` family: it holds the daemon's `WorktreeServiceImpl`, whose
+`resolve_listed_worktree` authorises every request, and an optional `Arc<dyn IndexChannelSource>` — the
+port through which it reaches the warm code-intelligence index. The daemon implements the port for the
+registry that manages the index daemon process, so this crate never names that registry and
+`tddy-daemon` keeps only wiring. Without a source every method answers `FailedPrecondition`; there is no
+fallback to another language server. The request path and the end-to-end tests are in
+[tddy-daemon's code-navigation-service.md](../../tddy-daemon/docs/code-navigation-service.md).
 
-`WatchCodeIndex` is the one method that does not forward: it follows the code-index warm-up progress
-the service holds for a session (`with_index_progress` hands it the holder the warm-up records into).
-It authorises through the worktree service's `resolve_owned_session_dir` — token → OS user →
-`<sessions base>/sessions/<id>` must exist — before looking anything up, so a foreign session and a
-missing one answer the same `NotFound`, and a progress `error` (which can carry paths) is never
-reachable by another user. It then follows the session's `watch` channel: the latest progress, each
-replacement, ending after a message with `ready` or `error`. A session nothing warmed ends the stream
-empty. The stream buffers eight messages (`WATCH_BUFFER`) for a reader that has not drained them.
+**`IndexChannelSource`**
+
+| Method | Contract |
+|---|---|
+| `connect()` | a channel to the index daemon, starting it if nothing has yet — the forwarding path, and what refreshes the process's idle timer |
+| `connect_if_running()` | a channel only if the index daemon is already running, `None` otherwise; never starts it and does not refresh its idle timer — for a passive watcher |
+| `keep_alive()` | counts a long-lived holder of a `connect` channel as use of the running index daemon, so it is not stopped for sitting idle; never starts it |
+| `keep_alive_every()` | how often such a holder calls `keep_alive` (the registry answers a third of its idle timeout, clamped to 100 ms–60 s) |
+
+**Unary navigation.** `Definition`, `References` and `Hover` authorise and dial through
+`authorise_and_connect`, put the question in the index's terms (`code_navigation/position_query.rs`,
+`PositionQuery::{definition, references, hover}`) and pass the index's answer back with its `state`
+(`code_navigation/convert.rs`: `web_definition`, `web_references`, `web_hover`, `web_locations`,
+`web_progress`, `web_state`). The same query and converters serve the `CodeSession`.
+
+**`WatchCodeIndex(session)`** — the header's passive follow. It authorises through the worktree service's
+`resolve_owned_session_dir` — token → OS user → `<sessions base>/sessions/<id>` must exist — before
+reading anything, so a foreign session and a missing one answer the same `NotFound`, and a progress
+`error` (which can carry paths) is never reachable by another user. It then reads the session's worktree
+from its `.session.yaml` (`tddy_core::read_session_metadata`; an unreadable record is
+`FailedPrecondition`) and follows `code_index.WatchRoot` for it, converting each message, until the
+client leaves or the index ends the stream. It never starts a load nor the index daemon: a session whose
+record names no worktree yet, a worktree that is not a Rust workspace (`tddy_index_daemon::is_rust_workspace`),
+a daemon without an `index_daemon:` section, or an index daemon not already running (`connect_if_running`
+answers `None`) ends the stream at once with no message — the web re-watches with backoff. The record is
+read directly rather than through `resolve_worktree_root_in_session_dir`, because that helper reports "no
+record" and "no worktree recorded yet" as the same `FailedPrecondition`, and here the second is an empty
+stream. Streams buffer eight messages (`WATCH_BUFFER`).
+
+### `CodeSession`
+
+`code_session.rs` (with `code_session/ask.rs`, `keep_alive.rs`, `without_an_index.rs`) serves the code
+pane's bidirectional `CodeSession`.
+
+- **Open.** The first frame must be `open {session_token, project_id, worktree_path}`, authorised with
+  `resolve_listed_worktree`. A query before `open`, a second `open`, or an empty frame ends the stream
+  `INVALID_ARGUMENT` (`misplaced_frame`). Opening dials `connect`, calls `code_index.Warm` for the
+  worktree — drained through `drain_warm`, a trigger only; a refused warm is logged, since `WatchRoot`
+  reports the root `FAILED` with the reason — and then follows `code_index.WatchRoot`, relaying every
+  message as a `progress` event for as long as the stream is open. `WatchRoot` ending ends the session
+  `UNAVAILABLE`.
+- **No index.** A worktree with no `Cargo.toml` at its root (`without_an_index.rs`) neither dials the
+  index daemon nor warms or follows anything: it sends one `NONE` progress carrying why, and answers every
+  query with that `error`.
+- **Queries.** Each query is asked of the index on a task of its own (`ask.rs`), so a slow hover never
+  delays a probe; every query also calls `keep_alive`. A hover, definition or references the index
+  answers `LOADING` is **held**: the session sends `held {request_id}` and asks again once the root
+  reports `READY` *after* the query was asked (a progress counter, so a stale `READY` never spins a re-ask
+  loop and a `READY` that raced the `LOADING` answer is not missed). A root that reports `FAILED` answers
+  every held query with `error: "the code index failed: <reason>"`; a held query stays held through
+  `IDLE`. A **probe** never waits: `LOADING` → `UNKNOWN` (no locations, even if the index returned some);
+  otherwise `DEFINABLE` with the definition's locations, or `NONE`. A query reusing a `request_id`
+  replaces the earlier one; `cancel` drops a query held or in flight, so no answer is sent for it.
+- **One loop.** Every event is sent from the one loop that owns the session's state, which reads the pane's
+  frames first (`biased`), so a `cancel` sent before the index became ready is applied before the held
+  query is released.
+- **Keep-alive** (`keep_alive.rs`). An open session is use of both the index-daemon process and its
+  root's language server. A heartbeat every `keep_alive_every()` calls `keep_alive` and, when the root is
+  `READY` or `LOADING` and no warm of this session is in flight, calls `Warm` again — idempotent, and
+  reaching the root's server through `WorkspaceIndex::client_for` is what the index daemon records as the
+  root's use. An `IDLE` or `FAILED` root is not warmed by the heartbeat. Should the root be let go anyway —
+  it reports `IDLE` after it held a server since the session's last warm (`served_since_warmed`) — the
+  session warms it again; an `IDLE` before that starts nothing. A forgotten open tab therefore keeps
+  rust-analyzer and the index daemon resident until it closes.
 
 ## Restructure plans
 
@@ -70,18 +127,21 @@ other stream error is a `failure` with no group.
 
 ## Code index warm-up
 
-`code_index_warmup.rs` warms a session's code index in the background and keeps its latest progress.
+`code_index_warmup.rs` starts a session's code-index load in the background once its worktree exists. It
+is a **trigger** only: what the index is doing is kept per worktree root in the index daemon, which
+`WatchCodeIndex` and `CodeSession` follow through `WatchRoot`, whoever started the load. Nothing is
+recorded here.
 
 | Item | What it is |
 |---|---|
-| `SessionIndexProgress` | one `tokio::sync::watch` channel per session id, holding the latest `CodeIndexProgress`. `record` replaces it; `latest` reads it; `follow` subscribes without creating an entry, so following an id nothing warmed (or one the caller does not own) leaves no trace. Entries of warmed sessions are not freed. The holder is `Clone`: the warm-ups and `WatchCodeIndex` share one |
-| `warm_for_session(index_daemon, progress, session_id, worktree)` | starts `code_index.Warm` for `worktree` on its own task and returns its `JoinHandle`, or `None` when nothing was started: no `IndexChannelSource`, or no `Cargo.toml` at the worktree root. A first `Starting` record is written before the task spawns, so a watcher arriving first finds a warm under way. The warm dials through `IndexChannelSource::connect` — the forwarding path navigation uses, which starts the index daemon on first use — and records each `IndexProgress` as a `CodeIndexProgress`. A failed or short warm (the stream ends before `ready`) ends with one record whose `error` says why, and is logged; it never fails the session |
+| `warm_for_session(index_daemon, session_id, worktree)` | starts `code_index.Warm` for `worktree` on its own task and returns its `JoinHandle`, or `None` when nothing was started: no `IndexChannelSource`, or not a Rust workspace. The warm dials through `IndexChannelSource::connect`, which starts the index daemon on first use, and drains the stream (`drain_warm`). A failed or short warm (the stream ends before `ready`) is logged; it never fails the session |
+| `drain_warm(stream)` | reads a `Warm` stream to its end and answers whether its last message said `ready`; shared with `CodeSession` |
 | `IndexWarmupObserver` | the implementation of `tddy-session-lifecycle`'s [`SessionWorktreeObserver`](../../tddy-session-lifecycle/docs/session-service.md#the-worktree-observer-port) port: `worktree_ready` calls `warm_for_session` and detaches the task |
 
 "Ready" is the index daemon's `Warm` `ready`, which waits for the graph; the registry's own readiness
-(its socket is bound) is not used for it. Without an `index_daemon:` section nothing warms and no
-progress exists. A session started by a path that does not announce its worktree (see the session
-host's not-covered list) is never warmed: its index loads on its first navigation request.
+(its socket is bound) is not used for it. Without an `index_daemon:` section nothing warms. A session
+started by a path that does not announce its worktree (see the session host's not-covered list) is not
+warmed at start; its index loads when its Code pane opens or its agent first calls a code tool.
 
 ## Why a crate above the lifecycle crate
 

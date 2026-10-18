@@ -5,8 +5,8 @@
  * the Code pane's reconnect waits (1 s, doubling to 30 s), so a load the pane or the agent starts
  * later still shows; a watch that ended drops what it last said; a refusal is not asked again.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md (session header);
- * changeset docs/dev/1-WIP/2026-10-18-code-index-warm-on-demand.md (FV2, FV6).
+ * Feature: docs/ft/web/session-drawer.md (session header);
+ * changeset docs/dev/changesets/2026-10-18-code-index-warm-on-demand.md (FV2, FV6).
  *
  * Timing is pinned with `cy.clock`, so every wait is exact and nothing waits in real time.
  */

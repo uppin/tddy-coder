@@ -34,7 +34,12 @@ rooted at itself.
 `tests/bin/fake_lsp.rs` is the deterministic server other crates test against. Besides the document
 versions and sync notifications it replays, `tddy/watchedFileChanges` returns the
 `workspace/didChangeWatchedFiles` changes a client sent, in arrival order, which is how
-`tddy-index-daemon` asserts that it told a warm server what changed on disk.
+`tddy-index-daemon` asserts that it told a warm server what changed on disk. With
+`--loads-crate-graph-on-signal <path>` it begins two overlapping `$/progress` phases (`Fetching`,
+`Indexing`, each with a message and percentage) under a non-quiescent `experimental/serverStatus`, and
+holds the load — answering requests meanwhile — until a file exists at `<path>`, then ends both phases
+and reports `quiescent: true`; the test decides when the graph is loaded, so "joined mid-load" and "held
+until ready" need no sleeps. Every mode is off unless asked for.
 
 ## Related
 

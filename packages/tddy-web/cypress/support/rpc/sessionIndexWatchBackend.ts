@@ -11,7 +11,7 @@
  * - `indexDaemonStops()` ends every open watch, as the index daemon's process going away does.
  * - `refusingEveryWatch(reason)` refuses every watch (`PERMISSION_DENIED`).
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md (session header).
+ * Feature: docs/ft/web/session-drawer.md (session header).
  */
 
 import { create } from "@bufbuild/protobuf";

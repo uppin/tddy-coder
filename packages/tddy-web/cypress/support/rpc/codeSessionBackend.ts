@@ -23,7 +23,7 @@
  * The fake refuses what the daemon refuses, loudly: a query without a position ends its session
  * `INVALID_ARGUMENT`, and reading a file the scenario never declared is `NOT_FOUND`.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md.
+ * Feature: docs/ft/web/session-code-pane.md.
  */
 
 import { create, type MessageInitShape } from "@bufbuild/protobuf";

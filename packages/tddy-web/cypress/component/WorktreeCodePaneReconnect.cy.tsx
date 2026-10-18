@@ -6,7 +6,7 @@
  * strip says it is reconnecting meanwhile, and queries still waiting are asked again on the new
  * session. A session the host refuses is not reopened; unmounting stops reopening.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md (Web, Code pane);
+ * Feature: docs/ft/web/session-code-pane.md (Web, Code pane);
  * reconnect decided 2026-10-18 (changeset Decisions & Trade-offs).
  *
  * Timing is pinned with `cy.clock`, so every delay is exact and nothing waits in real time.

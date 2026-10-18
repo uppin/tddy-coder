@@ -5,7 +5,7 @@
 //! the index daemon itself. With nothing to follow the watch ends at once with no message.
 //!
 //! Feature docs: docs/ft/web/session-drawer.md (Start progress), docs/ft/web/session-code-pane.md
-//! (Indexing indicator) and docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md
+//! (Indexing indicator) and docs/ft/web/session-code-pane.md
 //!
 //! The index daemon is real process management over a stand-in (see `support`): the registry
 //! starts a shell script that points the socket it was told to bind at a `code_index` server this

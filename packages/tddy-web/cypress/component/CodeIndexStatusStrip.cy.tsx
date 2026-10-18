@@ -5,7 +5,7 @@
  * no index, a failed load, an index let go while the pane is open, and a session being reopened.
  *
  * Feature: docs/ft/web/session-code-pane.md (Indexing indicator);
- * docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md.
+ * docs/ft/web/session-code-pane.md.
  */
 
 import {

@@ -3,10 +3,11 @@
 A warm rust-analyzer index, served as `code_index.CodeIndexService` over gRPC and stdio — or one
 operation run in process and then exit.
 
-Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Twenty RPCs covering the
+Owns `proto/code_index.proto`, serves it, and publishes its coordinate. Twenty-one RPCs covering the
 plan-driven restructuring operations (`tddy-code-restructuring`), the analysis operations
-(`tddy-code-analysis`) and code navigation (`Definition`, `References`, `Hover`), each request naming
-the `workspace_root` it acts on so one process serves several worktrees.
+(`tddy-code-analysis`), code navigation (`Definition`, `References`, `Hover`) and a root's index
+progress (`Warm`, `WatchRoot`), each request naming the `workspace_root` it acts on so one process serves
+several worktrees.
 
 ```bash
 tddy-index-daemon restructure check --workspace-root . plan.jsonl   # run once, exit(0|1)
@@ -35,8 +36,14 @@ subcommand nor a transport is an error rather than a default.
   `VerifyRequest.rebinds` (repeated, `NAME`) carries the `self` rebinds the author declares
   (`read_fields_through`); `--rebind` fills it.
 - **Navigation**: `Definition`, `References` and `Hover` answer from the root's warm rust-analyzer in
-  the service's one-based byte coordinates. Locations come back relative to the root, or absolute and
-  marked `outside_root`. Rust sources only; any other file is refused.
+  the service's one-based byte coordinates, each with the index `state` it was given in (`LOADING` /
+  `READY`). Locations come back relative to the root, or absolute and marked `outside_root`. Rust sources
+  only; any other file is refused.
+- **Root progress**: each root's rust-analyzer progress is folded from its first notification for the
+  server's whole life (`graph.rs`). `WatchRoot` follows it without ever starting a server (`IDLE` /
+  `LOADING` / `READY` / `FAILED`, with every running phase); `Warm` starts the server and follows it until
+  the crate graph is loaded. `is_rust_workspace` (a `Cargo.toml` at the root) is the crate's one test of
+  what it can serve.
 - **Contract, warm-state model and refusal classes**:
   [`docs/code-index-service.md`](docs/code-index-service.md)
 - **Product documentation**:

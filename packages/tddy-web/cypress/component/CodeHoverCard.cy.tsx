@@ -3,7 +3,7 @@
  * just below the symbol, is at most `min(40rem, pane width − 2rem)` wide and `20rem` tall, scrolls
  * its body while its References / Close actions stay in view, and renders the hover's markdown.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md (Web, Hover).
+ * Feature: docs/ft/web/session-code-pane.md (Web, Hover).
  *
  * Mounted through the whole pane over a `CodeSession` fake, so the card's position and size are the
  * ones the real layout gives it; the app stylesheet is loaded for the same reason.

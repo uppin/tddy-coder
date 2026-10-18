@@ -27,13 +27,16 @@ dev-dependency.
 
 ### Code navigation and index warm-up
 
-`CodeNavigationServiceImpl` serves `code_navigation.CodeNavigationService`: definition, references and
-hover forwarded to the warm index, `WatchCodeIndex`, a session's index warm-up progress, and the plan
+`CodeNavigationServiceImpl` serves `code_navigation.CodeNavigationService`: the code pane's
+bidirectional `CodeSession` (warms the worktree, streams its progress, holds hover / definition /
+references while the index loads, answers definition probes, keeps the index alive while open);
+definition, references and hover forwarded to the warm index with its state; `WatchCodeIndex`, the
+header's passive follow of a session's worktree index (never starts the index daemon); and the plan
 calls (`OpenPlan`, `WatchPlan`, `RunPlan`) that show and run a restructure plan, see
 [Restructure plans](./docs/architecture.md#restructure-plans).
-`code_index_warmup` starts that warm-up when a session's worktree appears (`IndexWarmupObserver`, the
-daemon's end of `tddy-session-lifecycle`'s `SessionWorktreeObserver` port) and keeps the latest
-progress per session. See [Code navigation](./docs/architecture.md#code-navigation) and
+`code_index_warmup` triggers a load when a session's worktree appears (`IndexWarmupObserver`, the
+daemon's end of `tddy-session-lifecycle`'s `SessionWorktreeObserver` port); it records nothing. See
+[Code navigation](./docs/architecture.md#code-navigation) and
 [Code index warm-up](./docs/architecture.md#code-index-warm-up).
 
 ### Conversation worktrees

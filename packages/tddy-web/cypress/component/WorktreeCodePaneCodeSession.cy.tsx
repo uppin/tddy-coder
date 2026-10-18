@@ -5,7 +5,7 @@
  * and answered once it is ready. Identifiers that have a definition are underlined on hover, and a
  * plain click on one goes there.
  *
- * Feature: docs/ft/web/1-WIP/PRD-2026-10-18-code-index-warm-on-demand.md (Web, Code pane).
+ * Feature: docs/ft/web/session-code-pane.md (Web, Code pane).
  *
  * All RPC flows through the in-memory backend. The host is `CodeIndexHost`, a fake of the daemon's
  * `CodeSession` handler: it records every frame the pane sends, holds queries while loading, and

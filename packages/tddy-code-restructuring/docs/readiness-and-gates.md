@@ -53,7 +53,17 @@ server's **last words** and how long they have been **unchanged** (`ServerChatte
 figure that separates a slow server from a stuck one), and the furthest phase reported
 (`ServerChatter::furthest`, the highest percentage of any phase). A consumer that names what the server
 is doing **now** reads `ServerChatter::current` instead: the phase reported on most recently, with the
-highest percentage that phase reached — which the index daemon's `Warm` stream does. The cadence
+highest percentage that phase reached — which the index daemon's `Warm` and `WatchRoot` streams do.
+A consumer that lists **everything** the server is doing reads `ServerChatter::active_phases`: one
+`ActivePhase { title, message, percentage }` per work-done token between its `begin` and its `end`, in
+begin order — the title from its `begin`, the latest `message`, the token's highest percentage (`None`
+until it reports one). A second `begin` on a running token restarts its phase at the end of the order; a
+report whose `begin` was never seen is an untitled phase; the fold sees every report, including those the
+console throttle does not print. After a notification gap, `ServerChatter::lost_sight` marks every token
+in flight unconfirmed; a token heard from again is confirmed, and the next `quiescent: true` drops the
+unconfirmed ones, so a phase whose `end` was lost does not stay listed for the server's life. The index
+daemon folds one unthrottled chatter per root for the server's whole life to publish these. The
+`"begin"` kind is read through one `BEGIN` constant. The cadence
 is a collaborator a host or a test injects (`with_wait_heartbeat`, `Options.wait_heartbeat`,
 `CodeIndexPorts.wait_heartbeat`), never a budget: nothing ends at it. A request already **in flight**
 on the shared client is narrated too — `LspClientBridge` polls it in heartbeat-sized slices and beats

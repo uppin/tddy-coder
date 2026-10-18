@@ -38,8 +38,11 @@ registration (`restructure_tools_env` in `tddy-session-lifecycle`), so the two c
 When `index_daemon:` is configured, `runtime::build` constructs the `IndexDaemonRegistry` **before** the
 session host, because the host's `SessionWorktreeObserver` (`tddy_daemon_rpc::code_index_warmup::IndexWarmupObserver`)
 holds the registry, as an `IndexChannelSource`, to warm each started session's code index. The same
-`SessionIndexProgress` holder is handed to the `CodeNavigationServiceImpl` that serves
-`WatchCodeIndex`. Without the section no observer is installed. See
+registry is the `IndexChannelSource` of the `CodeNavigationServiceImpl`, which serves the Code pane's
+`CodeSession` and the header's `WatchCodeIndex`; no progress is held in the daemon — it is per worktree
+root in the index daemon. The registry's `idle_timeout_secs` also sets how often an open `CodeSession`
+reports itself in use (`keep_alive_every`: a third of it, clamped to 100 ms–60 s). Without the section no
+observer is installed. See
 [code-navigation-service.md](code-navigation-service.md#warming-a-sessions-index).
 
 ### Assembling the session host and the RPC families

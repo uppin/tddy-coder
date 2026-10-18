@@ -37,51 +37,83 @@ The stream can also carry `keepAlive` events while the host provisions the proje
 
 ## Indexing indicator
 
-`useCodeIndexProgress(client, sessionToken, sessionId)` (`src/components/session/`) follows
-`code_navigation.CodeNavigationService.WatchCodeIndex(session)` and yields one of five states:
-`waiting` (nothing heard yet), `progress` (the latest message), `ready`, `failed` (a message carrying
-`error`, or the call failing) and `untracked` (the stream ended without a message — nothing on the host
-warms this session, including a warm the host no longer remembers). Two components read it.
+`useCodeIndexProgress.ts` (`src/components/session/`) classifies one `CodeIndexProgress` message into a
+`CodeIndexStatus` (`codeIndexStatusOf`) for both the header and the Code pane's strip:
+
+| Status | From |
+|---|---|
+| `waiting` | nothing heard yet |
+| `idle` | `state` `IDLE` — nothing holds the worktree's index; or the header's watch ended and the next has not reported |
+| `none` | `state` `NONE` — the worktree has no code index (not a Rust worktree); `error` says why |
+| `progress` | `state` `LOADING` — the message, naming the phase reported most recently, its percentage, and every running phase (`phases`) |
+| `ready` | `state` `READY` |
+| `failed` | `state` `FAILED` (its `error`, or *the code index failed* when empty), or the stream refused |
+| `reconnecting` | the Code pane's `CodeSession` dropped and is being reopened (never the header) |
+
+A message with `state` `UNSPECIFIED` comes from a host that predates the field and is read from
+`error` and `ready`. `currentPhaseHeadline` renders `<phase> <n>%`; `phaseHeadline` renders one running
+phase as `<title> <n>%`, or the bare title when it never reported a percentage.
+
+### Session header
+
+`useCodeIndexProgress(client, sessionToken, sessionId)` follows
+`code_navigation.CodeNavigationService.WatchCodeIndex(session)` through a `CodeIndexWatcher`. The host
+never starts anything for this watch: with no index daemon running, or a worktree that is not Rust or
+does not exist yet, the watch ends at once with no message, and it also ends when the index daemon stops.
+The watcher therefore **watches again** after every end or retryable failure, on the shared
+`StreamReopener` schedule (`streamReopening.ts`: 1 s doubling to 30 s, back to 1 s once a watch has
+delivered and stayed open 10 s), which is what lets the header show a load the Code pane or the agent
+starts later. A watch that ended reports `idle` — what it said last is no longer known — and one that
+failed retryably reports its reason, until the next watch reports. A **refusal**
+(`INVALID_ARGUMENT`, `NOT_FOUND`, `PERMISSION_DENIED`, `UNAUTHENTICATED`, `FAILED_PRECONDITION`,
+`UNIMPLEMENTED`) is not watched again and reads `failed` with the RPC's own message (no `[code]`
+prefix). Unmounting, or a change of client, token or session, stops it.
 
 `SessionIndexingIndicator` follows it on the **host that owns the session**:
 `SessionsDrawerScreen` resolves the `CodeNavigationService` client for the selected session's owning host
-and passes it through `SessionMainPane` as `codeNavigationClient`, the same client the code pane's
-navigation uses. `SessionMainPane` renders the indicator at the start of the session header row when that
-client exists and a session is selected
-(`data-testid="session-indexing-indicator"`).
+and passes it through `SessionMainPane` as `codeNavigationClient`, the same client the code pane uses.
+`SessionMainPane` renders the indicator at the start of the session header row when that client exists
+and a session is selected (`data-testid="session-indexing-indicator"`).
 
-| Stream | Shows |
+| Status | Shows |
 |---|---|
-| a progress message | `Indexing — <phase> <percentage>%` |
-| a message carrying `ready` | nothing |
-| a message carrying `error` | `Indexing failed — <reason>` |
-| the stream ending with no message (nothing warmed the session) | nothing |
-| the call failing | `Indexing failed — <message>` |
+| `progress` | `Indexing — <phase> <percentage>%` |
+| `failed` | `Indexing failed — <reason>` |
+| anything else | nothing |
 
-The indicator never blocks the session. It consumes the stream with a `cancelled` flag rather than an
-`AbortSignal`, because the LiveKit transport accepts a signal for server-streaming calls and never reads
-it; unmounting, or a change of client, token or session, ends the previous follow. Without a navigation
-client the header shows no indicator.
+The indicator never blocks the session. The LiveKit transport accepts a signal for server-streaming calls
+and never reads it, so the watcher drops whatever arrives after `stop` with a `stopped` flag and aborts
+the signal for transports that do read it. Without a navigation client the header shows no indicator.
+
+### Code pane strip
 
 `CodeIndexStatusStrip` is the bottom strip of the [Code pane](code-navigation.md)
-(`data-testid="worktree-code-index-status"`, with the state in `data-state`). `WorktreeCodePane`
-renders it when it has both a navigation client and a `sessionId`, which `SessionMainPane` passes from
-the selected session. Unlike the header it stays visible in every state:
+(`data-testid="worktree-code-index-status"`, with the status kind in `data-state`). It reads the status of
+the pane's own `CodeSession` (`useCodeSession`, see [code navigation](code-navigation.md#the-code-session)),
+so `WorktreeCodePane` renders it whenever it has a navigation client. Unlike the header it stays visible
+in every state:
 
-| State | Summary (`worktree-code-index-status-summary`) | Detail (`worktree-code-index-status-detail`) |
+| Status | Summary (`worktree-code-index-status-summary`) | Detail (`worktree-code-index-status-detail`) |
 |---|---|---|
 | `waiting` | `Code index: checking…` | — |
-| `progress` | `Indexing — <phase> <percentage>%` | the message's `line`, truncated with the full text as its title |
+| `idle` | `Code index starting…` (an open pane warms its index, so an idle root is about to load) | — |
+| `none` | `No code index for this worktree` | why |
+| `progress` | `Indexing — <phase> <percentage>%` | that phase's `message` (the latest-begun phase of that title), truncated with the full text as its title |
 | `ready` | `Code index ready` | — |
 | `failed` | `Indexing failed — <reason>`, in the error colour | — |
-| `untracked` | `Code index not warmed for this session` | that the index loads on the first definition or hover |
+| `reconnecting` | `Reconnecting…` | why the session dropped |
+
+While loading with more than one running phase the strip adds `+<N> more`
+(`worktree-code-index-status-more`), whose `title` lists every running phase in begin order as
+`<title> <n>%` followed by ` — <message>` when it has one.
 
 ## Testing
 
 | Spec | Pins |
 |---|---|
 | `cypress/component/SessionStartAndIndexingProgress.cy.tsx` (2) | the create pane shows the current start phase; the header shows indexing until ready |
-| `cypress/component/CodeIndexStatusStrip.cy.tsx` (3) | the Code pane's strip: phase, percentage and the server's line, then ready; not warmed when the stream ends empty; the failure's reason |
+| `cypress/component/SessionIndexingIndicatorResubscribe.cy.tsx` (4) | the header shows a load that starts after its first watch ended empty; drops what it said once its watch ends mid-load; watches again after 1, 2 and 4 s; a refused watch is not repeated and names why |
+| `cypress/component/CodeIndexStatusStrip.cy.tsx` | the strip's own states: the failure's reason; an index let go while the pane is open reads as starting; reconnecting with why; a non-Rust worktree has no code index, and why. Live progress, phases and `+N more` are pinned by `WorktreeCodePaneCodeSession.cy.tsx` ([code navigation](code-navigation.md#testing)) |
 | `cypress/component/CreateSessionAttachmentProgress.cy.tsx` | per-attachment progress, and a start with nothing attached going through the stream |
 | `cypress/component/CreateSessionPane.cy.tsx` (29) | the form, started through the streamed start |
 | `cypress/component/ServerStreamFallback.cy.tsx` (7) | the testkit fallback below |
