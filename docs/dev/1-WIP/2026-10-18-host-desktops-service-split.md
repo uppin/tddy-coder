@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
-**PR**: (opened in wave 1; number recorded in wave 2)
+**PR**: [#653](https://github.com/uppin/tddy-coder/pull/653)
 **Type**: Refactor (restructure, no behaviour change)
 **Stack**: `#host-desktops` 1/8. Base: `master`.
 
@@ -49,6 +49,24 @@ Wave 2 therefore publishes the **restructure plan** (the JSONL intents for
 and the module names, so nodes 6–8 can name their target modules in their documents. Its "tests"
 are the existing `tddy-screen-sharing` suite, which must stay green: the baseline is recorded in
 wave 2.
+
+## Seam plan (published in wave 2)
+
+The module layout nodes 6–8 target. Line numbers are today's (`master` @ `515c00149`, before #626);
+the `tddy-tools restructure` JSONL is generated at green, **after #626 merges**, against the shape it
+leaves, and proven with `restructure check --deep` before it is applied.
+
+| Seam | New module | Items (today's lines) | How |
+|---|---|---|---|
+| A | `src/bridge_lifecycle.rs` | `ScreenSharingServiceImpl::{terminate_bridge, prompt_for_desktop_password, try_spawn_bridge, spawn_bridge}` (L218–415) | `retarget_impl` into an `impl ScreenSharingServiceImpl` block in the new module |
+| B | `src/bridge_config.rs` | `BridgeSpawnConfig`, `PreparedBridge`, `prepare_bridge`, `build_bridge_spawn_config`, `session_bridge_key`, `host_bridge_key`, `host_bridge_identity`, `screenshare_track_name`, `browser_livekit_url`, `host_livekit_room`, `desktop_prompt_subject`, `decrypt_desktop_password`, `host_target_as_bridge_target`, `host_target_to_proto` (L51–65, L424–656) — plus whatever #626 adds here | `move_items` |
+| C | `src/host_targets.rs` | bodies of `list_host_targets`, `add_host_target`, `start_host_stream`, `stop_host_stream` (L680–820) | `extract_method` to inherent `*_impl` methods, then `retarget_impl`; the trait impl keeps one-line delegators |
+| — | stays | struct, builders, `require_*`, `resolve_session_dir`, `require_target_store`, `BridgeTarget`, `HostScope`, `target_error_to_status`, session (vault) RPCs | — |
+
+Expected result: ~440 production lines in `screen_sharing_service.rs` (967 − ~195 − ~245 − ~140 +
+delegators and `mod`/`use` lines), measured and recorded in the code issue at wrap.
+
+**Baseline (wave 2, 2026-10-18, before #626):** see `## Validation Results` → *Baseline*.
 
 ## Green wave
 
@@ -127,6 +145,10 @@ This node has no planned red tests; any red test is a stop, and a test that chan
 ### From /analyze-clean-code
 
 ## Validation Results
+### Baseline
+
+2026-10-18, wave 2, on `master` @ `515c00149` (**before #626**): `./test -p tddy-screen-sharing` — 7 test binaries, **48 passed, 0 failed, 0 ignored** (10 + 18 + 3 + 3 + 6 + 8 + 0). Re-record after rebasing onto `master` with #626 merged; that run is the restructure's baseline.
+
 ### /validate-changes
 ### /validate-tests
 ### /validate-prod-ready
@@ -138,10 +160,10 @@ This node has no planned red tests; any red test is a stop, and a test that chan
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests — N/A: a restructure adds no tests; the existing suite is the oracle
+- [x] Run acceptance tests (verify they fail) — N/A; baseline recorded green instead
+- [x] USER REVIEW — acceptance tests — N/A (seam plan reviewed with the wave-1 batch)
+- [x] TDD Red — write failing unit/integration tests — N/A for a restructure
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

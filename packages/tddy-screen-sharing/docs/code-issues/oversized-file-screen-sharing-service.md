@@ -6,7 +6,9 @@
 **Metrics:** **967 production lines** (2026-10-07, #514; first measured 2026-09-24) of 2,176 total (`#[cfg(all(test, unix))]` at line 968; 1,209 test lines) · budget 500 · **1.9× over**
 **Thresholds breached:** length 967 > 500
 **Restructure:** not designed
-**Status:** Open — regressed 2026-10-18 (+16 from #626, `#satellite` 4/13: `with_room_tokens`, the minter parameter threaded through `prepare_bridge` / `build_bridge_spawn_config`, `BRIDGE_TOKEN_TTL`; deferred with the developer's consent) — **unclaimed**
+**Status:** Open — regressed 2026-10-18 (+16 from #626, `#satellite` 4/13: `with_room_tokens`, the minter parameter threaded through `prepare_bridge` / `build_bridge_spawn_config`, `BRIDGE_TOKEN_TTL`; deferred with the developer's consent) — **claimed**
+**Claimed by:** #653 — `#host-desktops 1/8` (`feature/host-desktops/service-split`)
+**Lands after:** nothing open — #626 (`#satellite 4/13`) and #625 merged 2026-10-18 (`dc84ebe8c`), which was the developer's gate for starting the split
 **Verified:** ⚠ **not hand-verified** — the line count is machine-measured; the seam table is a first reading of the item list
 
 ## Measurement history
@@ -29,3 +31,10 @@
 From this first reading, A+B take it to about 525 lines, so Seam C (bodies moved behind delegating stubs) is also needed. The 1,209-line inline test module is a separate question and does not count against the budget. Prove the seams with `restructure check --deep` before applying them.
 
 **Stack constraint:** `#keyring` dependents #515 and #516 are still open and no split lands mid-stack; #514 (`#keyring` 7/9) touched this file without growing it. The vault-target RPCs the table calls "stays" are now the store-backed `list_targets` / `add_target` / `remove_target`.
+
+## Concurrent changes
+
+- **#626** (`#satellite 4/13`, merged 2026-10-18) threaded a `RoomTokenMinter` through `prepare_bridge` /
+  `build_bridge_spawn_config` (seam B). #653 moves that merged shape.
+- **#658, #659, #660** (`#host-desktops` 6–8) edit `spawn_bridge` and the host-target RPCs after
+  #653 has split them; they target the new modules, not this file.
