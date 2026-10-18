@@ -349,3 +349,21 @@ pub fn choose_route(sources: &RouteSources) -> Option<String> {
         None => sources.user_default.clone(),
     }
 }
+
+/// The provider id an OpenCode route's generated configuration declares the account under, so the
+/// person's own `opencode.json` providers are never shadowed.
+pub const OPENCODE_ROUTE_PROVIDER_ID: &str = "tddy-route";
+
+/// The variable an OpenCode route's key is delivered in; the generated configuration reads it with
+/// `{env:…}`, so the file itself holds no secret.
+pub const OPENCODE_ROUTE_KEY_ENV: &str = "TDDY_OPENCODE_PROVIDER_KEY";
+
+/// The `opencode.json` that declares `target`'s account as an OpenCode provider and selects
+/// `target.model` on it: `@ai-sdk/openai` over Responses (reasoning carried across turns) when the
+/// account serves Responses, `@ai-sdk/openai-compatible` over Chat Completions otherwise.
+#[must_use]
+pub fn opencode_config_for(target: &RouteTarget) -> RouteFile {
+    let _ = target;
+    // TODO(opencode-cli): implement
+    todo!()
+}

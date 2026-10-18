@@ -4,7 +4,7 @@ import type {
   StartSessionRequestInit,
 } from "../../hooks/useSessionAttachments";
 
-export type SessionType = "tool" | "claude-cli" | "cursor-cli";
+export type SessionType = "tool" | "claude-cli" | "cursor-cli" | "opencode-cli";
 
 /**
  * Every form value `buildStartSessionRequest` reads. Named rather than passed one argument at a

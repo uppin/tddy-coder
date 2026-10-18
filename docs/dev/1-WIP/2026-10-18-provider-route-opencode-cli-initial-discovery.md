@@ -399,3 +399,26 @@ fn vault_for(&self, session_token: &str) -> Result<(String, Arc<SessionVault>), 
 - The accounts service's per-subject vault access (`vault_for`) is the place a `ConnectProviderAccount` write goes (`SessionVault::put` a `CredentialRecord` with `provider = "meta" | "fireworks" | …`, `secret = api key`, `metadata = base URLs per wire protocol + preset id`).
 - `.session.yaml` takes an additive optional field for the chosen account id.
 - The Accounts screen's add flow is device-link only; an API-key form is a new branch beside it.
+
+## Exploration 4: OpenCode CLI and config contract — 2026-10-18
+
+**Agent**: parent WebFetch (OpenCode is not installed locally: `which opencode` → not found)
+**Scope**: the flags and config shape the descriptor and route generator depend on.
+
+### Sequence
+
+1. `which opencode muse codex claude agent` — only `claude` and `agent` present.
+2. WebFetch https://opencode.ai/docs/cli/ — TUI, `run`, `acp`, `models` flags and env vars.
+3. WebFetch https://opencode.ai/docs/providers/ — custom provider block.
+4. Read `packages/tddy-cli-sessions/src/cli_session_manager/argv.rs` (`build_claude_argv`, `build_cursor_argv`).
+5. Read `packages/tddy-session-files/src/context_files.rs:76` (`context_agent_for_session_type`).
+6. Read `packages/tddy-daemon-kernel/src/config.rs` 460–575, 800–830 (`CursorCliConfig`, `DaemonConfig` default); grep `DaemonConfig {` literals — 123 sites, all but the default impl use a spread.
+
+### Findings
+
+- TUI: `opencode [project]`, `--continue/-c`, `--session/-s <id>`, `--fork`, `--prompt`, `--model/-m provider/model`.
+- `opencode acp` — ACP over stdio (nd-JSON), `--cwd`.
+- `opencode models [provider]` — one `provider/model` per line.
+- Env: `OPENCODE_CONFIG` (config file path), `OPENCODE_CONFIG_CONTENT`, `OPENCODE_CONFIG_DIR`.
+- Provider block: `{"provider": {"<id>": {"npm": "@ai-sdk/openai-compatible" | "@ai-sdk/openai", "name", "options": {"baseURL", "apiKey": "{env:VAR}"}, "models": {"<model>": {"name", "limit": {...}}}}}, "model": "<id>/<model>"}`; `@ai-sdk/openai` for `/v1/responses`.
+- Claude/cursor argv shapes as quoted in the parity test.

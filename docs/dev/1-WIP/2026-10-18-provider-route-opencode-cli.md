@@ -3,7 +3,7 @@
 **Date**: 2026-10-18
 **Status**: 🚧 In Progress
 **Type**: Feature
-**Stack**: #provider-route 3/9. Base: `feature/provider-route/claude-route`.
+**Stack**: #provider-route 3/9. Base: `feature/provider-route/claude-route`. PR: [#664](https://github.com/uppin/tddy-coder/pull/664).
 
 ## Initial Discovery
 
@@ -21,12 +21,15 @@ State A below is distilled from that file. Do not duplicate grep traces or file 
 ## Responsibility
 
 The `opencode-cli` session type end-to-end (unsandboxed), and the **CLI harness descriptor** it
-registers through. Owns `tddy_agent_launch::cli_harness::{CliHarness, CliHarnessRegistry, cli_harness}`
-(or the crate wave 2 finds the session-type matches converge in), the claude-cli and cursor-cli
-descriptors (behaviour-preserving), the OpenCode descriptor, the **OpenCode route arm** of
-`resolve_route` (`Harness::OpenCodeCli` and `Harness::OpenCode` — the config generator
-`opencode_config_for(target) -> RouteFile`), `OpenCodeCliConfig { binary_path }` in daemon config, and
-the web "OpenCode" toggle.
+registers through. Owns `tddy_agent_backend::cli_harness::{CliHarness, CliLaunch, CliModelSource,
+cli_harnesses, cli_harness, models_from_listing}` (in the lowest crate every session-type consumer
+already reaches through `tddy_core`), the claude-cli and cursor-cli descriptors (behaviour-preserving —
+`CliSessionManager::build_{claude,cursor}_argv` delegate to them), the OpenCode descriptor, the
+**OpenCode route arm** of `resolve_route` (`Harness::OpenCodeCli`, `Harness::OpenCode`) with
+`opencode_config_for`, `OPENCODE_ROUTE_PROVIDER_ID`, `OPENCODE_ROUTE_KEY_ENV`, the `opencode` row of
+`context_globs_for_agent` (node 7 consumes it), `tddy_agent_launch::cli_route_launch`, the daemon
+config map `cli_harnesses.<session type>.binary_path` with `DaemonConfig::cli_harness_binary`, and the
+web `"opencode-cli"` session type and toggle entry.
 
 ## Boundaries
 
@@ -44,21 +47,31 @@ the web "OpenCode" toggle.
 ## Draft PR contract
 
 ```rust
-pub struct CliHarness {
-    pub session_type: &'static str,        // "claude-cli" | "cursor-cli" | "opencode-cli"
-    pub route_harness: Harness,
-    pub context_agent: &'static str,
-    pub binary: fn(&DaemonConfig) -> PathBuf,
-    pub argv: fn(&CliLaunch) -> Vec<String>,   // model, resume id, initial prompt, extra args
-    pub models: CliModelSource,               // Curated(fn) | Probe(fn) | Account
-}
+// tddy-agent-backend/src/cli_harness.rs
+pub struct CliLaunch<'a> { binary, model, session_id, conversation_id: Option<&str>, initial_prompt: Option<&str>,
+                           permission_mode: Option<&str>, dangerously_skip_permissions: bool, resume: bool }
+pub enum CliModelSource { Curated(fn() -> BackendModels), ListedByBinary(&'static [&'static str]) }
+pub struct CliHarness { session_type, label, route_harness: Harness, context_agent, default_binary, binary_env,
+                        route_config_env: Option<&'static str>, argv: fn(&CliLaunch) -> Vec<String>, models: CliModelSource }
+pub fn cli_harnesses() -> &'static [CliHarness];          // claude-cli, cursor-cli, opencode-cli
 pub fn cli_harness(session_type: &str) -> Option<&'static CliHarness>;
-pub fn cli_session_types() -> impl Iterator<Item = &'static str>;
-// provider_route.rs (arm owned here)
-pub fn opencode_config_for(target: &RouteTarget) -> RouteFile;   // opencode.json; key via {env:TDDY_OPENCODE_PROVIDER_KEY}
+pub fn models_from_listing(stdout: &str) -> BackendModels; // `opencode models`
+// tddy-agent-backend/src/provider_route.rs (OpenCode arm and helpers owned here)
+pub const OPENCODE_ROUTE_PROVIDER_ID: &str = "tddy-route";
+pub const OPENCODE_ROUTE_KEY_ENV: &str = "TDDY_OPENCODE_PROVIDER_KEY";
+pub fn opencode_config_for(target: &RouteTarget) -> RouteFile;   // opencode.json, key via {env:…}
+// route for OpenCode: files = [opencode.json], secret_env = [(OPENCODE_ROUTE_KEY_ENV, key)], args = ["--model", "tddy-route/<model>"]
+// tddy-agent-launch/src/cli_route_launch.rs
+pub struct CliRouteLaunch { pub env: Vec<(String, String)>, pub args: Vec<String> }
+pub fn cli_route_launch(harness: &CliHarness, route: Option<&HarnessRoute>, session_dir: &Path) -> io::Result<CliRouteLaunch>;
+// tddy-daemon-kernel config
+pub cli_harnesses: BTreeMap<String, CliHarnessConfig>;   // `cli_harnesses: { opencode-cli: { binary_path } }`
+impl DaemonConfig { pub fn cli_harness_binary(&self, session_type: &str, default_binary: &str, binary_env: &str) -> String; }
 ```
 
-Web: `SessionType` gains `"opencode-cli"`; `CreateSessionTypeToggle` renders from a list.
+OpenCode argv (from https://opencode.ai/docs/cli/): start `opencode [--model provider/model] [--prompt <p>]`,
+resume `opencode --continue` (one session per worktree, so the last session there is this one).
+Web: `SessionType` gains `"opencode-cli"`; `create-session-type-opencode-cli` toggle.
 
 ## Green wave
 
@@ -120,17 +133,25 @@ argv and config unit tests, launch-level acceptance with a fake `opencode` binar
 
 | Test | File | Validates |
 |---|---|---|
-| `claude_cli_and_cursor_cli_argv_are_unchanged_through_the_descriptor` | `packages/tddy-agent-launch/tests/cli_harness_descriptor_acceptance.rs` (new) | parity with today's builders |
-| `an_opencode_session_spawns_opencode_in_the_worktree_with_its_model` | same | argv, cwd |
-| `an_opencode_session_on_fireworks_gets_a_config_naming_that_endpoint` | same | `OPENCODE_CONFIG` file 0600, key only in env |
-| `a_resumed_opencode_session_reopens_its_session_id` | same | resume argv |
-| `opencode_on_meta_prefers_responses_and_carries_reasoning` | `packages/tddy-agent-backend/tests/provider_route_acceptance.rs` | generated JSON |
-| `opencode_on_baseten_uses_chat_completions` | same | adapter choice |
-| `the_pane_offers_opencode_and_lists_its_models` | `packages/tddy-web/cypress/component/CreateSessionOpenCodeAcceptance.cy.tsx` (new) | toggle + models |
+| `the_registry_offers_claude_cursor_and_opencode_in_order` / `a_tool_or_workspace_session_is_no_cli_harness` / `opencode_is_routed_as_opencode_and_reads_its_config_from_opencode_config` | `packages/tddy-agent-backend/tests/cli_harness_acceptance.rs` (new) | registry |
+| `an_opencode_session_starts_with_its_model_and_first_prompt` / `a_resumed_opencode_session_continues_the_worktrees_last_session` / `opencode_models_are_read_one_provider_model_per_line` | same | argv, `--continue`, model listing |
+| `claude_cli_and_cursor_cli_argv_are_unchanged_through_the_descriptor` | `packages/tddy-cli-sessions/tests/cli_harness_parity.rs` (new) | parity with today's builders |
+| `opencode_on_meta_prefers_responses_and_carries_reasoning` / `opencode_on_baseten_uses_chat_completions` / `the_generated_config_holds_no_key` | `packages/tddy-agent-backend/tests/opencode_route_acceptance.rs` (new) | generated `opencode.json` |
+| `an_opencode_route_carries_the_config_the_key_and_the_model_argument` / `opencode_refuses_an_account_that_serves_neither_openai_protocol` | same | the OpenCode arm of `resolve_route` |
+| `an_opencode_session_on_fireworks_gets_a_config_naming_that_endpoint` / `an_unrouted_launch_adds_nothing_and_writes_nothing` | `packages/tddy-agent-launch/src/cli_route_launch_tests.rs` (new) | 0600 file, `OPENCODE_CONFIG`, key env, args |
+| `an_opencode_session_is_served_opencodes_context_files` / `claude_cli_and_cursor_cli_keep_their_context_agents` | `packages/tddy-session-files/tests/opencode_context_files.rs` (new) | context agent + globs (second test is a regression guard and passes today) |
+| Cypress: offers OpenCode / lists the daemon's OpenCode models / starts an opencode-cli session | `packages/tddy-web/cypress/component/CreateSessionOpenCodeAcceptance.cy.tsx` (new) | toggle and request |
 
 ## Technical Debt & Production Readiness
 
 ## Decisions & Trade-offs
+- **Descriptor in `tddy-agent-backend`** (wave 2): every crate that matches session types reaches it
+  through `tddy_core`; putting it in `tddy-agent-launch` would leave `tddy-cli-sessions`,
+  `tddy-session-files` and the runner unable to use it.
+- **One config map** `cli_harnesses:` (wave 2) instead of an `opencode_cli:` section, so node 6 adds no
+  config field.
+- **Resume = `--continue`**: tddy never learns OpenCode's own session id; one session per worktree
+  makes "the last session here" exact.
 - **Descriptor now, not later**: two new CLI types in this stack; the descriptor pays for itself at the second.
 - **Key via `{env:…}` in config**, not written into `opencode.json`, so the file holds no secret.
 
@@ -139,6 +160,20 @@ argv and config unit tests, launch-level acceptance with a fake `opencode` binar
 ### From /validate-tests
 ### From /validate-prod-ready
 ### From /analyze-clean-code
+
+## Red-phase record (wave 2, 2026-10-18)
+
+Scoped: `tddy-agent-backend`, `tddy-agent-launch`, `tddy-cli-sessions`, `tddy-session-files`,
+`tddy-daemon-kernel` (clippy `--all-targets -D warnings` clean); one Cypress spec.
+
+- `cli_harness_acceptance` 6/6, `cli_harness_parity` 1/1, `cli_route_launch_tests` 2/2 fail at
+  `cli_harness.rs` `todo!()` (this node).
+- `opencode_route_acceptance`: 3 fail at `opencode_config_for` (this node); 2 fail first at node 2's
+  `resolve_route` `todo!()` — the OpenCode arm lives inside it. Sequencing: green after #663.
+- `opencode_context_files`: 1 fails (no `opencode` row yet); 1 regression guard passes.
+- `CreateSessionOpenCodeAcceptance.cy.tsx` 3/3 fail: no OpenCode toggle.
+- OpenCode is not installed on this machine; its CLI/config contract is taken from opencode.ai docs
+  (recorded in discovery). `/green` must confirm against a real `opencode --help`.
 
 ## Validation Results
 ### /validate-changes
@@ -156,10 +191,10 @@ argv and config unit tests, launch-level acceptance with a fake `opencode` binar
 - [x] Cross-check `packages/*/docs/code-issues/` and `docs/dev/todo/` for items this change touches (Step 2b)
 - [x] Create/update PRD documentation
 - [x] Create changeset (this document)
-- [ ] Create failing acceptance tests
-- [ ] Run acceptance tests (verify they fail)
-- [ ] USER REVIEW — acceptance tests
-- [ ] TDD Red — write failing unit/integration tests
+- [x] Create failing acceptance tests
+- [x] Run acceptance tests (verify they fail)
+- [x] USER REVIEW — acceptance tests
+- [x] TDD Red — write failing unit/integration tests
 - [ ] TDD Green — implement with quality code
 - [ ] Update documentation with progress
 - [ ] Run scoped tests for touched packages; full-workspace result from CI

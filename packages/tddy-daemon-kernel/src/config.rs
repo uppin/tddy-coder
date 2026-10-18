@@ -156,6 +156,10 @@ pub struct DaemonConfig {
     /// Cursor Agent CLI session configuration (spawning interactive `agent` processes in PTYs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor_cli: Option<agent_cli::CursorCliConfig>,
+    /// Further CLI harnesses (OpenCode, Muse Code), keyed by session type — `opencode-cli:`,
+    /// `muse-cli:`. Absent entries run the harness's default binary.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub cli_harnesses: std::collections::BTreeMap<String, agent_cli::CliHarnessConfig>,
     /// When set, this daemon runs in relay mode: no web bundle, idle-timeout auto-shutdown,
     /// forwards RPCs to a remote peer via LiveKit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -255,6 +259,7 @@ impl Default for DaemonConfig {
             telegram: None,
             claude_cli: None,
             cursor_cli: None,
+            cli_harnesses: std::collections::BTreeMap::new(),
             relay: None,
             tddy_data_dir: None,
             screen_sharing: None,

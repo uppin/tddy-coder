@@ -4,6 +4,7 @@ pub mod child_spawn_handler;
 pub mod claude_cli_spawn;
 pub mod claude_cli_spawn_steps;
 pub mod cli_branch_starts;
+pub mod cli_route_launch;
 mod clone_backend;
 mod clone_planner;
 pub mod clone_ssh_env;
@@ -53,6 +54,8 @@ pub mod tool_spawn_plan;
 pub mod workspace_branch_start;
 pub mod worktree_source;
 
+#[cfg(test)]
+mod cli_route_launch_tests;
 #[cfg(test)]
 mod conversation_spawn_wiring_tests;
 mod facilitation;

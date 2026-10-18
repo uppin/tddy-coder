@@ -7,6 +7,7 @@
 pub mod backend;
 pub mod claude_argv;
 pub mod claude_hooks;
+pub mod cli_harness;
 pub mod cursor_hooks;
 pub mod provider_route;
 pub mod spawn_env;
