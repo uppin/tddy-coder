@@ -7,7 +7,8 @@ use super::ExecToolRpcHandler;
 use async_trait::async_trait;
 use prost::Message as _;
 use tddy_core::session_lifecycle::{unified_session_dir_path, validate_session_id_segment};
-use tddy_daemon_livekit::livekit_peer_discovery::{local_instance_id_for_config, PeerRoute};
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
+use tddy_daemon_livekit::livekit_peer_discovery::PeerRoute;
 use tddy_rpc::{Request, Response, Status};
 use tddy_service::proto::exec_tools::{
     ConversationWorktreeRequest, ConversationWorktreeResponse, ExecuteToolChunk,

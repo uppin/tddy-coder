@@ -39,3 +39,7 @@ From this first reading, Seam A alone brings the file to about 355 lines. Prove 
 **Regressed, split deferred with consent:** 658 → 660 production lines. +2: the two `CloneRequest` constructions gained the `env` field the forked worker now carries (`env: Default::default()`). The change's own
 modules are all small and new; only this unavoidable wiring landed in the file. Not claimed by any PR.
 Deferred in `docs/dev/todo/2026-10-17-oversized-files-this-change-grew-by-wiring.md`.
+
+## Measurement update 2026-10-18 — `#satellite` 5/13
+
+**Touched, unchanged:** 660 → 660 production lines. #627 repoints one `local_instance_id_for_config` import at `tddy_daemon_kernel::daemon_identity`; no line count moves. Split not attempted (move-only node). Not claimed by any PR.

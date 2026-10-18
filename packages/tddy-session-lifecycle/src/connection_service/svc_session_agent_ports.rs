@@ -24,7 +24,7 @@ use tddy_session_agents::ports::SessionAgentPorts;
 use tddy_session_agents::SessionAgentServiceImpl;
 
 use super::DaemonSessionHost;
-use crate::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 /// The coordinate this daemon serves family B at, and the one a forwarded family-B call is
 /// addressed at on a peer — the same name, read from the crate that owns it so a forward cannot be

@@ -7,7 +7,7 @@ use tddy_session_files::attachment_progress::AttachmentMaterialization;
 use uuid::Uuid;
 
 use crate::stack_parent;
-use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use crate::stack_child_spawn::StackChildSpawnHandler;
 

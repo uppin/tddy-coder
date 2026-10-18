@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config;
+use tddy_daemon_kernel::daemon_identity::local_instance_id_for_config;
 
 use tddy_projects::project_storage;
 use tddy_rpc::Status;

@@ -1,8 +1,8 @@
 //! What `git` inside a session commits as — and what it deliberately still does not.
 
 use tddy_accounts::{ActingIdentity, GitIdentity};
+use tddy_agent_launch::session_git::session_git_environment;
 use tddy_credentials::AccountId;
-use tddy_daemon_livekit::session_git::session_git_environment;
 
 fn grace_acting() -> ActingIdentity {
     ActingIdentity {
@@ -87,7 +87,8 @@ fn the_session_s_git_environment_carries_the_identity_and_nothing_else() {
 fn a_work_in_progress_snapshot_is_still_signed_by_the_daemon_itself() {
     // Given the module that publishes work-in-progress refs
     let source = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/session_room.rs"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../tddy-daemon-livekit/src/session_room.rs"),
     )
     .expect("session_room.rs");
 

@@ -260,6 +260,14 @@ a hook posting to the wrong port fails silently. Each is a function of the confi
 
 Both are re-exported at their old `tddy_session_lifecycle::…` paths.
 
+## `os_user_resolution` — a session token to its OS user
+
+`resolve_os_user(config, user_resolver, session_token)` maps a caller's session token to the OS user the
+daemon runs its work as: `Unauthenticated` when the resolver knows no such session, `PermissionDenied`
+when the GitHub user has no OS user in `config`. It is a free function so a family handler above this
+crate authenticates a caller exactly as the session host does, without holding the host.
+`tddy-session-lifecycle` re-exports the module at its old path.
+
 ## See also
 
 - [`packages/tddy-daemon/docs/connection-service.md`](../../tddy-daemon/docs/connection-service.md)

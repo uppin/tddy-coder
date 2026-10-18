@@ -439,7 +439,7 @@ async fn a_fleet_with_peers(peers: &[(&str, &[&str])], model_base_url: &str) -> 
         },
     ]);
     let instance_id_a =
-        tddy_daemon_livekit::livekit_peer_discovery::local_instance_id_for_config(&config_a);
+        tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config_a);
     let rpc_identity_a =
         tddy_daemon_livekit::livekit_peer_discovery::daemon_rpc_identity(&instance_id_a);
     let rpc_token_a = livekit

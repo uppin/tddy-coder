@@ -1034,9 +1034,7 @@ pub async fn build(
         let model_registry = Arc::new(
             tddy_model_registry::ModelRegistryStore::open(
                 &tddy_data_dir.join("models.db"),
-                &tddy_session_lifecycle::livekit_peer_discovery::local_instance_id_for_config(
-                    &config,
-                ),
+                &tddy_daemon_kernel::daemon_identity::local_instance_id_for_config(&config),
                 // The same directory `DaemonSessionHost` resolves YAML defs from, so an
                 // assistant cannot be created under a name one of them already answers to.
                 &tddy_data_dir.join("agents"),
